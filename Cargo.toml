@@ -1,0 +1,23 @@
+[package]
+name = "openapi-gen"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Matthew Jarjoura <eklipse2k8>"]
+
+[dependencies]
+any_ascii = { version = "0.3" }
+anyhow = { version = "1.0" }
+clap = { version = "4.5", features = ["derive"] }
+futures = { version = "0.3" }
+inflections = { version = "1.1" }
+oas3 = { version = "0.19" }
+prettyplease = { version = "0.2" }
+proc-macro2 = { version = "1.0" }
+quote = { version = "1.0" }
+regex = { version = "1.11" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+syn = { version = "2.0", features = ["full", "parsing"] }
+tokio = { version = "1.48", features = ["full"] }
+validator = { version = "0.20", features = ["derive"] }

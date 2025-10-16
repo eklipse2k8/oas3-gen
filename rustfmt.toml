@@ -1,0 +1,5 @@
+blank_lines_upper_bound = 1
+imports_granularity = "Crate"
+normalize_doc_attributes = true
+tab_spaces = 2
+max_width = 120

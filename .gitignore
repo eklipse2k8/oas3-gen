@@ -1,0 +1,6 @@
+/target
+generated_types.rs
+.claude/settings.local.json
+*.json
+/specs
+.zed/
