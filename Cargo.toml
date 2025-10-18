@@ -15,6 +15,22 @@ readme = "README.md"
 repository = "https://github.com/eklipse2k8/oas3-gen"
 rust-version = "1.89"
 
+[profile.release]
+codegen-units = 1
+debug = true
+debug-assertions = false
+lto = "fat"
+opt-level = 3
+split-debuginfo = "packed"
+strip = "symbols"
+
+[profile.dev]
+debug = true
+debug-assertions = false
+opt-level = 0
+panic = "unwind"
+split-debuginfo = "unpacked"
+
 [dependencies]
 any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
@@ -29,5 +45,5 @@ regex = { version = "1.11" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
-tokio = { version = "1.48", features = ["full"] }
+tokio = { version = "1.48", default-features = false, features = ["rt-multi-thread", "fs", "macros"] }
 validator = { version = "0.20", features = ["derive"] }

@@ -2,12 +2,8 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![Documentation](https://docs.rs/oas3-gen/badge.svg?version=0.1.0)](https://docs.rs/oas3-gen/0.1.0)
 [![dependency status](https://deps.rs/crate/oas3-gen/0.1.0/status.svg)](https://deps.rs/crate/oas3-gen/0.1.0)
-![MIT licensed](https://img.shields.io/crates/l/oas3-gen.svg)
-<br />
-![Version](https://img.shields.io/crates/msrv/oas3-gen.svg)
-[![Download](https://img.shields.io/crates/d/oas3-gen.svg)](https://crates.io/crates/oas3-gen)
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 <!-- prettier-ignore-end -->
 
 `oas3-gen` is a command-line tool that generates idiomatic Rust type definitions from an OpenAPI v3.1.x specification. It is designed to create production-ready code that is easy to use and integrate into any Rust project.
