@@ -1,9 +1,19 @@
 [package]
-name = "openapi-gen"
+name = "oas3-gen"
 version = "0.1.0"
-edition = "2024"
-license = "MIT"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
+categories = [
+  "code-generation",
+  "api-generation",
+  "openapi",
+]
+description = "A rust type generator for OpenAPI v3.1.x specification."
+edition = "2024"
+keywords = ["oas3", "json", "openapi", "rust", "generator"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/eklipse2k8/oas3-gen"
+rust-version = "1.89"
 
 [dependencies]
 any_ascii = { version = "0.3" }
