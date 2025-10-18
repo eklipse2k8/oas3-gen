@@ -336,17 +336,17 @@ impl TypeRef {
     }
   }
 
-  pub fn as_option(mut self) -> Self {
+  pub fn with_option(mut self) -> Self {
     self.nullable = true;
     self
   }
 
-  pub fn as_vec(mut self) -> Self {
+  pub fn with_vec(mut self) -> Self {
     self.is_array = true;
     self
   }
 
-  pub fn as_boxed(mut self) -> Self {
+  pub fn with_boxed(mut self) -> Self {
     self.boxed = true;
     self
   }
@@ -1067,7 +1067,7 @@ impl<'a> SchemaConverter<'a> {
 
       // Don't double-wrap: if the type is already nullable, don't wrap again
       let final_type = if optional && !rust_type.nullable {
-        rust_type.as_option()
+        rust_type.with_option()
       } else {
         rust_type
       };
@@ -1207,7 +1207,7 @@ impl<'a> SchemaConverter<'a> {
 
       // Don't double-wrap: if the type is already nullable, don't wrap again
       let final_type = if optional && !rust_type.nullable {
-        rust_type.as_option()
+        rust_type.with_option()
       } else {
         rust_type
       };
@@ -1244,7 +1244,7 @@ impl<'a> SchemaConverter<'a> {
         let is_cyclic = self.graph.is_cyclic(title);
         let mut type_ref = TypeRef::new(to_rust_type_name(title));
         if is_cyclic {
-          type_ref = type_ref.as_boxed();
+          type_ref = type_ref.with_boxed();
         }
         return Ok(type_ref);
       }
@@ -1256,7 +1256,7 @@ impl<'a> SchemaConverter<'a> {
       let is_cyclic = self.graph.is_cyclic(title);
       let mut type_ref = TypeRef::new(to_rust_type_name(title));
       if is_cyclic {
-        type_ref = type_ref.as_boxed();
+        type_ref = type_ref.with_boxed();
       }
       return Ok(type_ref);
     }
@@ -1285,7 +1285,7 @@ impl<'a> SchemaConverter<'a> {
           if let ObjectOrReference::Ref { ref_path, .. } = variant_ref
             && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
           {
-            return Ok(TypeRef::new(to_rust_type_name(&ref_name)).as_option());
+            return Ok(TypeRef::new(to_rust_type_name(&ref_name)).with_option());
           }
 
           // Otherwise resolve
@@ -1297,7 +1297,7 @@ impl<'a> SchemaConverter<'a> {
 
             // Found the actual type - recurse to get it
             let inner_type = self.schema_to_type_ref(&resolved)?;
-            return Ok(inner_type.as_option());
+            return Ok(inner_type.with_option());
           }
         }
       }
@@ -1423,7 +1423,7 @@ impl<'a> SchemaConverter<'a> {
               return Ok(TypeRef::new("serde_json::Value"));
             }
             SchemaType::Null => {
-              return Ok(TypeRef::new("()").as_option());
+              return Ok(TypeRef::new("()").with_option());
             }
           };
           return Ok(TypeRef::new(base_type));
@@ -1571,7 +1571,11 @@ impl<'a> OperationConverter<'a> {
             .as_ref()
             .map(|d| doc_comment_lines(d))
             .unwrap_or_default(),
-          rust_type: if is_required { body_type } else { body_type.as_option() },
+          rust_type: if is_required {
+            body_type
+          } else {
+            body_type.with_option()
+          },
           optional: !is_required,
           serde_attrs,
           validation_attrs,
@@ -1709,7 +1713,11 @@ impl<'a> OperationConverter<'a> {
     Ok(FieldDef {
       name: to_rust_ident(&param.name),
       docs,
-      rust_type: if is_required { rust_type } else { rust_type.as_option() },
+      rust_type: if is_required {
+        rust_type
+      } else {
+        rust_type.with_option()
+      },
       optional: !is_required,
       serde_attrs,
       validation_attrs,
