@@ -10,9 +10,89 @@
 [![Download](https://img.shields.io/crates/d/oas3-gen.svg)](https://crates.io/crates/oas3-gen)
 <!-- prettier-ignore-end -->
 
-## Example
+`oas3-gen` is a command-line tool that generates idiomatic Rust type definitions from an OpenAPI v3.1.x specification. It is designed to create production-ready code that is easy to use and integrate into any Rust project.
 
-```md
+The primary goal is to provide a robust and reliable way to generate Rust types from an OpenAPI specification, ensuring that the generated code is correct, efficient, and well-documented.
+
+## Key Features
+
+- **OpenAPI 3.1 Support:** Full support for the latest OpenAPI specification.
+- **Idiomatic Rust Code:** Generates clean, readable, and idiomatic Rust structs and enums.
+- **Serde Integration:** Automatically derives `serde::Serialize` and `serde::Deserialize` for seamless JSON and other format integration.
+- **Documentation Generation:** Converts schema descriptions into Rust doc comments.
+- **Complex Schema Support:** Handles `allOf`, `oneOf`, and `anyOf` for complex type compositions.
+- **Cycle Detection:** Intelligently detects and handles cyclical dependencies between schemas.
+- **Naming Conventions:** Automatically detects `camelCase` and `snake_case` naming conventions and applies `#[serde(rename_all = "...")]`.
+- **Operation Generation:** Generates types for API operation parameters, request bodies, and responses.
+
+## Installation
+
+You can install `oas3-gen` directly from crates.io using `cargo`:
+
+```sh
+cargo install oas3-gen
+```
+
+## Usage
+
+To generate Rust types, provide the path to your OpenAPI specification file and the desired output file.
+
+```sh
+oas3-gen --input <path/to/openapi.json> --output <path/to/generated_types.rs>
+```
+
+### Example
+
+Given the following OpenAPI `schemas/pet.json`:
+
+```json
+{
+  "Pet": {
+    "type": "object",
+    "description": "Represents a pet in the store.",
+    "required": ["id", "name"],
+    "properties": {
+      "id": {
+        "type": "integer",
+        "format": "int64",
+        "description": "The unique identifier for the pet."
+      },
+      "name": {
+        "type": "string",
+        "description": "The name of the pet."
+      },
+      "tag": {
+        "type": "string",
+        "description": "An optional tag for the pet."
+      }
+    }
+  }
+}
+```
+
+Running `oas3-gen` will produce the following Rust code in `src/generated_types.rs`:
+
+```rust
+// src/generated_types.rs
+
+use serde::{Deserialize, Serialize};
+
+/// Represents a pet in the store.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Pet {
+    /// The unique identifier for the pet.
+    pub id: i64,
+    /// The name of the pet.
+    pub name: String,
+    /// An optional tag for the pet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+}
+```
+
+### Command-Line Options
+
+```
 A rust type generator for OpenAPI v3.1.x specification.
 
 Usage: oas3-gen [OPTIONS] --input <FILE> --output <FILE>
@@ -28,33 +108,12 @@ Options:
 
 ## License
 
-Copyright (c) 2025 Individual contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+This project is licensed under the MIT License. See the [LICENSE.md](LICENSE.md) file for details.
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally
-submitted for inclusion in the work by you, as defined in the Apache-2.0
-license, shall be dual-licensed as above, without any additional terms or
-conditions.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more details on how to get started.
 
-See [CONTRIBUTING](CONTRIBUTING.md) for more details.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you shall be licensed as MIT, without any additional terms or conditions.
 
 See [OpenAPI v3.1.x]: <https://spec.openapis.org/oas/v3.1.1>
