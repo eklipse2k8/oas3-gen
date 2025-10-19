@@ -11,7 +11,14 @@ const RUST_KEYWORDS: &[&str] = &[
 
 /// Convert a schema name to a valid Rust identifier (for field names)
 pub(crate) fn to_rust_field_name(name: &str) -> String {
-  let cleaned = any_ascii(name).to_snake_case();
+  // Replace invalid identifier characters with underscores before case conversion
+  let sanitized = name.replace(['.', '/', ' '], "_");
+  let cleaned = any_ascii(&sanitized).to_snake_case();
+
+  // Handle special keywords that can't use r# prefix
+  if cleaned == "self" || cleaned == "Self" {
+    return format!("{}_", cleaned);
+  }
 
   RUST_KEYWORDS
     .iter()

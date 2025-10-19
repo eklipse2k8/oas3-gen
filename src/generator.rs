@@ -34,34 +34,6 @@ pub fn doc_comment_block(input: &str) -> String {
   doc_comment_lines(input).join("\n")
 }
 
-/// Detect if all field names follow a consistent naming pattern
-/// Returns the serde rename_all value if consistent, None otherwise
-pub fn detect_naming_pattern(fields: &[(String, String)]) -> Option<&'static str> {
-  if fields.is_empty() {
-    return None;
-  }
-
-  // Check if all fields are snake_case
-  let all_snake_case = fields.iter().all(|(original, rust_name)| {
-    original.contains('_') || original.contains('-') && to_rust_field_name(original) == *rust_name
-  });
-
-  if all_snake_case {
-    return Some("snake_case");
-  }
-
-  // Check if all fields are camelCase
-  let all_camel_case = fields.iter().all(|(original, _)| {
-    original.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) && original.chars().any(|c| c.is_uppercase())
-  });
-
-  if all_camel_case {
-    return Some("camelCase");
-  }
-
-  None
-}
-
 #[derive(Debug)]
 pub struct SchemaGraph {
   /// All schemas from the OpenAPI spec
@@ -290,6 +262,11 @@ pub struct FieldDef {
   pub validation_attrs: Vec<String>,
   pub regex_validation: Option<String>,
   pub default_value: Option<serde_json::Value>,
+  pub read_only: bool,
+  pub write_only: bool,
+  pub deprecated: bool,
+  pub multiple_of: Option<serde_json::Number>,
+  pub unique_items: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +275,7 @@ pub struct TypeRef {
   pub boxed: bool,
   pub nullable: bool,
   pub is_array: bool,
+  pub unique_items: bool,
 }
 
 impl TypeRef {
@@ -307,6 +285,7 @@ impl TypeRef {
       boxed: false,
       nullable: false,
       is_array: false,
+      unique_items: false,
     }
   }
 
@@ -317,6 +296,11 @@ impl TypeRef {
 
   pub fn with_vec(mut self) -> Self {
     self.is_array = true;
+    self
+  }
+
+  pub fn with_unique_items(mut self, unique: bool) -> Self {
+    self.unique_items = unique;
     self
   }
 
@@ -334,7 +318,11 @@ impl TypeRef {
     }
 
     if self.is_array {
-      result = format!("Vec<{}>", result);
+      if self.unique_items {
+        result = format!("indexmap::IndexSet<{}>", result);
+      } else {
+        result = format!("Vec<{}>", result);
+      }
     }
 
     if self.nullable {
@@ -361,6 +349,7 @@ pub struct VariantDef {
   pub docs: Vec<String>,
   pub content: VariantContent,
   pub serde_attrs: Vec<String>,
+  pub deprecated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -456,6 +445,8 @@ impl<'a> SchemaConverter<'a> {
           .map(|d| doc_comment_lines(d))
           .unwrap_or_default();
 
+        let deprecated = variant_schema.deprecated.unwrap_or(false);
+
         // Determine the variant content based on the schema type
         // For discriminated unions (with tag), we MUST use struct variants (serde requirement)
         // For non-discriminated (untagged), we can use tuple variants to avoid duplication
@@ -501,6 +492,7 @@ impl<'a> SchemaConverter<'a> {
           docs,
           content,
           serde_attrs: vec![],
+          deprecated,
         });
       }
     }
@@ -538,10 +530,13 @@ impl<'a> SchemaConverter<'a> {
       .iter()
       .filter_map(|s| {
         if let Ok(resolved) = s.resolve(self.graph.spec()) {
-          resolved
-            .const_value
-            .as_ref()
-            .map(|v| (v.clone(), resolved.description.clone()))
+          resolved.const_value.as_ref().map(|v| {
+            (
+              v.clone(),
+              resolved.description.clone(),
+              resolved.deprecated.unwrap_or(false),
+            )
+          })
         } else {
           None
         }
@@ -584,6 +579,8 @@ impl<'a> SchemaConverter<'a> {
           .map(|d| doc_comment_lines(d))
           .unwrap_or_default();
 
+        let deprecated = variant_schema.deprecated.unwrap_or(false);
+
         // Determine variant content - prefer tuple variants for existing schemas
         let content = if let Some(ref title) = variant_schema.title {
           // If this variant has a title and matches an existing schema, use tuple variant
@@ -614,6 +611,7 @@ impl<'a> SchemaConverter<'a> {
           docs,
           content,
           serde_attrs: vec![],
+          deprecated,
         });
       }
     }
@@ -637,12 +635,12 @@ impl<'a> SchemaConverter<'a> {
     &self,
     name: &str,
     schema: &ObjectSchema,
-    const_values: &[(serde_json::Value, Option<String>)],
+    const_values: &[(serde_json::Value, Option<String>, bool)],
   ) -> anyhow::Result<RustType> {
     let mut variants = Vec::new();
 
     // Add a variant for each const value
-    for (value, description) in const_values {
+    for (value, description, deprecated) in const_values {
       if let Some(str_val) = value.as_str() {
         // Convert the const value to a variant name
         // e.g., "claude-3-7-sonnet-latest" -> "Claude37SonnetLatest"
@@ -655,6 +653,7 @@ impl<'a> SchemaConverter<'a> {
           docs,
           content: VariantContent::Unit,
           serde_attrs: vec![format!("rename = \"{}\"", str_val)],
+          deprecated: *deprecated,
         });
       }
     }
@@ -665,6 +664,7 @@ impl<'a> SchemaConverter<'a> {
       docs: vec!["/// Any other string value".to_string()],
       content: VariantContent::Tuple(vec![TypeRef::new("String")]),
       serde_attrs: vec!["untagged".to_string()],
+      deprecated: false,
     });
 
     Ok(RustType::Enum(EnumDef {
@@ -732,6 +732,7 @@ impl<'a> SchemaConverter<'a> {
           docs: vec![],
           content: VariantContent::Unit,
           serde_attrs: vec![format!("rename = \"{}\"", str_val)],
+          deprecated: false,
         });
       }
     }
@@ -755,37 +756,44 @@ impl<'a> SchemaConverter<'a> {
   fn convert_struct(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<(RustType, Vec<RustType>)> {
     let (mut fields, inline_types) = self.convert_fields_with_inline_types(name, schema)?;
 
-    // Detect if all fields follow a consistent naming pattern for serde rename_all
+    // Individual rename attributes are more explicit and handle all edge cases correctly
     let mut serde_attrs = vec![];
 
-    // Collect fields that have rename attributes
-    let renamed_fields: Vec<_> = fields
-      .iter()
-      .filter_map(|f| {
-        f.serde_attrs
-          .iter()
-          .find(|attr| attr.starts_with("rename = "))
-          .map(|attr| {
-            // Extract the original name from rename = "original-name"
-            let start = attr.find('"').unwrap() + 1;
-            let end = attr.rfind('"').unwrap();
-            attr[start..end].to_string()
-          })
-      })
-      .collect();
+    // Handle additionalProperties
+    if let Some(ref additional) = schema.additional_properties {
+      match additional {
+        Schema::Boolean(bool_schema) => {
+          if !bool_schema.0 {
+            // additionalProperties: false -> deny unknown fields
+            serde_attrs.push("deny_unknown_fields".to_string());
+          }
+          // additionalProperties: true is the default, no action needed
+        }
+        Schema::Object(schema_ref) => {
+          // additionalProperties with schema -> add HashMap field
+          if let Ok(additional_schema) = schema_ref.resolve(self.graph.spec()) {
+            let value_type = self.schema_to_type_ref(&additional_schema)?;
+            let map_type = TypeRef::new(format!(
+              "std::collections::HashMap<String, {}>",
+              value_type.to_rust_type()
+            ));
 
-    // If we have renamed fields, check if they all follow a consistent pattern
-    if !renamed_fields.is_empty() {
-      let all_kebab = renamed_fields.iter().all(|name| name.contains('-'));
-
-      if all_kebab {
-        // Use rename_all = "kebab-case" for all fields
-        // serde will automatically convert snake_case Rust names to kebab-case
-        serde_attrs.push("rename_all = \"kebab-case\"".to_string());
-
-        // Remove individual rename attributes since rename_all handles it
-        for field in &mut fields {
-          field.serde_attrs.retain(|attr| !attr.starts_with("rename = "));
+            fields.push(FieldDef {
+              name: "additional_properties".to_string(),
+              docs: vec!["/// Additional properties not defined in the schema".to_string()],
+              rust_type: map_type,
+              optional: false,
+              serde_attrs: vec!["flatten".to_string()],
+              validation_attrs: vec![],
+              regex_validation: None,
+              default_value: None,
+              read_only: false,
+              write_only: false,
+              deprecated: false,
+              multiple_of: None,
+              unique_items: false,
+            });
+          }
         }
       }
     }
@@ -822,6 +830,26 @@ impl<'a> SchemaConverter<'a> {
       serde_attrs.push("default".to_string());
     }
 
+    // Optimize derives based on field directionality
+    let all_read_only = !fields.is_empty() && fields.iter().all(|f| f.read_only);
+    let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
+
+    let mut derives = vec!["Debug".into(), "Clone".into()];
+
+    // Add Serialize/Deserialize based on field directionality
+    if !all_read_only {
+      // Include Serialize unless ALL fields are read-only (response-only)
+      derives.push("Serialize".into());
+    }
+
+    if !all_write_only {
+      // Include Deserialize unless ALL fields are write-only (request-only)
+      derives.push("Deserialize".into());
+    }
+
+    // Always include Validate for runtime validation
+    derives.push("Validate".into());
+
     let struct_type = RustType::Struct(StructDef {
       name: to_rust_type_name(name),
       docs: schema
@@ -830,13 +858,7 @@ impl<'a> SchemaConverter<'a> {
         .map(|d| doc_comment_lines(d))
         .unwrap_or_default(),
       fields,
-      derives: vec![
-        "Debug".into(),
-        "Clone".into(),
-        "Serialize".into(),
-        "Deserialize".into(),
-        "Validate".into(),
-      ],
+      derives,
       serde_attrs,
     });
 
@@ -893,6 +915,13 @@ impl<'a> SchemaConverter<'a> {
         let mut parts = Vec::<String>::new();
         let is_float = matches!(schema_type, SchemaTypeSet::Single(SchemaType::Number));
 
+        // multipleOf validation constraint
+        // Note: validator crate doesn't have built-in support for multipleOf
+        // We document this in field comments for manual validation
+        if schema.multiple_of.is_some() {
+          // multipleOf is tracked in FieldDef and documented in generated code
+        }
+
         // exclusive_minimum
         if let Some(exclusive_min) = schema
           .exclusive_minimum
@@ -934,15 +963,15 @@ impl<'a> SchemaConverter<'a> {
         }
       }
 
-      // string length validation (skip for date/time formats as they map to non-string types)
+      // string length validation (skip for date/time/binary/uuid formats as they map to non-string types)
       if matches!(schema_type, SchemaTypeSet::Single(SchemaType::String)) && schema.enum_values.is_empty() {
-        let is_datetime_format = schema
+        let is_non_string_format = schema
           .format
           .as_ref()
-          .map(|f| matches!(f.as_str(), "date" | "date-time" | "time"))
+          .map(|f| matches!(f.as_str(), "date" | "date-time" | "time" | "binary" | "byte" | "uuid"))
           .unwrap_or(false);
 
-        if !is_datetime_format {
+        if !is_non_string_format {
           if let (Some(min), Some(max)) = (schema.min_length, schema.max_length) {
             attrs.push(format!("length(min = {min}, max = {max})"));
           } else if let Some(min) = schema.min_length {
@@ -1021,8 +1050,10 @@ impl<'a> SchemaConverter<'a> {
       let optional = !is_required;
 
       let mut serde_attrs = vec![];
-      // Add rename if the property name is not a valid Rust identifier or uses snake_case
-      if prop_name.contains('-') || prop_name.contains('.') {
+      // Add rename if the Rust field name differs from the original OpenAPI property name
+      // This automatically handles: keywords (type -> r#type), special chars (user-id -> user_id), case changes (userId -> user_id)
+      let rust_field_name = to_rust_field_name(prop_name);
+      if rust_field_name != *prop_name {
         serde_attrs.push(format!("rename = \"{}\"", prop_name));
       }
 
@@ -1031,21 +1062,45 @@ impl<'a> SchemaConverter<'a> {
         serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
       }
 
-      // Extract validation attributes and default value from resolved schema
-      let (docs, validation_attrs, regex_validation, default_value) =
-        if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-          let docs = prop_schema
-            .description
-            .as_ref()
-            .map(|d| doc_comment_lines(d))
-            .unwrap_or_default();
-          let validation = self.extract_validation_attrs(prop_name, is_required, &prop_schema);
-          let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema);
-          let default = self.extract_default_value(&prop_schema);
-          (docs, validation, regex_validation.cloned(), default)
-        } else {
-          (vec![], vec![], None, None)
-        };
+      // Extract validation attributes, default value, and read/write metadata from resolved schema
+      let (
+        docs,
+        validation_attrs,
+        regex_validation,
+        default_value,
+        read_only,
+        write_only,
+        deprecated,
+        multiple_of,
+        unique_items,
+      ) = if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
+        let docs = prop_schema
+          .description
+          .as_ref()
+          .map(|d| doc_comment_lines(d))
+          .unwrap_or_default();
+        let validation = self.extract_validation_attrs(prop_name, is_required, &prop_schema);
+        let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema);
+        let default = self.extract_default_value(&prop_schema);
+        let read_only = prop_schema.read_only.unwrap_or(false);
+        let write_only = prop_schema.write_only.unwrap_or(false);
+        let deprecated = prop_schema.deprecated.unwrap_or(false);
+        let multiple_of = prop_schema.multiple_of.clone();
+        let unique_items = prop_schema.unique_items.unwrap_or(false);
+        (
+          docs,
+          validation,
+          regex_validation.cloned(),
+          default,
+          read_only,
+          write_only,
+          deprecated,
+          multiple_of,
+          unique_items,
+        )
+      } else {
+        (vec![], vec![], None, None, false, false, false, None, false)
+      };
 
       // Check nullable before moving rust_type
       let is_nullable = rust_type.nullable;
@@ -1066,6 +1121,11 @@ impl<'a> SchemaConverter<'a> {
         validation_attrs,
         regex_validation,
         default_value,
+        read_only,
+        write_only,
+        deprecated,
+        multiple_of,
+        unique_items,
       });
     }
 
@@ -1163,8 +1223,10 @@ impl<'a> SchemaConverter<'a> {
       let optional = !is_required;
 
       let mut serde_attrs = vec![];
-      // Add rename if the property name is not a valid Rust identifier or uses snake_case
-      if prop_name.contains('-') || prop_name.contains('.') {
+      // Add rename if the Rust field name differs from the original OpenAPI property name
+      // This automatically handles: keywords (type -> r#type), special chars (user-id -> user_id), case changes (userId -> user_id)
+      let rust_field_name = to_rust_field_name(prop_name);
+      if rust_field_name != *prop_name {
         serde_attrs.push(format!("rename = \"{}\"", prop_name));
       }
 
@@ -1173,22 +1235,46 @@ impl<'a> SchemaConverter<'a> {
         serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
       }
 
-      // Extract validation attributes and default value from resolved schema
-      let (docs, validation_attrs, regex_validation, default_value) =
-        if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-          let docs = prop_schema
-            .description
-            .as_ref()
-            .map(|d| doc_comment_lines(d))
-            .unwrap_or_default();
-          let required = schema.required.contains(prop_name);
-          let validation = self.extract_validation_attrs(prop_name, required, &prop_schema);
-          let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema);
-          let default = self.extract_default_value(&prop_schema);
-          (docs, validation, regex_validation.cloned(), default)
-        } else {
-          (vec![], vec![], None, None)
-        };
+      // Extract validation attributes, default value, and read/write metadata from resolved schema
+      let (
+        docs,
+        validation_attrs,
+        regex_validation,
+        default_value,
+        read_only,
+        write_only,
+        deprecated,
+        multiple_of,
+        unique_items,
+      ) = if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
+        let docs = prop_schema
+          .description
+          .as_ref()
+          .map(|d| doc_comment_lines(d))
+          .unwrap_or_default();
+        let required = schema.required.contains(prop_name);
+        let validation = self.extract_validation_attrs(prop_name, required, &prop_schema);
+        let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema);
+        let default = self.extract_default_value(&prop_schema);
+        let read_only = prop_schema.read_only.unwrap_or(false);
+        let write_only = prop_schema.write_only.unwrap_or(false);
+        let deprecated = prop_schema.deprecated.unwrap_or(false);
+        let multiple_of = prop_schema.multiple_of.clone();
+        let unique_items = prop_schema.unique_items.unwrap_or(false);
+        (
+          docs,
+          validation,
+          regex_validation.cloned(),
+          default,
+          read_only,
+          write_only,
+          deprecated,
+          multiple_of,
+          unique_items,
+        )
+      } else {
+        (vec![], vec![], None, None, false, false, false, None, false)
+      };
 
       // Check nullable before moving rust_type
       let is_nullable = rust_type.nullable;
@@ -1209,6 +1295,11 @@ impl<'a> SchemaConverter<'a> {
         validation_attrs,
         regex_validation,
         default_value,
+        read_only,
+        write_only,
+        deprecated,
+        multiple_of,
+        unique_items,
       });
     }
 
@@ -1311,6 +1402,7 @@ impl<'a> SchemaConverter<'a> {
 
           // Handle array types specially
           if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Array)) {
+            let unique_items = resolved.unique_items.unwrap_or(false);
             // Check array items for oneOf
             if let Some(ref items_box) = resolved.items
               && let Schema::Object(items_ref) = items_box.as_ref()
@@ -1322,7 +1414,11 @@ impl<'a> SchemaConverter<'a> {
                   if let ObjectOrReference::Ref { ref_path, .. } = one_of_ref
                     && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
                   {
-                    return Ok(TypeRef::new(format!("Vec<{}>", to_rust_type_name(&ref_name))));
+                    return Ok(
+                      TypeRef::new(to_rust_type_name(&ref_name))
+                        .with_vec()
+                        .with_unique_items(unique_items),
+                    );
                   }
                 }
               }
@@ -1376,6 +1472,9 @@ impl<'a> SchemaConverter<'a> {
                   "date" => "chrono::NaiveDate",
                   "date-time" => "chrono::DateTime<chrono::Utc>",
                   "time" => "chrono::NaiveTime",
+                  "binary" => "Vec<u8>",  // Raw binary (multipart/form-data)
+                  "byte" => "String",     // Base64-encoded binary (JSON)
+                  "uuid" => "uuid::Uuid", // UUID
                   _ => "String",
                 }
               } else {
@@ -1387,6 +1486,8 @@ impl<'a> SchemaConverter<'a> {
             SchemaType::Boolean => "bool",
             SchemaType::Array => {
               // Handle array items
+              let unique_items = schema.unique_items.unwrap_or(false);
+
               if let Some(ref items_box) = schema.items
                 && let Schema::Object(items_ref) = items_box.as_ref()
               {
@@ -1394,7 +1495,11 @@ impl<'a> SchemaConverter<'a> {
                 if let ObjectOrReference::Ref { ref_path, .. } = items_ref.as_ref() {
                   // Extract the type name from the reference
                   if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
-                    return Ok(TypeRef::new(format!("Vec<{}>", to_rust_type_name(&ref_name))));
+                    return Ok(
+                      TypeRef::new(to_rust_type_name(&ref_name))
+                        .with_vec()
+                        .with_unique_items(unique_items),
+                    );
                   }
                 }
 
@@ -1406,17 +1511,29 @@ impl<'a> SchemaConverter<'a> {
                       if let ObjectOrReference::Ref { ref_path, .. } = one_of_ref
                         && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
                       {
-                        return Ok(TypeRef::new(format!("Vec<{}>", to_rust_type_name(&ref_name))));
+                        return Ok(
+                          TypeRef::new(to_rust_type_name(&ref_name))
+                            .with_vec()
+                            .with_unique_items(unique_items),
+                        );
                       }
                     }
                   }
 
                   // Regular item type conversion
                   let item_type = self.schema_to_type_ref(&items_schema)?;
-                  return Ok(TypeRef::new(format!("Vec<{}>", item_type.to_rust_type())));
+                  return Ok(
+                    TypeRef::new(item_type.to_rust_type())
+                      .with_vec()
+                      .with_unique_items(unique_items),
+                  );
                 }
               }
-              return Ok(TypeRef::new("Vec<serde_json::Value>"));
+              return Ok(
+                TypeRef::new("serde_json::Value")
+                  .with_vec()
+                  .with_unique_items(unique_items),
+              );
             }
             SchemaType::Object => {
               // Object without a matching schema reference
@@ -1469,10 +1586,32 @@ impl<'a> OperationConverter<'a> {
       to_rust_type_name(&format!("{}_{}", method, path_part))
     };
 
+    // Generate inline request body struct if needed
+    if let Some(ref body_ref) = operation.request_body
+      && let Ok(body) = body_ref.resolve(self.spec)
+      && let Some((_content_type, media_type)) = body.content.iter().next()
+      && let Some(ref schema_ref) = media_type.schema
+    {
+      // Check if this is an inline schema (not a $ref)
+      if let ObjectOrReference::Object(inline_schema) = schema_ref
+        && !inline_schema.properties.is_empty()
+      {
+        // Generate a struct for the inline request body
+        let body_struct_name = format!("{}RequestBody", base_name);
+        let (body_struct, inline_types) = self.schema_converter.convert_struct(&body_struct_name, inline_schema)?;
+
+        // Add inline types first (if any)
+        types.extend(inline_types);
+
+        // Add the body struct
+        types.push(body_struct);
+      }
+    }
+
     // Generate request type if needed
     let request_type_name = if !operation.parameters.is_empty() || operation.request_body.is_some() {
       let request_name = format!("{}Request", base_name);
-      let request_struct = self.create_request_struct(&request_name, operation)?;
+      let request_struct = self.create_request_struct(&request_name, &base_name, operation)?;
       types.push(RustType::Struct(request_struct));
       Some(request_name)
     } else {
@@ -1513,7 +1652,7 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Create a request struct from operation parameters and body
-  fn create_request_struct(&self, name: &str, operation: &Operation) -> anyhow::Result<StructDef> {
+  fn create_request_struct(&self, name: &str, base_name: &str, operation: &Operation) -> anyhow::Result<StructDef> {
     let mut fields = Vec::new();
 
     // Process parameters
@@ -1549,15 +1688,34 @@ impl<'a> OperationConverter<'a> {
       // Extract schema from the first content type (usually application/json)
       if let Some((_content_type, media_type)) = body.content.iter().next()
         && let Some(ref schema_ref) = media_type.schema
-        && let Ok(schema) = schema_ref.resolve(self.spec)
       {
-        let body_type = self.schema_converter.schema_to_type_ref(&schema)?;
+        // Check if this is an inline schema (not a $ref) with properties
+        let body_type = if let ObjectOrReference::Object(inline_schema) = schema_ref
+          && !inline_schema.properties.is_empty()
+        {
+          // Use the generated inline body struct (apply same transformation as convert_struct does)
+          let body_struct_name = format!("{}RequestBody", base_name);
+          TypeRef::new(to_rust_type_name(&body_struct_name))
+        } else if let Ok(schema) = schema_ref.resolve(self.spec) {
+          // Use existing logic for $ref or other schemas
+          self.schema_converter.schema_to_type_ref(&schema)?
+        } else {
+          TypeRef::new("serde_json::Value")
+        };
+
         let is_required = body.required.unwrap_or(false);
-        let validation_attrs = self
-          .schema_converter
-          .extract_validation_attrs(name, is_required, &schema);
-        let regex_validation = self.schema_converter.extract_validation_pattern(name, &schema).cloned();
-        let default_value = self.schema_converter.extract_default_value(&schema);
+
+        // Get validation attrs from resolved schema if possible
+        let (validation_attrs, regex_validation, default_value) = if let Ok(schema) = schema_ref.resolve(self.spec) {
+          let validation = self
+            .schema_converter
+            .extract_validation_attrs(name, is_required, &schema);
+          let regex = self.schema_converter.extract_validation_pattern(name, &schema).cloned();
+          let default = self.schema_converter.extract_default_value(&schema);
+          (validation, regex, default)
+        } else {
+          (vec![], None, None)
+        };
 
         let mut serde_attrs = vec![];
         if !is_required {
@@ -1581,6 +1739,11 @@ impl<'a> OperationConverter<'a> {
           validation_attrs,
           regex_validation,
           default_value,
+          read_only: false,
+          write_only: false, // Request body fields are typically write-only, but we keep both derives for flexibility
+          deprecated: false,
+          multiple_of: None,
+          unique_items: false,
         });
       }
     }
@@ -1592,32 +1755,8 @@ impl<'a> OperationConverter<'a> {
       .map(|d| doc_comment_lines(d))
       .unwrap_or_default();
 
-    // Detect consistent naming pattern for rename_all
+    // Individual rename attributes are more explicit and handle all edge cases correctly
     let mut serde_attrs = vec![];
-    let renamed_fields: Vec<_> = fields
-      .iter()
-      .filter_map(|f| {
-        f.serde_attrs
-          .iter()
-          .find(|attr| attr.starts_with("rename = "))
-          .map(|attr| {
-            let start = attr.find('"').unwrap() + 1;
-            let end = attr.rfind('"').unwrap();
-            attr[start..end].to_string()
-          })
-      })
-      .collect();
-
-    if !renamed_fields.is_empty() {
-      let all_kebab = renamed_fields.iter().all(|name| name.contains('-'));
-      if all_kebab {
-        serde_attrs.push("rename_all = \"kebab-case\"".to_string());
-        // Remove individual rename attributes
-        for field in &mut fields {
-          field.serde_attrs.retain(|attr| !attr.starts_with("rename = "));
-        }
-      }
-    }
 
     // Only add serde(default) at struct level if ALL fields have defaults or are Option/Vec
     let all_fields_defaultable = fields.iter().all(|f| {
@@ -1650,17 +1789,31 @@ impl<'a> OperationConverter<'a> {
       serde_attrs.push("default".to_string());
     }
 
+    // Optimize derives based on field directionality
+    let all_read_only = !fields.is_empty() && fields.iter().all(|f| f.read_only);
+    let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
+
+    let mut derives = vec!["Debug".into(), "Clone".into()];
+
+    // Add Serialize/Deserialize based on field directionality
+    if !all_read_only {
+      // Include Serialize unless ALL fields are read-only (response-only)
+      derives.push("Serialize".into());
+    }
+
+    if !all_write_only {
+      // Include Deserialize unless ALL fields are write-only (request-only)
+      derives.push("Deserialize".into());
+    }
+
+    // Always include Validate for runtime validation
+    derives.push("Validate".into());
+
     Ok(StructDef {
       name: to_rust_type_name(name),
       docs,
       fields,
-      derives: vec![
-        "Debug".into(),
-        "Clone".into(),
-        "Serialize".into(),
-        "Deserialize".into(),
-        "Validate".into(),
-      ],
+      derives,
       serde_attrs,
     })
   }
@@ -1687,8 +1840,9 @@ impl<'a> OperationConverter<'a> {
     let is_required = param.required.unwrap_or(false);
 
     let mut serde_attrs = vec![];
-    // Add rename if the parameter name is not a valid Rust identifier
-    if param.name.contains('-') || param.name.contains('.') {
+    // Add rename if the Rust field name differs from the original parameter name
+    let rust_param_name = to_rust_field_name(&param.name);
+    if rust_param_name != param.name.as_str() {
       serde_attrs.push(format!("rename = \"{}\"", param.name));
     }
 
@@ -1723,6 +1877,11 @@ impl<'a> OperationConverter<'a> {
       validation_attrs,
       regex_validation,
       default_value,
+      read_only: false,
+      write_only: false, // Parameters could be either direction, keep both derives
+      deprecated: false,
+      multiple_of: None,
+      unique_items: false,
     })
   }
 
@@ -1741,6 +1900,16 @@ impl<'a> OperationConverter<'a> {
 }
 
 pub struct CodeGenerator;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeUsage {
+  /// Type is only used in requests (needs Serialize)
+  RequestOnly,
+  /// Type is only used in responses (needs Deserialize)
+  ResponseOnly,
+  /// Type is used in both requests and responses (needs both)
+  Bidirectional,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RegexKey {
@@ -1784,12 +1953,44 @@ enum TypeKind {
 }
 
 impl CodeGenerator {
-  pub fn generate(types: &[RustType]) -> TokenStream {
+  /// Build a map of type usage from operation metadata
+  pub fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
+    let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new(); // (used_in_request, used_in_response)
+
+    for op in operations {
+      // Track request types
+      if let Some(ref req_type) = op.request_type {
+        let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
+        entry.0 = true; // used in request
+      }
+
+      // Track response types
+      if let Some(ref resp_type) = op.response_type {
+        let entry = usage_map.entry(resp_type.clone()).or_insert((false, false));
+        entry.1 = true; // used in response
+      }
+    }
+
+    // Convert to TypeUsage enum
+    usage_map
+      .into_iter()
+      .map(|(type_name, (in_request, in_response))| {
+        let usage = match (in_request, in_response) {
+          (true, false) => TypeUsage::RequestOnly,
+          (false, true) => TypeUsage::ResponseOnly,
+          (true, true) | (false, false) => TypeUsage::Bidirectional, // Bidirectional or unknown
+        };
+        (type_name, usage)
+      })
+      .collect()
+  }
+
+  pub fn generate(types: &[RustType], type_usage: &BTreeMap<String, TypeUsage>) -> TokenStream {
     let ordered = Self::ordered_types(types);
     let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
     let type_tokens: Vec<TokenStream> = ordered
       .iter()
-      .map(|ty| Self::generate_type(ty, &regex_lookup))
+      .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage))
       .collect();
     let default_impls = Self::generate_default_impls(&ordered);
 
@@ -2100,20 +2301,64 @@ impl CodeGenerator {
     }
   }
 
-  fn generate_type(rust_type: &RustType, regex_lookup: &BTreeMap<RegexKey, String>) -> TokenStream {
+  fn generate_type(
+    rust_type: &RustType,
+    regex_lookup: &BTreeMap<RegexKey, String>,
+    type_usage: &BTreeMap<String, TypeUsage>,
+  ) -> TokenStream {
     match rust_type {
-      RustType::Struct(def) => Self::generate_struct(def, regex_lookup),
+      RustType::Struct(def) => Self::generate_struct(def, regex_lookup, type_usage),
       RustType::Enum(def) => Self::generate_enum(def, regex_lookup),
       RustType::TypeAlias(def) => Self::generate_type_alias(def),
     }
   }
 
-  fn generate_struct(def: &StructDef, regex_lookup: &BTreeMap<RegexKey, String>) -> TokenStream {
+  fn generate_struct(
+    def: &StructDef,
+    regex_lookup: &BTreeMap<RegexKey, String>,
+    type_usage: &BTreeMap<String, TypeUsage>,
+  ) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let docs = Self::generate_docs(&def.docs);
-    let derives = Self::generate_derives(&def.derives);
+
+    // Override derives based on operation-level usage (only for operation-specific types like *Request)
+    // Component schemas keep full derives to avoid dependency issues when nested in other types
+    let is_operation_type = def.name.ends_with("Request") || def.name.ends_with("RequestBody");
+
+    let derives = if is_operation_type && type_usage.contains_key(&def.name) {
+      let usage = type_usage.get(&def.name).unwrap();
+      let mut custom_derives = vec!["Debug".to_string(), "Clone".to_string()];
+
+      match usage {
+        TypeUsage::RequestOnly => {
+          // Request-only types need Serialize and Validate
+          custom_derives.push("Serialize".to_string());
+          custom_derives.push("Validate".to_string());
+        }
+        TypeUsage::ResponseOnly => {
+          // Response-only types need Deserialize but NOT Validate (we trust our server)
+          custom_derives.push("Deserialize".to_string());
+        }
+        TypeUsage::Bidirectional => {
+          // Bidirectional types need both Serialize/Deserialize and Validate
+          custom_derives.push("Serialize".to_string());
+          custom_derives.push("Deserialize".to_string());
+          custom_derives.push("Validate".to_string());
+        }
+      }
+
+      Self::generate_derives(&custom_derives)
+    } else {
+      // Component schemas and other types keep full derives (safe default)
+      Self::generate_derives(&def.derives)
+    };
+
     let serde_attrs = Self::generate_serde_attrs(&def.serde_attrs);
-    let fields = Self::generate_fields_with_visibility(&def.name, None, &def.fields, true, true, regex_lookup);
+
+    // Skip validation attributes for response-only operation types (no validation needed)
+    let include_validation = !(is_operation_type && matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)));
+    let fields =
+      Self::generate_fields_with_visibility(&def.name, None, &def.fields, true, include_validation, regex_lookup);
 
     quote! {
       #docs
@@ -2254,7 +2499,14 @@ impl CodeGenerator {
       .iter()
       .map(|field| {
         let name = format_ident!("{}", field.name);
-        let docs = Self::generate_docs(&field.docs);
+
+        // Add validation constraints to docs
+        let mut field_docs = field.docs.clone();
+        if let Some(ref multiple_of) = field.multiple_of {
+          field_docs.push(format!("/// Validation: Must be a multiple of {}", multiple_of));
+        }
+
+        let docs = Self::generate_docs(&field_docs);
         let serde_attrs = Self::generate_serde_attrs(&field.serde_attrs);
 
         // Only include validation for struct fields, not enum variant fields
@@ -2273,11 +2525,19 @@ impl CodeGenerator {
         } else {
           quote! {}
         };
+
+        let deprecated_attr = if field.deprecated {
+          quote! { #[deprecated] }
+        } else {
+          quote! {}
+        };
+
         let type_tokens = Self::parse_type_string(&field.rust_type.to_rust_type());
 
         if add_pub {
           quote! {
             #docs
+            #deprecated_attr
             #serde_attrs
             #validation_attrs
             pub #name: #type_tokens
@@ -2285,6 +2545,7 @@ impl CodeGenerator {
         } else {
           quote! {
             #docs
+            #deprecated_attr
             #serde_attrs
             #validation_attrs
             #name: #type_tokens
@@ -2306,6 +2567,12 @@ impl CodeGenerator {
         let docs = Self::generate_docs(&variant.docs);
         let serde_attrs = Self::generate_serde_attrs(&variant.serde_attrs);
 
+        let deprecated_attr = if variant.deprecated {
+          quote! { #[deprecated] }
+        } else {
+          quote! {}
+        };
+
         let content = match &variant.content {
           VariantContent::Unit => quote! {},
           VariantContent::Tuple(types) => {
@@ -2325,6 +2592,7 @@ impl CodeGenerator {
 
         quote! {
           #docs
+          #deprecated_attr
           #serde_attrs
           #name #content
         }
