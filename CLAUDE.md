@@ -76,78 +76,109 @@ cargo update
 
 ## Architecture
 
-The codebase is organized into two main modules:
-- **src/main.rs**: Entry point and orchestration
-- **src/generator.rs**: Core generation logic (2368 lines)
+The codebase is organized into a modular structure with clear separation of concerns:
 
-### Core Components
+```
+src/
+├── main.rs                        - Entry point and orchestration (173 lines)
+├── reserved.rs                    - Rust keyword handling and naming utilities
+└── generator/                     - Core generation logic (2693 lines total)
+    ├── mod.rs                     - Module definition and re-exports (29 lines)
+    ├── utils.rs                   - Helper functions (19 lines)
+    ├── ast.rs                     - AST type definitions (164 lines)
+    ├── schema_graph.rs            - Dependency tracking (188 lines)
+    ├── schema_converter.rs        - Schema → AST conversion (1207 lines)
+    ├── operation_converter.rs     - Operation → request/response types (355 lines)
+    └── code_generator.rs          - AST → Rust code generation (731 lines)
+```
 
-**SchemaGraph** (`src/generator.rs:98-276`)
-- Manages all schemas from the OpenAPI spec components
-- Builds and tracks dependency relationships between schemas
-- Detects circular dependencies using depth-first search
-- Provides schema resolution and lookup functionality
-- Key methods:
-  - `build_dependencies()`: Analyzes schema references to build dependency graph
-  - `detect_cycles()`: Identifies circular schema references
-  - `is_cyclic()`: Checks if a schema is part of a cycle (used to add Box<T> wrappers)
+### Module Structure
 
-**RustType AST** (`src/generator.rs:282-419`)
-Represents the intermediate representation of generated Rust code:
+**generator/mod.rs** (`src/generator/mod.rs`)
+- Module orchestration and public API
+- Re-exports: `SchemaGraph`, `SchemaConverter`, `OperationConverter`, `CodeGenerator`
+- Declares all submodules with clear documentation
+
+**generator/utils.rs** (`src/generator/utils.rs`)
+- `doc_comment_lines()`: Converts strings to Rust doc comment lines
+- `doc_comment_block()`: Creates full doc comment blocks
+
+**generator/ast.rs** (`src/generator/ast.rs`)
+Intermediate representation types:
 - `RustType`: Enum containing Struct, Enum, or TypeAlias variants
 - `StructDef`: Struct definition with fields, derives, and serde attributes
 - `FieldDef`: Field definition with type, docs, validation, and default values
 - `EnumDef`: Enum definition with variants and optional discriminator
 - `VariantDef`: Enum variant (Unit, Tuple, or Struct content)
 - `TypeRef`: Type reference with support for Box<T>, Option<T>, Vec<T> wrappers
+- `OperationInfo`: Metadata about API operations
 
-**SchemaConverter** (`src/generator.rs:425-1456`)
-Converts OpenAPI schemas to Rust AST structures:
+**generator/schema_graph.rs** (`src/generator/schema_graph.rs`)
+Schema dependency management and cycle detection:
+- `SchemaGraph` struct manages all schemas from OpenAPI spec
+- Builds dependency graph tracking which schemas reference others
+- DFS-based cycle detection algorithm
+- Marks cyclic schemas for Box<T> wrapper injection
+- Key methods:
+  - `new()`: Extracts schemas from OpenAPI spec components
+  - `build_dependencies()`: Analyzes schema references to build dependency graph
+  - `detect_cycles()`: Identifies circular schema references using DFS
+  - `is_cyclic()`: Checks if a schema is part of a cycle
+  - `extract_ref_name()`: Parses $ref strings to extract schema names
+
+**generator/schema_converter.rs** (`src/generator/schema_converter.rs`)
+Converts OpenAPI schemas to Rust AST (largest module):
 - Handles all schema types: objects, enums, oneOf, anyOf, allOf
-- Detects and handles nullable patterns (anyOf with null)
+- Detects and handles nullable patterns (anyOf with null → Option<T>)
 - Generates inline enum types for nested unions
-- Extracts validation rules from OpenAPI constraints:
-  - String length (min/max)
-  - Number ranges (min/max, exclusive min/max)
-  - Regex patterns
-  - Format-based validation (email, URL)
+- Extracts validation rules from OpenAPI constraints
 - Manages cyclic references with Box<T> wrappers
 - Handles discriminated unions with serde tag attribute
-- Key methods:
+- Key methods (16 total):
   - `convert_schema()`: Main entry point for schema conversion
   - `convert_one_of_enum()`: Handles oneOf with discriminator support
   - `convert_any_of_enum()`: Handles anyOf with untagged enum generation
+  - `convert_string_enum_with_catchall()`: Forward-compatible enums
+  - `convert_simple_enum()`: Simple string enums
   - `convert_struct()`: Converts object schemas to structs
-  - `schema_to_type_ref()`: Maps schemas to Rust type references
+  - `schema_to_type_ref()`: Maps schemas to Rust type references (public)
+  - `extract_validation_attrs()`: Extracts validation rules (public)
+  - `extract_validation_pattern()`: Extracts regex patterns (public)
+  - `extract_default_value()`: Extracts default values (public)
 
-**OperationConverter** (`src/generator.rs:1462-1752`)
-Generates request and response types for API operations:
+**generator/operation_converter.rs** (`src/generator/operation_converter.rs`)
+Generates request/response types for API operations:
 - Creates request structs combining parameters and request body
 - Orders parameters by location (path → query → header → cookie)
 - Extracts response type references from operation definitions
 - Generates OperationInfo metadata for tracking
-- Properly handles optional vs required parameters
+- Handles inline request body schemas
 - Key methods:
   - `convert_operation()`: Main operation conversion entry point
   - `create_request_struct()`: Builds request type from parameters and body
   - `convert_parameter()`: Converts individual parameter to field definition
+  - `extract_response_schema_name()`: Extracts schema name from response
 
-**CodeGenerator** (`src/generator.rs:1758-2367`)
-Converts Rust AST to actual Rust source code using quote! macro:
+**generator/code_generator.rs** (`src/generator/code_generator.rs`)
+Converts Rust AST to actual source code:
+- `TypeUsage` enum: Tracks request/response usage for derive optimization
+- `RegexKey` struct: Manages regex validation constant names
+- `TypeKind` enum: Internal type categorization (Struct, Enum, Alias)
 - Generates regex validation constants with LazyLock pattern
 - Deduplicates types using BTreeMap ordering
 - Generates impl Default blocks for structs and enums
-- Handles serde attributes (rename, rename_all, skip_serializing_if, tag, untagged)
-- Generates validator attributes for runtime validation
-- Converts JSON default values to Rust expressions
-- Key methods:
-  - `generate()`: Main code generation entry point
+- Handles serde attributes (rename, tag, untagged, skip_serializing_if)
+- Key methods (21 total):
+  - `build_type_usage_map()`: Builds type usage map from operations (public)
+  - `generate()`: Main code generation entry point (public)
   - `generate_regex_constants()`: Creates static regex validators
   - `generate_default_impls()`: Generates Default trait implementations
+  - `json_value_to_rust_expr()`: Converts JSON to Rust expressions
+  - `generate_struct()`, `generate_enum()`, `generate_type_alias()`
   - `ordered_types()`: Deduplicates and orders types for output
 
-**Main Orchestration & CLI** (`src/main.rs:7-153`)
-The main function coordinates the generation pipeline with CLI argument handling:
+**Main Orchestration** (`src/main.rs`)
+Coordinates the generation pipeline with CLI argument handling:
 1. Parses CLI arguments using clap (input file, output file, verbose/quiet flags)
 2. Loads OpenAPI spec from specified JSON file
 3. Builds SchemaGraph with dependency analysis
@@ -166,21 +197,38 @@ The CLI provides structured logging with three levels:
 
 ### Key Dependencies
 
-- **clap**: Command-line argument parsing with derive macros
-- **oas3**: Core OpenAPI 3.x parsing library
-- **serde/serde_json**: JSON serialization with preserved field order
-- **quote/proc-macro2**: For generating Rust code as token streams
-- **prettyplease**: Pretty-printing generated Rust code
-- **syn**: Parsing Rust syntax for code formatting
-- **validator**: Runtime validation attributes and traits
-- **regex**: Regular expression validation support
-- **inflections**: Case conversion utilities (PascalCase, snake_case, etc.)
-- **any_ascii**: ASCII transliteration for identifier sanitization
-- **tokio**: Async runtime for file I/O
+**Core Generation Dependencies:**
+- **oas3** (0.19): OpenAPI 3.x specification parsing library
+- **quote** (1.0): Quasi-quoting for generating Rust token streams
+- **proc-macro2** (1.0): Standalone proc-macro API for token manipulation
+- **syn** (2.0, features: full, parsing): Rust syntax parsing for code formatting
+- **prettyplease** (0.2): Pretty-printing generated Rust code with proper formatting
+
+**CLI and I/O:**
+- **clap** (4.5, features: derive): Command-line argument parsing with derive macros
+- **tokio** (1.48, features: rt-multi-thread, fs, macros): Async runtime for file I/O
+- **anyhow** (1.0): Flexible error handling
+
+**Serialization:**
+- **serde** (1.0, features: derive): Serialization framework
+- **serde_json** (1.0, features: preserve_order): JSON serialization with field order preservation
+
+**String Processing:**
+- **inflections** (1.1): Case conversion utilities (PascalCase, snake_case, camelCase)
+- **any_ascii** (0.3): ASCII transliteration for identifier sanitization
+
+**Validation:**
+- **validator** (0.20, features: derive): Runtime validation attributes and traits
+- **regex** (1.11): Regular expression validation support
+
+**Dev Dependencies** (for generated code):
+- **chrono** (0.4, features: std, clock, serde): Date/time types for OpenAPI date-time format
+- **indexmap** (2.12, features: serde): Ordered map for unique array items
+- **uuid** (1.11, features: serde): UUID types for OpenAPI uuid format
 
 ### Type Mapping System
 
-The `schema_to_type_ref()` method (`src/generator.rs:1246-1455`) maps OpenAPI types to Rust:
+The `schema_to_type_ref()` method in `SchemaConverter` (`src/generator/schema_converter.rs`) maps OpenAPI types to Rust:
 
 **Primitive Types:**
 - String → String
@@ -226,32 +274,71 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
 
 ### Naming and Formatting
 
-**Identifier Handling** (`src/generator.rs:41-64`):
+**Identifier Handling** (`src/reserved.rs`):
 - Converts OpenAPI names to valid Rust identifiers
 - Replaces invalid characters (-, ., spaces) with underscores
 - Handles Rust keyword conflicts with r# prefix
-- ASCII transliteration for international characters
+- ASCII transliteration for international characters using `any_ascii`
+- Key functions:
+  - `to_rust_type_name()`: Converts names to PascalCase for types
+  - `to_rust_field_name()`: Converts names to snake_case for fields
+  - `regex_const_name()`: Generates unique constant names for regex validators
 
-**Type Names** (`src/generator.rs:56-64`):
+**Type Names:**
 - Converts schema names to PascalCase
-- Handles keyword conflicts (Self, Type)
+- Handles keyword conflicts (Self, Type, etc.) with r# prefix
+- Ensures uniqueness in enum variant names
 
-**Field Names**:
+**Field Names:**
 - Converts property names to snake_case
-- Adds serde(rename = "...") for kebab-case or special characters
-- Uses rename_all when all fields follow consistent pattern
+- Adds `serde(rename = "...")` when Rust name differs from OpenAPI name
+- Automatically handles: keywords (type → r#type), special chars (user-id → user_id), case changes (userId → user_id)
 
 ### Documentation Generation
 
-**Doc Comments** (`src/generator.rs:21-38`):
-- Converts OpenAPI descriptions to Rust doc comments (`///`)
-- Handles literal `\n` escape sequences
-- Preserves multi-line documentation
-- Adds location hints for operation parameters (Path/Query/Header/Cookie)
+**Doc Comments** (`src/generator/utils.rs`):
+- `doc_comment_lines()`: Converts OpenAPI descriptions to Rust doc comments (`///`)
+- Handles literal `\n` escape sequences by normalizing to actual newlines
+- Preserves multi-line documentation with proper formatting
+- Empty lines converted to `/// ` (maintains doc comment continuity)
+- Used throughout generated code for structs, enums, fields, and variants
+
+**Location Hints** (`src/generator/operation_converter.rs`):
+- Adds parameter location hints to generated request structs
+- Format: `/// Path parameter`, `/// Query parameter`, etc.
+- Helps developers understand parameter usage in API requests
+
+### Benefits of Modular Architecture
+
+The refactored codebase provides significant advantages:
+
+**Maintainability:**
+- Each module has a single, well-defined responsibility
+- Changes are isolated to specific modules, reducing risk
+- Clear module boundaries make dependencies explicit
+- Easier to test individual components in isolation
+
+**Readability:**
+- Files are sized appropriately (19-1207 lines vs 2609 lines monolithic)
+- Related functionality is grouped together
+- Module documentation provides clear entry points
+- Easier to navigate and understand specific features
+
+**Extensibility:**
+- New converters can be added without modifying existing code
+- AST types are centralized in one location
+- Plugin-style architecture for different output formats (future)
+
+**Development:**
+- Multiple developers can work on different modules simultaneously
+- Reduced cognitive load when working on specific features
+- Better IDE support with smaller file sizes
+- Compile times benefit from smaller compilation units
 
 ## Features
 
 ### Fully Implemented
+✅ **Modular architecture** - Well-organized codebase with 7 focused modules
 ✅ CLI interface with clap (input/output paths, verbose/quiet modes)
 ✅ Automatic directory creation for output paths
 ✅ Schema parsing and conversion (objects, arrays, primitives, enums)
@@ -263,14 +350,17 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
 ✅ Parameter handling (path, query, header, cookie)
 ✅ Validation attribute generation (length, range, regex, email, URL)
 ✅ Default value generation with impl Default
-✅ Regex pattern validation with static constants
+✅ Regex pattern validation with static LazyLock constants
 ✅ Doc comment generation from OpenAPI descriptions
 ✅ Serde attribute generation (rename, tag, untagged, skip_serializing_if)
 ✅ Inline enum type generation for nested unions
 ✅ Forward-compatible enum patterns with catch-all variants
 ✅ Type deduplication and ordering
-✅ Pretty-printed output with rustfmt
+✅ Pretty-printed output with prettyplease
 ✅ Configurable logging levels (normal, verbose, quiet)
+✅ Support for date/time formats (chrono types)
+✅ Support for UUID format (uuid::Uuid)
+✅ Support for unique array items (IndexSet)
 
 ### Not Yet Implemented
 ❌ Callback schema handling

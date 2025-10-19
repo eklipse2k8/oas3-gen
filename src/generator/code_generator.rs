@@ -1,0 +1,731 @@
+//! Code generation module for converting AST to Rust source code
+//!
+//! This module provides the `CodeGenerator` which converts the intermediate
+//! Rust AST representation into actual Rust source code using the quote! macro.
+//!
+//! Key features:
+//! - Generates regex validation constants with LazyLock pattern
+//! - Deduplicates types using BTreeMap ordering
+//! - Generates impl Default blocks for structs and enums
+//! - Handles serde attributes (rename, rename_all, skip_serializing_if, tag, untagged)
+//! - Generates validator attributes for runtime validation
+//! - Converts JSON default values to Rust expressions
+
+use std::collections::BTreeMap;
+
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+
+use crate::reserved::regex_const_name;
+
+use super::ast::*;
+
+/// Type usage context for determining derive traits
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeUsage {
+  /// Type is only used in requests (needs Serialize)
+  RequestOnly,
+  /// Type is only used in responses (needs Deserialize)
+  ResponseOnly,
+  /// Type is used in both requests and responses (needs both)
+  Bidirectional,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RegexKey {
+  type_name: String,
+  variant_name: Option<String>,
+  field_name: String,
+}
+
+impl RegexKey {
+  fn for_struct(type_name: &str, field_name: &str) -> Self {
+    Self {
+      type_name: type_name.to_string(),
+      variant_name: None,
+      field_name: field_name.to_string(),
+    }
+  }
+
+  fn for_variant(type_name: &str, variant_name: &str, field_name: &str) -> Self {
+    Self {
+      type_name: type_name.to_string(),
+      variant_name: Some(variant_name.to_string()),
+      field_name: field_name.to_string(),
+    }
+  }
+
+  fn parts(&self) -> Vec<&str> {
+    let mut parts = vec![self.type_name.as_str()];
+    if let Some(variant) = &self.variant_name {
+      parts.push(variant.as_str());
+    }
+    parts.push(self.field_name.as_str());
+    parts
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum TypeKind {
+  Struct,
+  Enum,
+  Alias,
+}
+
+pub struct CodeGenerator;
+
+impl CodeGenerator {
+  /// Build a map of type usage from operation metadata
+  pub fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
+    let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new(); // (used_in_request, used_in_response)
+
+    for op in operations {
+      // Track request types
+      if let Some(ref req_type) = op.request_type {
+        let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
+        entry.0 = true; // used in request
+      }
+
+      // Track response types
+      if let Some(ref resp_type) = op.response_type {
+        let entry = usage_map.entry(resp_type.clone()).or_insert((false, false));
+        entry.1 = true; // used in response
+      }
+    }
+
+    // Convert to TypeUsage enum
+    usage_map
+      .into_iter()
+      .map(|(type_name, (in_request, in_response))| {
+        let usage = match (in_request, in_response) {
+          (true, false) => TypeUsage::RequestOnly,
+          (false, true) => TypeUsage::ResponseOnly,
+          (true, true) | (false, false) => TypeUsage::Bidirectional, // Bidirectional or unknown
+        };
+        (type_name, usage)
+      })
+      .collect()
+  }
+
+  pub fn generate(types: &[RustType], type_usage: &BTreeMap<String, TypeUsage>) -> TokenStream {
+    let ordered = Self::ordered_types(types);
+    let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
+    let type_tokens: Vec<TokenStream> = ordered
+      .iter()
+      .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage))
+      .collect();
+    let default_impls = Self::generate_default_impls(&ordered);
+
+    quote! {
+      use serde::{Deserialize, Serialize};
+      use validator::Validate;
+
+      #regex_consts
+
+      #(#type_tokens)*
+
+      #default_impls
+    }
+  }
+
+  fn ordered_types<'a>(types: &'a [RustType]) -> Vec<&'a RustType> {
+    let mut map: BTreeMap<(TypeKind, String), &'a RustType> = BTreeMap::new();
+    for ty in types {
+      let key = Self::type_key(ty);
+      map.entry(key).or_insert(ty);
+    }
+    map.into_values().collect()
+  }
+
+  fn type_key(rust_type: &RustType) -> (TypeKind, String) {
+    let kind = match rust_type {
+      RustType::Struct(_) => TypeKind::Struct,
+      RustType::Enum(_) => TypeKind::Enum,
+      RustType::TypeAlias(_) => TypeKind::Alias,
+    };
+
+    (kind, rust_type.type_name().to_string())
+  }
+
+  /// Generate regex constants for validation
+  fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTreeMap<RegexKey, String>) {
+    let mut const_defs: BTreeMap<String, String> = BTreeMap::new();
+    let mut lookup: BTreeMap<RegexKey, String> = BTreeMap::new();
+    let mut pattern_to_const: BTreeMap<String, String> = BTreeMap::new();
+
+    for rust_type in types {
+      match rust_type {
+        RustType::Struct(def) => {
+          for field in &def.fields {
+            let Some(pattern) = &field.regex_validation else {
+              continue;
+            };
+            let key = RegexKey::for_struct(&def.name, &field.name);
+            let pattern_key = pattern.clone();
+            let const_name = match pattern_to_const.get(&pattern_key) {
+              Some(existing) => existing.clone(),
+              None => {
+                let name = regex_const_name(&key.parts());
+                pattern_to_const.insert(pattern_key.clone(), name.clone());
+                const_defs.insert(name.clone(), pattern_key);
+                name
+              }
+            };
+            lookup.insert(key, const_name);
+          }
+        }
+        RustType::Enum(def) => {
+          for variant in &def.variants {
+            if let VariantContent::Struct(fields) = &variant.content {
+              for field in fields {
+                let Some(pattern) = &field.regex_validation else {
+                  continue;
+                };
+                let key = RegexKey::for_variant(&def.name, &variant.name, &field.name);
+                let pattern_key = pattern.clone();
+                let const_name = match pattern_to_const.get(&pattern_key) {
+                  Some(existing) => existing.clone(),
+                  None => {
+                    let name = regex_const_name(&key.parts());
+                    pattern_to_const.insert(pattern_key.clone(), name.clone());
+                    const_defs.insert(name.clone(), pattern_key);
+                    name
+                  }
+                };
+                lookup.insert(key, const_name);
+              }
+            }
+          }
+        }
+        RustType::TypeAlias(_) => {}
+      }
+    }
+
+    if const_defs.is_empty() {
+      return (quote! {}, lookup);
+    }
+
+    let regex_defs: Vec<TokenStream> = const_defs
+      .into_iter()
+      .map(|(name, pattern)| {
+        let ident = format_ident!("{}", name);
+        quote! {
+          static #ident: std::sync::LazyLock<regex::Regex> =
+            std::sync::LazyLock::new(|| regex::Regex::new(#pattern).expect("invalid regex"));
+        }
+      })
+      .collect();
+
+    (quote! { #(#regex_defs)* }, lookup)
+  }
+
+  /// Check if a type can safely use Default::default()
+  fn type_can_default(type_ref: &TypeRef) -> bool {
+    let base_type = &type_ref.base_type;
+
+    // Primitive types that implement Default
+    matches!(
+      base_type.as_str(),
+      "String"
+        | "bool"
+        | "i8"
+        | "i16"
+        | "i32"
+        | "i64"
+        | "i128"
+        | "isize"
+        | "u8"
+        | "u16"
+        | "u32"
+        | "u64"
+        | "u128"
+        | "usize"
+        | "f32"
+        | "f64"
+        | "serde_json::Value"
+    ) || type_ref.nullable
+      || type_ref.is_array
+      || base_type.starts_with("Vec<")
+      || base_type.starts_with("Option<")
+  }
+
+  /// Find the best variant to use as default for an enum
+  /// Priority: Unit > Vec/Option types > Struct variants > Tuple variants with primitives
+  fn find_best_default_variant(variants: &[VariantDef]) -> Option<(&VariantDef, TokenStream)> {
+    // Priority 1: Unit variants
+    for variant in variants {
+      if matches!(variant.content, VariantContent::Unit) {
+        let variant_name = format_ident!("{}", variant.name);
+        return Some((variant, quote! { Self::#variant_name }));
+      }
+    }
+
+    // Priority 2: Tuple variants with Vec or Option (always defaultable)
+    for variant in variants {
+      if let VariantContent::Tuple(types) = &variant.content
+        && types.len() == 1
+        && (types[0].is_array || types[0].nullable)
+      {
+        let variant_name = format_ident!("{}", variant.name);
+        return Some((variant, quote! { Self::#variant_name(Default::default()) }));
+      }
+    }
+
+    // Priority 3: Struct variants with defaultable fields
+    for variant in variants {
+      if let VariantContent::Struct(fields) = &variant.content {
+        // Check if all fields can be defaulted
+        let all_defaultable = fields
+          .iter()
+          .all(|f| f.default_value.is_some() || Self::type_can_default(&f.rust_type));
+
+        if all_defaultable {
+          let variant_name = format_ident!("{}", variant.name);
+          let field_inits: Vec<TokenStream> = fields
+            .iter()
+            .map(|field| {
+              let field_name = format_ident!("{}", field.name);
+              if let Some(ref default_val) = field.default_value {
+                let value_expr = Self::json_value_to_rust_expr(default_val, &field.rust_type);
+                quote! { #field_name: #value_expr }
+              } else {
+                quote! { #field_name: Default::default() }
+              }
+            })
+            .collect();
+          return Some((variant, quote! { Self::#variant_name { #(#field_inits),* } }));
+        }
+      }
+    }
+
+    // Priority 4: Tuple variants with primitive types
+    for variant in variants {
+      if let VariantContent::Tuple(types) = &variant.content
+        && types.iter().all(Self::type_can_default)
+      {
+        let variant_name = format_ident!("{}", variant.name);
+        let defaults: Vec<TokenStream> = types.iter().map(|_| quote! { Default::default() }).collect();
+        return Some((variant, quote! { Self::#variant_name(#(#defaults),*) }));
+      }
+    }
+
+    // No suitable variant found
+    None
+  }
+
+  /// Generate impl Default blocks for structs and enums
+  fn generate_default_impls(types: &[&RustType]) -> TokenStream {
+    let mut impls: Vec<(proc_macro2::Ident, TokenStream)> = Vec::new();
+
+    for rust_type in types {
+      match rust_type {
+        RustType::Struct(def) => {
+          let has_defaults = def.fields.iter().any(|f| f.default_value.is_some());
+
+          if has_defaults {
+            let all_fields_can_default = def
+              .fields
+              .iter()
+              .all(|f| f.default_value.is_some() || Self::type_can_default(&f.rust_type));
+
+            if all_fields_can_default {
+              let struct_name = format_ident!("{}", def.name);
+
+              let field_inits: Vec<TokenStream> = def
+                .fields
+                .iter()
+                .map(|field| {
+                  let field_name = format_ident!("{}", field.name);
+
+                  if let Some(ref default_val) = field.default_value {
+                    let value_expr = Self::json_value_to_rust_expr(default_val, &field.rust_type);
+                    quote! { #field_name: #value_expr }
+                  } else {
+                    quote! { #field_name: Default::default() }
+                  }
+                })
+                .collect();
+
+              impls.push((struct_name, quote! { Self { #(#field_inits),* } }));
+            }
+          }
+        }
+        RustType::Enum(def) => {
+          if let Some((_variant, default_expr)) = Self::find_best_default_variant(&def.variants) {
+            let enum_name = format_ident!("{}", def.name);
+            impls.push((enum_name, default_expr));
+          }
+        }
+        RustType::TypeAlias(_) => {}
+      }
+    }
+
+    if impls.is_empty() {
+      return quote! {};
+    }
+
+    let macro_def = quote! {
+      macro_rules! impl_default {
+        ($type:ident = $body:expr) => {
+          impl Default for $type {
+            fn default() -> Self {
+              $body
+            }
+          }
+        };
+      }
+    };
+
+    let macro_calls: Vec<TokenStream> = impls
+      .into_iter()
+      .map(|(ident, body)| quote! { impl_default!(#ident = #body); })
+      .collect();
+
+    quote! {
+      #macro_def
+
+      #(#macro_calls)*
+    }
+  }
+
+  /// Convert a JSON value to a Rust expression
+  fn json_value_to_rust_expr(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
+    let base_expr = match value {
+      serde_json::Value::String(s) => {
+        quote! { #s.to_string() }
+      }
+      serde_json::Value::Number(n) => {
+        if let Some(i) = n.as_i64() {
+          quote! { #i }
+        } else if let Some(f) = n.as_f64() {
+          quote! { #f }
+        } else {
+          quote! { Default::default() }
+        }
+      }
+      serde_json::Value::Bool(b) => {
+        quote! { #b }
+      }
+      serde_json::Value::Null => {
+        quote! { None }
+      }
+      serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+        // For complex types, use Default::default()
+        quote! { Default::default() }
+      }
+    };
+
+    // Wrap in Some() if the type is Option<T>
+    if rust_type.nullable && !matches!(value, serde_json::Value::Null) {
+      quote! { Some(#base_expr) }
+    } else {
+      base_expr
+    }
+  }
+
+  fn generate_type(
+    rust_type: &RustType,
+    regex_lookup: &BTreeMap<RegexKey, String>,
+    type_usage: &BTreeMap<String, TypeUsage>,
+  ) -> TokenStream {
+    match rust_type {
+      RustType::Struct(def) => Self::generate_struct(def, regex_lookup, type_usage),
+      RustType::Enum(def) => Self::generate_enum(def, regex_lookup),
+      RustType::TypeAlias(def) => Self::generate_type_alias(def),
+    }
+  }
+
+  fn generate_struct(
+    def: &StructDef,
+    regex_lookup: &BTreeMap<RegexKey, String>,
+    type_usage: &BTreeMap<String, TypeUsage>,
+  ) -> TokenStream {
+    let name = format_ident!("{}", def.name);
+    let docs = Self::generate_docs(&def.docs);
+
+    // Override derives based on operation-level usage (only for operation-specific types like *Request)
+    // Component schemas keep full derives to avoid dependency issues when nested in other types
+    let is_operation_type = def.name.ends_with("Request") || def.name.ends_with("RequestBody");
+
+    let derives = if is_operation_type && type_usage.contains_key(&def.name) {
+      let usage = type_usage.get(&def.name).unwrap();
+      let mut custom_derives = vec!["Debug".to_string(), "Clone".to_string()];
+
+      match usage {
+        TypeUsage::RequestOnly => {
+          // Request-only types need Serialize and Validate
+          custom_derives.push("Serialize".to_string());
+          custom_derives.push("Validate".to_string());
+        }
+        TypeUsage::ResponseOnly => {
+          // Response-only types need Deserialize but NOT Validate (we trust our server)
+          custom_derives.push("Deserialize".to_string());
+        }
+        TypeUsage::Bidirectional => {
+          // Bidirectional types need both Serialize/Deserialize and Validate
+          custom_derives.push("Serialize".to_string());
+          custom_derives.push("Deserialize".to_string());
+          custom_derives.push("Validate".to_string());
+        }
+      }
+
+      Self::generate_derives(&custom_derives)
+    } else {
+      // Component schemas and other types keep full derives (safe default)
+      Self::generate_derives(&def.derives)
+    };
+
+    let serde_attrs = Self::generate_serde_attrs(&def.serde_attrs);
+
+    // Skip validation attributes for response-only operation types (no validation needed)
+    let include_validation = !(is_operation_type && matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)));
+    let fields =
+      Self::generate_fields_with_visibility(&def.name, None, &def.fields, true, include_validation, regex_lookup);
+
+    quote! {
+      #docs
+      #derives
+      #serde_attrs
+      pub struct #name {
+        #(#fields),*
+      }
+    }
+  }
+
+  fn generate_enum(def: &EnumDef, regex_lookup: &BTreeMap<RegexKey, String>) -> TokenStream {
+    let name = format_ident!("{}", def.name);
+    let docs = Self::generate_docs(&def.docs);
+    let derives = Self::generate_derives(&def.derives);
+    let serde_attrs = Self::generate_enum_serde_attrs(def);
+    let variants = Self::generate_variants(&def.name, &def.variants, regex_lookup);
+
+    quote! {
+      #docs
+      #derives
+      #serde_attrs
+      pub enum #name {
+        #(#variants),*
+      }
+    }
+  }
+
+  fn generate_type_alias(def: &TypeAliasDef) -> TokenStream {
+    let name = format_ident!("{}", def.name);
+    let docs = Self::generate_docs(&def.docs);
+    let target = Self::parse_type_string(&def.target.to_rust_type());
+
+    quote! {
+      #docs
+      pub type #name = #target;
+    }
+  }
+
+  fn generate_docs(docs: &[String]) -> TokenStream {
+    if docs.is_empty() {
+      return quote! {};
+    }
+
+    let doc_lines: Vec<TokenStream> = docs
+      .iter()
+      .map(|line| {
+        // Remove the /// prefix that was added earlier
+        let clean_line = line.strip_prefix("/// ").unwrap_or(line);
+        quote! { #[doc = #clean_line] }
+      })
+      .collect();
+
+    quote! { #(#doc_lines)* }
+  }
+
+  fn generate_derives(derives: &[String]) -> TokenStream {
+    if derives.is_empty() {
+      return quote! {};
+    }
+
+    let derive_idents: Vec<_> = derives.iter().map(|d| format_ident!("{}", d)).collect();
+
+    quote! {
+      #[derive(#(#derive_idents),*)]
+    }
+  }
+
+  fn generate_serde_attrs(attrs: &[String]) -> TokenStream {
+    if attrs.is_empty() {
+      return quote! {};
+    }
+
+    let attr_tokens: Vec<TokenStream> = attrs
+      .iter()
+      .map(|attr| {
+        let attr_str = attr.as_str();
+        let tokens: TokenStream = attr_str.parse().unwrap_or_else(|_| quote! {});
+        quote! { #[serde(#tokens)] }
+      })
+      .collect();
+
+    quote! { #(#attr_tokens)* }
+  }
+
+  fn generate_validation_attrs(regex_const: Option<&str>, attrs: &[String]) -> TokenStream {
+    if attrs.is_empty() && regex_const.is_none() {
+      return quote! {};
+    }
+
+    let mut combined = attrs.to_owned();
+
+    if let Some(const_name) = regex_const {
+      combined.push(format!("regex(path = \"{}\")", const_name));
+    }
+
+    let attr_tokens: Vec<TokenStream> = combined
+      .iter()
+      .map(|attr| attr.parse().unwrap_or_else(|_| quote! {}))
+      .collect();
+
+    quote! { #[validate(#(#attr_tokens),*)] }
+  }
+
+  fn generate_enum_serde_attrs(def: &EnumDef) -> TokenStream {
+    let mut attrs = Vec::new();
+
+    // Add discriminator tag if present
+    if let Some(ref discriminator) = def.discriminator {
+      attrs.push(quote! { tag = #discriminator });
+    }
+
+    // Add other serde attributes
+    for attr in &def.serde_attrs {
+      if let Ok(tokens) = attr.parse::<TokenStream>() {
+        attrs.push(tokens);
+      }
+    }
+
+    if attrs.is_empty() {
+      return quote! {};
+    }
+
+    quote! {
+      #[serde(#(#attrs),*)]
+    }
+  }
+
+  fn generate_fields_with_visibility(
+    type_name: &str,
+    variant_name: Option<&str>,
+    fields: &[FieldDef],
+    add_pub: bool,
+    include_validation: bool,
+    regex_lookup: &BTreeMap<RegexKey, String>,
+  ) -> Vec<TokenStream> {
+    fields
+      .iter()
+      .map(|field| {
+        let name = format_ident!("{}", field.name);
+
+        // Add validation constraints to docs
+        let mut field_docs = field.docs.clone();
+        if let Some(ref multiple_of) = field.multiple_of {
+          field_docs.push(format!("/// Validation: Must be a multiple of {}", multiple_of));
+        }
+
+        let docs = Self::generate_docs(&field_docs);
+        let serde_attrs = Self::generate_serde_attrs(&field.serde_attrs);
+
+        // Only include validation for struct fields, not enum variant fields
+        let regex_const = if include_validation && field.regex_validation.is_some() {
+          let key = match variant_name {
+            Some(variant) => RegexKey::for_variant(type_name, variant, &field.name),
+            None => RegexKey::for_struct(type_name, &field.name),
+          };
+          regex_lookup.get(&key).map(|s| s.as_str())
+        } else {
+          None
+        };
+
+        let validation_attrs = if include_validation {
+          Self::generate_validation_attrs(regex_const, &field.validation_attrs)
+        } else {
+          quote! {}
+        };
+
+        let deprecated_attr = if field.deprecated {
+          quote! { #[deprecated] }
+        } else {
+          quote! {}
+        };
+
+        let type_tokens = Self::parse_type_string(&field.rust_type.to_rust_type());
+
+        if add_pub {
+          quote! {
+            #docs
+            #deprecated_attr
+            #serde_attrs
+            #validation_attrs
+            pub #name: #type_tokens
+          }
+        } else {
+          quote! {
+            #docs
+            #deprecated_attr
+            #serde_attrs
+            #validation_attrs
+            #name: #type_tokens
+          }
+        }
+      })
+      .collect()
+  }
+
+  fn generate_variants(
+    type_name: &str,
+    variants: &[VariantDef],
+    regex_lookup: &BTreeMap<RegexKey, String>,
+  ) -> Vec<TokenStream> {
+    variants
+      .iter()
+      .map(|variant| {
+        let name = format_ident!("{}", variant.name);
+        let docs = Self::generate_docs(&variant.docs);
+        let serde_attrs = Self::generate_serde_attrs(&variant.serde_attrs);
+
+        let deprecated_attr = if variant.deprecated {
+          quote! { #[deprecated] }
+        } else {
+          quote! {}
+        };
+
+        let content = match &variant.content {
+          VariantContent::Unit => quote! {},
+          VariantContent::Tuple(types) => {
+            let type_tokens: Vec<_> = types
+              .iter()
+              .map(|t| Self::parse_type_string(&t.to_rust_type()))
+              .collect();
+            quote! { ( #(#type_tokens),* ) }
+          }
+          VariantContent::Struct(fields) => {
+            // Enum variant fields should not have 'pub' keyword or validation attributes
+            let field_tokens =
+              Self::generate_fields_with_visibility(type_name, Some(&variant.name), fields, false, false, regex_lookup);
+            quote! { { #(#field_tokens),* } }
+          }
+        };
+
+        quote! {
+          #docs
+          #deprecated_attr
+          #serde_attrs
+          #name #content
+        }
+      })
+      .collect()
+  }
+
+  /// Parse a type string into a TokenStream
+  /// This is a simple parser that handles basic Rust types
+  fn parse_type_string(type_str: &str) -> TokenStream {
+    // For now, just parse it directly - this works for most cases
+    type_str.parse().unwrap_or_else(|_| quote! { serde_json::Value })
+  }
+}
