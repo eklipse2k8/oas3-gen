@@ -5,8 +5,6 @@ use std::{
   collections::{BTreeMap, BTreeSet},
 };
 
-use any_ascii::any_ascii;
-use inflections::{Inflect, case::to_pascal_case};
 use oas3::{
   Spec,
   spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, Schema, SchemaType, SchemaTypeSet},
@@ -15,6 +13,8 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use regex::Regex;
 use serde_json::Number;
+
+use crate::reserved::{regex_const_name, to_rust_field_name, to_rust_type_name};
 
 pub fn doc_comment_lines(input: &str) -> Vec<String> {
   let normalized = input.replace("\\n", "\n");
@@ -34,32 +34,6 @@ pub fn doc_comment_block(input: &str) -> String {
   doc_comment_lines(input).join("\n")
 }
 
-/// Convert a schema name to a valid Rust identifier (for field names)
-pub fn to_rust_ident(name: &str) -> String {
-  let cleaned = name.replace(['-', '.', ' '], "_");
-
-  // Check if it's a Rust keyword and prefix with r# if needed
-  match cleaned.as_str() {
-    "as" | "break" | "const" | "continue" | "crate" | "else" | "enum" | "extern" | "false" | "fn" | "for" | "if"
-    | "impl" | "in" | "let" | "loop" | "match" | "mod" | "move" | "mut" | "pub" | "ref" | "return" | "self"
-    | "Self" | "static" | "struct" | "super" | "trait" | "true" | "type" | "unsafe" | "use" | "where" | "while"
-    | "async" | "await" | "dyn" | "abstract" | "become" | "box" | "do" | "final" | "macro" | "override" | "priv"
-    | "typeof" | "unsized" | "virtual" | "yield" | "try" => format!("r#{}", cleaned),
-    _ => cleaned,
-  }
-}
-
-/// Convert a schema name to a valid Rust type name (PascalCase)
-pub fn to_rust_type_name(name: &str) -> String {
-  let pascal = any_ascii(name).to_pascal_case();
-
-  // Check if it's a Rust keyword and prefix with r# if needed
-  match pascal.as_str() {
-    "Self" | "Type" => format!("r#{}", pascal),
-    _ => pascal,
-  }
-}
-
 /// Detect if all field names follow a consistent naming pattern
 /// Returns the serde rename_all value if consistent, None otherwise
 pub fn detect_naming_pattern(fields: &[(String, String)]) -> Option<&'static str> {
@@ -69,7 +43,7 @@ pub fn detect_naming_pattern(fields: &[(String, String)]) -> Option<&'static str
 
   // Check if all fields are snake_case
   let all_snake_case = fields.iter().all(|(original, rust_name)| {
-    original.contains('_') || original.contains('-') && to_rust_ident(original) == *rust_name
+    original.contains('_') || original.contains('-') && to_rust_field_name(original) == *rust_name
   });
 
   if all_snake_case {
@@ -464,7 +438,7 @@ impl<'a> SchemaConverter<'a> {
 
         // Generate a good variant name
         let mut variant_name = if let Some(ref title) = variant_schema.title {
-          to_pascal_case(title)
+          to_rust_type_name(title)
         } else {
           // Infer name from type
           self.infer_variant_name(&variant_schema, i)
@@ -523,7 +497,7 @@ impl<'a> SchemaConverter<'a> {
         };
 
         variants.push(VariantDef {
-          name: to_rust_ident(&variant_name),
+          name: to_rust_type_name(&variant_name),
           docs,
           content,
           serde_attrs: vec![],
@@ -592,7 +566,7 @@ impl<'a> SchemaConverter<'a> {
 
         // Generate a good variant name
         let mut variant_name = if let Some(ref title) = variant_schema.title {
-          to_pascal_case(title)
+          to_rust_type_name(title)
         } else {
           // Infer name from type
           self.infer_variant_name(&variant_schema, i)
@@ -636,7 +610,7 @@ impl<'a> SchemaConverter<'a> {
         };
 
         variants.push(VariantDef {
-          name: to_rust_ident(&variant_name),
+          name: to_rust_type_name(&variant_name),
           docs,
           content,
           serde_attrs: vec![],
@@ -672,7 +646,7 @@ impl<'a> SchemaConverter<'a> {
       if let Some(str_val) = value.as_str() {
         // Convert the const value to a variant name
         // e.g., "claude-3-7-sonnet-latest" -> "Claude37SonnetLatest"
-        let variant_name = to_pascal_case(&str_val.replace(['-', '.'], "_"));
+        let variant_name = to_rust_type_name(str_val);
 
         let docs = description.as_ref().map(|d| doc_comment_lines(d)).unwrap_or_default();
 
@@ -694,7 +668,7 @@ impl<'a> SchemaConverter<'a> {
     });
 
     Ok(RustType::Enum(EnumDef {
-      name: to_rust_ident(name),
+      name: to_rust_type_name(name),
       docs: schema
         .description
         .as_ref()
@@ -752,7 +726,7 @@ impl<'a> SchemaConverter<'a> {
 
     for value in enum_values {
       if let Some(str_val) = value.as_str() {
-        let variant_name = to_pascal_case(str_val);
+        let variant_name = to_rust_type_name(str_val);
         variants.push(VariantDef {
           name: variant_name,
           docs: vec![],
@@ -763,7 +737,7 @@ impl<'a> SchemaConverter<'a> {
     }
 
     Ok(RustType::Enum(EnumDef {
-      name: to_rust_ident(name),
+      name: to_rust_type_name(name),
       docs: schema
         .description
         .as_ref()
@@ -960,17 +934,25 @@ impl<'a> SchemaConverter<'a> {
         }
       }
 
-      // string length validation
+      // string length validation (skip for date/time formats as they map to non-string types)
       if matches!(schema_type, SchemaTypeSet::Single(SchemaType::String)) && schema.enum_values.is_empty() {
-        if let (Some(min), Some(max)) = (schema.min_length, schema.max_length) {
-          attrs.push(format!("length(min = {min}, max = {max})"));
-        } else if let Some(min) = schema.min_length {
-          attrs.push(format!("length(min = {min})"));
-        } else if let Some(max) = schema.max_length {
-          attrs.push(format!("length(max = {max})"));
-        } else if is_required {
-          // Require non-empty string for required fields
-          attrs.push("length(min = 1)".to_string());
+        let is_datetime_format = schema
+          .format
+          .as_ref()
+          .map(|f| matches!(f.as_str(), "date" | "date-time" | "time"))
+          .unwrap_or(false);
+
+        if !is_datetime_format {
+          if let (Some(min), Some(max)) = (schema.min_length, schema.max_length) {
+            attrs.push(format!("length(min = {min}, max = {max})"));
+          } else if let Some(min) = schema.min_length {
+            attrs.push(format!("length(min = {min})"));
+          } else if let Some(max) = schema.max_length {
+            attrs.push(format!("length(max = {max})"));
+          } else if is_required {
+            // Require non-empty string for required fields
+            attrs.push("length(min = 1)".to_string());
+          }
         }
       }
 
@@ -1044,8 +1026,8 @@ impl<'a> SchemaConverter<'a> {
         serde_attrs.push(format!("rename = \"{}\"", prop_name));
       }
 
-      // Add skip_serializing_if for optional fields
-      if optional {
+      // Add skip_serializing_if for optional fields or nullable types
+      if optional || rust_type.nullable {
         serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
       }
 
@@ -1065,18 +1047,21 @@ impl<'a> SchemaConverter<'a> {
           (vec![], vec![], None, None)
         };
 
+      // Check nullable before moving rust_type
+      let is_nullable = rust_type.nullable;
+
       // Don't double-wrap: if the type is already nullable, don't wrap again
-      let final_type = if optional && !rust_type.nullable {
+      let final_type = if optional && !is_nullable {
         rust_type.with_option()
       } else {
         rust_type
       };
 
       fields.push(FieldDef {
-        name: to_rust_ident(prop_name),
+        name: to_rust_field_name(prop_name),
         docs,
         rust_type: final_type,
-        optional,
+        optional: optional || is_nullable,
         serde_attrs,
         validation_attrs,
         regex_validation,
@@ -1134,25 +1119,25 @@ impl<'a> SchemaConverter<'a> {
           // If anyOf has null and exactly 2 variants, it's just an optional type
 
           if !prop_schema.any_of.is_empty() && has_null && prop_schema.any_of.len() == 2 {
-            // Extract the non-null type
+            // Extract the non-null type and wrap in Option (since it's nullable)
             let mut found_type = None;
             for variant_ref in &prop_schema.any_of {
               // Check if it's a $ref first (before resolving)
               if let ObjectOrReference::Ref { ref_path, .. } = variant_ref {
                 if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
-                  found_type = Some(TypeRef::new(to_rust_type_name(&ref_name)));
+                  found_type = Some(TypeRef::new(to_rust_type_name(&ref_name)).with_option());
                   break;
                 }
               } else if let Ok(resolved) = variant_ref.resolve(self.graph.spec())
                 && resolved.schema_type != Some(SchemaTypeSet::Single(SchemaType::Null))
               {
-                // Found the actual type - return it (it will be wrapped in Option later)
-                found_type = Some(self.schema_to_type_ref(&resolved)?);
+                // Found the actual type - wrap in Option since this is a nullable pattern
+                found_type = Some(self.schema_to_type_ref(&resolved)?.with_option());
                 break;
               }
             }
             // Use found type or fallback
-            found_type.unwrap_or_else(|| self.schema_to_type_ref(&prop_schema).unwrap())
+            found_type.unwrap_or_else(|| self.schema_to_type_ref(&prop_schema).unwrap().with_option())
           } else if !prop_schema.any_of.is_empty()
             && (prop_schema.title.is_none()
               || prop_schema
@@ -1162,7 +1147,7 @@ impl<'a> SchemaConverter<'a> {
                 .unwrap_or(true))
           {
             // Generate inline enum for non-nullable anyOf unions
-            let enum_name = format!("{}{}", parent_name, to_pascal_case(prop_name));
+            let enum_name = format!("{}{}", parent_name, to_rust_type_name(prop_name));
             let enum_type = self.convert_any_of_enum(&enum_name, &prop_schema)?;
             inline_types.push(enum_type);
             TypeRef::new(to_rust_type_name(&enum_name))
@@ -1183,8 +1168,8 @@ impl<'a> SchemaConverter<'a> {
         serde_attrs.push(format!("rename = \"{}\"", prop_name));
       }
 
-      // Add skip_serializing_if for optional fields
-      if optional {
+      // Add skip_serializing_if for optional fields or nullable types
+      if optional || rust_type.nullable {
         serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
       }
 
@@ -1205,18 +1190,21 @@ impl<'a> SchemaConverter<'a> {
           (vec![], vec![], None, None)
         };
 
+      // Check nullable before moving rust_type
+      let is_nullable = rust_type.nullable;
+
       // Don't double-wrap: if the type is already nullable, don't wrap again
-      let final_type = if optional && !rust_type.nullable {
+      let final_type = if optional && !is_nullable {
         rust_type.with_option()
       } else {
         rust_type
       };
 
       fields.push(FieldDef {
-        name: to_rust_ident(prop_name),
+        name: to_rust_field_name(prop_name),
         docs,
         rust_type: final_type,
-        optional,
+        optional: optional || is_nullable,
         serde_attrs,
         validation_attrs,
         regex_validation,
@@ -1381,7 +1369,19 @@ impl<'a> SchemaConverter<'a> {
       match schema_type {
         SchemaTypeSet::Single(typ) => {
           let base_type = match typ {
-            SchemaType::String => "String",
+            SchemaType::String => {
+              // Check for format field to handle special string types
+              if let Some(ref format) = schema.format {
+                match format.as_str() {
+                  "date" => "chrono::NaiveDate",
+                  "date-time" => "chrono::DateTime<chrono::Utc>",
+                  "time" => "chrono::NaiveTime",
+                  _ => "String",
+                }
+              } else {
+                "String"
+              }
+            }
             SchemaType::Number => "f64",
             SchemaType::Integer => "i64",
             SchemaType::Boolean => "bool",
@@ -1462,11 +1462,11 @@ impl<'a> OperationConverter<'a> {
 
     // Generate a base name for the operation
     let base_name = if let Some(ref op_id) = operation.operation_id {
-      to_pascal_case(op_id)
+      to_rust_type_name(op_id)
     } else {
       // Fallback: use method + sanitized path
       let path_part = path.replace('/', "_").replace(['{', '}'], "");
-      to_pascal_case(&format!("{}_{}", method, path_part))
+      to_rust_type_name(&format!("{}_{}", method, path_part))
     };
 
     // Generate request type if needed
@@ -1711,7 +1711,7 @@ impl<'a> OperationConverter<'a> {
     }
 
     Ok(FieldDef {
-      name: to_rust_ident(&param.name),
+      name: to_rust_field_name(&param.name),
       docs,
       rust_type: if is_required {
         rust_type
@@ -1794,6 +1794,7 @@ impl CodeGenerator {
     let default_impls = Self::generate_default_impls(&ordered);
 
     quote! {
+      use chrono;
       use serde::{Deserialize, Serialize};
       use validator::Validate;
 
@@ -1842,7 +1843,7 @@ impl CodeGenerator {
             let const_name = match pattern_to_const.get(&pattern_key) {
               Some(existing) => existing.clone(),
               None => {
-                let name = Self::regex_const_name(&key);
+                let name = regex_const_name(&key.parts());
                 pattern_to_const.insert(pattern_key.clone(), name.clone());
                 const_defs.insert(name.clone(), pattern_key);
                 name
@@ -1863,7 +1864,7 @@ impl CodeGenerator {
                 let const_name = match pattern_to_const.get(&pattern_key) {
                   Some(existing) => existing.clone(),
                   None => {
-                    let name = Self::regex_const_name(&key);
+                    let name = regex_const_name(&key.parts());
                     pattern_to_const.insert(pattern_key.clone(), name.clone());
                     const_defs.insert(name.clone(), pattern_key);
                     name
@@ -1894,17 +1895,6 @@ impl CodeGenerator {
       .collect();
 
     (quote! { #(#regex_defs)* }, lookup)
-  }
-
-  fn regex_const_name(key: &RegexKey) -> String {
-    let joined = key
-      .parts()
-      .into_iter()
-      .map(any_ascii::any_ascii)
-      .collect::<Vec<_>>()
-      .join("_");
-
-    format!("REGEX_{}", joined.to_constant_case())
   }
 
   /// Check if a type can safely use Default::default()
