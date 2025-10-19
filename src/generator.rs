@@ -1794,7 +1794,6 @@ impl CodeGenerator {
     let default_impls = Self::generate_default_impls(&ordered);
 
     quote! {
-      use chrono;
       use serde::{Deserialize, Serialize};
       use validator::Validate;
 
