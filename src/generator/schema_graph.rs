@@ -2,7 +2,7 @@
 //!
 //! This module handles schema storage, dependency tracking, and cycle detection.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use oas3::{Spec, spec::ObjectSchema};
 
@@ -74,48 +74,71 @@ impl SchemaGraph {
     }
   }
 
-  /// Recursively collect all schema dependencies from a schema
+  /// Iteratively collect all schema dependencies from a schema
+  /// Uses a work queue to avoid stack overflow on deeply nested schemas
   fn collect_dependencies(&self, schema: &ObjectSchema, deps: &mut BTreeSet<String>) {
-    // Check properties
-    for prop_schema in schema.properties.values() {
-      // Try to resolve the property schema and extract dependencies
-      if let Ok(resolved) = prop_schema.resolve(&self.spec) {
-        // Check if this is a reference to another schema by looking at the title
-        if let Some(ref title) = resolved.title {
-          deps.insert(title.clone());
-        }
-        // Recursively collect from inline schemas
-        self.collect_dependencies(&resolved, deps);
-      }
-    }
+    // Use a work queue and visited set to avoid deep recursion
+    let mut queue = VecDeque::new();
+    let mut visited = BTreeSet::new();
 
-    // Check oneOf
-    for one_of_schema in &schema.one_of {
-      if let Ok(resolved) = one_of_schema.resolve(&self.spec) {
-        if let Some(ref title) = resolved.title {
-          deps.insert(title.clone());
-        }
-        self.collect_dependencies(&resolved, deps);
-      }
-    }
+    // Start with the initial schema
+    queue.push_back(schema.clone());
 
-    // Check anyOf
-    for any_of_schema in &schema.any_of {
-      if let Ok(resolved) = any_of_schema.resolve(&self.spec) {
-        if let Some(ref title) = resolved.title {
-          deps.insert(title.clone());
-        }
-        self.collect_dependencies(&resolved, deps);
-      }
-    }
+    while let Some(current_schema) = queue.pop_front() {
+      // Generate a simple hash/key for this schema to track if we've visited it
+      // We'll use a combination of its properties to create a unique identifier
+      let schema_key = format!(
+        "{:?}_{:?}_{:?}_{:?}",
+        current_schema.title,
+        current_schema.properties.len(),
+        current_schema.one_of.len(),
+        current_schema.any_of.len()
+      );
 
-    // Check allOf
-    for all_of_schema in &schema.all_of {
-      if let Ok(resolved) = all_of_schema.resolve(&self.spec) {
-        if let Some(ref title) = resolved.title {
-          deps.insert(title.clone());
+      // Skip if we've already processed this exact schema structure
+      if visited.contains(&schema_key) {
+        continue;
+      }
+      visited.insert(schema_key);
+
+      // Check properties
+      for prop_schema in current_schema.properties.values() {
+        if let Ok(resolved) = prop_schema.resolve(&self.spec) {
+          if let Some(ref title) = resolved.title {
+            deps.insert(title.clone());
+          }
+          queue.push_back(resolved);
         }
-        self.collect_dependencies(&resolved, deps);
+      }
+
+      // Check oneOf
+      for one_of_schema in &current_schema.one_of {
+        if let Ok(resolved) = one_of_schema.resolve(&self.spec) {
+          if let Some(ref title) = resolved.title {
+            deps.insert(title.clone());
+          }
+          queue.push_back(resolved);
+        }
+      }
+
+      // Check anyOf
+      for any_of_schema in &current_schema.any_of {
+        if let Ok(resolved) = any_of_schema.resolve(&self.spec) {
+          if let Some(ref title) = resolved.title {
+            deps.insert(title.clone());
+          }
+          queue.push_back(resolved);
+        }
+      }
+
+      // Check allOf
+      for all_of_schema in &current_schema.all_of {
+        if let Ok(resolved) = all_of_schema.resolve(&self.spec) {
+          if let Some(ref title) = resolved.title {
+            deps.insert(title.clone());
+          }
+          queue.push_back(resolved);
+        }
       }
     }
   }

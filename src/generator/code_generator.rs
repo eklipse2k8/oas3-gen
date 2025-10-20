@@ -16,9 +16,8 @@ use std::collections::BTreeMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::reserved::regex_const_name;
-
 use super::ast::*;
+use crate::reserved::regex_const_name;
 
 /// Type usage context for determining derive traits
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,12 +128,34 @@ impl CodeGenerator {
   }
 
   fn ordered_types<'a>(types: &'a [RustType]) -> Vec<&'a RustType> {
-    let mut map: BTreeMap<(TypeKind, String), &'a RustType> = BTreeMap::new();
+    let mut map: BTreeMap<String, &'a RustType> = BTreeMap::new();
     for ty in types {
-      let key = Self::type_key(ty);
-      map.entry(key).or_insert(ty);
+      let name = ty.type_name().to_string();
+
+      // If name already exists, keep the one with higher priority
+      if let Some(existing) = map.get(&name) {
+        let existing_priority = Self::type_priority(existing);
+        let new_priority = Self::type_priority(ty);
+
+        // Keep the one with higher priority (lower number = higher priority)
+        if new_priority < existing_priority {
+          map.insert(name, ty);
+        }
+      } else {
+        map.insert(name, ty);
+      }
     }
     map.into_values().collect()
+  }
+
+  /// Determine type priority for deduplication (lower = higher priority)
+  /// Priority: Enum > Struct > TypeAlias
+  fn type_priority(rust_type: &RustType) -> u8 {
+    match rust_type {
+      RustType::Enum(_) => 0,      // Highest priority - most specific
+      RustType::Struct(_) => 1,    // Medium priority
+      RustType::TypeAlias(_) => 2, // Lowest priority
+    }
   }
 
   fn type_key(rust_type: &RustType) -> (TypeKind, String) {

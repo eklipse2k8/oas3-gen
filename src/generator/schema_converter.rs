@@ -10,13 +10,12 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaType
 use regex::Regex;
 use serde_json::Number;
 
-use crate::reserved::{to_rust_field_name, to_rust_type_name};
-
 use super::{
   SchemaGraph,
   ast::{EnumDef, FieldDef, RustType, StructDef, TypeRef, VariantContent, VariantDef},
   utils::doc_comment_lines,
 };
+use crate::reserved::{to_rust_field_name, to_rust_type_name};
 
 /// Converter that transforms OpenAPI schemas into Rust AST structures
 pub struct SchemaConverter<'a> {
@@ -33,13 +32,18 @@ impl<'a> SchemaConverter<'a> {
   pub fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
     // Determine the type of Rust definition we need to create
 
+    // Check if this is an allOf composition
+    if !schema.all_of.is_empty() {
+      return self.convert_all_of_schema(name, schema);
+    }
+
     // Check if this is an enum (oneOf/anyOf)
     if !schema.one_of.is_empty() {
       return Ok(vec![self.convert_one_of_enum(name, schema)?]);
     }
 
     if !schema.any_of.is_empty() {
-      return Ok(vec![self.convert_any_of_enum(name, schema)?]);
+      return self.convert_any_of_enum(name, schema);
     }
 
     // Check if this is a simple enum (string with enum values)
@@ -57,6 +61,30 @@ impl<'a> SchemaConverter<'a> {
 
     // Otherwise, might be a type alias or something we can skip
     Ok(vec![])
+  }
+
+  /// Convert an allOf schema by merging all schemas into one struct
+  fn convert_all_of_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
+    // Merge all allOf schemas into a single schema
+    let mut merged_schema = schema.clone();
+
+    for all_of_ref in &schema.all_of {
+      if let Ok(all_of_schema) = all_of_ref.resolve(self.graph.spec()) {
+        // Merge properties
+        for (prop_name, prop_ref) in &all_of_schema.properties {
+          merged_schema.properties.insert(prop_name.clone(), prop_ref.clone());
+        }
+
+        // Merge required fields
+        merged_schema.required.extend(all_of_schema.required.iter().cloned());
+      }
+    }
+
+    // Now convert as a regular struct
+    let (main_type, inline_types) = self.convert_struct(name, &merged_schema)?;
+    let mut all_types = vec![main_type];
+    all_types.extend(inline_types);
+    Ok(all_types)
   }
 
   /// Convert a schema with oneOf into a Rust enum
@@ -101,13 +129,29 @@ impl<'a> SchemaConverter<'a> {
         // For non-discriminated (untagged), we can use tuple variants to avoid duplication
         let content = if discriminator_property.is_some() {
           // Has discriminator - must use struct variant for serde(tag) to work
+          // serde internally-tagged enums REQUIRE all variants to be struct-like
           if !variant_schema.properties.is_empty() {
             let fields = self.convert_fields_with_exclusions(&variant_schema, discriminator_property)?;
             VariantContent::Struct(fields)
           } else {
-            // Primitive or non-object - tuple variant
+            // Primitive or non-object - wrap in single-field struct for serde compatibility
             let type_ref = self.schema_to_type_ref(&variant_schema)?;
-            VariantContent::Tuple(vec![type_ref])
+            let field = FieldDef {
+              name: "value".to_string(),
+              docs: vec![],
+              rust_type: type_ref,
+              optional: false,
+              serde_attrs: vec![],
+              validation_attrs: vec![],
+              regex_validation: None,
+              default_value: None,
+              read_only: false,
+              write_only: false,
+              deprecated: false,
+              multiple_of: None,
+              unique_items: false,
+            };
+            VariantContent::Struct(vec![field])
           }
         } else {
           // No discriminator - can use tuple variants to avoid duplication
@@ -164,7 +208,8 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Convert a schema with anyOf into an untagged Rust enum
-  fn convert_any_of_enum(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<RustType> {
+  /// May return multiple types (e.g., for catch-all enums with inner/outer structure)
+  fn convert_any_of_enum(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
     // Check if this is a string enum with const values pattern (common for forward-compatible enums)
     let has_freeform_string = schema.any_of.iter().any(|s| {
       if let Ok(resolved) = s.resolve(self.graph.spec()) {
@@ -193,6 +238,7 @@ impl<'a> SchemaConverter<'a> {
       .collect();
 
     // Special case: freeform string + const values = forward-compatible enum
+    // Returns multiple types (inner Known enum + outer untagged wrapper)
     if has_freeform_string && !const_values.is_empty() {
       return self.convert_string_enum_with_catchall(name, schema, &const_values);
     }
@@ -265,8 +311,21 @@ impl<'a> SchemaConverter<'a> {
       }
     }
 
-    Ok(RustType::Enum(EnumDef {
-      name: to_rust_type_name(name),
+    let enum_name = to_rust_type_name(name);
+
+    // Fix self-referential fields in variants by adding Box wrapping
+    for variant in &mut variants {
+      if let VariantContent::Struct(ref mut fields) = variant.content {
+        for field in fields {
+          if field.rust_type.base_type == enum_name && !field.rust_type.boxed {
+            field.rust_type = field.rust_type.clone().with_boxed();
+          }
+        }
+      }
+    }
+
+    Ok(vec![RustType::Enum(EnumDef {
+      name: enum_name,
       docs: schema
         .description
         .as_ref()
@@ -276,28 +335,38 @@ impl<'a> SchemaConverter<'a> {
       discriminator: None,
       derives: vec!["Debug".into(), "Clone".into(), "Serialize".into(), "Deserialize".into()],
       serde_attrs: vec!["untagged".into()],
-    }))
+    })])
   }
 
   /// Convert a string enum with const values + a catch-all for unknown strings
+  /// This generates TWO enums:
+  /// 1. Inner "Known" enum with unit variants for known const values
+  /// 2. Outer untagged enum with Known(InnerEnum) + Other(String) variants
   fn convert_string_enum_with_catchall(
     &self,
     name: &str,
     schema: &ObjectSchema,
     const_values: &[(serde_json::Value, Option<String>, bool)],
-  ) -> anyhow::Result<RustType> {
-    let mut variants = Vec::new();
+  ) -> anyhow::Result<Vec<RustType>> {
+    let base_name = to_rust_type_name(name);
+    let known_name = format!("{}Known", base_name);
 
-    // Add a variant for each const value
-    for (value, description, deprecated) in const_values {
+    // Create inner enum with known values (simple unit enum)
+    let mut known_variants = Vec::new();
+    let mut seen_names = BTreeSet::new();
+
+    for (i, (value, description, deprecated)) in const_values.iter().enumerate() {
       if let Some(str_val) = value.as_str() {
-        // Convert the const value to a variant name
-        // e.g., "claude-3-7-sonnet-latest" -> "Claude37SonnetLatest"
-        let variant_name = to_rust_type_name(str_val);
+        let mut variant_name = to_rust_type_name(str_val);
+
+        if seen_names.contains(&variant_name) {
+          variant_name = format!("{}{}", variant_name, i);
+        }
+        seen_names.insert(variant_name.clone());
 
         let docs = description.as_ref().map(|d| doc_comment_lines(d)).unwrap_or_default();
 
-        variants.push(VariantDef {
+        known_variants.push(VariantDef {
           name: variant_name,
           docs,
           content: VariantContent::Unit,
@@ -307,23 +376,10 @@ impl<'a> SchemaConverter<'a> {
       }
     }
 
-    // Add the catch-all variant for unknown strings
-    variants.push(VariantDef {
-      name: "Other".to_string(),
-      docs: vec!["/// Any other string value".to_string()],
-      content: VariantContent::Tuple(vec![TypeRef::new("String")]),
-      serde_attrs: vec!["untagged".to_string()],
-      deprecated: false,
-    });
-
-    Ok(RustType::Enum(EnumDef {
-      name: to_rust_type_name(name),
-      docs: schema
-        .description
-        .as_ref()
-        .map(|d| doc_comment_lines(d))
-        .unwrap_or_default(),
-      variants,
+    let inner_enum = RustType::Enum(EnumDef {
+      name: known_name.clone(),
+      docs: vec!["/// Known string values".to_string()],
+      variants: known_variants,
       discriminator: None,
       derives: vec![
         "Debug".into(),
@@ -334,7 +390,48 @@ impl<'a> SchemaConverter<'a> {
         "Deserialize".into(),
       ],
       serde_attrs: vec![],
-    }))
+    });
+
+    // Create outer untagged enum that wraps the known enum + Other variant
+    let outer_variants = vec![
+      VariantDef {
+        name: "Known".to_string(),
+        docs: vec!["/// A known string value".to_string()],
+        content: VariantContent::Tuple(vec![TypeRef::new(&known_name)]),
+        serde_attrs: vec![],
+        deprecated: false,
+      },
+      VariantDef {
+        name: "Other".to_string(),
+        docs: vec!["/// An unknown string value not in the known set".to_string()],
+        content: VariantContent::Tuple(vec![TypeRef::new("String")]),
+        serde_attrs: vec![],
+        deprecated: false,
+      },
+    ];
+
+    let outer_enum = RustType::Enum(EnumDef {
+      name: base_name,
+      docs: schema
+        .description
+        .as_ref()
+        .map(|d| doc_comment_lines(d))
+        .unwrap_or_default(),
+      variants: outer_variants,
+      discriminator: None,
+      derives: vec![
+        "Debug".into(),
+        "Clone".into(),
+        "PartialEq".into(),
+        "Eq".into(),
+        "Serialize".into(),
+        "Deserialize".into(),
+      ],
+      serde_attrs: vec!["untagged".into()],
+    });
+
+    // Return both enums: inner first (must be defined before outer references it)
+    Ok(vec![inner_enum, outer_enum])
   }
 
   /// Infer a variant name from the schema type
@@ -372,10 +469,18 @@ impl<'a> SchemaConverter<'a> {
     enum_values: &[serde_json::Value],
   ) -> anyhow::Result<RustType> {
     let mut variants = Vec::new();
+    let mut seen_names = BTreeSet::new();
 
-    for value in enum_values {
+    for (i, value) in enum_values.iter().enumerate() {
       if let Some(str_val) = value.as_str() {
-        let variant_name = to_rust_type_name(str_val);
+        let mut variant_name = to_rust_type_name(str_val);
+
+        // Ensure uniqueness - append index if needed
+        if seen_names.contains(&variant_name) {
+          variant_name = format!("{}{}", variant_name, i);
+        }
+        seen_names.insert(variant_name.clone());
+
         variants.push(VariantDef {
           name: variant_name,
           docs: vec![],
@@ -751,6 +856,12 @@ impl<'a> SchemaConverter<'a> {
         (vec![], vec![], None, None, false, false, false, None, false)
       };
 
+      // Skip regex validation for types that don't support it (chrono, uuid types)
+      let regex_validation = match rust_type.base_type.as_str() {
+        "chrono::DateTime<chrono::Utc>" | "chrono::NaiveDate" | "chrono::NaiveTime" | "uuid::Uuid" => None,
+        _ => regex_validation,
+      };
+
       // Check nullable before moving rust_type
       let is_nullable = rust_type.nullable;
 
@@ -794,6 +905,9 @@ impl<'a> SchemaConverter<'a> {
   ) -> anyhow::Result<(Vec<FieldDef>, Vec<RustType>)> {
     let mut fields = Vec::new();
     let mut inline_types = Vec::new();
+
+    // Keep parent name unconverted - conversion will happen when creating the enum
+    // This ensures consistent case handling for compound names
 
     let mut properties: Vec<_> = schema.properties.iter().collect();
     properties.sort_by(|(a, _), (b, _)| a.cmp(b));
@@ -856,10 +970,19 @@ impl<'a> SchemaConverter<'a> {
                 .unwrap_or(true))
           {
             // Generate inline enum for non-nullable anyOf unions
-            let enum_name = format!("{}{}", parent_name, to_rust_type_name(prop_name));
-            let enum_type = self.convert_any_of_enum(&enum_name, &prop_schema)?;
-            inline_types.push(enum_type);
-            TypeRef::new(to_rust_type_name(&enum_name))
+            // Create compound name from parent and property - conversion happens in convert_any_of_enum
+            // May return multiple types (e.g., inner Known enum + outer wrapper for catch-all enums)
+            let enum_name = format!("{}.{}", parent_name, prop_name);
+            let enum_types = self.convert_any_of_enum(&enum_name, &prop_schema)?;
+            // Get the converted name from the last type (outer/main enum)
+            let type_name = if let Some(RustType::Enum(enum_def)) = enum_types.last() {
+              enum_def.name.clone()
+            } else {
+              to_rust_type_name(&enum_name)
+            };
+            // Add all generated types to inline_types
+            inline_types.extend(enum_types);
+            TypeRef::new(&type_name)
           } else {
             self.schema_to_type_ref(&prop_schema)?
           }
@@ -923,6 +1046,12 @@ impl<'a> SchemaConverter<'a> {
         )
       } else {
         (vec![], vec![], None, None, false, false, false, None, false)
+      };
+
+      // Skip regex validation for types that don't support it (chrono, uuid types)
+      let regex_validation = match rust_type.base_type.as_str() {
+        "chrono::DateTime<chrono::Utc>" | "chrono::NaiveDate" | "chrono::NaiveTime" | "uuid::Uuid" => None,
+        _ => regex_validation,
       };
 
       // Check nullable before moving rust_type
@@ -1203,5 +1332,369 @@ impl<'a> SchemaConverter<'a> {
 
     // Default to serde_json::Value for schemas without type or title
     Ok(TypeRef::new("serde_json::Value"))
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::collections::BTreeMap;
+
+  use oas3::spec::{Discriminator, Spec};
+  use serde_json::json;
+
+  use super::*;
+
+  /// Helper to create a minimal OpenAPI spec with given schemas
+  fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec {
+    let mut spec_json = json!({
+      "openapi": "3.0.0",
+      "info": {
+        "title": "Test API",
+        "version": "1.0.0"
+      },
+      "paths": {},
+      "components": {
+        "schemas": {}
+      }
+    });
+
+    // Add schemas to the spec
+    if let Some(components) = spec_json.get_mut("components")
+      && let Some(schemas_obj) = components.get_mut("schemas")
+    {
+      for (name, schema) in schemas {
+        let schema_json = serde_json::to_value(schema).unwrap();
+        schemas_obj[name] = schema_json;
+      }
+    }
+
+    serde_json::from_value(spec_json).unwrap()
+  }
+
+  #[test]
+  fn test_discriminated_union_uses_struct_variants() {
+    // Create a oneOf schema with discriminator
+    let mut one_of_schema = ObjectSchema::default();
+
+    // Add object variant
+    let mut object_variant = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      title: Some("ObjectVariant".to_string()),
+      ..Default::default()
+    };
+    object_variant.properties.insert(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("object")),
+        ..Default::default()
+      }),
+    );
+    object_variant.properties.insert(
+      "name".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    object_variant.required.push("type".to_string());
+    object_variant.required.push("name".to_string());
+
+    // Add string variant (primitive type)
+    let string_variant = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      title: Some("StringVariant".to_string()),
+      ..Default::default()
+    };
+
+    // Add integer variant (primitive type)
+    let integer_variant = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+      title: Some("IntegerVariant".to_string()),
+      ..Default::default()
+    };
+
+    one_of_schema.one_of.push(ObjectOrReference::Object(object_variant));
+    one_of_schema.one_of.push(ObjectOrReference::Object(string_variant));
+    one_of_schema.one_of.push(ObjectOrReference::Object(integer_variant));
+
+    one_of_schema.discriminator = Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: Some(BTreeMap::new()),
+    });
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("TestUnion".to_string(), one_of_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap())
+      .unwrap();
+
+    assert_eq!(result.len(), 1, "Should generate exactly one type");
+
+    if let RustType::Enum(enum_def) = &result[0] {
+      assert_eq!(enum_def.name, "TestUnion");
+      assert!(enum_def.discriminator.is_some(), "Should have discriminator");
+
+      // Check that ALL variants are struct variants (required for serde internally-tagged enums)
+      for variant in &enum_def.variants {
+        match &variant.content {
+          VariantContent::Struct(fields) => {
+            // For primitive types, should have a single "value" field
+            if variant.name == "StringVariant" || variant.name == "IntegerVariant" {
+              assert_eq!(
+                fields.len(),
+                1,
+                "Primitive variant {} should have exactly one field",
+                variant.name
+              );
+              assert_eq!(
+                fields[0].name, "value",
+                "Primitive variant field should be named 'value'"
+              );
+            }
+          }
+          VariantContent::Tuple(_) => {
+            panic!(
+              "Discriminated union variant {} must be a struct, not tuple",
+              variant.name
+            );
+          }
+          VariantContent::Unit => {
+            panic!(
+              "Discriminated union variant {} must be a struct, not unit",
+              variant.name
+            );
+          }
+        }
+      }
+
+      assert_eq!(
+        enum_def.serde_attrs.len(),
+        0,
+        "serde_attrs should be empty (discriminator is separate)"
+      );
+    } else {
+      panic!("Expected enum, got {:?}", result[0]);
+    }
+  }
+
+  #[test]
+  fn test_catch_all_enum_generates_two_level_structure() {
+    // Create anyOf with const values + freeform string
+    let mut any_of_schema = ObjectSchema::default();
+
+    // Add const values
+    any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      const_value: Some(json!("known-value-1")),
+      description: Some("First known value".to_string()),
+      ..Default::default()
+    }));
+
+    any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      const_value: Some(json!("known-value-2")),
+      description: Some("Second known value".to_string()),
+      ..Default::default()
+    }));
+
+    // Add freeform string (no const)
+    any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      description: Some("Any other string".to_string()),
+      ..Default::default()
+    }));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("CatchAllEnum".to_string(), any_of_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("CatchAllEnum", graph.get_schema("CatchAllEnum").unwrap())
+      .unwrap();
+
+    assert_eq!(
+      result.len(),
+      2,
+      "Should generate TWO types (inner Known enum + outer untagged wrapper)"
+    );
+
+    // Check inner enum (Known values)
+    if let RustType::Enum(inner_enum) = &result[0] {
+      assert_eq!(inner_enum.name, "CatchAllEnumKnown");
+      assert_eq!(inner_enum.variants.len(), 2, "Should have 2 known variants");
+      assert!(inner_enum.serde_attrs.is_empty(), "Inner enum should not be untagged");
+
+      // All variants should be unit variants with rename
+      for variant in &inner_enum.variants {
+        assert!(
+          matches!(variant.content, VariantContent::Unit),
+          "Known enum variants should be unit variants"
+        );
+        assert!(
+          variant.serde_attrs.iter().any(|a| a.starts_with("rename")),
+          "Known enum variants should have rename attribute"
+        );
+      }
+    } else {
+      panic!("First type should be inner Known enum, got {:?}", result[0]);
+    }
+
+    // Check outer enum (wrapper)
+    if let RustType::Enum(outer_enum) = &result[1] {
+      assert_eq!(outer_enum.name, "CatchAllEnum");
+      assert_eq!(outer_enum.variants.len(), 2, "Should have 2 variants (Known + Other)");
+      assert!(
+        outer_enum.serde_attrs.contains(&"untagged".to_string()),
+        "Outer enum should be untagged"
+      );
+
+      // Check Known variant
+      let known_variant = outer_enum.variants.iter().find(|v| v.name == "Known").unwrap();
+      match &known_variant.content {
+        VariantContent::Tuple(types) => {
+          assert_eq!(types.len(), 1);
+          assert_eq!(types[0].base_type, "CatchAllEnumKnown");
+        }
+        _ => panic!("Known variant should be a tuple variant"),
+      }
+
+      // Check Other variant
+      let other_variant = outer_enum.variants.iter().find(|v| v.name == "Other").unwrap();
+      match &other_variant.content {
+        VariantContent::Tuple(types) => {
+          assert_eq!(types.len(), 1);
+          assert_eq!(types[0].base_type, "String");
+        }
+        _ => panic!("Other variant should be a tuple variant"),
+      }
+    } else {
+      panic!("Second type should be outer wrapper enum, got {:?}", result[1]);
+    }
+  }
+
+  #[test]
+  fn test_simple_string_enum() {
+    let enum_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      enum_values: vec![json!("value1"), json!("value2"), json!("value3")],
+      ..Default::default()
+    };
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("SimpleEnum".to_string(), enum_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("SimpleEnum", graph.get_schema("SimpleEnum").unwrap())
+      .unwrap();
+
+    assert_eq!(result.len(), 1, "Should generate exactly one enum");
+
+    if let RustType::Enum(enum_def) = &result[0] {
+      assert_eq!(enum_def.name, "SimpleEnum");
+      assert_eq!(enum_def.variants.len(), 3);
+      assert!(enum_def.discriminator.is_none());
+      assert!(enum_def.serde_attrs.is_empty(), "Simple enum should not be untagged");
+
+      // All variants should be unit variants with rename
+      for variant in &enum_def.variants {
+        assert!(matches!(variant.content, VariantContent::Unit));
+        assert!(variant.serde_attrs.iter().any(|a| a.starts_with("rename")));
+      }
+    } else {
+      panic!("Expected enum, got {:?}", result[0]);
+    }
+  }
+
+  #[test]
+  fn test_nullable_pattern_detection() {
+    // Create anyOf with [Type, null] pattern
+    let mut any_of_schema = ObjectSchema::default();
+
+    // Add a string type
+    any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }));
+
+    // Add null type
+    any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+      ..Default::default()
+    }));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("NullableString".to_string(), any_of_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    // For nullable patterns, schema_to_type_ref should return Option<String>
+    let type_ref = converter
+      .schema_to_type_ref(graph.get_schema("NullableString").unwrap())
+      .unwrap();
+
+    assert_eq!(type_ref.base_type, "String");
+    assert!(
+      type_ref.nullable,
+      "Should detect nullable pattern and set nullable=true"
+    );
+    assert_eq!(type_ref.to_rust_type(), "Option<String>");
+  }
+
+  #[test]
+  fn test_untagged_any_of_enum() {
+    // Create anyOf with multiple non-const types (should be untagged enum)
+    let mut any_of_schema = ObjectSchema::default();
+
+    any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      title: Some("StringVariant".to_string()),
+      ..Default::default()
+    }));
+
+    any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+      title: Some("IntegerVariant".to_string()),
+      ..Default::default()
+    }));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("UntaggedUnion".to_string(), any_of_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("UntaggedUnion", graph.get_schema("UntaggedUnion").unwrap())
+      .unwrap();
+
+    assert_eq!(result.len(), 1, "Should generate one enum");
+
+    if let RustType::Enum(enum_def) = &result[0] {
+      assert_eq!(enum_def.name, "UntaggedUnion");
+      assert!(enum_def.discriminator.is_none(), "Should not have discriminator");
+      assert!(
+        enum_def.serde_attrs.contains(&"untagged".to_string()),
+        "Should be untagged"
+      );
+      assert_eq!(enum_def.variants.len(), 2);
+    } else {
+      panic!("Expected enum, got {:?}", result[0]);
+    }
   }
 }
