@@ -10,22 +10,22 @@ use oas3::{
   spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
 };
 
-use super::{SchemaConverter, SchemaGraph, ast::*, utils::doc_comment_lines};
+use super::{ast::*, schema_converter::SchemaConverter, schema_graph::SchemaGraph, utils::doc_comment_lines};
 use crate::reserved::{to_rust_field_name, to_rust_type_name};
 
 /// Converter for OpenAPI operations to Rust request/response types
-pub struct OperationConverter<'a> {
+pub(crate) struct OperationConverter<'a> {
   schema_converter: &'a SchemaConverter<'a>,
   spec: &'a Spec,
 }
 
 impl<'a> OperationConverter<'a> {
-  pub fn new(schema_converter: &'a SchemaConverter<'a>, spec: &'a Spec) -> Self {
+  pub(crate) fn new(schema_converter: &'a SchemaConverter<'a>, spec: &'a Spec) -> Self {
     Self { schema_converter, spec }
   }
 
   /// Convert an operation to request and response types
-  pub fn convert_operation(
+  pub(crate) fn convert_operation(
     &self,
     operation_id: &str,
     method: &str,
@@ -185,7 +185,6 @@ impl<'a> OperationConverter<'a> {
           } else {
             body_type.with_option()
           },
-          optional: !is_required,
           serde_attrs,
           validation_attrs,
           regex_validation,
@@ -194,7 +193,6 @@ impl<'a> OperationConverter<'a> {
           write_only: false, // Request body fields are typically write-only, but we keep both derives for flexibility
           deprecated: false,
           multiple_of: None,
-          unique_items: false,
         });
       }
     }
@@ -312,7 +310,6 @@ impl<'a> OperationConverter<'a> {
       } else {
         rust_type.with_option()
       },
-      optional: !is_required,
       serde_attrs,
       validation_attrs,
       regex_validation,
@@ -321,7 +318,6 @@ impl<'a> OperationConverter<'a> {
       write_only: false, // Parameters could be either direction, keep both derives
       deprecated: false,
       multiple_of: None,
-      unique_items: false,
     })
   }
 

@@ -3,7 +3,7 @@
 //! This test generates code from OpenAPI specs and verifies that the generated
 //! types correctly serialize and deserialize with serde, maintaining symmetry.
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, process::Command};
 
 /// Test that discriminated unions (with #[serde(tag)]) work correctly
 #[test]
@@ -158,10 +158,13 @@ fn test_catch_all_enum_round_trip() {
 
   // Verify two-level structure
   assert!(
-    generated_code.contains("pub enum ModelKnown"),
+    generated_code.contains("pub(crate) enum ModelKnown"),
     "Should have inner Known enum"
   );
-  assert!(generated_code.contains("pub enum Model"), "Should have outer enum");
+  assert!(
+    generated_code.contains("pub(crate) enum Model"),
+    "Should have outer enum"
+  );
   assert!(
     generated_code.contains("#[serde(rename = \"gpt-4\")]"),
     "Inner enum should have renamed variants"
@@ -183,12 +186,12 @@ fn test_catch_all_enum_round_trip() {
   let lines: Vec<&str> = generated_code.lines().collect();
   for (i, line) in lines.iter().enumerate() {
     if line.contains("#[serde(untagged)]") {
-      // Next non-comment, non-attribute line should be "pub enum Model"
+      // Next non-comment, non-attribute line should be "pub(crate) enum Model"
       for j in (i + 1)..lines.len() {
         let next_line = lines[j].trim();
         if !next_line.is_empty() && !next_line.starts_with("//") && !next_line.starts_with("#[") {
           assert!(
-            next_line.contains("pub enum Model"),
+            next_line.contains("pub(crate) enum Model"),
             "untagged should be at enum level, not variant level"
           );
           break;
@@ -251,11 +254,11 @@ fn test_nullable_pattern() {
 
   // Should generate Option<String>, not an enum
   assert!(
-    generated_code.contains("pub name: Option<String>"),
+    generated_code.contains("pub(crate) name: Option<String>"),
     "Nullable pattern should be converted to Option<String>"
   );
   assert!(
-    !generated_code.contains("pub enum Name"),
+    !generated_code.contains("pub(crate) enum Name"),
     "Should not generate an enum for simple nullable pattern"
   );
 

@@ -5,25 +5,25 @@
 //!
 //! ## Module Structure
 //!
+//! - [`orchestrator`] - High-level pipeline orchestration (public API)
 //! - [`utils`] - Helper functions for documentation generation
 //! - [`ast`] - Abstract Syntax Tree types for representing Rust code
 //! - [`schema_graph`] - Schema dependency tracking and cycle detection
 //! - [`schema_converter`] - Converts OpenAPI schemas to Rust AST
 //! - [`operation_converter`] - Converts OpenAPI operations to request/response types
 //! - [`code_generator`] - Generates Rust source code from AST
+//!
+//! ## Public API
+//!
+//! The primary entry point for code generation is the [`orchestrator::Orchestrator`] struct,
+//! which provides a simple, opaque interface for generating Rust code from OpenAPI specs.
+//! All internal types and conversion logic are private implementation details.
 
-#![allow(dead_code)]
-
-// Declare sub-modules
-mod ast;
-mod code_generator;
-mod operation_converter;
-mod schema_converter;
-mod schema_graph;
-mod utils;
-
-// Re-export public API
-pub use code_generator::CodeGenerator;
-pub use operation_converter::OperationConverter;
-pub use schema_converter::SchemaConverter;
-pub use schema_graph::SchemaGraph;
+// Declare sub-modules (all internal except orchestrator)
+pub(crate) mod ast;
+pub(crate) mod code_generator;
+pub(crate) mod operation_converter;
+pub mod orchestrator;
+pub(crate) mod schema_converter;
+pub(crate) mod schema_graph;
+pub(crate) mod utils;
