@@ -10,9 +10,8 @@ use oas3::{
   spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
 };
 
-use crate::reserved::{to_rust_field_name, to_rust_type_name};
-
 use super::{SchemaConverter, SchemaGraph, ast::*, utils::doc_comment_lines};
+use crate::reserved::{to_rust_field_name, to_rust_type_name};
 
 /// Converter for OpenAPI operations to Rust request/response types
 pub struct OperationConverter<'a> {
@@ -241,25 +240,14 @@ impl<'a> OperationConverter<'a> {
       serde_attrs.push("default".to_string());
     }
 
-    // Optimize derives based on field directionality
-    let all_read_only = !fields.is_empty() && fields.iter().all(|f| f.read_only);
-    let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
-
-    let mut derives = vec!["Debug".into(), "Clone".into()];
-
-    // Add Serialize/Deserialize based on field directionality
-    if !all_read_only {
-      // Include Serialize unless ALL fields are read-only (response-only)
-      derives.push("Serialize".into());
-    }
-
-    if !all_write_only {
-      // Include Deserialize unless ALL fields are write-only (request-only)
-      derives.push("Deserialize".into());
-    }
-
-    // Always include Validate for runtime validation
-    derives.push("Validate".into());
+    // Always derive Serialize and Deserialize - per-field serde attributes handle readOnly/writeOnly
+    let derives = vec![
+      "Debug".into(),
+      "Clone".into(),
+      "Serialize".into(),
+      "Deserialize".into(),
+      "Validate".into(),
+    ];
 
     Ok(StructDef {
       name: to_rust_type_name(name),

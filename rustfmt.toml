@@ -3,3 +3,4 @@ imports_granularity = "Crate"
 normalize_doc_attributes = true
 tab_spaces = 2
 max_width = 120
+group_imports = "StdExternalCrate"

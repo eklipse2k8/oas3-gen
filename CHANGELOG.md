@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.0 - 2025-10-20
+
+* Refactor schema dependency collection to use iterative approach instead of recursive to avoid stack overflow on large specs
+* Add more sophisticated rust type naming for more ergonomic rust use
+
 ## 0.2.0 - 2025-10-19
 
 * Remove extra packages
