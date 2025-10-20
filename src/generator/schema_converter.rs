@@ -11,25 +11,37 @@ use regex::Regex;
 use serde_json::Number;
 
 use super::{
-  SchemaGraph,
   ast::{EnumDef, FieldDef, RustType, StructDef, TypeRef, VariantContent, VariantDef},
+  schema_graph::SchemaGraph,
   utils::doc_comment_lines,
 };
 use crate::reserved::{to_rust_field_name, to_rust_type_name};
 
+/// Field metadata extracted from an OpenAPI schema property
+struct FieldMetadata {
+  docs: Vec<String>,
+  validation_attrs: Vec<String>,
+  regex_validation: Option<String>,
+  default_value: Option<serde_json::Value>,
+  read_only: bool,
+  write_only: bool,
+  deprecated: bool,
+  multiple_of: Option<serde_json::Number>,
+}
+
 /// Converter that transforms OpenAPI schemas into Rust AST structures
-pub struct SchemaConverter<'a> {
+pub(crate) struct SchemaConverter<'a> {
   graph: &'a SchemaGraph,
 }
 
 impl<'a> SchemaConverter<'a> {
-  pub fn new(graph: &'a SchemaGraph) -> Self {
+  pub(crate) fn new(graph: &'a SchemaGraph) -> Self {
     Self { graph }
   }
 
   /// Convert a schema to Rust type definitions
   /// Returns the main type and any inline types that were generated
-  pub fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
+  pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
     // Determine the type of Rust definition we need to create
 
     // Check if this is an allOf composition
@@ -140,7 +152,6 @@ impl<'a> SchemaConverter<'a> {
               name: "value".to_string(),
               docs: vec![],
               rust_type: type_ref,
-              optional: false,
               serde_attrs: vec![],
               validation_attrs: vec![],
               regex_validation: None,
@@ -149,7 +160,6 @@ impl<'a> SchemaConverter<'a> {
               write_only: false,
               deprecated: false,
               multiple_of: None,
-              unique_items: false,
             };
             VariantContent::Struct(vec![field])
           }
@@ -248,9 +258,48 @@ impl<'a> SchemaConverter<'a> {
     let mut seen_names = BTreeSet::new();
 
     for (i, variant_schema_ref) in schema.any_of.iter().enumerate() {
+      // Check if this is a $ref before resolving
+      let ref_schema_name = if let ObjectOrReference::Ref { ref_path, .. } = variant_schema_ref {
+        SchemaGraph::extract_ref_name(ref_path)
+      } else {
+        None
+      };
+
       if let Ok(variant_schema) = variant_schema_ref.resolve(self.graph.spec()) {
         // Skip null variants - they're handled by making the field Option<T>
         if variant_schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
+          continue;
+        }
+
+        // If this was a $ref to a schema in components, use a tuple variant
+        if let Some(ref schema_name) = ref_schema_name {
+          let rust_type_name = to_rust_type_name(schema_name);
+          let mut type_ref = TypeRef::new(&rust_type_name);
+          // Apply Box wrapping if this schema is part of a cycle
+          if self.graph.is_cyclic(schema_name) {
+            type_ref = type_ref.with_boxed();
+          }
+          let docs = variant_schema
+            .description
+            .as_ref()
+            .map(|d| doc_comment_lines(d))
+            .unwrap_or_default();
+          let deprecated = variant_schema.deprecated.unwrap_or(false);
+
+          // Use the schema name as variant name
+          let mut variant_name = rust_type_name.clone();
+          if seen_names.contains(&variant_name) {
+            variant_name = format!("{}{}", variant_name, i);
+          }
+          seen_names.insert(variant_name.clone());
+
+          variants.push(VariantDef {
+            name: variant_name,
+            docs,
+            content: VariantContent::Tuple(vec![type_ref]),
+            serde_attrs: vec![],
+            deprecated,
+          });
           continue;
         }
 
@@ -276,23 +325,9 @@ impl<'a> SchemaConverter<'a> {
 
         let deprecated = variant_schema.deprecated.unwrap_or(false);
 
-        // Determine variant content - prefer tuple variants for existing schemas
-        let content = if let Some(ref title) = variant_schema.title {
-          // If this variant has a title and matches an existing schema, use tuple variant
-          if self.graph.get_schema(title).is_some() {
-            let type_ref = TypeRef::new(to_rust_type_name(title));
-            VariantContent::Tuple(vec![type_ref])
-          } else if !variant_schema.properties.is_empty() {
-            // Inline object without matching schema - create struct variant
-            let fields = self.convert_fields(&variant_schema)?;
-            VariantContent::Struct(fields)
-          } else {
-            // Other types - tuple variant
-            let type_ref = self.schema_to_type_ref(&variant_schema)?;
-            VariantContent::Tuple(vec![type_ref])
-          }
-        } else if !variant_schema.properties.is_empty() {
-          // Anonymous object - create inline struct variant
+        // Determine variant content - inline objects or primitives
+        let content = if !variant_schema.properties.is_empty() {
+          // Inline object - create struct variant
           let fields = self.convert_fields(&variant_schema)?;
           VariantContent::Struct(fields)
         } else {
@@ -507,7 +542,7 @@ impl<'a> SchemaConverter<'a> {
 
   /// Convert an object schema to a Rust struct
   /// Returns the struct and any inline types that were generated
-  pub fn convert_struct(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<(RustType, Vec<RustType>)> {
+  pub(crate) fn convert_struct(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<(RustType, Vec<RustType>)> {
     let (mut fields, inline_types) = self.convert_fields_with_inline_types(name, schema)?;
 
     // Individual rename attributes are more explicit and handle all edge cases correctly
@@ -536,7 +571,6 @@ impl<'a> SchemaConverter<'a> {
               name: "additional_properties".to_string(),
               docs: vec!["/// Additional properties not defined in the schema".to_string()],
               rust_type: map_type,
-              optional: false,
               serde_attrs: vec!["flatten".to_string()],
               validation_attrs: vec![],
               regex_validation: None,
@@ -545,7 +579,6 @@ impl<'a> SchemaConverter<'a> {
               write_only: false,
               deprecated: false,
               multiple_of: None,
-              unique_items: false,
             });
           }
         }
@@ -619,7 +652,7 @@ impl<'a> SchemaConverter<'a> {
     Ok((struct_type, inline_types))
   }
 
-  pub fn extract_validation_pattern<'s>(&self, prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
+  pub(crate) fn extract_validation_pattern<'s>(&self, prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
     match (schema.schema_type.as_ref(), schema.pattern.as_ref()) {
       (Some(SchemaTypeSet::Single(SchemaType::String)), Some(pattern)) => {
         if Regex::new(pattern).is_ok() {
@@ -649,7 +682,12 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Extract validation attributes from an OpenAPI schema
-  pub fn extract_validation_attrs(&self, _prop_name: &str, is_required: bool, schema: &ObjectSchema) -> Vec<String> {
+  pub(crate) fn extract_validation_attrs(
+    &self,
+    _prop_name: &str,
+    is_required: bool,
+    schema: &ObjectSchema,
+  ) -> Vec<String> {
     let mut attrs = Vec::new();
 
     // Handle format-based validation
@@ -755,138 +793,249 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Extract default value from an OpenAPI schema
-  pub fn extract_default_value(&self, schema: &ObjectSchema) -> Option<serde_json::Value> {
+  pub(crate) fn extract_default_value(&self, schema: &ObjectSchema) -> Option<serde_json::Value> {
     schema.default.clone()
   }
 
-  /// Convert schema properties to struct fields, excluding specified field names
+  /// Resolves a property type with special handling for inline anyOf unions
+  /// Returns the TypeRef and any generated inline enum types
+  fn resolve_property_type_with_inline_enums(
+    &self,
+    parent_name: &str,
+    prop_name: &str,
+    prop_schema_ref: &ObjectOrReference<ObjectSchema>,
+  ) -> anyhow::Result<(TypeRef, Vec<RustType>)> {
+    match prop_schema_ref {
+      ObjectOrReference::Ref { ref_path, .. } => {
+        if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
+          Ok((TypeRef::new(to_rust_type_name(&ref_name)), vec![]))
+        } else if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
+          Ok((self.schema_to_type_ref(&prop_schema)?, vec![]))
+        } else {
+          Ok((TypeRef::new("serde_json::Value"), vec![]))
+        }
+      }
+      _ => {
+        let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) else {
+          return Ok((TypeRef::new("serde_json::Value"), vec![]));
+        };
+
+        if prop_schema.any_of.is_empty() {
+          return Ok((self.schema_to_type_ref(&prop_schema)?, vec![]));
+        }
+
+        let has_nullable_or_generic = prop_schema.any_of.iter().any(|v| {
+          v.resolve(self.graph.spec())
+            .ok()
+            .map(|s| Self::is_nullable_or_generic(&s))
+            .unwrap_or(false)
+        });
+
+        if has_nullable_or_generic && prop_schema.any_of.len() == 2 {
+          for variant_ref in &prop_schema.any_of {
+            if let Some(ref_name) = Self::try_extract_ref_name(variant_ref) {
+              let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
+              // Apply Box wrapping if this schema is part of a cycle
+              if self.graph.is_cyclic(&ref_name) {
+                type_ref = type_ref.with_boxed();
+              }
+              return Ok((type_ref.with_option(), vec![]));
+            }
+
+            if let Ok(resolved) = variant_ref.resolve(self.graph.spec())
+              && !Self::is_nullable_or_generic(&resolved)
+            {
+              return Ok((self.schema_to_type_ref(&resolved)?.with_option(), vec![]));
+            }
+          }
+          return Ok((self.schema_to_type_ref(&prop_schema)?.with_option(), vec![]));
+        }
+
+        let should_generate_inline_enum = prop_schema.title.is_none()
+          || prop_schema
+            .title
+            .as_ref()
+            .map(|t| self.graph.get_schema(t).is_none())
+            .unwrap_or(true);
+
+        if should_generate_inline_enum {
+          let enum_name = format!("{}.{}", parent_name, prop_name);
+          let enum_types = self.convert_any_of_enum(&enum_name, &prop_schema)?;
+          let type_name = if let Some(RustType::Enum(enum_def)) = enum_types.last() {
+            enum_def.name.clone()
+          } else {
+            to_rust_type_name(&enum_name)
+          };
+          Ok((TypeRef::new(&type_name), enum_types))
+        } else {
+          Ok((self.schema_to_type_ref(&prop_schema)?, vec![]))
+        }
+      }
+    }
+  }
+
+  /// Converts a property schema reference to a TypeRef, handling both $ref and inline schemas
+  fn resolve_property_type(&self, prop_schema_ref: &ObjectOrReference<ObjectSchema>) -> anyhow::Result<TypeRef> {
+    match prop_schema_ref {
+      ObjectOrReference::Ref { ref_path, .. } => {
+        if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
+          let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
+          // Apply Box wrapping if this schema is part of a cycle
+          if self.graph.is_cyclic(&ref_name) {
+            type_ref = type_ref.with_boxed();
+          }
+          Ok(type_ref)
+        } else if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
+          self.schema_to_type_ref(&prop_schema)
+        } else {
+          Ok(TypeRef::new("serde_json::Value"))
+        }
+      }
+      _ => {
+        if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
+          self.schema_to_type_ref(&prop_schema)
+        } else {
+          Ok(TypeRef::new("serde_json::Value"))
+        }
+      }
+    }
+  }
+
+  /// Extracts metadata (docs, validation, flags) from a resolved property schema
+  fn extract_field_metadata(
+    &self,
+    prop_name: &str,
+    is_required: bool,
+    prop_schema_ref: &ObjectOrReference<ObjectSchema>,
+  ) -> FieldMetadata {
+    if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
+      let docs = prop_schema
+        .description
+        .as_ref()
+        .map(|d| doc_comment_lines(d))
+        .unwrap_or_default();
+      let validation_attrs = self.extract_validation_attrs(prop_name, is_required, &prop_schema);
+      let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema).cloned();
+      let default_value = self.extract_default_value(&prop_schema);
+      let read_only = prop_schema.read_only.unwrap_or(false);
+      let write_only = prop_schema.write_only.unwrap_or(false);
+      let deprecated = prop_schema.deprecated.unwrap_or(false);
+      let multiple_of = prop_schema.multiple_of.clone();
+
+      FieldMetadata {
+        docs,
+        validation_attrs,
+        regex_validation,
+        default_value,
+        read_only,
+        write_only,
+        deprecated,
+        multiple_of,
+      }
+    } else {
+      FieldMetadata {
+        docs: vec![],
+        validation_attrs: vec![],
+        regex_validation: None,
+        default_value: None,
+        read_only: false,
+        write_only: false,
+        deprecated: false,
+        multiple_of: None,
+      }
+    }
+  }
+
+  /// Builds serde attributes for a field (rename, skip_serializing_if)
+  fn build_serde_attrs(prop_name: &str, is_optional: bool, is_nullable: bool) -> Vec<String> {
+    let mut serde_attrs = vec![];
+
+    let rust_field_name = to_rust_field_name(prop_name);
+    if rust_field_name != prop_name {
+      serde_attrs.push(format!("rename = \"{}\"", prop_name));
+    }
+
+    if is_optional || is_nullable {
+      serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
+    }
+
+    serde_attrs
+  }
+
+  /// Filters out regex validation for types that don't support it
+  fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>) -> Option<String> {
+    match rust_type.base_type.as_str() {
+      "chrono::DateTime<chrono::Utc>" | "chrono::NaiveDate" | "chrono::NaiveTime" | "uuid::Uuid" => None,
+      _ => regex,
+    }
+  }
+
+  /// Wraps a TypeRef with Option if needed (avoids double-wrapping)
+  fn apply_optionality(rust_type: TypeRef, is_optional: bool) -> TypeRef {
+    let is_nullable = rust_type.nullable;
+    if is_optional && !is_nullable {
+      rust_type.with_option()
+    } else {
+      rust_type
+    }
+  }
+
+  /// Builds a FieldDef from all the constituent parts
+  fn build_field_def(
+    prop_name: &str,
+    rust_type: TypeRef,
+    serde_attrs: Vec<String>,
+    metadata: FieldMetadata,
+    regex_validation: Option<String>,
+  ) -> FieldDef {
+    FieldDef {
+      name: to_rust_field_name(prop_name),
+      docs: metadata.docs,
+      rust_type,
+      serde_attrs,
+      validation_attrs: metadata.validation_attrs,
+      regex_validation,
+      default_value: metadata.default_value,
+      read_only: metadata.read_only,
+      write_only: metadata.write_only,
+      deprecated: metadata.deprecated,
+      multiple_of: metadata.multiple_of,
+    }
+  }
+
+  /// Converts schema properties to struct fields, optionally excluding specified fields
   fn convert_fields_with_exclusions(
     &self,
     schema: &ObjectSchema,
     exclude_field: Option<&str>,
   ) -> anyhow::Result<Vec<FieldDef>> {
     let mut fields = Vec::new();
-
     let mut properties: Vec<_> = schema.properties.iter().collect();
     properties.sort_by(|(a, _), (b, _)| a.cmp(b));
 
     for (prop_name, prop_schema_ref) in properties {
-      // Skip excluded fields (e.g., discriminator fields)
       if let Some(exclude) = exclude_field
         && prop_name == exclude
       {
         continue;
       }
 
-      // Check if this is a direct $ref first
-      let rust_type = if let ObjectOrReference::Ref { ref_path, .. } = prop_schema_ref {
-        // Extract type name directly from the reference
-        if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
-          TypeRef::new(to_rust_type_name(&ref_name))
-        } else {
-          // Fallback to resolution
-          if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-            self.schema_to_type_ref(&prop_schema)?
-          } else {
-            TypeRef::new("serde_json::Value")
-          }
-        }
-      } else {
-        // Inline schema - resolve and convert
-        if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-          self.schema_to_type_ref(&prop_schema)?
-        } else {
-          TypeRef::new("serde_json::Value")
-        }
-      };
-
+      let rust_type = self.resolve_property_type(prop_schema_ref)?;
       let is_required = schema.required.contains(prop_name);
-      let optional = !is_required;
+      let is_optional = !is_required;
 
-      let mut serde_attrs = vec![];
-      // Add rename if the Rust field name differs from the original OpenAPI property name
-      // This automatically handles: keywords (type -> r#type), special chars (user-id -> user_id), case changes (userId -> user_id)
-      let rust_field_name = to_rust_field_name(prop_name);
-      if rust_field_name != *prop_name {
-        serde_attrs.push(format!("rename = \"{}\"", prop_name));
-      }
+      let serde_attrs = Self::build_serde_attrs(prop_name, is_optional, rust_type.nullable);
+      let metadata = self.extract_field_metadata(prop_name, is_required, prop_schema_ref);
+      let regex_validation = Self::filter_regex_validation(&rust_type, metadata.regex_validation.clone());
+      let final_type = Self::apply_optionality(rust_type, is_optional);
 
-      // Add skip_serializing_if for optional fields or nullable types
-      if optional || rust_type.nullable {
-        serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
-      }
-
-      // Extract validation attributes, default value, and read/write metadata from resolved schema
-      let (
-        docs,
-        validation_attrs,
-        regex_validation,
-        default_value,
-        read_only,
-        write_only,
-        deprecated,
-        multiple_of,
-        unique_items,
-      ) = if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-        let docs = prop_schema
-          .description
-          .as_ref()
-          .map(|d| doc_comment_lines(d))
-          .unwrap_or_default();
-        let validation = self.extract_validation_attrs(prop_name, is_required, &prop_schema);
-        let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema);
-        let default = self.extract_default_value(&prop_schema);
-        let read_only = prop_schema.read_only.unwrap_or(false);
-        let write_only = prop_schema.write_only.unwrap_or(false);
-        let deprecated = prop_schema.deprecated.unwrap_or(false);
-        let multiple_of = prop_schema.multiple_of.clone();
-        let unique_items = prop_schema.unique_items.unwrap_or(false);
-        (
-          docs,
-          validation,
-          regex_validation.cloned(),
-          default,
-          read_only,
-          write_only,
-          deprecated,
-          multiple_of,
-          unique_items,
-        )
-      } else {
-        (vec![], vec![], None, None, false, false, false, None, false)
-      };
-
-      // Skip regex validation for types that don't support it (chrono, uuid types)
-      let regex_validation = match rust_type.base_type.as_str() {
-        "chrono::DateTime<chrono::Utc>" | "chrono::NaiveDate" | "chrono::NaiveTime" | "uuid::Uuid" => None,
-        _ => regex_validation,
-      };
-
-      // Check nullable before moving rust_type
-      let is_nullable = rust_type.nullable;
-
-      // Don't double-wrap: if the type is already nullable, don't wrap again
-      let final_type = if optional && !is_nullable {
-        rust_type.with_option()
-      } else {
-        rust_type
-      };
-
-      fields.push(FieldDef {
-        name: to_rust_field_name(prop_name),
-        docs,
-        rust_type: final_type,
-        optional: optional || is_nullable,
+      fields.push(Self::build_field_def(
+        prop_name,
+        final_type,
         serde_attrs,
-        validation_attrs,
+        metadata,
         regex_validation,
-        default_value,
-        read_only,
-        write_only,
-        deprecated,
-        multiple_of,
-        unique_items,
-      });
+      ));
     }
 
     Ok(fields)
@@ -897,7 +1046,7 @@ impl<'a> SchemaConverter<'a> {
     self.convert_fields_with_exclusions(schema, None)
   }
 
-  /// Convert schema properties to struct fields, generating inline enum types for anyOf unions
+  /// Converts schema properties to struct fields with inline enum generation for anyOf unions
   fn convert_fields_with_inline_types(
     &self,
     parent_name: &str,
@@ -906,219 +1055,272 @@ impl<'a> SchemaConverter<'a> {
     let mut fields = Vec::new();
     let mut inline_types = Vec::new();
 
-    // Keep parent name unconverted - conversion will happen when creating the enum
-    // This ensures consistent case handling for compound names
-
     let mut properties: Vec<_> = schema.properties.iter().collect();
     properties.sort_by(|(a, _), (b, _)| a.cmp(b));
 
     for (prop_name, prop_schema_ref) in properties {
-      // Check if this is a direct $ref first
-      let rust_type = if let ObjectOrReference::Ref { ref_path, .. } = prop_schema_ref {
-        // Extract type name directly from the reference
-        if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
-          TypeRef::new(to_rust_type_name(&ref_name))
-        } else {
-          // Fallback to resolution
-          if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-            self.schema_to_type_ref(&prop_schema)?
-          } else {
-            TypeRef::new("serde_json::Value")
-          }
-        }
-      } else {
-        // Inline schema - resolve and convert
-        if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-          // Special handling for inline anyOf unions
-          // Check if this is just a nullable pattern (anyOf with null)
-          let has_null = prop_schema.any_of.iter().any(|v| {
-            if let Ok(resolved) = v.resolve(self.graph.spec()) {
-              resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null))
-            } else {
-              false
-            }
-          });
-
-          // If anyOf has null and exactly 2 variants, it's just an optional type
-
-          if !prop_schema.any_of.is_empty() && has_null && prop_schema.any_of.len() == 2 {
-            // Extract the non-null type and wrap in Option (since it's nullable)
-            let mut found_type = None;
-            for variant_ref in &prop_schema.any_of {
-              // Check if it's a $ref first (before resolving)
-              if let ObjectOrReference::Ref { ref_path, .. } = variant_ref {
-                if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
-                  found_type = Some(TypeRef::new(to_rust_type_name(&ref_name)).with_option());
-                  break;
-                }
-              } else if let Ok(resolved) = variant_ref.resolve(self.graph.spec())
-                && resolved.schema_type != Some(SchemaTypeSet::Single(SchemaType::Null))
-              {
-                // Found the actual type - wrap in Option since this is a nullable pattern
-                found_type = Some(self.schema_to_type_ref(&resolved)?.with_option());
-                break;
-              }
-            }
-            // Use found type or fallback
-            found_type.unwrap_or_else(|| self.schema_to_type_ref(&prop_schema).unwrap().with_option())
-          } else if !prop_schema.any_of.is_empty()
-            && (prop_schema.title.is_none()
-              || prop_schema
-                .title
-                .as_ref()
-                .map(|t| self.graph.get_schema(t).is_none())
-                .unwrap_or(true))
-          {
-            // Generate inline enum for non-nullable anyOf unions
-            // Create compound name from parent and property - conversion happens in convert_any_of_enum
-            // May return multiple types (e.g., inner Known enum + outer wrapper for catch-all enums)
-            let enum_name = format!("{}.{}", parent_name, prop_name);
-            let enum_types = self.convert_any_of_enum(&enum_name, &prop_schema)?;
-            // Get the converted name from the last type (outer/main enum)
-            let type_name = if let Some(RustType::Enum(enum_def)) = enum_types.last() {
-              enum_def.name.clone()
-            } else {
-              to_rust_type_name(&enum_name)
-            };
-            // Add all generated types to inline_types
-            inline_types.extend(enum_types);
-            TypeRef::new(&type_name)
-          } else {
-            self.schema_to_type_ref(&prop_schema)?
-          }
-        } else {
-          TypeRef::new("serde_json::Value")
-        }
-      };
+      let (rust_type, generated_types) =
+        self.resolve_property_type_with_inline_enums(parent_name, prop_name, prop_schema_ref)?;
+      inline_types.extend(generated_types);
 
       let is_required = schema.required.contains(prop_name);
-      let optional = !is_required;
+      let is_optional = !is_required;
 
-      let mut serde_attrs = vec![];
-      // Add rename if the Rust field name differs from the original OpenAPI property name
-      // This automatically handles: keywords (type -> r#type), special chars (user-id -> user_id), case changes (userId -> user_id)
-      let rust_field_name = to_rust_field_name(prop_name);
-      if rust_field_name != *prop_name {
-        serde_attrs.push(format!("rename = \"{}\"", prop_name));
-      }
+      let serde_attrs = Self::build_serde_attrs(prop_name, is_optional, rust_type.nullable);
+      let metadata = self.extract_field_metadata(prop_name, is_required, prop_schema_ref);
+      let regex_validation = Self::filter_regex_validation(&rust_type, metadata.regex_validation.clone());
+      let final_type = Self::apply_optionality(rust_type, is_optional);
 
-      // Add skip_serializing_if for optional fields or nullable types
-      if optional || rust_type.nullable {
-        serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
-      }
-
-      // Extract validation attributes, default value, and read/write metadata from resolved schema
-      let (
-        docs,
-        validation_attrs,
-        regex_validation,
-        default_value,
-        read_only,
-        write_only,
-        deprecated,
-        multiple_of,
-        unique_items,
-      ) = if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
-        let docs = prop_schema
-          .description
-          .as_ref()
-          .map(|d| doc_comment_lines(d))
-          .unwrap_or_default();
-        let required = schema.required.contains(prop_name);
-        let validation = self.extract_validation_attrs(prop_name, required, &prop_schema);
-        let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema);
-        let default = self.extract_default_value(&prop_schema);
-        let read_only = prop_schema.read_only.unwrap_or(false);
-        let write_only = prop_schema.write_only.unwrap_or(false);
-        let deprecated = prop_schema.deprecated.unwrap_or(false);
-        let multiple_of = prop_schema.multiple_of.clone();
-        let unique_items = prop_schema.unique_items.unwrap_or(false);
-        (
-          docs,
-          validation,
-          regex_validation.cloned(),
-          default,
-          read_only,
-          write_only,
-          deprecated,
-          multiple_of,
-          unique_items,
-        )
-      } else {
-        (vec![], vec![], None, None, false, false, false, None, false)
-      };
-
-      // Skip regex validation for types that don't support it (chrono, uuid types)
-      let regex_validation = match rust_type.base_type.as_str() {
-        "chrono::DateTime<chrono::Utc>" | "chrono::NaiveDate" | "chrono::NaiveTime" | "uuid::Uuid" => None,
-        _ => regex_validation,
-      };
-
-      // Check nullable before moving rust_type
-      let is_nullable = rust_type.nullable;
-
-      // Don't double-wrap: if the type is already nullable, don't wrap again
-      let final_type = if optional && !is_nullable {
-        rust_type.with_option()
-      } else {
-        rust_type
-      };
-
-      fields.push(FieldDef {
-        name: to_rust_field_name(prop_name),
-        docs,
-        rust_type: final_type,
-        optional: optional || is_nullable,
+      fields.push(Self::build_field_def(
+        prop_name,
+        final_type,
         serde_attrs,
-        validation_attrs,
+        metadata,
         regex_validation,
-        default_value,
-        read_only,
-        write_only,
-        deprecated,
-        multiple_of,
-        unique_items,
-      });
+      ));
     }
 
     Ok((fields, inline_types))
   }
 
-  /// Convert an OpenAPI schema to a TypeRef (exposed for OperationConverter)
-  pub fn schema_to_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
-    // First priority: Check the schema type - if it has a concrete type, use that
-    // This prevents title conflicts (e.g., a string field titled "Message" being confused with Message struct)
-    if let Some(ref schema_type) = schema.schema_type {
-      // If it has a concrete type AND properties/oneOf/anyOf, it might be a complex type
-      // Only use title-based lookup for objects without explicit primitive types
-      if !matches!(schema_type, SchemaTypeSet::Single(SchemaType::Object)) {
-        // It's a primitive type - continue to primitive type handling below
-      } else if let Some(ref title) = schema.title
-        && self.graph.get_schema(title).is_some()
-        && !schema.properties.is_empty()
+  /// Maps OpenAPI string format values to their corresponding Rust types
+  fn map_string_format(format: Option<&String>) -> &'static str {
+    format
+      .map(|f| match f.as_str() {
+        "date" => "chrono::NaiveDate",
+        "date-time" => "chrono::DateTime<chrono::Utc>",
+        "time" => "chrono::NaiveTime",
+        "binary" => "Vec<u8>",
+        "byte" => "String",
+        "uuid" => "uuid::Uuid",
+        _ => "String",
+      })
+      .unwrap_or("String")
+  }
+
+  /// Attempts to extract a schema name from a $ref path
+  fn try_extract_ref_name(obj_ref: &ObjectOrReference<ObjectSchema>) -> Option<String> {
+    match obj_ref {
+      ObjectOrReference::Ref { ref_path, .. } => SchemaGraph::extract_ref_name(ref_path),
+      _ => None,
+    }
+  }
+
+  /// Extracts the first $ref from a schema's oneOf array, if present
+  fn try_extract_first_oneof_ref(&self, schema: &ObjectSchema) -> Option<String> {
+    schema.one_of.iter().find_map(Self::try_extract_ref_name)
+  }
+
+  /// Checks if a schema represents a null type
+  fn is_null_schema(schema: &ObjectSchema) -> bool {
+    schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null))
+  }
+
+  /// Returns true if the schema is nullable or contains null as one of its types
+  fn is_nullable_or_generic(schema: &ObjectSchema) -> bool {
+    // Check if it's explicitly nullable using the oas3 helper
+    if schema.is_nullable() == Some(true) {
+      return true;
+    }
+    // Check if it's a generic type like ["null", "object"] which is essentially a wildcard
+    if let Some(SchemaTypeSet::Multiple(ref types)) = schema.schema_type {
+      types.contains(&SchemaType::Null)
+    } else {
+      false
+    }
+  }
+
+  /// Converts OpenAPI array schema items to a Rust TypeRef
+  /// Returns the array element type without the Vec wrapper
+  fn convert_array_items(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
+    let Some(ref items_box) = schema.items else {
+      return Ok(TypeRef::new("serde_json::Value"));
+    };
+
+    let Schema::Object(items_ref) = items_box.as_ref() else {
+      return Ok(TypeRef::new("serde_json::Value"));
+    };
+
+    if let Some(ref_name) = Self::try_extract_ref_name(items_ref) {
+      return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
+    }
+
+    let items_schema = items_ref.resolve(self.graph.spec())?;
+
+    if let Some(ref_name) = self.try_extract_first_oneof_ref(&items_schema) {
+      return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
+    }
+
+    self.schema_to_type_ref(&items_schema)
+  }
+
+  /// Finds the non-null variant in a two-element union of [T, null]
+  /// Returns None if not a nullable pattern
+  fn find_non_null_variant<'b>(
+    &self,
+    variants: &'b [ObjectOrReference<ObjectSchema>],
+  ) -> Option<&'b ObjectOrReference<ObjectSchema>> {
+    if variants.len() != 2 {
+      return None;
+    }
+
+    let has_null = variants.iter().any(|v| {
+      v.resolve(self.graph.spec())
+        .ok()
+        .map(|s| Self::is_null_schema(&s))
+        .unwrap_or(false)
+    });
+
+    if !has_null {
+      return None;
+    }
+
+    variants.iter().find(|v| {
+      v.resolve(self.graph.spec())
+        .ok()
+        .map(|s| !Self::is_null_schema(&s))
+        .unwrap_or(false)
+    })
+  }
+
+  /// Attempts to resolve a schema by its title property
+  /// Returns a TypeRef with Box wrapper if the type is cyclic
+  fn try_resolve_by_title(&self, schema: &ObjectSchema) -> Option<TypeRef> {
+    let title = schema.title.as_ref()?;
+
+    if self.graph.get_schema(title).is_none() || schema.properties.is_empty() {
+      return None;
+    }
+
+    let mut type_ref = TypeRef::new(to_rust_type_name(title));
+    if self.graph.is_cyclic(title) {
+      type_ref = type_ref.with_boxed();
+    }
+
+    Some(type_ref)
+  }
+
+  /// Attempts to convert oneOf/anyOf union variants to a TypeRef
+  /// Handles nullable patterns and type extraction from unions
+  fn try_convert_union_to_type_ref(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Option<TypeRef> {
+    if let Some(non_null_variant) = self.find_non_null_variant(variants) {
+      if let Some(ref_name) = Self::try_extract_ref_name(non_null_variant) {
+        return Some(TypeRef::new(to_rust_type_name(&ref_name)).with_option());
+      }
+
+      if let Ok(resolved) = non_null_variant.resolve(self.graph.spec())
+        && let Ok(inner_type) = self.schema_to_type_ref(&resolved)
       {
-        // It's an object with a title that matches a schema and has properties
-        let is_cyclic = self.graph.is_cyclic(title);
-        let mut type_ref = TypeRef::new(to_rust_type_name(title));
-        if is_cyclic {
-          type_ref = type_ref.with_boxed();
-        }
+        return Some(inner_type.with_option());
+      }
+    }
+
+    let mut fallback_type: Option<TypeRef> = None;
+
+    for variant_ref in variants {
+      if let Some(ref_name) = Self::try_extract_ref_name(variant_ref) {
+        return Some(TypeRef::new(to_rust_type_name(&ref_name)));
+      }
+
+      let Ok(resolved) = variant_ref.resolve(self.graph.spec()) else {
+        continue;
+      };
+
+      if Self::is_null_schema(&resolved) {
+        continue;
+      }
+
+      if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Array))
+        && let Ok(item_type) = self.convert_array_items(&resolved)
+      {
+        let unique_items = resolved.unique_items.unwrap_or(false);
+        return Some(
+          TypeRef::new(item_type.to_rust_type())
+            .with_vec()
+            .with_unique_items(unique_items),
+        );
+      }
+
+      if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::String)) && fallback_type.is_none() {
+        fallback_type = Some(TypeRef::new("String"));
+        continue;
+      }
+
+      if let Some(ref_name) = self.try_extract_first_oneof_ref(&resolved) {
+        return Some(TypeRef::new(to_rust_type_name(&ref_name)));
+      }
+
+      if let Some(ref variant_title) = resolved.title
+        && self.graph.get_schema(variant_title).is_some()
+      {
+        return Some(TypeRef::new(to_rust_type_name(variant_title)));
+      }
+    }
+
+    fallback_type
+  }
+
+  /// Maps a single primitive SchemaType to a Rust TypeRef
+  fn map_single_primitive_type(&self, schema_type: &SchemaType, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
+    match schema_type {
+      SchemaType::String => Ok(TypeRef::new(Self::map_string_format(schema.format.as_ref()))),
+      SchemaType::Number => Ok(TypeRef::new("f64")),
+      SchemaType::Integer => Ok(TypeRef::new("i64")),
+      SchemaType::Boolean => Ok(TypeRef::new("bool")),
+      SchemaType::Array => {
+        let item_type = self.convert_array_items(schema)?;
+        let unique_items = schema.unique_items.unwrap_or(false);
+        Ok(
+          TypeRef::new(item_type.to_rust_type())
+            .with_vec()
+            .with_unique_items(unique_items),
+        )
+      }
+      SchemaType::Object => Ok(TypeRef::new("serde_json::Value")),
+      SchemaType::Null => Ok(TypeRef::new("()").with_option()),
+    }
+  }
+
+  /// Converts nullable primitive types from SchemaTypeSet::Multiple
+  /// Detects [T, null] patterns and returns Option<T>
+  fn convert_nullable_primitive(&self, types: &[SchemaType], schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
+    let type_vec: Vec<_> = types.iter().collect();
+
+    if type_vec.len() != 2 {
+      return Ok(TypeRef::new("serde_json::Value"));
+    }
+
+    let has_null = type_vec.iter().any(|t| matches!(t, SchemaType::Null));
+    if !has_null {
+      return Ok(TypeRef::new("serde_json::Value"));
+    }
+
+    let Some(non_null_type) = type_vec.iter().find(|t| !matches!(t, SchemaType::Null)) else {
+      return Ok(TypeRef::new("serde_json::Value"));
+    };
+
+    let type_ref = self.map_single_primitive_type(non_null_type, schema)?;
+    Ok(type_ref.with_option())
+  }
+
+  /// Converts an OpenAPI schema to a Rust TypeRef
+  ///
+  /// This is the main entry point for type conversion. It handles:
+  /// - Title-based schema references (with cycle detection)
+  /// - Union types (oneOf/anyOf) including nullable patterns
+  /// - Primitive types (string, number, integer, boolean, array, object, null)
+  /// - Nullable primitives using SchemaTypeSet::Multiple
+  pub(crate) fn schema_to_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
+    if let Some(ref schema_type) = schema.schema_type {
+      if matches!(schema_type, SchemaTypeSet::Single(SchemaType::Object))
+        && let Some(type_ref) = self.try_resolve_by_title(schema)
+      {
         return Ok(type_ref);
       }
-    } else if let Some(ref title) = schema.title
-      && self.graph.get_schema(title).is_some()
-      && !schema.properties.is_empty()
-    {
-      // No explicit type, but has title matching a schema and has properties - likely a reference
-      let is_cyclic = self.graph.is_cyclic(title);
-      let mut type_ref = TypeRef::new(to_rust_type_name(title));
-      if is_cyclic {
-        type_ref = type_ref.with_boxed();
-      }
+    } else if let Some(type_ref) = self.try_resolve_by_title(schema) {
       return Ok(type_ref);
     }
 
-    // Check for inline oneOf/anyOf - detect nullable pattern
     if !schema.one_of.is_empty() || !schema.any_of.is_empty() {
       let variants = if !schema.one_of.is_empty() {
         &schema.one_of
@@ -1126,211 +1328,18 @@ impl<'a> SchemaConverter<'a> {
         &schema.any_of
       };
 
-      // Check if this is the nullable pattern: anyOf/oneOf with [T, null]
-      let has_null = variants.iter().any(|v| {
-        if let Ok(resolved) = v.resolve(self.graph.spec()) {
-          resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null))
-        } else {
-          false
-        }
-      });
-
-      if has_null && variants.len() == 2 {
-        // This is a nullable type - extract the non-null variant
-        for variant_ref in variants {
-          // Check if it's a direct $ref first
-          if let ObjectOrReference::Ref { ref_path, .. } = variant_ref
-            && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
-          {
-            return Ok(TypeRef::new(to_rust_type_name(&ref_name)).with_option());
-          }
-
-          // Otherwise resolve
-          if let Ok(resolved) = variant_ref.resolve(self.graph.spec()) {
-            // Skip null types
-            if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
-              continue;
-            }
-
-            // Found the actual type - recurse to get it
-            let inner_type = self.schema_to_type_ref(&resolved)?;
-            return Ok(inner_type.with_option());
-          }
-        }
+      if let Some(type_ref) = self.try_convert_union_to_type_ref(variants) {
+        return Ok(type_ref);
       }
-
-      // Try to extract type from the first non-null, non-string variant (for non-nullable unions)
-      // Prefer complex types (arrays, objects) over simple types (strings)
-      let mut fallback_type: Option<TypeRef> = None;
-
-      for variant_ref in variants {
-        // Check if it's a direct $ref
-        if let ObjectOrReference::Ref { ref_path, .. } = variant_ref
-          && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
-        {
-          return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
-        }
-
-        // Try resolving
-        if let Ok(resolved) = variant_ref.resolve(self.graph.spec()) {
-          // Skip null types
-          if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
-            continue;
-          }
-
-          // Handle array types specially
-          if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Array)) {
-            let unique_items = resolved.unique_items.unwrap_or(false);
-            // Check array items for oneOf
-            if let Some(ref items_box) = resolved.items
-              && let Schema::Object(items_ref) = items_box.as_ref()
-              && let Ok(items_schema) = items_ref.resolve(self.graph.spec())
-            {
-              // Items have oneOf - extract first ref
-              if !items_schema.one_of.is_empty() {
-                for one_of_ref in &items_schema.one_of {
-                  if let ObjectOrReference::Ref { ref_path, .. } = one_of_ref
-                    && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
-                  {
-                    return Ok(
-                      TypeRef::new(to_rust_type_name(&ref_name))
-                        .with_vec()
-                        .with_unique_items(unique_items),
-                    );
-                  }
-                }
-              }
-            }
-          }
-
-          // Save string types as fallback but prefer arrays/objects
-          if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::String)) && fallback_type.is_none() {
-            fallback_type = Some(TypeRef::new("String"));
-            continue;
-          }
-
-          // Check for nested oneOf (common pattern)
-          if !resolved.one_of.is_empty() {
-            for nested_ref in &resolved.one_of {
-              if let ObjectOrReference::Ref { ref_path, .. } = nested_ref
-                && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
-              {
-                return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
-              }
-            }
-          }
-
-          // Use title if available
-          if let Some(ref variant_title) = resolved.title
-            && self.graph.get_schema(variant_title).is_some()
-          {
-            return Ok(TypeRef::new(to_rust_type_name(variant_title)));
-          }
-        }
-      }
-
-      // Use fallback if we found one
-      if let Some(t) = fallback_type {
-        return Ok(t);
-      }
-
-      // Fall through if we couldn't resolve to a concrete type
     }
 
-    // Check schema type for primitives
-    // This handles inline primitive types
     if let Some(ref schema_type) = schema.schema_type {
-      match schema_type {
-        SchemaTypeSet::Single(typ) => {
-          let base_type = match typ {
-            SchemaType::String => {
-              // Check for format field to handle special string types
-              if let Some(ref format) = schema.format {
-                match format.as_str() {
-                  "date" => "chrono::NaiveDate",
-                  "date-time" => "chrono::DateTime<chrono::Utc>",
-                  "time" => "chrono::NaiveTime",
-                  "binary" => "Vec<u8>",  // Raw binary (multipart/form-data)
-                  "byte" => "String",     // Base64-encoded binary (JSON)
-                  "uuid" => "uuid::Uuid", // UUID
-                  _ => "String",
-                }
-              } else {
-                "String"
-              }
-            }
-            SchemaType::Number => "f64",
-            SchemaType::Integer => "i64",
-            SchemaType::Boolean => "bool",
-            SchemaType::Array => {
-              // Handle array items
-              let unique_items = schema.unique_items.unwrap_or(false);
-
-              if let Some(ref items_box) = schema.items
-                && let Schema::Object(items_ref) = items_box.as_ref()
-              {
-                // Check if this is a $ref first
-                if let ObjectOrReference::Ref { ref_path, .. } = items_ref.as_ref() {
-                  // Extract the type name from the reference
-                  if let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path) {
-                    return Ok(
-                      TypeRef::new(to_rust_type_name(&ref_name))
-                        .with_vec()
-                        .with_unique_items(unique_items),
-                    );
-                  }
-                }
-
-                // Otherwise resolve and check for oneOf/anyOf in items
-                if let Ok(items_schema) = items_ref.resolve(self.graph.spec()) {
-                  // If items have oneOf, extract the first ref type
-                  if !items_schema.one_of.is_empty() {
-                    for one_of_ref in &items_schema.one_of {
-                      if let ObjectOrReference::Ref { ref_path, .. } = one_of_ref
-                        && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
-                      {
-                        return Ok(
-                          TypeRef::new(to_rust_type_name(&ref_name))
-                            .with_vec()
-                            .with_unique_items(unique_items),
-                        );
-                      }
-                    }
-                  }
-
-                  // Regular item type conversion
-                  let item_type = self.schema_to_type_ref(&items_schema)?;
-                  return Ok(
-                    TypeRef::new(item_type.to_rust_type())
-                      .with_vec()
-                      .with_unique_items(unique_items),
-                  );
-                }
-              }
-              return Ok(
-                TypeRef::new("serde_json::Value")
-                  .with_vec()
-                  .with_unique_items(unique_items),
-              );
-            }
-            SchemaType::Object => {
-              // Object without a matching schema reference
-              return Ok(TypeRef::new("serde_json::Value"));
-            }
-            SchemaType::Null => {
-              return Ok(TypeRef::new("()").with_option());
-            }
-          };
-          return Ok(TypeRef::new(base_type));
-        }
-        SchemaTypeSet::Multiple(_) => {
-          // Handle nullable types - check if it's a simple nullable pattern
-          return Ok(TypeRef::new("serde_json::Value"));
-        }
-      }
+      return match schema_type {
+        SchemaTypeSet::Single(typ) => self.map_single_primitive_type(typ, schema),
+        SchemaTypeSet::Multiple(types) => self.convert_nullable_primitive(types, schema),
+      };
     }
 
-    // Default to serde_json::Value for schemas without type or title
     Ok(TypeRef::new("serde_json::Value"))
   }
 }

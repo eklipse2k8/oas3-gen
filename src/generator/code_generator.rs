@@ -21,7 +21,7 @@ use crate::reserved::regex_const_name;
 
 /// Type usage context for determining derive traits
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeUsage {
+pub(crate) enum TypeUsage {
   /// Type is only used in requests (needs Serialize)
   RequestOnly,
   /// Type is only used in responses (needs Deserialize)
@@ -64,18 +64,11 @@ impl RegexKey {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum TypeKind {
-  Struct,
-  Enum,
-  Alias,
-}
-
-pub struct CodeGenerator;
+pub(crate) struct CodeGenerator;
 
 impl CodeGenerator {
   /// Build a map of type usage from operation metadata
-  pub fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
+  pub(crate) fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
     let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new(); // (used_in_request, used_in_response)
 
     for op in operations {
@@ -106,7 +99,7 @@ impl CodeGenerator {
       .collect()
   }
 
-  pub fn generate(types: &[RustType], type_usage: &BTreeMap<String, TypeUsage>) -> TokenStream {
+  pub(crate) fn generate(types: &[RustType], type_usage: &BTreeMap<String, TypeUsage>) -> TokenStream {
     let ordered = Self::ordered_types(types);
     let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
     let type_tokens: Vec<TokenStream> = ordered
@@ -156,16 +149,6 @@ impl CodeGenerator {
       RustType::Struct(_) => 1,    // Medium priority
       RustType::TypeAlias(_) => 2, // Lowest priority
     }
-  }
-
-  fn type_key(rust_type: &RustType) -> (TypeKind, String) {
-    let kind = match rust_type {
-      RustType::Struct(_) => TypeKind::Struct,
-      RustType::Enum(_) => TypeKind::Enum,
-      RustType::TypeAlias(_) => TypeKind::Alias,
-    };
-
-    (kind, rust_type.type_name().to_string())
   }
 
   /// Generate regex constants for validation
@@ -507,7 +490,7 @@ impl CodeGenerator {
       #docs
       #derives
       #serde_attrs
-      pub struct #name {
+      pub(crate) struct #name {
         #(#fields),*
       }
     }
@@ -524,7 +507,7 @@ impl CodeGenerator {
       #docs
       #derives
       #serde_attrs
-      pub enum #name {
+      pub(crate) enum #name {
         #(#variants),*
       }
     }
@@ -537,7 +520,7 @@ impl CodeGenerator {
 
     quote! {
       #docs
-      pub type #name = #target;
+      pub(crate) type #name = #target;
     }
   }
 
@@ -683,7 +666,7 @@ impl CodeGenerator {
             #deprecated_attr
             #serde_attrs
             #validation_attrs
-            pub #name: #type_tokens
+            pub(crate) #name: #type_tokens
           }
         } else {
           quote! {
