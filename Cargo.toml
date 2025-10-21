@@ -1,6 +1,6 @@
 [package]
 name = "oas3-gen"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
