@@ -75,22 +75,47 @@ impl<'a> SchemaConverter<'a> {
     Ok(vec![])
   }
 
-  /// Convert an allOf schema by merging all schemas into one struct
-  fn convert_all_of_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
-    // Merge all allOf schemas into a single schema
-    let mut merged_schema = schema.clone();
-
+  /// Recursively collect all properties and required fields from a schema's allOf chain
+  fn collect_all_of_properties(
+    &self,
+    schema: &ObjectSchema,
+    properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
+    required: &mut Vec<String>,
+  ) -> anyhow::Result<()> {
+    // First, recursively process all allOf references to get inherited properties
     for all_of_ref in &schema.all_of {
       if let Ok(all_of_schema) = all_of_ref.resolve(self.graph.spec()) {
-        // Merge properties
-        for (prop_name, prop_ref) in &all_of_schema.properties {
-          merged_schema.properties.insert(prop_name.clone(), prop_ref.clone());
-        }
-
-        // Merge required fields
-        merged_schema.required.extend(all_of_schema.required.iter().cloned());
+        self.collect_all_of_properties(&all_of_schema, properties, required)?;
       }
     }
+
+    // Then add this schema's own properties (later schemas can override)
+    for (prop_name, prop_ref) in &schema.properties {
+      properties.insert(prop_name.clone(), prop_ref.clone());
+    }
+
+    // Merge required fields (avoid duplicates)
+    for req in &schema.required {
+      if !required.contains(req) {
+        required.push(req.clone());
+      }
+    }
+
+    Ok(())
+  }
+
+  /// Convert an allOf schema by merging all schemas into one struct
+  fn convert_all_of_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
+    // Recursively collect all properties from the entire allOf chain
+    let mut merged_properties = BTreeMap::new();
+    let mut merged_required = Vec::new();
+
+    self.collect_all_of_properties(schema, &mut merged_properties, &mut merged_required)?;
+
+    // Create a merged schema with all collected properties
+    let mut merged_schema = schema.clone();
+    merged_schema.properties = merged_properties;
+    merged_schema.required = merged_required;
 
     // Now convert as a regular struct
     let (main_type, inline_types) = self.convert_struct(name, &merged_schema)?;
