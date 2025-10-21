@@ -32,8 +32,8 @@ pub enum Visibility {
 }
 
 impl Visibility {
-  /// Convert string to Visibility
-  pub fn from_str(s: &str) -> Option<Self> {
+  /// Parse a string into a Visibility
+  pub fn parse(s: &str) -> Option<Self> {
     match s {
       "public" => Some(Visibility::Public),
       "crate" => Some(Visibility::Crate),

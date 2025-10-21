@@ -4,7 +4,7 @@
 //! Rust type definitions (structs, enums, type aliases) with proper validation,
 //! serde attributes, and documentation.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use regex::Regex;
@@ -99,171 +99,128 @@ impl<'a> SchemaConverter<'a> {
     Ok(all_types)
   }
 
-  /// Convert a schema with oneOf into a Rust enum
-  /// Returns the main enum and any inline types that were generated
   fn convert_one_of_enum(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
-    let mut variants = Vec::new();
-    let mut seen_names = BTreeSet::new();
     let mut inline_types = Vec::new();
-    let mut variant_schema_refs = Vec::new(); // Track schema refs for discriminator mapping
 
-    // Get discriminator property name if present
-    let discriminator_property = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
+    let discriminator_prop = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
 
-    // Build reverse discriminator mapping: schema_ref -> discriminator_value
-    let mut discriminator_values: HashMap<String, String> = HashMap::new();
-    if let Some(discriminator) = &schema.discriminator
-      && let Some(mapping) = &discriminator.mapping
-    {
-      for (disc_value, schema_ref) in mapping {
-        if let Some(schema_name) = SchemaGraph::extract_ref_name(schema_ref) {
-          discriminator_values.insert(schema_name, disc_value.clone());
-        }
-      }
-    }
+    let discriminator_map: BTreeMap<String, String> = schema
+      .discriminator
+      .as_ref()
+      .and_then(|d| d.mapping.as_ref())
+      .map(|mapping| {
+        mapping
+          .iter()
+          .filter_map(|(val, ref_path)| SchemaGraph::extract_ref_name(ref_path).map(|name| (name, val.clone())))
+          .collect()
+      })
+      .unwrap_or_default();
 
-    for (i, variant_schema_ref) in schema.one_of.iter().enumerate() {
-      // Track the original schema name for discriminator mapping
-      let schema_name = if let ObjectOrReference::Ref { ref_path, .. } = variant_schema_ref {
-        SchemaGraph::extract_ref_name(ref_path)
-      } else {
-        None
-      };
-
-      if let Ok(variant_schema) = variant_schema_ref.resolve(self.graph.spec()) {
-        // Skip null variants - they're handled by making the field Option<T>
-        if variant_schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
-          continue;
+    let mut seen_names = BTreeSet::new();
+    let mut variants_intermediate: Vec<_> = schema
+      .one_of
+      .iter()
+      .enumerate()
+      .filter_map(|(i, variant_schema_ref)| {
+        let resolved_schema = variant_schema_ref.resolve(self.graph.spec()).ok()?;
+        if resolved_schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
+          return None;
         }
 
-        // Generate a good variant name
-        let mut variant_name = if let Some(ref title) = variant_schema.title {
-          to_rust_type_name(title)
-        } else {
-          // Infer name from type
-          self.infer_variant_name(&variant_schema, i)
-        };
+        let mut variant_name = resolved_schema
+          .title
+          .as_deref()
+          .map(to_rust_type_name)
+          .unwrap_or_else(|| self.infer_variant_name(&resolved_schema, i));
 
-        // Ensure uniqueness
-        if seen_names.contains(&variant_name) {
+        if !seen_names.insert(variant_name.clone()) {
           variant_name = format!("{}{}", variant_name, i);
+          seen_names.insert(variant_name.clone());
         }
-        seen_names.insert(variant_name.clone());
-        variant_schema_refs.push(schema_name);
 
-        let docs = variant_schema
-          .description
-          .as_ref()
-          .map(|d| doc_comment_lines(d))
-          .unwrap_or_default();
+        let (content, mut generated_types) = self
+          .determine_variant_content(name, &resolved_schema, discriminator_prop)
+          .ok()?;
+        inline_types.append(&mut generated_types);
 
-        let deprecated = variant_schema.deprecated.unwrap_or(false);
+        let mut serde_attrs = Vec::new();
+        if discriminator_prop.is_some()
+          && let ObjectOrReference::Ref { ref_path, .. } = variant_schema_ref
+          && let Some(schema_name) = SchemaGraph::extract_ref_name(ref_path)
+          && let Some(disc_value) = discriminator_map.get(&schema_name)
+        {
+          serde_attrs.push(format!("rename = \"{}\"", disc_value));
+        }
 
-        // Determine the variant content based on the schema type
-        // For discriminated unions (with tag), we MUST use struct variants (serde requirement)
-        // For non-discriminated (untagged), we can use tuple variants to avoid duplication
-        let content = if discriminator_property.is_some() {
-          // Has discriminator - must use struct variant for serde(tag) to work
-          // serde internally-tagged enums REQUIRE all variants to be struct-like
-          if !variant_schema.properties.is_empty() {
-            let (fields, generated_types) =
-              self.convert_fields_with_inline_types_and_exclusions(name, &variant_schema, discriminator_property)?;
-            inline_types.extend(generated_types);
-            VariantContent::Struct(fields)
-          } else {
-            // Primitive or non-object - wrap in single-field struct for serde compatibility
-            let type_ref = self.schema_to_type_ref(&variant_schema)?;
-            let field = FieldDef {
-              name: "value".to_string(),
-              docs: vec![],
-              rust_type: type_ref,
-              serde_attrs: vec![],
-              validation_attrs: vec![],
-              regex_validation: None,
-              default_value: None,
-              read_only: false,
-              write_only: false,
-              deprecated: false,
-              multiple_of: None,
-            };
-            VariantContent::Struct(vec![field])
-          }
-        } else {
-          // No discriminator - can use tuple variants to avoid duplication
-          if let Some(ref title) = variant_schema.title {
-            if self.graph.get_schema(title).is_some() {
-              // Reference to existing schema - use tuple variant
-              let type_ref = TypeRef::new(to_rust_type_name(title));
-              VariantContent::Tuple(vec![type_ref])
-            } else if !variant_schema.properties.is_empty() {
-              // Inline object - struct variant
-              let fields = self.convert_fields(&variant_schema)?;
-              VariantContent::Struct(fields)
-            } else {
-              // Other types - tuple variant
-              let type_ref = self.schema_to_type_ref(&variant_schema)?;
-              VariantContent::Tuple(vec![type_ref])
-            }
-          } else if !variant_schema.properties.is_empty() {
-            // Anonymous object - inline struct variant
-            let fields = self.convert_fields(&variant_schema)?;
-            VariantContent::Struct(fields)
-          } else {
-            // Primitive - tuple variant
-            let type_ref = self.schema_to_type_ref(&variant_schema)?;
-            VariantContent::Tuple(vec![type_ref])
-          }
-        };
-
-        variants.push(VariantDef {
-          name: to_rust_type_name(&variant_name),
-          docs,
+        Some(VariantDef {
+          name: variant_name,
+          docs: resolved_schema
+            .description
+            .as_deref()
+            .map(doc_comment_lines)
+            .unwrap_or_default(),
           content,
-          serde_attrs: vec![],
-          deprecated,
-        });
-      }
-    }
+          serde_attrs,
+          deprecated: resolved_schema.deprecated.unwrap_or(false),
+        })
+      })
+      .collect();
 
-    // Strip common prefix/suffix from variant names to satisfy clippy::enum_variant_names
-    let original_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+    let original_names: Vec<_> = variants_intermediate.iter().map(|v| v.name.clone()).collect();
     let stripped_names = Self::strip_common_affixes(&original_names);
 
-    // Update variant names with stripped versions and add serde(rename) for discriminated unions
-    for (i, (variant, stripped_name)) in variants.iter_mut().zip(stripped_names.iter()).enumerate() {
-      // If we have a discriminator, always check if we need serde(rename)
-      if discriminator_property.is_some() {
-        // Look up the discriminator value for this schema
-        if let Some(Some(schema_name)) = variant_schema_refs.get(i)
-          && let Some(disc_value) = discriminator_values.get(schema_name)
-        {
-          // Always add rename for discriminated unions - serde doesn't auto-convert case
-          variant.serde_attrs.push(format!("rename = \"{}\"", disc_value));
-        }
-      }
-
-      variant.name = stripped_name.clone();
+    for (variant, stripped_name) in variants_intermediate.iter_mut().zip(stripped_names) {
+      variant.name = stripped_name;
     }
-
-    // Check if there's a discriminator
-    let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.clone());
 
     let main_enum = RustType::Enum(EnumDef {
       name: to_rust_type_name(name),
-      docs: schema
-        .description
-        .as_ref()
-        .map(|d| doc_comment_lines(d))
-        .unwrap_or_default(),
-      variants,
-      discriminator,
+      docs: schema.description.as_deref().map(doc_comment_lines).unwrap_or_default(),
+      variants: variants_intermediate,
+      discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),
       derives: vec!["Debug".into(), "Clone".into(), "Serialize".into(), "Deserialize".into()],
       serde_attrs: vec![],
     });
 
-    // Return inline types first, then the main enum
     inline_types.push(main_enum);
     Ok(inline_types)
+  }
+
+  fn determine_variant_content(
+    &self,
+    parent_name: &str,
+    schema: &ObjectSchema,
+    discriminator_prop: Option<&str>,
+  ) -> anyhow::Result<(VariantContent, Vec<RustType>)> {
+    if let Some(disc_prop) = discriminator_prop {
+      return if !schema.properties.is_empty() {
+        let (fields, inline_types) =
+          self.convert_fields_with_inline_types_and_exclusions(parent_name, schema, Some(disc_prop))?;
+        Ok((VariantContent::Struct(fields), inline_types))
+      } else {
+        let field = FieldDef {
+          name: "value".to_string(),
+          rust_type: self.schema_to_type_ref(schema)?,
+          ..Default::default()
+        };
+        Ok((VariantContent::Struct(vec![field]), vec![]))
+      };
+    }
+
+    match (&schema.title, !schema.properties.is_empty()) {
+      (Some(title), _) if self.graph.get_schema(title).is_some() => {
+        let type_ref = TypeRef::new(to_rust_type_name(title));
+        Ok((VariantContent::Tuple(vec![type_ref]), vec![]))
+      }
+      (_, true) => {
+        let fields = self.convert_fields(schema)?;
+        Ok((VariantContent::Struct(fields), vec![]))
+      }
+      _ => {
+        let type_ref = self.schema_to_type_ref(schema)?;
+        Ok((VariantContent::Tuple(vec![type_ref]), vec![]))
+      }
+    }
   }
 
   /// Convert a schema with anyOf into an untagged Rust enum
@@ -1149,47 +1106,44 @@ impl<'a> SchemaConverter<'a> {
   /// - If duplicates exist where some are deprecated and some are not, remove deprecated ones
   /// - Otherwise, append numeric suffixes (_2, _3, etc.) to later occurrences
   fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
-    // Group fields by name to identify collisions
     let mut name_groups: HashMap<String, Vec<usize>> = HashMap::new();
+
     for (idx, field) in fields.iter().enumerate() {
       name_groups.entry(field.name.clone()).or_default().push(idx);
     }
 
-    // Track indices to remove
-    let mut indices_to_remove = Vec::new();
+    let mut indices_to_remove = HashSet::<usize>::new();
 
-    // Process each group of duplicate names
-    for (name, indices) in name_groups.iter() {
-      if indices.len() > 1 {
-        // Check if we have a mix of deprecated and non-deprecated fields
-        let has_deprecated = indices.iter().any(|&idx| fields[idx].deprecated);
-        let has_non_deprecated = indices.iter().any(|&idx| !fields[idx].deprecated);
+    for (name, indices) in name_groups {
+      if indices.len() <= 1 {
+        // Skip if there's no collision.
+        continue;
+      }
 
-        if has_deprecated && has_non_deprecated {
-          // Remove all deprecated versions, keep non-deprecated ones
-          for &idx in indices {
-            if fields[idx].deprecated {
-              indices_to_remove.push(idx);
-            }
-          }
-        } else {
-          // All same deprecation status - use numeric suffix strategy
-          let mut counter = 1;
-          for &idx in indices {
-            if counter > 1 {
-              fields[idx].name = format!("{}_{}", name, counter);
-            }
-            counter += 1;
-          }
+      let (deprecated_indices, non_deprecated_indices): (Vec<_>, Vec<_>) =
+        indices.iter().partition(|&&idx| fields[idx].deprecated);
+
+      if !deprecated_indices.is_empty() && !non_deprecated_indices.is_empty() {
+        indices_to_remove.extend(&deprecated_indices);
+      } else {
+        for (i, &idx) in indices.iter().enumerate().skip(1) {
+          fields[idx].name = format!("{}_{}", name, i + 1);
         }
       }
     }
 
-    // Remove fields in reverse order to maintain correct indices
-    indices_to_remove.sort_unstable();
-    indices_to_remove.reverse();
-    for idx in indices_to_remove {
-      fields.remove(idx);
+    if !indices_to_remove.is_empty() {
+      *fields = fields
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, field)| {
+          if indices_to_remove.contains(&idx) {
+            None
+          } else {
+            Some(field.clone())
+          }
+        })
+        .collect();
     }
   }
 

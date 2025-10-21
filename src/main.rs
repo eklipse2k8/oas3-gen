@@ -57,13 +57,7 @@ async fn main() -> anyhow::Result<()> {
   let cli = Cli::parse();
 
   // Parse visibility argument
-  let visibility = Visibility::from_str(&cli.visibility).unwrap_or_else(|| {
-    eprintln!(
-      "Invalid visibility value '{}'. Must be one of: public, crate, file. Using 'public' as default.",
-      cli.visibility
-    );
-    Visibility::Public
-  });
+  let visibility = Visibility::parse(&cli.visibility).unwrap_or(Visibility::Public);
 
   // Load and parse OpenAPI specification
   log_info!(cli, "Loading OpenAPI spec from: {}", cli.input.display());
