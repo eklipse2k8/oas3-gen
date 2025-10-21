@@ -46,7 +46,7 @@ pub(crate) struct StructDef {
 }
 
 /// Rust struct field definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct FieldDef {
   pub(crate) name: String,
   pub(crate) docs: Vec<String>,
@@ -62,7 +62,7 @@ pub(crate) struct FieldDef {
 }
 
 /// Type reference with wrapper support (Box, Option, Vec)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct TypeRef {
   pub(crate) base_type: String,
   pub(crate) boxed: bool,

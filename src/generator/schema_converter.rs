@@ -4,7 +4,7 @@
 //! Rust type definitions (structs, enums, type aliases) with proper validation,
 //! serde attributes, and documentation.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use regex::Regex;
@@ -51,7 +51,7 @@ impl<'a> SchemaConverter<'a> {
 
     // Check if this is an enum (oneOf/anyOf)
     if !schema.one_of.is_empty() {
-      return Ok(vec![self.convert_one_of_enum(name, schema)?]);
+      return self.convert_one_of_enum(name, schema);
     }
 
     if !schema.any_of.is_empty() {
@@ -99,122 +99,128 @@ impl<'a> SchemaConverter<'a> {
     Ok(all_types)
   }
 
-  /// Convert a schema with oneOf into a Rust enum
-  fn convert_one_of_enum(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<RustType> {
-    let mut variants = Vec::new();
+  fn convert_one_of_enum(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
+    let mut inline_types = Vec::new();
+
+    let discriminator_prop = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
+
+    let discriminator_map: BTreeMap<String, String> = schema
+      .discriminator
+      .as_ref()
+      .and_then(|d| d.mapping.as_ref())
+      .map(|mapping| {
+        mapping
+          .iter()
+          .filter_map(|(val, ref_path)| SchemaGraph::extract_ref_name(ref_path).map(|name| (name, val.clone())))
+          .collect()
+      })
+      .unwrap_or_default();
+
     let mut seen_names = BTreeSet::new();
-
-    // Get discriminator property name if present
-    let discriminator_property = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
-
-    for (i, variant_schema_ref) in schema.one_of.iter().enumerate() {
-      if let Ok(variant_schema) = variant_schema_ref.resolve(self.graph.spec()) {
-        // Skip null variants - they're handled by making the field Option<T>
-        if variant_schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
-          continue;
+    let mut variants_intermediate: Vec<_> = schema
+      .one_of
+      .iter()
+      .enumerate()
+      .filter_map(|(i, variant_schema_ref)| {
+        let resolved_schema = variant_schema_ref.resolve(self.graph.spec()).ok()?;
+        if resolved_schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
+          return None;
         }
 
-        // Generate a good variant name
-        let mut variant_name = if let Some(ref title) = variant_schema.title {
-          to_rust_type_name(title)
-        } else {
-          // Infer name from type
-          self.infer_variant_name(&variant_schema, i)
-        };
+        let mut variant_name = resolved_schema
+          .title
+          .as_deref()
+          .map(to_rust_type_name)
+          .unwrap_or_else(|| self.infer_variant_name(&resolved_schema, i));
 
-        // Ensure uniqueness
-        if seen_names.contains(&variant_name) {
+        if !seen_names.insert(variant_name.clone()) {
           variant_name = format!("{}{}", variant_name, i);
+          seen_names.insert(variant_name.clone());
         }
-        seen_names.insert(variant_name.clone());
 
-        let docs = variant_schema
-          .description
-          .as_ref()
-          .map(|d| doc_comment_lines(d))
-          .unwrap_or_default();
+        let (content, mut generated_types) = self
+          .determine_variant_content(name, &resolved_schema, discriminator_prop)
+          .ok()?;
+        inline_types.append(&mut generated_types);
 
-        let deprecated = variant_schema.deprecated.unwrap_or(false);
+        let mut serde_attrs = Vec::new();
+        if discriminator_prop.is_some()
+          && let ObjectOrReference::Ref { ref_path, .. } = variant_schema_ref
+          && let Some(schema_name) = SchemaGraph::extract_ref_name(ref_path)
+          && let Some(disc_value) = discriminator_map.get(&schema_name)
+        {
+          serde_attrs.push(format!("rename = \"{}\"", disc_value));
+        }
 
-        // Determine the variant content based on the schema type
-        // For discriminated unions (with tag), we MUST use struct variants (serde requirement)
-        // For non-discriminated (untagged), we can use tuple variants to avoid duplication
-        let content = if discriminator_property.is_some() {
-          // Has discriminator - must use struct variant for serde(tag) to work
-          // serde internally-tagged enums REQUIRE all variants to be struct-like
-          if !variant_schema.properties.is_empty() {
-            let fields = self.convert_fields_with_exclusions(&variant_schema, discriminator_property)?;
-            VariantContent::Struct(fields)
-          } else {
-            // Primitive or non-object - wrap in single-field struct for serde compatibility
-            let type_ref = self.schema_to_type_ref(&variant_schema)?;
-            let field = FieldDef {
-              name: "value".to_string(),
-              docs: vec![],
-              rust_type: type_ref,
-              serde_attrs: vec![],
-              validation_attrs: vec![],
-              regex_validation: None,
-              default_value: None,
-              read_only: false,
-              write_only: false,
-              deprecated: false,
-              multiple_of: None,
-            };
-            VariantContent::Struct(vec![field])
-          }
-        } else {
-          // No discriminator - can use tuple variants to avoid duplication
-          if let Some(ref title) = variant_schema.title {
-            if self.graph.get_schema(title).is_some() {
-              // Reference to existing schema - use tuple variant
-              let type_ref = TypeRef::new(to_rust_type_name(title));
-              VariantContent::Tuple(vec![type_ref])
-            } else if !variant_schema.properties.is_empty() {
-              // Inline object - struct variant
-              let fields = self.convert_fields(&variant_schema)?;
-              VariantContent::Struct(fields)
-            } else {
-              // Other types - tuple variant
-              let type_ref = self.schema_to_type_ref(&variant_schema)?;
-              VariantContent::Tuple(vec![type_ref])
-            }
-          } else if !variant_schema.properties.is_empty() {
-            // Anonymous object - inline struct variant
-            let fields = self.convert_fields(&variant_schema)?;
-            VariantContent::Struct(fields)
-          } else {
-            // Primitive - tuple variant
-            let type_ref = self.schema_to_type_ref(&variant_schema)?;
-            VariantContent::Tuple(vec![type_ref])
-          }
-        };
-
-        variants.push(VariantDef {
-          name: to_rust_type_name(&variant_name),
-          docs,
+        Some(VariantDef {
+          name: variant_name,
+          docs: resolved_schema
+            .description
+            .as_deref()
+            .map(doc_comment_lines)
+            .unwrap_or_default(),
           content,
-          serde_attrs: vec![],
-          deprecated,
-        });
-      }
+          serde_attrs,
+          deprecated: resolved_schema.deprecated.unwrap_or(false),
+        })
+      })
+      .collect();
+
+    let original_names: Vec<_> = variants_intermediate.iter().map(|v| v.name.clone()).collect();
+    let stripped_names = Self::strip_common_affixes(&original_names);
+
+    for (variant, stripped_name) in variants_intermediate.iter_mut().zip(stripped_names) {
+      variant.name = stripped_name;
     }
 
-    // Check if there's a discriminator
-    let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.clone());
-
-    Ok(RustType::Enum(EnumDef {
+    let main_enum = RustType::Enum(EnumDef {
       name: to_rust_type_name(name),
-      docs: schema
-        .description
-        .as_ref()
-        .map(|d| doc_comment_lines(d))
-        .unwrap_or_default(),
-      variants,
-      discriminator,
+      docs: schema.description.as_deref().map(doc_comment_lines).unwrap_or_default(),
+      variants: variants_intermediate,
+      discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),
       derives: vec!["Debug".into(), "Clone".into(), "Serialize".into(), "Deserialize".into()],
       serde_attrs: vec![],
-    }))
+    });
+
+    inline_types.push(main_enum);
+    Ok(inline_types)
+  }
+
+  fn determine_variant_content(
+    &self,
+    parent_name: &str,
+    schema: &ObjectSchema,
+    discriminator_prop: Option<&str>,
+  ) -> anyhow::Result<(VariantContent, Vec<RustType>)> {
+    if let Some(disc_prop) = discriminator_prop {
+      return if !schema.properties.is_empty() {
+        let (fields, inline_types) =
+          self.convert_fields_with_inline_types_and_exclusions(parent_name, schema, Some(disc_prop))?;
+        Ok((VariantContent::Struct(fields), inline_types))
+      } else {
+        let field = FieldDef {
+          name: "value".to_string(),
+          rust_type: self.schema_to_type_ref(schema)?,
+          ..Default::default()
+        };
+        Ok((VariantContent::Struct(vec![field]), vec![]))
+      };
+    }
+
+    match (&schema.title, !schema.properties.is_empty()) {
+      (Some(title), _) if self.graph.get_schema(title).is_some() => {
+        let type_ref = TypeRef::new(to_rust_type_name(title));
+        Ok((VariantContent::Tuple(vec![type_ref]), vec![]))
+      }
+      (_, true) => {
+        let fields = self.convert_fields(schema)?;
+        Ok((VariantContent::Struct(fields), vec![]))
+      }
+      _ => {
+        let type_ref = self.schema_to_type_ref(schema)?;
+        Ok((VariantContent::Tuple(vec![type_ref]), vec![]))
+      }
+    }
   }
 
   /// Convert a schema with anyOf into an untagged Rust enum
@@ -347,6 +353,15 @@ impl<'a> SchemaConverter<'a> {
     }
 
     let enum_name = to_rust_type_name(name);
+
+    // Strip common prefix/suffix from variant names to satisfy clippy::enum_variant_names
+    let original_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+    let stripped_names = Self::strip_common_affixes(&original_names);
+
+    // Update variant names with stripped versions
+    for (variant, stripped_name) in variants.iter_mut().zip(stripped_names.iter()) {
+      variant.name = stripped_name.clone();
+    }
 
     // Fix self-referential fields in variants by adding Box wrapping
     for variant in &mut variants {
@@ -494,6 +509,88 @@ impl<'a> SchemaConverter<'a> {
       // Fallback
       format!("Variant{}", index)
     }
+  }
+
+  /// Split a PascalCase name into words
+  fn split_pascal_case(name: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current_word = String::new();
+
+    for (i, ch) in name.chars().enumerate() {
+      if ch.is_uppercase() && i > 0 && !current_word.is_empty() {
+        words.push(current_word.clone());
+        current_word.clear();
+      }
+      current_word.push(ch);
+    }
+
+    if !current_word.is_empty() {
+      words.push(current_word);
+    }
+
+    words
+  }
+
+  /// Strip common prefix/suffix from enum variant names to satisfy clippy::enum_variant_names
+  /// Only strips if there are at least 3 variants with the common prefix/suffix
+  fn strip_common_affixes(variant_names: &[String]) -> Vec<String> {
+    if variant_names.len() < 3 {
+      return variant_names.to_vec();
+    }
+
+    // Split all names into words
+    let split_names: Vec<Vec<String>> = variant_names.iter().map(|n| Self::split_pascal_case(n)).collect();
+
+    // Find common prefix words
+    let mut common_prefix_len = 0;
+    if let Some(first) = split_names.first() {
+      'prefix: for (i, word) in first.iter().enumerate() {
+        for name_words in &split_names[1..] {
+          if name_words.len() <= i || &name_words[i] != word {
+            break 'prefix;
+          }
+        }
+        common_prefix_len = i + 1;
+      }
+    }
+
+    // Find common suffix words
+    let mut common_suffix_len = 0;
+    if let Some(first) = split_names.first() {
+      'suffix: for i in 1..=first.len() {
+        let word = &first[first.len() - i];
+        for name_words in &split_names[1..] {
+          if name_words.len() < i || &name_words[name_words.len() - i] != word {
+            break 'suffix;
+          }
+        }
+        common_suffix_len = i;
+      }
+    }
+
+    // Build stripped names
+    let mut stripped_names = Vec::new();
+    for words in &split_names {
+      let start = common_prefix_len;
+      let end = words.len().saturating_sub(common_suffix_len);
+
+      if start >= end {
+        // Stripping would leave empty name - keep original
+        stripped_names.push(words.join(""));
+      } else {
+        stripped_names.push(words[start..end].join(""));
+      }
+    }
+
+    // Check for conflicts - if any stripped name is empty or duplicated, return original
+    let mut seen = BTreeSet::new();
+    for name in &stripped_names {
+      if name.is_empty() || !seen.insert(name) {
+        return variant_names.to_vec();
+      }
+    }
+
+    stripped_names
   }
 
   /// Convert a simple string enum
@@ -820,19 +917,30 @@ impl<'a> SchemaConverter<'a> {
           return Ok((TypeRef::new("serde_json::Value"), vec![]));
         };
 
-        if prop_schema.any_of.is_empty() {
+        // Check if this has oneOf or anyOf
+        let has_one_of = !prop_schema.one_of.is_empty();
+        let has_any_of = !prop_schema.any_of.is_empty();
+
+        if !has_one_of && !has_any_of {
           return Ok((self.schema_to_type_ref(&prop_schema)?, vec![]));
         }
 
-        let has_nullable_or_generic = prop_schema.any_of.iter().any(|v| {
+        // Use oneOf if present, otherwise anyOf
+        let variants = if has_one_of {
+          &prop_schema.one_of
+        } else {
+          &prop_schema.any_of
+        };
+
+        let has_nullable_or_generic = variants.iter().any(|v| {
           v.resolve(self.graph.spec())
             .ok()
             .map(|s| Self::is_nullable_or_generic(&s))
             .unwrap_or(false)
         });
 
-        if has_nullable_or_generic && prop_schema.any_of.len() == 2 {
-          for variant_ref in &prop_schema.any_of {
+        if has_nullable_or_generic && variants.len() == 2 {
+          for variant_ref in variants {
             if let Some(ref_name) = Self::try_extract_ref_name(variant_ref) {
               let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
               // Apply Box wrapping if this schema is part of a cycle
@@ -851,6 +959,15 @@ impl<'a> SchemaConverter<'a> {
           return Ok((self.schema_to_type_ref(&prop_schema)?.with_option(), vec![]));
         }
 
+        // Check if this union matches an existing schema
+        if let Some(matching_schema) = self.find_matching_union_schema(variants) {
+          let mut type_ref = TypeRef::new(to_rust_type_name(&matching_schema));
+          if self.graph.is_cyclic(&matching_schema) {
+            type_ref = type_ref.with_boxed();
+          }
+          return Ok((type_ref, vec![]));
+        }
+
         let should_generate_inline_enum = prop_schema.title.is_none()
           || prop_schema
             .title
@@ -860,7 +977,11 @@ impl<'a> SchemaConverter<'a> {
 
         if should_generate_inline_enum {
           let enum_name = format!("{}.{}", parent_name, prop_name);
-          let enum_types = self.convert_any_of_enum(&enum_name, &prop_schema)?;
+          let enum_types = if has_one_of {
+            self.convert_one_of_enum(&enum_name, &prop_schema)?
+          } else {
+            self.convert_any_of_enum(&enum_name, &prop_schema)?
+          };
           let type_name = if let Some(RustType::Enum(enum_def)) = enum_types.last() {
             enum_def.name.clone()
           } else {
@@ -980,6 +1101,52 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
+  /// Deduplicates field names that collide after conversion to snake_case.
+  /// Strategy:
+  /// - If duplicates exist where some are deprecated and some are not, remove deprecated ones
+  /// - Otherwise, append numeric suffixes (_2, _3, etc.) to later occurrences
+  fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
+    let mut name_groups: HashMap<String, Vec<usize>> = HashMap::new();
+
+    for (idx, field) in fields.iter().enumerate() {
+      name_groups.entry(field.name.clone()).or_default().push(idx);
+    }
+
+    let mut indices_to_remove = HashSet::<usize>::new();
+
+    for (name, indices) in name_groups {
+      if indices.len() <= 1 {
+        // Skip if there's no collision.
+        continue;
+      }
+
+      let (deprecated_indices, non_deprecated_indices): (Vec<_>, Vec<_>) =
+        indices.iter().partition(|&&idx| fields[idx].deprecated);
+
+      if !deprecated_indices.is_empty() && !non_deprecated_indices.is_empty() {
+        indices_to_remove.extend(&deprecated_indices);
+      } else {
+        for (i, &idx) in indices.iter().enumerate().skip(1) {
+          fields[idx].name = format!("{}_{}", name, i + 1);
+        }
+      }
+    }
+
+    if !indices_to_remove.is_empty() {
+      *fields = fields
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, field)| {
+          if indices_to_remove.contains(&idx) {
+            None
+          } else {
+            Some(field.clone())
+          }
+        })
+        .collect();
+    }
+  }
+
   /// Builds a FieldDef from all the constituent parts
   fn build_field_def(
     prop_name: &str,
@@ -1038,7 +1205,57 @@ impl<'a> SchemaConverter<'a> {
       ));
     }
 
+    // Deduplicate field names that collide after conversion to snake_case
+    Self::deduplicate_field_names(&mut fields);
+
     Ok(fields)
+  }
+
+  /// Converts schema properties to struct fields with inline enum generation, optionally excluding specified fields
+  fn convert_fields_with_inline_types_and_exclusions(
+    &self,
+    parent_name: &str,
+    schema: &ObjectSchema,
+    exclude_field: Option<&str>,
+  ) -> anyhow::Result<(Vec<FieldDef>, Vec<RustType>)> {
+    let mut fields = Vec::new();
+    let mut inline_types = Vec::new();
+
+    let mut properties: Vec<_> = schema.properties.iter().collect();
+    properties.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    for (prop_name, prop_schema_ref) in properties {
+      if let Some(exclude) = exclude_field
+        && prop_name == exclude
+      {
+        continue;
+      }
+
+      let (rust_type, generated_types) =
+        self.resolve_property_type_with_inline_enums(parent_name, prop_name, prop_schema_ref)?;
+      inline_types.extend(generated_types);
+
+      let is_required = schema.required.contains(prop_name);
+      let is_optional = !is_required;
+
+      let serde_attrs = Self::build_serde_attrs(prop_name, is_optional, rust_type.nullable);
+      let metadata = self.extract_field_metadata(prop_name, is_required, prop_schema_ref);
+      let regex_validation = Self::filter_regex_validation(&rust_type, metadata.regex_validation.clone());
+      let final_type = Self::apply_optionality(rust_type, is_optional);
+
+      fields.push(Self::build_field_def(
+        prop_name,
+        final_type,
+        serde_attrs,
+        metadata,
+        regex_validation,
+      ));
+    }
+
+    // Deduplicate field names that collide after conversion to snake_case
+    Self::deduplicate_field_names(&mut fields);
+
+    Ok((fields, inline_types))
   }
 
   /// Convert schema properties to struct fields (convenience wrapper)
@@ -1080,6 +1297,9 @@ impl<'a> SchemaConverter<'a> {
       ));
     }
 
+    // Deduplicate field names that collide after conversion to snake_case
+    Self::deduplicate_field_names(&mut fields);
+
     Ok((fields, inline_types))
   }
 
@@ -1109,6 +1329,45 @@ impl<'a> SchemaConverter<'a> {
   /// Extracts the first $ref from a schema's oneOf array, if present
   fn try_extract_first_oneof_ref(&self, schema: &ObjectSchema) -> Option<String> {
     schema.one_of.iter().find_map(Self::try_extract_ref_name)
+  }
+
+  /// Extracts all $ref names from a list of variants (oneOf/anyOf)
+  fn extract_all_variant_refs(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
+    variants.iter().filter_map(Self::try_extract_ref_name).collect()
+  }
+
+  /// Finds an existing schema that has the same oneOf/anyOf variants
+  /// Returns the schema name if a match is found
+  fn find_matching_union_schema(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Option<String> {
+    let variant_refs = Self::extract_all_variant_refs(variants);
+
+    // Need at least 2 variants to be considered a union worth matching
+    if variant_refs.len() < 2 {
+      return None;
+    }
+
+    // Search through all schemas to find one with matching variants
+    for schema_name in self.graph.schema_names() {
+      if let Some(schema) = self.graph.get_schema(schema_name) {
+        // Check oneOf variants
+        if !schema.one_of.is_empty() {
+          let schema_refs = Self::extract_all_variant_refs(&schema.one_of);
+          if schema_refs == variant_refs {
+            return Some(schema_name.clone());
+          }
+        }
+
+        // Check anyOf variants
+        if !schema.any_of.is_empty() {
+          let schema_refs = Self::extract_all_variant_refs(&schema.any_of);
+          if schema_refs == variant_refs {
+            return Some(schema_name.clone());
+          }
+        }
+      }
+    }
+
+    None
   }
 
   /// Checks if a schema represents a null type
@@ -1203,6 +1462,16 @@ impl<'a> SchemaConverter<'a> {
   /// Attempts to convert oneOf/anyOf union variants to a TypeRef
   /// Handles nullable patterns and type extraction from unions
   fn try_convert_union_to_type_ref(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Option<TypeRef> {
+    // First, check if this inline union matches an existing schema definition
+    if let Some(matching_schema) = self.find_matching_union_schema(variants) {
+      let mut type_ref = TypeRef::new(to_rust_type_name(&matching_schema));
+      // Apply Box wrapping if this schema is part of a cycle
+      if self.graph.is_cyclic(&matching_schema) {
+        type_ref = type_ref.with_boxed();
+      }
+      return Some(type_ref);
+    }
+
     if let Some(non_null_variant) = self.find_non_null_variant(variants) {
       if let Some(ref_name) = Self::try_extract_ref_name(non_null_variant) {
         return Some(TypeRef::new(to_rust_type_name(&ref_name)).with_option());

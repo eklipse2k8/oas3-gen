@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::generator::orchestrator::Orchestrator;
+use crate::generator::{code_generator::Visibility, orchestrator::Orchestrator};
 
 mod generator;
 mod reserved;
@@ -22,6 +22,10 @@ struct Cli {
   /// Path where the generated Rust code will be written
   #[arg(short, long, value_name = "FILE")]
   output: PathBuf,
+
+  /// Visibility level for generated types
+  #[arg(long, value_name = "VISIBILITY", default_value = "public")]
+  visibility: String,
 
   /// Enable verbose output with detailed progress information
   #[arg(short, long, default_value_t = false)]
@@ -52,6 +56,9 @@ macro_rules! log_verbose {
 async fn main() -> anyhow::Result<()> {
   let cli = Cli::parse();
 
+  // Parse visibility argument
+  let visibility = Visibility::parse(&cli.visibility).unwrap_or(Visibility::Public);
+
   // Load and parse OpenAPI specification
   log_info!(cli, "Loading OpenAPI spec from: {}", cli.input.display());
   let file_content = tokio::fs::read_to_string(&cli.input).await?;
@@ -59,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
 
   // Create orchestrator and generate code
   log_info!(cli, "Generating Rust types...");
-  let orchestrator = Orchestrator::new(spec)?;
+  let orchestrator = Orchestrator::new(spec, visibility)?;
   let (code, stats) = orchestrator.generate_with_header(&cli.input.display().to_string())?;
 
   // Report statistics

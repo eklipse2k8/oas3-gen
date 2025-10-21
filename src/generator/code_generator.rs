@@ -19,6 +19,39 @@ use quote::{format_ident, quote};
 use super::ast::*;
 use crate::reserved::regex_const_name;
 
+/// Visibility level for generated types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Visibility {
+  /// Public visibility (`pub`)
+  #[default]
+  Public,
+  /// Crate visibility (`pub(crate)`)
+  Crate,
+  /// File/module-private (no visibility modifier)
+  File,
+}
+
+impl Visibility {
+  /// Parse a string into a Visibility
+  pub fn parse(s: &str) -> Option<Self> {
+    match s {
+      "public" => Some(Visibility::Public),
+      "crate" => Some(Visibility::Crate),
+      "file" => Some(Visibility::File),
+      _ => None,
+    }
+  }
+
+  /// Get the Rust visibility token
+  fn to_tokens(self) -> TokenStream {
+    match self {
+      Visibility::Public => quote! { pub },
+      Visibility::Crate => quote! { pub(crate) },
+      Visibility::File => quote! {},
+    }
+  }
+}
+
 /// Type usage context for determining derive traits
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TypeUsage {
@@ -99,12 +132,16 @@ impl CodeGenerator {
       .collect()
   }
 
-  pub(crate) fn generate(types: &[RustType], type_usage: &BTreeMap<String, TypeUsage>) -> TokenStream {
+  pub(crate) fn generate(
+    types: &[RustType],
+    type_usage: &BTreeMap<String, TypeUsage>,
+    visibility: Visibility,
+  ) -> TokenStream {
     let ordered = Self::ordered_types(types);
     let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
     let type_tokens: Vec<TokenStream> = ordered
       .iter()
-      .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage))
+      .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage, visibility))
       .collect();
     let default_impls = Self::generate_default_impls(&ordered);
 
@@ -431,11 +468,12 @@ impl CodeGenerator {
     rust_type: &RustType,
     regex_lookup: &BTreeMap<RegexKey, String>,
     type_usage: &BTreeMap<String, TypeUsage>,
+    visibility: Visibility,
   ) -> TokenStream {
     match rust_type {
-      RustType::Struct(def) => Self::generate_struct(def, regex_lookup, type_usage),
-      RustType::Enum(def) => Self::generate_enum(def, regex_lookup),
-      RustType::TypeAlias(def) => Self::generate_type_alias(def),
+      RustType::Struct(def) => Self::generate_struct(def, regex_lookup, type_usage, visibility),
+      RustType::Enum(def) => Self::generate_enum(def, regex_lookup, visibility),
+      RustType::TypeAlias(def) => Self::generate_type_alias(def, visibility),
     }
   }
 
@@ -443,9 +481,11 @@ impl CodeGenerator {
     def: &StructDef,
     regex_lookup: &BTreeMap<RegexKey, String>,
     type_usage: &BTreeMap<String, TypeUsage>,
+    visibility: Visibility,
   ) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let docs = Self::generate_docs(&def.docs);
+    let vis = visibility.to_tokens();
 
     // Override derives based on operation-level usage (only for operation-specific types like *Request)
     // Component schemas keep full derives to avoid dependency issues when nested in other types
@@ -483,22 +523,30 @@ impl CodeGenerator {
 
     // Skip validation attributes for response-only operation types (no validation needed)
     let include_validation = !(is_operation_type && matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)));
-    let fields =
-      Self::generate_fields_with_visibility(&def.name, None, &def.fields, true, include_validation, regex_lookup);
+    let fields = Self::generate_fields_with_visibility(
+      &def.name,
+      None,
+      &def.fields,
+      true,
+      include_validation,
+      regex_lookup,
+      visibility,
+    );
 
     quote! {
       #docs
       #derives
       #serde_attrs
-      pub(crate) struct #name {
+      #vis struct #name {
         #(#fields),*
       }
     }
   }
 
-  fn generate_enum(def: &EnumDef, regex_lookup: &BTreeMap<RegexKey, String>) -> TokenStream {
+  fn generate_enum(def: &EnumDef, regex_lookup: &BTreeMap<RegexKey, String>, visibility: Visibility) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let docs = Self::generate_docs(&def.docs);
+    let vis = visibility.to_tokens();
     let derives = Self::generate_derives(&def.derives);
     let serde_attrs = Self::generate_enum_serde_attrs(def);
     let variants = Self::generate_variants(&def.name, &def.variants, regex_lookup);
@@ -507,20 +555,21 @@ impl CodeGenerator {
       #docs
       #derives
       #serde_attrs
-      pub(crate) enum #name {
+      #vis enum #name {
         #(#variants),*
       }
     }
   }
 
-  fn generate_type_alias(def: &TypeAliasDef) -> TokenStream {
+  fn generate_type_alias(def: &TypeAliasDef, visibility: Visibility) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let docs = Self::generate_docs(&def.docs);
+    let vis = visibility.to_tokens();
     let target = Self::parse_type_string(&def.target.to_rust_type());
 
     quote! {
       #docs
-      pub(crate) type #name = #target;
+      #vis type #name = #target;
     }
   }
 
@@ -620,6 +669,7 @@ impl CodeGenerator {
     add_pub: bool,
     include_validation: bool,
     regex_lookup: &BTreeMap<RegexKey, String>,
+    visibility: Visibility,
   ) -> Vec<TokenStream> {
     fields
       .iter()
@@ -661,12 +711,13 @@ impl CodeGenerator {
         let type_tokens = Self::parse_type_string(&field.rust_type.to_rust_type());
 
         if add_pub {
+          let vis = visibility.to_tokens();
           quote! {
             #docs
             #deprecated_attr
             #serde_attrs
             #validation_attrs
-            pub(crate) #name: #type_tokens
+            #vis #name: #type_tokens
           }
         } else {
           quote! {
@@ -710,8 +761,16 @@ impl CodeGenerator {
           }
           VariantContent::Struct(fields) => {
             // Enum variant fields should not have 'pub' keyword or validation attributes
-            let field_tokens =
-              Self::generate_fields_with_visibility(type_name, Some(&variant.name), fields, false, false, regex_lookup);
+            // Use File visibility for enum variant fields (they never have visibility modifiers)
+            let field_tokens = Self::generate_fields_with_visibility(
+              type_name,
+              Some(&variant.name),
+              fields,
+              false,
+              false,
+              regex_lookup,
+              Visibility::File,
+            );
             quote! { { #(#field_tokens),* } }
           }
         };
