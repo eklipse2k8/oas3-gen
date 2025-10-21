@@ -264,3 +264,235 @@ fn test_nullable_pattern() {
 
   println!("✓ Nullable pattern detected and converted to Option<T>");
 }
+
+/// Test that message stream events are generated with correct serde attributes
+/// This tests the actual Anthropic API event stream format
+#[test]
+fn test_message_stream_event_deserialization() {
+  let spec_json = r##"{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Test API",
+    "version": "1.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "MessageStreamEvent": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/MessageStartEvent"},
+          {"$ref": "#/components/schemas/ContentBlockStartEvent"},
+          {"$ref": "#/components/schemas/ContentBlockDeltaEvent"},
+          {"$ref": "#/components/schemas/ContentBlockStopEvent"},
+          {"$ref": "#/components/schemas/MessageStopEvent"}
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "message_start": "#/components/schemas/MessageStartEvent",
+            "content_block_start": "#/components/schemas/ContentBlockStartEvent",
+            "content_block_delta": "#/components/schemas/ContentBlockDeltaEvent",
+            "content_block_stop": "#/components/schemas/ContentBlockStopEvent",
+            "message_stop": "#/components/schemas/MessageStopEvent"
+          }
+        }
+      },
+      "MessageStartEvent": {
+        "type": "object",
+        "title": "MessageStartEvent",
+        "required": ["type", "message"],
+        "properties": {
+          "type": {"type": "string", "const": "message_start"},
+          "message": {"$ref": "#/components/schemas/Message"}
+        }
+      },
+      "ContentBlockStartEvent": {
+        "type": "object",
+        "title": "ContentBlockStartEvent",
+        "required": ["type", "index", "content_block"],
+        "properties": {
+          "type": {"type": "string", "const": "content_block_start"},
+          "index": {"type": "integer"},
+          "content_block": {"$ref": "#/components/schemas/ContentBlock"}
+        }
+      },
+      "ContentBlockDeltaEvent": {
+        "type": "object",
+        "title": "ContentBlockDeltaEvent",
+        "required": ["type", "index", "delta"],
+        "properties": {
+          "type": {"type": "string", "const": "content_block_delta"},
+          "index": {"type": "integer"},
+          "delta": {"$ref": "#/components/schemas/Delta"}
+        }
+      },
+      "ContentBlockStopEvent": {
+        "type": "object",
+        "title": "ContentBlockStopEvent",
+        "required": ["type", "index"],
+        "properties": {
+          "type": {"type": "string", "const": "content_block_stop"},
+          "index": {"type": "integer"}
+        }
+      },
+      "MessageStopEvent": {
+        "type": "object",
+        "title": "MessageStopEvent",
+        "required": ["type"],
+        "properties": {
+          "type": {"type": "string", "const": "message_stop"}
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": ["id", "role"],
+        "properties": {
+          "id": {"type": "string"},
+          "role": {"type": "string"}
+        }
+      },
+      "ContentBlock": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/TextBlock"}
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/TextBlock"
+          }
+        }
+      },
+      "TextBlock": {
+        "type": "object",
+        "title": "TextBlock",
+        "required": ["type", "text"],
+        "properties": {
+          "type": {"type": "string", "const": "text"},
+          "text": {"type": "string"}
+        }
+      },
+      "Delta": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/TextDelta"}
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text_delta": "#/components/schemas/TextDelta"
+          }
+        }
+      },
+      "TextDelta": {
+        "type": "object",
+        "title": "TextDelta",
+        "required": ["type", "text"],
+        "properties": {
+          "type": {"type": "string", "const": "text_delta"},
+          "text": {"type": "string"}
+        }
+      }
+    }
+  }
+}"##;
+
+  let temp_dir = tempfile::tempdir().unwrap();
+  let spec_path = temp_dir.path().join("spec.json");
+  let output_path = temp_dir.path().join("generated.rs");
+
+  fs::write(&spec_path, spec_json).unwrap();
+
+  let status = Command::new("cargo")
+    .args(&[
+      "run",
+      "--",
+      "-i",
+      spec_path.to_str().unwrap(),
+      "-o",
+      output_path.to_str().unwrap(),
+    ])
+    .status()
+    .unwrap();
+
+  assert!(status.success(), "Code generation failed");
+
+  let generated_code = fs::read_to_string(&output_path).unwrap();
+
+  // Verify MessageStreamEvent enum has correct structure
+  assert!(
+    generated_code.contains("pub(crate) enum MessageStreamEvent"),
+    "Should generate MessageStreamEvent enum"
+  );
+  assert!(
+    generated_code.contains("#[serde(tag = \"type\")]"),
+    "Should have serde tag attribute for discriminated union"
+  );
+
+  // Verify variant names are stripped (clippy-compliant)
+  assert!(
+    generated_code.contains("MessageStart {"),
+    "Variant names should be stripped: MessageStartEvent -> MessageStart"
+  );
+  assert!(
+    generated_code.contains("ContentBlockStart {"),
+    "Variant names should be stripped: ContentBlockStartEvent -> ContentBlockStart"
+  );
+  assert!(
+    generated_code.contains("ContentBlockDelta {"),
+    "Variant names should be stripped"
+  );
+  assert!(
+    generated_code.contains("ContentBlockStop {"),
+    "Variant names should be stripped"
+  );
+  assert!(
+    generated_code.contains("MessageStop {"),
+    "Variant names should be stripped"
+  );
+
+  // Verify serde(rename) attributes map to snake_case discriminator values
+  assert!(
+    generated_code.contains("#[serde(rename = \"message_start\")]"),
+    "Should have serde(rename) for message_start to match JSON discriminator"
+  );
+  assert!(
+    generated_code.contains("#[serde(rename = \"content_block_start\")]"),
+    "Should have serde(rename) for content_block_start"
+  );
+  assert!(
+    generated_code.contains("#[serde(rename = \"content_block_delta\")]"),
+    "Should have serde(rename) for content_block_delta"
+  );
+  assert!(
+    generated_code.contains("#[serde(rename = \"content_block_stop\")]"),
+    "Should have serde(rename) for content_block_stop"
+  );
+  assert!(
+    generated_code.contains("#[serde(rename = \"message_stop\")]"),
+    "Should have serde(rename) for message_stop"
+  );
+
+  // Verify nested discriminated unions also work correctly
+  assert!(
+    generated_code.contains("pub(crate) enum Delta"),
+    "Should generate nested Delta enum"
+  );
+  assert!(
+    generated_code.contains("#[serde(rename = \"text_delta\")]"),
+    "Nested enum should have serde(rename) for text_delta"
+  );
+
+  // Verify ContentBlock enum
+  assert!(
+    generated_code.contains("pub(crate) enum ContentBlock"),
+    "Should generate ContentBlock enum"
+  );
+  assert!(
+    generated_code.contains("#[serde(rename = \"text\")]"),
+    "ContentBlock should have serde(rename) for text"
+  );
+
+  println!("✓ Message stream event generated with correct serde attributes for Anthropic API format");
+  println!("  - Discriminated unions use #[serde(tag = \"type\")]");
+  println!("  - Variant names are stripped (clippy-compliant)");
+  println!("  - serde(rename) attributes match snake_case JSON discriminators");
+}

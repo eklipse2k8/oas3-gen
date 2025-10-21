@@ -23,7 +23,9 @@
 //! ```
 
 use crate::generator::{
-  code_generator::CodeGenerator, operation_converter::OperationConverter, schema_converter::SchemaConverter,
+  code_generator::{CodeGenerator, Visibility},
+  operation_converter::OperationConverter,
+  schema_converter::SchemaConverter,
   schema_graph::SchemaGraph,
 };
 
@@ -33,6 +35,7 @@ use crate::generator::{
 /// simple methods for generating Rust code from OpenAPI specifications.
 pub struct Orchestrator {
   spec: oas3::Spec,
+  visibility: Visibility,
 }
 
 /// Metadata about the OpenAPI specification for code header generation.
@@ -68,11 +71,16 @@ impl Orchestrator {
   /// The actual generation is performed when calling `generate()` or
   /// `generate_with_header()`.
   ///
+  /// # Arguments
+  ///
+  /// * `spec` - The OpenAPI specification
+  /// * `visibility` - Visibility level for generated types (public, crate, or file-private)
+  ///
   /// # Errors
   ///
   /// Returns an error if the spec cannot be processed or contains invalid references.
-  pub fn new(spec: oas3::Spec) -> anyhow::Result<Self> {
-    Ok(Self { spec })
+  pub fn new(spec: oas3::Spec, visibility: Visibility) -> anyhow::Result<Self> {
+    Ok(Self { spec, visibility })
   }
 
   /// Extracts metadata from the OpenAPI specification.
@@ -161,7 +169,7 @@ impl Orchestrator {
 
     // Generate and format code
     let type_usage = CodeGenerator::build_type_usage_map(&operations_info);
-    let code = CodeGenerator::generate(&rust_types, &type_usage);
+    let code = CodeGenerator::generate(&rust_types, &type_usage, self.visibility);
     let syntax_tree = syn::parse2(code)?;
     let formatted = prettyplease::unparse(&syntax_tree);
 
@@ -246,7 +254,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
 
     let metadata = orchestrator.metadata();
     assert_eq!(metadata.title, "Empty API");
@@ -264,7 +272,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
 
     let result = orchestrator.generate();
     assert!(result.is_ok());
@@ -289,7 +297,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
 
     let result = orchestrator.generate_with_header("/path/to/spec.json");
     assert!(result.is_ok());
@@ -314,7 +322,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
     let metadata = orchestrator.metadata();
 
     assert_eq!(metadata.title, "Test API");
