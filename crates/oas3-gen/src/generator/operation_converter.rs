@@ -245,6 +245,7 @@ impl<'a> OperationConverter<'a> {
       "Serialize".into(),
       "Deserialize".into(),
       "Validate".into(),
+      "Default".into(), // Always derive Default
     ];
 
     Ok(StructDef {

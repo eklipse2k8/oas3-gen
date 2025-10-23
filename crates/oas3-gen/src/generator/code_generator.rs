@@ -138,22 +138,31 @@ impl CodeGenerator {
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
+
+    // Check if we need the discriminated_enum macro
+    let has_discriminated_enums = ordered.iter().any(|ty| matches!(ty, RustType::DiscriminatedEnum(_)));
+    let discriminated_enum_import = if has_discriminated_enums {
+      quote! { use oas3_gen_support::discriminated_enum; }
+    } else {
+      quote! {}
+    };
+
     let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
     let type_tokens: Vec<TokenStream> = ordered
       .iter()
       .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage, visibility))
       .collect();
-    let default_impls = Self::generate_default_impls(&ordered);
 
     quote! {
       use serde::{Deserialize, Serialize};
       use validator::Validate;
+      use oas3_gen_support::Default;
+
+      #discriminated_enum_import
 
       #regex_consts
 
       #(#type_tokens)*
-
-      #default_impls
     }
   }
 
@@ -179,12 +188,13 @@ impl CodeGenerator {
   }
 
   /// Determine type priority for deduplication (lower = higher priority)
-  /// Priority: Enum > Struct > TypeAlias
+  /// Priority: DiscriminatedEnum > Enum > Struct > TypeAlias
   fn type_priority(rust_type: &RustType) -> u8 {
     match rust_type {
-      RustType::Enum(_) => 0,      // Highest priority - most specific
-      RustType::Struct(_) => 1,    // Medium priority
-      RustType::TypeAlias(_) => 2, // Lowest priority
+      RustType::DiscriminatedEnum(_) => 0, // Highest - references other types
+      RustType::Enum(_) => 1,              // High priority - most specific
+      RustType::Struct(_) => 2,            // Medium priority
+      RustType::TypeAlias(_) => 3,         // Lowest priority
     }
   }
 
@@ -239,6 +249,7 @@ impl CodeGenerator {
           }
         }
         RustType::TypeAlias(_) => {}
+        RustType::DiscriminatedEnum(_) => {}
       }
     }
 
@@ -258,175 +269,6 @@ impl CodeGenerator {
       .collect();
 
     (quote! { #(#regex_defs)* }, lookup)
-  }
-
-  /// Check if a type can safely use Default::default()
-  fn type_can_default(type_ref: &TypeRef) -> bool {
-    let base_type = &type_ref.base_type;
-
-    // Primitive types that implement Default
-    matches!(
-      base_type.as_str(),
-      "String"
-        | "bool"
-        | "i8"
-        | "i16"
-        | "i32"
-        | "i64"
-        | "i128"
-        | "isize"
-        | "u8"
-        | "u16"
-        | "u32"
-        | "u64"
-        | "u128"
-        | "usize"
-        | "f32"
-        | "f64"
-        | "serde_json::Value"
-    ) || type_ref.nullable
-      || type_ref.is_array
-      || base_type.starts_with("Vec<")
-      || base_type.starts_with("Option<")
-  }
-
-  /// Find the best variant to use as default for an enum
-  /// Priority: Unit > Vec/Option types > Struct variants > Tuple variants with primitives
-  fn find_best_default_variant(variants: &[VariantDef]) -> Option<(&VariantDef, TokenStream)> {
-    // Priority 1: Unit variants
-    for variant in variants {
-      if matches!(variant.content, VariantContent::Unit) {
-        let variant_name = format_ident!("{}", variant.name);
-        return Some((variant, quote! { Self::#variant_name }));
-      }
-    }
-
-    // Priority 2: Tuple variants with Vec or Option (always defaultable)
-    for variant in variants {
-      if let VariantContent::Tuple(types) = &variant.content
-        && types.len() == 1
-        && (types[0].is_array || types[0].nullable)
-      {
-        let variant_name = format_ident!("{}", variant.name);
-        return Some((variant, quote! { Self::#variant_name(Default::default()) }));
-      }
-    }
-
-    // Priority 3: Struct variants with defaultable fields
-    for variant in variants {
-      if let VariantContent::Struct(fields) = &variant.content {
-        // Check if all fields can be defaulted
-        let all_defaultable = fields
-          .iter()
-          .all(|f| f.default_value.is_some() || Self::type_can_default(&f.rust_type));
-
-        if all_defaultable {
-          let variant_name = format_ident!("{}", variant.name);
-          let field_inits: Vec<TokenStream> = fields
-            .iter()
-            .map(|field| {
-              let field_name = format_ident!("{}", field.name);
-              if let Some(ref default_val) = field.default_value {
-                let value_expr = Self::json_value_to_rust_expr(default_val, &field.rust_type);
-                quote! { #field_name: #value_expr }
-              } else {
-                quote! { #field_name: Default::default() }
-              }
-            })
-            .collect();
-          return Some((variant, quote! { Self::#variant_name { #(#field_inits),* } }));
-        }
-      }
-    }
-
-    // Priority 4: Tuple variants with primitive types
-    for variant in variants {
-      if let VariantContent::Tuple(types) = &variant.content
-        && types.iter().all(Self::type_can_default)
-      {
-        let variant_name = format_ident!("{}", variant.name);
-        let defaults: Vec<TokenStream> = types.iter().map(|_| quote! { Default::default() }).collect();
-        return Some((variant, quote! { Self::#variant_name(#(#defaults),*) }));
-      }
-    }
-
-    // No suitable variant found
-    None
-  }
-
-  /// Generate impl Default blocks for structs and enums
-  fn generate_default_impls(types: &[&RustType]) -> TokenStream {
-    let mut impls: Vec<(proc_macro2::Ident, TokenStream)> = Vec::new();
-
-    for rust_type in types {
-      match rust_type {
-        RustType::Struct(def) => {
-          let has_defaults = def.fields.iter().any(|f| f.default_value.is_some());
-
-          if has_defaults {
-            let all_fields_can_default = def
-              .fields
-              .iter()
-              .all(|f| f.default_value.is_some() || Self::type_can_default(&f.rust_type));
-
-            if all_fields_can_default {
-              let struct_name = format_ident!("{}", def.name);
-
-              let field_inits: Vec<TokenStream> = def
-                .fields
-                .iter()
-                .map(|field| {
-                  let field_name = format_ident!("{}", field.name);
-
-                  if let Some(ref default_val) = field.default_value {
-                    let value_expr = Self::json_value_to_rust_expr(default_val, &field.rust_type);
-                    quote! { #field_name: #value_expr }
-                  } else {
-                    quote! { #field_name: Default::default() }
-                  }
-                })
-                .collect();
-
-              impls.push((struct_name, quote! { Self { #(#field_inits),* } }));
-            }
-          }
-        }
-        RustType::Enum(def) => {
-          if let Some((_variant, default_expr)) = Self::find_best_default_variant(&def.variants) {
-            let enum_name = format_ident!("{}", def.name);
-            impls.push((enum_name, default_expr));
-          }
-        }
-        RustType::TypeAlias(_) => {}
-      }
-    }
-
-    if impls.is_empty() {
-      return quote! {};
-    }
-
-    let macro_def = quote! {
-      macro_rules! impl_default {
-        ($type:ident = $body:expr) => {
-          impl Default for $type {
-            fn default() -> Self {
-              $body
-            }
-          }
-        };
-      }
-    };
-
-    let macro_calls: Vec<TokenStream> = impls
-      .into_iter()
-      .map(|(ident, body)| quote! { impl_default!(#ident = #body); })
-      .collect();
-
-    quote! {
-      #macro_def
-
-      #(#macro_calls)*
-    }
   }
 
   /// Convert a JSON value to a Rust expression
@@ -474,6 +316,7 @@ impl CodeGenerator {
       RustType::Struct(def) => Self::generate_struct(def, regex_lookup, type_usage, visibility),
       RustType::Enum(def) => Self::generate_enum(def, regex_lookup, visibility),
       RustType::TypeAlias(def) => Self::generate_type_alias(def, visibility),
+      RustType::DiscriminatedEnum(def) => Self::generate_discriminated_enum(def, visibility),
     }
   }
 
@@ -512,6 +355,9 @@ impl CodeGenerator {
           custom_derives.push("Validate".to_string());
         }
       }
+
+      // Always include Default
+      custom_derives.push("Default".to_string());
 
       Self::generate_derives(&custom_derives)
     } else {
@@ -570,6 +416,57 @@ impl CodeGenerator {
     quote! {
       #docs
       #vis type #name = #target;
+    }
+  }
+
+  fn generate_discriminated_enum(
+    def: &crate::generator::ast::DiscriminatedEnumDef,
+    visibility: Visibility,
+  ) -> TokenStream {
+    let name = format_ident!("{}", def.name);
+    let disc_field = &def.discriminator_field;
+    let docs = Self::generate_docs(&def.docs);
+    let vis = visibility.to_tokens();
+
+    let variants: Vec<TokenStream> = def
+      .variants
+      .iter()
+      .map(|v| {
+        let disc_value = &v.discriminator_value;
+        let variant_name = format_ident!("{}", v.variant_name);
+        let type_name = Self::parse_type_string(&v.type_name);
+        quote! { (#disc_value, #variant_name(#type_name)) }
+      })
+      .collect();
+
+    if let Some(ref fallback) = def.fallback {
+      let fallback_variant = format_ident!("{}", fallback.variant_name);
+      let fallback_type = Self::parse_type_string(&fallback.type_name);
+
+      quote! {
+        #docs
+        discriminated_enum! {
+          #vis enum #name {
+            discriminator: #disc_field,
+            variants: [
+              #(#variants),*
+            ],
+            fallback: #fallback_variant(#fallback_type),
+          }
+        }
+      }
+    } else {
+      quote! {
+        #docs
+        discriminated_enum! {
+          #vis enum #name {
+            discriminator: #disc_field,
+            variants: [
+              #(#variants),*
+            ],
+          }
+        }
+      }
     }
   }
 
@@ -708,6 +605,14 @@ impl CodeGenerator {
           quote! {}
         };
 
+        // Generate #[default(value)] attribute for fields with default values
+        let default_attr = if add_pub && field.default_value.is_some() {
+          let default_expr = Self::json_value_to_rust_expr(field.default_value.as_ref().unwrap(), &field.rust_type);
+          quote! { #[default(#default_expr)] }
+        } else {
+          quote! {}
+        };
+
         let type_tokens = Self::parse_type_string(&field.rust_type.to_rust_type());
 
         if add_pub {
@@ -717,6 +622,7 @@ impl CodeGenerator {
             #deprecated_attr
             #serde_attrs
             #validation_attrs
+            #default_attr
             #vis #name: #type_tokens
           }
         } else {
@@ -739,13 +645,21 @@ impl CodeGenerator {
   ) -> Vec<TokenStream> {
     variants
       .iter()
-      .map(|variant| {
+      .enumerate()
+      .map(|(idx, variant)| {
         let name = format_ident!("{}", variant.name);
         let docs = Self::generate_docs(&variant.docs);
         let serde_attrs = Self::generate_serde_attrs(&variant.serde_attrs);
 
         let deprecated_attr = if variant.deprecated {
           quote! { #[deprecated] }
+        } else {
+          quote! {}
+        };
+
+        // Add #[default] to the first variant for Rust's built-in Default derive
+        let default_attr = if idx == 0 {
+          quote! { #[default] }
         } else {
           quote! {}
         };
@@ -779,6 +693,7 @@ impl CodeGenerator {
           #docs
           #deprecated_attr
           #serde_attrs
+          #default_attr
           #name #content
         }
       })

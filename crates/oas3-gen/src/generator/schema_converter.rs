@@ -39,6 +39,271 @@ impl<'a> SchemaConverter<'a> {
     Self { graph }
   }
 
+  /// Check if a schema is a discriminated base type (has discriminator with mappings and properties)
+  fn is_discriminated_base_type(&self, schema: &ObjectSchema) -> bool {
+    schema
+      .discriminator
+      .as_ref()
+      .map(|d| d.mapping.as_ref().map(|m| !m.is_empty()).unwrap_or(false))
+      .unwrap_or(false)
+      && !schema.properties.is_empty()
+  }
+
+  /// Compute the inheritance depth of a schema (0 for schemas with no allOf)
+  fn compute_inheritance_depth(&self, schema_name: &str, memo: &mut HashMap<String, usize>) -> usize {
+    // Check memo first
+    if let Some(&depth) = memo.get(schema_name) {
+      return depth;
+    }
+
+    // Get the schema from components
+    let Some(schema_ref) = self
+      .graph
+      .spec()
+      .components
+      .as_ref()
+      .and_then(|c| c.schemas.get(schema_name))
+    else {
+      return 0;
+    };
+
+    let Ok(schema) = schema_ref.resolve(self.graph.spec()) else {
+      return 0;
+    };
+
+    // Find max depth among all allOf parents
+    let depth = if schema.all_of.is_empty() {
+      0
+    } else {
+      schema
+        .all_of
+        .iter()
+        .filter_map(|all_of_ref| match all_of_ref {
+          ObjectOrReference::Ref { ref_path, .. } => SchemaGraph::extract_ref_name(ref_path),
+          _ => None,
+        })
+        .map(|parent_name| self.compute_inheritance_depth(&parent_name, memo))
+        .max()
+        .unwrap_or(0)
+        + 1
+    };
+
+    memo.insert(schema_name.to_string(), depth);
+    depth
+  }
+
+  /// Extract child schemas from discriminator mapping, sorted by depth (deepest first)
+  fn extract_discriminator_children(&self, schema: &ObjectSchema) -> Vec<(String, String)> {
+    let Some(discriminator) = schema.discriminator.as_ref() else {
+      return vec![];
+    };
+
+    let Some(mapping) = discriminator.mapping.as_ref() else {
+      return vec![];
+    };
+
+    let mut children: Vec<(String, String)> = mapping
+      .iter()
+      .filter_map(|(disc_value, ref_path)| {
+        let schema_name = SchemaGraph::extract_ref_name(ref_path)?;
+        Some((disc_value.clone(), schema_name))
+      })
+      .collect();
+
+    // Sort by inheritance depth (deepest first)
+    let mut depth_memo = HashMap::new();
+    children
+      .sort_by_cached_key(|(_, schema_name)| -(self.compute_inheritance_depth(schema_name, &mut depth_memo) as i32));
+
+    children
+  }
+
+  /// Convert a child schema that extends a discriminated parent
+  fn convert_discriminated_child(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    parent_name: &str,
+    parent_schema: &ObjectSchema,
+  ) -> anyhow::Result<Vec<RustType>> {
+    let struct_name = to_rust_type_name(name);
+    let parent_type_name = format!("{}Fields", to_rust_type_name(parent_name));
+
+    let Some(discriminator_prop_name) = parent_schema.discriminator.as_ref().map(|d| d.property_name.clone()) else {
+      return Err(anyhow::anyhow!("Parent schema is not discriminated"));
+    };
+
+    let discriminator_value = self.get_discriminator_value_for_child(name, schema, &discriminator_prop_name);
+
+    // Create discriminator field as String with default value
+    // We'll use the default_value in the FieldDef to trigger Default impl generation
+    let disc_field = FieldDef {
+      name: to_rust_field_name(&discriminator_prop_name),
+      docs: vec![],
+      rust_type: TypeRef::new("String"),
+      serde_attrs: vec![
+        "default".to_string(), // Use Default::default() when field missing from JSON
+        format!("rename = \"{}\"", discriminator_prop_name),
+      ],
+      validation_attrs: vec![],
+      regex_validation: None,
+      default_value: Some(serde_json::Value::String(discriminator_value.clone())),
+      read_only: false,
+      write_only: false,
+      deprecated: false,
+      multiple_of: None,
+    };
+
+    // Create flattened parent field
+    let parent_field = FieldDef {
+      name: "__inherited_properties".to_string(),
+      docs: vec![],
+      rust_type: TypeRef::new(parent_type_name),
+      serde_attrs: vec!["flatten".to_string()],
+      validation_attrs: vec![],
+      regex_validation: None,
+      default_value: None,
+      read_only: false,
+      write_only: false,
+      deprecated: false,
+      multiple_of: None,
+    };
+
+    // Extract this child's own properties (from inline schema in allOf)
+    // Exclude the discriminator field since we're adding it separately
+    let mut own_fields = Vec::new();
+    let mut inline_types = Vec::new();
+
+    for all_of_item in &schema.all_of {
+      if let ObjectOrReference::Object(inline_schema) = all_of_item {
+        let (child_fields, child_inline_types) = self.convert_fields_with_inline_types_and_exclusions(
+          &struct_name,
+          inline_schema,
+          Some(&discriminator_prop_name),
+        )?;
+        own_fields.extend(child_fields);
+        inline_types.extend(child_inline_types);
+      }
+    }
+
+    let mut fields = vec![disc_field, parent_field];
+    fields.extend(own_fields);
+
+    let derives = vec![
+      "Debug".into(),
+      "Clone".into(),
+      "Serialize".into(),
+      "Deserialize".into(),
+      "Validate".into(),
+      "Default".into(), // Always derive Default
+    ];
+
+    let struct_type = RustType::Struct(StructDef {
+      name: struct_name,
+      docs: schema
+        .description
+        .as_ref()
+        .map(|d| doc_comment_lines(d))
+        .unwrap_or_default(),
+      fields,
+      derives,
+      serde_attrs: vec![], // Don't use struct-level default - discriminator field has its own default
+    });
+
+    let mut all_types = vec![struct_type];
+    all_types.extend(inline_types);
+    Ok(all_types)
+  }
+
+  /// Get the discriminator value for a child schema
+  fn get_discriminator_value_for_child(
+    &self,
+    _child_name: &str,
+    child_schema: &ObjectSchema,
+    discriminator_prop_name: &str,
+  ) -> String {
+    for all_of_item in &child_schema.all_of {
+      if let ObjectOrReference::Object(inline_schema) = all_of_item
+        && let Some(disc_prop) = inline_schema.properties.get(discriminator_prop_name)
+        && let Ok(disc_schema) = disc_prop.resolve(self.graph.spec())
+        && let Some(default) = disc_schema.default.as_ref()
+        && let Some(default_str) = default.as_str()
+      {
+        return default_str.to_string();
+      }
+    }
+    format!("#{}", _child_name)
+  }
+
+  /// Create a discriminated enum for schemas with discriminator mappings
+  fn create_discriminated_enum(&self, base_name: &str, schema: &ObjectSchema) -> anyhow::Result<RustType> {
+    use crate::generator::ast::{DiscriminatedEnumDef, DiscriminatedVariant};
+
+    let children = self.extract_discriminator_children(schema);
+    let enum_name = to_rust_type_name(base_name);
+    let base_struct_name = format!("{}Base", enum_name);
+
+    let discriminator_field = schema
+      .discriminator
+      .as_ref()
+      .map(|d| d.property_name.clone())
+      .unwrap_or_else(|| "@odata.type".to_string());
+
+    let mut variants = Vec::new();
+
+    // Add child variants (most specific first - already sorted by depth)
+    for (disc_value, child_schema_name) in children {
+      let child_type_name = to_rust_type_name(&child_schema_name);
+
+      // Generate variant name by removing common prefix
+      let variant_name = if child_type_name.starts_with(&enum_name) {
+        child_type_name
+          .strip_prefix(&enum_name)
+          .unwrap_or(&child_type_name)
+          .to_string()
+      } else {
+        child_type_name.clone()
+      };
+
+      // Ensure variant name is not empty
+      let variant_name = if variant_name.is_empty() {
+        child_type_name.clone()
+      } else {
+        variant_name
+      };
+
+      // Always use Box<> for child variants to prevent infinite recursion
+      // Child types might reference the parent enum, creating cycles
+      let final_type_name = format!("Box<{}>", child_type_name);
+
+      variants.push(DiscriminatedVariant {
+        discriminator_value: disc_value,
+        variant_name,
+        type_name: final_type_name,
+      });
+    }
+
+    // Add fallback variant (for inheritance hierarchies where base type can appear)
+    let base_variant_name = to_rust_type_name(base_name.split('.').next_back().unwrap_or(base_name));
+    let fallback = Some(DiscriminatedVariant {
+      discriminator_value: "".into(), // Not used for fallback
+      variant_name: base_variant_name,
+      type_name: base_struct_name,
+    });
+
+    Ok(RustType::DiscriminatedEnum(DiscriminatedEnumDef {
+      name: enum_name,
+      docs: schema
+        .description
+        .as_ref()
+        .map(|d| doc_comment_lines(d))
+        .unwrap_or_default(),
+      discriminator_field,
+      variants,
+      fallback,
+    }))
+  }
+
   /// Convert a schema to Rust type definitions
   /// Returns the main type and any inline types that were generated
   pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
@@ -65,9 +330,18 @@ impl<'a> SchemaConverter<'a> {
 
     // Check if this is a struct (object with properties)
     if !schema.properties.is_empty() {
-      let (main_type, inline_types) = self.convert_struct(name, schema)?;
-      let mut all_types = vec![main_type];
-      all_types.extend(inline_types);
+      let (main_type, mut inline_types) = self.convert_struct(name, schema)?;
+
+      // If this is a discriminated base type, also generate the discriminated enum
+      let mut all_types = if self.is_discriminated_base_type(schema) {
+        // Generate the discriminated enum that wraps all variants
+        let discriminated_enum = self.create_discriminated_enum(name, schema)?;
+        vec![discriminated_enum, main_type] // Enum first, then base struct
+      } else {
+        vec![main_type]
+      };
+
+      all_types.append(&mut inline_types);
       return Ok(all_types);
     }
 
@@ -75,17 +349,18 @@ impl<'a> SchemaConverter<'a> {
     Ok(vec![])
   }
 
-  /// Recursively collect all properties and required fields from a schema's allOf chain
+  /// Recursively collect all properties, required fields, and discriminators from a schema's allOf chain
   fn collect_all_of_properties(
     &self,
     schema: &ObjectSchema,
     properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
     required: &mut Vec<String>,
+    discriminator: &mut Option<oas3::spec::Discriminator>,
   ) -> anyhow::Result<()> {
     // First, recursively process all allOf references to get inherited properties
     for all_of_ref in &schema.all_of {
       if let Ok(all_of_schema) = all_of_ref.resolve(self.graph.spec()) {
-        self.collect_all_of_properties(&all_of_schema, properties, required)?;
+        self.collect_all_of_properties(&all_of_schema, properties, required, discriminator)?;
       }
     }
 
@@ -101,26 +376,88 @@ impl<'a> SchemaConverter<'a> {
       }
     }
 
+    // Preserve discriminator if present (last one wins)
+    if schema.discriminator.is_some() {
+      *discriminator = schema.discriminator.clone();
+    }
+
     Ok(())
   }
 
   /// Convert an allOf schema by merging all schemas into one struct
   fn convert_all_of_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
-    // Recursively collect all properties from the entire allOf chain
+    // Check if any parent has a discriminator
+    // Need to merge the parent's allOf first to check for discriminators in inline schemas
+    let discriminated_parent = schema.all_of.iter().find_map(|all_of_ref| {
+      let ObjectOrReference::Ref { ref_path, .. } = all_of_ref else {
+        return None;
+      };
+      let parent_name = SchemaGraph::extract_ref_name(ref_path)?;
+
+      let parent_ref = self.graph.spec().components.as_ref()?.schemas.get(&parent_name)?;
+      let parent_schema = parent_ref.resolve(self.graph.spec()).ok()?;
+
+      // Merge parent's allOf to get complete schema with discriminators from inline schemas
+      let merged_parent = if !parent_schema.all_of.is_empty() {
+        let mut merged_props = BTreeMap::new();
+        let mut merged_req = Vec::new();
+        let mut merged_disc = None;
+        self
+          .collect_all_of_properties(&parent_schema, &mut merged_props, &mut merged_req, &mut merged_disc)
+          .ok()?;
+
+        let mut merged = parent_schema.clone();
+        merged.properties = merged_props;
+        merged.required = merged_req;
+        merged.discriminator = merged_disc;
+        merged
+      } else {
+        parent_schema.clone()
+      };
+
+      let is_disc_base = self.is_discriminated_base_type(&merged_parent);
+
+      if is_disc_base {
+        Some((parent_name, merged_parent))
+      } else {
+        None
+      }
+    });
+
+    if let Some((parent_name, parent_schema)) = discriminated_parent {
+      // Generate child struct with discriminator field and flattened parent
+      return self.convert_discriminated_child(name, schema, &parent_name, &parent_schema);
+    }
+
     let mut merged_properties = BTreeMap::new();
     let mut merged_required = Vec::new();
+    let mut merged_discriminator = None;
 
-    self.collect_all_of_properties(schema, &mut merged_properties, &mut merged_required)?;
+    self.collect_all_of_properties(
+      schema,
+      &mut merged_properties,
+      &mut merged_required,
+      &mut merged_discriminator,
+    )?;
 
-    // Create a merged schema with all collected properties
+    // Create a merged schema with all collected properties and discriminator
     let mut merged_schema = schema.clone();
     merged_schema.properties = merged_properties;
     merged_schema.required = merged_required;
+    merged_schema.discriminator = merged_discriminator.clone();
 
     // Now convert as a regular struct
-    let (main_type, inline_types) = self.convert_struct(name, &merged_schema)?;
-    let mut all_types = vec![main_type];
-    all_types.extend(inline_types);
+    let (main_type, mut inline_types) = self.convert_struct(name, &merged_schema)?;
+
+    // If the merged schema is a discriminated base type, also generate the enum
+    let mut all_types = if self.is_discriminated_base_type(&merged_schema) {
+      let discriminated_enum = self.create_discriminated_enum(name, &merged_schema)?;
+      vec![discriminated_enum, main_type] // Enum first, then base struct
+    } else {
+      vec![main_type]
+    };
+
+    all_types.append(&mut inline_types);
     Ok(all_types)
   }
 
@@ -203,7 +540,13 @@ impl<'a> SchemaConverter<'a> {
       docs: schema.description.as_deref().map(doc_comment_lines).unwrap_or_default(),
       variants: variants_intermediate,
       discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),
-      derives: vec!["Debug".into(), "Clone".into(), "Serialize".into(), "Deserialize".into()],
+      derives: vec![
+        "Debug".into(),
+        "Clone".into(),
+        "Serialize".into(),
+        "Deserialize".into(),
+        "Default".into(),
+      ],
       serde_attrs: vec![],
     });
 
@@ -408,7 +751,13 @@ impl<'a> SchemaConverter<'a> {
         .unwrap_or_default(),
       variants,
       discriminator: None,
-      derives: vec!["Debug".into(), "Clone".into(), "Serialize".into(), "Deserialize".into()],
+      derives: vec![
+        "Debug".into(),
+        "Clone".into(),
+        "Serialize".into(),
+        "Deserialize".into(),
+        "Default".into(),
+      ],
       serde_attrs: vec!["untagged".into()],
     })])
   }
@@ -463,6 +812,7 @@ impl<'a> SchemaConverter<'a> {
         "Eq".into(),
         "Serialize".into(),
         "Deserialize".into(),
+        "Default".into(),
       ],
       serde_attrs: vec![],
     });
@@ -501,6 +851,7 @@ impl<'a> SchemaConverter<'a> {
         "Eq".into(),
         "Serialize".into(),
         "Deserialize".into(),
+        "Default".into(),
       ],
       serde_attrs: vec!["untagged".into()],
     });
@@ -657,7 +1008,13 @@ impl<'a> SchemaConverter<'a> {
         .unwrap_or_default(),
       variants,
       discriminator: None,
-      derives: vec!["Debug".into(), "Clone".into(), "Serialize".into(), "Deserialize".into()],
+      derives: vec![
+        "Debug".into(),
+        "Clone".into(),
+        "Serialize".into(),
+        "Deserialize".into(),
+        "Default".into(),
+      ],
       serde_attrs: vec![],
     }))
   }
@@ -665,7 +1022,25 @@ impl<'a> SchemaConverter<'a> {
   /// Convert an object schema to a Rust struct
   /// Returns the struct and any inline types that were generated
   pub(crate) fn convert_struct(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<(RustType, Vec<RustType>)> {
-    let (mut fields, inline_types) = self.convert_fields_with_inline_types(name, schema)?;
+    let is_discriminated = self.is_discriminated_base_type(schema);
+
+    let struct_name = if is_discriminated {
+      format!("{}Fields", to_rust_type_name(name))
+    } else {
+      to_rust_type_name(name)
+    };
+
+    let discriminator_field_to_exclude = if is_discriminated {
+      schema.discriminator.as_ref().map(|d| d.property_name.as_str())
+    } else {
+      None
+    };
+
+    let (mut fields, inline_types) = if is_discriminated {
+      self.convert_fields_with_inline_types_and_exclusions(&struct_name, schema, discriminator_field_to_exclude)?
+    } else {
+      self.convert_fields_with_inline_types(&struct_name, schema)?
+    };
 
     // Individual rename attributes are more explicit and handle all edge cases correctly
     let mut serde_attrs = vec![];
@@ -759,8 +1134,11 @@ impl<'a> SchemaConverter<'a> {
     // Always include Validate for runtime validation
     derives.push("Validate".into());
 
+    // ALWAYS derive Default for all structs (using better_default)
+    derives.push("Default".into());
+
     let struct_type = RustType::Struct(StructDef {
-      name: to_rust_type_name(name),
+      name: struct_name,
       docs: schema
         .description
         .as_ref()
