@@ -330,44 +330,34 @@ impl CodeGenerator {
     let docs = Self::generate_docs(&def.docs);
     let vis = visibility.to_tokens();
 
-    // Override derives based on operation-level usage (only for operation-specific types like *Request)
-    // Component schemas keep full derives to avoid dependency issues when nested in other types
     let is_operation_type = def.name.ends_with("Request") || def.name.ends_with("RequestBody");
 
     let derives = if is_operation_type && type_usage.contains_key(&def.name) {
       let usage = type_usage.get(&def.name).unwrap();
-      let mut custom_derives = vec!["Debug".to_string(), "Clone".to_string()];
-
+      let mut custom = vec!["Debug".to_string(), "Clone".to_string(), "PartialEq".to_string()];
       match usage {
         TypeUsage::RequestOnly => {
-          // Request-only types need Serialize and Validate
-          custom_derives.push("Serialize".to_string());
-          custom_derives.push("Validate".to_string());
+          custom.push("Serialize".to_string());
+          custom.push("Validate".to_string());
         }
         TypeUsage::ResponseOnly => {
-          // Response-only types need Deserialize but NOT Validate (we trust our server)
-          custom_derives.push("Deserialize".to_string());
+          custom.push("Deserialize".to_string());
         }
         TypeUsage::Bidirectional => {
-          // Bidirectional types need both Serialize/Deserialize and Validate
-          custom_derives.push("Serialize".to_string());
-          custom_derives.push("Deserialize".to_string());
-          custom_derives.push("Validate".to_string());
+          custom.push("Serialize".to_string());
+          custom.push("Deserialize".to_string());
+          custom.push("Validate".to_string());
         }
       }
-
-      // Always include Default
-      custom_derives.push("Default".to_string());
-
-      Self::generate_derives(&custom_derives)
+      custom.push("Default".to_string());
+      Self::generate_derives(&custom)
     } else {
-      // Component schemas and other types keep full derives (safe default)
       Self::generate_derives(&def.derives)
     };
 
+    let outer_attrs = Self::generate_outer_attrs(&def.outer_attrs);
     let serde_attrs = Self::generate_serde_attrs(&def.serde_attrs);
 
-    // Skip validation attributes for response-only operation types (no validation needed)
     let include_validation = !(is_operation_type && matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)));
     let fields = Self::generate_fields_with_visibility(
       &def.name,
@@ -381,6 +371,7 @@ impl CodeGenerator {
 
     quote! {
       #docs
+      #outer_attrs
       #derives
       #serde_attrs
       #vis struct #name {
@@ -394,11 +385,13 @@ impl CodeGenerator {
     let docs = Self::generate_docs(&def.docs);
     let vis = visibility.to_tokens();
     let derives = Self::generate_derives(&def.derives);
+    let outer_attrs = Self::generate_outer_attrs(&def.outer_attrs);
     let serde_attrs = Self::generate_enum_serde_attrs(def);
     let variants = Self::generate_variants(&def.name, &def.variants, regex_lookup);
 
     quote! {
       #docs
+      #outer_attrs
       #derives
       #serde_attrs
       #vis enum #name {
@@ -474,16 +467,13 @@ impl CodeGenerator {
     if docs.is_empty() {
       return quote! {};
     }
-
     let doc_lines: Vec<TokenStream> = docs
       .iter()
       .map(|line| {
-        // Remove the /// prefix that was added earlier
-        let clean_line = line.strip_prefix("/// ").unwrap_or(line);
-        quote! { #[doc = #clean_line] }
+        let clean = line.strip_prefix("/// ").unwrap_or(line);
+        quote! { #[doc = #clean] }
       })
       .collect();
-
     quote! { #(#doc_lines)* }
   }
 
@@ -491,28 +481,35 @@ impl CodeGenerator {
     if derives.is_empty() {
       return quote! {};
     }
-
     let derive_idents: Vec<_> = derives.iter().map(|d| format_ident!("{}", d)).collect();
+    quote! { #[derive(#(#derive_idents),*)] }
+  }
 
-    quote! {
-      #[derive(#(#derive_idents),*)]
+  fn generate_outer_attrs(attrs: &[String]) -> TokenStream {
+    if attrs.is_empty() {
+      return quote! {};
     }
+    let attr_tokens: Vec<TokenStream> = attrs
+      .iter()
+      .map(|a| {
+        let tokens: TokenStream = a.as_str().parse().unwrap_or_else(|_| quote! {});
+        quote! { #[#tokens] }
+      })
+      .collect();
+    quote! { #(#attr_tokens)* }
   }
 
   fn generate_serde_attrs(attrs: &[String]) -> TokenStream {
     if attrs.is_empty() {
       return quote! {};
     }
-
     let attr_tokens: Vec<TokenStream> = attrs
       .iter()
       .map(|attr| {
-        let attr_str = attr.as_str();
-        let tokens: TokenStream = attr_str.parse().unwrap_or_else(|_| quote! {});
+        let tokens: TokenStream = attr.as_str().parse().unwrap_or_else(|_| quote! {});
         quote! { #[serde(#tokens)] }
       })
       .collect();
-
     quote! { #(#attr_tokens)* }
   }
 

@@ -63,6 +63,7 @@ pub(crate) struct StructDef {
   pub(crate) fields: Vec<FieldDef>,
   pub(crate) derives: Vec<String>,
   pub(crate) serde_attrs: Vec<String>,
+  pub(crate) outer_attrs: Vec<String>,
 }
 
 /// Rust struct field definition
@@ -155,6 +156,7 @@ pub(crate) struct EnumDef {
   pub(crate) discriminator: Option<String>,
   pub(crate) derives: Vec<String>,
   pub(crate) serde_attrs: Vec<String>,
+  pub(crate) outer_attrs: Vec<String>,
 }
 
 /// Rust enum variant definition

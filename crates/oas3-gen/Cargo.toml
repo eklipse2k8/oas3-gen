@@ -31,5 +31,6 @@ validator.workspace = true
 [dev-dependencies]
 chrono.workspace = true
 indexmap.workspace = true
+serde_with.workspace = true
 tempfile.workspace = true
 uuid.workspace = true

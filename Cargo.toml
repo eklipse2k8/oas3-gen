@@ -48,6 +48,7 @@ quote = { version = "1.0" }
 regex = { version = "1.11" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
+serde_with = { version = "3.15", features = ["indexmap", "chrono"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
 tokio = { version = "1.48", default-features = false, features = [
   "rt-multi-thread",

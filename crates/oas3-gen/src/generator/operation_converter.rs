@@ -254,6 +254,7 @@ impl<'a> OperationConverter<'a> {
       fields,
       derives,
       serde_attrs,
+      outer_attrs: vec![],
     })
   }
 
