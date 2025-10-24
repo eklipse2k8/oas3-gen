@@ -594,11 +594,11 @@ impl<'a> SchemaConverter<'a> {
         }
 
         let mut serde_attrs = Vec::new();
-        if discriminator_prop.is_some() {
-          if let Some(disc_value) = discriminator_map.get(schema_name) {
-            serde_attrs.push(format!("rename = \"{}\"", disc_value));
-            // note: in internally tagged enums, serde rename at variant level maps discriminator value
-          }
+        if discriminator_prop.is_some()
+          && let Some(disc_value) = discriminator_map.get(schema_name)
+        {
+          serde_attrs.push(format!("rename = \"{}\"", disc_value));
+          // note: in internally tagged enums, serde rename at variant level maps discriminator value
         }
 
         variants.push(VariantDef {
