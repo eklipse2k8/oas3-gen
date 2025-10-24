@@ -2208,10 +2208,7 @@ mod tests {
       .expect("Backing struct should be present");
     assert_eq!(struct_def.name, "EntityBase");
     assert!(
-      struct_def
-        .serde_attrs
-        .iter()
-        .any(|attr| attr == "deny_unknown_fields"),
+      struct_def.serde_attrs.iter().any(|attr| attr == "deny_unknown_fields"),
       "Backing struct should inherit deny_unknown_fields"
     );
   }
