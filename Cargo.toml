@@ -41,7 +41,7 @@ better_default = { version = "1.0" }
 clap = { version = "4.5", features = ["derive"] }
 inflections = { version = "1.1" }
 oas3 = { version = "0.19" }
-oas3-gen-support = { path = "crates/oas3-gen-support" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.6.0" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }
 quote = { version = "1.0" }
