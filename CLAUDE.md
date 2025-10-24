@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a fully-functional OpenAPI-to-Rust code generator that parses OpenAPI 3.x specifications and generates comprehensive Rust type definitions with validation. The tool reads OpenAPI JSON files and generates idiomatic Rust code including structs, enums, type aliases, validation attributes, and Default implementations.
 
+The project is organized as a Cargo workspace with two crates:
+- **oas3-gen**: The main CLI tool for code generation
+- **oas3-gen-support**: Runtime support library providing macros and utilities for generated code
+
 ## Build and Development Commands
 
 ### Build
@@ -74,36 +78,71 @@ cargo deny check
 cargo update
 ```
 
+### Workspace-Specific Commands
+
+The project uses a Cargo workspace, so you can work with individual crates:
+
+```bash
+# Build only the CLI tool
+cargo build -p oas3-gen
+
+# Build only the support library
+cargo build -p oas3-gen-support
+
+# Run tests for a specific crate
+cargo test -p oas3-gen
+cargo test -p oas3-gen-support
+
+# Run the CLI (from workspace root)
+cargo run -p oas3-gen -- -i spec.json -o output.rs
+
+# Check a specific crate
+cargo check -p oas3-gen-support
+```
+
 ## Architecture
 
-The codebase is organized into a modular structure with clear separation of concerns:
+The codebase is organized as a Cargo workspace with two crates:
 
 ```
-src/
-├── main.rs                        - Entry point and orchestration (173 lines)
-├── reserved.rs                    - Rust keyword handling and naming utilities
-└── generator/                     - Core generation logic (2693 lines total)
-    ├── mod.rs                     - Module definition and re-exports (29 lines)
-    ├── utils.rs                   - Helper functions (19 lines)
-    ├── ast.rs                     - AST type definitions (164 lines)
-    ├── schema_graph.rs            - Dependency tracking (188 lines)
-    ├── schema_converter.rs        - Schema → AST conversion (1207 lines)
-    ├── operation_converter.rs     - Operation → request/response types (355 lines)
-    └── code_generator.rs          - AST → Rust code generation (731 lines)
+crates/
+├── oas3-gen/                      - Main CLI tool
+│   ├── Cargo.toml                 - Binary crate dependencies
+│   ├── src/
+│   │   ├── main.rs                - Entry point and orchestration
+│   │   ├── reserved.rs            - Rust keyword handling and naming utilities
+│   │   └── generator/             - Core generation logic
+│   │       ├── mod.rs             - Module definition and re-exports
+│   │       ├── utils.rs           - Helper functions
+│   │       ├── ast.rs             - AST type definitions
+│   │       ├── schema_graph.rs    - Dependency tracking
+│   │       ├── schema_converter.rs - Schema → AST conversion
+│   │       ├── operation_converter.rs - Operation → request/response types
+│   │       └── code_generator.rs  - AST → Rust code generation
+│   ├── tests/                     - Integration tests
+│   │   └── discriminator_deserialization.rs
+│   └── examples/                  - Example generated code
+│       └── generated_types.rs
+└── oas3-gen-support/              - Runtime support library
+    ├── Cargo.toml                 - Library crate (rlib + cdylib)
+    └── src/
+        └── lib.rs                 - Macros and runtime utilities
 ```
 
 ### Module Structure
 
-**generator/mod.rs** (`src/generator/mod.rs`)
+#### oas3-gen Crate (CLI Tool)
+
+**generator/mod.rs** (`crates/oas3-gen/src/generator/mod.rs`)
 - Module orchestration and public API
 - Re-exports: `SchemaGraph`, `SchemaConverter`, `OperationConverter`, `CodeGenerator`
 - Declares all submodules with clear documentation
 
-**generator/utils.rs** (`src/generator/utils.rs`)
+**generator/utils.rs** (`crates/oas3-gen/src/generator/utils.rs`)
 - `doc_comment_lines()`: Converts strings to Rust doc comment lines
 - `doc_comment_block()`: Creates full doc comment blocks
 
-**generator/ast.rs** (`src/generator/ast.rs`)
+**generator/ast.rs** (`crates/oas3-gen/src/generator/ast.rs`)
 Intermediate representation types:
 - `RustType`: Enum containing Struct, Enum, or TypeAlias variants
 - `StructDef`: Struct definition with fields, derives, and serde attributes
@@ -113,7 +152,7 @@ Intermediate representation types:
 - `TypeRef`: Type reference with support for Box<T>, Option<T>, Vec<T> wrappers
 - `OperationInfo`: Metadata about API operations
 
-**generator/schema_graph.rs** (`src/generator/schema_graph.rs`)
+**generator/schema_graph.rs** (`crates/oas3-gen/src/generator/schema_graph.rs`)
 Schema dependency management and cycle detection:
 - `SchemaGraph` struct manages all schemas from OpenAPI spec
 - Builds dependency graph tracking which schemas reference others
@@ -126,7 +165,7 @@ Schema dependency management and cycle detection:
   - `is_cyclic()`: Checks if a schema is part of a cycle
   - `extract_ref_name()`: Parses $ref strings to extract schema names
 
-**generator/schema_converter.rs** (`src/generator/schema_converter.rs`)
+**generator/schema_converter.rs** (`crates/oas3-gen/src/generator/schema_converter.rs`)
 Converts OpenAPI schemas to Rust AST (largest module):
 - Handles all schema types: objects, enums, oneOf, anyOf, allOf
 - Detects and handles nullable patterns (anyOf with null → Option<T>)
@@ -146,7 +185,7 @@ Converts OpenAPI schemas to Rust AST (largest module):
   - `extract_validation_pattern()`: Extracts regex patterns (public)
   - `extract_default_value()`: Extracts default values (public)
 
-**generator/operation_converter.rs** (`src/generator/operation_converter.rs`)
+**generator/operation_converter.rs** (`crates/oas3-gen/src/generator/operation_converter.rs`)
 Generates request/response types for API operations:
 - Creates request structs combining parameters and request body
 - Orders parameters by location (path → query → header → cookie)
@@ -159,7 +198,7 @@ Generates request/response types for API operations:
   - `convert_parameter()`: Converts individual parameter to field definition
   - `extract_response_schema_name()`: Extracts schema name from response
 
-**generator/code_generator.rs** (`src/generator/code_generator.rs`)
+**generator/code_generator.rs** (`crates/oas3-gen/src/generator/code_generator.rs`)
 Converts Rust AST to actual source code:
 - `TypeUsage` enum: Tracks request/response usage for derive optimization
 - `RegexKey` struct: Manages regex validation constant names
@@ -177,7 +216,7 @@ Converts Rust AST to actual source code:
   - `generate_struct()`, `generate_enum()`, `generate_type_alias()`
   - `ordered_types()`: Deduplicates and orders types for output
 
-**Main Orchestration** (`src/main.rs`)
+**Main Orchestration** (`crates/oas3-gen/src/main.rs`)
 Coordinates the generation pipeline with CLI argument handling:
 1. Parses CLI arguments using clap (input file, output file, verbose/quiet flags)
 2. Loads OpenAPI spec from specified JSON file
@@ -195,10 +234,31 @@ The CLI provides structured logging with three levels:
 - Verbose (`--verbose`): Detailed cycle information, operation counts, etc.
 - Quiet (`--quiet`): Errors only
 
+#### oas3-gen-support Crate (Runtime Library)
+
+**lib.rs** (`crates/oas3-gen-support/src/lib.rs`)
+Provides runtime support for generated code:
+- **`discriminated_enum!` macro**: Declarative macro for discriminated union deserialization
+  - Supports discriminator field-based routing
+  - Optional fallback variant for unknown discriminator values
+  - Custom serialize/deserialize implementations
+  - Used for oneOf/anyOf with discriminator in generated code
+- **`better_default::Default` re-export**: Enables `#[default(value)]` attribute on struct fields
+  - Allows inline default value specification
+  - Generates Default trait implementations automatically
+
+**Integration Tests** (`crates/oas3-gen/tests/discriminator_deserialization.rs`)
+- Tests discriminated enum deserialization with real-world scenarios
+- Validates fallback variant behavior
+- Ensures proper handling of nested discriminated types
+
 ### Key Dependencies
 
-**Core Generation Dependencies:**
+All dependencies are managed at the workspace level in the root `Cargo.toml` and inherited by crates.
+
+**Core Generation Dependencies (oas3-gen):**
 - **oas3** (0.19): OpenAPI 3.x specification parsing library
+- **oas3-gen-support**: Workspace crate providing runtime support utilities
 - **quote** (1.0): Quasi-quoting for generating Rust token streams
 - **proc-macro2** (1.0): Standalone proc-macro API for token manipulation
 - **syn** (2.0, features: full, parsing): Rust syntax parsing for code formatting
@@ -221,14 +281,24 @@ The CLI provides structured logging with three levels:
 - **validator** (0.20, features: derive): Runtime validation attributes and traits
 - **regex** (1.11): Regular expression validation support
 
-**Dev Dependencies** (for generated code):
+**Runtime Support Dependencies (oas3-gen-support):**
+- **better_default** (1.0): Provides `#[default(value)]` attribute for struct fields
+- **serde/serde_json**: For custom discriminated enum serialization
+- **regex**: Shared validation support
+- **validator**: Shared validation framework
 - **chrono** (0.4, features: std, clock, serde): Date/time types for OpenAPI date-time format
 - **indexmap** (2.12, features: serde): Ordered map for unique array items
 - **uuid** (1.11, features: serde): UUID types for OpenAPI uuid format
 
+**Dev Dependencies (oas3-gen):**
+- **chrono**: For testing generated date-time types
+- **indexmap**: For testing generated unique array types
+- **uuid**: For testing generated UUID types
+- **tempfile** (3.14): For creating temporary test files
+
 ### Type Mapping System
 
-The `schema_to_type_ref()` method in `SchemaConverter` (`src/generator/schema_converter.rs`) maps OpenAPI types to Rust:
+The `schema_to_type_ref()` method in `SchemaConverter` (`crates/oas3-gen/src/generator/schema_converter.rs`) maps OpenAPI types to Rust:
 
 **Primitive Types:**
 - String → String
@@ -274,7 +344,7 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
 
 ### Naming and Formatting
 
-**Identifier Handling** (`src/reserved.rs`):
+**Identifier Handling** (`crates/oas3-gen/src/reserved.rs`):
 - Converts OpenAPI names to valid Rust identifiers
 - Replaces invalid characters (-, ., spaces) with underscores
 - Handles Rust keyword conflicts with r# prefix
@@ -296,49 +366,61 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
 
 ### Documentation Generation
 
-**Doc Comments** (`src/generator/utils.rs`):
+**Doc Comments** (`crates/oas3-gen/src/generator/utils.rs`):
 - `doc_comment_lines()`: Converts OpenAPI descriptions to Rust doc comments (`///`)
 - Handles literal `\n` escape sequences by normalizing to actual newlines
 - Preserves multi-line documentation with proper formatting
 - Empty lines converted to `/// ` (maintains doc comment continuity)
 - Used throughout generated code for structs, enums, fields, and variants
 
-**Location Hints** (`src/generator/operation_converter.rs`):
+**Location Hints** (`crates/oas3-gen/src/generator/operation_converter.rs`):
 - Adds parameter location hints to generated request structs
 - Format: `/// Path parameter`, `/// Query parameter`, etc.
 - Helps developers understand parameter usage in API requests
 
-### Benefits of Modular Architecture
+### Benefits of Workspace Architecture
 
-The refactored codebase provides significant advantages:
+The workspace structure provides significant advantages:
+
+**Code Organization:**
+- Clear separation between code generation (oas3-gen) and runtime support (oas3-gen-support)
+- Generator can be used as a CLI tool without pulling in runtime dependencies
+- Support library can be versioned and published independently
+- Generated code only depends on the lightweight support crate
 
 **Maintainability:**
-- Each module has a single, well-defined responsibility
-- Changes are isolated to specific modules, reducing risk
-- Clear module boundaries make dependencies explicit
-- Easier to test individual components in isolation
+- Each crate and module has a single, well-defined responsibility
+- Changes are isolated to specific crates/modules, reducing risk
+- Clear boundaries make dependencies explicit
+- Easier to test individual components in isolation (integration tests in oas3-gen)
 
 **Readability:**
-- Files are sized appropriately (19-1207 lines vs 2609 lines monolithic)
-- Related functionality is grouped together
-- Module documentation provides clear entry points
+- Modules are sized appropriately for comprehension
+- Related functionality is grouped together within crates
+- Clear entry points via crate structure
 - Easier to navigate and understand specific features
 
 **Extensibility:**
-- New converters can be added without modifying existing code
-- AST types are centralized in one location
-- Plugin-style architecture for different output formats (future)
+- New converters can be added to oas3-gen without modifying runtime support
+- New runtime utilities can be added to oas3-gen-support independently
+- Support for different output formats can be added as new workspace crates
+- Workspace-level dependency management simplifies version coordination
 
 **Development:**
-- Multiple developers can work on different modules simultaneously
-- Reduced cognitive load when working on specific features
-- Better IDE support with smaller file sizes
-- Compile times benefit from smaller compilation units
+- Multiple developers can work on different crates simultaneously
+- Reduced cognitive load with clear crate boundaries
+- Better IDE support with modular structure
+- Compile times benefit from incremental compilation per crate
+- Integration tests validate end-to-end behavior without coupling to internals
 
 ## Features
 
 ### Fully Implemented
-✅ **Modular architecture** - Well-organized codebase with 7 focused modules
+✅ **Workspace architecture** - Organized into oas3-gen CLI and oas3-gen-support runtime library
+✅ **Modular code generation** - Well-organized codebase with focused modules per concern
+✅ **Runtime support library** - Dedicated crate for generated code utilities
+  - `discriminated_enum!` macro for oneOf/anyOf with discriminator
+  - `better_default::Default` for `#[default(value)]` attributes
 ✅ CLI interface with clap (input/output paths, verbose/quiet modes)
 ✅ Automatic directory creation for output paths
 ✅ Schema parsing and conversion (objects, arrays, primitives, enums)
@@ -361,6 +443,8 @@ The refactored codebase provides significant advantages:
 ✅ Support for date/time formats (chrono types)
 ✅ Support for UUID format (uuid::Uuid)
 ✅ Support for unique array items (IndexSet)
+✅ Integration tests for discriminated enum deserialization
+✅ Example generated code in crates/oas3-gen/examples/
 
 ### Not Yet Implemented
 ❌ Callback schema handling
@@ -368,3 +452,4 @@ The refactored codebase provides significant advantages:
 ❌ Security scheme type generation
 ❌ Multi-file output (currently single file)
 ❌ Custom type mapping configuration
+❌ Publishing oas3-gen-support crate to crates.io

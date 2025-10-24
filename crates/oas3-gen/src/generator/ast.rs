@@ -3,6 +3,24 @@
 //! This module contains the intermediate representation of Rust types
 //! that will be generated from OpenAPI schemas.
 
+/// Discriminated enum variant mapping
+#[derive(Debug, Clone)]
+pub(crate) struct DiscriminatedVariant {
+  pub(crate) discriminator_value: String,
+  pub(crate) variant_name: String,
+  pub(crate) type_name: String,
+}
+
+/// Discriminated enum definition (uses macro for custom ser/de)
+#[derive(Debug, Clone)]
+pub(crate) struct DiscriminatedEnumDef {
+  pub(crate) name: String,
+  pub(crate) docs: Vec<String>,
+  pub(crate) discriminator_field: String,
+  pub(crate) variants: Vec<DiscriminatedVariant>,
+  pub(crate) fallback: Option<DiscriminatedVariant>,
+}
+
 /// Top-level Rust type representation
 #[derive(Debug, Clone)]
 pub(crate) enum RustType {
@@ -10,6 +28,7 @@ pub(crate) enum RustType {
   Enum(EnumDef),
   #[allow(dead_code)]
   TypeAlias(TypeAliasDef),
+  DiscriminatedEnum(DiscriminatedEnumDef),
 }
 
 impl RustType {
@@ -18,6 +37,7 @@ impl RustType {
       RustType::Struct(def) => &def.name,
       RustType::Enum(def) => &def.name,
       RustType::TypeAlias(def) => &def.name,
+      RustType::DiscriminatedEnum(def) => &def.name,
     }
   }
 }
@@ -43,6 +63,7 @@ pub(crate) struct StructDef {
   pub(crate) fields: Vec<FieldDef>,
   pub(crate) derives: Vec<String>,
   pub(crate) serde_attrs: Vec<String>,
+  pub(crate) outer_attrs: Vec<String>,
 }
 
 /// Rust struct field definition
@@ -135,6 +156,7 @@ pub(crate) struct EnumDef {
   pub(crate) discriminator: Option<String>,
   pub(crate) derives: Vec<String>,
   pub(crate) serde_attrs: Vec<String>,
+  pub(crate) outer_attrs: Vec<String>,
 }
 
 /// Rust enum variant definition
