@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.6.0"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",

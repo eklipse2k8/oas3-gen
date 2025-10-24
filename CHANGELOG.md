@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0 - 2025-10-23
+
+* Refactor code into separate crates and improve structure
+* Update dependencies and enhance allOf schema conversion logic
+* Add visibility control for generated types and improve code generation
+
 ## 0.3.0 - 2025-10-20
 
 * Refactor schema dependency collection to use iterative approach instead of recursive to avoid stack overflow on large specs
