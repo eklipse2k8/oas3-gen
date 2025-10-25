@@ -132,11 +132,7 @@ impl TypeRef {
     }
 
     if self.is_array {
-      if self.unique_items {
-        result = format!("indexmap::IndexSet<{}>", result);
-      } else {
-        result = format!("Vec<{}>", result);
-      }
+      result = format!("Vec<{}>", result);
     }
 
     if self.nullable {

@@ -8,7 +8,7 @@ use regex::Regex;
 use serde_json::Number;
 
 use super::{
-  ast::{EnumDef, FieldDef, RustType, StructDef, TypeRef, VariantContent, VariantDef},
+  ast::{EnumDef, FieldDef, RustType, StructDef, TypeAliasDef, TypeRef, VariantContent, VariantDef},
   schema_graph::SchemaGraph,
   utils::doc_comment_lines,
 };
@@ -385,7 +385,13 @@ impl<'a> SchemaConverter<'a> {
       return Ok(all_types);
     }
 
-    Ok(vec![])
+    let alias = RustType::TypeAlias(TypeAliasDef {
+      name: to_rust_type_name(name),
+      docs: Self::docs(schema.description.as_ref()),
+      target: TypeRef::new("serde_json::Value"),
+    });
+
+    Ok(vec![alias])
   }
 
   /// Recursively collect all properties, required fields, and discriminators from a schema's allOf chain
@@ -2619,5 +2625,33 @@ mod tests {
       Some(&json!("plain")),
       "const string should produce a default value"
     );
+
+    assert!(
+      kind_field.serde_attrs.iter().any(|attr| attr == r#"rename = "kind""#) || kind_field.serde_attrs.is_empty(),
+      "Sanity check attribute state left untouched"
+    );
+  }
+
+  #[test]
+  fn test_empty_schema_produces_type_alias() {
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Empty".to_string(), ObjectSchema::default());
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let generated = converter
+      .convert_schema("Empty", graph.get_schema("Empty").unwrap())
+      .unwrap();
+
+    assert_eq!(generated.len(), 1);
+    match &generated[0] {
+      RustType::TypeAlias(alias) => {
+        assert_eq!(alias.name, "Empty");
+        assert_eq!(alias.target.to_rust_type(), "serde_json::Value");
+      }
+      other => panic!("Expected type alias for empty schema, got {:?}", other),
+    }
   }
 }
