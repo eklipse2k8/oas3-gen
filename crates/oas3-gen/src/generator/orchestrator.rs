@@ -170,7 +170,9 @@ impl Orchestrator {
 
     // Generate and format code
     let type_usage = CodeGenerator::build_type_usage_map(&operations_info);
-    let code = CodeGenerator::generate(&rust_types, &type_usage, self.visibility);
+    let headers: Vec<String> = graph.all_headers().into_iter().cloned().collect();
+
+    let code = CodeGenerator::generate(&rust_types, &type_usage, &headers, self.visibility);
     let syntax_tree = syn::parse2(code)?;
     let formatted = prettyplease::unparse(&syntax_tree);
 

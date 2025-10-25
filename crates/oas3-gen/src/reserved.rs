@@ -145,6 +145,20 @@ pub(crate) fn regex_const_name(key: &[&str]) -> String {
   format!("REGEX_{}", ident)
 }
 
+/// Converts a header name into a valid Rust constant identifier (`SCREAMING_SNAKE_CASE`).
+pub(crate) fn header_const_name(header: &str) -> String {
+  let sanitized = sanitize(header);
+  if sanitized.is_empty() {
+    return "HEADER".to_string();
+  }
+
+  let mut ident = sanitized.to_constant_case();
+  if ident.starts_with(|c: char| c.is_ascii_digit()) {
+    ident.insert(0, '_');
+  }
+  ident
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -195,5 +209,13 @@ mod tests {
   fn test_const_name() {
     assert_eq!(regex_const_name(&["foo.bar", "baz"]), "REGEX_FOO_BAR_BAZ");
     assert_eq!(regex_const_name(&["1a", "2b"]), "REGEX__1A_2B");
+  }
+
+  #[test]
+  fn test_header_const_name() {
+    assert_eq!(header_const_name("x-my-header"), "X_MY_HEADER");
+    assert_eq!(header_const_name("Content-Type"), "CONTENT_TYPE");
+    assert_eq!(header_const_name("123-custom"), "_123_CUSTOM");
+    assert_eq!(header_const_name(""), "HEADER");
   }
 }

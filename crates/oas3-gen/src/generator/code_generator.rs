@@ -17,7 +17,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::ast::*;
-use crate::reserved::regex_const_name;
+use crate::reserved::{header_const_name, regex_const_name};
 
 /// Visibility level for generated types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -135,10 +135,12 @@ impl CodeGenerator {
   pub(crate) fn generate(
     types: &[RustType],
     type_usage: &BTreeMap<String, TypeUsage>,
+    headers: &[String],
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
     let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
+    let header_consts = Self::generate_header_constants(headers);
     let type_tokens: Vec<TokenStream> = ordered
       .iter()
       .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage, visibility))
@@ -148,6 +150,8 @@ impl CodeGenerator {
       use serde::{Deserialize, Serialize};
 
       #regex_consts
+
+      #header_consts
 
       #(#type_tokens)*
     }
@@ -256,6 +260,26 @@ impl CodeGenerator {
       .collect();
 
     (quote! { #(#regex_defs)* }, lookup)
+  }
+
+  /// Generate HTTP header name constants from collected headers
+  fn generate_header_constants(headers: &[String]) -> TokenStream {
+    if headers.is_empty() {
+      return quote! {};
+    }
+
+    let const_tokens: Vec<TokenStream> = headers
+      .iter()
+      .map(|header| {
+        let const_name = header_const_name(header);
+        let ident = format_ident!("{}", const_name);
+        quote! {
+          const #ident: http::HeaderName = http::HeaderName::from_static(#header);
+        }
+      })
+      .collect();
+
+    quote! { #(#const_tokens)* }
   }
 
   /// Convert a JSON value to a Rust expression

@@ -68,7 +68,7 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Derives for enum, optionally include Eq
-  fn derives_for_enum(include_eq: bool) -> Vec<String> {
+  fn derives_for_enum() -> Vec<String> {
     let derives = vec![
       "Debug".into(),
       "Clone".into(),
@@ -504,26 +504,44 @@ impl<'a> SchemaConverter<'a> {
         }
       });
 
-      let const_values: Vec<_> = schema
-        .any_of
-        .iter()
-        .filter_map(|s| {
-          if let Ok(resolved) = s.resolve(self.graph.spec()) {
-            resolved.const_value.as_ref().map(|v| {
-              (
-                v.clone(),
+      let mut seen_values = HashSet::new();
+      let mut known_values = Vec::new();
+
+      for variant in &schema.any_of {
+        let Ok(resolved) = variant.resolve(self.graph.spec()) else {
+          continue;
+        };
+
+        if let Some(const_value) = resolved.const_value.as_ref() {
+          if let Some(str_val) = const_value.as_str()
+            && seen_values.insert(str_val.to_string())
+          {
+            known_values.push((
+              serde_json::Value::String(str_val.to_string()),
+              resolved.description.clone(),
+              resolved.deprecated.unwrap_or(false),
+            ));
+          }
+          continue;
+        }
+
+        if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::String)) && !resolved.enum_values.is_empty() {
+          for enum_value in &resolved.enum_values {
+            if let Some(str_val) = enum_value.as_str()
+              && seen_values.insert(str_val.to_string())
+            {
+              known_values.push((
+                serde_json::Value::String(str_val.to_string()),
                 resolved.description.clone(),
                 resolved.deprecated.unwrap_or(false),
-              )
-            })
-          } else {
-            None
+              ));
+            }
           }
-        })
-        .collect();
+        }
+      }
 
-      if has_freeform_string && !const_values.is_empty() {
-        return self.convert_string_enum_with_catchall(name, schema, &const_values);
+      if has_freeform_string && !known_values.is_empty() {
+        return self.convert_string_enum_with_catchall(name, schema, &known_values);
       }
     }
 
@@ -683,9 +701,9 @@ impl<'a> SchemaConverter<'a> {
     }
 
     let (serde_attrs, derives) = if kind == UnionKind::AnyOf {
-      (vec!["untagged".into()], Self::derives_for_enum(false))
+      (vec!["untagged".into()], Self::derives_for_enum())
     } else {
-      (vec![], Self::derives_for_enum(false))
+      (vec![], Self::derives_for_enum())
     };
 
     let main_enum = RustType::Enum(EnumDef {
@@ -741,7 +759,7 @@ impl<'a> SchemaConverter<'a> {
       docs: vec!["/// Known string values".to_string()],
       variants: known_variants,
       discriminator: None,
-      derives: Self::derives_for_enum(true),
+      derives: Self::derives_for_enum(),
       serde_attrs: vec![],
       outer_attrs: vec![],
     });
@@ -768,7 +786,7 @@ impl<'a> SchemaConverter<'a> {
       docs: Self::docs(schema.description.as_ref()),
       variants: outer_variants,
       discriminator: None,
-      derives: Self::derives_for_enum(true),
+      derives: Self::derives_for_enum(),
       serde_attrs: vec!["untagged".into()],
       outer_attrs: vec![],
     });
@@ -901,7 +919,7 @@ impl<'a> SchemaConverter<'a> {
       docs: Self::docs(schema.description.as_ref()),
       variants,
       discriminator: None,
-      derives: Self::derives_for_enum(true),
+      derives: Self::derives_for_enum(),
       serde_attrs: vec![],
       outer_attrs: vec![],
     }))
@@ -1145,7 +1163,19 @@ impl<'a> SchemaConverter<'a> {
   }
 
   pub(crate) fn extract_default_value(&self, schema: &ObjectSchema) -> Option<serde_json::Value> {
-    schema.default.clone()
+    if let Some(default) = schema.default.clone() {
+      return Some(default);
+    }
+
+    if let Some(const_value) = schema.const_value.clone() {
+      return Some(const_value);
+    }
+
+    if schema.enum_values.len() == 1 {
+      return schema.enum_values.first().cloned();
+    }
+
+    None
   }
 
   /// Resolves a property type with special handling for inline anyOf/oneOf unions
@@ -2532,6 +2562,62 @@ mod tests {
     assert!(
       required_struct.outer_attrs.is_empty(),
       "Required-only fields should not add serde_with::skip_serializing_none"
+    );
+  }
+
+  #[test]
+  fn test_const_values_become_field_defaults() {
+    let mut schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      additional_properties: Some(Schema::Boolean(BooleanSchema(false))),
+      ..Default::default()
+    };
+
+    schema.properties.insert(
+      "kind".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("plain")),
+        enum_values: vec![json!("plain")],
+        ..Default::default()
+      }),
+    );
+    schema.properties.insert(
+      "value".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    schema.required.push("kind".to_string());
+    schema.required.push("value".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("ConstStruct".to_string(), schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let (rust_type, _) = converter
+      .convert_struct("ConstStruct", graph.get_schema("ConstStruct").unwrap())
+      .unwrap();
+
+    let struct_def = match rust_type {
+      RustType::Struct(def) => def,
+      _ => panic!("Expected struct"),
+    };
+
+    let kind_field = struct_def
+      .fields
+      .iter()
+      .find(|f| f.name == "kind")
+      .expect("kind field should exist");
+
+    assert_eq!(
+      kind_field.default_value.as_ref(),
+      Some(&json!("plain")),
+      "const string should produce a default value"
     );
   }
 }
