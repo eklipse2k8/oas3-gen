@@ -482,10 +482,20 @@ impl CodeGenerator {
     }
     let attr_tokens: Vec<TokenStream> = attrs
       .iter()
-      .map(|a| syn::parse_str(a).unwrap_or_else(|_| quote! {}))
+      .map(|attr| {
+        let trimmed = attr.trim();
+        if trimmed.is_empty() {
+          return quote! {};
+        }
+        let source = if trimmed.starts_with("#[") {
+          trimmed.to_string()
+        } else {
+          format!("#[{}]", trimmed)
+        };
+        syn::parse_str::<TokenStream>(&source).unwrap_or_else(|_| quote! {})
+      })
       .collect();
-    //    quote! { #(#attr_tokens)* }
-    quote! {}
+    quote! { #(#attr_tokens)* }
   }
 
   fn generate_serde_attrs(attrs: &[String]) -> TokenStream {

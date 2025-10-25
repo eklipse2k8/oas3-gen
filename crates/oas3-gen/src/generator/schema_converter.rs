@@ -149,6 +149,15 @@ impl<'a> SchemaConverter<'a> {
     children
   }
 
+  /// Determine container-level attributes for a struct based on its fields
+  pub(crate) fn container_outer_attrs(fields: &[FieldDef]) -> Vec<String> {
+    if fields.iter().any(|field| field.rust_type.nullable) {
+      vec!["serde_with::skip_serializing_none".into()]
+    } else {
+      Vec::new()
+    }
+  }
+
   /// Finds the discriminator field name for a schema that appears in another schema's discriminator mapping.
   fn find_discriminator_field_for_child(&self, child_name: &str) -> Option<String> {
     if child_name.starts_with('<') {
@@ -262,13 +271,15 @@ impl<'a> SchemaConverter<'a> {
     let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
     let derives = Self::derives_for_struct(all_read_only, all_write_only);
 
+    let outer_attrs = Self::container_outer_attrs(&fields);
+
     let struct_type = RustType::Struct(StructDef {
       name: struct_name,
       docs: Self::docs(schema.description.as_ref()),
       fields,
       derives,
       serde_attrs,
-      outer_attrs: vec!["serde_with::skip_serializing_none".into()],
+      outer_attrs,
     });
 
     let mut all_types = vec![struct_type];
@@ -999,6 +1010,7 @@ impl<'a> SchemaConverter<'a> {
     let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
 
     let derives = Self::derives_for_struct(all_read_only, all_write_only);
+    let outer_attrs = Self::container_outer_attrs(&fields);
 
     let struct_type = RustType::Struct(StructDef {
       name: struct_name,
@@ -1006,8 +1018,7 @@ impl<'a> SchemaConverter<'a> {
       fields,
       derives,
       serde_attrs,
-      // Here is the serde_with container attribute to drop per-field skips:
-      outer_attrs: vec!["serde_with::skip_serializing_none".into()],
+      outer_attrs,
     });
 
     Ok((struct_type, inline_types))
@@ -2448,6 +2459,79 @@ mod tests {
     assert!(
       cat_struct.fields.iter().any(|field| field.name == "meows"),
       "Non-discriminator fields must still be generated"
+    );
+  }
+
+  #[test]
+  fn test_skip_serializing_none_only_added_when_options_present() {
+    let mut optional_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    optional_schema.properties.insert(
+      "value".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("OptionalStruct".to_string(), optional_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let (optional_type, _) = converter
+      .convert_struct("OptionalStruct", graph.get_schema("OptionalStruct").unwrap())
+      .unwrap();
+
+    let optional_struct = match optional_type {
+      RustType::Struct(def) => def,
+      _ => panic!("Expected struct for OptionalStruct"),
+    };
+
+    assert!(
+      optional_struct
+        .outer_attrs
+        .iter()
+        .any(|attr| attr.contains("serde_with::skip_serializing_none")),
+      "Optional fields should trigger serde_with::skip_serializing_none"
+    );
+
+    let mut required_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    required_schema.properties.insert(
+      "value".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    required_schema.required.push("value".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("RequiredStruct".to_string(), required_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let (required_type, _) = converter
+      .convert_struct("RequiredStruct", graph.get_schema("RequiredStruct").unwrap())
+      .unwrap();
+
+    let required_struct = match required_type {
+      RustType::Struct(def) => def,
+      _ => panic!("Expected struct for RequiredStruct"),
+    };
+
+    assert!(
+      required_struct.outer_attrs.is_empty(),
+      "Required-only fields should not add serde_with::skip_serializing_none"
     );
   }
 }

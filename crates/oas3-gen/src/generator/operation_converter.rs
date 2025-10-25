@@ -230,14 +230,9 @@ impl<'a> OperationConverter<'a> {
         )
     });
 
-    let mut outer_attrs: Vec<String> = vec![];
-
-    if fields.iter().any(|f| f.default_value.is_some()) {
-      outer_attrs.push("#[serde_with::skip_serializing_none]".to_string());
-
-      if all_fields_defaultable {
-        serde_attrs.push("default".to_string());
-      }
+    let outer_attrs = SchemaConverter::container_outer_attrs(&fields);
+    if fields.iter().any(|f| f.default_value.is_some()) && all_fields_defaultable {
+      serde_attrs.push("default".to_string());
     }
 
     let derives = vec![
