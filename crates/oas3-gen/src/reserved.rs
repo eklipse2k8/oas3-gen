@@ -27,7 +27,7 @@ static RESERVED_PASCAL_CASE: LazyLock<HashSet<&str>> = LazyLock::new(|| {
 /// A single, powerful sanitization function that handles the common base transformations.
 /// It transliterates to ASCII, replaces invalid characters with underscores, collapses
 /// consecutive underscores, and trims any leading or trailing underscores.
-fn sanitize(input: &str) -> String {
+pub(crate) fn sanitize(input: &str) -> String {
   if input.is_empty() {
     return String::new();
   }

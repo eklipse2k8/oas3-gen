@@ -33,6 +33,7 @@ use crate::generator::{
 ///
 /// This struct encapsulates the entire generation pipeline and provides
 /// simple methods for generating Rust code from OpenAPI specifications.
+#[derive(Debug)]
 pub struct Orchestrator {
   spec: oas3::Spec,
   visibility: Visibility,
@@ -246,7 +247,7 @@ mod tests {
   #[test]
   fn test_orchestrator_empty_spec() {
     let spec_json = r#"{
-      "openapi": "3.0.0",
+      "openapi": "3.1.0",
       "info": {
         "title": "Empty API",
         "version": "1.0.0"
@@ -264,7 +265,7 @@ mod tests {
   #[test]
   fn test_orchestrator_generate_empty() {
     let spec_json = r#"{
-      "openapi": "3.0.0",
+      "openapi": "3.1.0",
       "info": {
         "title": "Empty API",
         "version": "1.0.0"
@@ -288,7 +289,7 @@ mod tests {
   #[test]
   fn test_orchestrator_generate_with_header() {
     let spec_json = r#"{
-      "openapi": "3.0.0",
+      "openapi": "3.1.0",
       "info": {
         "title": "Test API",
         "version": "2.0.0",
@@ -313,7 +314,7 @@ mod tests {
   #[test]
   fn test_code_metadata() {
     let spec_json = r#"{
-      "openapi": "3.0.0",
+      "openapi": "3.1.0",
       "info": {
         "title": "Test API",
         "version": "1.0.0",

@@ -15,6 +15,7 @@ rust-version.workspace = true
 any_ascii.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+http.workspace = true
 inflections.workspace = true
 oas3.workspace = true
 oas3-gen-support.workspace = true

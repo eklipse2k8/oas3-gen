@@ -138,15 +138,6 @@ impl CodeGenerator {
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
-
-    // Check if we need the discriminated_enum macro
-    let has_discriminated_enums = ordered.iter().any(|ty| matches!(ty, RustType::DiscriminatedEnum(_)));
-    let discriminated_enum_import = if has_discriminated_enums {
-      quote! { use oas3_gen_support::discriminated_enum; }
-    } else {
-      quote! {}
-    };
-
     let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
     let type_tokens: Vec<TokenStream> = ordered
       .iter()
@@ -155,10 +146,6 @@ impl CodeGenerator {
 
     quote! {
       use serde::{Deserialize, Serialize};
-      use validator::Validate;
-      use oas3_gen_support::Default;
-
-      #discriminated_enum_import
 
       #regex_consts
 
@@ -338,7 +325,7 @@ impl CodeGenerator {
       match usage {
         TypeUsage::RequestOnly => {
           custom.push("Serialize".to_string());
-          custom.push("Validate".to_string());
+          custom.push("validator::Validate".to_string());
         }
         TypeUsage::ResponseOnly => {
           custom.push("Deserialize".to_string());
@@ -346,10 +333,10 @@ impl CodeGenerator {
         TypeUsage::Bidirectional => {
           custom.push("Serialize".to_string());
           custom.push("Deserialize".to_string());
-          custom.push("Validate".to_string());
+          custom.push("validator::Validate".to_string());
         }
       }
-      custom.push("Default".to_string());
+      custom.push("oas3_gen_support::Default".to_string());
       Self::generate_derives(&custom)
     } else {
       Self::generate_derives(&def.derives)
@@ -438,7 +425,7 @@ impl CodeGenerator {
 
       quote! {
         #docs
-        discriminated_enum! {
+        oas3_gen_support::discriminated_enum! {
           #vis enum #name {
             discriminator: #disc_field,
             variants: [
@@ -451,7 +438,7 @@ impl CodeGenerator {
     } else {
       quote! {
         #docs
-        discriminated_enum! {
+        oas3_gen_support::discriminated_enum! {
           #vis enum #name {
             discriminator: #disc_field,
             variants: [
@@ -481,7 +468,11 @@ impl CodeGenerator {
     if derives.is_empty() {
       return quote! {};
     }
-    let derive_idents: Vec<_> = derives.iter().map(|d| format_ident!("{}", d)).collect();
+    let derive_idents = derives
+      .iter()
+      .map(|d| syn::parse_str(d).unwrap_or_else(|_| quote! {}))
+      .collect::<Vec<_>>();
+
     quote! { #[derive(#(#derive_idents),*)] }
   }
 
@@ -491,12 +482,10 @@ impl CodeGenerator {
     }
     let attr_tokens: Vec<TokenStream> = attrs
       .iter()
-      .map(|a| {
-        let tokens: TokenStream = a.as_str().parse().unwrap_or_else(|_| quote! {});
-        quote! { #[#tokens] }
-      })
+      .map(|a| syn::parse_str(a).unwrap_or_else(|_| quote! {}))
       .collect();
-    quote! { #(#attr_tokens)* }
+    //    quote! { #(#attr_tokens)* }
+    quote! {}
   }
 
   fn generate_serde_attrs(attrs: &[String]) -> TokenStream {

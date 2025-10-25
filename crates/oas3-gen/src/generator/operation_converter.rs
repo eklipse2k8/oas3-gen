@@ -168,11 +168,7 @@ impl<'a> OperationConverter<'a> {
           (vec![], None, None)
         };
 
-        let mut serde_attrs = vec![];
-        if !is_required {
-          serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
-        }
-
+        let serde_attrs = vec![];
         fields.push(FieldDef {
           name: "body".to_string(),
           docs: body
@@ -234,18 +230,24 @@ impl<'a> OperationConverter<'a> {
         )
     });
 
-    if all_fields_defaultable && fields.iter().any(|f| f.default_value.is_some()) {
-      serde_attrs.push("default".to_string());
+    let mut outer_attrs: Vec<String> = vec![];
+
+    if fields.iter().any(|f| f.default_value.is_some()) {
+      outer_attrs.push("#[serde_with::skip_serializing_none]".to_string());
+
+      if all_fields_defaultable {
+        serde_attrs.push("default".to_string());
+      }
     }
 
-    // Always derive Serialize and Deserialize - per-field serde attributes handle readOnly/writeOnly
     let derives = vec![
-      "Debug".into(),
       "Clone".into(),
+      "Debug".into(),
       "Serialize".into(),
       "Deserialize".into(),
-      "Validate".into(),
-      "Default".into(), // Always derive Default
+      "PartialEq".into(),
+      "validator::Validate".into(),
+      "oas3_gen_support::Default".into(),
     ];
 
     Ok(StructDef {
@@ -254,7 +256,7 @@ impl<'a> OperationConverter<'a> {
       fields,
       derives,
       serde_attrs,
-      outer_attrs: vec![],
+      outer_attrs,
     })
   }
 
@@ -286,11 +288,6 @@ impl<'a> OperationConverter<'a> {
       serde_attrs.push(format!("rename = \"{}\"", param.name));
     }
 
-    // Add skip_serializing_if for optional parameters
-    if !is_required {
-      serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
-    }
-
     // Add location hint as a comment in docs
     let location_hint = match param.location {
       ParameterIn::Path => "Path parameter",
@@ -317,7 +314,7 @@ impl<'a> OperationConverter<'a> {
       regex_validation,
       default_value,
       read_only: false,
-      write_only: false, // Parameters could be either direction, keep both derives
+      write_only: false,
       deprecated: false,
       multiple_of: None,
     })

@@ -62,24 +62,21 @@ impl<'a> SchemaConverter<'a> {
     if !all_write_only {
       derives.push("Deserialize".into());
     }
-    derives.push("Validate".into());
-    derives.push("Default".into());
+    derives.push("validator::Validate".into());
+    derives.push("oas3_gen_support::Default".into());
     derives
   }
 
   /// Derives for enum, optionally include Eq
   fn derives_for_enum(include_eq: bool) -> Vec<String> {
-    let mut derives = vec![
+    let derives = vec![
       "Debug".into(),
       "Clone".into(),
       "PartialEq".into(),
       "Serialize".into(),
       "Deserialize".into(),
-      "Default".into(),
+      "oas3_gen_support::Default".into(),
     ];
-    if include_eq {
-      derives.insert(3, "Eq".into()); // after PartialEq for readability
-    }
     derives
   }
 
@@ -152,6 +149,38 @@ impl<'a> SchemaConverter<'a> {
     children
   }
 
+  /// Finds the discriminator field name for a schema that appears in another schema's discriminator mapping.
+  fn find_discriminator_field_for_child(&self, child_name: &str) -> Option<String> {
+    if child_name.starts_with('<') {
+      return None;
+    }
+
+    for schema_name in self.graph.schema_names() {
+      let Some(schema) = self.graph.get_schema(schema_name) else {
+        continue;
+      };
+      let Some(discriminator) = schema.discriminator.as_ref() else {
+        continue;
+      };
+      let Some(mapping) = discriminator.mapping.as_ref() else {
+        continue;
+      };
+
+      let matches_child = mapping.values().any(|ref_path| {
+        SchemaGraph::extract_ref_name(ref_path)
+          .as_deref()
+          .map(|mapped_name| mapped_name == child_name)
+          .unwrap_or(false)
+      });
+
+      if matches_child {
+        return Some(discriminator.property_name.clone());
+      }
+    }
+
+    None
+  }
+
   /// Convert a child schema that extends a discriminated parent
   fn convert_discriminated_child(
     &self,
@@ -164,25 +193,6 @@ impl<'a> SchemaConverter<'a> {
 
     let Some(discriminator_prop_name) = parent_schema.discriminator.as_ref().map(|d| d.property_name.clone()) else {
       return Err(anyhow::anyhow!("Parent schema is not discriminated"));
-    };
-
-    let discriminator_value = self.get_discriminator_value_for_child(name, schema, &discriminator_prop_name);
-
-    let disc_field = FieldDef {
-      name: to_rust_field_name(&discriminator_prop_name),
-      docs: vec![],
-      rust_type: TypeRef::new("String"),
-      serde_attrs: vec![
-        "default".to_string(),
-        format!("rename = \"{}\"", discriminator_prop_name),
-      ],
-      validation_attrs: vec![],
-      regex_validation: None,
-      default_value: Some(serde_json::Value::String(discriminator_value)),
-      read_only: false,
-      write_only: false,
-      deprecated: false,
-      multiple_of: None,
     };
 
     let mut merged_properties = BTreeMap::new();
@@ -246,9 +256,7 @@ impl<'a> SchemaConverter<'a> {
       }
     }
 
-    let mut fields = Vec::with_capacity(child_fields.len() + 1);
-    fields.push(disc_field);
-    fields.extend(child_fields);
+    let fields = child_fields;
 
     let all_read_only = !fields.is_empty() && fields.iter().all(|f| f.read_only);
     let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
@@ -266,26 +274,6 @@ impl<'a> SchemaConverter<'a> {
     let mut all_types = vec![struct_type];
     all_types.extend(inline_types);
     Ok(all_types)
-  }
-
-  /// Get the discriminator value for a child schema
-  fn get_discriminator_value_for_child(
-    &self,
-    child_name: &str,
-    child_schema: &ObjectSchema,
-    discriminator_prop_name: &str,
-  ) -> String {
-    for all_of_item in &child_schema.all_of {
-      if let ObjectOrReference::Object(inline_schema) = all_of_item
-        && let Some(disc_prop) = inline_schema.properties.get(discriminator_prop_name)
-        && let Ok(disc_schema) = disc_prop.resolve(self.graph.spec())
-        && let Some(default) = disc_schema.default.as_ref()
-        && let Some(default_str) = default.as_str()
-      {
-        return default_str.to_string();
-      }
-    }
-    format!("#{}", child_name)
   }
 
   /// Create a discriminated enum for schemas with discriminator mappings
@@ -911,6 +899,12 @@ impl<'a> SchemaConverter<'a> {
   /// Convert an object schema to a Rust struct
   pub(crate) fn convert_struct(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<(RustType, Vec<RustType>)> {
     let is_discriminated = self.is_discriminated_base_type(schema);
+    let inherited_discriminator_field = if is_discriminated {
+      None
+    } else {
+      self.find_discriminator_field_for_child(name)
+    };
+
     let struct_name_base = to_rust_type_name(name);
     let struct_name = if is_discriminated {
       format!("{}Base", struct_name_base)
@@ -921,7 +915,7 @@ impl<'a> SchemaConverter<'a> {
     let discriminator_field_to_exclude = if is_discriminated {
       schema.discriminator.as_ref().map(|d| d.property_name.as_str())
     } else {
-      None
+      inherited_discriminator_field.as_deref()
     };
 
     let (mut fields, inline_types) = self.convert_fields_core(
@@ -2344,26 +2338,116 @@ mod tests {
       "Optional inherited field should remain optional"
     );
 
-    let odata_field = user_struct
-      .fields
-      .iter()
-      .find(|field| field.name == "odata_type")
-      .expect("discriminator field should be generated");
-    assert_eq!(
-      odata_field.default_value.as_ref(),
-      Some(&json!("#microsoft.graph.user"))
-    );
     assert!(
-      odata_field
-        .serde_attrs
-        .iter()
-        .any(|attr| attr == r#"rename = "@odata.type""#),
-      "Discriminator field should keep rename attribute"
+      user_struct.fields.iter().all(|field| field.name != "odata_type"),
+      "Discriminator field should be omitted; enum tag supplies the discriminator"
     );
 
     assert!(
       user_struct.serde_attrs.iter().any(|attr| attr == "deny_unknown_fields"),
       "deny_unknown_fields should carry over from parent additionalProperties=false"
+    );
+  }
+
+  #[test]
+  fn test_discriminator_field_removed_from_child_struct() {
+    let mut cat_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    cat_schema.properties.insert(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("cat")),
+        default: Some(json!("cat")),
+        enum_values: vec![json!("cat")],
+        ..Default::default()
+      }),
+    );
+    cat_schema.properties.insert(
+      "meows".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
+        ..Default::default()
+      }),
+    );
+    cat_schema.required.push("type".to_string());
+    cat_schema.required.push("meows".to_string());
+
+    let mut dog_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    dog_schema.properties.insert(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("dog")),
+        default: Some(json!("dog")),
+        enum_values: vec![json!("dog")],
+        ..Default::default()
+      }),
+    );
+    dog_schema.properties.insert(
+      "barks".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
+        ..Default::default()
+      }),
+    );
+    dog_schema.required.push("type".to_string());
+    dog_schema.required.push("barks".to_string());
+
+    let mut mapping = BTreeMap::new();
+    mapping.insert("cat".to_string(), "#/components/schemas/Cat".to_string());
+    mapping.insert("dog".to_string(), "#/components/schemas/Dog".to_string());
+
+    let mut pet_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      discriminator: Some(Discriminator {
+        property_name: "type".to_string(),
+        mapping: Some(mapping),
+      }),
+      ..Default::default()
+    };
+    pet_schema.one_of.push(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/Cat".to_string(),
+      summary: None,
+      description: None,
+    });
+    pet_schema.one_of.push(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/Dog".to_string(),
+      summary: None,
+      description: None,
+    });
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Pet".to_string(), pet_schema);
+    schemas.insert("Cat".to_string(), cat_schema);
+    schemas.insert("Dog".to_string(), dog_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let cat_struct = converter
+      .convert_schema("Cat", graph.get_schema("Cat").unwrap())
+      .unwrap()
+      .into_iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) => Some(def),
+        _ => None,
+      })
+      .expect("Cat struct should be generated");
+
+    assert!(
+      cat_struct.fields.iter().all(|field| field.name != "r#type"),
+      "Discriminator property should be omitted from child struct; enum tag will supply it"
+    );
+    assert!(
+      cat_struct.fields.iter().any(|field| field.name == "meows"),
+      "Non-discriminator fields must still be generated"
     );
   }
 }

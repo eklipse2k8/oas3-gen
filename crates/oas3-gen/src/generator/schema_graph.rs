@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Schema},
+  spec::{ObjectOrReference, ObjectSchema, ParameterIn, Schema},
 };
 
 /// Graph structure for managing OpenAPI schemas and their dependencies
@@ -19,6 +19,7 @@ pub(crate) struct SchemaGraph {
   /// Schemas that are part of cycles
   cyclic_schemas: BTreeSet<String>,
   /// Reference to the original spec for resolution
+  headers: BTreeSet<String>,
   spec: Spec,
 }
 
@@ -28,6 +29,7 @@ impl SchemaGraph {
       schemas: BTreeMap::new(),
       dependencies: BTreeMap::new(),
       cyclic_schemas: BTreeSet::new(),
+      headers: BTreeSet::new(),
       spec,
     };
 
@@ -40,6 +42,8 @@ impl SchemaGraph {
       }
     }
 
+    graph.extract_operations()?;
+
     Ok(graph)
   }
 
@@ -51,6 +55,10 @@ impl SchemaGraph {
   /// Get all schema names
   pub(crate) fn schema_names(&self) -> Vec<&String> {
     self.schemas.keys().collect()
+  }
+
+  pub(crate) fn all_headers(&self) -> Vec<&String> {
+    self.headers.iter().collect()
   }
 
   /// Get the spec reference
@@ -70,6 +78,25 @@ impl SchemaGraph {
       ObjectOrReference::Ref { ref_path, .. } => Self::extract_ref_name(ref_path),
       ObjectOrReference::Object(_) => None,
     }
+  }
+
+  fn extract_operations(&mut self) -> anyhow::Result<()> {
+    for (_, _, operation) in self.spec.operations() {
+      for parameter in &operation.parameters {
+        let resolved = parameter.resolve(&self.spec)?;
+        match resolved.location {
+          ParameterIn::Path => {}
+          ParameterIn::Query => {}
+          ParameterIn::Header => {
+            let header_name = resolved.name.to_lowercase();
+            self.headers.insert(header_name);
+          }
+          ParameterIn::Cookie => {}
+        }
+      }
+    }
+
+    Ok(())
   }
 
   /// Build the dependency graph by analyzing all schema references

@@ -294,23 +294,23 @@ mod tests {
   }
 
   // Test for cyclic types with Box
+  #[serde_with::skip_serializing_none]
   #[derive(super::Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
   #[serde(default)]
   struct NodeA {
     #[default("node_a".to_string())]
     node_type: String,
     value: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     child: Option<Box<CyclicNode>>,
   }
 
+  #[serde_with::skip_serializing_none]
   #[derive(super::Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
   #[serde(default)]
   struct NodeB {
     #[default("node_b".to_string())]
     node_type: String,
     count: i32,
-    #[serde(skip_serializing_if = "Option::is_none")]
     child: Option<Box<CyclicNode>>,
   }
 
