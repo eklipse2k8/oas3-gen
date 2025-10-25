@@ -147,6 +147,8 @@ impl CodeGenerator {
       .collect();
 
     quote! {
+      use std::fmt::Write as _;
+
       use serde::{Deserialize, Serialize};
 
       #regex_consts
@@ -274,7 +276,7 @@ impl CodeGenerator {
         let const_name = header_const_name(header);
         let ident = format_ident!("{}", const_name);
         quote! {
-          const #ident: http::HeaderName = http::HeaderName::from_static(#header);
+          pub const #ident: http::HeaderName = http::HeaderName::from_static(#header);
         }
       })
       .collect();
@@ -380,13 +382,38 @@ impl CodeGenerator {
       visibility,
     );
 
-    quote! {
+    let struct_tokens = quote! {
       #docs
       #outer_attrs
       #derives
       #serde_attrs
       #vis struct #name {
         #(#fields),*
+      }
+    };
+
+    if def.methods.is_empty() {
+      struct_tokens
+    } else {
+      let methods: Vec<TokenStream> = def
+        .methods
+        .iter()
+        .map(|method| {
+          let docs = Self::generate_docs(&method.docs);
+          let tokens = &method.tokens;
+          quote! {
+            #docs
+            #tokens
+          }
+        })
+        .collect();
+
+      quote! {
+        #struct_tokens
+
+        impl #name {
+          #(#methods)*
+        }
       }
     }
   }

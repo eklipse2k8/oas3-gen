@@ -20,6 +20,7 @@ better_default.workspace = true
 chrono.workspace = true
 indexmap.workspace = true
 oas3.workspace = true
+percent-encoding.workspace = true
 prettyplease.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true

@@ -280,6 +280,7 @@ impl<'a> SchemaConverter<'a> {
       derives,
       serde_attrs,
       outer_attrs,
+      methods: vec![],
     });
 
     let mut all_types = vec![struct_type];
@@ -1043,6 +1044,7 @@ impl<'a> SchemaConverter<'a> {
       derives,
       serde_attrs,
       outer_attrs,
+      methods: vec![],
     });
 
     Ok((struct_type, inline_types))

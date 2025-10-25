@@ -1,4 +1,5 @@
 pub use better_default::Default;
+pub use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
 #[macro_export]
 macro_rules! discriminated_enum {
@@ -116,6 +117,8 @@ macro_rules! discriminated_enum {
     }
   };
 }
+
+pub const PATH_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
 #[cfg(test)]
 mod tests {

@@ -55,6 +55,8 @@ pub(crate) struct OperationInfo {
   pub(crate) response_type: Option<String>,
 }
 
+use proc_macro2::TokenStream;
+
 /// Rust struct definition
 #[derive(Debug, Clone)]
 pub(crate) struct StructDef {
@@ -64,6 +66,14 @@ pub(crate) struct StructDef {
   pub(crate) derives: Vec<String>,
   pub(crate) serde_attrs: Vec<String>,
   pub(crate) outer_attrs: Vec<String>,
+  pub(crate) methods: Vec<StructMethod>,
+}
+
+/// Associated method definition for a struct
+#[derive(Debug, Clone)]
+pub(crate) struct StructMethod {
+  pub(crate) docs: Vec<String>,
+  pub(crate) tokens: TokenStream,
 }
 
 /// Rust struct field definition

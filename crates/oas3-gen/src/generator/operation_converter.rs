@@ -3,12 +3,14 @@
 //! This module handles the conversion of OpenAPI operation definitions (paths, methods)
 //! into Rust struct types for requests and response metadata.
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::HashMap};
 
 use oas3::{
   Spec,
   spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
 };
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 
 use super::{ast::*, schema_converter::SchemaConverter, schema_graph::SchemaGraph, utils::doc_comment_lines};
 use crate::reserved::{to_rust_field_name, to_rust_type_name};
@@ -62,7 +64,7 @@ impl<'a> OperationConverter<'a> {
     // Generate request type if needed
     let request_type_name = if !operation.parameters.is_empty() || operation.request_body.is_some() {
       let request_name = format!("{}Request", base_name);
-      let request_struct = self.create_request_struct(&request_name, &base_name, operation)?;
+      let request_struct = self.create_request_struct(&request_name, &base_name, path, operation)?;
       types.push(RustType::Struct(request_struct));
       Some(request_name)
     } else {
@@ -103,8 +105,15 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Create a request struct from operation parameters and body
-  fn create_request_struct(&self, name: &str, base_name: &str, operation: &Operation) -> anyhow::Result<StructDef> {
+  fn create_request_struct(
+    &self,
+    name: &str,
+    base_name: &str,
+    path: &str,
+    operation: &Operation,
+  ) -> anyhow::Result<StructDef> {
     let mut fields = Vec::new();
+    let mut path_param_mappings: Vec<(String, String)> = Vec::new();
 
     // Process parameters
     let mut params: Vec<_> = operation
@@ -129,6 +138,9 @@ impl<'a> OperationConverter<'a> {
 
     for param in params {
       let field = self.convert_parameter(&param)?;
+      if matches!(param.location, ParameterIn::Path) {
+        path_param_mappings.push((field.name.clone(), param.name.clone()));
+      }
       fields.push(field);
     }
 
@@ -245,6 +257,8 @@ impl<'a> OperationConverter<'a> {
       "oas3_gen_support::Default".into(),
     ];
 
+    let methods = vec![Self::build_render_path_method(path, &path_param_mappings)];
+
     Ok(StructDef {
       name: to_rust_type_name(name),
       docs,
@@ -252,7 +266,100 @@ impl<'a> OperationConverter<'a> {
       derives,
       serde_attrs,
       outer_attrs,
+      methods,
     })
+  }
+
+  fn build_render_path_method(path: &str, path_params: &[(String, String)]) -> StructMethod {
+    let docs = vec!["/// Render the request path with percent-encoded parameters.".to_string()];
+
+    if path_params.is_empty() {
+      let template = path.to_string();
+      let tokens = quote! {
+        pub fn render_path(&self) -> String {
+          let _ = self;
+          #template.to_string()
+        }
+      };
+
+      return StructMethod { docs, tokens };
+    }
+
+    let mut param_map: HashMap<&str, &str> = HashMap::new();
+    for (rust_name, original_name) in path_params {
+      param_map.insert(original_name.as_str(), rust_name.as_str());
+    }
+
+    enum Segment {
+      Literal(String),
+      Parameter { rust_name: String },
+    }
+
+    let mut segments: Vec<Segment> = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(open_rel) = path[cursor..].find('{') {
+      let open = cursor + open_rel;
+      if open > cursor {
+        segments.push(Segment::Literal(path[cursor..open].to_string()));
+      }
+
+      let after_open = open + 1;
+      if let Some(close_rel) = path[after_open..].find('}') {
+        let close = after_open + close_rel;
+        let placeholder = &path[after_open..close];
+        if let Some(rust_name) = param_map.get(placeholder) {
+          segments.push(Segment::Parameter {
+            rust_name: (*rust_name).to_string(),
+          });
+        } else {
+          segments.push(Segment::Literal(format!("{{{}}}", placeholder)));
+        }
+        cursor = close + 1;
+      } else {
+        segments.push(Segment::Literal(path[open..].to_string()));
+        cursor = path.len();
+        break;
+      }
+    }
+
+    if cursor < path.len() {
+      segments.push(Segment::Literal(path[cursor..].to_string()));
+    }
+
+    let mut segment_tokens: Vec<TokenStream> = Vec::new();
+    for segment in segments {
+      match segment {
+        Segment::Literal(lit) => {
+          if !lit.is_empty() {
+            segment_tokens.push(quote! { path.push_str(#lit); });
+          }
+        }
+        Segment::Parameter { rust_name } => {
+          let ident = format_ident!("{}", rust_name);
+          segment_tokens.push(quote! {
+            {
+              let value = self.#ident.to_string();
+              write!(
+                path,
+                "{}",
+                oas3_gen_support::utf8_percent_encode(value.as_str(), oas3_gen_support::PATH_ENCODE_SET)
+              )
+              .expect("failed to encode path parameter");
+            }
+          });
+        }
+      }
+    }
+
+    let tokens = quote! {
+      pub fn render_path(&self) -> String {
+        let mut path = String::new();
+        #(#segment_tokens)*
+        path
+      }
+    };
+
+    StructMethod { docs, tokens }
   }
 
   /// Convert a parameter to a field definition
