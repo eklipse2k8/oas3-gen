@@ -15,10 +15,10 @@ rust-version.workspace = true
 any_ascii.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+crossterm.workspace = true
 http.workspace = true
 inflections.workspace = true
 oas3.workspace = true
-oas3-gen-support.workspace = true
 prettyplease.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true
@@ -27,11 +27,11 @@ serde.workspace = true
 serde_json.workspace = true
 syn.workspace = true
 tokio.workspace = true
-validator.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
 indexmap.workspace = true
-serde_with.workspace = true
+oas3-gen-support.workspace = true
 tempfile.workspace = true
 uuid.workspace = true
+validator = { workspace = true, features = ["derive"] }

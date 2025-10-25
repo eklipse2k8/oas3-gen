@@ -1,5 +1,7 @@
 pub use better_default::Default;
+pub use http::Method;
 pub use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+pub use serde_with::skip_serializing_none;
 
 #[macro_export]
 macro_rules! discriminated_enum {
@@ -119,6 +121,11 @@ macro_rules! discriminated_enum {
 }
 
 pub const PATH_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+
+#[inline]
+pub fn percent_encode_path_segment(segment: &str) -> String {
+  utf8_percent_encode(segment, PATH_ENCODE_SET).to_string()
+}
 
 #[cfg(test)]
 mod tests {

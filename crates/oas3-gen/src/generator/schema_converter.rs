@@ -152,7 +152,7 @@ impl<'a> SchemaConverter<'a> {
   /// Determine container-level attributes for a struct based on its fields
   pub(crate) fn container_outer_attrs(fields: &[FieldDef]) -> Vec<String> {
     if fields.iter().any(|field| field.rust_type.nullable) {
-      vec!["serde_with::skip_serializing_none".into()]
+      vec!["oas3_gen_support::skip_serializing_none".into()]
     } else {
       Vec::new()
     }
@@ -2534,8 +2534,8 @@ mod tests {
       optional_struct
         .outer_attrs
         .iter()
-        .any(|attr| attr.contains("serde_with::skip_serializing_none")),
-      "Optional fields should trigger serde_with::skip_serializing_none"
+        .any(|attr| attr.contains("oas3_gen_support::skip_serializing_none")),
+      "Optional fields should trigger oas3_gen_support::skip_serializing_none"
     );
 
     let mut required_schema = ObjectSchema {
@@ -2569,7 +2569,7 @@ mod tests {
 
     assert!(
       required_struct.outer_attrs.is_empty(),
-      "Required-only fields should not add serde_with::skip_serializing_none"
+      "Required-only fields should not add oas3_gen_support::skip_serializing_none"
     );
   }
 
