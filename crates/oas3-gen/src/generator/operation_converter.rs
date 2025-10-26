@@ -1,8 +1,3 @@
-//! Operation converter for transforming OpenAPI operations to Rust request/response types
-//!
-//! This module handles the conversion of OpenAPI operation definitions (paths, methods)
-//! into Rust struct types for requests and response metadata.
-
 use std::collections::HashMap;
 
 use http::Method;

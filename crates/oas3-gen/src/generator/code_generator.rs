@@ -1,16 +1,3 @@
-//! Code generation module for converting AST to Rust source code
-//!
-//! This module provides the `CodeGenerator` which converts the intermediate
-//! Rust AST representation into actual Rust source code using the quote! macro.
-//!
-//! Key features:
-//! - Generates regex validation constants with LazyLock pattern
-//! - Deduplicates types using BTreeMap ordering
-//! - Generates impl Default blocks for structs and enums
-//! - Handles serde attributes (rename, rename_all, skip_serializing_if, tag, untagged)
-//! - Generates validator attributes for runtime validation
-//! - Converts JSON default values to Rust expressions
-
 use std::collections::BTreeMap;
 
 use proc_macro2::TokenStream;

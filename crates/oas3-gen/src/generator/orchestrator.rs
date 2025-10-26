@@ -1,27 +1,3 @@
-//! Orchestration for the OpenAPI to Rust code generation pipeline.
-//!
-//! This module provides an opaque `Orchestrator` struct that manages the entire
-//! code generation process. The orchestrator hides all internal complexity and
-//! exposes a simple, clean API for CLI tools or library users.
-//!
-//! ## Usage
-//!
-//! ```no_run
-//! use openapi_gen::generator::orchestrator::Orchestrator;
-//!
-//! # fn example() -> anyhow::Result<()> {
-//! let spec_json = std::fs::read_to_string("openapi.json")?;
-//! let spec = oas3::from_json(spec_json)?;
-//!
-//! let orchestrator = Orchestrator::new(spec)?;
-//! let (code, stats) = orchestrator.generate_with_header("openapi.json")?;
-//!
-//! println!("Generated {} types with {} warnings", stats.types_generated, stats.warnings.len());
-//! std::fs::write("output.rs", code)?;
-//! # Ok(())
-//! # }
-//! ```
-
 use crate::generator::{
   code_generator::{CodeGenerator, Visibility},
   operation_converter::OperationConverter,
