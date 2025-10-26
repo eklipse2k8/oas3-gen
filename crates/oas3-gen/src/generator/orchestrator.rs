@@ -146,14 +146,8 @@ impl Orchestrator {
     let mut operations_info = Vec::new();
 
     if let Some(ref paths) = graph.spec().paths {
-      let mut path_entries: Vec<_> = paths.iter().collect();
-      path_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-      for (path, path_item) in path_entries {
-        let mut methods: Vec<_> = path_item.methods().into_iter().collect();
-        methods.sort_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()));
-
-        for (method, operation) in methods {
+      for (path, path_item) in paths {
+        for (method, operation) in path_item.methods() {
           let method_str = method.as_str();
           let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
@@ -172,9 +166,7 @@ impl Orchestrator {
 
     // Generate and format code
     let type_usage = CodeGenerator::build_type_usage_map(&operations_info);
-    let headers: Vec<String> = graph.all_headers().into_iter().cloned().collect();
-
-    let code = CodeGenerator::generate(&rust_types, &type_usage, &headers, self.visibility);
+    let code = CodeGenerator::generate(&rust_types, &type_usage, graph.all_headers(), self.visibility);
     let syntax_tree = syn::parse2(code)?;
     let formatted = prettyplease::unparse(&syntax_tree);
 

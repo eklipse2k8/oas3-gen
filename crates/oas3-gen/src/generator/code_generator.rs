@@ -106,15 +106,14 @@ impl CodeGenerator {
     }
   }
 
-  /// Build a map of type usage from operation metadata
+  /// Build a map of type usage (request/response) from operations
   pub(crate) fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
-    let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new(); // (used_in_request, used_in_response)
+    let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new();
 
     for op in operations {
-      // Track request types
       if let Some(ref req_type) = op.request_type {
         let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
-        entry.0 = true; // used in request
+        entry.0 = true;
       }
 
       for body_type in &op.request_body_types {
@@ -122,21 +121,19 @@ impl CodeGenerator {
         entry.0 = true;
       }
 
-      // Track response types
       if let Some(ref resp_type) = op.response_type {
         let entry = usage_map.entry(resp_type.clone()).or_insert((false, false));
-        entry.1 = true; // used in response
+        entry.1 = true;
       }
     }
 
-    // Convert to TypeUsage enum
     usage_map
       .into_iter()
       .map(|(type_name, (in_request, in_response))| {
         let usage = match (in_request, in_response) {
           (true, false) => TypeUsage::RequestOnly,
           (false, true) => TypeUsage::ResponseOnly,
-          (true, true) | (false, false) => TypeUsage::Bidirectional, // Bidirectional or unknown
+          (true, true) | (false, false) => TypeUsage::Bidirectional,
         };
         (type_name, usage)
       })
@@ -146,7 +143,7 @@ impl CodeGenerator {
   pub(crate) fn generate(
     types: &[RustType],
     type_usage: &BTreeMap<String, TypeUsage>,
-    headers: &[String],
+    headers: Vec<&String>,
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
@@ -274,7 +271,7 @@ impl CodeGenerator {
   }
 
   /// Generate HTTP header name constants from collected headers
-  fn generate_header_constants(headers: &[String]) -> TokenStream {
+  fn generate_header_constants(headers: Vec<&String>) -> TokenStream {
     if headers.is_empty() {
       return quote! {};
     }
