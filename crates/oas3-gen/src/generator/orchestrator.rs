@@ -1,27 +1,3 @@
-//! Orchestration for the OpenAPI to Rust code generation pipeline.
-//!
-//! This module provides an opaque `Orchestrator` struct that manages the entire
-//! code generation process. The orchestrator hides all internal complexity and
-//! exposes a simple, clean API for CLI tools or library users.
-//!
-//! ## Usage
-//!
-//! ```no_run
-//! use openapi_gen::generator::orchestrator::Orchestrator;
-//!
-//! # fn example() -> anyhow::Result<()> {
-//! let spec_json = std::fs::read_to_string("openapi.json")?;
-//! let spec = oas3::from_json(spec_json)?;
-//!
-//! let orchestrator = Orchestrator::new(spec)?;
-//! let (code, stats) = orchestrator.generate_with_header("openapi.json")?;
-//!
-//! println!("Generated {} types with {} warnings", stats.types_generated, stats.warnings.len());
-//! std::fs::write("output.rs", code)?;
-//! # Ok(())
-//! # }
-//! ```
-
 use crate::generator::{
   code_generator::{CodeGenerator, Visibility},
   operation_converter::OperationConverter,
@@ -146,14 +122,8 @@ impl Orchestrator {
     let mut operations_info = Vec::new();
 
     if let Some(ref paths) = graph.spec().paths {
-      let mut path_entries: Vec<_> = paths.iter().collect();
-      path_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-      for (path, path_item) in path_entries {
-        let mut methods: Vec<_> = path_item.methods().into_iter().collect();
-        methods.sort_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()));
-
-        for (method, operation) in methods {
+      for (path, path_item) in paths {
+        for (method, operation) in path_item.methods() {
           let method_str = method.as_str();
           let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
@@ -172,9 +142,7 @@ impl Orchestrator {
 
     // Generate and format code
     let type_usage = CodeGenerator::build_type_usage_map(&operations_info);
-    let headers: Vec<String> = graph.all_headers().into_iter().cloned().collect();
-
-    let code = CodeGenerator::generate(&rust_types, &type_usage, &headers, self.visibility);
+    let code = CodeGenerator::generate(&rust_types, &type_usage, graph.all_headers(), self.visibility);
     let syntax_tree = syn::parse2(code)?;
     let formatted = prettyplease::unparse(&syntax_tree);
 

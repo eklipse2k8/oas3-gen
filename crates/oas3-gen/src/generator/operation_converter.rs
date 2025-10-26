@@ -1,8 +1,3 @@
-//! Operation converter for transforming OpenAPI operations to Rust request/response types
-//!
-//! This module handles the conversion of OpenAPI operation definitions (paths, methods)
-//! into Rust struct types for requests and response metadata.
-
 use std::collections::HashMap;
 
 use http::Method;
@@ -40,7 +35,9 @@ impl<'a> OperationConverter<'a> {
       self.prepare_request_body(&base_name, operation)?;
     types.append(&mut request_body_defs);
 
-    let request_type_name = if !operation.parameters.is_empty() || operation.request_body.is_some() {
+    let has_parameters = self.operation_has_parameters(path, operation);
+
+    let request_type_name = if has_parameters || operation.request_body.is_some() {
       let request_name = format!("{}Request", base_name);
       let request_struct = self.create_request_struct(&request_name, path, operation, request_body_type)?;
       types.push(RustType::Struct(request_struct));
@@ -94,6 +91,22 @@ impl<'a> OperationConverter<'a> {
     } else {
       None
     }
+  }
+
+  #[inline]
+  fn operation_has_parameters(&self, path: &str, operation: &Operation) -> bool {
+    if !operation.parameters.is_empty() {
+      return true;
+    }
+
+    if let Some(ref paths) = self.spec.paths
+      && let Some(path_item) = paths.get(path)
+      && !path_item.parameters.is_empty()
+    {
+      return true;
+    }
+
+    false
   }
 
   fn prepare_request_body(
@@ -174,11 +187,28 @@ impl<'a> OperationConverter<'a> {
   ) -> anyhow::Result<StructDef> {
     let mut fields = Vec::new();
     let mut path_param_mappings: Vec<(String, String)> = Vec::new();
-    let params: Vec<_> = operation
-      .parameters
-      .iter()
-      .filter_map(|param_ref| param_ref.resolve(self.spec).ok())
-      .collect();
+    let mut params: Vec<Parameter> = Vec::new();
+
+    if let Some(ref paths) = self.spec.paths
+      && let Some(path_item) = paths.get(path)
+    {
+      for param_ref in &path_item.parameters {
+        if let Ok(param) = param_ref.resolve(self.spec)
+          && !params
+            .iter()
+            .any(|existing| existing.location == param.location && existing.name == param.name)
+        {
+          params.push(param);
+        }
+      }
+    }
+
+    for param_ref in &operation.parameters {
+      if let Ok(param) = param_ref.resolve(self.spec) {
+        params.retain(|existing| !(existing.location == param.location && existing.name == param.name));
+        params.push(param);
+      }
+    }
 
     for param in params {
       let field = self.convert_parameter(&param)?;

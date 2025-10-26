@@ -1,16 +1,3 @@
-//! Code generation module for converting AST to Rust source code
-//!
-//! This module provides the `CodeGenerator` which converts the intermediate
-//! Rust AST representation into actual Rust source code using the quote! macro.
-//!
-//! Key features:
-//! - Generates regex validation constants with LazyLock pattern
-//! - Deduplicates types using BTreeMap ordering
-//! - Generates impl Default blocks for structs and enums
-//! - Handles serde attributes (rename, rename_all, skip_serializing_if, tag, untagged)
-//! - Generates validator attributes for runtime validation
-//! - Converts JSON default values to Rust expressions
-
 use std::collections::BTreeMap;
 
 use proc_macro2::TokenStream;
@@ -106,15 +93,14 @@ impl CodeGenerator {
     }
   }
 
-  /// Build a map of type usage from operation metadata
+  /// Build a map of type usage (request/response) from operations
   pub(crate) fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
-    let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new(); // (used_in_request, used_in_response)
+    let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new();
 
     for op in operations {
-      // Track request types
       if let Some(ref req_type) = op.request_type {
         let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
-        entry.0 = true; // used in request
+        entry.0 = true;
       }
 
       for body_type in &op.request_body_types {
@@ -122,21 +108,19 @@ impl CodeGenerator {
         entry.0 = true;
       }
 
-      // Track response types
       if let Some(ref resp_type) = op.response_type {
         let entry = usage_map.entry(resp_type.clone()).or_insert((false, false));
-        entry.1 = true; // used in response
+        entry.1 = true;
       }
     }
 
-    // Convert to TypeUsage enum
     usage_map
       .into_iter()
       .map(|(type_name, (in_request, in_response))| {
         let usage = match (in_request, in_response) {
           (true, false) => TypeUsage::RequestOnly,
           (false, true) => TypeUsage::ResponseOnly,
-          (true, true) | (false, false) => TypeUsage::Bidirectional, // Bidirectional or unknown
+          (true, true) | (false, false) => TypeUsage::Bidirectional,
         };
         (type_name, usage)
       })
@@ -146,7 +130,7 @@ impl CodeGenerator {
   pub(crate) fn generate(
     types: &[RustType],
     type_usage: &BTreeMap<String, TypeUsage>,
-    headers: &[String],
+    headers: Vec<&String>,
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
@@ -158,8 +142,6 @@ impl CodeGenerator {
       .collect();
 
     quote! {
-      use std::fmt::Write as _;
-
       use serde::{Deserialize, Serialize};
 
       #regex_consts
@@ -276,7 +258,7 @@ impl CodeGenerator {
   }
 
   /// Generate HTTP header name constants from collected headers
-  fn generate_header_constants(headers: &[String]) -> TokenStream {
+  fn generate_header_constants(headers: Vec<&String>) -> TokenStream {
     if headers.is_empty() {
       return quote! {};
     }
@@ -438,37 +420,33 @@ impl CodeGenerator {
     let name = format_ident!("{}", method.name);
     let body = match &method.kind {
       StructMethodKind::RenderPath { segments } => {
-        let segment_tokens: Vec<TokenStream> = segments
-          .iter()
-          .map(|segment| match segment {
+        let mut format_string = String::new();
+        let mut fallback_string = String::new();
+        let mut args: Vec<TokenStream> = Vec::new();
+
+        for segment in segments {
+          match segment {
             PathSegment::Literal(lit) => {
-              if lit.is_empty() {
-                quote! {}
-              } else {
-                quote! { path.push_str(#lit); }
-              }
+              let escaped = lit.replace('{', "{{").replace('}', "}}");
+              format_string.push_str(&escaped);
+              fallback_string.push_str(lit);
             }
             PathSegment::Parameter { field } => {
-              let ident = format_ident!("{field}");
-              quote! {
-                {
-                  let value = self.#ident.to_string();
-                  write!(
-                    path,
-                    "{}",
-                    oas3_gen_support::utf8_percent_encode(value.as_str(), oas3_gen_support::PATH_ENCODE_SET)
-                  )
-                  .expect("failed to encode path parameter");
-                }
-              }
+              format_string.push_str("{}");
+              fallback_string.push_str("{}");
+              let ident = format_ident!("{}", field);
+              args.push(quote! {
+                oas3_gen_support::percent_encode_path_segment(&self.#ident.to_string())
+              });
             }
-          })
-          .collect();
+          }
+        }
 
-        quote! {
-          let mut path = String::new();
-          #(#segment_tokens)*
-          path
+        if args.is_empty() {
+          quote! { #fallback_string.to_string() }
+        } else {
+          let args_tokens = args;
+          quote! { format!(#format_string, #(#args_tokens),*) }
         }
       }
     };

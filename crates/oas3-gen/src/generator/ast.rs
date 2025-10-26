@@ -1,8 +1,3 @@
-//! Abstract Syntax Tree (AST) types for Rust code generation
-//!
-//! This module contains the intermediate representation of Rust types
-//! that will be generated from OpenAPI schemas.
-
 /// Discriminated enum variant mapping
 #[derive(Debug, Clone)]
 pub(crate) struct DiscriminatedVariant {

@@ -1,7 +1,3 @@
-//! Schema graph for managing OpenAPI schema dependencies
-//!
-//! This module handles schema storage, dependency tracking, and cycle detection.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::{
@@ -18,8 +14,9 @@ pub(crate) struct SchemaGraph {
   dependencies: BTreeMap<String, BTreeSet<String>>,
   /// Schemas that are part of cycles
   cyclic_schemas: BTreeSet<String>,
-  /// Reference to the original spec for resolution
+  /// Collected HTTP header names from parameters
   headers: BTreeSet<String>,
+  /// Reference to the original spec for resolution
   spec: Spec,
 }
 
