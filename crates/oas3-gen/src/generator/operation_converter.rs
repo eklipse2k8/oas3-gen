@@ -3,11 +3,23 @@ use std::collections::HashMap;
 use http::Method;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
+  spec::{ObjectOrReference, Operation, Parameter, ParameterIn, ParameterStyle},
 };
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
 use super::{ast::*, schema_converter::SchemaConverter, schema_graph::SchemaGraph, utils::doc_comment_lines};
 use crate::reserved::{to_rust_field_name, to_rust_type_name};
+
+const QUERY_COMPONENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+
+#[derive(Debug, Clone)]
+struct QueryParamMapping {
+  rust_field: String,
+  original_name: String,
+  explode: bool,
+  optional: bool,
+  is_array: bool,
+}
 
 /// Converter for OpenAPI operations to Rust request/response types
 pub(crate) struct OperationConverter<'a> {
@@ -187,6 +199,7 @@ impl<'a> OperationConverter<'a> {
   ) -> anyhow::Result<StructDef> {
     let mut fields = Vec::new();
     let mut path_param_mappings: Vec<(String, String)> = Vec::new();
+    let mut query_param_mappings: Vec<QueryParamMapping> = Vec::new();
     let mut params: Vec<Parameter> = Vec::new();
 
     if let Some(ref paths) = self.spec.paths
@@ -212,6 +225,8 @@ impl<'a> OperationConverter<'a> {
 
     for param in params {
       let field = self.convert_parameter(&param)?;
+      let optional = field.rust_type.nullable;
+      let is_array = field.rust_type.is_array;
 
       match param.location {
         ParameterIn::Path => {
@@ -232,6 +247,13 @@ impl<'a> OperationConverter<'a> {
               param.name,
             );
           }
+          query_param_mappings.push(QueryParamMapping {
+            rust_field: field.name.clone(),
+            original_name: param.name.clone(),
+            explode: Self::query_param_explode(&param),
+            optional,
+            is_array,
+          });
         }
         ParameterIn::Header => {
           // TODO: handle header parameters if needed
@@ -369,7 +391,11 @@ impl<'a> OperationConverter<'a> {
       "oas3_gen_support::Default".into(),
     ];
 
-    let methods = vec![Self::build_render_path_method(path, &path_param_mappings)];
+    let methods = vec![Self::build_render_path_method(
+      path,
+      &path_param_mappings,
+      &query_param_mappings,
+    )];
 
     Ok(StructDef {
       name: to_rust_type_name(name),
@@ -382,7 +408,11 @@ impl<'a> OperationConverter<'a> {
     })
   }
 
-  fn build_render_path_method(path: &str, path_params: &[(String, String)]) -> StructMethod {
+  fn build_render_path_method(
+    path: &str,
+    path_params: &[(String, String)],
+    query_params: &[QueryParamMapping],
+  ) -> StructMethod {
     let docs = vec!["/// Render the request path with percent-encoded parameters.".to_string()];
 
     if path_params.is_empty() {
@@ -390,7 +420,19 @@ impl<'a> OperationConverter<'a> {
       return StructMethod {
         name: "render_path".to_string(),
         docs,
-        kind: StructMethodKind::RenderPath { segments },
+        kind: StructMethodKind::RenderPath {
+          segments,
+          query_params: query_params
+            .iter()
+            .map(|mapping| QueryParameter {
+              field: mapping.rust_field.clone(),
+              encoded_name: Self::encode_query_name(&mapping.original_name),
+              explode: mapping.explode,
+              optional: mapping.optional,
+              is_array: mapping.is_array,
+            })
+            .collect(),
+        },
       };
     }
 
@@ -430,11 +472,34 @@ impl<'a> OperationConverter<'a> {
       segments.push(PathSegment::Literal(path[cursor..].to_string()));
     }
 
+    let query_params = query_params
+      .iter()
+      .map(|mapping| QueryParameter {
+        field: mapping.rust_field.clone(),
+        encoded_name: Self::encode_query_name(&mapping.original_name),
+        explode: mapping.explode,
+        optional: mapping.optional,
+        is_array: mapping.is_array,
+      })
+      .collect();
+
     StructMethod {
       name: "render_path".to_string(),
       docs,
-      kind: StructMethodKind::RenderPath { segments },
+      kind: StructMethodKind::RenderPath { segments, query_params },
     }
+  }
+
+  fn query_param_explode(param: &Parameter) -> bool {
+    if let Some(explode) = param.explode {
+      explode
+    } else {
+      matches!(param.style, None | Some(ParameterStyle::Form))
+    }
+  }
+
+  fn encode_query_name(name: &str) -> String {
+    utf8_percent_encode(name, QUERY_COMPONENT_ENCODE_SET).to_string()
   }
 
   /// Convert a parameter to a field definition

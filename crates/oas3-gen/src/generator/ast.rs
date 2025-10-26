@@ -72,8 +72,20 @@ pub(crate) struct StructMethod {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct QueryParameter {
+  pub(crate) field: String,
+  pub(crate) encoded_name: String,
+  pub(crate) explode: bool,
+  pub(crate) optional: bool,
+  pub(crate) is_array: bool,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum StructMethodKind {
-  RenderPath { segments: Vec<PathSegment> },
+  RenderPath {
+    segments: Vec<PathSegment>,
+    query_params: Vec<QueryParameter>,
+  },
 }
 
 #[derive(Debug, Clone)]

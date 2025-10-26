@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.8.9 - 2025-10-26
+
+* Adding in query parameters
+
 ## 0.7.1 - 2025-10-26
 
 * Include paths with injected parameters.

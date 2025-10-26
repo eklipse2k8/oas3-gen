@@ -699,7 +699,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -711,6 +711,7 @@ dependencies = [
  "inflections",
  "oas3",
  "oas3-gen-support",
+ "percent-encoding",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -726,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen-support"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "better_default",
