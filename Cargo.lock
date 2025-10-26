@@ -711,6 +711,7 @@ dependencies = [
  "inflections",
  "oas3",
  "oas3-gen-support",
+ "percent-encoding",
  "prettyplease",
  "proc-macro2",
  "quote",

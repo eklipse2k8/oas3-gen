@@ -127,6 +127,13 @@ pub fn percent_encode_path_segment(segment: &str) -> String {
   utf8_percent_encode(segment, PATH_ENCODE_SET).to_string()
 }
 
+pub const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+
+#[inline]
+pub fn percent_encode_query_component(component: &str) -> String {
+  utf8_percent_encode(component, QUERY_ENCODE_SET).to_string()
+}
+
 #[cfg(test)]
 mod tests {
 

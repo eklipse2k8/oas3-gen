@@ -419,7 +419,7 @@ impl CodeGenerator {
     let docs = Self::generate_docs(&method.docs);
     let name = format_ident!("{}", method.name);
     let body = match &method.kind {
-      StructMethodKind::RenderPath { segments } => {
+      StructMethodKind::RenderPath { segments, query_params } => {
         let mut format_string = String::new();
         let mut fallback_string = String::new();
         let mut args: Vec<TokenStream> = Vec::new();
@@ -442,11 +442,26 @@ impl CodeGenerator {
           }
         }
 
-        if args.is_empty() {
+        let path_expr = if args.is_empty() {
           quote! { #fallback_string.to_string() }
         } else {
           let args_tokens = args;
           quote! { format!(#format_string, #(#args_tokens),*) }
+        };
+
+        if query_params.is_empty() {
+          path_expr
+        } else {
+          let query_statements: Vec<TokenStream> =
+            query_params.iter().map(Self::generate_query_param_statement).collect();
+
+          quote! {
+            use std::fmt::Write as _;
+            let mut path = #path_expr;
+            let mut prefix = '\0';
+            #(#query_statements)*
+            path
+          }
         }
       }
     };
@@ -455,6 +470,66 @@ impl CodeGenerator {
       #docs
       pub fn #name(&self) -> String {
         #body
+      }
+    }
+  }
+
+  fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
+    let ident = format_ident!("{}", param.field);
+    let key = &param.encoded_name;
+    let param_equal = format!("{{prefix}}{key}={{}}");
+
+    if param.optional {
+      if param.is_array {
+        if param.explode {
+          quote! {
+            if let Some(values) = &self.#ident {
+              for value in values {
+                prefix = if prefix != '\0' { '&' } else { '?' };
+                write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+              }
+            }
+          }
+        } else {
+          quote! {
+            if let Some(values) = &self.#ident {
+              if !values.is_empty() {
+                prefix = if prefix != '\0' { '&' } else { '?' };
+                let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
+                write!(&mut path, #param_equal, values).unwrap();
+              }
+            }
+          }
+        }
+      } else {
+        quote! {
+          if let Some(value) = &self.#ident {
+            prefix = if prefix != '\0' { '&' } else { '?' };
+            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+          }
+        }
+      }
+    } else if param.is_array {
+      if param.explode {
+        quote! {
+          for value in &self.#ident {
+            prefix = if prefix != '\0' { '&' } else { '?' };
+            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+          }
+        }
+      } else {
+        quote! {
+          if !self.#ident.is_empty() {
+            prefix = if prefix != '\0' { '&' } else { '?' };
+            let values = self.#ident.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
+            write!(&mut path, #param_equal, values).unwrap();
+          }
+        }
+      }
+    } else {
+      quote! {
+        prefix = if prefix != '\0' { '&' } else { '?' };
+        write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&self.#ident.to_string())).unwrap();
       }
     }
   }
