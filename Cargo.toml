@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.7.1"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -35,15 +35,20 @@ panic = "unwind"
 split-debuginfo = "unpacked"
 
 [workspace.dependencies]
+# Workspace Members
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.7.1" }
+
+# External Dependencies
 any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
 better_default = { version = "1.0" }
+chrono = { version = ">=0.4.20", default-features = false, features = ["std", "clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = { version = "0.29", default-features = false }
-inflections = { version = "1.1" }
 http = { version = "1.3" }
+indexmap = { version = "2.12", features = ["serde"] }
+inflections = { version = "1.1" }
 oas3 = { version = "0.19" }
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.7.0" }
 percent-encoding = { version = "2.3" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }
@@ -53,17 +58,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_with = { version = "3.15", features = ["chrono"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
-tokio = { version = "1.48", default-features = false, features = [
-  "rt-multi-thread",
-  "fs",
-  "macros",
-] }
-validator = { version = "0.20" }
-chrono = { version = "0.4", default-features = false, features = [
-  "std",
-  "clock",
-  "serde",
-] }
-indexmap = { version = "2.12", features = ["serde"] }
 tempfile = { version = "3.14" }
-uuid = { version = "1.11", features = ["serde"] }
+tokio = { version = "1.48", default-features = false, features = ["rt-multi-thread", "fs", "macros"] }
+uuid = { version = "1.18", features = ["serde"] }
+validator = { version = "0.20" }

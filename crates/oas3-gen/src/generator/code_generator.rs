@@ -158,8 +158,6 @@ impl CodeGenerator {
       .collect();
 
     quote! {
-      use std::fmt::Write as _;
-
       use serde::{Deserialize, Serialize};
 
       #regex_consts
@@ -438,37 +436,33 @@ impl CodeGenerator {
     let name = format_ident!("{}", method.name);
     let body = match &method.kind {
       StructMethodKind::RenderPath { segments } => {
-        let segment_tokens: Vec<TokenStream> = segments
-          .iter()
-          .map(|segment| match segment {
+        let mut format_string = String::new();
+        let mut fallback_string = String::new();
+        let mut args: Vec<TokenStream> = Vec::new();
+
+        for segment in segments {
+          match segment {
             PathSegment::Literal(lit) => {
-              if lit.is_empty() {
-                quote! {}
-              } else {
-                quote! { path.push_str(#lit); }
-              }
+              let escaped = lit.replace('{', "{{").replace('}', "}}");
+              format_string.push_str(&escaped);
+              fallback_string.push_str(lit);
             }
             PathSegment::Parameter { field } => {
-              let ident = format_ident!("{field}");
-              quote! {
-                {
-                  let value = self.#ident.to_string();
-                  write!(
-                    path,
-                    "{}",
-                    oas3_gen_support::utf8_percent_encode(value.as_str(), oas3_gen_support::PATH_ENCODE_SET)
-                  )
-                  .expect("failed to encode path parameter");
-                }
-              }
+              format_string.push_str("{}");
+              fallback_string.push_str("{}");
+              let ident = format_ident!("{}", field);
+              args.push(quote! {
+                oas3_gen_support::percent_encode_path_segment(&self.#ident.to_string())
+              });
             }
-          })
-          .collect();
+          }
+        }
 
-        quote! {
-          let mut path = String::new();
-          #(#segment_tokens)*
-          path
+        if args.is_empty() {
+          quote! { #fallback_string.to_string() }
+        } else {
+          let args_tokens = args;
+          quote! { format!(#format_string, #(#args_tokens),*) }
         }
       }
     };
