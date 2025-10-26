@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.7.1 - 2025-10-26
+
+* Include paths with injected parameters.
+
 ## 0.6.0 - 2025-10-23
 
 * Refactor code into separate crates and improve structure
