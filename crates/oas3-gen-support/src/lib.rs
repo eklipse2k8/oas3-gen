@@ -1,4 +1,7 @@
 pub use better_default::Default;
+pub use http::Method;
+pub use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+pub use serde_with::skip_serializing_none;
 
 #[macro_export]
 macro_rules! discriminated_enum {
@@ -115,6 +118,13 @@ macro_rules! discriminated_enum {
       }
     }
   };
+}
+
+pub const PATH_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+
+#[inline]
+pub fn percent_encode_path_segment(segment: &str) -> String {
+  utf8_percent_encode(segment, PATH_ENCODE_SET).to_string()
 }
 
 #[cfg(test)]
@@ -294,23 +304,23 @@ mod tests {
   }
 
   // Test for cyclic types with Box
+  #[serde_with::skip_serializing_none]
   #[derive(super::Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
   #[serde(default)]
   struct NodeA {
     #[default("node_a".to_string())]
     node_type: String,
     value: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     child: Option<Box<CyclicNode>>,
   }
 
+  #[serde_with::skip_serializing_none]
   #[derive(super::Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
   #[serde(default)]
   struct NodeB {
     #[default("node_b".to_string())]
     node_type: String,
     count: i32,
-    #[serde(skip_serializing_if = "Option::is_none")]
     child: Option<Box<CyclicNode>>,
   }
 

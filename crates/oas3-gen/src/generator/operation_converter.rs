@@ -3,8 +3,9 @@
 //! This module handles the conversion of OpenAPI operation definitions (paths, methods)
 //! into Rust struct types for requests and response metadata.
 
-use std::cmp::Ordering;
+use std::collections::HashMap;
 
+use http::Method;
 use oas3::{
   Spec,
   spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
@@ -33,36 +34,15 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
   ) -> anyhow::Result<(Vec<RustType>, OperationInfo)> {
     let mut types = Vec::new();
-
-    // Generate a base name for the operation
     let base_name = to_rust_type_name(operation_id);
 
-    // Generate inline request body struct if needed
-    if let Some(ref body_ref) = operation.request_body
-      && let Ok(body) = body_ref.resolve(self.spec)
-      && let Some((_content_type, media_type)) = body.content.iter().next()
-      && let Some(ref schema_ref) = media_type.schema
-    {
-      // Check if this is an inline schema (not a $ref)
-      if let ObjectOrReference::Object(inline_schema) = schema_ref
-        && !inline_schema.properties.is_empty()
-      {
-        // Generate a struct for the inline request body
-        let body_struct_name = format!("{}RequestBody", base_name);
-        let (body_struct, inline_types) = self.schema_converter.convert_struct(&body_struct_name, inline_schema)?;
+    let (request_body_type, mut request_body_defs, request_body_usage) =
+      self.prepare_request_body(&base_name, operation)?;
+    types.append(&mut request_body_defs);
 
-        // Add inline types first (if any)
-        types.extend(inline_types);
-
-        // Add the body struct
-        types.push(body_struct);
-      }
-    }
-
-    // Generate request type if needed
     let request_type_name = if !operation.parameters.is_empty() || operation.request_body.is_some() {
       let request_name = format!("{}Request", base_name);
-      let request_struct = self.create_request_struct(&request_name, &base_name, operation)?;
+      let request_struct = self.create_request_struct(&request_name, path, operation, request_body_type)?;
       types.push(RustType::Struct(request_struct));
       Some(request_name)
     } else {
@@ -97,103 +77,213 @@ impl<'a> OperationConverter<'a> {
       description: operation.description.clone(),
       request_type: request_type_name,
       response_type: response_type_name,
+      request_body_types: request_body_usage,
     };
 
     Ok((types, op_info))
   }
 
-  /// Create a request struct from operation parameters and body
-  fn create_request_struct(&self, name: &str, base_name: &str, operation: &Operation) -> anyhow::Result<StructDef> {
-    let mut fields = Vec::new();
+  /// Return `Method` of the operation built from the `path`
+  #[inline]
+  fn operation_method(&self, path: &str, operation: &Operation) -> Option<Method> {
+    if let Some(ref paths) = self.spec.paths
+      && let Some(item) = paths.get(path)
+      && let Some((method, _)) = item.methods().into_iter().find(|m| m.1 == operation)
+    {
+      Some(method)
+    } else {
+      None
+    }
+  }
 
-    // Process parameters
-    let mut params: Vec<_> = operation
+  fn prepare_request_body(
+    &self,
+    base_name: &str,
+    operation: &Operation,
+  ) -> anyhow::Result<(Option<TypeRef>, Vec<RustType>, Vec<String>)> {
+    let mut generated_types = Vec::new();
+    let mut request_usage = Vec::new();
+
+    let Some(body_ref) = operation.request_body.as_ref() else {
+      return Ok((None, generated_types, request_usage));
+    };
+
+    let body = body_ref.resolve(self.spec)?;
+    let Some((_content_type, media_type)) = body.content.iter().next() else {
+      return Ok((None, generated_types, request_usage));
+    };
+
+    let Some(schema_or_ref) = media_type.schema.as_ref() else {
+      return Ok((None, generated_types, request_usage));
+    };
+
+    let raw_body_type_name = format!("{base_name}RequestBody");
+    let rust_body_type_name = to_rust_type_name(&raw_body_type_name);
+    let mut resolved_type: Option<TypeRef> = None;
+
+    match schema_or_ref {
+      ObjectOrReference::Object(inline_schema) => {
+        if !inline_schema.properties.is_empty() {
+          let (body_struct, mut inline_types) = self
+            .schema_converter
+            .convert_struct(&raw_body_type_name, inline_schema)?;
+          generated_types.append(&mut inline_types);
+          generated_types.push(body_struct);
+          resolved_type = Some(TypeRef::new(rust_body_type_name.clone()));
+          request_usage.push(rust_body_type_name.clone());
+        }
+      }
+      ObjectOrReference::Ref { ref_path, .. } => {
+        let target_name = SchemaGraph::extract_ref_name(ref_path)
+          .or_else(|| ref_path.rsplit('/').next().map(|segment| segment.to_string()));
+
+        if let Some(target) = target_name {
+          let alias = TypeAliasDef {
+            name: rust_body_type_name.clone(),
+            docs: body
+              .description
+              .as_ref()
+              .map(|d| doc_comment_lines(d))
+              .unwrap_or_default(),
+            target: TypeRef::new(to_rust_type_name(&target)),
+          };
+          generated_types.push(RustType::TypeAlias(alias));
+          resolved_type = Some(TypeRef::new(rust_body_type_name.clone()));
+          request_usage.push(to_rust_type_name(&target));
+          request_usage.push(rust_body_type_name.clone());
+        }
+      }
+    }
+
+    if resolved_type.is_none()
+      && let Ok(resolved_schema) = schema_or_ref.resolve(self.spec)
+    {
+      resolved_type = Some(self.schema_converter.schema_to_type_ref(&resolved_schema)?);
+    }
+
+    Ok((resolved_type, generated_types, request_usage))
+  }
+
+  /// Create a request struct from operation parameters and body
+  fn create_request_struct(
+    &self,
+    name: &str,
+    path: &str,
+    operation: &Operation,
+    body_type: Option<TypeRef>,
+  ) -> anyhow::Result<StructDef> {
+    let mut fields = Vec::new();
+    let mut path_param_mappings: Vec<(String, String)> = Vec::new();
+    let params: Vec<_> = operation
       .parameters
       .iter()
       .filter_map(|param_ref| param_ref.resolve(self.spec).ok())
       .collect();
 
-    params.sort_by(|a, b| {
-      let rank = |loc: &ParameterIn| match loc {
-        ParameterIn::Path => 0u8,
-        ParameterIn::Query => 1,
-        ParameterIn::Header => 2,
-        ParameterIn::Cookie => 3,
-      };
-
-      match rank(&a.location).cmp(&rank(&b.location)) {
-        Ordering::Equal => a.name.cmp(&b.name),
-        other => other,
-      }
-    });
-
     for param in params {
       let field = self.convert_parameter(&param)?;
+
+      match param.location {
+        ParameterIn::Path => {
+          if !param.required.unwrap_or(false) {
+            eprintln!(
+              "[{}] warning: path parameter '{}' is optional.",
+              operation.operation_id.as_deref().unwrap_or("unknown"),
+              param.name,
+            );
+          }
+          path_param_mappings.push((field.name.clone(), param.name.clone()));
+        }
+        ParameterIn::Query => {
+          if param.required.unwrap_or(false) {
+            eprintln!(
+              "[{}] warning: query parameter '{}' is required.",
+              operation.operation_id.as_deref().unwrap_or("unknown"),
+              param.name,
+            );
+          }
+        }
+        ParameterIn::Header => {
+          // TODO: handle header parameters if needed
+        }
+        ParameterIn::Cookie => {
+          // TODO: handle cookie parameters if needed
+          eprintln!(
+            "[{}] warning: cookie parameter '{}' is not supported",
+            operation.operation_id.as_deref().unwrap_or("unknown"),
+            param.name,
+          );
+        }
+      }
+
       fields.push(field);
     }
 
-    // Process request body
-    if let Some(ref body_ref) = operation.request_body
-      && let Ok(body) = body_ref.resolve(self.spec)
-    {
-      // Extract schema from the first content type (usually application/json)
-      if let Some((_content_type, media_type)) = body.content.iter().next()
-        && let Some(ref schema_ref) = media_type.schema
-      {
-        // Check if this is an inline schema (not a $ref) with properties
-        let body_type = if let ObjectOrReference::Object(inline_schema) = schema_ref
-          && !inline_schema.properties.is_empty()
-        {
-          // Use the generated inline body struct (apply same transformation as convert_struct does)
-          let body_struct_name = format!("{}RequestBody", base_name);
-          TypeRef::new(to_rust_type_name(&body_struct_name))
-        } else if let Ok(schema) = schema_ref.resolve(self.spec) {
-          // Use existing logic for $ref or other schemas
-          self.schema_converter.schema_to_type_ref(&schema)?
-        } else {
-          TypeRef::new("serde_json::Value")
-        };
+    // Check if body is expected based on HTTP method type
+    let request_body_required = self
+      .operation_method(path, operation)
+      .map(|m| matches!(m, Method::POST | Method::PATCH | Method::PUT))
+      .unwrap_or(false);
 
-        let is_required = body.required.unwrap_or(false);
+    if request_body_required && let Ok(Some(body)) = operation.request_body(self.spec) {
+      let is_required = body.required.as_ref().unwrap_or(&false);
 
-        // Get validation attrs from resolved schema if possible
-        let (validation_attrs, regex_validation, default_value) = if let Ok(schema) = schema_ref.resolve(self.spec) {
-          let validation = self
+      for (body_count, (content_type, media_type)) in body.content.into_iter().enumerate() {
+        if let Ok(Some(schema_ref)) = media_type.schema(self.spec) {
+          let type_ref = if let Some(ref override_type) = body_type {
+            override_type.clone()
+          } else {
+            self.schema_converter.schema_to_type_ref(&schema_ref)?
+          };
+
+          if schema_ref.properties.is_empty() && *is_required && body_type.is_none() {
+            eprintln!(
+              "[{}] error: required request body schema has no properties.",
+              operation.operation_id.as_deref().unwrap_or("unknown"),
+            );
+          }
+
+          let validation_attrs = self
             .schema_converter
-            .extract_validation_attrs(name, is_required, &schema);
-          let regex = self.schema_converter.extract_validation_pattern(name, &schema).cloned();
-          let default = self.schema_converter.extract_default_value(&schema);
-          (validation, regex, default)
-        } else {
-          (vec![], None, None)
-        };
+            .extract_validation_attrs(name, *is_required, &schema_ref);
+          let regex_validation = self
+            .schema_converter
+            .extract_validation_pattern(name, &schema_ref)
+            .cloned();
+          let default_value = self.schema_converter.extract_default_value(&schema_ref);
 
-        let mut serde_attrs = vec![];
-        if !is_required {
-          serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
-        }
+          let serde_attrs = vec![];
 
-        fields.push(FieldDef {
-          name: "body".to_string(),
-          docs: body
+          let mut docs = body
             .description
             .as_ref()
             .map(|d| doc_comment_lines(d))
-            .unwrap_or_default(),
-          rust_type: if is_required {
-            body_type
+            .unwrap_or_default();
+
+          docs.push("/// ## Schema".to_string());
+          docs.push(format!("/// - Required: `{}`", if *is_required { "yes" } else { "no" }));
+          docs.push(format!("/// - Content-Type: `{content_type}`"));
+
+          let name = if body_count > 1 {
+            format!("body_{body_count}")
           } else {
-            body_type.with_option()
-          },
-          serde_attrs,
-          validation_attrs,
-          regex_validation,
-          default_value,
-          read_only: false,
-          write_only: false, // Request body fields are typically write-only, but we keep both derives for flexibility
-          deprecated: false,
-          multiple_of: None,
-        });
+            "body".to_string()
+          };
+
+          fields.push(FieldDef {
+            name,
+            docs,
+            rust_type: if *is_required { type_ref } else { type_ref.with_option() },
+            serde_attrs,
+            validation_attrs,
+            regex_validation,
+            default_value,
+            read_only: false,
+            write_only: false,
+            deprecated: false,
+            multiple_of: None,
+          });
+        }
       }
     }
 
@@ -234,19 +324,22 @@ impl<'a> OperationConverter<'a> {
         )
     });
 
-    if all_fields_defaultable && fields.iter().any(|f| f.default_value.is_some()) {
+    let outer_attrs = SchemaConverter::container_outer_attrs(&fields);
+    if fields.iter().any(|f| f.default_value.is_some()) && all_fields_defaultable {
       serde_attrs.push("default".to_string());
     }
 
-    // Always derive Serialize and Deserialize - per-field serde attributes handle readOnly/writeOnly
     let derives = vec![
-      "Debug".into(),
       "Clone".into(),
+      "Debug".into(),
       "Serialize".into(),
       "Deserialize".into(),
-      "Validate".into(),
-      "Default".into(), // Always derive Default
+      "PartialEq".into(),
+      "validator::Validate".into(),
+      "oas3_gen_support::Default".into(),
     ];
+
+    let methods = vec![Self::build_render_path_method(path, &path_param_mappings)];
 
     Ok(StructDef {
       name: to_rust_type_name(name),
@@ -254,8 +347,64 @@ impl<'a> OperationConverter<'a> {
       fields,
       derives,
       serde_attrs,
-      outer_attrs: vec![],
+      outer_attrs,
+      methods,
     })
+  }
+
+  fn build_render_path_method(path: &str, path_params: &[(String, String)]) -> StructMethod {
+    let docs = vec!["/// Render the request path with percent-encoded parameters.".to_string()];
+
+    if path_params.is_empty() {
+      let segments = vec![PathSegment::Literal(path.to_string())];
+      return StructMethod {
+        name: "render_path".to_string(),
+        docs,
+        kind: StructMethodKind::RenderPath { segments },
+      };
+    }
+
+    let mut param_map: HashMap<&str, &str> = HashMap::new();
+    for (rust_name, original_name) in path_params {
+      param_map.insert(original_name.as_str(), rust_name.as_str());
+    }
+
+    let mut segments: Vec<PathSegment> = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(open_rel) = path[cursor..].find('{') {
+      let open = cursor + open_rel;
+      if open > cursor {
+        segments.push(PathSegment::Literal(path[cursor..open].to_string()));
+      }
+
+      let after_open = open + 1;
+      if let Some(close_rel) = path[after_open..].find('}') {
+        let close = after_open + close_rel;
+        let placeholder = &path[after_open..close];
+        if let Some(rust_name) = param_map.get(placeholder) {
+          segments.push(PathSegment::Parameter {
+            field: (*rust_name).to_string(),
+          });
+        } else {
+          segments.push(PathSegment::Literal(format!("{{{}}}", placeholder)));
+        }
+        cursor = close + 1;
+      } else {
+        segments.push(PathSegment::Literal(path[open..].to_string()));
+        cursor = path.len();
+        break;
+      }
+    }
+
+    if cursor < path.len() {
+      segments.push(PathSegment::Literal(path[cursor..].to_string()));
+    }
+
+    StructMethod {
+      name: "render_path".to_string(),
+      docs,
+      kind: StructMethodKind::RenderPath { segments },
+    }
   }
 
   /// Convert a parameter to a field definition
@@ -286,23 +435,20 @@ impl<'a> OperationConverter<'a> {
       serde_attrs.push(format!("rename = \"{}\"", param.name));
     }
 
-    // Add skip_serializing_if for optional parameters
-    if !is_required {
-      serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
-    }
-
     // Add location hint as a comment in docs
     let location_hint = match param.location {
-      ParameterIn::Path => "Path parameter",
-      ParameterIn::Query => "Query parameter",
-      ParameterIn::Header => "Header parameter",
-      ParameterIn::Cookie => "Cookie parameter",
+      ParameterIn::Path => "Path",
+      ParameterIn::Query => "Query",
+      ParameterIn::Header => "Header",
+      ParameterIn::Cookie => "Cookie",
     };
 
-    let mut docs = vec![format!("/// {}", location_hint)];
+    let mut docs = vec![];
     if let Some(ref desc) = param.description {
       docs.extend(doc_comment_lines(desc));
     }
+    docs.push("/// ## Schema".to_string());
+    docs.push(format!("/// - Location: {}", location_hint));
 
     Ok(FieldDef {
       name: to_rust_field_name(&param.name),
@@ -317,7 +463,7 @@ impl<'a> OperationConverter<'a> {
       regex_validation,
       default_value,
       read_only: false,
-      write_only: false, // Parameters could be either direction, keep both derives
+      write_only: false,
       deprecated: false,
       multiple_of: None,
     })

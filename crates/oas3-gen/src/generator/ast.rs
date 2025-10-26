@@ -53,6 +53,7 @@ pub(crate) struct OperationInfo {
   pub(crate) description: Option<String>,
   pub(crate) request_type: Option<String>,
   pub(crate) response_type: Option<String>,
+  pub(crate) request_body_types: Vec<String>,
 }
 
 /// Rust struct definition
@@ -64,6 +65,26 @@ pub(crate) struct StructDef {
   pub(crate) derives: Vec<String>,
   pub(crate) serde_attrs: Vec<String>,
   pub(crate) outer_attrs: Vec<String>,
+  pub(crate) methods: Vec<StructMethod>,
+}
+
+/// Associated method definition for a struct
+#[derive(Debug, Clone)]
+pub(crate) struct StructMethod {
+  pub(crate) name: String,
+  pub(crate) docs: Vec<String>,
+  pub(crate) kind: StructMethodKind,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum StructMethodKind {
+  RenderPath { segments: Vec<PathSegment> },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PathSegment {
+  Literal(String),
+  Parameter { field: String },
 }
 
 /// Rust struct field definition
@@ -132,11 +153,7 @@ impl TypeRef {
     }
 
     if self.is_array {
-      if self.unique_items {
-        result = format!("indexmap::IndexSet<{}>", result);
-      } else {
-        result = format!("Vec<{}>", result);
-      }
+      result = format!("Vec<{}>", result);
     }
 
     if self.nullable {

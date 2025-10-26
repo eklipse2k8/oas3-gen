@@ -17,7 +17,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::ast::*;
-use crate::reserved::regex_const_name;
+use crate::reserved::{header_const_name, regex_const_name};
 
 /// Visibility level for generated types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -100,6 +100,12 @@ impl RegexKey {
 pub(crate) struct CodeGenerator;
 
 impl CodeGenerator {
+  fn ensure_derive(derives: &mut Vec<String>, trait_name: &str) {
+    if !derives.iter().any(|existing| existing == trait_name) {
+      derives.push(trait_name.to_string());
+    }
+  }
+
   /// Build a map of type usage from operation metadata
   pub(crate) fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
     let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new(); // (used_in_request, used_in_response)
@@ -109,6 +115,11 @@ impl CodeGenerator {
       if let Some(ref req_type) = op.request_type {
         let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
         entry.0 = true; // used in request
+      }
+
+      for body_type in &op.request_body_types {
+        let entry = usage_map.entry(body_type.clone()).or_insert((false, false));
+        entry.0 = true;
       }
 
       // Track response types
@@ -135,32 +146,25 @@ impl CodeGenerator {
   pub(crate) fn generate(
     types: &[RustType],
     type_usage: &BTreeMap<String, TypeUsage>,
+    headers: &[String],
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
-
-    // Check if we need the discriminated_enum macro
-    let has_discriminated_enums = ordered.iter().any(|ty| matches!(ty, RustType::DiscriminatedEnum(_)));
-    let discriminated_enum_import = if has_discriminated_enums {
-      quote! { use oas3_gen_support::discriminated_enum; }
-    } else {
-      quote! {}
-    };
-
     let (regex_consts, regex_lookup) = Self::generate_regex_constants(&ordered);
+    let header_consts = Self::generate_header_constants(headers);
     let type_tokens: Vec<TokenStream> = ordered
       .iter()
       .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage, visibility))
       .collect();
 
     quote! {
-      use serde::{Deserialize, Serialize};
-      use validator::Validate;
-      use oas3_gen_support::Default;
+      use std::fmt::Write as _;
 
-      #discriminated_enum_import
+      use serde::{Deserialize, Serialize};
 
       #regex_consts
+
+      #header_consts
 
       #(#type_tokens)*
     }
@@ -271,6 +275,26 @@ impl CodeGenerator {
     (quote! { #(#regex_defs)* }, lookup)
   }
 
+  /// Generate HTTP header name constants from collected headers
+  fn generate_header_constants(headers: &[String]) -> TokenStream {
+    if headers.is_empty() {
+      return quote! {};
+    }
+
+    let const_tokens: Vec<TokenStream> = headers
+      .iter()
+      .map(|header| {
+        let const_name = header_const_name(header);
+        let ident = format_ident!("{}", const_name);
+        quote! {
+          pub const #ident: http::HeaderName = http::HeaderName::from_static(#header);
+        }
+      })
+      .collect();
+
+    quote! { #(#const_tokens)* }
+  }
+
   /// Convert a JSON value to a Rust expression
   fn json_value_to_rust_expr(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
     let base_expr = match value {
@@ -293,12 +317,10 @@ impl CodeGenerator {
         quote! { None }
       }
       serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-        // For complex types, use Default::default()
         quote! { Default::default() }
       }
     };
 
-    // Wrap in Some() if the type is Option<T>
     if rust_type.nullable && !matches!(value, serde_json::Value::Null) {
       quote! { Some(#base_expr) }
     } else {
@@ -338,7 +360,7 @@ impl CodeGenerator {
       match usage {
         TypeUsage::RequestOnly => {
           custom.push("Serialize".to_string());
-          custom.push("Validate".to_string());
+          custom.push("validator::Validate".to_string());
         }
         TypeUsage::ResponseOnly => {
           custom.push("Deserialize".to_string());
@@ -346,13 +368,30 @@ impl CodeGenerator {
         TypeUsage::Bidirectional => {
           custom.push("Serialize".to_string());
           custom.push("Deserialize".to_string());
-          custom.push("Validate".to_string());
+          custom.push("validator::Validate".to_string());
         }
       }
-      custom.push("Default".to_string());
+      custom.push("oas3_gen_support::Default".to_string());
       Self::generate_derives(&custom)
     } else {
-      Self::generate_derives(&def.derives)
+      let mut derives = def.derives.clone();
+      if let Some(usage) = type_usage.get(&def.name) {
+        match usage {
+          TypeUsage::RequestOnly => {
+            Self::ensure_derive(&mut derives, "Serialize");
+            Self::ensure_derive(&mut derives, "validator::Validate");
+          }
+          TypeUsage::ResponseOnly => {
+            Self::ensure_derive(&mut derives, "Deserialize");
+          }
+          TypeUsage::Bidirectional => {
+            Self::ensure_derive(&mut derives, "Serialize");
+            Self::ensure_derive(&mut derives, "Deserialize");
+            Self::ensure_derive(&mut derives, "validator::Validate");
+          }
+        }
+      }
+      Self::generate_derives(&derives)
     };
 
     let outer_attrs = Self::generate_outer_attrs(&def.outer_attrs);
@@ -369,13 +408,75 @@ impl CodeGenerator {
       visibility,
     );
 
-    quote! {
+    let struct_tokens = quote! {
       #docs
       #outer_attrs
       #derives
       #serde_attrs
       #vis struct #name {
         #(#fields),*
+      }
+    };
+
+    if def.methods.is_empty() {
+      struct_tokens
+    } else {
+      let methods: Vec<TokenStream> = def.methods.iter().map(Self::generate_struct_method).collect();
+
+      quote! {
+        #struct_tokens
+
+        impl #name {
+          #(#methods)*
+        }
+      }
+    }
+  }
+
+  fn generate_struct_method(method: &StructMethod) -> TokenStream {
+    let docs = Self::generate_docs(&method.docs);
+    let name = format_ident!("{}", method.name);
+    let body = match &method.kind {
+      StructMethodKind::RenderPath { segments } => {
+        let segment_tokens: Vec<TokenStream> = segments
+          .iter()
+          .map(|segment| match segment {
+            PathSegment::Literal(lit) => {
+              if lit.is_empty() {
+                quote! {}
+              } else {
+                quote! { path.push_str(#lit); }
+              }
+            }
+            PathSegment::Parameter { field } => {
+              let ident = format_ident!("{field}");
+              quote! {
+                {
+                  let value = self.#ident.to_string();
+                  write!(
+                    path,
+                    "{}",
+                    oas3_gen_support::utf8_percent_encode(value.as_str(), oas3_gen_support::PATH_ENCODE_SET)
+                  )
+                  .expect("failed to encode path parameter");
+                }
+              }
+            }
+          })
+          .collect();
+
+        quote! {
+          let mut path = String::new();
+          #(#segment_tokens)*
+          path
+        }
+      }
+    };
+
+    quote! {
+      #docs
+      pub fn #name(&self) -> String {
+        #body
       }
     }
   }
@@ -438,7 +539,7 @@ impl CodeGenerator {
 
       quote! {
         #docs
-        discriminated_enum! {
+        oas3_gen_support::discriminated_enum! {
           #vis enum #name {
             discriminator: #disc_field,
             variants: [
@@ -451,7 +552,7 @@ impl CodeGenerator {
     } else {
       quote! {
         #docs
-        discriminated_enum! {
+        oas3_gen_support::discriminated_enum! {
           #vis enum #name {
             discriminator: #disc_field,
             variants: [
@@ -481,7 +582,11 @@ impl CodeGenerator {
     if derives.is_empty() {
       return quote! {};
     }
-    let derive_idents: Vec<_> = derives.iter().map(|d| format_ident!("{}", d)).collect();
+    let derive_idents = derives
+      .iter()
+      .map(|d| syn::parse_str(d).unwrap_or_else(|_| quote! {}))
+      .collect::<Vec<_>>();
+
     quote! { #[derive(#(#derive_idents),*)] }
   }
 
@@ -491,9 +596,17 @@ impl CodeGenerator {
     }
     let attr_tokens: Vec<TokenStream> = attrs
       .iter()
-      .map(|a| {
-        let tokens: TokenStream = a.as_str().parse().unwrap_or_else(|_| quote! {});
-        quote! { #[#tokens] }
+      .map(|attr| {
+        let trimmed = attr.trim();
+        if trimmed.is_empty() {
+          return quote! {};
+        }
+        let source = if trimmed.starts_with("#[") {
+          trimmed.to_string()
+        } else {
+          format!("#[{}]", trimmed)
+        };
+        syn::parse_str::<TokenStream>(&source).unwrap_or_else(|_| quote! {})
       })
       .collect();
     quote! { #(#attr_tokens)* }
