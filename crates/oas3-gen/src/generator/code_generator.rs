@@ -744,6 +744,11 @@ impl CodeGenerator {
 
         let docs = Self::generate_docs(&field_docs);
         let serde_attrs = Self::generate_serde_attrs(&field.serde_attrs);
+        let extra_attrs: Vec<TokenStream> = field
+          .extra_attrs
+          .iter()
+          .filter_map(|attr| attr.parse::<TokenStream>().ok())
+          .collect();
 
         // Only include validation for struct fields, not enum variant fields
         let regex_const = if include_validation && field.regex_validation.is_some() {
@@ -781,6 +786,7 @@ impl CodeGenerator {
         if add_pub {
           let vis = visibility.to_tokens();
           quote! {
+            #(#extra_attrs)*
             #docs
             #deprecated_attr
             #serde_attrs
@@ -790,6 +796,7 @@ impl CodeGenerator {
           }
         } else {
           quote! {
+            #(#extra_attrs)*
             #docs
             #deprecated_attr
             #serde_attrs

@@ -101,6 +101,7 @@ pub(crate) struct FieldDef {
   pub(crate) docs: Vec<String>,
   pub(crate) rust_type: TypeRef,
   pub(crate) serde_attrs: Vec<String>,
+  pub(crate) extra_attrs: Vec<String>,
   pub(crate) validation_attrs: Vec<String>,
   pub(crate) regex_validation: Option<String>,
   pub(crate) default_value: Option<serde_json::Value>,
