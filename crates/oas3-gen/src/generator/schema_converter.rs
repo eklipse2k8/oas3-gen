@@ -1,8 +1,10 @@
 use std::{
   cmp::Reverse,
   collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+  sync::LazyLock,
 };
 
+use num_format::{CustomFormat, Grouping, ToFormattedString as _};
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use regex::Regex;
 use serde_json::Number;
@@ -37,6 +39,14 @@ enum UnionKind {
   OneOf,
   AnyOf,
 }
+
+static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
+  CustomFormat::builder()
+    .grouping(Grouping::Standard)
+    .separator("_")
+    .build()
+    .expect("formatter failed to build.")
+});
 
 /// Converter that transforms OpenAPI schemas into Rust AST structures
 pub(crate) struct SchemaConverter<'a> {
@@ -1055,7 +1065,13 @@ impl<'a> SchemaConverter<'a> {
       let s = num.to_string();
       if s.contains('.') { s } else { format!("{}.0", s) }
     } else {
-      format!("{}i64", num.as_i64().unwrap_or_default())
+      format!(
+        "{}i64",
+        num
+          .as_i64()
+          .unwrap_or_default()
+          .to_formatted_string(&*UNDERSCORE_FORMAT)
+      )
     }
   }
 
@@ -1126,11 +1142,14 @@ impl<'a> SchemaConverter<'a> {
           .unwrap_or(false);
 
         if !is_non_string_format {
-          if let (Some(min), Some(max)) = (schema.min_length, schema.max_length) {
+          let min_length = schema.min_length.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+          let max_length = schema.max_length.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+
+          if let (Some(min), Some(max)) = (&min_length, &max_length) {
             attrs.push(format!("length(min = {min}, max = {max})"));
-          } else if let Some(min) = schema.min_length {
+          } else if let Some(min) = &min_length {
             attrs.push(format!("length(min = {min})"));
-          } else if let Some(max) = schema.max_length {
+          } else if let Some(max) = &max_length {
             attrs.push(format!("length(max = {max})"));
           } else if is_required {
             attrs.push("length(min = 1)".to_string());
@@ -1139,11 +1158,14 @@ impl<'a> SchemaConverter<'a> {
       }
 
       if matches!(schema_type, SchemaTypeSet::Single(SchemaType::Array)) {
-        if let (Some(min), Some(max)) = (schema.min_items, schema.max_items) {
+        let min_length = schema.min_items.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+        let max_length = schema.max_items.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+
+        if let (Some(min), Some(max)) = (&min_length, &max_length) {
           attrs.push(format!("length(min = {min}, max = {max})"));
-        } else if let Some(min) = schema.min_items {
+        } else if let Some(min) = &min_length {
           attrs.push(format!("length(min = {min})"));
-        } else if let Some(max) = schema.max_items {
+        } else if let Some(max) = &max_length {
           attrs.push(format!("length(max = {max})"));
         }
       }

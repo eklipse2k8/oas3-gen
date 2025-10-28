@@ -69,6 +69,7 @@ pub(crate) struct StructMethod {
   pub(crate) name: String,
   pub(crate) docs: Vec<String>,
   pub(crate) kind: StructMethodKind,
+  pub(crate) attrs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

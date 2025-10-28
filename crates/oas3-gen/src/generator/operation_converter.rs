@@ -434,6 +434,7 @@ impl<'a> OperationConverter<'a> {
             })
             .collect(),
         },
+        attrs: vec!["must_use".to_string()],
       };
     }
 
@@ -488,6 +489,7 @@ impl<'a> OperationConverter<'a> {
       name: "render_path".to_string(),
       docs,
       kind: StructMethodKind::RenderPath { segments, query_params },
+      attrs: vec!["must_use".to_string()],
     }
   }
 

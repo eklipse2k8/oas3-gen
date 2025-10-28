@@ -123,6 +123,7 @@ macro_rules! discriminated_enum {
 pub const PATH_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
 #[inline]
+#[must_use]
 pub fn percent_encode_path_segment(segment: &str) -> String {
   utf8_percent_encode(segment, PATH_ENCODE_SET).to_string()
 }
@@ -130,6 +131,7 @@ pub fn percent_encode_path_segment(segment: &str) -> String {
 pub const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
 #[inline]
+#[must_use]
 pub fn percent_encode_query_component(component: &str) -> String {
   utf8_percent_encode(component, QUERY_ENCODE_SET).to_string()
 }
