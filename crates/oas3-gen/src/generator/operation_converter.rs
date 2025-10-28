@@ -327,6 +327,7 @@ impl<'a> OperationConverter<'a> {
             docs,
             rust_type: if *is_required { type_ref } else { type_ref.with_option() },
             serde_attrs,
+            extra_attrs: vec![],
             validation_attrs,
             regex_validation,
             default_value,
@@ -433,6 +434,7 @@ impl<'a> OperationConverter<'a> {
             })
             .collect(),
         },
+        attrs: vec!["must_use".to_string()],
       };
     }
 
@@ -487,6 +489,7 @@ impl<'a> OperationConverter<'a> {
       name: "render_path".to_string(),
       docs,
       kind: StructMethodKind::RenderPath { segments, query_params },
+      attrs: vec!["must_use".to_string()],
     }
   }
 
@@ -554,6 +557,7 @@ impl<'a> OperationConverter<'a> {
         rust_type.with_option()
       },
       serde_attrs,
+      extra_attrs: vec![],
       validation_attrs,
       regex_validation,
       default_value,

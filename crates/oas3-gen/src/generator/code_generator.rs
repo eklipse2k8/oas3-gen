@@ -281,7 +281,11 @@ impl CodeGenerator {
   fn json_value_to_rust_expr(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
     let base_expr = match value {
       serde_json::Value::String(s) => {
-        quote! { #s.to_string() }
+        if s.is_empty() {
+          quote! { String::new() }
+        } else {
+          quote! { #s.to_string() }
+        }
       }
       serde_json::Value::Number(n) => {
         if let Some(i) = n.as_i64() {
@@ -403,7 +407,11 @@ impl CodeGenerator {
     if def.methods.is_empty() {
       struct_tokens
     } else {
-      let methods: Vec<TokenStream> = def.methods.iter().map(Self::generate_struct_method).collect();
+      let methods: Vec<TokenStream> = def
+        .methods
+        .iter()
+        .map(|m| Self::generate_struct_method(m, visibility))
+        .collect();
 
       quote! {
         #struct_tokens
@@ -415,9 +423,12 @@ impl CodeGenerator {
     }
   }
 
-  fn generate_struct_method(method: &StructMethod) -> TokenStream {
+  fn generate_struct_method(method: &StructMethod, visibility: Visibility) -> TokenStream {
     let docs = Self::generate_docs(&method.docs);
     let name = format_ident!("{}", method.name);
+    let attrs = Self::generate_outer_attrs(&method.attrs);
+    let vis = visibility.to_tokens();
+
     let body = match &method.kind {
       StructMethodKind::RenderPath { segments, query_params } => {
         let mut format_string = String::new();
@@ -468,7 +479,8 @@ impl CodeGenerator {
 
     quote! {
       #docs
-      pub fn #name(&self) -> String {
+      #attrs
+      #vis fn #name(&self) -> String {
         #body
       }
     }
@@ -485,26 +497,24 @@ impl CodeGenerator {
           quote! {
             if let Some(values) = &self.#ident {
               for value in values {
-                prefix = if prefix != '\0' { '&' } else { '?' };
+                prefix = if prefix == '\0' { '?' } else { '&' };
                 write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
               }
             }
           }
         } else {
           quote! {
-            if let Some(values) = &self.#ident {
-              if !values.is_empty() {
-                prefix = if prefix != '\0' { '&' } else { '?' };
-                let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
-                write!(&mut path, #param_equal, values).unwrap();
-              }
+            if let Some(values) = &self.#ident && !values.is_empty() {
+              prefix = if prefix == '\0' { '?' } else { '&' };
+              let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
+              write!(&mut path, #param_equal, values).unwrap();
             }
           }
         }
       } else {
         quote! {
           if let Some(value) = &self.#ident {
-            prefix = if prefix != '\0' { '&' } else { '?' };
+            prefix = if prefix == '\0' { '?' } else { '&' };
             write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
           }
         }
@@ -513,14 +523,14 @@ impl CodeGenerator {
       if param.explode {
         quote! {
           for value in &self.#ident {
-            prefix = if prefix != '\0' { '&' } else { '?' };
+            prefix = if prefix == '\0' { '?' } else { '&' };
             write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
           }
         }
       } else {
         quote! {
           if !self.#ident.is_empty() {
-            prefix = if prefix != '\0' { '&' } else { '?' };
+            prefix = if prefix == '\0' { '?' } else { '&' };
             let values = self.#ident.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
             write!(&mut path, #param_equal, values).unwrap();
           }
@@ -528,7 +538,7 @@ impl CodeGenerator {
       }
     } else {
       quote! {
-        prefix = if prefix != '\0' { '&' } else { '?' };
+        prefix = if prefix == '\0' { '?' } else { '&' };
         write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&self.#ident.to_string())).unwrap();
       }
     }
@@ -744,6 +754,11 @@ impl CodeGenerator {
 
         let docs = Self::generate_docs(&field_docs);
         let serde_attrs = Self::generate_serde_attrs(&field.serde_attrs);
+        let extra_attrs: Vec<TokenStream> = field
+          .extra_attrs
+          .iter()
+          .filter_map(|attr| attr.parse::<TokenStream>().ok())
+          .collect();
 
         // Only include validation for struct fields, not enum variant fields
         let regex_const = if include_validation && field.regex_validation.is_some() {
@@ -781,6 +796,7 @@ impl CodeGenerator {
         if add_pub {
           let vis = visibility.to_tokens();
           quote! {
+            #(#extra_attrs)*
             #docs
             #deprecated_attr
             #serde_attrs
@@ -790,6 +806,7 @@ impl CodeGenerator {
           }
         } else {
           quote! {
+            #(#extra_attrs)*
             #docs
             #deprecated_attr
             #serde_attrs

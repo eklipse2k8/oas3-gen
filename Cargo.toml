@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -36,7 +36,7 @@ split-debuginfo = "unpacked"
 
 [workspace.dependencies]
 # Workspace Members
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.8.0" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.9.0" }
 
 # External Dependencies
 any_ascii = { version = "0.3" }
@@ -48,6 +48,7 @@ crossterm = { version = "0.29", default-features = false }
 http = { version = "1.3" }
 indexmap = { version = "2.12", features = ["serde"] }
 inflections = { version = "1.1" }
+num-format = { version = "0.4" }
 oas3 = { version = "0.19" }
 percent-encoding = { version = "2.3" }
 prettyplease = { version = "0.2" }

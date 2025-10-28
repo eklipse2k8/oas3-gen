@@ -1,8 +1,10 @@
 use std::{
   cmp::Reverse,
   collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+  sync::LazyLock,
 };
 
+use num_format::{CustomFormat, Grouping, ToFormattedString as _};
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use regex::Regex;
 use serde_json::Number;
@@ -37,6 +39,14 @@ enum UnionKind {
   OneOf,
   AnyOf,
 }
+
+static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
+  CustomFormat::builder()
+    .grouping(Grouping::Standard)
+    .separator("_")
+    .build()
+    .expect("formatter failed to build.")
+});
 
 /// Converter that transforms OpenAPI schemas into Rust AST structures
 pub(crate) struct SchemaConverter<'a> {
@@ -159,31 +169,25 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Finds the discriminator field name for a schema that appears in another schema's discriminator mapping.
-  fn find_discriminator_field_for_child(&self, child_name: &str) -> Option<String> {
-    if child_name.starts_with('<') {
-      return None;
-    }
-
-    for schema_name in self.graph.schema_names() {
-      let Some(schema) = self.graph.get_schema(schema_name) else {
+  fn find_discriminator_mapping_value(&self, schema_name: &str) -> Option<(String, String)> {
+    for candidate_name in self.graph.schema_names() {
+      let Some(candidate_schema) = self.graph.get_schema(candidate_name) else {
         continue;
       };
-      let Some(discriminator) = schema.discriminator.as_ref() else {
+      let Some(discriminator) = candidate_schema.discriminator.as_ref() else {
         continue;
       };
       let Some(mapping) = discriminator.mapping.as_ref() else {
         continue;
       };
 
-      let matches_child = mapping.values().any(|ref_path| {
-        SchemaGraph::extract_ref_name(ref_path)
+      for (disc_value, ref_path) in mapping {
+        if SchemaGraph::extract_ref_name(ref_path)
           .as_deref()
-          .map(|mapped_name| mapped_name == child_name)
-          .unwrap_or(false)
-      });
-
-      if matches_child {
-        return Some(discriminator.property_name.clone());
+          .is_some_and(|mapped| mapped == schema_name)
+        {
+          return Some((discriminator.property_name.clone(), disc_value.clone()));
+        }
       }
     }
 
@@ -200,7 +204,7 @@ impl<'a> SchemaConverter<'a> {
   ) -> anyhow::Result<Vec<RustType>> {
     let struct_name = to_rust_type_name(name);
 
-    let Some(discriminator_prop_name) = parent_schema.discriminator.as_ref().map(|d| d.property_name.clone()) else {
+    let Some(_discriminator_prop_name) = parent_schema.discriminator.as_ref().map(|d| d.property_name.clone()) else {
       return Err(anyhow::anyhow!("Parent schema is not discriminated"));
     };
 
@@ -228,7 +232,8 @@ impl<'a> SchemaConverter<'a> {
       &struct_name,
       &merged_schema,
       InlinePolicy::InlineUnions,
-      Some(&discriminator_prop_name),
+      None,
+      Some(name),
     )?;
 
     let mut serde_attrs = Vec::new();
@@ -252,6 +257,7 @@ impl<'a> SchemaConverter<'a> {
               docs: vec!["/// Additional properties not defined in the schema".to_string()],
               rust_type: map_type,
               serde_attrs: vec!["flatten".to_string()],
+              extra_attrs: vec![],
               validation_attrs: vec![],
               regex_validation: None,
               default_value: None,
@@ -654,7 +660,7 @@ impl<'a> SchemaConverter<'a> {
         // internally tagged wants struct-like variants
         if !resolved.properties.is_empty() {
           self
-            .convert_fields_core(name, &resolved, InlinePolicy::InlineUnions, Some(disc_prop))
+            .convert_fields_core(name, &resolved, InlinePolicy::InlineUnions, Some(disc_prop), None)
             .map_or_else(
               |_e| Ok::<_, anyhow::Error>((VariantContent::Struct(vec![]), vec![])),
               |(fields, tys)| Ok((VariantContent::Struct(fields), tys)),
@@ -935,11 +941,6 @@ impl<'a> SchemaConverter<'a> {
   /// Convert an object schema to a Rust struct
   pub(crate) fn convert_struct(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<(RustType, Vec<RustType>)> {
     let is_discriminated = self.is_discriminated_base_type(schema);
-    let inherited_discriminator_field = if is_discriminated {
-      None
-    } else {
-      self.find_discriminator_field_for_child(name)
-    };
 
     let struct_name_base = to_rust_type_name(name);
     let struct_name = if is_discriminated {
@@ -948,18 +949,8 @@ impl<'a> SchemaConverter<'a> {
       struct_name_base.clone()
     };
 
-    let discriminator_field_to_exclude = if is_discriminated {
-      schema.discriminator.as_ref().map(|d| d.property_name.as_str())
-    } else {
-      inherited_discriminator_field.as_deref()
-    };
-
-    let (mut fields, inline_types) = self.convert_fields_core(
-      &struct_name,
-      schema,
-      InlinePolicy::InlineUnions,
-      discriminator_field_to_exclude,
-    )?;
+    let (mut fields, inline_types) =
+      self.convert_fields_core(&struct_name, schema, InlinePolicy::InlineUnions, None, Some(name))?;
 
     // Serde container attributes
     let mut serde_attrs = vec![];
@@ -987,6 +978,7 @@ impl<'a> SchemaConverter<'a> {
               docs: vec!["/// Additional properties not defined in the schema".to_string()],
               rust_type: map_type,
               serde_attrs: vec!["flatten".to_string()],
+              extra_attrs: vec![],
               validation_attrs: vec![],
               regex_validation: None,
               default_value: None,
@@ -1073,7 +1065,13 @@ impl<'a> SchemaConverter<'a> {
       let s = num.to_string();
       if s.contains('.') { s } else { format!("{}.0", s) }
     } else {
-      format!("{}i64", num.as_i64().unwrap_or_default())
+      format!(
+        "{}i64",
+        num
+          .as_i64()
+          .unwrap_or_default()
+          .to_formatted_string(&*UNDERSCORE_FORMAT)
+      )
     }
   }
 
@@ -1144,11 +1142,14 @@ impl<'a> SchemaConverter<'a> {
           .unwrap_or(false);
 
         if !is_non_string_format {
-          if let (Some(min), Some(max)) = (schema.min_length, schema.max_length) {
+          let min_length = schema.min_length.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+          let max_length = schema.max_length.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+
+          if let (Some(min), Some(max)) = (&min_length, &max_length) {
             attrs.push(format!("length(min = {min}, max = {max})"));
-          } else if let Some(min) = schema.min_length {
+          } else if let Some(min) = &min_length {
             attrs.push(format!("length(min = {min})"));
-          } else if let Some(max) = schema.max_length {
+          } else if let Some(max) = &max_length {
             attrs.push(format!("length(max = {max})"));
           } else if is_required {
             attrs.push("length(min = 1)".to_string());
@@ -1157,11 +1158,14 @@ impl<'a> SchemaConverter<'a> {
       }
 
       if matches!(schema_type, SchemaTypeSet::Single(SchemaType::Array)) {
-        if let (Some(min), Some(max)) = (schema.min_items, schema.max_items) {
+        let min_length = schema.min_items.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+        let max_length = schema.max_items.map(|l| l.to_formatted_string(&*UNDERSCORE_FORMAT));
+
+        if let (Some(min), Some(max)) = (&min_length, &max_length) {
           attrs.push(format!("length(min = {min}, max = {max})"));
-        } else if let Some(min) = schema.min_items {
+        } else if let Some(min) = &min_length {
           attrs.push(format!("length(min = {min})"));
-        } else if let Some(max) = schema.max_items {
+        } else if let Some(max) = &max_length {
           attrs.push(format!("length(max = {max})"));
         }
       }
@@ -1427,12 +1431,14 @@ impl<'a> SchemaConverter<'a> {
     serde_attrs: Vec<String>,
     metadata: FieldMetadata,
     regex_validation: Option<String>,
+    extra_attrs: Vec<String>,
   ) -> FieldDef {
     FieldDef {
       name: to_rust_field_name(prop_name),
       docs: metadata.docs,
       rust_type,
       serde_attrs,
+      extra_attrs,
       validation_attrs: metadata.validation_attrs,
       regex_validation,
       default_value: metadata.default_value,
@@ -1450,6 +1456,7 @@ impl<'a> SchemaConverter<'a> {
     schema: &ObjectSchema,
     policy: InlinePolicy,
     exclude_field: Option<&str>,
+    schema_name: Option<&str>,
   ) -> anyhow::Result<(Vec<FieldDef>, Vec<RustType>)> {
     let mut fields = Vec::new();
     let mut inline_types = Vec::new();
@@ -1474,9 +1481,42 @@ impl<'a> SchemaConverter<'a> {
       let is_required = required_set.contains(prop_name.as_str());
       let final_type = Self::apply_optionality(rust_type, !is_required);
 
-      let metadata = self.extract_field_metadata(prop_name, is_required, prop_schema_ref);
-      let regex_validation = Self::filter_regex_validation(&final_type, metadata.regex_validation.clone());
-      let serde_attrs = Self::build_serde_attrs(prop_name);
+      let mut metadata = self.extract_field_metadata(prop_name, is_required, prop_schema_ref);
+      let mut serde_attrs = Self::build_serde_attrs(prop_name);
+      let mut extra_attrs = Vec::new();
+
+      let mut regex_validation = Self::filter_regex_validation(&final_type, metadata.regex_validation.clone());
+
+      if self.graph.discriminator_fields().contains(prop_name) {
+        metadata.docs.clear();
+        metadata.validation_attrs.clear();
+        regex_validation = None;
+        extra_attrs.push("#[doc(hidden)]".to_string());
+
+        if metadata.default_value.is_none()
+          && let Some(schema_name) = schema_name
+          && let Some((disc_prop, disc_value)) = self.find_discriminator_mapping_value(schema_name)
+          && disc_prop == *prop_name
+        {
+          metadata.default_value = Some(serde_json::Value::String(disc_value));
+        }
+
+        if !serde_attrs.iter().any(|attr| attr == "default") {
+          serde_attrs.push("default".to_string());
+        }
+
+        if metadata.default_value.is_none() && final_type.base_type == "String" && !final_type.is_array {
+          metadata.default_value = Some(serde_json::Value::String(String::new()));
+        }
+
+        if metadata
+          .default_value
+          .as_ref()
+          .is_none_or(|value| value.as_str().is_some_and(|s| s.is_empty()))
+        {
+          serde_attrs.push("skip".to_string());
+        }
+      }
 
       fields.push(Self::build_field_def(
         prop_name,
@@ -1484,6 +1524,7 @@ impl<'a> SchemaConverter<'a> {
         serde_attrs,
         metadata,
         regex_validation,
+        extra_attrs,
       ));
     }
 
@@ -1494,7 +1535,7 @@ impl<'a> SchemaConverter<'a> {
   /// Convert schema properties to struct fields (convenience wrapper)
   fn convert_fields(&self, schema: &ObjectSchema) -> anyhow::Result<Vec<FieldDef>> {
     self
-      .convert_fields_core("<inline>", schema, InlinePolicy::None, None)
+      .convert_fields_core("<inline>", schema, InlinePolicy::None, None, None)
       .map(|(f, _)| f)
   }
 
@@ -2387,9 +2428,33 @@ mod tests {
       "Optional inherited field should remain optional"
     );
 
+    let discriminator_field = user_struct
+      .fields
+      .iter()
+      .find(|field| field.name == "odata_type")
+      .expect("Discriminator field should be present to retain default value");
+    assert_eq!(
+      discriminator_field.default_value.as_ref(),
+      Some(&json!("#microsoft.graph.user")),
+      "Child discriminator should retain its default value"
+    );
     assert!(
-      user_struct.fields.iter().all(|field| field.name != "odata_type"),
-      "Discriminator field should be omitted; enum tag supplies the discriminator"
+      discriminator_field
+        .extra_attrs
+        .iter()
+        .any(|attr| attr == "#[doc(hidden)]"),
+      "Discriminator field should be hidden from documentation"
+    );
+    assert!(
+      discriminator_field.serde_attrs.iter().any(|attr| attr == "default"),
+      "Discriminator field should request serde to use the default value when missing"
+    );
+    assert!(
+      discriminator_field
+        .serde_attrs
+        .iter()
+        .all(|attr| attr != "skip" && attr != "skip_serializing"),
+      "Discriminator field should be serialized with its default value"
     );
 
     assert!(
@@ -2490,9 +2555,26 @@ mod tests {
       })
       .expect("Cat struct should be generated");
 
+    let discrim_field = cat_struct
+      .fields
+      .iter()
+      .find(|field| field.name == "r#type")
+      .expect("Discriminator property should be retained on child struct");
+    assert_eq!(
+      discrim_field.default_value.as_ref(),
+      Some(&json!("cat")),
+      "Child discriminator should preserve the schema default"
+    );
     assert!(
-      cat_struct.fields.iter().all(|field| field.name != "r#type"),
-      "Discriminator property should be omitted from child struct; enum tag will supply it"
+      discrim_field.serde_attrs.iter().any(|attr| attr == "default"),
+      "Discriminator should request serde to use its default when absent"
+    );
+    assert!(
+      discrim_field
+        .serde_attrs
+        .iter()
+        .all(|attr| attr != "skip" && attr != "skip_serializing"),
+      "Discriminator should serialize with the default value"
     );
     assert!(
       cat_struct.fields.iter().any(|field| field.name == "meows"),
@@ -2631,6 +2713,97 @@ mod tests {
     assert!(
       kind_field.serde_attrs.iter().any(|attr| attr == r#"rename = "kind""#) || kind_field.serde_attrs.is_empty(),
       "Sanity check attribute state left untouched"
+    );
+  }
+
+  #[test]
+  fn test_discriminator_mapping_sets_default_value() {
+    let mut parent_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    parent_schema.properties.insert(
+      "kind".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    parent_schema.required.push("kind".to_string());
+
+    let mut mapping = BTreeMap::new();
+    mapping.insert("base#kind".to_string(), "#/components/schemas/Base".to_string());
+    parent_schema.discriminator = Some(Discriminator {
+      property_name: "kind".to_string(),
+      mapping: Some(mapping),
+    });
+
+    let mut base_inline = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    base_inline.properties.insert(
+      "kind".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+
+    let mut base_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    base_schema.all_of.push(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/Parent".to_string(),
+      summary: None,
+      description: None,
+    });
+    base_schema.all_of.push(ObjectOrReference::Object(base_inline));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Parent".to_string(), parent_schema);
+    schemas.insert("Base".to_string(), base_schema);
+
+    let spec = create_test_spec(schemas);
+    let mut graph = SchemaGraph::new(spec).unwrap();
+    graph.build_dependencies();
+    graph.detect_cycles();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("Base", graph.get_schema("Base").unwrap())
+      .unwrap();
+
+    let struct_def = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) if def.name == "Base" => Some(def),
+        _ => None,
+      })
+      .expect("Base struct should exist");
+
+    let kind_field = struct_def
+      .fields
+      .iter()
+      .find(|field| field.name == "kind")
+      .expect("kind field should exist");
+
+    assert_eq!(
+      kind_field.default_value.as_ref(),
+      Some(&json!("base#kind")),
+      "Discriminator should use mapping value when schema default is absent"
+    );
+    assert!(
+      kind_field.serde_attrs.iter().any(|attr| attr == "default"),
+      "Field should request serde to inject the default when missing"
+    );
+    assert!(
+      kind_field
+        .serde_attrs
+        .iter()
+        .all(|attr| attr != "skip" && attr != "skip_serializing"),
+      "Field should serialize with the default discriminator value"
     );
   }
 
