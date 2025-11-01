@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::ast::*;
+use super::ast::{
+  EnumDef, FieldDef, OperationInfo, PathSegment, QueryParameter, RustType, StructDef, StructMethod, StructMethodKind,
+  TypeAliasDef, TypeRef, VariantContent, VariantDef,
+};
 use crate::reserved::{header_const_name, regex_const_name};
 
 /// Visibility level for generated types
@@ -199,14 +202,13 @@ impl CodeGenerator {
             };
             let key = RegexKey::for_struct(&def.name, &field.name);
             let pattern_key = pattern.clone();
-            let const_name = match pattern_to_const.get(&pattern_key) {
-              Some(existing) => existing.clone(),
-              None => {
-                let name = regex_const_name(&key.parts());
-                pattern_to_const.insert(pattern_key.clone(), name.clone());
-                const_defs.insert(name.clone(), pattern_key);
-                name
-              }
+            let const_name = if let Some(existing) = pattern_to_const.get(&pattern_key) {
+              existing.clone()
+            } else {
+              let name = regex_const_name(&key.parts());
+              pattern_to_const.insert(pattern_key.clone(), name.clone());
+              const_defs.insert(name.clone(), pattern_key);
+              name
             };
             lookup.insert(key, const_name);
           }
@@ -220,14 +222,13 @@ impl CodeGenerator {
                 };
                 let key = RegexKey::for_variant(&def.name, &variant.name, &field.name);
                 let pattern_key = pattern.clone();
-                let const_name = match pattern_to_const.get(&pattern_key) {
-                  Some(existing) => existing.clone(),
-                  None => {
-                    let name = regex_const_name(&key.parts());
-                    pattern_to_const.insert(pattern_key.clone(), name.clone());
-                    const_defs.insert(name.clone(), pattern_key);
-                    name
-                  }
+                let const_name = if let Some(existing) = pattern_to_const.get(&pattern_key) {
+                  existing.clone()
+                } else {
+                  let name = regex_const_name(&key.parts());
+                  pattern_to_const.insert(pattern_key.clone(), name.clone());
+                  const_defs.insert(name.clone(), pattern_key);
+                  name
                 };
                 lookup.insert(key, const_name);
               }
@@ -667,7 +668,7 @@ impl CodeGenerator {
         let source = if trimmed.starts_with("#[") {
           trimmed.to_string()
         } else {
-          format!("#[{}]", trimmed)
+          format!("#[{trimmed}]")
         };
         syn::parse_str::<TokenStream>(&source).unwrap_or_else(|_| quote! {})
       })
@@ -697,7 +698,7 @@ impl CodeGenerator {
     let mut combined = attrs.to_owned();
 
     if let Some(const_name) = regex_const {
-      combined.push(format!("regex(path = \"{}\")", const_name));
+      combined.push(format!("regex(path = \"{const_name}\")"));
     }
 
     let attr_tokens: Vec<TokenStream> = combined
@@ -749,7 +750,7 @@ impl CodeGenerator {
         // Add validation constraints to docs
         let mut field_docs = field.docs.clone();
         if let Some(ref multiple_of) = field.multiple_of {
-          field_docs.push(format!("/// Validation: Must be a multiple of {}", multiple_of));
+          field_docs.push(format!("/// Validation: Must be a multiple of {multiple_of}"));
         }
 
         let docs = Self::generate_docs(&field_docs);
@@ -766,7 +767,7 @@ impl CodeGenerator {
             Some(variant) => RegexKey::for_variant(type_name, variant, &field.name),
             None => RegexKey::for_struct(type_name, &field.name),
           };
-          regex_lookup.get(&key).map(|s| s.as_str())
+          regex_lookup.get(&key).map(std::string::String::as_str)
         } else {
           None
         };

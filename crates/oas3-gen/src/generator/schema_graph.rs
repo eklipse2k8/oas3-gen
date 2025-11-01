@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  string::ToString,
+};
 
 use oas3::{
   Spec,
@@ -83,7 +86,9 @@ impl SchemaGraph {
   /// Extract schema name from a $ref string
   pub(crate) fn extract_ref_name(ref_string: &str) -> Option<String> {
     // Format: "#/components/schemas/SchemaName"
-    ref_string.strip_prefix("#/components/schemas/").map(|s| s.to_string())
+    ref_string
+      .strip_prefix("#/components/schemas/")
+      .map(ToString::to_string)
   }
 
   /// Extract schema name from an ObjectOrReference if it's a $ref

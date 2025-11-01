@@ -158,15 +158,15 @@ impl TypeRef {
     let mut result = self.base_type.clone();
 
     if self.boxed {
-      result = format!("Box<{}>", result);
+      result = format!("Box<{result}>");
     }
 
     if self.is_array {
-      result = format!("Vec<{}>", result);
+      result = format!("Vec<{result}>");
     }
 
     if self.nullable {
-      result = format!("Option<{}>", result);
+      result = format!("Option<{result}>");
     }
 
     result

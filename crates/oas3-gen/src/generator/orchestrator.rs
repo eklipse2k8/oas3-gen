@@ -97,7 +97,7 @@ impl Orchestrator {
   /// - Schema graph cannot be built
   /// - Code generation produces invalid Rust syntax
   /// - Code formatter fails
-  pub fn generate(&self) -> anyhow::Result<(String, GenerationStats)> {
+  pub async fn generate(&self) -> anyhow::Result<(String, GenerationStats)> {
     // Build schema graph with dependency analysis
     let mut graph = SchemaGraph::new(self.spec.clone())?;
     graph.build_dependencies();
@@ -110,9 +110,9 @@ impl Orchestrator {
 
     for schema_name in graph.schema_names() {
       if let Some(schema) = graph.get_schema(schema_name) {
-        match schema_converter.convert_schema(schema_name, schema) {
+        match schema_converter.convert_schema(schema_name, schema).await {
           Ok(types) => rust_types.extend(types),
-          Err(e) => warnings.push(format!("Failed to convert schema {}: {}", schema_name, e)),
+          Err(e) => warnings.push(format!("Failed to convert schema {schema_name}: {e}")),
         }
       }
     }
@@ -127,13 +127,16 @@ impl Orchestrator {
           let method_str = method.as_str();
           let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
-          match operation_converter.convert_operation(operation_id, method_str, path, operation) {
+          match operation_converter
+            .convert_operation(operation_id, method_str, path, operation)
+            .await
+          {
             Ok((types, op_info)) => {
               rust_types.extend(types);
               operations_info.push(op_info);
             }
             Err(e) => {
-              warnings.push(format!("Failed to convert operation {} {}: {}", method_str, path, e));
+              warnings.push(format!("Failed to convert operation {method_str} {path}: {e}"));
             }
           }
         }
@@ -180,18 +183,17 @@ impl Orchestrator {
   /// # Errors
   ///
   /// Returns the same errors as `generate()`.
-  pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let (code, stats) = self.generate()?;
+  pub async fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
+    let (code, stats) = self.generate().await?;
     let metadata = self.metadata();
 
-    let description = metadata
-      .description
-      .as_ref()
-      .map(|d| d.replace("\n", "\n//! "))
-      .unwrap_or_else(|| String::from("No description provided"));
+    let description = metadata.description.as_ref().map_or_else(
+      || String::from("No description provided"),
+      |d| d.replace('\n', "\n//! "),
+    );
 
     let final_code = format!(
-      r#"//! AUTO-GENERATED CODE - DO NOT EDIT!
+      r"//! AUTO-GENERATED CODE - DO NOT EDIT!
 //!
 //! {}
 //! Source: {}
@@ -204,7 +206,7 @@ impl Orchestrator {
 {}
 
 fn main() {{}}
-"#,
+",
       metadata.title, source_path, metadata.version, OAS3_GEN_VERSION, description, code
     );
 
@@ -234,8 +236,8 @@ mod tests {
     assert_eq!(metadata.version, "1.0.0");
   }
 
-  #[test]
-  fn test_orchestrator_generate_empty() {
+  #[tokio::test]
+  async fn test_orchestrator_generate_empty() {
     let spec_json = r#"{
       "openapi": "3.1.0",
       "info": {
@@ -247,7 +249,7 @@ mod tests {
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
 
-    let result = orchestrator.generate();
+    let result = orchestrator.generate().await;
     assert!(result.is_ok());
 
     let (code, stats) = result.unwrap();
@@ -258,8 +260,8 @@ mod tests {
     assert_eq!(stats.warnings.len(), 0);
   }
 
-  #[test]
-  fn test_orchestrator_generate_with_header() {
+  #[tokio::test]
+  async fn test_orchestrator_generate_with_header() {
     let spec_json = r#"{
       "openapi": "3.1.0",
       "info": {
@@ -272,7 +274,7 @@ mod tests {
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
 
-    let result = orchestrator.generate_with_header("/path/to/spec.json");
+    let result = orchestrator.generate_with_header("/path/to/spec.json").await;
     assert!(result.is_ok());
 
     let (code, _) = result.unwrap();

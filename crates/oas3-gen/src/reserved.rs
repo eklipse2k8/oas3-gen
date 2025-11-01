@@ -69,7 +69,7 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
 
   // Prepend "negative_" if original name started with `-`
   if has_leading_minus {
-    ident = format!("negative_{}", ident);
+    ident = format!("negative_{ident}");
   }
 
   if ident == "self" {
@@ -77,7 +77,7 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
   }
 
   if FORBIDDEN_IDENTIFIERS.contains(ident.as_str()) {
-    return format!("r#{}", ident);
+    return format!("r#{ident}");
   }
 
   if ident.starts_with(|c: char| c.is_ascii_digit()) {
@@ -118,11 +118,11 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
 
   // Prepend "Negative" if original name started with `-`
   if has_leading_minus {
-    ident = format!("Negative{}", ident);
+    ident = format!("Negative{ident}");
   }
 
   if RESERVED_PASCAL_CASE.contains(ident.as_str()) {
-    return format!("r#{}", ident);
+    return format!("r#{ident}");
   }
 
   if ident.starts_with(|c: char| c.is_ascii_digit()) {
@@ -142,7 +142,7 @@ pub(crate) fn regex_const_name(key: &[&str]) -> String {
     ident.insert(0, '_');
   }
 
-  format!("REGEX_{}", ident)
+  format!("REGEX_{ident}")
 }
 
 /// Converts a header name into a valid Rust constant identifier (`SCREAMING_SNAKE_CASE`).
