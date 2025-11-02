@@ -16,7 +16,10 @@ use super::{
   schema_graph::SchemaGraph,
   utils::doc_comment_lines,
 };
-use crate::reserved::{to_rust_field_name, to_rust_type_name};
+use crate::{
+  generator::ast::StructKind,
+  reserved::{to_rust_field_name, to_rust_type_name},
+};
 
 const QUERY_COMPONENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
@@ -68,10 +71,7 @@ impl<'a> OperationConverter<'a> {
       None
     };
 
-    // Extract primary response type (typically 200/201 response)
-    // Don't generate response enums - let HTTP clients use http::StatusCode
     let response_type_name = if let Some(ref responses) = operation.responses {
-      // Look for successful response (200, 201, etc.)
       responses
         .iter()
         .find(|(code, _)| code.starts_with('2'))
@@ -161,7 +161,7 @@ impl<'a> OperationConverter<'a> {
         if !inline_schema.properties.is_empty() {
           let (body_struct, mut inline_types) = self
             .schema_converter
-            .convert_struct(&raw_body_type_name, inline_schema)
+            .convert_struct(&raw_body_type_name, inline_schema, Some(StructKind::RequestBody))
             .await?;
           generated_types.append(&mut inline_types);
           generated_types.push(body_struct);
@@ -357,47 +357,12 @@ impl<'a> OperationConverter<'a> {
       vec![]
     };
 
-    // Individual rename attributes are more explicit and handle all edge cases correctly
-    let mut serde_attrs = vec![];
-
-    // Only add serde(default) at struct level if ALL fields have defaults or are Option/Vec
-    let all_fields_defaultable = fields.iter().all(|f| {
-      f.default_value.is_some()
-        || f.rust_type.nullable
-        || f.rust_type.is_array
-        || matches!(
-          f.rust_type.base_type.as_str(),
-          "String"
-            | "bool"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "i128"
-            | "isize"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u128"
-            | "usize"
-            | "f32"
-            | "f64"
-            | "serde_json::Value"
-        )
-    });
-
-    let outer_attrs = SchemaConverter::container_outer_attrs(&fields);
-    if fields.iter().any(|f| f.default_value.is_some()) && all_fields_defaultable {
-      serde_attrs.push("default".to_string());
-    }
+    let serde_attrs = vec![];
+    let outer_attrs = Vec::new();
 
     let derives = vec![
       "Clone".into(),
       "Debug".into(),
-      "Serialize".into(),
-      "Deserialize".into(),
-      "PartialEq".into(),
       "validator::Validate".into(),
       "oas3_gen_support::Default".into(),
     ];
@@ -416,6 +381,7 @@ impl<'a> OperationConverter<'a> {
       serde_attrs,
       outer_attrs,
       methods,
+      kind: StructKind::OperationRequest,
     })
   }
 
@@ -535,15 +501,8 @@ impl<'a> OperationConverter<'a> {
     };
 
     let is_required = param.required.unwrap_or(false);
+    let serde_attrs = vec![];
 
-    let mut serde_attrs = vec![];
-    // Add rename if the Rust field name differs from the original parameter name
-    let rust_param_name = to_rust_field_name(&param.name);
-    if rust_param_name != param.name.as_str() {
-      serde_attrs.push(format!("rename = \"{}\"", param.name));
-    }
-
-    // Add location hint as a comment in docs
     let location_hint = match param.location {
       ParameterIn::Path => "Path",
       ParameterIn::Query => "Query",

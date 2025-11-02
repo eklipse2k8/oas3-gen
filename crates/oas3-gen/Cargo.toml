@@ -11,6 +11,10 @@ readme.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+mdformat = []
+
 [dependencies]
 any_ascii.workspace = true
 anyhow.workspace = true

@@ -16,9 +16,12 @@ use super::{
   schema_graph::SchemaGraph,
   utils::doc_comment_lines,
 };
-use crate::reserved::{to_rust_field_name, to_rust_type_name};
+use crate::{
+  generator::ast::StructKind,
+  reserved::{to_rust_field_name, to_rust_type_name},
+};
 
-/// Field metadata extracted from an OpenAPI schema property
+/// Field metadata extracted from an `OpenAPI` schema property
 #[derive(Clone)]
 struct FieldMetadata {
   docs: Vec<String>,
@@ -55,7 +58,7 @@ static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
 type FieldConversionFuture<'a> =
   Pin<Box<dyn Future<Output = anyhow::Result<(Vec<FieldDef>, Vec<RustType>)>> + Send + 'a>>;
 
-/// Converter that transforms OpenAPI schemas into Rust AST structures
+/// Converter that transforms `OpenAPI` schemas into Rust AST structures
 pub(crate) struct SchemaConverter<'a> {
   graph: &'a SchemaGraph,
 }
@@ -300,6 +303,7 @@ impl<'a> SchemaConverter<'a> {
       serde_attrs,
       outer_attrs,
       methods: vec![],
+      kind: StructKind::Schema,
     });
 
     let mut all_types = vec![struct_type];
@@ -389,7 +393,7 @@ impl<'a> SchemaConverter<'a> {
 
     if !schema.properties.is_empty() {
       let is_discriminated = self.is_discriminated_base_type(schema);
-      let (main_type, mut inline_types) = self.convert_struct(name, schema).await?;
+      let (main_type, mut inline_types) = self.convert_struct(name, schema, None).await?;
       let mut all_types = Vec::new();
       if is_discriminated {
         let base_struct_name = match &main_type {
@@ -502,7 +506,7 @@ impl<'a> SchemaConverter<'a> {
     merged_schema.discriminator = merged_discriminator.clone();
 
     let is_discriminated = self.is_discriminated_base_type(&merged_schema);
-    let (main_type, mut inline_types) = self.convert_struct(name, &merged_schema).await?;
+    let (main_type, mut inline_types) = self.convert_struct(name, &merged_schema, None).await?;
 
     let mut all_types = Vec::new();
     if is_discriminated {
@@ -854,7 +858,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Split a PascalCase name into words
+  /// Split a `PascalCase` name into words
   fn split_pascal_case(name: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current_word = String::new();
@@ -967,6 +971,7 @@ impl<'a> SchemaConverter<'a> {
     &self,
     name: &str,
     schema: &ObjectSchema,
+    kind: Option<StructKind>,
   ) -> anyhow::Result<(RustType, Vec<RustType>)> {
     let is_discriminated = self.is_discriminated_base_type(schema);
 
@@ -1066,6 +1071,7 @@ impl<'a> SchemaConverter<'a> {
       serde_attrs,
       outer_attrs,
       methods: vec![],
+      kind: kind.unwrap_or(StructKind::Schema),
     });
 
     Ok((struct_type, inline_types))
@@ -1101,7 +1107,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Extract validation attributes from an OpenAPI schema
+  /// Extract validation attributes from an `OpenAPI` schema
   pub(crate) fn extract_validation_attrs(
     &self,
     _prop_name: &str,
@@ -1313,7 +1319,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Converts a property schema reference to a TypeRef (no inline enums)
+  /// Converts a property schema reference to a `TypeRef` (no inline enums)
   fn resolve_property_type(&self, prop_schema_ref: &ObjectOrReference<ObjectSchema>) -> anyhow::Result<TypeRef> {
     match prop_schema_ref {
       ObjectOrReference::Ref { ref_path, .. } => {
@@ -1380,7 +1386,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Builds serde attributes for a field (rename only; skip_serializing_if is handled at container-level by serde_with)
+  /// Builds serde attributes for a field (rename only; `skip_serializing_if` is handled at container-level by `serde_with`)
   fn build_serde_attrs(prop_name: &str) -> Vec<String> {
     let mut serde_attrs = vec![];
     let rust_field_name = to_rust_field_name(prop_name);
@@ -1398,7 +1404,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Wraps a TypeRef with Option if needed (avoids double-wrapping)
+  /// Wraps a `TypeRef` with Option if needed (avoids double-wrapping)
   fn apply_optionality(rust_type: TypeRef, is_optional: bool) -> TypeRef {
     let is_nullable = rust_type.nullable;
     if is_optional && !is_nullable {
@@ -1408,7 +1414,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Deduplicates field names that collide after conversion to snake_case.
+  /// Deduplicates field names that collide after conversion to `snake_case`.
   fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
     let mut name_groups: HashMap<String, Vec<usize>> = HashMap::new();
     for (idx, field) in fields.iter().enumerate() {
@@ -1449,7 +1455,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Builds a FieldDef from all the constituent parts
+  /// Builds a `FieldDef` from all the constituent parts
   fn build_field_def(
     prop_name: &str,
     rust_type: TypeRef,
@@ -1541,7 +1547,7 @@ impl<'a> SchemaConverter<'a> {
     (metadata, serde_attrs, extra_attrs, regex_validation)
   }
 
-  /// Processes a single property into a FieldDef with generated types
+  /// Processes a single property into a `FieldDef` with generated types
   async fn process_single_field(
     &self,
     parent_name: &str,
@@ -1628,7 +1634,7 @@ impl<'a> SchemaConverter<'a> {
       .map(|(f, _)| f)
   }
 
-  /// Maps OpenAPI string format values to their corresponding Rust types
+  /// Maps `OpenAPI` string format values to their corresponding Rust types
   fn map_string_format(format: Option<&String>) -> &'static str {
     format.map_or("String", |f| match f.as_str() {
       "date" => "chrono::NaiveDate",
@@ -1702,7 +1708,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Converts OpenAPI array schema items to a Rust TypeRef (returns element type, caller adds Vec)
+  /// Converts `OpenAPI` array schema items to a Rust `TypeRef` (returns element type, caller adds Vec)
   fn convert_array_items(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
     let Some(ref items_box) = schema.items else {
       return Ok(TypeRef::new("serde_json::Value"));
@@ -1766,7 +1772,7 @@ impl<'a> SchemaConverter<'a> {
     Some(type_ref)
   }
 
-  /// Attempts to convert oneOf/anyOf union variants to a TypeRef
+  /// Attempts to convert oneOf/anyOf union variants to a `TypeRef`
   fn try_convert_union_to_type_ref(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Option<TypeRef> {
     if let Some(matching_schema) = self.find_matching_union_schema(variants) {
       let mut type_ref = TypeRef::new(to_rust_type_name(&matching_schema));
@@ -1833,7 +1839,7 @@ impl<'a> SchemaConverter<'a> {
     fallback_type
   }
 
-  /// Maps a single primitive SchemaType to a Rust TypeRef
+  /// Maps a single primitive `SchemaType` to a Rust `TypeRef`
   fn map_single_primitive_type(&self, schema_type: &SchemaType, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
     match schema_type {
       SchemaType::String => Ok(TypeRef::new(Self::map_string_format(schema.format.as_ref()))),
@@ -1854,7 +1860,7 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  /// Converts nullable primitive types from SchemaTypeSet::Multiple -> Option<T>
+  /// Converts nullable primitive types from `SchemaTypeSet::Multiple` -> Option<T>
   fn convert_nullable_primitive(&self, types: &[SchemaType], schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
     let type_vec: Vec<_> = types.iter().collect();
 
@@ -1875,7 +1881,7 @@ impl<'a> SchemaConverter<'a> {
     Ok(type_ref.with_option())
   }
 
-  /// Converts OpenAPI schema to TypeRef
+  /// Converts `OpenAPI` schema to `TypeRef`
   pub(crate) fn schema_to_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
     if let Some(ref schema_type) = schema.schema_type {
       if matches!(schema_type, SchemaTypeSet::Single(SchemaType::Object))
@@ -2696,7 +2702,7 @@ mod tests {
     let converter = SchemaConverter::new(&graph);
 
     let (optional_type, _) = converter
-      .convert_struct("OptionalStruct", graph.get_schema("OptionalStruct").unwrap())
+      .convert_struct("OptionalStruct", graph.get_schema("OptionalStruct").unwrap(), None)
       .await
       .unwrap();
 
@@ -2734,7 +2740,7 @@ mod tests {
     let converter = SchemaConverter::new(&graph);
 
     let (required_type, _) = converter
-      .convert_struct("RequiredStruct", graph.get_schema("RequiredStruct").unwrap())
+      .convert_struct("RequiredStruct", graph.get_schema("RequiredStruct").unwrap(), None)
       .await
       .unwrap();
 
@@ -2784,7 +2790,7 @@ mod tests {
     let converter = SchemaConverter::new(&graph);
 
     let (rust_type, _) = converter
-      .convert_struct("ConstStruct", graph.get_schema("ConstStruct").unwrap())
+      .convert_struct("ConstStruct", graph.get_schema("ConstStruct").unwrap(), None)
       .await
       .unwrap();
 

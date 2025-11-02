@@ -21,7 +21,6 @@ pub(crate) struct DiscriminatedEnumDef {
 pub(crate) enum RustType {
   Struct(StructDef),
   Enum(EnumDef),
-  #[allow(dead_code)]
   TypeAlias(TypeAliasDef),
   DiscriminatedEnum(DiscriminatedEnumDef),
 }
@@ -51,6 +50,18 @@ pub(crate) struct OperationInfo {
   pub(crate) request_body_types: Vec<String>,
 }
 
+/// Semantic kind of a struct to determine code generation behavior
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum StructKind {
+  /// Regular OpenAPI schema struct from components.schemas
+  #[default]
+  Schema,
+  /// Operation request struct combining parameters and body (has `render_path` method)
+  OperationRequest,
+  /// Inline request body struct for an operation
+  RequestBody,
+}
+
 /// Rust struct definition
 #[derive(Debug, Clone)]
 pub(crate) struct StructDef {
@@ -61,6 +72,7 @@ pub(crate) struct StructDef {
   pub(crate) serde_attrs: Vec<String>,
   pub(crate) outer_attrs: Vec<String>,
   pub(crate) methods: Vec<StructMethod>,
+  pub(crate) kind: StructKind,
 }
 
 /// Associated method definition for a struct

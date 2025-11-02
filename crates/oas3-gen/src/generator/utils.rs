@@ -1,10 +1,15 @@
+#[cfg(feature = "mdformat")]
 use std::process::Stdio;
 
-use tokio::{io::AsyncWriteExt, process::Command};
+#[cfg(feature = "mdformat")]
+use tokio::process::Command;
 
 /// Convert a string into doc comment lines with `///` prefix
 pub(crate) async fn doc_comment_lines(input: &str) -> Vec<String> {
+  #[cfg(feature = "mdformat")]
   let reformatted = format_with_mdformat(input).await.unwrap_or_default();
+  #[cfg(not(feature = "mdformat"))]
+  let reformatted = input.to_string();
 
   let normalized = reformatted.replace("\\n", "\n");
   normalized
@@ -19,7 +24,10 @@ pub(crate) async fn doc_comment_lines(input: &str) -> Vec<String> {
     .collect()
 }
 
+#[cfg(feature = "mdformat")]
 async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
+  use tokio::io::AsyncWriteExt;
+
   let mut child = Command::new("uvx")
     .arg("mdformat")
     .args(["--wrap", "100"])
@@ -50,6 +58,7 @@ async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
 mod tests {
   use super::*;
 
+  #[cfg(feature = "mdformat")]
   #[tokio::test]
   async fn test_doc_comment_lines() {
     let input = "This is a test.\n\nNew line here.\nLine with \n escaped newline.";
