@@ -78,7 +78,7 @@ impl<'a> OperationConverter<'a> {
         .or_else(|| responses.iter().next())
         .and_then(|(_, response_ref)| {
           if let Ok(response) = response_ref.resolve(self.spec) {
-            self.extract_response_schema_name(&response)
+            Self::extract_response_schema_name(&response)
           } else {
             None
           }
@@ -202,6 +202,7 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Create a request struct from operation parameters and body
+  #[allow(clippy::too_many_lines)]
   async fn create_request_struct(
     &self,
     name: &str,
@@ -283,7 +284,6 @@ impl<'a> OperationConverter<'a> {
       fields.push(field);
     }
 
-    // Check if body is expected based on HTTP method type
     let request_body_required = self
       .operation_method(path, operation)
       .is_some_and(|m| matches!(m, Method::POST | Method::PATCH | Method::PUT));
@@ -306,14 +306,9 @@ impl<'a> OperationConverter<'a> {
             );
           }
 
-          let validation_attrs = self
-            .schema_converter
-            .extract_validation_attrs(name, *is_required, &schema_ref);
-          let regex_validation = self
-            .schema_converter
-            .extract_validation_pattern(name, &schema_ref)
-            .cloned();
-          let default_value = self.schema_converter.extract_default_value(&schema_ref);
+          let validation_attrs = SchemaConverter::extract_validation_attrs(name, *is_required, &schema_ref);
+          let regex_validation = SchemaConverter::extract_validation_pattern(name, &schema_ref).cloned();
+          let default_value = SchemaConverter::extract_default_value(&schema_ref);
 
           let serde_attrs = vec![];
 
@@ -487,11 +482,9 @@ impl<'a> OperationConverter<'a> {
       if let Ok(schema) = schema_ref.resolve(self.spec) {
         let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
         let is_required = param.required.unwrap_or(false);
-        let validation = self
-          .schema_converter
-          .extract_validation_attrs(&param.name, is_required, &schema);
-        let regex_validation = self.schema_converter.extract_validation_pattern(&param.name, &schema);
-        let default = self.schema_converter.extract_default_value(&schema);
+        let validation = SchemaConverter::extract_validation_attrs(&param.name, is_required, &schema);
+        let regex_validation = SchemaConverter::extract_validation_pattern(&param.name, &schema);
+        let default = SchemaConverter::extract_default_value(&schema);
         (type_ref, validation, regex_validation.cloned(), default)
       } else {
         (TypeRef::new("String"), vec![], None, None)
@@ -538,7 +531,7 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Extract schema name from a response (helper)
-  fn extract_response_schema_name(&self, response: &oas3::spec::Response) -> Option<String> {
+  fn extract_response_schema_name(response: &oas3::spec::Response) -> Option<String> {
     response.content.iter().next().and_then(|(_, media_type)| {
       media_type.schema.as_ref().and_then(|schema_ref| {
         if let ObjectOrReference::Ref { ref_path, .. } = schema_ref {

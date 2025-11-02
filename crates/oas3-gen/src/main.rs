@@ -1,3 +1,4 @@
+#![allow(clippy::doc_markdown)]
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -66,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
   // Create orchestrator and generate code
   log_info!(cli, "Generating Rust types...");
-  let orchestrator = Orchestrator::new(spec, visibility)?;
+  let orchestrator = Orchestrator::new(spec, visibility);
   let (code, stats) = orchestrator
     .generate_with_header(&cli.input.display().to_string())
     .await?;

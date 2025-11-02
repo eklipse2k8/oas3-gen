@@ -54,12 +54,9 @@ impl Orchestrator {
   ///
   /// * `spec` - The OpenAPI specification
   /// * `visibility` - Visibility level for generated types (public, crate, or file-private)
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if the spec cannot be processed or contains invalid references.
-  pub fn new(spec: oas3::Spec, visibility: Visibility) -> anyhow::Result<Self> {
-    Ok(Self { spec, visibility })
+  #[must_use]
+  pub const fn new(spec: oas3::Spec, visibility: Visibility) -> Self {
+    Self { spec, visibility }
   }
 
   /// Extracts metadata from the OpenAPI specification.
@@ -98,12 +95,10 @@ impl Orchestrator {
   /// - Code generation produces invalid Rust syntax
   /// - Code formatter fails
   pub async fn generate(&self) -> anyhow::Result<(String, GenerationStats)> {
-    // Build schema graph with dependency analysis
     let mut graph = SchemaGraph::new(self.spec.clone())?;
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
-    // Convert schemas to Rust AST
     let schema_converter = SchemaConverter::new(&graph);
     let mut rust_types = Vec::new();
     let mut warnings = Vec::new();
@@ -117,7 +112,6 @@ impl Orchestrator {
       }
     }
 
-    // Convert operations to request/response types
     let operation_converter = OperationConverter::new(&schema_converter, graph.spec());
     let mut operations_info = Vec::new();
 
@@ -143,13 +137,11 @@ impl Orchestrator {
       }
     }
 
-    // Generate and format code
     let type_usage = CodeGenerator::build_type_usage_map(&operations_info);
-    let code = CodeGenerator::generate(&rust_types, &type_usage, graph.all_headers(), self.visibility);
+    let code = CodeGenerator::generate(&rust_types, &type_usage, &graph.all_headers(), self.visibility);
     let syntax_tree = syn::parse2(code)?;
     let formatted = prettyplease::unparse(&syntax_tree);
 
-    // Collect statistics
     let stats = GenerationStats {
       types_generated: rust_types.len(),
       operations_converted: operations_info.len(),
@@ -229,7 +221,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default());
 
     let metadata = orchestrator.metadata();
     assert_eq!(metadata.title, "Empty API");
@@ -247,7 +239,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default());
 
     let result = orchestrator.generate().await;
     assert!(result.is_ok());
@@ -272,7 +264,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default());
 
     let result = orchestrator.generate_with_header("/path/to/spec.json").await;
     assert!(result.is_ok());
@@ -297,7 +289,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec, Visibility::default()).unwrap();
+    let orchestrator = Orchestrator::new(spec, Visibility::default());
     let metadata = orchestrator.metadata();
 
     assert_eq!(metadata.title, "Test API");

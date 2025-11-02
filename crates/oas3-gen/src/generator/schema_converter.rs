@@ -12,7 +12,7 @@ use regex::Regex;
 use serde_json::Number;
 
 use super::{
-  ast::{EnumDef, FieldDef, RustType, StructDef, TypeAliasDef, TypeRef, VariantContent, VariantDef},
+  ast::{EnumDef, FieldDef, RustPrimitive, RustType, StructDef, TypeAliasDef, TypeRef, VariantContent, VariantDef},
   schema_graph::SchemaGraph,
   utils::doc_comment_lines,
 };
@@ -37,7 +37,7 @@ struct FieldMetadata {
 #[derive(Copy, Clone)]
 enum InlinePolicy {
   None,
-  InlineUnions, // generate inline enums for oneOf/anyOf in properties
+  InlineUnions,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -105,7 +105,7 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Check if a schema is a discriminated base type (has discriminator with mappings and properties)
-  fn is_discriminated_base_type(&self, schema: &ObjectSchema) -> bool {
+  fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {
     schema
       .discriminator
       .as_ref()
@@ -140,7 +140,7 @@ impl<'a> SchemaConverter<'a> {
         .iter()
         .filter_map(|all_of_ref| match all_of_ref {
           ObjectOrReference::Ref { ref_path, .. } => SchemaGraph::extract_ref_name(ref_path),
-          _ => None,
+          ObjectOrReference::Object(_) => None,
         })
         .map(|parent_name| self.compute_inheritance_depth(&parent_name, memo))
         .max()
@@ -239,7 +239,9 @@ impl<'a> SchemaConverter<'a> {
     merged_schema.discriminator = merged_discriminator;
     merged_schema.all_of.clear();
     if merged_schema.additional_properties.is_none() {
-      merged_schema.additional_properties = parent_schema.additional_properties.clone();
+      merged_schema
+        .additional_properties
+        .clone_from(&parent_schema.additional_properties);
     }
 
     let (mut child_fields, inline_types) = self
@@ -330,11 +332,9 @@ impl<'a> SchemaConverter<'a> {
 
     let mut variants = Vec::new();
 
-    // Add child variants (most specific first - already sorted by depth)
     for (disc_value, child_schema_name) in children {
       let child_type_name = to_rust_type_name(&child_schema_name);
 
-      // Generate variant name by removing common prefix
       let variant_name = if child_type_name.starts_with(&enum_name) {
         child_type_name
           .strip_prefix(&enum_name)
@@ -352,11 +352,10 @@ impl<'a> SchemaConverter<'a> {
       variants.push(DiscriminatedVariant {
         discriminator_value: disc_value,
         variant_name,
-        type_name: format!("Box<{child_type_name}>"), // always boxed to avoid recursion
+        type_name: format!("Box<{child_type_name}>"),
       });
     }
 
-    // Add fallback variant (base type)
     let base_variant_name = to_rust_type_name(base_name.split('.').next_back().unwrap_or(base_name));
     let fallback = Some(DiscriminatedVariant {
       discriminator_value: String::new(),
@@ -392,7 +391,7 @@ impl<'a> SchemaConverter<'a> {
     }
 
     if !schema.properties.is_empty() {
-      let is_discriminated = self.is_discriminated_base_type(schema);
+      let is_discriminated = Self::is_discriminated_base_type(schema);
       let (main_type, mut inline_types) = self.convert_struct(name, schema, None).await?;
       let mut all_types = Vec::new();
       if is_discriminated {
@@ -442,7 +441,7 @@ impl<'a> SchemaConverter<'a> {
     }
 
     if schema.discriminator.is_some() {
-      *discriminator = schema.discriminator.clone();
+      discriminator.clone_from(&schema.discriminator);
     }
 
     Ok(())
@@ -476,7 +475,7 @@ impl<'a> SchemaConverter<'a> {
         merged
       };
 
-      if self.is_discriminated_base_type(&merged_parent) {
+      if Self::is_discriminated_base_type(&merged_parent) {
         Some((parent_name, merged_parent))
       } else {
         None
@@ -503,9 +502,9 @@ impl<'a> SchemaConverter<'a> {
     let mut merged_schema = schema.clone();
     merged_schema.properties = merged_properties;
     merged_schema.required = merged_required;
-    merged_schema.discriminator = merged_discriminator.clone();
+    merged_schema.discriminator.clone_from(&merged_discriminator);
 
-    let is_discriminated = self.is_discriminated_base_type(&merged_schema);
+    let is_discriminated = Self::is_discriminated_base_type(&merged_schema);
     let (main_type, mut inline_types) = self.convert_struct(name, &merged_schema, None).await?;
 
     let mut all_types = Vec::new();
@@ -526,6 +525,7 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Unified converter for oneOf and anyOf enums (keeps anyOf special-case for forward-compatible string enums)
+  #[allow(clippy::too_many_lines)]
   async fn convert_union_enum(
     &self,
     name: &str,
@@ -668,11 +668,10 @@ impl<'a> SchemaConverter<'a> {
         continue;
       }
 
-      // Inline variant - naming + content
       let mut variant_name = if let Some(ref title) = resolved.title {
         to_rust_type_name(title)
       } else {
-        self.infer_variant_name(&resolved, i)
+        Self::infer_variant_name(&resolved, i)
       };
 
       if !seen_names.insert(variant_name.clone()) {
@@ -684,7 +683,6 @@ impl<'a> SchemaConverter<'a> {
       let deprecated = resolved.deprecated.unwrap_or(false);
 
       let (content, mut generated_types) = if let Some(disc_prop) = discriminator_prop {
-        // internally tagged wants struct-like variants
         if resolved.properties.is_empty() {
           let field = FieldDef {
             name: "value".to_string(),
@@ -720,20 +718,18 @@ impl<'a> SchemaConverter<'a> {
       });
     }
 
-    // Strip common prefix/suffix for clippy::enum_variant_names
     let original_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
     let stripped_names = Self::strip_common_affixes(&original_names);
     for (variant, stripped_name) in variants.iter_mut().zip(stripped_names.iter()) {
-      variant.name = stripped_name.clone();
+      variant.name.clone_from(stripped_name);
     }
 
-    // For untagged (anyOf) fix self-referential struct fields by adding Box to fields of the same enum type
     if kind == UnionKind::AnyOf {
       let enum_name = to_rust_type_name(name);
       for variant in &mut variants {
         if let VariantContent::Struct(ref mut fields) = variant.content {
           for field in fields {
-            if field.rust_type.base_type == enum_name && !field.rust_type.boxed {
+            if field.rust_type.base_type.to_string() == enum_name && !field.rust_type.boxed {
               field.rust_type = field.rust_type.clone().with_boxed();
             }
           }
@@ -754,16 +750,14 @@ impl<'a> SchemaConverter<'a> {
       discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),
       derives,
       serde_attrs,
-      outer_attrs: vec![], // no outer attrs needed for enums
+      outer_attrs: vec![],
     });
 
-    // Preserve convert_one_of_enum behavior: place generated inline types first, then enum
     let mut out = inline_types;
     out.push(main_enum);
     Ok(out)
   }
 
-  /// Convert a string enum with const values + a catch-all for unknown strings
   async fn convert_string_enum_with_catchall(
     &self,
     name: &str,
@@ -773,7 +767,6 @@ impl<'a> SchemaConverter<'a> {
     let base_name = to_rust_type_name(name);
     let known_name = format!("{base_name}Known");
 
-    // Inner enum with known values
     let mut known_variants = Vec::new();
     let mut seen_names = BTreeSet::new();
 
@@ -836,7 +829,7 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Infer a variant name from the schema type
-  fn infer_variant_name(&self, schema: &ObjectSchema, index: usize) -> String {
+  fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
     if !schema.enum_values.is_empty() {
       return "Enum".to_string();
     }
@@ -973,7 +966,7 @@ impl<'a> SchemaConverter<'a> {
     schema: &ObjectSchema,
     kind: Option<StructKind>,
   ) -> anyhow::Result<(RustType, Vec<RustType>)> {
-    let is_discriminated = self.is_discriminated_base_type(schema);
+    let is_discriminated = Self::is_discriminated_base_type(schema);
 
     let struct_name_base = to_rust_type_name(name);
     let struct_name = if is_discriminated {
@@ -986,10 +979,8 @@ impl<'a> SchemaConverter<'a> {
       .convert_fields_core(&struct_name, schema, InlinePolicy::InlineUnions, None, Some(name))
       .await?;
 
-    // Serde container attributes
     let mut serde_attrs = vec![];
 
-    // additionalProperties handling
     if let Some(ref additional) = schema.additional_properties {
       match additional {
         Schema::Boolean(bool_schema) => {
@@ -1006,7 +997,6 @@ impl<'a> SchemaConverter<'a> {
               "std::collections::HashMap<String, {}>",
               value_type.to_rust_type()
             ));
-            // Flatten map of additional properties
             fields.push(FieldDef {
               name: "additional_properties".to_string(),
               docs: vec!["/// Additional properties not defined in the schema".to_string()],
@@ -1026,30 +1016,29 @@ impl<'a> SchemaConverter<'a> {
       }
     }
 
-    // serde(default) at struct level if useful (unchanged policy)
     let all_fields_defaultable = fields.iter().all(|f| {
       f.default_value.is_some()
         || f.rust_type.nullable
         || f.rust_type.is_array
         || matches!(
-          f.rust_type.base_type.as_str(),
-          "String"
-            | "bool"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "i128"
-            | "isize"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u128"
-            | "usize"
-            | "f32"
-            | "f64"
-            | "serde_json::Value"
+          &f.rust_type.base_type,
+          RustPrimitive::String
+            | RustPrimitive::Bool
+            | RustPrimitive::I8
+            | RustPrimitive::I16
+            | RustPrimitive::I32
+            | RustPrimitive::I64
+            | RustPrimitive::I128
+            | RustPrimitive::Isize
+            | RustPrimitive::U8
+            | RustPrimitive::U16
+            | RustPrimitive::U32
+            | RustPrimitive::U64
+            | RustPrimitive::U128
+            | RustPrimitive::Usize
+            | RustPrimitive::F32
+            | RustPrimitive::F64
+            | RustPrimitive::Value
         )
     });
 
@@ -1077,7 +1066,7 @@ impl<'a> SchemaConverter<'a> {
     Ok((struct_type, inline_types))
   }
 
-  pub(crate) fn extract_validation_pattern<'s>(&self, prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
+  pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
     match (schema.schema_type.as_ref(), schema.pattern.as_ref()) {
       (Some(SchemaTypeSet::Single(SchemaType::String)), Some(pattern)) => {
         if Regex::new(pattern).is_ok() {
@@ -1093,7 +1082,6 @@ impl<'a> SchemaConverter<'a> {
 
   fn render_number(is_float: bool, num: &Number) -> String {
     if is_float {
-      // Keep stable formatting, ensure trailing .0 for integers
       let s = num.to_string();
       if s.contains('.') { s } else { format!("{s}.0") }
     } else {
@@ -1108,12 +1096,7 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Extract validation attributes from an `OpenAPI` schema
-  pub(crate) fn extract_validation_attrs(
-    &self,
-    _prop_name: &str,
-    is_required: bool,
-    schema: &ObjectSchema,
-  ) -> Vec<String> {
+  pub(crate) fn extract_validation_attrs(_prop_name: &str, is_required: bool, schema: &ObjectSchema) -> Vec<String> {
     let mut attrs = Vec::new();
 
     if let Some(ref format) = schema.format {
@@ -1205,7 +1188,7 @@ impl<'a> SchemaConverter<'a> {
     attrs
   }
 
-  pub(crate) fn extract_default_value(&self, schema: &ObjectSchema) -> Option<serde_json::Value> {
+  pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
     if let Some(default) = schema.default.clone() {
       return Some(default);
     }
@@ -1335,7 +1318,7 @@ impl<'a> SchemaConverter<'a> {
           Ok(TypeRef::new("serde_json::Value"))
         }
       }
-      _ => {
+      ObjectOrReference::Object(_) => {
         if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
           self.schema_to_type_ref(&prop_schema)
         } else {
@@ -1354,9 +1337,9 @@ impl<'a> SchemaConverter<'a> {
   ) -> FieldMetadata {
     if let Ok(prop_schema) = prop_schema_ref.resolve(self.graph.spec()) {
       let docs = Self::docs(prop_schema.description.as_ref()).await;
-      let validation_attrs = self.extract_validation_attrs(prop_name, is_required, &prop_schema);
-      let regex_validation = self.extract_validation_pattern(prop_name, &prop_schema).cloned();
-      let default_value = self.extract_default_value(&prop_schema);
+      let validation_attrs = SchemaConverter::extract_validation_attrs(prop_name, is_required, &prop_schema);
+      let regex_validation = Self::extract_validation_pattern(prop_name, &prop_schema).cloned();
+      let default_value = Self::extract_default_value(&prop_schema);
       let read_only = prop_schema.read_only.unwrap_or(false);
       let write_only = prop_schema.write_only.unwrap_or(false);
       let deprecated = prop_schema.deprecated.unwrap_or(false);
@@ -1398,8 +1381,8 @@ impl<'a> SchemaConverter<'a> {
 
   /// Filters out regex validation for types that don't support it
   fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>) -> Option<String> {
-    match rust_type.base_type.as_str() {
-      "chrono::DateTime<chrono::Utc>" | "chrono::NaiveDate" | "chrono::NaiveTime" | "uuid::Uuid" => None,
+    match &rust_type.base_type {
+      RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid => None,
       _ => regex,
     }
   }
@@ -1532,7 +1515,7 @@ impl<'a> SchemaConverter<'a> {
       serde_attrs.push("default".to_string());
     }
 
-    if metadata.default_value.is_none() && final_type.base_type == "String" && !final_type.is_array {
+    if metadata.default_value.is_none() && final_type.base_type == RustPrimitive::String && !final_type.is_array {
       metadata.default_value = Some(serde_json::Value::String(String::new()));
     }
 
@@ -1635,15 +1618,39 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Maps `OpenAPI` string format values to their corresponding Rust types
-  fn map_string_format(format: Option<&String>) -> &'static str {
-    format.map_or("String", |f| match f.as_str() {
-      "date" => "chrono::NaiveDate",
-      "date-time" => "chrono::DateTime<chrono::Utc>",
-      "time" => "chrono::NaiveTime",
-      "binary" => "Vec<u8>",
-      "byte" => "String",
-      "uuid" => "uuid::Uuid",
-      _ => "String",
+  fn map_string_format(format: Option<&String>) -> RustPrimitive {
+    format.map_or(RustPrimitive::String, |f| match f.as_str() {
+      "date" => RustPrimitive::Date,
+      "date-time" => RustPrimitive::DateTime,
+      "time" => RustPrimitive::Time,
+      "binary" => RustPrimitive::Bytes,
+
+      "uuid" => RustPrimitive::Uuid,
+      _ => RustPrimitive::String,
+    })
+  }
+
+  /// Maps `OpenAPI` integer format values to their corresponding Rust types
+  fn map_integer_format(format: Option<&String>) -> RustPrimitive {
+    format.map_or(RustPrimitive::I64, |f| match f.as_str() {
+      "int32" => RustPrimitive::I32,
+
+      "int8" => RustPrimitive::I8,
+      "int16" => RustPrimitive::I16,
+      "uint8" | "u8" => RustPrimitive::U8,
+      "uint16" | "u16" => RustPrimitive::U16,
+      "uint32" | "u32" => RustPrimitive::U32,
+      "uint64" | "u64" => RustPrimitive::U64,
+      _ => RustPrimitive::I64,
+    })
+  }
+
+  /// Maps `OpenAPI` number format values to their corresponding Rust types
+  fn map_number_format(format: Option<&String>) -> RustPrimitive {
+    format.map_or(RustPrimitive::F64, |f| match f.as_str() {
+      "float" => RustPrimitive::F32,
+
+      _ => RustPrimitive::F64,
     })
   }
 
@@ -1651,12 +1658,12 @@ impl<'a> SchemaConverter<'a> {
   fn try_extract_ref_name(obj_ref: &ObjectOrReference<ObjectSchema>) -> Option<String> {
     match obj_ref {
       ObjectOrReference::Ref { ref_path, .. } => SchemaGraph::extract_ref_name(ref_path),
-      _ => None,
+      ObjectOrReference::Object(_) => None,
     }
   }
 
   /// Extracts the first $ref from a schema's oneOf array, if present
-  fn try_extract_first_oneof_ref(&self, schema: &ObjectSchema) -> Option<String> {
+  fn try_extract_first_oneof_ref(schema: &ObjectSchema) -> Option<String> {
     schema.one_of.iter().find_map(Self::try_extract_ref_name)
   }
 
@@ -1723,7 +1730,7 @@ impl<'a> SchemaConverter<'a> {
 
     let items_schema = items_ref.resolve(self.graph.spec())?;
 
-    if let Some(ref_name) = self.try_extract_first_oneof_ref(&items_schema) {
+    if let Some(ref_name) = Self::try_extract_first_oneof_ref(&items_schema) {
       return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
     }
 
@@ -1825,7 +1832,7 @@ impl<'a> SchemaConverter<'a> {
         continue;
       }
 
-      if let Some(ref_name) = self.try_extract_first_oneof_ref(&resolved) {
+      if let Some(ref_name) = Self::try_extract_first_oneof_ref(&resolved) {
         return Some(TypeRef::new(to_rust_type_name(&ref_name)));
       }
 
@@ -1840,12 +1847,13 @@ impl<'a> SchemaConverter<'a> {
   }
 
   /// Maps a single primitive `SchemaType` to a Rust `TypeRef`
+  #[allow(clippy::trivially_copy_pass_by_ref)]
   fn map_single_primitive_type(&self, schema_type: &SchemaType, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
     match schema_type {
       SchemaType::String => Ok(TypeRef::new(Self::map_string_format(schema.format.as_ref()))),
-      SchemaType::Number => Ok(TypeRef::new("f64")),
-      SchemaType::Integer => Ok(TypeRef::new("i64")),
-      SchemaType::Boolean => Ok(TypeRef::new("bool")),
+      SchemaType::Number => Ok(TypeRef::new(Self::map_number_format(schema.format.as_ref()))),
+      SchemaType::Integer => Ok(TypeRef::new(Self::map_integer_format(schema.format.as_ref()))),
+      SchemaType::Boolean => Ok(TypeRef::new(RustPrimitive::Bool)),
       SchemaType::Array => {
         let item_type = self.convert_array_items(schema)?;
         let unique_items = schema.unique_items.unwrap_or(false);
@@ -1855,8 +1863,8 @@ impl<'a> SchemaConverter<'a> {
             .with_unique_items(unique_items),
         )
       }
-      SchemaType::Object => Ok(TypeRef::new("serde_json::Value")),
-      SchemaType::Null => Ok(TypeRef::new("()").with_option()),
+      SchemaType::Object => Ok(TypeRef::new(RustPrimitive::Value)),
+      SchemaType::Null => Ok(TypeRef::new(RustPrimitive::Unit).with_option()),
     }
   }
 
@@ -1925,7 +1933,105 @@ mod tests {
 
   use super::*;
 
-  /// Helper to create a minimal OpenAPI spec with given schemas
+  #[test]
+  fn test_map_string_format() {
+    assert_eq!(SchemaConverter::map_string_format(None), RustPrimitive::String);
+    assert_eq!(
+      SchemaConverter::map_string_format(Some(&"date".to_string())),
+      RustPrimitive::Date
+    );
+    assert_eq!(
+      SchemaConverter::map_string_format(Some(&"date-time".to_string())),
+      RustPrimitive::DateTime
+    );
+    assert_eq!(
+      SchemaConverter::map_string_format(Some(&"time".to_string())),
+      RustPrimitive::Time
+    );
+    assert_eq!(
+      SchemaConverter::map_string_format(Some(&"binary".to_string())),
+      RustPrimitive::Bytes
+    );
+    assert_eq!(
+      SchemaConverter::map_string_format(Some(&"uuid".to_string())),
+      RustPrimitive::Uuid
+    );
+    assert_eq!(
+      SchemaConverter::map_string_format(Some(&"byte".to_string())),
+      RustPrimitive::String
+    );
+    assert_eq!(
+      SchemaConverter::map_string_format(Some(&"unknown".to_string())),
+      RustPrimitive::String
+    );
+  }
+
+  #[test]
+  fn test_map_integer_format() {
+    assert_eq!(SchemaConverter::map_integer_format(None), RustPrimitive::I64);
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"int32".to_string())),
+      RustPrimitive::I32
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"int64".to_string())),
+      RustPrimitive::I64
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"int8".to_string())),
+      RustPrimitive::I8
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"int16".to_string())),
+      RustPrimitive::I16
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"uint8".to_string())),
+      RustPrimitive::U8
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"uint16".to_string())),
+      RustPrimitive::U16
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"uint32".to_string())),
+      RustPrimitive::U32
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"uint64".to_string())),
+      RustPrimitive::U64
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"u8".to_string())),
+      RustPrimitive::U8
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"u32".to_string())),
+      RustPrimitive::U32
+    );
+    assert_eq!(
+      SchemaConverter::map_integer_format(Some(&"unknown".to_string())),
+      RustPrimitive::I64
+    );
+  }
+
+  #[test]
+  fn test_map_number_format() {
+    assert_eq!(SchemaConverter::map_number_format(None), RustPrimitive::F64);
+    assert_eq!(
+      SchemaConverter::map_number_format(Some(&"float".to_string())),
+      RustPrimitive::F32
+    );
+    assert_eq!(
+      SchemaConverter::map_number_format(Some(&"double".to_string())),
+      RustPrimitive::F64
+    );
+    assert_eq!(
+      SchemaConverter::map_number_format(Some(&"unknown".to_string())),
+      RustPrimitive::F64
+    );
+  }
+
   fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec {
     let mut spec_json = json!({
       "openapi": "3.0.0",
@@ -1939,7 +2045,6 @@ mod tests {
       }
     });
 
-    // Add schemas to the spec
     if let Some(components) = spec_json.get_mut("components")
       && let Some(schemas_obj) = components.get_mut("schemas")
     {
@@ -1954,10 +2059,8 @@ mod tests {
 
   #[tokio::test]
   async fn test_discriminated_union_uses_struct_variants() {
-    // Create a oneOf schema with discriminator
     let mut one_of_schema = ObjectSchema::default();
 
-    // Add object variant
     let mut object_variant = ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
       title: Some("ObjectVariant".to_string()),
@@ -1981,14 +2084,12 @@ mod tests {
     object_variant.required.push("type".to_string());
     object_variant.required.push("name".to_string());
 
-    // Add string variant (primitive type)
     let string_variant = ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       title: Some("StringVariant".to_string()),
       ..Default::default()
     };
 
-    // Add integer variant (primitive type)
     let integer_variant = ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       title: Some("IntegerVariant".to_string()),
@@ -2022,11 +2123,9 @@ mod tests {
       assert_eq!(enum_def.name, "TestUnion");
       assert!(enum_def.discriminator.is_some(), "Should have discriminator");
 
-      // Check that ALL variants are struct variants (required for serde internally-tagged enums)
       for variant in &enum_def.variants {
         match &variant.content {
           VariantContent::Struct(fields) => {
-            // For primitive types, should have a single "value" field
             if variant.name == "StringVariant" || variant.name == "IntegerVariant" {
               assert_eq!(
                 fields.len(),
@@ -2067,10 +2166,8 @@ mod tests {
 
   #[tokio::test]
   async fn test_catch_all_enum_generates_two_level_structure() {
-    // Create anyOf with const values + freeform string
     let mut any_of_schema = ObjectSchema::default();
 
-    // Add const values
     any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       const_value: Some(json!("known-value-1")),
@@ -2085,7 +2182,6 @@ mod tests {
       ..Default::default()
     }));
 
-    // Add freeform string (no const)
     any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       description: Some("Any other string".to_string()),
@@ -2110,13 +2206,11 @@ mod tests {
       "Should generate TWO types (inner Known enum + outer untagged wrapper)"
     );
 
-    // Check inner enum (Known values)
     if let RustType::Enum(inner_enum) = &result[0] {
       assert_eq!(inner_enum.name, "CatchAllEnumKnown");
       assert_eq!(inner_enum.variants.len(), 2, "Should have 2 known variants");
       assert!(inner_enum.serde_attrs.is_empty(), "Inner enum should not be untagged");
 
-      // All variants should be unit variants with rename
       for variant in &inner_enum.variants {
         assert!(
           matches!(variant.content, VariantContent::Unit),
@@ -2131,7 +2225,6 @@ mod tests {
       panic!("First type should be inner Known enum, got {:?}", result[0]);
     }
 
-    // Check outer enum (wrapper)
     if let RustType::Enum(outer_enum) = &result[1] {
       assert_eq!(outer_enum.name, "CatchAllEnum");
       assert_eq!(outer_enum.variants.len(), 2, "Should have 2 variants (Known + Other)");
@@ -2140,22 +2233,23 @@ mod tests {
         "Outer enum should be untagged"
       );
 
-      // Check Known variant
       let known_variant = outer_enum.variants.iter().find(|v| v.name == "Known").unwrap();
       match &known_variant.content {
         VariantContent::Tuple(types) => {
           assert_eq!(types.len(), 1);
-          assert_eq!(types[0].base_type, "CatchAllEnumKnown");
+          assert_eq!(
+            types[0].base_type,
+            RustPrimitive::Custom("CatchAllEnumKnown".to_string())
+          );
         }
         _ => panic!("Known variant should be a tuple variant"),
       }
 
-      // Check Other variant
       let other_variant = outer_enum.variants.iter().find(|v| v.name == "Other").unwrap();
       match &other_variant.content {
         VariantContent::Tuple(types) => {
           assert_eq!(types.len(), 1);
-          assert_eq!(types[0].base_type, "String");
+          assert_eq!(types[0].base_type, RustPrimitive::String);
         }
         _ => panic!("Other variant should be a tuple variant"),
       }
@@ -2192,7 +2286,6 @@ mod tests {
       assert!(enum_def.discriminator.is_none());
       assert!(enum_def.serde_attrs.is_empty(), "Simple enum should not be untagged");
 
-      // All variants should be unit variants with rename
       for variant in &enum_def.variants {
         assert!(matches!(variant.content, VariantContent::Unit));
         assert!(variant.serde_attrs.iter().any(|a| a.starts_with("rename")));
@@ -2204,16 +2297,13 @@ mod tests {
 
   #[tokio::test]
   async fn test_nullable_pattern_detection() {
-    // Create anyOf with [Type, null] pattern
     let mut any_of_schema = ObjectSchema::default();
 
-    // Add a string type
     any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }));
 
-    // Add null type
     any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
       ..Default::default()
@@ -2226,12 +2316,11 @@ mod tests {
     let graph = SchemaGraph::new(spec).unwrap();
     let converter = SchemaConverter::new(&graph);
 
-    // For nullable patterns, schema_to_type_ref should return Option<String>
     let type_ref = converter
       .schema_to_type_ref(graph.get_schema("NullableString").unwrap())
       .unwrap();
 
-    assert_eq!(type_ref.base_type, "String");
+    assert_eq!(type_ref.base_type, RustPrimitive::String);
     assert!(
       type_ref.nullable,
       "Should detect nullable pattern and set nullable=true"
@@ -2241,7 +2330,6 @@ mod tests {
 
   #[tokio::test]
   async fn test_untagged_any_of_enum() {
-    // Create anyOf with multiple non-const types (should be untagged enum)
     let mut any_of_schema = ObjectSchema::default();
 
     any_of_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {

@@ -4,8 +4,8 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::ast::{
-  EnumDef, FieldDef, OperationInfo, PathSegment, QueryParameter, RustType, StructDef, StructMethod, StructMethodKind,
-  TypeAliasDef, TypeRef, VariantContent, VariantDef,
+  EnumDef, FieldDef, OperationInfo, PathSegment, QueryParameter, RustPrimitive, RustType, StructDef, StructMethod,
+  StructMethodKind, TypeAliasDef, TypeRef, VariantContent, VariantDef,
 };
 use crate::{
   generator::ast::StructKind,
@@ -58,34 +58,34 @@ pub(crate) enum TypeUsage {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RegexKey {
-  type_name: String,
-  variant_name: Option<String>,
-  field_name: String,
+  owner_type: String,
+  owner_variant: Option<String>,
+  field: String,
 }
 
 impl RegexKey {
   fn for_struct(type_name: &str, field_name: &str) -> Self {
     Self {
-      type_name: type_name.to_string(),
-      variant_name: None,
-      field_name: field_name.to_string(),
+      owner_type: type_name.to_string(),
+      owner_variant: None,
+      field: field_name.to_string(),
     }
   }
 
   fn for_variant(type_name: &str, variant_name: &str, field_name: &str) -> Self {
     Self {
-      type_name: type_name.to_string(),
-      variant_name: Some(variant_name.to_string()),
-      field_name: field_name.to_string(),
+      owner_type: type_name.to_string(),
+      owner_variant: Some(variant_name.to_string()),
+      field: field_name.to_string(),
     }
   }
 
   fn parts(&self) -> Vec<&str> {
-    let mut parts = vec![self.type_name.as_str()];
-    if let Some(variant) = &self.variant_name {
+    let mut parts = vec![self.owner_type.as_str()];
+    if let Some(variant) = &self.owner_variant {
       parts.push(variant.as_str());
     }
-    parts.push(self.field_name.as_str());
+    parts.push(self.field.as_str());
     parts
   }
 }
@@ -136,7 +136,7 @@ impl CodeGenerator {
   pub(crate) fn generate(
     types: &[RustType],
     type_usage: &BTreeMap<String, TypeUsage>,
-    headers: Vec<&String>,
+    headers: &[&String],
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
@@ -238,8 +238,7 @@ impl CodeGenerator {
             }
           }
         }
-        RustType::TypeAlias(_) => {}
-        RustType::DiscriminatedEnum(_) => {}
+        RustType::TypeAlias(_) | RustType::DiscriminatedEnum(_) => {}
       }
     }
 
@@ -262,7 +261,7 @@ impl CodeGenerator {
   }
 
   /// Generate HTTP header name constants from collected headers
-  fn generate_header_constants(headers: Vec<&String>) -> TokenStream {
+  fn generate_header_constants(headers: &[&String]) -> TokenStream {
     if headers.is_empty() {
       return quote! {};
     }
@@ -298,16 +297,24 @@ impl CodeGenerator {
   }
 
   /// Coerce a JSON value to the target Rust type, enabling type conversions
-  fn coerce_to_rust_type(value: &serde_json::Value, rust_type: &str) -> TokenStream {
+  fn coerce_to_rust_type(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
     match rust_type {
-      "String" => Self::coerce_to_string(value),
-      "i64" | "i32" | "i16" | "i8" | "isize" => Self::coerce_to_int(value),
-      "f64" | "f32" => Self::coerce_to_float(value),
-      "bool" => Self::coerce_to_bool(value),
-      _ => match value {
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => quote! { Default::default() },
-        _ => quote! { Default::default() },
-      },
+      RustPrimitive::String => Self::coerce_to_string(value),
+      RustPrimitive::I8
+      | RustPrimitive::I16
+      | RustPrimitive::I32
+      | RustPrimitive::I64
+      | RustPrimitive::I128
+      | RustPrimitive::Isize => Self::coerce_to_int(value),
+      RustPrimitive::U8
+      | RustPrimitive::U16
+      | RustPrimitive::U32
+      | RustPrimitive::U64
+      | RustPrimitive::U128
+      | RustPrimitive::Usize => Self::coerce_to_uint(value),
+      RustPrimitive::F32 | RustPrimitive::F64 => Self::coerce_to_float(value),
+      RustPrimitive::Bool => Self::coerce_to_bool(value),
+      _ => quote! { Default::default() },
     }
   }
 
@@ -328,7 +335,7 @@ impl CodeGenerator {
     }
   }
 
-  /// Coerce a JSON value to a Rust integer type
+  /// Coerce a JSON value to a Rust signed integer type
   fn coerce_to_int(value: &serde_json::Value) -> TokenStream {
     match value {
       serde_json::Value::Number(n) => n
@@ -342,6 +349,20 @@ impl CodeGenerator {
     }
   }
 
+  /// Coerce a JSON value to a Rust unsigned integer type
+  fn coerce_to_uint(value: &serde_json::Value) -> TokenStream {
+    match value {
+      serde_json::Value::Number(n) => n
+        .as_u64()
+        .map_or_else(|| quote! { Default::default() }, |u| quote! { #u }),
+      serde_json::Value::String(s) => s
+        .parse::<u64>()
+        .ok()
+        .map_or_else(|| quote! { Default::default() }, |u| quote! { #u }),
+      _ => quote! { Default::default() },
+    }
+  }
+
   /// Coerce a JSON value to a Rust float type, handling integer-to-float conversion
   fn coerce_to_float(value: &serde_json::Value) -> TokenStream {
     match value {
@@ -349,6 +370,7 @@ impl CodeGenerator {
         if let Some(f) = n.as_f64() {
           quote! { #f }
         } else if let Some(i) = n.as_i64() {
+          #[allow(clippy::cast_precision_loss)]
           let f = i as f64;
           quote! { #f }
         } else {
@@ -456,9 +478,8 @@ impl CodeGenerator {
     let serde_attrs = Self::generate_serde_attrs(&def.serde_attrs);
 
     let include_validation = match def.kind {
-      StructKind::OperationRequest => true,
       StructKind::RequestBody => !matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)),
-      StructKind::Schema => true,
+      StructKind::OperationRequest | StructKind::Schema => true,
     };
     let fields = Self::generate_fields_with_visibility(
       &def.name,
@@ -959,6 +980,8 @@ impl CodeGenerator {
 
 #[cfg(test)]
 mod tests {
+  use serde_json::json;
+
   use super::*;
   use crate::generator::ast::{FieldDef, StructDef, StructKind, TypeRef};
 
@@ -1283,279 +1306,306 @@ mod tests {
     assert!(contains_validation(&result), "Should include validation attributes");
   }
 
-  // Tests for JSON value to Rust expression conversion
-  mod json_conversion_tests {
-    use serde_json::json;
+  fn assert_conversion(value: &serde_json::Value, rust_type: &TypeRef, expected: &str) {
+    let result = CodeGenerator::json_value_to_rust_expr(value, rust_type);
+    let code = result.to_string();
+    assert_eq!(code.trim(), expected.trim(), "Conversion mismatch");
+  }
 
-    use super::*;
+  #[test]
+  fn test_string_empty() {
+    let value = json!("");
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, "String :: new ()");
+  }
 
-    /// Helper to convert TypeRef and check generated code
-    fn assert_conversion(value: &serde_json::Value, rust_type: &TypeRef, expected: &str) {
-      let result = CodeGenerator::json_value_to_rust_expr(value, rust_type);
-      let code = result.to_string();
-      assert_eq!(code.trim(), expected.trim(), "Conversion mismatch");
-    }
+  #[test]
+  fn test_string_regular() {
+    let value = json!("hello");
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""hello" . to_string ()"#);
+  }
 
-    #[test]
-    fn test_string_empty() {
-      let value = json!("");
-      let rust_type = TypeRef::new("String");
-      assert_conversion(&value, &rust_type, "String :: new ()");
-    }
+  #[test]
+  fn test_string_with_spaces() {
+    let value = json!("hello world");
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""hello world" . to_string ()"#);
+  }
 
-    #[test]
-    fn test_string_regular() {
-      let value = json!("hello");
-      let rust_type = TypeRef::new("String");
-      assert_conversion(&value, &rust_type, r#""hello" . to_string ()"#);
-    }
+  #[test]
+  fn test_number_to_string() {
+    let value = json!(42);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""42" . to_string ()"#);
+  }
 
-    #[test]
-    fn test_string_with_spaces() {
-      let value = json!("hello world");
-      let rust_type = TypeRef::new("String");
-      assert_conversion(&value, &rust_type, r#""hello world" . to_string ()"#);
-    }
+  #[test]
+  fn test_float_to_string() {
+    let value = json!(2.5);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""2.5" . to_string ()"#);
+  }
 
-    #[test]
-    fn test_number_to_string() {
-      let value = json!(42);
-      let rust_type = TypeRef::new("String");
-      assert_conversion(&value, &rust_type, r#""42" . to_string ()"#);
-    }
+  #[test]
+  fn test_bool_to_string() {
+    let value = json!(true);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""true" . to_string ()"#);
+  }
 
-    #[test]
-    fn test_float_to_string() {
-      let value = json!(2.5);
-      let rust_type = TypeRef::new("String");
-      assert_conversion(&value, &rust_type, r#""2.5" . to_string ()"#);
-    }
+  #[test]
+  fn test_int_from_number() {
+    let value = json!(42);
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "42i64");
+  }
 
-    #[test]
-    fn test_bool_to_string() {
-      let value = json!(true);
-      let rust_type = TypeRef::new("String");
-      assert_conversion(&value, &rust_type, r#""true" . to_string ()"#);
-    }
+  #[test]
+  fn test_int_from_string() {
+    let value = json!("123");
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "123i64");
+  }
 
-    #[test]
-    fn test_int_from_number() {
-      let value = json!(42);
-      let rust_type = TypeRef::new("i64");
-      assert_conversion(&value, &rust_type, "42i64");
-    }
+  #[test]
+  fn test_int_invalid_string() {
+    let value = json!("not_a_number");
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
 
-    #[test]
-    fn test_int_from_string() {
-      let value = json!("123");
-      let rust_type = TypeRef::new("i64");
-      assert_conversion(&value, &rust_type, "123i64");
-    }
+  #[test]
+  fn test_float_from_float() {
+    let value = json!(2.5);
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "2.5f64");
+  }
 
-    #[test]
-    fn test_int_invalid_string() {
-      let value = json!("not_a_number");
-      let rust_type = TypeRef::new("i64");
-      assert_conversion(&value, &rust_type, "Default :: default ()");
-    }
+  #[test]
+  fn test_float_from_integer_coercion() {
+    let value = json!(10);
+    let rust_type = TypeRef::new("f64");
+    // This tests the critical int-to-float coercion
+    assert_conversion(&value, &rust_type, "10f64");
+  }
 
-    #[test]
-    fn test_float_from_float() {
-      let value = json!(2.5);
-      let rust_type = TypeRef::new("f64");
-      assert_conversion(&value, &rust_type, "2.5f64");
-    }
+  #[test]
+  fn test_float_from_string() {
+    let value = json!("2.718");
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "2.718f64");
+  }
 
-    #[test]
-    fn test_float_from_integer_coercion() {
-      let value = json!(10);
-      let rust_type = TypeRef::new("f64");
-      // This tests the critical int-to-float coercion
-      assert_conversion(&value, &rust_type, "10f64");
-    }
+  #[test]
+  fn test_float_invalid_string() {
+    let value = json!("not_a_float");
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
 
-    #[test]
-    fn test_float_from_string() {
-      let value = json!("2.718");
-      let rust_type = TypeRef::new("f64");
-      assert_conversion(&value, &rust_type, "2.718f64");
-    }
+  #[test]
+  fn test_bool_from_bool() {
+    let value = json!(true);
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "true");
 
-    #[test]
-    fn test_float_invalid_string() {
-      let value = json!("not_a_float");
-      let rust_type = TypeRef::new("f64");
-      assert_conversion(&value, &rust_type, "Default :: default ()");
-    }
+    let value = json!(false);
+    assert_conversion(&value, &rust_type, "false");
+  }
 
-    #[test]
-    fn test_bool_from_bool() {
-      let value = json!(true);
-      let rust_type = TypeRef::new("bool");
-      assert_conversion(&value, &rust_type, "true");
+  #[test]
+  fn test_bool_from_number_nonzero() {
+    let value = json!(1);
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "true");
 
-      let value = json!(false);
-      assert_conversion(&value, &rust_type, "false");
-    }
+    let value = json!(42);
+    assert_conversion(&value, &rust_type, "true");
+  }
 
-    #[test]
-    fn test_bool_from_number_nonzero() {
-      let value = json!(1);
-      let rust_type = TypeRef::new("bool");
-      assert_conversion(&value, &rust_type, "true");
+  #[test]
+  fn test_bool_from_number_zero() {
+    let value = json!(0);
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "false");
+  }
 
-      let value = json!(42);
-      assert_conversion(&value, &rust_type, "true");
-    }
+  #[test]
+  fn test_bool_from_string_true() {
+    let value = json!("true");
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "true");
 
-    #[test]
-    fn test_bool_from_number_zero() {
-      let value = json!(0);
-      let rust_type = TypeRef::new("bool");
-      assert_conversion(&value, &rust_type, "false");
-    }
+    let value = json!("True");
+    assert_conversion(&value, &rust_type, "true");
 
-    #[test]
-    fn test_bool_from_string_true() {
-      let value = json!("true");
-      let rust_type = TypeRef::new("bool");
-      assert_conversion(&value, &rust_type, "true");
+    let value = json!("TRUE");
+    assert_conversion(&value, &rust_type, "true");
 
-      let value = json!("True");
-      assert_conversion(&value, &rust_type, "true");
+    let value = json!("1");
+    assert_conversion(&value, &rust_type, "true");
 
-      let value = json!("TRUE");
-      assert_conversion(&value, &rust_type, "true");
+    let value = json!("yes");
+    assert_conversion(&value, &rust_type, "true");
 
-      let value = json!("1");
-      assert_conversion(&value, &rust_type, "true");
+    let value = json!("Yes");
+    assert_conversion(&value, &rust_type, "true");
+  }
 
-      let value = json!("yes");
-      assert_conversion(&value, &rust_type, "true");
+  #[test]
+  fn test_bool_from_string_false() {
+    let value = json!("false");
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "false");
 
-      let value = json!("Yes");
-      assert_conversion(&value, &rust_type, "true");
-    }
+    let value = json!("no");
+    assert_conversion(&value, &rust_type, "false");
 
-    #[test]
-    fn test_bool_from_string_false() {
-      let value = json!("false");
-      let rust_type = TypeRef::new("bool");
-      assert_conversion(&value, &rust_type, "false");
+    let value = json!("0");
+    assert_conversion(&value, &rust_type, "false");
 
-      let value = json!("no");
-      assert_conversion(&value, &rust_type, "false");
+    let value = json!("anything");
+    assert_conversion(&value, &rust_type, "false");
+  }
 
-      let value = json!("0");
-      assert_conversion(&value, &rust_type, "false");
+  #[test]
+  fn test_null_value() {
+    let value = json!(null);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, "None");
+  }
 
-      let value = json!("anything");
-      assert_conversion(&value, &rust_type, "false");
-    }
+  #[test]
+  fn test_nullable_string_with_value() {
+    let value = json!("hello");
+    let mut rust_type = TypeRef::new("String");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, r#"Some ("hello" . to_string ())"#);
+  }
 
-    #[test]
-    fn test_null_value() {
-      let value = json!(null);
-      let rust_type = TypeRef::new("String");
-      assert_conversion(&value, &rust_type, "None");
-    }
+  #[test]
+  fn test_nullable_int_with_value() {
+    let value = json!(42);
+    let mut rust_type = TypeRef::new("i64");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (42i64)");
+  }
 
-    #[test]
-    fn test_nullable_string_with_value() {
-      let value = json!("hello");
-      let mut rust_type = TypeRef::new("String");
-      rust_type.nullable = true;
-      assert_conversion(&value, &rust_type, r#"Some ("hello" . to_string ())"#);
-    }
+  #[test]
+  fn test_nullable_float_with_value() {
+    let value = json!(2.5);
+    let mut rust_type = TypeRef::new("f64");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (2.5f64)");
+  }
 
-    #[test]
-    fn test_nullable_int_with_value() {
-      let value = json!(42);
-      let mut rust_type = TypeRef::new("i64");
-      rust_type.nullable = true;
-      assert_conversion(&value, &rust_type, "Some (42i64)");
-    }
+  #[test]
+  fn test_nullable_bool_with_value() {
+    let value = json!(true);
+    let mut rust_type = TypeRef::new("bool");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (true)");
+  }
 
-    #[test]
-    fn test_nullable_float_with_value() {
-      let value = json!(2.5);
-      let mut rust_type = TypeRef::new("f64");
-      rust_type.nullable = true;
-      assert_conversion(&value, &rust_type, "Some (2.5f64)");
-    }
+  #[test]
+  fn test_nullable_with_null() {
+    let value = json!(null);
+    let mut rust_type = TypeRef::new("String");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "None");
+  }
 
-    #[test]
-    fn test_nullable_bool_with_value() {
-      let value = json!(true);
-      let mut rust_type = TypeRef::new("bool");
-      rust_type.nullable = true;
-      assert_conversion(&value, &rust_type, "Some (true)");
-    }
+  #[test]
+  fn test_array_defaults() {
+    let value = json!([1, 2, 3]);
+    let rust_type = TypeRef::new("Vec<i64>");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
 
-    #[test]
-    fn test_nullable_with_null() {
-      let value = json!(null);
-      let mut rust_type = TypeRef::new("String");
-      rust_type.nullable = true;
-      // Null should always be None, even if nullable
-      assert_conversion(&value, &rust_type, "None");
-    }
+  #[test]
+  fn test_object_defaults() {
+    let value = json!({"key": "value"});
+    let rust_type = TypeRef::new("CustomType");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
 
-    #[test]
-    fn test_array_defaults() {
-      let value = json!([1, 2, 3]);
-      let rust_type = TypeRef::new("Vec<i64>");
-      assert_conversion(&value, &rust_type, "Default :: default ()");
-    }
+  #[test]
+  fn test_int_types_i32() {
+    let value = json!(100);
+    let rust_type = TypeRef::new("i32");
+    assert_conversion(&value, &rust_type, "100i64");
+  }
 
-    #[test]
-    fn test_object_defaults() {
-      let value = json!({"key": "value"});
-      let rust_type = TypeRef::new("CustomType");
-      assert_conversion(&value, &rust_type, "Default :: default ()");
-    }
+  #[test]
+  fn test_int_types_i16() {
+    let value = json!(50);
+    let rust_type = TypeRef::new("i16");
+    assert_conversion(&value, &rust_type, "50i64");
+  }
 
-    #[test]
-    fn test_int_types_i32() {
-      let value = json!(100);
-      let rust_type = TypeRef::new("i32");
-      assert_conversion(&value, &rust_type, "100i64");
-    }
+  #[test]
+  fn test_float_types_f32() {
+    let value = json!(1.5);
+    let rust_type = TypeRef::new("f32");
+    assert_conversion(&value, &rust_type, "1.5f64");
+  }
 
-    #[test]
-    fn test_int_types_i16() {
-      let value = json!(50);
-      let rust_type = TypeRef::new("i16");
-      assert_conversion(&value, &rust_type, "50i64");
-    }
+  #[test]
+  fn test_negative_numbers() {
+    let value = json!(-42);
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "- 42i64");
 
-    #[test]
-    fn test_float_types_f32() {
-      let value = json!(1.5);
-      let rust_type = TypeRef::new("f32");
-      assert_conversion(&value, &rust_type, "1.5f64");
-    }
+    let value = json!(-2.5);
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "- 2.5f64");
+  }
 
-    #[test]
-    fn test_negative_numbers() {
-      let value = json!(-42);
-      let rust_type = TypeRef::new("i64");
-      assert_conversion(&value, &rust_type, "- 42i64");
+  #[test]
+  fn test_zero_values() {
+    let value = json!(0);
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "0i64");
 
-      let value = json!(-2.5);
-      let rust_type = TypeRef::new("f64");
-      assert_conversion(&value, &rust_type, "- 2.5f64");
-    }
+    let value = json!(0.0);
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "0f64");
+  }
 
-    #[test]
-    fn test_zero_values() {
-      let value = json!(0);
-      let rust_type = TypeRef::new("i64");
-      assert_conversion(&value, &rust_type, "0i64");
+  #[test]
+  fn test_unsigned_from_number() {
+    let value = json!(42);
+    let rust_type = TypeRef::new("u32");
+    assert_conversion(&value, &rust_type, "42u64");
 
-      let value = json!(0.0);
-      let rust_type = TypeRef::new("f64");
-      assert_conversion(&value, &rust_type, "0f64");
-    }
+    let value = json!(255);
+    let rust_type = TypeRef::new("u8");
+    assert_conversion(&value, &rust_type, "255u64");
+  }
+
+  #[test]
+  fn test_unsigned_from_string() {
+    let value = json!("100");
+    let rust_type = TypeRef::new("u64");
+    assert_conversion(&value, &rust_type, "100u64");
+  }
+
+  #[test]
+  fn test_unsigned_invalid_negative() {
+    let value = json!(-1);
+    let rust_type = TypeRef::new("u32");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
+
+  #[test]
+  fn test_format_based_type_coercion() {
+    let value = json!(100);
+    let rust_type = TypeRef::new("i32");
+    assert_conversion(&value, &rust_type, "100i64");
+
+    let value = json!(1.5);
+    let rust_type = TypeRef::new("f32");
+    assert_conversion(&value, &rust_type, "1.5f64");
   }
 }

@@ -56,8 +56,6 @@ async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-
   #[cfg(feature = "mdformat")]
   #[tokio::test]
   async fn test_doc_comment_lines() {
