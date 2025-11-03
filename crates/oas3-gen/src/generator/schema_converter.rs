@@ -1069,6 +1069,15 @@ impl<'a> SchemaConverter<'a> {
   pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
     match (schema.schema_type.as_ref(), schema.pattern.as_ref()) {
       (Some(SchemaTypeSet::Single(SchemaType::String)), Some(pattern)) => {
+        let is_non_string_format = schema
+          .format
+          .as_ref()
+          .is_some_and(|f| matches!(f.as_str(), "date" | "date-time" | "time" | "binary" | "byte" | "uuid"));
+
+        if is_non_string_format {
+          return None;
+        }
+
         if Regex::new(pattern).is_ok() {
           Some(pattern)
         } else {

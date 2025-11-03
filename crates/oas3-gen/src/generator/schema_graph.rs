@@ -205,11 +205,11 @@ impl SchemaGraph {
       for dep in deps {
         if !visited.contains(dep) {
           self.dfs_detect_cycle(dep, visited, rec_stack, path, cycles);
-        } else if rec_stack.contains(dep) {
-          if let Some(cycle_start) = path.iter().position(|n| n == dep) {
-            let cycle: Vec<String> = path[cycle_start..].to_vec();
-            cycles.push(cycle);
-          }
+        } else if rec_stack.contains(dep)
+          && let Some(cycle_start) = path.iter().position(|n| n == dep)
+        {
+          let cycle: Vec<String> = path[cycle_start..].to_vec();
+          cycles.push(cycle);
         }
       }
     }
