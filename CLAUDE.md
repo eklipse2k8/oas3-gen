@@ -7,12 +7,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a fully-functional OpenAPI-to-Rust code generator that parses OpenAPI 3.x specifications and generates comprehensive Rust type definitions with validation. The tool reads OpenAPI JSON files and generates idiomatic Rust code including structs, enums, type aliases, validation attributes, and Default implementations.
 
 The project is organized as a Cargo workspace with two crates:
+
 - **oas3-gen**: The main CLI tool for code generation
 - **oas3-gen-support**: Runtime support library providing macros and utilities for generated code
 
 ## Build and Development Commands
 
 ### Build
+
 ```bash
 cargo build
 ```
@@ -42,34 +44,40 @@ cargo run -- --help
 ```
 
 **CLI Arguments:**
+
 - `--input` / `-i`: (Required) Path to OpenAPI JSON specification file
 - `--output` / `-o`: (Required) Path where generated Rust code will be written
 - `--verbose` / `-v`: Enable verbose output with detailed progress information
 - `--quiet` / `-q`: Suppress non-essential output (errors only)
 
 ### Testing
+
 ```bash
 cargo test
 ```
 
 ### Linting
+
 ```bash
 cargo clippy
 cargo fmt --check
 ```
 
 ### Format Code
+
 ```bash
 cargo fmt
 ```
 
 Note: This project uses custom rustfmt settings (see rustfmt.toml):
+
 - 2 spaces for indentation
 - 120 character max width
 - Merged imports with crate granularity
 - Normalized doc attributes
 
 ### Dependency Management
+
 ```bash
 # Check for security advisories and licensing issues
 cargo deny check
@@ -104,7 +112,7 @@ cargo check -p oas3-gen-support
 
 The codebase is organized as a Cargo workspace with two crates:
 
-```
+```text
 crates/
 ├── oas3-gen/                      - Main CLI tool
 │   ├── Cargo.toml                 - Binary crate dependencies
@@ -134,16 +142,19 @@ crates/
 #### oas3-gen Crate (CLI Tool)
 
 **generator/mod.rs** (`crates/oas3-gen/src/generator/mod.rs`)
+
 - Module orchestration and public API
 - Re-exports: `SchemaGraph`, `SchemaConverter`, `OperationConverter`, `CodeGenerator`
 - Declares all submodules with clear documentation
 
 **generator/utils.rs** (`crates/oas3-gen/src/generator/utils.rs`)
+
 - `doc_comment_lines()`: Converts strings to Rust doc comment lines
 - `doc_comment_block()`: Creates full doc comment blocks
 
 **generator/ast.rs** (`crates/oas3-gen/src/generator/ast.rs`)
 Intermediate representation types:
+
 - `RustType`: Enum containing Struct, Enum, or TypeAlias variants
 - `StructDef`: Struct definition with fields, derives, and serde attributes
 - `FieldDef`: Field definition with type, docs, validation, and default values
@@ -154,6 +165,7 @@ Intermediate representation types:
 
 **generator/schema_graph.rs** (`crates/oas3-gen/src/generator/schema_graph.rs`)
 Schema dependency management and cycle detection:
+
 - `SchemaGraph` struct manages all schemas from OpenAPI spec
 - Builds dependency graph tracking which schemas reference others
 - DFS-based cycle detection algorithm
@@ -167,6 +179,7 @@ Schema dependency management and cycle detection:
 
 **generator/schema_converter.rs** (`crates/oas3-gen/src/generator/schema_converter.rs`)
 Converts OpenAPI schemas to Rust AST (largest module):
+
 - Handles all schema types: objects, enums, oneOf, anyOf, allOf
 - Detects and handles nullable patterns (anyOf with null → Option<T>)
 - Generates inline enum types for nested unions
@@ -187,6 +200,7 @@ Converts OpenAPI schemas to Rust AST (largest module):
 
 **generator/operation_converter.rs** (`crates/oas3-gen/src/generator/operation_converter.rs`)
 Generates request/response types for API operations:
+
 - Creates request structs combining parameters and request body
 - Orders parameters by location (path → query → header → cookie)
 - Extracts response type references from operation definitions
@@ -200,6 +214,7 @@ Generates request/response types for API operations:
 
 **generator/code_generator.rs** (`crates/oas3-gen/src/generator/code_generator.rs`)
 Converts Rust AST to actual source code:
+
 - `TypeUsage` enum: Tracks request/response usage for derive optimization
 - `RegexKey` struct: Manages regex validation constant names
 - `TypeKind` enum: Internal type categorization (Struct, Enum, Alias)
@@ -218,6 +233,7 @@ Converts Rust AST to actual source code:
 
 **Main Orchestration** (`crates/oas3-gen/src/main.rs`)
 Coordinates the generation pipeline with CLI argument handling:
+
 1. Parses CLI arguments using clap (input file, output file, verbose/quiet flags)
 2. Loads OpenAPI spec from specified JSON file
 3. Builds SchemaGraph with dependency analysis
@@ -230,6 +246,7 @@ Coordinates the generation pipeline with CLI argument handling:
 10. Writes output to user-specified path
 
 The CLI provides structured logging with three levels:
+
 - Normal: Key progress updates (default)
 - Verbose (`--verbose`): Detailed cycle information, operation counts, etc.
 - Quiet (`--quiet`): Errors only
@@ -238,6 +255,7 @@ The CLI provides structured logging with three levels:
 
 **lib.rs** (`crates/oas3-gen-support/src/lib.rs`)
 Provides runtime support for generated code:
+
 - **`discriminated_enum!` macro**: Declarative macro for discriminated union deserialization
   - Supports discriminator field-based routing
   - Optional fallback variant for unknown discriminator values
@@ -248,6 +266,7 @@ Provides runtime support for generated code:
   - Generates Default trait implementations automatically
 
 **Integration Tests** (`crates/oas3-gen/tests/discriminator_deserialization.rs`)
+
 - Tests discriminated enum deserialization with real-world scenarios
 - Validates fallback variant behavior
 - Ensures proper handling of nested discriminated types
@@ -257,6 +276,7 @@ Provides runtime support for generated code:
 All dependencies are managed at the workspace level in the root `Cargo.toml` and inherited by crates.
 
 **Core Generation Dependencies (oas3-gen):**
+
 - **oas3** (0.19): OpenAPI 3.x specification parsing library
 - **oas3-gen-support**: Workspace crate providing runtime support utilities
 - **quote** (1.0): Quasi-quoting for generating Rust token streams
@@ -265,23 +285,28 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **prettyplease** (0.2): Pretty-printing generated Rust code with proper formatting
 
 **CLI and I/O:**
+
 - **clap** (4.5, features: derive): Command-line argument parsing with derive macros
 - **tokio** (1.48, features: rt-multi-thread, fs, macros): Async runtime for file I/O
 - **anyhow** (1.0): Flexible error handling
 
 **Serialization:**
+
 - **serde** (1.0, features: derive): Serialization framework
 - **serde_json** (1.0, features: preserve_order): JSON serialization with field order preservation
 
 **String Processing:**
+
 - **inflections** (1.1): Case conversion utilities (PascalCase, snake_case, camelCase)
 - **any_ascii** (0.3): ASCII transliteration for identifier sanitization
 
 **Validation:**
+
 - **validator** (0.20, features: derive): Runtime validation attributes and traits
 - **regex** (1.11): Regular expression validation support
 
 **Runtime Support Dependencies (oas3-gen-support):**
+
 - **better_default** (1.0): Provides `#[default(value)]` attribute for struct fields
 - **serde/serde_json**: For custom discriminated enum serialization
 - **regex**: Shared validation support
@@ -291,6 +316,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **uuid** (1.11, features: serde): UUID types for OpenAPI uuid format
 
 **Dev Dependencies (oas3-gen):**
+
 - **chrono**: For testing generated date-time types
 - **indexmap**: For testing generated unique array types
 - **uuid**: For testing generated UUID types
@@ -301,6 +327,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 The `schema_to_type_ref()` method in `SchemaConverter` (`crates/oas3-gen/src/generator/schema_converter.rs`) maps OpenAPI types to Rust:
 
 **Primitive Types:**
+
 - String → String
 - Number → f64
 - Integer → i64
@@ -309,6 +336,7 @@ The `schema_to_type_ref()` method in `SchemaConverter` (`crates/oas3-gen/src/gen
 - Object (without schema) → serde_json::Value
 
 **Complex Types:**
+
 - Array → Vec<T> (where T is derived from items schema)
 - Object (with schema) → Named struct type
 - oneOf → Tagged or untagged enum
@@ -316,6 +344,7 @@ The `schema_to_type_ref()` method in `SchemaConverter` (`crates/oas3-gen/src/gen
 - Enums → String enums with serde rename attributes
 
 **Special Patterns:**
+
 - `anyOf: [T, null]` → Option<T> (nullable pattern)
 - Forward-compatible enums → Enum with catch-all variant
 - Cyclic references → Box<T> wrapper
@@ -326,25 +355,30 @@ The `schema_to_type_ref()` method in `SchemaConverter` (`crates/oas3-gen/src/gen
 The generator extracts OpenAPI validation constraints and converts them to Rust validator attributes:
 
 **String Validation:**
+
 - `minLength`/`maxLength` → `#[validate(length(min = X, max = Y))]`
 - `pattern` → Generates regex constant + `#[validate(regex(path = "CONST_NAME"))]`
 - `format: email` → `#[validate(email)]`
 - `format: uri` → `#[validate(url)]`
 
 **Numeric Validation:**
+
 - `minimum`/`maximum` → `#[validate(range(min = X, max = Y))]`
 - `exclusiveMinimum`/`exclusiveMaximum` → `#[validate(range(exclusive_min = X, ...))]`
 
 **Array Validation:**
+
 - `minItems`/`maxItems` → `#[validate(length(min = X, max = Y))]`
 
 **Default Values:**
+
 - Generates `impl Default` for structs/enums with default values
 - Converts JSON defaults to Rust expressions
 
 ### Naming and Formatting
 
 **Identifier Handling** (`crates/oas3-gen/src/reserved.rs`):
+
 - Converts OpenAPI names to valid Rust identifiers
 - Replaces invalid characters (-, ., spaces) with underscores
 - Handles Rust keyword conflicts with r# prefix
@@ -355,11 +389,13 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
   - `regex_const_name()`: Generates unique constant names for regex validators
 
 **Type Names:**
+
 - Converts schema names to PascalCase
 - Handles keyword conflicts (Self, Type, etc.) with r# prefix
 - Ensures uniqueness in enum variant names
 
 **Field Names:**
+
 - Converts property names to snake_case
 - Adds `serde(rename = "...")` when Rust name differs from OpenAPI name
 - Automatically handles: keywords (type → r#type), special chars (user-id → user_id), case changes (userId → user_id)
@@ -367,6 +403,7 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
 ### Documentation Generation
 
 **Doc Comments** (`crates/oas3-gen/src/generator/utils.rs`):
+
 - `doc_comment_lines()`: Converts OpenAPI descriptions to Rust doc comments (`///`)
 - Handles literal `\n` escape sequences by normalizing to actual newlines
 - Preserves multi-line documentation with proper formatting
@@ -374,82 +411,7 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
 - Used throughout generated code for structs, enums, fields, and variants
 
 **Location Hints** (`crates/oas3-gen/src/generator/operation_converter.rs`):
+
 - Adds parameter location hints to generated request structs
 - Format: `/// Path parameter`, `/// Query parameter`, etc.
 - Helps developers understand parameter usage in API requests
-
-### Benefits of Workspace Architecture
-
-The workspace structure provides significant advantages:
-
-**Code Organization:**
-- Clear separation between code generation (oas3-gen) and runtime support (oas3-gen-support)
-- Generator can be used as a CLI tool without pulling in runtime dependencies
-- Support library can be versioned and published independently
-- Generated code only depends on the lightweight support crate
-
-**Maintainability:**
-- Each crate and module has a single, well-defined responsibility
-- Changes are isolated to specific crates/modules, reducing risk
-- Clear boundaries make dependencies explicit
-- Easier to test individual components in isolation (integration tests in oas3-gen)
-
-**Readability:**
-- Modules are sized appropriately for comprehension
-- Related functionality is grouped together within crates
-- Clear entry points via crate structure
-- Easier to navigate and understand specific features
-
-**Extensibility:**
-- New converters can be added to oas3-gen without modifying runtime support
-- New runtime utilities can be added to oas3-gen-support independently
-- Support for different output formats can be added as new workspace crates
-- Workspace-level dependency management simplifies version coordination
-
-**Development:**
-- Multiple developers can work on different crates simultaneously
-- Reduced cognitive load with clear crate boundaries
-- Better IDE support with modular structure
-- Compile times benefit from incremental compilation per crate
-- Integration tests validate end-to-end behavior without coupling to internals
-
-## Features
-
-### Fully Implemented
-✅ **Workspace architecture** - Organized into oas3-gen CLI and oas3-gen-support runtime library
-✅ **Modular code generation** - Well-organized codebase with focused modules per concern
-✅ **Runtime support library** - Dedicated crate for generated code utilities
-  - `discriminated_enum!` macro for oneOf/anyOf with discriminator
-  - `better_default::Default` for `#[default(value)]` attributes
-✅ CLI interface with clap (input/output paths, verbose/quiet modes)
-✅ Automatic directory creation for output paths
-✅ Schema parsing and conversion (objects, arrays, primitives, enums)
-✅ oneOf/anyOf/allOf composition handling
-✅ Discriminated and untagged union types
-✅ Nullable type detection and Option<T> generation
-✅ Cyclic dependency detection and Box<T> wrapper injection
-✅ Operation to request/response type generation
-✅ Parameter handling (path, query, header, cookie)
-✅ Validation attribute generation (length, range, regex, email, URL)
-✅ Default value generation with impl Default
-✅ Regex pattern validation with static LazyLock constants
-✅ Doc comment generation from OpenAPI descriptions
-✅ Serde attribute generation (rename, tag, untagged, skip_serializing_if)
-✅ Inline enum type generation for nested unions
-✅ Forward-compatible enum patterns with catch-all variants
-✅ Type deduplication and ordering
-✅ Pretty-printed output with prettyplease
-✅ Configurable logging levels (normal, verbose, quiet)
-✅ Support for date/time formats (chrono types)
-✅ Support for UUID format (uuid::Uuid)
-✅ Support for unique array items (IndexSet)
-✅ Integration tests for discriminated enum deserialization
-✅ Example generated code in crates/oas3-gen/examples/
-
-### Not Yet Implemented
-❌ Callback schema handling
-❌ Link object processing
-❌ Security scheme type generation
-❌ Multi-file output (currently single file)
-❌ Custom type mapping configuration
-❌ Publishing oas3-gen-support crate to crates.io

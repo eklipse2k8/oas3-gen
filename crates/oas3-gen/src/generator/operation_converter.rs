@@ -7,8 +7,19 @@ use oas3::{
 };
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
-use super::{ast::*, schema_converter::SchemaConverter, schema_graph::SchemaGraph, utils::doc_comment_lines};
-use crate::reserved::{to_rust_field_name, to_rust_type_name};
+use super::{
+  ast::{
+    FieldDef, OperationInfo, PathSegment, QueryParameter, RustType, StructDef, StructMethod, StructMethodKind,
+    TypeAliasDef, TypeRef,
+  },
+  schema_converter::SchemaConverter,
+  schema_graph::SchemaGraph,
+  utils::doc_comment_lines,
+};
+use crate::{
+  generator::ast::StructKind,
+  reserved::{to_rust_field_name, to_rust_type_name},
+};
 
 const QUERY_COMPONENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
@@ -33,7 +44,7 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Convert an operation to request and response types
-  pub(crate) fn convert_operation(
+  pub(crate) async fn convert_operation(
     &self,
     operation_id: &str,
     method: &str,
@@ -44,31 +55,30 @@ impl<'a> OperationConverter<'a> {
     let base_name = to_rust_type_name(operation_id);
 
     let (request_body_type, mut request_body_defs, request_body_usage) =
-      self.prepare_request_body(&base_name, operation)?;
+      self.prepare_request_body(&base_name, operation).await?;
     types.append(&mut request_body_defs);
 
     let has_parameters = self.operation_has_parameters(path, operation);
 
     let request_type_name = if has_parameters || operation.request_body.is_some() {
-      let request_name = format!("{}Request", base_name);
-      let request_struct = self.create_request_struct(&request_name, path, operation, request_body_type)?;
+      let request_name = format!("{base_name}Request");
+      let request_struct = self
+        .create_request_struct(&request_name, path, operation, request_body_type)
+        .await?;
       types.push(RustType::Struct(request_struct));
       Some(request_name)
     } else {
       None
     };
 
-    // Extract primary response type (typically 200/201 response)
-    // Don't generate response enums - let HTTP clients use http::StatusCode
     let response_type_name = if let Some(ref responses) = operation.responses {
-      // Look for successful response (200, 201, etc.)
       responses
         .iter()
         .find(|(code, _)| code.starts_with('2'))
         .or_else(|| responses.iter().next())
         .and_then(|(_, response_ref)| {
           if let Ok(response) = response_ref.resolve(self.spec) {
-            self.extract_response_schema_name(&response)
+            Self::extract_response_schema_name(&response)
           } else {
             None
           }
@@ -121,7 +131,7 @@ impl<'a> OperationConverter<'a> {
     false
   }
 
-  fn prepare_request_body(
+  async fn prepare_request_body(
     &self,
     base_name: &str,
     operation: &Operation,
@@ -151,7 +161,8 @@ impl<'a> OperationConverter<'a> {
         if !inline_schema.properties.is_empty() {
           let (body_struct, mut inline_types) = self
             .schema_converter
-            .convert_struct(&raw_body_type_name, inline_schema)?;
+            .convert_struct(&raw_body_type_name, inline_schema, Some(StructKind::RequestBody))
+            .await?;
           generated_types.append(&mut inline_types);
           generated_types.push(body_struct);
           resolved_type = Some(TypeRef::new(rust_body_type_name.clone()));
@@ -160,16 +171,17 @@ impl<'a> OperationConverter<'a> {
       }
       ObjectOrReference::Ref { ref_path, .. } => {
         let target_name = SchemaGraph::extract_ref_name(ref_path)
-          .or_else(|| ref_path.rsplit('/').next().map(|segment| segment.to_string()));
+          .or_else(|| ref_path.rsplit('/').next().map(std::string::ToString::to_string));
 
         if let Some(target) = target_name {
+          let docs = if let Some(d) = body.description.as_ref() {
+            doc_comment_lines(d).await
+          } else {
+            vec![]
+          };
           let alias = TypeAliasDef {
             name: rust_body_type_name.clone(),
-            docs: body
-              .description
-              .as_ref()
-              .map(|d| doc_comment_lines(d))
-              .unwrap_or_default(),
+            docs,
             target: TypeRef::new(to_rust_type_name(&target)),
           };
           generated_types.push(RustType::TypeAlias(alias));
@@ -190,7 +202,8 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Create a request struct from operation parameters and body
-  fn create_request_struct(
+  #[allow(clippy::too_many_lines)]
+  async fn create_request_struct(
     &self,
     name: &str,
     path: &str,
@@ -224,7 +237,7 @@ impl<'a> OperationConverter<'a> {
     }
 
     for param in params {
-      let field = self.convert_parameter(&param)?;
+      let field = self.convert_parameter(&param).await?;
       let optional = field.rust_type.nullable;
       let is_array = field.rust_type.is_array;
 
@@ -271,11 +284,9 @@ impl<'a> OperationConverter<'a> {
       fields.push(field);
     }
 
-    // Check if body is expected based on HTTP method type
     let request_body_required = self
       .operation_method(path, operation)
-      .map(|m| matches!(m, Method::POST | Method::PATCH | Method::PUT))
-      .unwrap_or(false);
+      .is_some_and(|m| matches!(m, Method::POST | Method::PATCH | Method::PUT));
 
     if request_body_required && let Ok(Some(body)) = operation.request_body(self.spec) {
       let is_required = body.required.as_ref().unwrap_or(&false);
@@ -295,22 +306,17 @@ impl<'a> OperationConverter<'a> {
             );
           }
 
-          let validation_attrs = self
-            .schema_converter
-            .extract_validation_attrs(name, *is_required, &schema_ref);
-          let regex_validation = self
-            .schema_converter
-            .extract_validation_pattern(name, &schema_ref)
-            .cloned();
-          let default_value = self.schema_converter.extract_default_value(&schema_ref);
+          let validation_attrs = SchemaConverter::extract_validation_attrs(name, *is_required, &schema_ref);
+          let regex_validation = SchemaConverter::extract_validation_pattern(name, &schema_ref).cloned();
+          let default_value = SchemaConverter::extract_default_value(&schema_ref);
 
           let serde_attrs = vec![];
 
-          let mut docs = body
-            .description
-            .as_ref()
-            .map(|d| doc_comment_lines(d))
-            .unwrap_or_default();
+          let mut docs = if let Some(d) = body.description.as_ref() {
+            doc_comment_lines(d).await
+          } else {
+            vec![]
+          };
 
           docs.push("/// ## Schema".to_string());
           docs.push(format!("/// - Required: `{}`", if *is_required { "yes" } else { "no" }));
@@ -340,54 +346,18 @@ impl<'a> OperationConverter<'a> {
       }
     }
 
-    let docs = operation
-      .description
-      .as_ref()
-      .or(operation.summary.as_ref())
-      .map(|d| doc_comment_lines(d))
-      .unwrap_or_default();
+    let docs = if let Some(d) = operation.description.as_ref().or(operation.summary.as_ref()) {
+      doc_comment_lines(d).await
+    } else {
+      vec![]
+    };
 
-    // Individual rename attributes are more explicit and handle all edge cases correctly
-    let mut serde_attrs = vec![];
-
-    // Only add serde(default) at struct level if ALL fields have defaults or are Option/Vec
-    let all_fields_defaultable = fields.iter().all(|f| {
-      f.default_value.is_some()
-        || f.rust_type.nullable
-        || f.rust_type.is_array
-        || matches!(
-          f.rust_type.base_type.as_str(),
-          "String"
-            | "bool"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "i128"
-            | "isize"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u128"
-            | "usize"
-            | "f32"
-            | "f64"
-            | "serde_json::Value"
-        )
-    });
-
-    let outer_attrs = SchemaConverter::container_outer_attrs(&fields);
-    if fields.iter().any(|f| f.default_value.is_some()) && all_fields_defaultable {
-      serde_attrs.push("default".to_string());
-    }
+    let serde_attrs = vec![];
+    let outer_attrs = Vec::new();
 
     let derives = vec![
       "Clone".into(),
       "Debug".into(),
-      "Serialize".into(),
-      "Deserialize".into(),
-      "PartialEq".into(),
       "validator::Validate".into(),
       "oas3_gen_support::Default".into(),
     ];
@@ -406,6 +376,7 @@ impl<'a> OperationConverter<'a> {
       serde_attrs,
       outer_attrs,
       methods,
+      kind: StructKind::OperationRequest,
     })
   }
 
@@ -460,7 +431,7 @@ impl<'a> OperationConverter<'a> {
             field: (*rust_name).to_string(),
           });
         } else {
-          segments.push(PathSegment::Literal(format!("{{{}}}", placeholder)));
+          segments.push(PathSegment::Literal(format!("{{{placeholder}}}")));
         }
         cursor = close + 1;
       } else {
@@ -506,16 +477,14 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Convert a parameter to a field definition
-  fn convert_parameter(&self, param: &Parameter) -> anyhow::Result<FieldDef> {
+  async fn convert_parameter(&self, param: &Parameter) -> anyhow::Result<FieldDef> {
     let (rust_type, validation_attrs, regex_validation, default_value) = if let Some(ref schema_ref) = param.schema {
       if let Ok(schema) = schema_ref.resolve(self.spec) {
         let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
         let is_required = param.required.unwrap_or(false);
-        let validation = self
-          .schema_converter
-          .extract_validation_attrs(&param.name, is_required, &schema);
-        let regex_validation = self.schema_converter.extract_validation_pattern(&param.name, &schema);
-        let default = self.schema_converter.extract_default_value(&schema);
+        let validation = SchemaConverter::extract_validation_attrs(&param.name, is_required, &schema);
+        let regex_validation = SchemaConverter::extract_validation_pattern(&param.name, &schema);
+        let default = SchemaConverter::extract_default_value(&schema);
         (type_ref, validation, regex_validation.cloned(), default)
       } else {
         (TypeRef::new("String"), vec![], None, None)
@@ -525,15 +494,8 @@ impl<'a> OperationConverter<'a> {
     };
 
     let is_required = param.required.unwrap_or(false);
+    let serde_attrs = vec![];
 
-    let mut serde_attrs = vec![];
-    // Add rename if the Rust field name differs from the original parameter name
-    let rust_param_name = to_rust_field_name(&param.name);
-    if rust_param_name != param.name.as_str() {
-      serde_attrs.push(format!("rename = \"{}\"", param.name));
-    }
-
-    // Add location hint as a comment in docs
     let location_hint = match param.location {
       ParameterIn::Path => "Path",
       ParameterIn::Query => "Query",
@@ -543,10 +505,10 @@ impl<'a> OperationConverter<'a> {
 
     let mut docs = vec![];
     if let Some(ref desc) = param.description {
-      docs.extend(doc_comment_lines(desc));
+      docs.extend(doc_comment_lines(desc).await);
     }
     docs.push("/// ## Schema".to_string());
-    docs.push(format!("/// - Location: {}", location_hint));
+    docs.push(format!("/// - Location: {location_hint}"));
 
     Ok(FieldDef {
       name: to_rust_field_name(&param.name),
@@ -569,7 +531,7 @@ impl<'a> OperationConverter<'a> {
   }
 
   /// Extract schema name from a response (helper)
-  fn extract_response_schema_name(&self, response: &oas3::spec::Response) -> Option<String> {
+  fn extract_response_schema_name(response: &oas3::spec::Response) -> Option<String> {
     response.content.iter().next().and_then(|(_, media_type)| {
       media_type.schema.as_ref().and_then(|schema_ref| {
         if let ObjectOrReference::Ref { ref_path, .. } = schema_ref {

@@ -24,6 +24,10 @@ static RESERVED_PASCAL_CASE: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     .collect()
 });
 
+// Compile static regexes only once for sanitization.
+static INVALID_CHARS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^A-Za-z0-9_]+").unwrap());
+static MULTI_UNDERSCORE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"_+").unwrap());
+
 /// A single, powerful sanitization function that handles the common base transformations.
 /// It transliterates to ASCII, replaces invalid characters with underscores, collapses
 /// consecutive underscores, and trims any leading or trailing underscores.
@@ -31,10 +35,6 @@ pub(crate) fn sanitize(input: &str) -> String {
   if input.is_empty() {
     return String::new();
   }
-
-  // Compile static regexes only once.
-  static INVALID_CHARS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^A-Za-z0-9_]+").unwrap());
-  static MULTI_UNDERSCORE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"_+").unwrap());
 
   let ascii = any_ascii(input);
   let replaced = INVALID_CHARS_RE.replace_all(&ascii, "_");
@@ -69,7 +69,7 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
 
   // Prepend "negative_" if original name started with `-`
   if has_leading_minus {
-    ident = format!("negative_{}", ident);
+    ident = format!("negative_{ident}");
   }
 
   if ident == "self" {
@@ -77,7 +77,7 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
   }
 
   if FORBIDDEN_IDENTIFIERS.contains(ident.as_str()) {
-    return format!("r#{}", ident);
+    return format!("r#{ident}");
   }
 
   if ident.starts_with(|c: char| c.is_ascii_digit()) {
@@ -86,6 +86,9 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
 
   ident
 }
+
+// Regex for preprocessing type names (convert digit followed by uppercase to snake_case format)
+static DIGIT_TO_UPPER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d)([A-Z])").expect("bad regex"));
 
 /// Converts a string into a valid Rust type name (`PascalCase`).
 ///
@@ -106,8 +109,6 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
 
   let sanitized = sanitize(name_without_minus);
 
-  static DIGIT_TO_UPPER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d)([A-Z])").expect("bad regex"));
-
   let preprocessed = DIGIT_TO_UPPER_RE.replace_all(&sanitized, "${1}_${2}");
 
   let mut ident = preprocessed.to_snake_case().to_pascal_case();
@@ -118,11 +119,11 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
 
   // Prepend "Negative" if original name started with `-`
   if has_leading_minus {
-    ident = format!("Negative{}", ident);
+    ident = format!("Negative{ident}");
   }
 
   if RESERVED_PASCAL_CASE.contains(ident.as_str()) {
-    return format!("r#{}", ident);
+    return format!("r#{ident}");
   }
 
   if ident.starts_with(|c: char| c.is_ascii_digit()) {
@@ -142,7 +143,7 @@ pub(crate) fn regex_const_name(key: &[&str]) -> String {
     ident.insert(0, '_');
   }
 
-  format!("REGEX_{}", ident)
+  format!("REGEX_{ident}")
 }
 
 /// Converts a header name into a valid Rust constant identifier (`SCREAMING_SNAKE_CASE`).

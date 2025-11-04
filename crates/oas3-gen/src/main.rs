@@ -1,3 +1,4 @@
+#![allow(clippy::doc_markdown)]
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -7,15 +8,15 @@ use crate::generator::{code_generator::Visibility, orchestrator::Orchestrator};
 mod generator;
 mod reserved;
 
-/// OpenAPI to Rust code generator
+/// `OpenAPI` to Rust code generator
 ///
-/// Generates Rust type definitions from OpenAPI 3.x specifications with validation,
+/// Generates Rust type definitions from `OpenAPI` 3.x specifications with validation,
 /// serde serialization, and comprehensive documentation.
 #[derive(Parser, Debug)]
 #[command(name = "openapi-gen")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-  /// Path to the OpenAPI JSON specification file
+  /// Path to the `OpenAPI` JSON specification file
   #[arg(short, long, value_name = "FILE")]
   input: PathBuf,
 
@@ -66,8 +67,10 @@ async fn main() -> anyhow::Result<()> {
 
   // Create orchestrator and generate code
   log_info!(cli, "Generating Rust types...");
-  let orchestrator = Orchestrator::new(spec, visibility)?;
-  let (code, stats) = orchestrator.generate_with_header(&cli.input.display().to_string())?;
+  let orchestrator = Orchestrator::new(spec, visibility);
+  let (code, stats) = orchestrator
+    .generate_with_header(&cli.input.display().to_string())
+    .await?;
 
   // Report statistics
   log_verbose!(cli, "  Types generated: {}", stats.types_generated);
@@ -86,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
   if !stats.warnings.is_empty() {
     log_verbose!(cli, "");
     for warning in &stats.warnings {
-      eprintln!("Warning: {}", warning);
+      eprintln!("Warning: {warning}");
     }
   }
 

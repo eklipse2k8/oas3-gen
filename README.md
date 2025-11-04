@@ -89,7 +89,7 @@ pub struct Pet {
 
 ### Command-Line Options
 
-```
+```text
 A rust type generator for OpenAPI v3.1.x specification.
 
 Usage: oas3-gen [OPTIONS] --input <FILE> --output <FILE>

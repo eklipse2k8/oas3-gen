@@ -11,6 +11,10 @@ readme.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+mdformat = []
+
 [dependencies]
 any_ascii.workspace = true
 anyhow.workspace = true
@@ -26,6 +30,7 @@ quote.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_plain.workspace = true
 syn.workspace = true
 tokio.workspace = true
 percent-encoding.workspace = true

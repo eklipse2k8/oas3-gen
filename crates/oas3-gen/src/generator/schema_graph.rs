@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  string::ToString,
+};
 
 use oas3::{
   Spec,
@@ -33,7 +36,6 @@ impl SchemaGraph {
       spec,
     };
 
-    // Extract all schemas from components/schemas
     if let Some(components) = &graph.spec.components {
       for (name, schema_ref) in &components.schemas {
         if let Ok(schema) = schema_ref.resolve(&graph.spec) {
@@ -82,8 +84,9 @@ impl SchemaGraph {
 
   /// Extract schema name from a $ref string
   pub(crate) fn extract_ref_name(ref_string: &str) -> Option<String> {
-    // Format: "#/components/schemas/SchemaName"
-    ref_string.strip_prefix("#/components/schemas/").map(|s| s.to_string())
+    ref_string
+      .strip_prefix("#/components/schemas/")
+      .map(ToString::to_string)
   }
 
   /// Extract schema name from an ObjectOrReference if it's a $ref
@@ -99,13 +102,11 @@ impl SchemaGraph {
       for parameter in &operation.parameters {
         let resolved = parameter.resolve(&self.spec)?;
         match resolved.location {
-          ParameterIn::Path => {}
-          ParameterIn::Query => {}
           ParameterIn::Header => {
             let header_name = resolved.name.to_lowercase();
             self.headers.insert(header_name);
           }
-          ParameterIn::Cookie => {}
+          ParameterIn::Path | ParameterIn::Query | ParameterIn::Cookie => {}
         }
       }
     }
@@ -129,27 +130,22 @@ impl SchemaGraph {
   /// Recursively collect all schema dependencies from a schema
   /// Extracts all $ref names that point to schemas in components/schemas
   fn collect_dependencies(&self, schema: &ObjectSchema, deps: &mut BTreeSet<String>) {
-    // Check properties
     for prop_schema in schema.properties.values() {
       self.extract_refs_from_schema_ref(prop_schema, deps);
     }
 
-    // Check oneOf
     for one_of_schema in &schema.one_of {
       self.extract_refs_from_schema_ref(one_of_schema, deps);
     }
 
-    // Check anyOf
     for any_of_schema in &schema.any_of {
       self.extract_refs_from_schema_ref(any_of_schema, deps);
     }
 
-    // Check allOf
     for all_of_schema in &schema.all_of {
       self.extract_refs_from_schema_ref(all_of_schema, deps);
     }
 
-    // Check items (for array schemas)
     if let Some(ref items_box) = schema.items
       && let Schema::Object(ref schema_ref) = **items_box
     {
@@ -159,13 +155,11 @@ impl SchemaGraph {
 
   /// Extract all $ref names from a schema reference, recursively processing inline schemas
   fn extract_refs_from_schema_ref(&self, schema_ref: &ObjectOrReference<ObjectSchema>, deps: &mut BTreeSet<String>) {
-    // If this is a $ref, extract the schema name
     if let Some(ref_name) = Self::extract_ref_from_obj_ref(schema_ref) {
       deps.insert(ref_name);
     }
 
-    // Also recurse into inline schemas (but don't resolve $refs to avoid cloning)
-    if let oas3::spec::ObjectOrReference::Object(inline_schema) = schema_ref {
+    if let ObjectOrReference::Object(inline_schema) = schema_ref {
       self.collect_dependencies(inline_schema, deps);
     }
   }
@@ -185,7 +179,6 @@ impl SchemaGraph {
       }
     }
 
-    // Mark all schemas involved in cycles
     for cycle in &cycles {
       for schema_name in cycle {
         self.cyclic_schemas.insert(schema_name.clone());
@@ -212,12 +205,11 @@ impl SchemaGraph {
       for dep in deps {
         if !visited.contains(dep) {
           self.dfs_detect_cycle(dep, visited, rec_stack, path, cycles);
-        } else if rec_stack.contains(dep) {
-          // Found a cycle! Extract the cycle from the path
-          if let Some(cycle_start) = path.iter().position(|n| n == dep) {
-            let cycle: Vec<String> = path[cycle_start..].to_vec();
-            cycles.push(cycle);
-          }
+        } else if rec_stack.contains(dep)
+          && let Some(cycle_start) = path.iter().position(|n| n == dep)
+        {
+          let cycle: Vec<String> = path[cycle_start..].to_vec();
+          cycles.push(cycle);
         }
       }
     }

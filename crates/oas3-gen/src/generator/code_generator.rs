@@ -3,8 +3,14 @@ use std::collections::BTreeMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::ast::*;
-use crate::reserved::{header_const_name, regex_const_name};
+use super::ast::{
+  EnumDef, FieldDef, OperationInfo, PathSegment, QueryParameter, RustPrimitive, RustType, StructDef, StructMethod,
+  StructMethodKind, TypeAliasDef, TypeRef, VariantContent, VariantDef,
+};
+use crate::{
+  generator::ast::StructKind,
+  reserved::{header_const_name, regex_const_name},
+};
 
 /// Visibility level for generated types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,34 +58,34 @@ pub(crate) enum TypeUsage {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RegexKey {
-  type_name: String,
-  variant_name: Option<String>,
-  field_name: String,
+  owner_type: String,
+  owner_variant: Option<String>,
+  field: String,
 }
 
 impl RegexKey {
   fn for_struct(type_name: &str, field_name: &str) -> Self {
     Self {
-      type_name: type_name.to_string(),
-      variant_name: None,
-      field_name: field_name.to_string(),
+      owner_type: type_name.to_string(),
+      owner_variant: None,
+      field: field_name.to_string(),
     }
   }
 
   fn for_variant(type_name: &str, variant_name: &str, field_name: &str) -> Self {
     Self {
-      type_name: type_name.to_string(),
-      variant_name: Some(variant_name.to_string()),
-      field_name: field_name.to_string(),
+      owner_type: type_name.to_string(),
+      owner_variant: Some(variant_name.to_string()),
+      field: field_name.to_string(),
     }
   }
 
   fn parts(&self) -> Vec<&str> {
-    let mut parts = vec![self.type_name.as_str()];
-    if let Some(variant) = &self.variant_name {
+    let mut parts = vec![self.owner_type.as_str()];
+    if let Some(variant) = &self.owner_variant {
       parts.push(variant.as_str());
     }
-    parts.push(self.field_name.as_str());
+    parts.push(self.field.as_str());
     parts
   }
 }
@@ -130,7 +136,7 @@ impl CodeGenerator {
   pub(crate) fn generate(
     types: &[RustType],
     type_usage: &BTreeMap<String, TypeUsage>,
-    headers: Vec<&String>,
+    headers: &[&String],
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
@@ -199,14 +205,13 @@ impl CodeGenerator {
             };
             let key = RegexKey::for_struct(&def.name, &field.name);
             let pattern_key = pattern.clone();
-            let const_name = match pattern_to_const.get(&pattern_key) {
-              Some(existing) => existing.clone(),
-              None => {
-                let name = regex_const_name(&key.parts());
-                pattern_to_const.insert(pattern_key.clone(), name.clone());
-                const_defs.insert(name.clone(), pattern_key);
-                name
-              }
+            let const_name = if let Some(existing) = pattern_to_const.get(&pattern_key) {
+              existing.clone()
+            } else {
+              let name = regex_const_name(&key.parts());
+              pattern_to_const.insert(pattern_key.clone(), name.clone());
+              const_defs.insert(name.clone(), pattern_key);
+              name
             };
             lookup.insert(key, const_name);
           }
@@ -220,22 +225,20 @@ impl CodeGenerator {
                 };
                 let key = RegexKey::for_variant(&def.name, &variant.name, &field.name);
                 let pattern_key = pattern.clone();
-                let const_name = match pattern_to_const.get(&pattern_key) {
-                  Some(existing) => existing.clone(),
-                  None => {
-                    let name = regex_const_name(&key.parts());
-                    pattern_to_const.insert(pattern_key.clone(), name.clone());
-                    const_defs.insert(name.clone(), pattern_key);
-                    name
-                  }
+                let const_name = if let Some(existing) = pattern_to_const.get(&pattern_key) {
+                  existing.clone()
+                } else {
+                  let name = regex_const_name(&key.parts());
+                  pattern_to_const.insert(pattern_key.clone(), name.clone());
+                  const_defs.insert(name.clone(), pattern_key);
+                  name
                 };
                 lookup.insert(key, const_name);
               }
             }
           }
         }
-        RustType::TypeAlias(_) => {}
-        RustType::DiscriminatedEnum(_) => {}
+        RustType::TypeAlias(_) | RustType::DiscriminatedEnum(_) => {}
       }
     }
 
@@ -258,7 +261,7 @@ impl CodeGenerator {
   }
 
   /// Generate HTTP header name constants from collected headers
-  fn generate_header_constants(headers: Vec<&String>) -> TokenStream {
+  fn generate_header_constants(headers: &[&String]) -> TokenStream {
     if headers.is_empty() {
       return quote! {};
     }
@@ -277,40 +280,124 @@ impl CodeGenerator {
     quote! { #(#const_tokens)* }
   }
 
-  /// Convert a JSON value to a Rust expression
+  /// Convert a JSON value to a Rust expression, dispatching on target Rust type for proper coercion
   fn json_value_to_rust_expr(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
-    let base_expr = match value {
-      serde_json::Value::String(s) => {
-        if s.is_empty() {
-          quote! { String::new() }
-        } else {
-          quote! { #s.to_string() }
-        }
-      }
+    if matches!(value, serde_json::Value::Null) {
+      return quote! { None };
+    }
+
+    // Use base_type for coercion, not the wrapped Option<T> type
+    let base_expr = Self::coerce_to_rust_type(value, &rust_type.base_type);
+
+    if rust_type.nullable {
+      quote! { Some(#base_expr) }
+    } else {
+      base_expr
+    }
+  }
+
+  /// Coerce a JSON value to the target Rust type, enabling type conversions
+  fn coerce_to_rust_type(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
+    match rust_type {
+      RustPrimitive::String => Self::coerce_to_string(value),
+      RustPrimitive::I8
+      | RustPrimitive::I16
+      | RustPrimitive::I32
+      | RustPrimitive::I64
+      | RustPrimitive::I128
+      | RustPrimitive::Isize => Self::coerce_to_int(value),
+      RustPrimitive::U8
+      | RustPrimitive::U16
+      | RustPrimitive::U32
+      | RustPrimitive::U64
+      | RustPrimitive::U128
+      | RustPrimitive::Usize => Self::coerce_to_uint(value),
+      RustPrimitive::F32 | RustPrimitive::F64 => Self::coerce_to_float(value),
+      RustPrimitive::Bool => Self::coerce_to_bool(value),
+      _ => quote! { Default::default() },
+    }
+  }
+
+  /// Coerce a JSON value to a Rust String
+  fn coerce_to_string(value: &serde_json::Value) -> TokenStream {
+    match value {
+      serde_json::Value::String(s) if s.is_empty() => quote! { String::new() },
+      serde_json::Value::String(s) => quote! { #s.to_string() },
       serde_json::Value::Number(n) => {
-        if let Some(i) = n.as_i64() {
-          quote! { #i }
-        } else if let Some(f) = n.as_f64() {
+        let n_str = n.to_string();
+        quote! { #n_str.to_string() }
+      }
+      serde_json::Value::Bool(b) => {
+        let b_str = b.to_string();
+        quote! { #b_str.to_string() }
+      }
+      _ => quote! { Default::default() },
+    }
+  }
+
+  /// Coerce a JSON value to a Rust signed integer type
+  fn coerce_to_int(value: &serde_json::Value) -> TokenStream {
+    match value {
+      serde_json::Value::Number(n) => n
+        .as_i64()
+        .map_or_else(|| quote! { Default::default() }, |i| quote! { #i }),
+      serde_json::Value::String(s) => s
+        .parse::<i64>()
+        .ok()
+        .map_or_else(|| quote! { Default::default() }, |i| quote! { #i }),
+      _ => quote! { Default::default() },
+    }
+  }
+
+  /// Coerce a JSON value to a Rust unsigned integer type
+  fn coerce_to_uint(value: &serde_json::Value) -> TokenStream {
+    match value {
+      serde_json::Value::Number(n) => n
+        .as_u64()
+        .map_or_else(|| quote! { Default::default() }, |u| quote! { #u }),
+      serde_json::Value::String(s) => s
+        .parse::<u64>()
+        .ok()
+        .map_or_else(|| quote! { Default::default() }, |u| quote! { #u }),
+      _ => quote! { Default::default() },
+    }
+  }
+
+  /// Coerce a JSON value to a Rust float type, handling integer-to-float conversion
+  fn coerce_to_float(value: &serde_json::Value) -> TokenStream {
+    match value {
+      serde_json::Value::Number(n) => {
+        if let Some(f) = n.as_f64() {
+          quote! { #f }
+        } else if let Some(i) = n.as_i64() {
+          #[allow(clippy::cast_precision_loss)]
+          let f = i as f64;
           quote! { #f }
         } else {
           quote! { Default::default() }
         }
       }
-      serde_json::Value::Bool(b) => {
+      serde_json::Value::String(s) => s
+        .parse::<f64>()
+        .ok()
+        .map_or_else(|| quote! { Default::default() }, |f| quote! { #f }),
+      _ => quote! { Default::default() },
+    }
+  }
+
+  /// Coerce a JSON value to a Rust bool
+  fn coerce_to_bool(value: &serde_json::Value) -> TokenStream {
+    match value {
+      serde_json::Value::Bool(b) => quote! { #b },
+      serde_json::Value::Number(n) => {
+        let b = n.as_i64().is_some_and(|i| i != 0);
         quote! { #b }
       }
-      serde_json::Value::Null => {
-        quote! { None }
+      serde_json::Value::String(s) => {
+        let b = matches!(s.to_lowercase().as_str(), "true" | "1" | "yes");
+        quote! { #b }
       }
-      serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-        quote! { Default::default() }
-      }
-    };
-
-    if rust_type.nullable && !matches!(value, serde_json::Value::Null) {
-      quote! { Some(#base_expr) }
-    } else {
-      base_expr
+      _ => quote! { Default::default() },
     }
   }
 
@@ -338,52 +425,62 @@ impl CodeGenerator {
     let docs = Self::generate_docs(&def.docs);
     let vis = visibility.to_tokens();
 
-    let is_operation_type = def.name.ends_with("Request") || def.name.ends_with("RequestBody");
-
-    let derives = if is_operation_type && type_usage.contains_key(&def.name) {
-      let usage = type_usage.get(&def.name).unwrap();
-      let mut custom = vec!["Debug".to_string(), "Clone".to_string(), "PartialEq".to_string()];
-      match usage {
-        TypeUsage::RequestOnly => {
-          custom.push("Serialize".to_string());
-          custom.push("validator::Validate".to_string());
-        }
-        TypeUsage::ResponseOnly => {
-          custom.push("Deserialize".to_string());
-        }
-        TypeUsage::Bidirectional => {
-          custom.push("Serialize".to_string());
-          custom.push("Deserialize".to_string());
-          custom.push("validator::Validate".to_string());
-        }
+    let derives = match def.kind {
+      StructKind::OperationRequest => {
+        let mut custom = vec!["Debug".to_string(), "Clone".to_string()];
+        custom.push("validator::Validate".to_string());
+        custom.push("oas3_gen_support::Default".to_string());
+        Self::generate_derives(&custom)
       }
-      custom.push("oas3_gen_support::Default".to_string());
-      Self::generate_derives(&custom)
-    } else {
-      let mut derives = def.derives.clone();
-      if let Some(usage) = type_usage.get(&def.name) {
+      StructKind::RequestBody => {
+        let usage = type_usage.get(&def.name).unwrap_or(&TypeUsage::Bidirectional);
+        let mut custom = vec!["Debug".to_string(), "Clone".to_string()];
         match usage {
           TypeUsage::RequestOnly => {
-            Self::ensure_derive(&mut derives, "Serialize");
-            Self::ensure_derive(&mut derives, "validator::Validate");
+            custom.push("Serialize".to_string());
+            custom.push("validator::Validate".to_string());
           }
           TypeUsage::ResponseOnly => {
-            Self::ensure_derive(&mut derives, "Deserialize");
+            custom.push("Deserialize".to_string());
           }
           TypeUsage::Bidirectional => {
-            Self::ensure_derive(&mut derives, "Serialize");
-            Self::ensure_derive(&mut derives, "Deserialize");
-            Self::ensure_derive(&mut derives, "validator::Validate");
+            custom.push("Serialize".to_string());
+            custom.push("Deserialize".to_string());
+            custom.push("validator::Validate".to_string());
           }
         }
+        custom.push("oas3_gen_support::Default".to_string());
+        Self::generate_derives(&custom)
       }
-      Self::generate_derives(&derives)
+      StructKind::Schema => {
+        let mut derives = def.derives.clone();
+        if let Some(usage) = type_usage.get(&def.name) {
+          match usage {
+            TypeUsage::RequestOnly => {
+              Self::ensure_derive(&mut derives, "Serialize");
+              Self::ensure_derive(&mut derives, "validator::Validate");
+            }
+            TypeUsage::ResponseOnly => {
+              Self::ensure_derive(&mut derives, "Deserialize");
+            }
+            TypeUsage::Bidirectional => {
+              Self::ensure_derive(&mut derives, "Serialize");
+              Self::ensure_derive(&mut derives, "Deserialize");
+              Self::ensure_derive(&mut derives, "validator::Validate");
+            }
+          }
+        }
+        Self::generate_derives(&derives)
+      }
     };
 
     let outer_attrs = Self::generate_outer_attrs(&def.outer_attrs);
     let serde_attrs = Self::generate_serde_attrs(&def.serde_attrs);
 
-    let include_validation = !(is_operation_type && matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)));
+    let include_validation = match def.kind {
+      StructKind::RequestBody => !matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)),
+      StructKind::OperationRequest | StructKind::Schema => true,
+    };
     let fields = Self::generate_fields_with_visibility(
       &def.name,
       None,
@@ -667,7 +764,7 @@ impl CodeGenerator {
         let source = if trimmed.starts_with("#[") {
           trimmed.to_string()
         } else {
-          format!("#[{}]", trimmed)
+          format!("#[{trimmed}]")
         };
         syn::parse_str::<TokenStream>(&source).unwrap_or_else(|_| quote! {})
       })
@@ -697,7 +794,7 @@ impl CodeGenerator {
     let mut combined = attrs.to_owned();
 
     if let Some(const_name) = regex_const {
-      combined.push(format!("regex(path = \"{}\")", const_name));
+      combined.push(format!("regex(path = \"{const_name}\")"));
     }
 
     let attr_tokens: Vec<TokenStream> = combined
@@ -746,10 +843,9 @@ impl CodeGenerator {
       .map(|field| {
         let name = format_ident!("{}", field.name);
 
-        // Add validation constraints to docs
         let mut field_docs = field.docs.clone();
         if let Some(ref multiple_of) = field.multiple_of {
-          field_docs.push(format!("/// Validation: Must be a multiple of {}", multiple_of));
+          field_docs.push(format!("/// Validation: Must be a multiple of {multiple_of}"));
         }
 
         let docs = Self::generate_docs(&field_docs);
@@ -760,13 +856,12 @@ impl CodeGenerator {
           .filter_map(|attr| attr.parse::<TokenStream>().ok())
           .collect();
 
-        // Only include validation for struct fields, not enum variant fields
         let regex_const = if include_validation && field.regex_validation.is_some() {
           let key = match variant_name {
             Some(variant) => RegexKey::for_variant(type_name, variant, &field.name),
             None => RegexKey::for_struct(type_name, &field.name),
           };
-          regex_lookup.get(&key).map(|s| s.as_str())
+          regex_lookup.get(&key).map(std::string::String::as_str)
         } else {
           None
         };
@@ -783,7 +878,6 @@ impl CodeGenerator {
           quote! {}
         };
 
-        // Generate #[default(value)] attribute for fields with default values
         let default_attr = if add_pub && field.default_value.is_some() {
           let default_expr = Self::json_value_to_rust_expr(field.default_value.as_ref().unwrap(), &field.rust_type);
           quote! { #[default(#default_expr)] }
@@ -837,7 +931,6 @@ impl CodeGenerator {
           quote! {}
         };
 
-        // Add #[default] to the first variant for Rust's built-in Default derive
         let default_attr = if idx == 0 {
           quote! { #[default] }
         } else {
@@ -854,8 +947,6 @@ impl CodeGenerator {
             quote! { ( #(#type_tokens),* ) }
           }
           VariantContent::Struct(fields) => {
-            // Enum variant fields should not have 'pub' keyword or validation attributes
-            // Use File visibility for enum variant fields (they never have visibility modifiers)
             let field_tokens = Self::generate_fields_with_visibility(
               type_name,
               Some(&variant.name),
@@ -880,10 +971,641 @@ impl CodeGenerator {
       .collect()
   }
 
-  /// Parse a type string into a TokenStream
+  /// Parse a type string into a `TokenStream`
   /// This is a simple parser that handles basic Rust types
   fn parse_type_string(type_str: &str) -> TokenStream {
-    // For now, just parse it directly - this works for most cases
     type_str.parse().unwrap_or_else(|_| quote! { serde_json::Value })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use serde_json::json;
+
+  use super::*;
+  use crate::generator::ast::{FieldDef, StructDef, StructKind, TypeRef};
+
+  /// Helper to create a basic test struct definition
+  fn create_test_struct(name: &str, kind: StructKind) -> StructDef {
+    StructDef {
+      name: name.to_string(),
+      docs: vec![],
+      fields: vec![FieldDef {
+        name: "field1".to_string(),
+        docs: vec![],
+        rust_type: TypeRef::new("String"),
+        serde_attrs: vec![],
+        extra_attrs: vec![],
+        validation_attrs: vec!["length(min = 1)".to_string()],
+        regex_validation: None,
+        default_value: None,
+        read_only: false,
+        write_only: false,
+        deprecated: false,
+        multiple_of: None,
+      }],
+      derives: vec![
+        "Debug".to_string(),
+        "Clone".to_string(),
+        "Serialize".to_string(),
+        "Deserialize".to_string(),
+      ],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind,
+    }
+  }
+
+  /// Helper to check if generated code contains a specific derive
+  fn contains_derive(tokens: &TokenStream, derive_name: &str) -> bool {
+    let code = tokens.to_string();
+    code.contains("derive (") && code.contains(derive_name)
+  }
+
+  /// Helper to check if generated code contains validation attributes
+  fn contains_validation(tokens: &TokenStream) -> bool {
+    let code = tokens.to_string();
+    code.contains("validate") && (code.contains("# [validate") || code.contains("#[validate"))
+  }
+
+  #[test]
+  fn test_schema_struct_no_type_usage() {
+    let def = create_test_struct("TestSchema", StructKind::Schema);
+    let type_usage = BTreeMap::new();
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    let code = result.to_string();
+
+    assert!(contains_derive(&result, "Debug"), "Should contain Debug derive");
+    assert!(contains_derive(&result, "Clone"), "Should contain Clone derive");
+    assert!(contains_derive(&result, "Serialize"), "Should contain Serialize derive");
+    assert!(
+      contains_derive(&result, "Deserialize"),
+      "Should contain Deserialize derive"
+    );
+    assert!(contains_validation(&result), "Should include validation attributes");
+    assert!(code.contains("pub struct TestSchema"), "Should be public struct");
+  }
+
+  #[test]
+  fn test_schema_struct_with_request_only_usage() {
+    let def = create_test_struct("RequestSchema", StructKind::Schema);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("RequestSchema".to_string(), TypeUsage::RequestOnly);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    assert!(contains_derive(&result, "Serialize"), "Should contain Serialize derive");
+    assert!(
+      contains_derive(&result, "validator :: Validate"),
+      "Should contain Validate derive"
+    );
+    assert!(contains_validation(&result), "Should include validation attributes");
+  }
+
+  #[test]
+  fn test_schema_struct_with_response_only_usage() {
+    let def = create_test_struct("ResponseSchema", StructKind::Schema);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("ResponseSchema".to_string(), TypeUsage::ResponseOnly);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    assert!(
+      contains_derive(&result, "Deserialize"),
+      "Should contain Deserialize derive"
+    );
+    assert!(contains_validation(&result), "Should include validation attributes");
+  }
+
+  #[test]
+  fn test_schema_struct_with_bidirectional_usage() {
+    let def = create_test_struct("BidirectionalSchema", StructKind::Schema);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("BidirectionalSchema".to_string(), TypeUsage::Bidirectional);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    assert!(contains_derive(&result, "Serialize"), "Should contain Serialize derive");
+    assert!(
+      contains_derive(&result, "Deserialize"),
+      "Should contain Deserialize derive"
+    );
+    assert!(
+      contains_derive(&result, "validator :: Validate"),
+      "Should contain Validate derive"
+    );
+    assert!(contains_validation(&result), "Should include validation attributes");
+  }
+
+  #[test]
+  fn test_operation_request_struct() {
+    let def = create_test_struct("GetUsersRequest", StructKind::OperationRequest);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("GetUsersRequest".to_string(), TypeUsage::RequestOnly);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    let code = result.to_string();
+    assert!(contains_derive(&result, "Debug"), "Should contain Debug derive");
+    assert!(contains_derive(&result, "Clone"), "Should contain Clone derive");
+    assert!(
+      contains_derive(&result, "validator :: Validate"),
+      "Should contain Validate derive"
+    );
+    assert!(
+      contains_derive(&result, "oas3_gen_support :: Default"),
+      "Should contain Default derive"
+    );
+    assert!(!code.contains("Serialize"), "Should NOT contain Serialize derive");
+    assert!(!code.contains("Deserialize"), "Should NOT contain Deserialize derive");
+    assert!(contains_validation(&result), "Should include validation attributes");
+  }
+
+  #[test]
+  fn test_request_body_struct_request_only() {
+    let def = create_test_struct("CreateUserRequestBody", StructKind::RequestBody);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("CreateUserRequestBody".to_string(), TypeUsage::RequestOnly);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    let code = result.to_string();
+    assert!(contains_derive(&result, "Debug"), "Should contain Debug derive");
+    assert!(contains_derive(&result, "Clone"), "Should contain Clone derive");
+    assert!(contains_derive(&result, "Serialize"), "Should contain Serialize derive");
+    assert!(
+      contains_derive(&result, "validator :: Validate"),
+      "Should contain Validate derive"
+    );
+    assert!(
+      contains_derive(&result, "oas3_gen_support :: Default"),
+      "Should contain Default derive"
+    );
+    assert!(!code.contains("Deserialize"), "Should NOT contain Deserialize derive");
+    assert!(contains_validation(&result), "Should include validation attributes");
+  }
+
+  #[test]
+  fn test_request_body_struct_response_only() {
+    let def = create_test_struct("GetUserResponseBody", StructKind::RequestBody);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("GetUserResponseBody".to_string(), TypeUsage::ResponseOnly);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    let code = result.to_string();
+    assert!(contains_derive(&result, "Debug"), "Should contain Debug derive");
+    assert!(contains_derive(&result, "Clone"), "Should contain Clone derive");
+    assert!(
+      contains_derive(&result, "Deserialize"),
+      "Should contain Deserialize derive"
+    );
+    assert!(
+      contains_derive(&result, "oas3_gen_support :: Default"),
+      "Should contain Default derive"
+    );
+    assert!(!code.contains("Serialize"), "Should NOT contain Serialize derive");
+    assert!(
+      !code.contains("validator :: Validate"),
+      "Should NOT contain Validate derive"
+    );
+    assert!(
+      !contains_validation(&result),
+      "Should NOT include validation attributes"
+    );
+  }
+
+  #[test]
+  fn test_request_body_struct_bidirectional() {
+    let def = create_test_struct("UpdateUserRequestBody", StructKind::RequestBody);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("UpdateUserRequestBody".to_string(), TypeUsage::Bidirectional);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    assert!(contains_derive(&result, "Debug"), "Should contain Debug derive");
+    assert!(contains_derive(&result, "Clone"), "Should contain Clone derive");
+    assert!(contains_derive(&result, "Serialize"), "Should contain Serialize derive");
+    assert!(
+      contains_derive(&result, "Deserialize"),
+      "Should contain Deserialize derive"
+    );
+    assert!(
+      contains_derive(&result, "validator :: Validate"),
+      "Should contain Validate derive"
+    );
+    assert!(
+      contains_derive(&result, "oas3_gen_support :: Default"),
+      "Should contain Default derive"
+    );
+    assert!(contains_validation(&result), "Should include validation attributes");
+  }
+
+  #[test]
+  fn test_request_body_struct_no_usage_defaults_to_bidirectional() {
+    let def = create_test_struct("UnknownRequestBody", StructKind::RequestBody);
+    let type_usage = BTreeMap::new(); // Empty - no usage info
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    assert!(contains_derive(&result, "Serialize"), "Should contain Serialize derive");
+    assert!(
+      contains_derive(&result, "Deserialize"),
+      "Should contain Deserialize derive"
+    );
+    assert!(
+      contains_derive(&result, "validator :: Validate"),
+      "Should contain Validate derive"
+    );
+  }
+
+  #[test]
+  fn test_visibility_crate() {
+    let def = create_test_struct("CrateStruct", StructKind::Schema);
+    let type_usage = BTreeMap::new();
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Crate);
+    let code = result.to_string();
+    assert!(
+      code.contains("pub (crate) struct CrateStruct"),
+      "Should be pub(crate) struct"
+    );
+  }
+
+  #[test]
+  fn test_visibility_file() {
+    let def = create_test_struct("FileStruct", StructKind::Schema);
+    let type_usage = BTreeMap::new();
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::File);
+    let code = result.to_string();
+    assert!(code.contains("struct FileStruct"), "Should be file-private struct");
+    assert!(!code.contains("pub struct"), "Should NOT have pub modifier");
+  }
+
+  #[test]
+  fn test_struct_with_methods_generates_impl_block() {
+    use crate::generator::ast::{PathSegment, StructMethod, StructMethodKind};
+
+    let mut def = create_test_struct("RequestWithMethod", StructKind::OperationRequest);
+    def.methods.push(StructMethod {
+      name: "render_path".to_string(),
+      docs: vec!["/// Renders the path".to_string()],
+      kind: StructMethodKind::RenderPath {
+        segments: vec![PathSegment::Literal("/api/users".to_string())],
+        query_params: vec![],
+      },
+      attrs: vec!["must_use".to_string()],
+    });
+
+    let type_usage = BTreeMap::new();
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    let code = result.to_string();
+    assert!(code.contains("impl RequestWithMethod"), "Should generate impl block");
+    assert!(code.contains("fn render_path"), "Should include render_path method");
+  }
+
+  #[test]
+  fn test_regex_validation_lookup() {
+    let mut def = create_test_struct("RegexStruct", StructKind::Schema);
+    def.fields[0].regex_validation = Some("[a-z]+".to_string());
+
+    let type_usage = BTreeMap::new();
+    let mut regex_lookup = BTreeMap::new();
+    let key = RegexKey::for_struct("RegexStruct", "field1");
+    regex_lookup.insert(key, "REGEX_CONST_NAME".to_string());
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    let code = result.to_string();
+    assert!(code.contains("regex"), "Should include regex validation");
+    assert!(code.contains("REGEX_CONST_NAME"), "Should reference the regex constant");
+  }
+
+  #[test]
+  fn test_operation_request_ignores_type_usage_for_derives() {
+    let def = create_test_struct("RequestIgnoresUsage", StructKind::OperationRequest);
+    let mut type_usage = BTreeMap::new();
+    type_usage.insert("RequestIgnoresUsage".to_string(), TypeUsage::ResponseOnly);
+    let regex_lookup = BTreeMap::new();
+
+    let result = CodeGenerator::generate_struct(&def, &regex_lookup, &type_usage, Visibility::Public);
+    let code = result.to_string();
+    assert!(
+      contains_derive(&result, "validator :: Validate"),
+      "Should contain Validate derive"
+    );
+    assert!(!code.contains("Serialize"), "Should NOT have Serialize");
+    assert!(!code.contains("Deserialize"), "Should NOT have Deserialize");
+    assert!(contains_validation(&result), "Should include validation attributes");
+  }
+
+  fn assert_conversion(value: &serde_json::Value, rust_type: &TypeRef, expected: &str) {
+    let result = CodeGenerator::json_value_to_rust_expr(value, rust_type);
+    let code = result.to_string();
+    assert_eq!(code.trim(), expected.trim(), "Conversion mismatch");
+  }
+
+  #[test]
+  fn test_string_empty() {
+    let value = json!("");
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, "String :: new ()");
+  }
+
+  #[test]
+  fn test_string_regular() {
+    let value = json!("hello");
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""hello" . to_string ()"#);
+  }
+
+  #[test]
+  fn test_string_with_spaces() {
+    let value = json!("hello world");
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""hello world" . to_string ()"#);
+  }
+
+  #[test]
+  fn test_number_to_string() {
+    let value = json!(42);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""42" . to_string ()"#);
+  }
+
+  #[test]
+  fn test_float_to_string() {
+    let value = json!(2.5);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""2.5" . to_string ()"#);
+  }
+
+  #[test]
+  fn test_bool_to_string() {
+    let value = json!(true);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, r#""true" . to_string ()"#);
+  }
+
+  #[test]
+  fn test_int_from_number() {
+    let value = json!(42);
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "42i64");
+  }
+
+  #[test]
+  fn test_int_from_string() {
+    let value = json!("123");
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "123i64");
+  }
+
+  #[test]
+  fn test_int_invalid_string() {
+    let value = json!("not_a_number");
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
+
+  #[test]
+  fn test_float_from_float() {
+    let value = json!(2.5);
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "2.5f64");
+  }
+
+  #[test]
+  fn test_float_from_integer_coercion() {
+    let value = json!(10);
+    let rust_type = TypeRef::new("f64");
+    // This tests the critical int-to-float coercion
+    assert_conversion(&value, &rust_type, "10f64");
+  }
+
+  #[test]
+  fn test_float_from_string() {
+    let value = json!("2.718");
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "2.718f64");
+  }
+
+  #[test]
+  fn test_float_invalid_string() {
+    let value = json!("not_a_float");
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
+
+  #[test]
+  fn test_bool_from_bool() {
+    let value = json!(true);
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "true");
+
+    let value = json!(false);
+    assert_conversion(&value, &rust_type, "false");
+  }
+
+  #[test]
+  fn test_bool_from_number_nonzero() {
+    let value = json!(1);
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "true");
+
+    let value = json!(42);
+    assert_conversion(&value, &rust_type, "true");
+  }
+
+  #[test]
+  fn test_bool_from_number_zero() {
+    let value = json!(0);
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "false");
+  }
+
+  #[test]
+  fn test_bool_from_string_true() {
+    let value = json!("true");
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "true");
+
+    let value = json!("True");
+    assert_conversion(&value, &rust_type, "true");
+
+    let value = json!("TRUE");
+    assert_conversion(&value, &rust_type, "true");
+
+    let value = json!("1");
+    assert_conversion(&value, &rust_type, "true");
+
+    let value = json!("yes");
+    assert_conversion(&value, &rust_type, "true");
+
+    let value = json!("Yes");
+    assert_conversion(&value, &rust_type, "true");
+  }
+
+  #[test]
+  fn test_bool_from_string_false() {
+    let value = json!("false");
+    let rust_type = TypeRef::new("bool");
+    assert_conversion(&value, &rust_type, "false");
+
+    let value = json!("no");
+    assert_conversion(&value, &rust_type, "false");
+
+    let value = json!("0");
+    assert_conversion(&value, &rust_type, "false");
+
+    let value = json!("anything");
+    assert_conversion(&value, &rust_type, "false");
+  }
+
+  #[test]
+  fn test_null_value() {
+    let value = json!(null);
+    let rust_type = TypeRef::new("String");
+    assert_conversion(&value, &rust_type, "None");
+  }
+
+  #[test]
+  fn test_nullable_string_with_value() {
+    let value = json!("hello");
+    let mut rust_type = TypeRef::new("String");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, r#"Some ("hello" . to_string ())"#);
+  }
+
+  #[test]
+  fn test_nullable_int_with_value() {
+    let value = json!(42);
+    let mut rust_type = TypeRef::new("i64");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (42i64)");
+  }
+
+  #[test]
+  fn test_nullable_float_with_value() {
+    let value = json!(2.5);
+    let mut rust_type = TypeRef::new("f64");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (2.5f64)");
+  }
+
+  #[test]
+  fn test_nullable_bool_with_value() {
+    let value = json!(true);
+    let mut rust_type = TypeRef::new("bool");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (true)");
+  }
+
+  #[test]
+  fn test_nullable_with_null() {
+    let value = json!(null);
+    let mut rust_type = TypeRef::new("String");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "None");
+  }
+
+  #[test]
+  fn test_array_defaults() {
+    let value = json!([1, 2, 3]);
+    let rust_type = TypeRef::new("Vec<i64>");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
+
+  #[test]
+  fn test_object_defaults() {
+    let value = json!({"key": "value"});
+    let rust_type = TypeRef::new("CustomType");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
+
+  #[test]
+  fn test_int_types_i32() {
+    let value = json!(100);
+    let rust_type = TypeRef::new("i32");
+    assert_conversion(&value, &rust_type, "100i64");
+  }
+
+  #[test]
+  fn test_int_types_i16() {
+    let value = json!(50);
+    let rust_type = TypeRef::new("i16");
+    assert_conversion(&value, &rust_type, "50i64");
+  }
+
+  #[test]
+  fn test_float_types_f32() {
+    let value = json!(1.5);
+    let rust_type = TypeRef::new("f32");
+    assert_conversion(&value, &rust_type, "1.5f64");
+  }
+
+  #[test]
+  fn test_negative_numbers() {
+    let value = json!(-42);
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "- 42i64");
+
+    let value = json!(-2.5);
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "- 2.5f64");
+  }
+
+  #[test]
+  fn test_zero_values() {
+    let value = json!(0);
+    let rust_type = TypeRef::new("i64");
+    assert_conversion(&value, &rust_type, "0i64");
+
+    let value = json!(0.0);
+    let rust_type = TypeRef::new("f64");
+    assert_conversion(&value, &rust_type, "0f64");
+  }
+
+  #[test]
+  fn test_unsigned_from_number() {
+    let value = json!(42);
+    let rust_type = TypeRef::new("u32");
+    assert_conversion(&value, &rust_type, "42u64");
+
+    let value = json!(255);
+    let rust_type = TypeRef::new("u8");
+    assert_conversion(&value, &rust_type, "255u64");
+  }
+
+  #[test]
+  fn test_unsigned_from_string() {
+    let value = json!("100");
+    let rust_type = TypeRef::new("u64");
+    assert_conversion(&value, &rust_type, "100u64");
+  }
+
+  #[test]
+  fn test_unsigned_invalid_negative() {
+    let value = json!(-1);
+    let rust_type = TypeRef::new("u32");
+    assert_conversion(&value, &rust_type, "Default :: default ()");
+  }
+
+  #[test]
+  fn test_format_based_type_coercion() {
+    let value = json!(100);
+    let rust_type = TypeRef::new("i32");
+    assert_conversion(&value, &rust_type, "100i64");
+
+    let value = json!(1.5);
+    let rust_type = TypeRef::new("f32");
+    assert_conversion(&value, &rust_type, "1.5f64");
   }
 }
