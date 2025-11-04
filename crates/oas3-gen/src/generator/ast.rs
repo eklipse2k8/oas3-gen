@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// Discriminated enum variant mapping
 #[derive(Debug, Clone)]
 pub(crate) struct DiscriminatedVariant {
@@ -125,8 +127,7 @@ pub(crate) struct FieldDef {
 }
 
 /// Rust primitive and standard library types
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub(crate) enum RustPrimitive {
   #[serde(rename = "i8")]
   I8,
@@ -169,6 +170,8 @@ pub(crate) enum RustPrimitive {
   DateTime,
   #[serde(rename = "chrono::NaiveTime")]
   Time,
+  #[serde(rename = "chrono::Duration")]
+  Duration,
   #[serde(rename = "uuid::Uuid")]
   Uuid,
   #[serde(rename = "serde_json::Value")]
@@ -178,33 +181,36 @@ pub(crate) enum RustPrimitive {
   Custom(String),
 }
 
+impl RustPrimitive {
+  pub(crate) fn is_float(&self) -> bool {
+    matches!(self, RustPrimitive::F32 | RustPrimitive::F64)
+  }
+
+  #[allow(unused)]
+  pub(crate) fn is_integer(&self) -> bool {
+    matches!(
+      self,
+      RustPrimitive::I8
+        | RustPrimitive::I16
+        | RustPrimitive::I32
+        | RustPrimitive::I64
+        | RustPrimitive::I128
+        | RustPrimitive::Isize
+        | RustPrimitive::U8
+        | RustPrimitive::U16
+        | RustPrimitive::U32
+        | RustPrimitive::U64
+        | RustPrimitive::U128
+        | RustPrimitive::Usize
+    )
+  }
+}
+
 impl std::fmt::Display for RustPrimitive {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let s = match self {
-      RustPrimitive::I8 => "i8",
-      RustPrimitive::I16 => "i16",
-      RustPrimitive::I32 => "i32",
-      RustPrimitive::I64 => "i64",
-      RustPrimitive::I128 => "i128",
-      RustPrimitive::Isize => "isize",
-      RustPrimitive::U8 => "u8",
-      RustPrimitive::U16 => "u16",
-      RustPrimitive::U32 => "u32",
-      RustPrimitive::U64 => "u64",
-      RustPrimitive::U128 => "u128",
-      RustPrimitive::Usize => "usize",
-      RustPrimitive::F32 => "f32",
-      RustPrimitive::F64 => "f64",
-      RustPrimitive::Bool => "bool",
-      RustPrimitive::String => "String",
-      RustPrimitive::Bytes => "Vec<u8>",
-      RustPrimitive::Date => "chrono::NaiveDate",
-      RustPrimitive::DateTime => "chrono::DateTime<chrono::Utc>",
-      RustPrimitive::Time => "chrono::NaiveTime",
-      RustPrimitive::Uuid => "uuid::Uuid",
-      RustPrimitive::Value => "serde_json::Value",
-      RustPrimitive::Unit => "()",
-      RustPrimitive::Custom(name) => return write!(f, "{name}"),
+      RustPrimitive::Custom(name) => name,
+      _ => &serde_plain::to_string(self).unwrap(),
     };
     write!(f, "{s}")
   }
@@ -235,6 +241,7 @@ impl std::str::FromStr for RustPrimitive {
       "chrono::NaiveDate" => RustPrimitive::Date,
       "chrono::DateTime<chrono::Utc>" => RustPrimitive::DateTime,
       "chrono::NaiveTime" => RustPrimitive::Time,
+      "chrono::Duration" => RustPrimitive::Duration,
       "uuid::Uuid" => RustPrimitive::Uuid,
       "serde_json::Value" => RustPrimitive::Value,
       "()" => RustPrimitive::Unit,

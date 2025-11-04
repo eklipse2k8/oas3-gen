@@ -7,7 +7,12 @@ use tokio::process::Command;
 /// Convert a string into doc comment lines with `///` prefix
 pub(crate) async fn doc_comment_lines(input: &str) -> Vec<String> {
   #[cfg(feature = "mdformat")]
-  let reformatted = format_with_mdformat(input).await.unwrap_or_default();
+  let reformatted = if input.len() > 100 {
+    format_with_mdformat(input).await.unwrap_or_default()
+  } else {
+    input.to_string()
+  };
+
   #[cfg(not(feature = "mdformat"))]
   let reformatted = input.to_string();
 
@@ -56,8 +61,8 @@ async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
-  #[cfg(feature = "mdformat")]
   #[tokio::test]
+  #[cfg(feature = "mdformat")]
   async fn test_doc_comment_lines() {
     let input = "This is a test.\n\nNew line here.\nLine with \n escaped newline.";
     let expected = vec![

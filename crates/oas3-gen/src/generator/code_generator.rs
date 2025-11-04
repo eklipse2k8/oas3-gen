@@ -1020,7 +1020,7 @@ mod tests {
   /// Helper to check if generated code contains a specific derive
   fn contains_derive(tokens: &TokenStream, derive_name: &str) -> bool {
     let code = tokens.to_string();
-    code.contains(&format!("derive (")) && code.contains(derive_name)
+    code.contains("derive (") && code.contains(derive_name)
   }
 
   /// Helper to check if generated code contains validation attributes
