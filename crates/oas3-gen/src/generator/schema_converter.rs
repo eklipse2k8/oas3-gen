@@ -6,6 +6,7 @@ use std::{
   sync::LazyLock,
 };
 
+use inflections::Inflect;
 use num_format::{CustomFormat, Grouping, ToFormattedString as _};
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use regex::Regex;
@@ -1579,6 +1580,22 @@ impl<'a> SchemaConverter<'a> {
       return Ok((TypeRef::new("serde_json::Value"), vec![]));
     };
 
+    if !prop_schema.enum_values.is_empty() {
+      if prop_schema.enum_values.len() == 1 {
+        return Ok((self.schema_to_type_ref(&prop_schema)?, vec![]));
+      }
+
+      let prop_pascal = prop_name.to_pascal_case();
+      let enum_name = format!("{parent_name}{prop_pascal}");
+      let inline_enum = self
+        .convert_simple_enum(&enum_name, &prop_schema, &prop_schema.enum_values)
+        .await?;
+      return Ok((
+        TypeRef::new(RustPrimitive::Custom(enum_name.clone())),
+        vec![inline_enum],
+      ));
+    }
+
     let has_one_of = !prop_schema.one_of.is_empty();
     let has_any_of = !prop_schema.any_of.is_empty();
 
@@ -1819,6 +1836,7 @@ impl<'a> SchemaConverter<'a> {
   /// # Parameters
   /// - `prop_name`: The property name being evaluated.
   /// - `schema_name`: Optional schema name used to locate discriminator mappings.
+  /// - `schema_discriminator`: The discriminator of the current schema being processed.
   /// - `metadata`: Field metadata prior to discriminator adjustments.
   /// - `serde_attrs`: Existing serde attributes for the field.
   /// - `final_type`: The final resolved type for the field.
@@ -1827,11 +1845,27 @@ impl<'a> SchemaConverter<'a> {
     &self,
     prop_name: &str,
     schema_name: Option<&str>,
+    schema_discriminator: Option<&oas3::spec::Discriminator>,
     metadata: FieldMetadata,
     serde_attrs: Vec<String>,
     final_type: &TypeRef,
   ) -> (FieldMetadata, Vec<String>, Vec<String>, Option<String>) {
-    if !self.graph.discriminator_fields().contains(prop_name) {
+    let is_base_discriminator = schema_discriminator
+      .as_ref()
+      .is_some_and(|d| d.property_name == prop_name);
+
+    let discriminator_info = schema_name.and_then(|name| self.find_discriminator_mapping_value(name));
+    let is_child_discriminator = discriminator_info
+      .as_ref()
+      .is_some_and(|(disc_prop, _)| disc_prop == prop_name);
+
+    if !is_base_discriminator && !is_child_discriminator {
+      let regex = metadata.regex_validation.clone();
+      return (metadata, serde_attrs, Vec::new(), regex);
+    }
+
+    let is_enum_type = matches!(final_type.base_type, RustPrimitive::Custom(_));
+    if is_enum_type && is_base_discriminator {
       let regex = metadata.regex_validation.clone();
       return (metadata, serde_attrs, Vec::new(), regex);
     }
@@ -1844,11 +1878,7 @@ impl<'a> SchemaConverter<'a> {
     let regex_validation = None;
     let extra_attrs = vec!["#[doc(hidden)]".to_string()];
 
-    if metadata.default_value.is_none()
-      && let Some(schema_name) = schema_name
-      && let Some((disc_prop, disc_value)) = self.find_discriminator_mapping_value(schema_name)
-      && disc_prop == *prop_name
-    {
+    if let Some((_, disc_value)) = discriminator_info {
       metadata.default_value = Some(serde_json::Value::String(disc_value));
     }
 
@@ -1863,7 +1893,7 @@ impl<'a> SchemaConverter<'a> {
     if metadata
       .default_value
       .as_ref()
-      .is_none_or(|value| value.as_str().is_some_and(str::is_empty))
+      .is_some_and(|value| value.as_str().is_some_and(str::is_empty))
     {
       serde_attrs.push("skip".to_string());
     }
@@ -1880,7 +1910,9 @@ impl<'a> SchemaConverter<'a> {
   /// - `is_required`: Indicates whether the property is required.
   /// - `policy`: Controls union inlining.
   /// - `schema_name`: Optional schema name used for discriminator handling.
+  /// - `schema`: The schema being processed (for discriminator info).
   ///
+  #[allow(clippy::too_many_arguments)]
   async fn process_single_field(
     &self,
     parent_name: &str,
@@ -1889,6 +1921,7 @@ impl<'a> SchemaConverter<'a> {
     is_required: bool,
     policy: InlinePolicy,
     schema_name: Option<&str>,
+    schema: &ObjectSchema,
   ) -> anyhow::Result<(FieldDef, Vec<RustType>)> {
     let (rust_type, generated_types) = self
       .resolve_field_type(parent_name, prop_name, prop_schema_ref, policy)
@@ -1901,8 +1934,14 @@ impl<'a> SchemaConverter<'a> {
       .await;
     let serde_attrs = Self::serde_renamed_if_needed(prop_name);
 
-    let (metadata, serde_attrs, extra_attrs, regex_validation) =
-      self.apply_discriminator_attributes(prop_name, schema_name, metadata, serde_attrs, &final_type);
+    let (metadata, serde_attrs, extra_attrs, regex_validation) = self.apply_discriminator_attributes(
+      prop_name,
+      schema_name,
+      schema.discriminator.as_ref(),
+      metadata,
+      serde_attrs,
+      &final_type,
+    );
 
     let regex_validation =
       regex_validation.or_else(|| Self::filter_regex_validation(&final_type, metadata.regex_validation.clone()));
@@ -1955,6 +1994,7 @@ impl<'a> SchemaConverter<'a> {
             is_required,
             policy,
             schema_name,
+            schema,
           )
           .await?;
 
@@ -3404,5 +3444,374 @@ mod tests {
       }
       other => panic!("Expected type alias for empty schema, got {:?}", other),
     }
+  }
+
+  #[tokio::test]
+  async fn test_inline_enum_field_generates_separate_enum_type() {
+    let mut user_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+
+    user_schema.properties.insert(
+      "status".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("active"), json!("inactive"), json!("pending")],
+        description: Some("User account status".to_string()),
+        ..Default::default()
+      }),
+    );
+    user_schema.properties.insert(
+      "name".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    user_schema.required.push("name".to_string());
+    user_schema.required.push("status".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("User".to_string(), user_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("User", graph.get_schema("User").unwrap())
+      .await
+      .unwrap();
+
+    assert_eq!(
+      result.len(),
+      2,
+      "Should generate User struct + inline UserStatus enum"
+    );
+
+    let inline_enum = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Enum(def) if def.name == "UserStatus" => Some(def),
+        _ => None,
+      })
+      .expect("UserStatus enum should be generated");
+
+    assert_eq!(inline_enum.name, "UserStatus");
+    assert_eq!(inline_enum.variants.len(), 3);
+    assert!(
+      inline_enum.variants.iter().all(|v| matches!(v.content, VariantContent::Unit)),
+      "All variants should be unit variants"
+    );
+    assert!(
+      inline_enum.derives.contains(&"Eq".to_string()),
+      "Simple enum should have Eq derive"
+    );
+    assert!(
+      inline_enum.derives.contains(&"Hash".to_string()),
+      "Simple enum should have Hash derive"
+    );
+
+    let user_struct = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) if def.name == "User" => Some(def),
+        _ => None,
+      })
+      .expect("User struct should be generated");
+
+    let status_field = user_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "status")
+      .expect("status field should exist");
+
+    assert_eq!(status_field.rust_type.base_type, RustPrimitive::Custom("UserStatus".to_string()));
+    assert!(
+      !status_field.rust_type.nullable,
+      "Required enum field should not be nullable"
+    );
+    // Note: Documentation from inline schemas is typically not preserved on fields,
+    // but the enum type itself will have documentation if the schema has it
+  }
+
+  #[tokio::test]
+  async fn test_single_value_enum_does_not_generate_separate_type() {
+    let mut config_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+
+    config_schema.properties.insert(
+      "kind".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("standard")],
+        const_value: Some(json!("standard")),
+        ..Default::default()
+      }),
+    );
+    config_schema.required.push("kind".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Config".to_string(), config_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("Config", graph.get_schema("Config").unwrap())
+      .await
+      .unwrap();
+
+    assert_eq!(result.len(), 1, "Should only generate Config struct");
+
+    let config_struct = match &result[0] {
+      RustType::Struct(def) => def,
+      _ => panic!("Expected struct"),
+    };
+
+    let kind_field = config_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "kind")
+      .expect("kind field should exist");
+
+    assert_eq!(
+      kind_field.rust_type.base_type,
+      RustPrimitive::String,
+      "Single-value enum should use String type, not custom enum"
+    );
+    assert_eq!(
+      kind_field.default_value.as_ref(),
+      Some(&json!("standard")),
+      "Single-value enum should have const as default"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_referenced_enum_not_duplicated() {
+    let status_enum = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      enum_values: vec![json!("active"), json!("inactive"), json!("pending")],
+      ..Default::default()
+    };
+
+    let mut user_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    user_schema.properties.insert(
+      "status".to_string(),
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/Status".to_string(),
+        summary: None,
+        description: None,
+      },
+    );
+    user_schema.required.push("status".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Status".to_string(), status_enum);
+    schemas.insert("User".to_string(), user_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let user_result = converter
+      .convert_schema("User", graph.get_schema("User").unwrap())
+      .await
+      .unwrap();
+
+    assert_eq!(
+      user_result.len(),
+      1,
+      "Should only generate User struct, no inline enum"
+    );
+
+    let user_struct = match &user_result[0] {
+      RustType::Struct(def) => def,
+      _ => panic!("Expected struct"),
+    };
+
+    let status_field = user_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "status")
+      .expect("status field should exist");
+
+    assert_eq!(
+      status_field.rust_type.base_type,
+      RustPrimitive::Custom("Status".to_string()),
+      "Referenced enum should use the ref name, not create inline enum"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_inline_enum_field_with_base_discriminator_preserves_enum_type() {
+    // Test that when a discriminator property has inline enum values,
+    // the enum type is preserved and not hidden as a string field
+    let mut animal_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+
+    animal_schema.properties.insert(
+      "species".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("cat"), json!("dog"), json!("bird")],
+        description: Some("Species of animal".to_string()),
+        ..Default::default()
+      }),
+    );
+    animal_schema.properties.insert(
+      "name".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    animal_schema.required.push("species".to_string());
+    animal_schema.required.push("name".to_string());
+
+    // Set species as discriminator
+    animal_schema.discriminator = Some(Discriminator {
+      property_name: "species".to_string(),
+      mapping: None,
+    });
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Animal".to_string(), animal_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("Animal", graph.get_schema("Animal").unwrap())
+      .await
+      .unwrap();
+
+    // Should generate Animal struct + inline AnimalSpecies enum
+    let inline_enum = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Enum(def) if def.name == "AnimalSpecies" => Some(def),
+        _ => None,
+      })
+      .expect("AnimalSpecies enum should be generated");
+
+    assert_eq!(inline_enum.variants.len(), 3);
+    assert!(
+      inline_enum.variants.iter().any(|v| v.name == "Cat"),
+      "Should have Cat variant"
+    );
+
+    // Find the struct (could be Animal or AnimalBase depending on discriminator handling)
+    let animal_struct = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) => Some(def),
+        _ => None,
+      })
+      .expect("Animal struct should be generated");
+
+    let species_field = animal_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "species")
+      .expect("species field should exist");
+
+    assert_eq!(
+      species_field.rust_type.base_type,
+      RustPrimitive::Custom("AnimalSpecies".to_string()),
+      "Base discriminator with enum values should generate and use enum type"
+    );
+
+    // The key behavior: enum discriminator fields should NOT be hidden
+    // (They should preserve their enum type and not be treated as hidden string fields)
+    assert!(
+      !species_field.extra_attrs.iter().any(|a| a == "#[doc(hidden)]"),
+      "Enum discriminator field should not be hidden - it's a proper typed field"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_optional_inline_enum_field() {
+    let mut profile_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+
+    profile_schema.properties.insert(
+      "visibility".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("public"), json!("private"), json!("friends")],
+        ..Default::default()
+      }),
+    );
+    profile_schema.properties.insert(
+      "username".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    profile_schema.required.push("username".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Profile".to_string(), profile_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("Profile", graph.get_schema("Profile").unwrap())
+      .await
+      .unwrap();
+
+    let profile_struct = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) if def.name == "Profile" => Some(def),
+        _ => None,
+      })
+      .expect("Profile struct should be generated");
+
+    let visibility_field = profile_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "visibility")
+      .expect("visibility field should exist");
+
+    assert_eq!(
+      visibility_field.rust_type.base_type,
+      RustPrimitive::Custom("ProfileVisibility".to_string())
+    );
+    assert!(
+      visibility_field.rust_type.nullable,
+      "Optional enum field should be nullable"
+    );
+    assert_eq!(
+      visibility_field.rust_type.to_rust_type(),
+      "Option<ProfileVisibility>",
+      "Should wrap enum in Option"
+    );
+
+    let inline_enum = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Enum(def) if def.name == "ProfileVisibility" => Some(def),
+        _ => None,
+      })
+      .expect("ProfileVisibility enum should be generated");
+
+    assert_eq!(inline_enum.variants.len(), 3);
   }
 }

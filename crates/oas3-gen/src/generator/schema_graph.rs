@@ -19,8 +19,6 @@ pub(crate) struct SchemaGraph {
   cyclic_schemas: BTreeSet<String>,
   /// Collected HTTP header names from parameters
   headers: BTreeSet<String>,
-  /// Property names that are used as discriminators anywhere in the spec
-  discriminator_fields: BTreeSet<String>,
   /// Reference to the original spec for resolution
   spec: Spec,
 }
@@ -32,7 +30,6 @@ impl SchemaGraph {
       dependencies: BTreeMap::new(),
       cyclic_schemas: BTreeSet::new(),
       headers: BTreeSet::new(),
-      discriminator_fields: BTreeSet::new(),
       spec,
     };
 
@@ -44,19 +41,9 @@ impl SchemaGraph {
       }
     }
 
-    graph.collect_discriminator_fields();
     graph.extract_operations()?;
 
     Ok(graph)
-  }
-
-  fn collect_discriminator_fields(&mut self) {
-    self.discriminator_fields.clear();
-    for schema in self.schemas.values() {
-      if let Some(discriminator) = &schema.discriminator {
-        self.discriminator_fields.insert(discriminator.property_name.clone());
-      }
-    }
   }
 
   /// Get a schema by name
@@ -76,10 +63,6 @@ impl SchemaGraph {
   /// Get the spec reference
   pub(crate) fn spec(&self) -> &Spec {
     &self.spec
-  }
-
-  pub(crate) fn discriminator_fields(&self) -> &BTreeSet<String> {
-    &self.discriminator_fields
   }
 
   /// Extract schema name from a $ref string
