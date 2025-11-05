@@ -103,19 +103,31 @@ impl<'a> SchemaConverter<'a> {
   /// Builds derive attribute list for enums.
   ///
   /// # Parameters
-  /// None.
+  /// - `is_simple`: True if the enum only contains Unit variants (simple string enums).
   ///
   #[inline]
-  fn derives_for_enum() -> Vec<String> {
-    let derives = vec![
-      "Debug".into(),
-      "Clone".into(),
-      "PartialEq".into(),
-      "Serialize".into(),
-      "Deserialize".into(),
-      "oas3_gen_support::Default".into(),
-    ];
-    derives
+  fn derives_for_enum(is_simple: bool) -> Vec<String> {
+    if is_simple {
+      vec![
+        "Debug".into(),
+        "Clone".into(),
+        "PartialEq".into(),
+        "Eq".into(),
+        "Hash".into(),
+        "Serialize".into(),
+        "Deserialize".into(),
+        "oas3_gen_support::Default".into(),
+      ]
+    } else {
+      vec![
+        "Debug".into(),
+        "Clone".into(),
+        "PartialEq".into(),
+        "Serialize".into(),
+        "Deserialize".into(),
+        "oas3_gen_support::Default".into(),
+      ]
+    }
   }
 
   /// Determines whether a schema is a discriminated base type (has discriminator mappings and properties).
@@ -850,9 +862,9 @@ impl<'a> SchemaConverter<'a> {
     }
 
     let (serde_attrs, derives) = if kind == UnionKind::AnyOf {
-      (vec!["untagged".into()], Self::derives_for_enum())
+      (vec!["untagged".into()], Self::derives_for_enum(false))
     } else {
-      (vec![], Self::derives_for_enum())
+      (vec![], Self::derives_for_enum(false))
     };
 
     let main_enum = RustType::Enum(EnumDef {
@@ -912,7 +924,7 @@ impl<'a> SchemaConverter<'a> {
       docs: vec!["/// Known string values".to_string()],
       variants: known_variants,
       discriminator: None,
-      derives: Self::derives_for_enum(),
+      derives: Self::derives_for_enum(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
     });
@@ -939,7 +951,7 @@ impl<'a> SchemaConverter<'a> {
       docs: Self::docs(schema.description.as_ref()).await,
       variants: outer_variants,
       discriminator: None,
-      derives: Self::derives_for_enum(),
+      derives: Self::derives_for_enum(false),
       serde_attrs: vec!["untagged".into()],
       outer_attrs: vec![],
     });
@@ -1091,7 +1103,7 @@ impl<'a> SchemaConverter<'a> {
       docs: Self::docs(schema.description.as_ref()).await,
       variants,
       discriminator: None,
-      derives: Self::derives_for_enum(),
+      derives: Self::derives_for_enum(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
     }))
@@ -1223,9 +1235,9 @@ impl<'a> SchemaConverter<'a> {
       match primitive {
         RustPrimitive::I8 => {
           if let Some(value) = num.as_i64() {
-            if value <= i8::MIN as i64 {
+            if value <= i64::from(i8::MIN) {
               return "i8::MIN".to_string();
-            } else if value >= i8::MAX as i64 {
+            } else if value >= i64::from(i8::MAX) {
               return "i8::MAX".to_string();
             }
             format!("{}i8", value.to_formatted_string(&*UNDERSCORE_FORMAT))
@@ -1235,9 +1247,9 @@ impl<'a> SchemaConverter<'a> {
         }
         RustPrimitive::I16 => {
           if let Some(value) = num.as_i64() {
-            if value <= i16::MIN as i64 {
+            if value <= i64::from(i16::MIN) {
               return "i16::MIN".to_string();
-            } else if value >= i16::MAX as i64 {
+            } else if value >= i64::from(i16::MAX) {
               return "i16::MAX".to_string();
             }
             format!("{}i16", value.to_formatted_string(&*UNDERSCORE_FORMAT))
@@ -1247,9 +1259,9 @@ impl<'a> SchemaConverter<'a> {
         }
         RustPrimitive::I32 => {
           if let Some(value) = num.as_i64() {
-            if value <= i32::MIN as i64 {
+            if value <= i64::from(i32::MIN) {
               return "i32::MIN".to_string();
-            } else if value >= i32::MAX as i64 {
+            } else if value >= i64::from(i32::MAX) {
               return "i32::MAX".to_string();
             }
             format!("{}i32", value.to_formatted_string(&*UNDERSCORE_FORMAT))
@@ -1266,7 +1278,7 @@ impl<'a> SchemaConverter<'a> {
         }
         RustPrimitive::U8 => {
           if let Some(value) = num.as_u64() {
-            if value >= u8::MAX as u64 {
+            if value >= u64::from(u8::MAX) {
               return "u8::MAX".to_string();
             }
             format!("{}u8", value.to_formatted_string(&*UNDERSCORE_FORMAT))
@@ -1276,7 +1288,7 @@ impl<'a> SchemaConverter<'a> {
         }
         RustPrimitive::U16 => {
           if let Some(value) = num.as_u64() {
-            if value >= u16::MAX as u64 {
+            if value >= u64::from(u16::MAX) {
               return "u16::MAX".to_string();
             }
             format!("{}u16", value.to_formatted_string(&*UNDERSCORE_FORMAT))
@@ -1286,7 +1298,7 @@ impl<'a> SchemaConverter<'a> {
         }
         RustPrimitive::U32 => {
           if let Some(value) = num.as_u64() {
-            if value >= u32::MAX as u64 {
+            if value >= u64::from(u32::MAX) {
               return "u32::MAX".to_string();
             }
             format!("{}u32", value.to_formatted_string(&*UNDERSCORE_FORMAT))
@@ -2597,6 +2609,74 @@ mod tests {
       }
     } else {
       panic!("Expected enum, got {:?}", result[0]);
+    }
+  }
+
+  #[tokio::test]
+  async fn test_enum_derives_eq_hash() {
+    let simple_enum = ObjectSchema {
+      enum_values: vec!["active".into(), "inactive".into(), "pending".into()],
+      ..Default::default()
+    };
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Status".to_string(), simple_enum.clone());
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("Status", graph.get_schema("Status").unwrap())
+      .await
+      .unwrap();
+
+    if let RustType::Enum(enum_def) = &result[0] {
+      assert!(
+        enum_def.derives.contains(&"Eq".to_string()),
+        "Simple enum should have Eq derive"
+      );
+      assert!(
+        enum_def.derives.contains(&"Hash".to_string()),
+        "Simple enum should have Hash derive"
+      );
+    } else {
+      panic!("Expected enum");
+    }
+
+    let mut one_of_schema = ObjectSchema::default();
+    one_of_schema.one_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }));
+    one_of_schema.one_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
+      ..Default::default()
+    }));
+
+    let mut schemas2 = BTreeMap::new();
+    schemas2.insert("ComplexEnum".to_string(), one_of_schema);
+
+    let spec2 = create_test_spec(schemas2);
+    let graph2 = SchemaGraph::new(spec2).unwrap();
+    let converter2 = SchemaConverter::new(&graph2);
+
+    let result2 = converter2
+      .convert_schema("ComplexEnum", graph2.get_schema("ComplexEnum").unwrap())
+      .await
+      .unwrap();
+
+    if let RustType::Enum(enum_def) = &result2[0] {
+      assert!(
+        !enum_def.derives.contains(&"Eq".to_string()),
+        "Complex enum should not have Eq derive"
+      );
+      assert!(
+        !enum_def.derives.contains(&"Hash".to_string()),
+        "Complex enum should not have Hash derive"
+      );
+    } else {
+      panic!("Expected enum");
     }
   }
 
