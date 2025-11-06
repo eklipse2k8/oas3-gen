@@ -126,6 +126,9 @@ impl Orchestrator {
             .await
           {
             Ok((types, op_info)) => {
+              for warning in &op_info.warnings {
+                warnings.push(format!("[{}] {}", op_info.operation_id, warning));
+              }
               rust_types.extend(types);
               operations_info.push(op_info);
             }
