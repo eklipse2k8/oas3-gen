@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::LazyLock};
+use std::{char::ToUppercase, collections::HashSet, iter::Peekable, sync::LazyLock};
 
 use any_ascii::any_ascii;
 use inflections::Inflect;
@@ -87,19 +87,18 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
   ident
 }
 
-// Regex for preprocessing type names (convert digit followed by uppercase to snake_case format)
-static DIGIT_TO_UPPER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d)([A-Z])").expect("bad regex"));
-
 /// Converts a string into a valid Rust type name (`PascalCase`).
 ///
 /// # Rules:
 /// 1. If the string starts with `-`, it's stripped and "Negative" is prepended to the result.
-/// 2. Sanitizes the base string.
-/// 3. Converts to `PascalCase`.
+/// 2. If the input already has mixed case (both upper and lowercase, no separators), preserve capitalization.
+/// 3. Otherwise, sanitizes the base string and converts to `PascalCase` using capitalize_words.
 /// 4. If the result is a reserved name (e.g., `Clone`, `Vec`), it gets a raw identifier prefix (`r#`).
 /// 5. If the result starts with a digit, it's prefixed with `T`.
 /// 6. If the result is empty, it becomes `Unnamed`.
 pub(crate) fn to_rust_type_name(name: &str) -> String {
+  use crate::reserved::CapitalizeWordsExt;
+
   // Check for leading `-` which indicates a "negative" or inverse meaning
   let (has_leading_minus, name_without_minus) = if let Some(stripped) = name.strip_prefix('-') {
     (true, stripped)
@@ -107,11 +106,39 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
     (false, name)
   };
 
-  let sanitized = sanitize(name_without_minus);
+  // Check if the string already appears to be in mixed case format
+  // (has both uppercase and lowercase letters with no separators)
+  let has_separators = name_without_minus.contains(['-', '_', '.', ' ']);
+  let has_upper = name_without_minus.chars().any(|c| c.is_ascii_uppercase());
+  let has_lower = name_without_minus.chars().any(|c| c.is_ascii_lowercase());
+  let appears_mixed_case = !has_separators && has_upper && has_lower;
 
-  let preprocessed = DIGIT_TO_UPPER_RE.replace_all(&sanitized, "${1}_${2}");
+  let mut ident = if appears_mixed_case {
+    // Preserve existing capitalization, just clean non-alphanumeric characters
+    let ascii = any_ascii(name_without_minus);
+    let cleaned: String = ascii.chars().filter(char::is_ascii_alphanumeric).collect();
 
-  let mut ident = preprocessed.to_snake_case().to_pascal_case();
+    // Ensure first letter is uppercase for PascalCase
+    if cleaned.is_empty() {
+      cleaned
+    } else {
+      let mut chars = cleaned.chars();
+      match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+      }
+    }
+  } else {
+    // Apply conversion using capitalize_words for any string with separators or not in mixed case
+    let ascii = any_ascii(name_without_minus);
+
+    // Use capitalize_words to handle capitalization, treating non-alphanumeric as separators
+    ascii
+      .chars()
+      .capitalize_words(|c| !c.is_ascii_alphanumeric())
+      .filter(char::is_ascii_alphanumeric) // Remove separators after capitalizing
+      .collect()
+  };
 
   if ident.is_empty() {
     return "Unnamed".to_string();
@@ -160,6 +187,76 @@ pub(crate) fn header_const_name(header: &str) -> String {
   ident
 }
 
+/// An extension trait for char iterators to add word capitalization.
+pub trait CapitalizeWordsExt: Iterator<Item = char> {
+  fn capitalize_words<F>(self, is_separator: F) -> CapitalizeWords<Self, F>
+  where
+    Self: Sized,
+    F: Fn(char) -> bool;
+}
+
+impl<I> CapitalizeWordsExt for I
+where
+  I: Iterator<Item = char>,
+{
+  fn capitalize_words<F>(self, is_separator: F) -> CapitalizeWords<Self, F>
+  where
+    Self: Sized,
+    F: Fn(char) -> bool,
+  {
+    CapitalizeWords {
+      iter: self.peekable(),
+      is_separator,
+      capitalize_next: true,
+      pending_upper: None,
+    }
+  }
+}
+
+/// An iterator that capitalizes the first character of words in a char stream.
+#[derive(Clone)]
+pub struct CapitalizeWords<I, F>
+where
+  I: Iterator<Item = char>,
+  F: Fn(char) -> bool,
+{
+  iter: Peekable<I>,
+  is_separator: F,
+  capitalize_next: bool,
+  pending_upper: Option<ToUppercase>,
+}
+
+impl<I, F> Iterator for CapitalizeWords<I, F>
+where
+  I: Iterator<Item = char>,
+  F: Fn(char) -> bool,
+{
+  type Item = char;
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    if let Some(ref mut upper_iter) = self.pending_upper {
+      if let Some(c) = upper_iter.next() {
+        return Some(c);
+      }
+      self.pending_upper = None;
+    }
+
+    let c = self.iter.next()?;
+
+    if (self.is_separator)(c) {
+      self.capitalize_next = self.iter.peek().is_some_and(|next_c| !(self.is_separator)(*next_c));
+      Some(c)
+    } else if self.capitalize_next {
+      self.capitalize_next = false;
+      self.pending_upper = Some(c.to_uppercase());
+      self.pending_upper.as_mut().unwrap().next()
+    } else {
+      Some(c)
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -185,10 +282,36 @@ mod tests {
   #[test]
   fn test_type_names() {
     assert_eq!(to_rust_type_name("oAuth"), "OAuth");
-    assert_eq!(to_rust_type_name("-INF"), "NegativeInf");
+    assert_eq!(to_rust_type_name("-INF"), "NegativeINF");
     assert_eq!(to_rust_type_name("123Response"), "T123Response");
     assert_eq!(to_rust_type_name(""), "Unnamed");
     assert_eq!(to_rust_type_name("  "), "Unnamed");
+  }
+
+  #[test]
+  fn test_type_names_preserve_pascal_case() {
+    assert_eq!(
+      to_rust_type_name("BetaResponseMCPToolUseBlock"),
+      "BetaResponseMCPToolUseBlock"
+    );
+    assert_eq!(to_rust_type_name("XMLHttpRequest"), "XMLHttpRequest");
+    assert_eq!(to_rust_type_name("IOError"), "IOError");
+    assert_eq!(to_rust_type_name("HTTPSConnection"), "HTTPSConnection");
+    assert_eq!(
+      to_rust_type_name("betaResponseMCPToolUseBlock"),
+      "BetaResponseMCPToolUseBlock"
+    );
+    assert_eq!(to_rust_type_name("xmlHttpRequest"), "XmlHttpRequest");
+    assert_eq!(
+      to_rust_type_name("beta_response_mcp_tool_use_block"),
+      "BetaResponseMcpToolUseBlock"
+    );
+    assert_eq!(
+      to_rust_type_name("beta-response-mcp-tool-use-block"),
+      "BetaResponseMcpToolUseBlock"
+    );
+    assert_eq!(to_rust_type_name("beta_ResponseMCP"), "BetaResponseMCP");
+    assert_eq!(to_rust_type_name("Beta-Response-MCP"), "BetaResponseMCP");
   }
 
   #[test]

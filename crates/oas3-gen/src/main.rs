@@ -8,6 +8,9 @@ use crate::generator::{code_generator::Visibility, orchestrator::Orchestrator};
 mod generator;
 mod reserved;
 
+#[macro_use(cfg_if)]
+extern crate cfg_if;
+
 /// `OpenAPI` to Rust code generator
 ///
 /// Generates Rust type definitions from `OpenAPI` 3.x specifications with validation,
@@ -68,9 +71,7 @@ async fn main() -> anyhow::Result<()> {
   // Create orchestrator and generate code
   log_info!(cli, "Generating Rust types...");
   let orchestrator = Orchestrator::new(spec, visibility);
-  let (code, stats) = orchestrator
-    .generate_with_header(&cli.input.display().to_string())
-    .await?;
+  let (code, stats) = orchestrator.generate_with_header(&cli.input.display().to_string())?;
 
   // Report statistics
   log_verbose!(cli, "  Types generated: {}", stats.types_generated);

@@ -365,11 +365,11 @@ mod tests {
             CyclicNode::B(boxed_b) => {
               assert_eq!(boxed_b.count, 42);
             }
-            _ => panic!("Expected NodeB variant"),
+            CyclicNode::A(_) => panic!("Expected NodeB variant"),
           }
         }
       }
-      _ => panic!("Expected NodeA variant"),
+      CyclicNode::B(_) => panic!("Expected NodeA variant"),
     }
   }
 

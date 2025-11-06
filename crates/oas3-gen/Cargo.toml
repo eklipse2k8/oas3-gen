@@ -18,6 +18,7 @@ mdformat = []
 [dependencies]
 any_ascii.workspace = true
 anyhow.workspace = true
+cfg-if.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 http.workspace = true

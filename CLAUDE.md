@@ -11,6 +11,16 @@ The project is organized as a Cargo workspace with two crates:
 - **oas3-gen**: The main CLI tool for code generation
 - **oas3-gen-support**: Runtime support library providing macros and utilities for generated code
 
+## Coding Standards
+
+### CRITICAL: Token Conservation Requirements
+
+- **NO inline comments**: Never add explanatory comments, session notes, or relative-to-session notes within code. Code must be self-documenting through clear naming and structure.
+- **NO emojis**: Never use emojis in any context - code, comments, documentation, or messages. Emojis consume valuable tokens.
+- **Doc comments only**: Only use proper Rust doc comments (`///` or `//!`) for public API documentation that will be part of generated rustdoc.
+
+This project prioritizes token efficiency. Every inline comment and emoji wastes tokens that could be used for actual code or logic.
+
 ## Build and Development Commands
 
 ### Build
@@ -47,6 +57,7 @@ cargo run -- --help
 
 - `--input` / `-i`: (Required) Path to OpenAPI JSON specification file
 - `--output` / `-o`: (Required) Path where generated Rust code will be written
+- `--visibility`: Visibility level for generated types (public, crate, or file; default: public)
 - `--verbose` / `-v`: Enable verbose output with detailed progress information
 - `--quiet` / `-q`: Suppress non-essential output (errors only)
 
@@ -59,14 +70,14 @@ cargo test
 ### Linting
 
 ```bash
-cargo clippy
-cargo fmt --check
+cargo clippy --fix --all --allow-dirty -- -W clippy::pedantic
+cargo +nightly fmt --all --check
 ```
 
 ### Format Code
 
 ```bash
-cargo fmt
+cargo +nightly fmt --all 
 ```
 
 Note: This project uses custom rustfmt settings (see rustfmt.toml):
@@ -117,18 +128,19 @@ crates/
 ├── oas3-gen/                      - Main CLI tool
 │   ├── Cargo.toml                 - Binary crate dependencies
 │   ├── src/
-│   │   ├── main.rs                - Entry point and orchestration
+│   │   ├── main.rs                - CLI entry point
 │   │   ├── reserved.rs            - Rust keyword handling and naming utilities
 │   │   └── generator/             - Core generation logic
 │   │       ├── mod.rs             - Module definition and re-exports
+│   │       ├── orchestrator.rs    - High-level generation orchestration
 │   │       ├── utils.rs           - Helper functions
-│   │       ├── ast.rs             - AST type definitions
-│   │       ├── schema_graph.rs    - Dependency tracking
+│   │       ├── ast/               - AST type definitions
+│   │       │   ├── mod.rs         - AST module exports
+│   │       │   └── types.rs       - Type reference definitions
+│   │       ├── schema_graph.rs    - Dependency tracking and cycle detection
 │   │       ├── schema_converter.rs - Schema → AST conversion
 │   │       ├── operation_converter.rs - Operation → request/response types
 │   │       └── code_generator.rs  - AST → Rust code generation
-│   ├── tests/                     - Integration tests
-│   │   └── discriminator_deserialization.rs
 │   └── examples/                  - Example generated code
 │       └── generated_types.rs
 └── oas3-gen-support/              - Runtime support library
@@ -143,50 +155,86 @@ crates/
 
 **generator/mod.rs** (`crates/oas3-gen/src/generator/mod.rs`)
 
-- Module orchestration and public API
-- Re-exports: `SchemaGraph`, `SchemaConverter`, `OperationConverter`, `CodeGenerator`
-- Declares all submodules with clear documentation
+- Module declarations and visibility control
+- Re-exports: `orchestrator` module (public API)
+- Internal modules: `ast`, `code_generator`, `operation_converter`, `schema_converter`, `schema_graph`, `utils`
 
 **generator/utils.rs** (`crates/oas3-gen/src/generator/utils.rs`)
 
 - `doc_comment_lines()`: Converts strings to Rust doc comment lines
 - `doc_comment_block()`: Creates full doc comment blocks
 
-**generator/ast.rs** (`crates/oas3-gen/src/generator/ast.rs`)
-Intermediate representation types:
+**generator/orchestrator.rs** (`crates/oas3-gen/src/generator/orchestrator.rs`)
+High-level orchestration for code generation:
 
-- `RustType`: Enum containing Struct, Enum, or TypeAlias variants
-- `StructDef`: Struct definition with fields, derives, and serde attributes
-- `FieldDef`: Field definition with type, docs, validation, and default values
-- `EnumDef`: Enum definition with variants and optional discriminator
-- `VariantDef`: Enum variant (Unit, Tuple, or Struct content)
-- `TypeRef`: Type reference with support for Box<T>, Option<T>, Vec<T> wrappers
-- `OperationInfo`: Metadata about API operations
+- `Orchestrator`: Main coordinator for the generation pipeline
+- `CodeMetadata`: API metadata (title, version, description) for file headers
+- `GenerationStats`: Statistics about generation (types count, cycles, warnings)
+- Key methods:
+  - `new()`: Creates orchestrator from OpenAPI spec and visibility setting
+  - `generate()`: Runs full pipeline and returns formatted code + stats
+  - `generate_with_header()`: Generates code with auto-generated file header
+  - `metadata()`: Extracts API metadata from spec
+
+**generator/ast/** (`crates/oas3-gen/src/generator/ast/`)
+Intermediate representation types organized in a module:
+
+- **ast/mod.rs**: Re-exports and additional AST types
+  - `DiscriminatedEnumDef`: Discriminated union enum using macro
+  - `DiscriminatedVariant`: Variant mapping for discriminated enums
+  - `RustType`: Top-level enum (Struct, Enum, TypeAlias, DiscriminatedEnum)
+  - `OperationInfo`: Metadata about API operations
+  - `StructKind`: Semantic categorization (Schema, OperationRequest, RequestBody)
+  - `StructDef`: Struct definition with fields, methods, derives, and serde attributes
+  - `StructMethod`: Associated method definition (e.g., render_path)
+  - `StructMethodKind`: Method type (RenderPath with segments and query params)
+  - `PathSegment`: Path segment (Literal or Parameter)
+  - `QueryParameter`: Query parameter metadata for URL rendering
+  - `FieldDef`: Field definition with type, docs, validation, and default values
+  - `EnumDef`: Enum definition with variants and optional discriminator
+  - `VariantDef`: Enum variant (Unit, Tuple, or Struct content)
+  - `VariantContent`: Content type for enum variants
+  - `TypeAliasDef`: Type alias definition
+
+- **ast/types.rs**: Type reference system
+  - `TypeRef`: Type reference with support for wrappers (Box, Option, Vec, etc.)
+  - `RustPrimitive`: Primitive type representation
 
 **generator/schema_graph.rs** (`crates/oas3-gen/src/generator/schema_graph.rs`)
-Schema dependency management and cycle detection:
+Schema dependency management and cycle detection (564 lines):
 
-- `SchemaGraph` struct manages all schemas from OpenAPI spec
-- Builds dependency graph tracking which schemas reference others
-- DFS-based cycle detection algorithm
-- Marks cyclic schemas for Box<T> wrapper injection
-- Key methods:
-  - `new()`: Extracts schemas from OpenAPI spec components
-  - `build_dependencies()`: Analyzes schema references to build dependency graph
-  - `detect_cycles()`: Identifies circular schema references using DFS
-  - `is_cyclic()`: Checks if a schema is part of a cycle
-  - `extract_ref_name()`: Parses $ref strings to extract schema names
+- `SchemaGraph`: Main public API for schema management
+  - Manages all schemas from OpenAPI spec
+  - Tracks dependencies and detects cycles
+  - Extracts header parameters from spec
+  - Key methods:
+    - `new()`: Creates graph from OpenAPI spec
+    - `build_dependencies()`: Builds dependency graph
+    - `detect_cycles()`: Identifies circular schema references
+    - `is_cyclic()`: Checks if schema is part of cycle
+    - `get_schema()`: Retrieves schema by name
+    - `schema_names()`: Lists all schema names
+    - `all_headers()`: Lists all header parameter names
+    - `extract_ref_name()`: Parses $ref strings
+
+- Internal helper structures:
+  - `SchemaRepository`: Schema storage and retrieval
+  - `ReferenceExtractor`: Extracts schema references from schemas
+  - `DependencyGraph`: Manages dependency relationships and cyclic detection
+  - `CycleDetector`: DFS-based cycle detection algorithm
+  - `HeaderExtractor`: Extracts header parameters from operations
 
 **generator/schema_converter.rs** (`crates/oas3-gen/src/generator/schema_converter.rs`)
-Converts OpenAPI schemas to Rust AST (largest module):
+Converts OpenAPI schemas to Rust AST (largest module at 4,298 lines):
 
 - Handles all schema types: objects, enums, oneOf, anyOf, allOf
-- Detects and handles nullable patterns (anyOf with null → Option<T>)
+- Detects and handles nullable patterns (anyOf with null → Option)
 - Generates inline enum types for nested unions
 - Extracts validation rules from OpenAPI constraints
-- Manages cyclic references with Box<T> wrappers
-- Handles discriminated unions with serde tag attribute
-- Key methods (16 total):
+- Manages cyclic references with Box wrappers
+- Handles discriminated unions with discriminated_enum! macro
+- Supports inline enums within schemas
+- Key methods:
   - `convert_schema()`: Main entry point for schema conversion
   - `convert_one_of_enum()`: Handles oneOf with discriminator support
   - `convert_any_of_enum()`: Handles anyOf with untagged enum generation
@@ -199,53 +247,60 @@ Converts OpenAPI schemas to Rust AST (largest module):
   - `extract_default_value()`: Extracts default values (public)
 
 **generator/operation_converter.rs** (`crates/oas3-gen/src/generator/operation_converter.rs`)
-Generates request/response types for API operations:
+Generates request/response types for API operations (874 lines):
 
 - Creates request structs combining parameters and request body
+- Generates `render_path()` method for URL construction with query parameters
 - Orders parameters by location (path → query → header → cookie)
+- Supports explode and style for query parameter encoding
 - Extracts response type references from operation definitions
 - Generates OperationInfo metadata for tracking
 - Handles inline request body schemas
 - Key methods:
   - `convert_operation()`: Main operation conversion entry point
-  - `create_request_struct()`: Builds request type from parameters and body
+  - `create_request_struct()`: Builds request type with render_path method
   - `convert_parameter()`: Converts individual parameter to field definition
   - `extract_response_schema_name()`: Extracts schema name from response
+  - `build_render_path_method()`: Generates URL rendering method
+  - `parse_path_template()`: Parses OpenAPI path into segments
 
 **generator/code_generator.rs** (`crates/oas3-gen/src/generator/code_generator.rs`)
-Converts Rust AST to actual source code:
+Converts Rust AST to actual source code (1,611 lines):
 
+- `Visibility` enum: Controls visibility level (Public, Crate, File)
 - `TypeUsage` enum: Tracks request/response usage for derive optimization
 - `RegexKey` struct: Manages regex validation constant names
-- `TypeKind` enum: Internal type categorization (Struct, Enum, Alias)
 - Generates regex validation constants with LazyLock pattern
+- Generates header constants for HTTP header names
 - Deduplicates types using BTreeMap ordering
 - Generates impl Default blocks for structs and enums
+- Generates struct methods (e.g., render_path for request types)
 - Handles serde attributes (rename, tag, untagged, skip_serializing_if)
-- Key methods (21 total):
+- Supports discriminated enums using discriminated_enum! macro
+- Key methods:
   - `build_type_usage_map()`: Builds type usage map from operations (public)
   - `generate()`: Main code generation entry point (public)
   - `generate_regex_constants()`: Creates static regex validators
+  - `generate_header_constants()`: Creates static header name constants
   - `generate_default_impls()`: Generates Default trait implementations
+  - `generate_struct_methods()`: Generates associated methods for structs
+  - `generate_render_path_method()`: Generates URL rendering logic
   - `json_value_to_rust_expr()`: Converts JSON to Rust expressions
-  - `generate_struct()`, `generate_enum()`, `generate_type_alias()`
+  - `generate_struct()`, `generate_enum()`, `generate_type_alias()`, `generate_discriminated_enum()`
   - `ordered_types()`: Deduplicates and orders types for output
 
-**Main Orchestration** (`crates/oas3-gen/src/main.rs`)
-Coordinates the generation pipeline with CLI argument handling:
+**Main Entry Point** (`crates/oas3-gen/src/main.rs`)
+CLI entry point that delegates to Orchestrator (115 lines):
 
-1. Parses CLI arguments using clap (input file, output file, verbose/quiet flags)
+1. Parses CLI arguments using clap (input, output, visibility, verbose, quiet)
 2. Loads OpenAPI spec from specified JSON file
-3. Builds SchemaGraph with dependency analysis
-4. Detects and reports circular dependencies (with detailed output in verbose mode)
-5. Converts all schemas to Rust AST using SchemaConverter
-6. Converts all operations to request/response types using OperationConverter
-7. Generates final Rust code using CodeGenerator
-8. Formats code with prettyplease
-9. Creates parent directories if needed
-10. Writes output to user-specified path
+3. Creates Orchestrator with spec and visibility setting
+4. Calls `generate_with_header()` to produce code and stats
+5. Reports statistics (types generated, operations converted, cycles detected)
+6. Creates parent directories if needed
+7. Writes output to user-specified path
 
-The CLI provides structured logging with three levels:
+The CLI provides structured logging with three levels (using macros):
 
 - Normal: Key progress updates (default)
 - Verbose (`--verbose`): Detailed cycle information, operation counts, etc.
@@ -265,11 +320,14 @@ Provides runtime support for generated code:
   - Allows inline default value specification
   - Generates Default trait implementations automatically
 
-**Integration Tests** (`crates/oas3-gen/tests/discriminator_deserialization.rs`)
+**Additional Dependencies:**
 
-- Tests discriminated enum deserialization with real-world scenarios
-- Validates fallback variant behavior
-- Ensures proper handling of nested discriminated types
+- **http** (1.3): HTTP types for Method enum re-export
+- **percent-encoding** (2.3): URL encoding for query parameters
+- **serde_plain** (1): Plain text serialization for query parameters
+- **num-format** (0.4): Number formatting utilities
+- **crossterm** (0.29): Terminal interaction utilities
+- **serde_with** (3.15): Additional serde utilities with chrono support
 
 ### Key Dependencies
 
@@ -309,11 +367,20 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 - **better_default** (1.0): Provides `#[default(value)]` attribute for struct fields
 - **serde/serde_json**: For custom discriminated enum serialization
-- **regex**: Shared validation support
-- **validator**: Shared validation framework
-- **chrono** (0.4, features: std, clock, serde): Date/time types for OpenAPI date-time format
+- **regex** (1.11): Shared validation support
+- **validator** (0.20): Shared validation framework
+- **chrono** (>=0.4.20, features: std, clock, serde): Date/time types for OpenAPI date-time format
 - **indexmap** (2.12, features: serde): Ordered map for unique array items
-- **uuid** (1.11, features: serde): UUID types for OpenAPI uuid format
+- **uuid** (1.18, features: serde): UUID types for OpenAPI uuid format
+- **http** (1.3): HTTP types for Method enum
+- **percent-encoding** (2.3): URL encoding utilities
+- **serde_with** (3.15): Additional serde utilities
+- **anyhow** (1.0): Error handling
+- **oas3** (0.19): OpenAPI spec types
+- **prettyplease** (0.2): Code formatting
+- **proc-macro2** (1.0): Token stream manipulation
+- **quote** (1.0): Code generation
+- **syn** (2.0): Rust syntax parsing
 
 **Dev Dependencies (oas3-gen):**
 
@@ -321,6 +388,8 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **indexmap**: For testing generated unique array types
 - **uuid**: For testing generated UUID types
 - **tempfile** (3.14): For creating temporary test files
+- **oas3-gen-support**: For testing generated code that uses support library
+- **validator** (with derive feature): For testing validation attributes
 
 ### Type Mapping System
 
@@ -337,18 +406,20 @@ The `schema_to_type_ref()` method in `SchemaConverter` (`crates/oas3-gen/src/gen
 
 **Complex Types:**
 
-- Array → Vec<T> (where T is derived from items schema)
+- Array → Vec (where T is derived from items schema)
 - Object (with schema) → Named struct type
-- oneOf → Tagged or untagged enum
+- oneOf → Discriminated enum (with discriminator) or tagged enum
 - anyOf → Untagged enum (or nullable pattern detection)
 - Enums → String enums with serde rename attributes
+- Inline enums → Generated inline enum types within schemas
 
 **Special Patterns:**
 
-- `anyOf: [T, null]` → Option<T> (nullable pattern)
+- `anyOf: [T, null]` → Option (nullable pattern)
 - Forward-compatible enums → Enum with catch-all variant
-- Cyclic references → Box<T> wrapper
-- Discriminated unions → Tagged enum with serde(tag = "field")
+- Cyclic references → Box wrapper
+- Discriminated unions → discriminated_enum! macro with fallback support
+- Operation requests → Struct with render_path() method for URL construction
 
 ### Validation Features
 
@@ -387,6 +458,7 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
   - `to_rust_type_name()`: Converts names to PascalCase for types
   - `to_rust_field_name()`: Converts names to snake_case for fields
   - `regex_const_name()`: Generates unique constant names for regex validators
+  - `header_const_name()`: Generates constant names for HTTP headers
 
 **Type Names:**
 
@@ -399,6 +471,28 @@ The generator extracts OpenAPI validation constraints and converts them to Rust 
 - Converts property names to snake_case
 - Adds `serde(rename = "...")` when Rust name differs from OpenAPI name
 - Automatically handles: keywords (type → r#type), special chars (user-id → user_id), case changes (userId → user_id)
+
+### Code Generation Features
+
+**Request Type Generation:**
+
+- Operation request structs include all parameters (path, query, header, cookie)
+- Generates `render_path(&self) -> String` method for URL construction
+- Handles query parameter encoding with explode and style support
+- Uses percent-encoding for safe URL construction
+- Parameters ordered by location for consistent code generation
+
+**Header Constants:**
+
+- Generates static constants for HTTP header names used in operations
+- Format: `pub static HEADER_X_API_KEY: &str = "x-api-key";`
+- Normalized to lowercase for consistency
+
+**Visibility Control:**
+
+- Three visibility levels: public (default), crate, or file-private
+- Applied to all generated types consistently
+- Configurable via `--visibility` CLI flag
 
 ### Documentation Generation
 
