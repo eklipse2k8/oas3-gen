@@ -17,6 +17,15 @@ pub(crate) enum UnionKind {
   AnyOf,
 }
 
+struct VariantContext<'a> {
+  parent_name: &'a str,
+  index: usize,
+  variant_ref: &'a ObjectOrReference<ObjectSchema>,
+  resolved_schema: &'a ObjectSchema,
+  has_discriminator: bool,
+  discriminator_map: &'a BTreeMap<String, String>,
+}
+
 #[derive(Clone)]
 pub(crate) struct EnumConverter<'a> {
   graph: &'a SchemaGraph,
@@ -113,15 +122,15 @@ impl<'a> EnumConverter<'a> {
         continue;
       }
 
-      let (variant, mut generated_types) = self.process_union_variant(
-        name,
-        i,
+      let ctx = VariantContext {
+        parent_name: name,
+        index: i,
         variant_ref,
-        &resolved,
-        &mut seen_names,
+        resolved_schema: &resolved,
         has_discriminator,
-        &discriminator_map,
-      )?;
+        discriminator_map: &discriminator_map,
+      };
+      let (variant, mut generated_types) = self.process_union_variant(&ctx, &mut seen_names)?;
       variants.push(variant);
       inline_types.append(&mut generated_types);
     }
@@ -150,15 +159,10 @@ impl<'a> EnumConverter<'a> {
 
   fn process_union_variant(
     &self,
-    parent_name: &str,
-    index: usize,
-    variant_ref: &ObjectOrReference<ObjectSchema>,
-    resolved_schema: &ObjectSchema,
+    ctx: &VariantContext<'_>,
     seen_names: &mut BTreeSet<String>,
-    has_discriminator: bool,
-    discriminator_map: &BTreeMap<String, String>,
   ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
-    let ref_schema_name = SchemaGraph::extract_ref_name_from_ref(variant_ref);
+    let ref_schema_name = SchemaGraph::extract_ref_name_from_ref(ctx.variant_ref);
 
     if let Some(schema_name) = ref_schema_name {
       let rust_type_name = to_rust_type_name(&schema_name);
@@ -166,35 +170,38 @@ impl<'a> EnumConverter<'a> {
       if self.graph.is_cyclic(&schema_name) {
         type_ref = type_ref.with_boxed();
       }
-      let variant_name = utils::unique_variant_name(&rust_type_name, index, seen_names);
+      let variant_name = utils::unique_variant_name(&rust_type_name, ctx.index, seen_names);
       let mut serde_attrs = Vec::new();
-      if has_discriminator && let Some(disc_value) = discriminator_map.get(&schema_name) {
-        serde_attrs.push(format!(r#"rename = "{}""#, disc_value));
+      if ctx.has_discriminator
+        && let Some(disc_value) = ctx.discriminator_map.get(&schema_name)
+      {
+        serde_attrs.push(format!(r#"rename = "{disc_value}""#));
       }
       let variant = VariantDef {
         name: variant_name,
-        docs: metadata::extract_docs(resolved_schema.description.as_ref()),
+        docs: metadata::extract_docs(ctx.resolved_schema.description.as_ref()),
         content: VariantContent::Tuple(vec![type_ref]),
         serde_attrs,
-        deprecated: resolved_schema.deprecated.unwrap_or(false),
+        deprecated: ctx.resolved_schema.deprecated.unwrap_or(false),
       };
       return Ok((variant, vec![]));
     }
 
-    let base_name = resolved_schema.title.as_ref().map_or_else(
-      || utils::infer_variant_name(resolved_schema, index),
+    let base_name = ctx.resolved_schema.title.as_ref().map_or_else(
+      || utils::infer_variant_name(ctx.resolved_schema, ctx.index),
       |t| to_rust_type_name(t),
     );
-    let variant_name = utils::unique_variant_name(&base_name, index, seen_names);
+    let variant_name = utils::unique_variant_name(&base_name, ctx.index, seen_names);
 
-    let (content, generated_types) = if resolved_schema.properties.is_empty() {
-      let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;
+    let (content, generated_types) = if ctx.resolved_schema.properties.is_empty() {
+      let type_ref = self.type_resolver.schema_to_type_ref(ctx.resolved_schema)?;
       (VariantContent::Tuple(vec![type_ref]), vec![])
     } else {
-      let (struct_def, mut inline_types) =
-        self
-          .struct_converter
-          .convert_struct(&format!("{parent_name}{variant_name}"), resolved_schema, None)?;
+      let (struct_def, mut inline_types) = self.struct_converter.convert_struct(
+        &format!("{}{variant_name}", ctx.parent_name),
+        ctx.resolved_schema,
+        None,
+      )?;
       let struct_name = match &struct_def {
         RustType::Struct(s) => s.name.clone(),
         _ => unreachable!(),
@@ -205,10 +212,10 @@ impl<'a> EnumConverter<'a> {
 
     let variant = VariantDef {
       name: variant_name,
-      docs: metadata::extract_docs(resolved_schema.description.as_ref()),
+      docs: metadata::extract_docs(ctx.resolved_schema.description.as_ref()),
       content,
       serde_attrs: vec![],
-      deprecated: resolved_schema.deprecated.unwrap_or(false),
+      deprecated: ctx.resolved_schema.deprecated.unwrap_or(false),
     };
 
     Ok((variant, generated_types))

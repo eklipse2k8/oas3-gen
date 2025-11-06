@@ -301,11 +301,11 @@ mod tests {
         terms_of_service: None,
         contact: None,
         license: None,
-        extensions: Default::default(),
+        extensions: BTreeMap::default(),
       },
       servers: Vec::new(),
-      paths: Default::default(),
-      webhooks: Default::default(),
+      paths: Option::default(),
+      webhooks: BTreeMap::default(),
       components: Some(Components {
         schemas,
         ..Default::default()
@@ -313,7 +313,7 @@ mod tests {
       security: Vec::new(),
       tags: Vec::new(),
       external_docs: None,
-      extensions: Default::default(),
+      extensions: BTreeMap::default(),
     }
   }
 

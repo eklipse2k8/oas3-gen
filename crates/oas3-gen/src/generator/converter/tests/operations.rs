@@ -49,10 +49,10 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
     allow_reserved: None,
     explode: None,
     style: None,
-    content: Default::default(),
+    content: Option::default(),
     example: None,
-    examples: Default::default(),
-    extensions: Default::default(),
+    examples: BTreeMap::default(),
+    extensions: BTreeMap::default(),
   }));
 
   let (types, info) = converter.convert("getUser", "GET", "/users/{userId}", &operation)?;
@@ -91,21 +91,23 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
   let schema_converter = SchemaConverter::new(&graph);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
-  let mut operation = Operation::default();
-  operation.request_body = Some(ObjectOrReference::Object(RequestBody {
-    content: BTreeMap::from([(
-      "application/json".to_string(),
-      MediaType {
-        schema: Some(ObjectOrReference::Ref {
-          ref_path: "#/components/schemas/User".to_string(),
-          summary: None,
-          description: None,
-        }),
-        ..Default::default()
-      },
-    )]),
+  let operation = Operation {
+    request_body: Some(ObjectOrReference::Object(RequestBody {
+      content: BTreeMap::from([(
+        "application/json".to_string(),
+        MediaType {
+          schema: Some(ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/User".to_string(),
+            summary: None,
+            description: None,
+          }),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    })),
     ..Default::default()
-  }));
+  };
 
   let (types, info) = converter.convert("createUser", "POST", "/users", &operation)?;
 
@@ -135,24 +137,26 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
   let schema_converter = SchemaConverter::new(&graph);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
-  let mut operation = Operation::default();
-  operation.responses = Some(ResponseMap::from([(
-    "200".to_string(),
-    ObjectOrReference::Object(Response {
-      content: BTreeMap::from([(
-        "application/json".to_string(),
-        MediaType {
-          schema: Some(ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/User".to_string(),
-            summary: None,
-            description: None,
-          }),
-          ..Default::default()
-        },
-      )]),
-      ..Default::default()
-    }),
-  )]));
+  let operation = Operation {
+    responses: Some(ResponseMap::from([(
+      "200".to_string(),
+      ObjectOrReference::Object(Response {
+        content: BTreeMap::from([(
+          "application/json".to_string(),
+          MediaType {
+            schema: Some(ObjectOrReference::Ref {
+              ref_path: "#/components/schemas/User".to_string(),
+              summary: None,
+              description: None,
+            }),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
 
   let (_, info) = converter.convert("getUser", "GET", "/user", &operation)?;
 
