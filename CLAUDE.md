@@ -11,6 +11,16 @@ The project is organized as a Cargo workspace with two crates:
 - **oas3-gen**: The main CLI tool for code generation
 - **oas3-gen-support**: Runtime support library providing macros and utilities for generated code
 
+## Coding Standards
+
+### CRITICAL: Token Conservation Requirements
+
+- **NO inline comments**: Never add explanatory comments, session notes, or relative-to-session notes within code. Code must be self-documenting through clear naming and structure.
+- **NO emojis**: Never use emojis in any context - code, comments, documentation, or messages. Emojis consume valuable tokens.
+- **Doc comments only**: Only use proper Rust doc comments (`///` or `//!`) for public API documentation that will be part of generated rustdoc.
+
+This project prioritizes token efficiency. Every inline comment and emoji wastes tokens that could be used for actual code or logic.
+
 ## Build and Development Commands
 
 ### Build

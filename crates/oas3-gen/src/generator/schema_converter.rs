@@ -1585,6 +1585,13 @@ impl<'a> SchemaConverter<'a> {
         return Ok((self.schema_to_type_ref(&prop_schema)?, vec![]));
       }
 
+      if let Some(matching_schema) = self.find_matching_enum_schema(&prop_schema.enum_values) {
+        return Ok((
+          TypeRef::new(RustPrimitive::Custom(to_rust_type_name(&matching_schema))),
+          vec![],
+        ));
+      }
+
       let prop_pascal = prop_name.to_pascal_case();
       let enum_name = format!("{parent_name}{prop_pascal}");
       let inline_enum = self
@@ -1878,23 +1885,24 @@ impl<'a> SchemaConverter<'a> {
     let regex_validation = None;
     let extra_attrs = vec!["#[doc(hidden)]".to_string()];
 
+    let is_child_with_constant = discriminator_info.is_some();
+
     if let Some((_, disc_value)) = discriminator_info {
       metadata.default_value = Some(serde_json::Value::String(disc_value));
-    }
-
-    if !serde_attrs.iter().any(|attr| attr == "default") {
-      serde_attrs.push("default".to_string());
     }
 
     if metadata.default_value.is_none() && final_type.base_type == RustPrimitive::String && !final_type.is_array {
       metadata.default_value = Some(serde_json::Value::String(String::new()));
     }
 
-    if metadata
-      .default_value
-      .as_ref()
-      .is_some_and(|value| value.as_str().is_some_and(str::is_empty))
-    {
+    if is_child_with_constant {
+      if !serde_attrs.iter().any(|attr| attr.contains("skip_deserializing")) {
+        serde_attrs.push("skip_deserializing".to_string());
+      }
+      if !serde_attrs.iter().any(|attr| attr == "default") {
+        serde_attrs.push("default".to_string());
+      }
+    } else if !serde_attrs.iter().any(|attr| attr == "skip") {
       serde_attrs.push("skip".to_string());
     }
 
@@ -2101,6 +2109,40 @@ impl<'a> SchemaConverter<'a> {
           if schema_refs == variant_refs {
             return Some(schema_name.clone());
           }
+        }
+      }
+    }
+    None
+  }
+
+  fn find_matching_enum_schema(&self, enum_values: &[serde_json::Value]) -> Option<String> {
+    if enum_values.is_empty() {
+      return None;
+    }
+
+    let enum_set: BTreeSet<String> = enum_values
+      .iter()
+      .filter_map(|v| v.as_str())
+      .map(std::string::ToString::to_string)
+      .collect();
+
+    if enum_set.is_empty() {
+      return None;
+    }
+
+    for schema_name in self.graph.schema_names() {
+      if let Some(schema) = self.graph.get_schema(schema_name)
+        && !schema.enum_values.is_empty()
+      {
+        let schema_enum_set: BTreeSet<String> = schema
+          .enum_values
+          .iter()
+          .filter_map(|v| v.as_str())
+          .map(std::string::ToString::to_string)
+          .collect();
+
+        if schema_enum_set == enum_set {
+          return Some(schema_name.clone());
         }
       }
     }
@@ -2382,12 +2424,13 @@ impl<'a> SchemaConverter<'a> {
 
 #[cfg(test)]
 mod tests {
-  use std::collections::BTreeMap;
+  use std::collections::{BTreeMap, BTreeMap as CodeBTreeMap};
 
   use oas3::spec::{BooleanSchema, Discriminator, Spec};
   use serde_json::json;
 
   use super::*;
+  use crate::generator::code_generator::{CodeGenerator, Visibility};
 
   fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec {
     let mut spec_json = json!({
@@ -3063,7 +3106,14 @@ mod tests {
       discriminator_field
         .serde_attrs
         .iter()
-        .all(|attr| attr != "skip" && attr != "skip_serializing"),
+        .any(|attr| attr == "skip_deserializing"),
+      "Child discriminator field should skip deserialization"
+    );
+    assert!(
+      discriminator_field
+        .serde_attrs
+        .iter()
+        .all(|attr| attr != "skip_serializing"),
       "Discriminator field should be serialized with its default value"
     );
 
@@ -3184,7 +3234,11 @@ mod tests {
       discrim_field
         .serde_attrs
         .iter()
-        .all(|attr| attr != "skip" && attr != "skip_serializing"),
+        .any(|attr| attr == "skip_deserializing"),
+      "Child discriminator field should skip deserialization"
+    );
+    assert!(
+      discrim_field.serde_attrs.iter().all(|attr| attr != "skip_serializing"),
       "Discriminator should serialize with the default value"
     );
     assert!(
@@ -3414,10 +3468,11 @@ mod tests {
       "Field should request serde to inject the default when missing"
     );
     assert!(
-      kind_field
-        .serde_attrs
-        .iter()
-        .all(|attr| attr != "skip" && attr != "skip_serializing"),
+      kind_field.serde_attrs.iter().any(|attr| attr == "skip_deserializing"),
+      "Child discriminator field should skip deserialization"
+    );
+    assert!(
+      kind_field.serde_attrs.iter().all(|attr| attr != "skip_serializing"),
       "Field should serialize with the default discriminator value"
     );
   }
@@ -3484,11 +3539,7 @@ mod tests {
       .await
       .unwrap();
 
-    assert_eq!(
-      result.len(),
-      2,
-      "Should generate User struct + inline UserStatus enum"
-    );
+    assert_eq!(result.len(), 2, "Should generate User struct + inline UserStatus enum");
 
     let inline_enum = result
       .iter()
@@ -3501,7 +3552,10 @@ mod tests {
     assert_eq!(inline_enum.name, "UserStatus");
     assert_eq!(inline_enum.variants.len(), 3);
     assert!(
-      inline_enum.variants.iter().all(|v| matches!(v.content, VariantContent::Unit)),
+      inline_enum
+        .variants
+        .iter()
+        .all(|v| matches!(v.content, VariantContent::Unit)),
       "All variants should be unit variants"
     );
     assert!(
@@ -3527,13 +3581,14 @@ mod tests {
       .find(|f| f.name == "status")
       .expect("status field should exist");
 
-    assert_eq!(status_field.rust_type.base_type, RustPrimitive::Custom("UserStatus".to_string()));
+    assert_eq!(
+      status_field.rust_type.base_type,
+      RustPrimitive::Custom("UserStatus".to_string())
+    );
     assert!(
       !status_field.rust_type.nullable,
       "Required enum field should not be nullable"
     );
-    // Note: Documentation from inline schemas is typically not preserved on fields,
-    // but the enum type itself will have documentation if the schema has it
   }
 
   #[tokio::test]
@@ -3626,11 +3681,7 @@ mod tests {
       .await
       .unwrap();
 
-    assert_eq!(
-      user_result.len(),
-      1,
-      "Should only generate User struct, no inline enum"
-    );
+    assert_eq!(user_result.len(), 1, "Should only generate User struct, no inline enum");
 
     let user_struct = match &user_result[0] {
       RustType::Struct(def) => def,
@@ -3652,8 +3703,6 @@ mod tests {
 
   #[tokio::test]
   async fn test_inline_enum_field_with_base_discriminator_preserves_enum_type() {
-    // Test that when a discriminator property has inline enum values,
-    // the enum type is preserved and not hidden as a string field
     let mut animal_schema = ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
       ..Default::default()
@@ -3678,7 +3727,6 @@ mod tests {
     animal_schema.required.push("species".to_string());
     animal_schema.required.push("name".to_string());
 
-    // Set species as discriminator
     animal_schema.discriminator = Some(Discriminator {
       property_name: "species".to_string(),
       mapping: None,
@@ -3696,7 +3744,6 @@ mod tests {
       .await
       .unwrap();
 
-    // Should generate Animal struct + inline AnimalSpecies enum
     let inline_enum = result
       .iter()
       .find_map(|ty| match ty {
@@ -3711,7 +3758,6 @@ mod tests {
       "Should have Cat variant"
     );
 
-    // Find the struct (could be Animal or AnimalBase depending on discriminator handling)
     let animal_struct = result
       .iter()
       .find_map(|ty| match ty {
@@ -3732,8 +3778,6 @@ mod tests {
       "Base discriminator with enum values should generate and use enum type"
     );
 
-    // The key behavior: enum discriminator fields should NOT be hidden
-    // (They should preserve their enum type and not be treated as hidden string fields)
     assert!(
       !species_field.extra_attrs.iter().any(|a| a == "#[doc(hidden)]"),
       "Enum discriminator field should not be hidden - it's a proper typed field"
@@ -3813,5 +3857,442 @@ mod tests {
       .expect("ProfileVisibility enum should be generated");
 
     assert_eq!(inline_enum.variants.len(), 3);
+  }
+
+  #[tokio::test]
+  async fn test_enum_deduplication_reuses_named_schema() {
+    let status_enum = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      enum_values: vec![json!("active"), json!("inactive"), json!("pending")],
+      description: Some("Shared status enum".to_string()),
+      ..Default::default()
+    };
+
+    let mut user_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    user_schema.properties.insert(
+      "currentStatus".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("active"), json!("inactive"), json!("pending")],
+        description: Some("Current user status".to_string()),
+        ..Default::default()
+      }),
+    );
+    user_schema.properties.insert(
+      "previousStatus".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("active"), json!("inactive"), json!("pending")],
+        ..Default::default()
+      }),
+    );
+    user_schema.properties.insert(
+      "priority".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("low"), json!("medium"), json!("high")],
+        ..Default::default()
+      }),
+    );
+    user_schema.required.push("currentStatus".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Status".to_string(), status_enum);
+    schemas.insert("User".to_string(), user_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("User", graph.get_schema("User").unwrap())
+      .await
+      .unwrap();
+
+    let user_struct = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) if def.name == "User" => Some(def),
+        _ => None,
+      })
+      .expect("User struct should be generated");
+
+    let current_status_field = user_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "current_status")
+      .expect("current_status field should exist");
+
+    assert_eq!(
+      current_status_field.rust_type.base_type,
+      RustPrimitive::Custom("Status".to_string()),
+      "currentStatus should reuse existing Status enum, not generate UserCurrentStatus"
+    );
+
+    let previous_status_field = user_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "previous_status")
+      .expect("previous_status field should exist");
+
+    assert_eq!(
+      previous_status_field.rust_type.base_type,
+      RustPrimitive::Custom("Status".to_string()),
+      "previousStatus should also reuse existing Status enum"
+    );
+
+    let priority_field = user_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "priority")
+      .expect("priority field should exist");
+
+    assert_eq!(
+      priority_field.rust_type.base_type,
+      RustPrimitive::Custom("UserPriority".to_string()),
+      "priority has different values so should generate inline enum"
+    );
+
+    let user_priority_enum = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Enum(def) if def.name == "UserPriority" => Some(def),
+        _ => None,
+      })
+      .expect("UserPriority enum should be generated");
+
+    assert_eq!(user_priority_enum.variants.len(), 3);
+
+    assert!(
+      !result
+        .iter()
+        .any(|ty| matches!(ty, RustType::Enum(def) if def.name == "UserCurrentStatus")),
+      "UserCurrentStatus should not be generated - Status should be reused"
+    );
+    assert!(
+      !result
+        .iter()
+        .any(|ty| matches!(ty, RustType::Enum(def) if def.name == "UserPreviousStatus")),
+      "UserPreviousStatus should not be generated - Status should be reused"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_enum_deduplication_order_independent() {
+    let status_enum = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      enum_values: vec![json!("pending"), json!("active"), json!("inactive")],
+      ..Default::default()
+    };
+
+    let mut user_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    user_schema.properties.insert(
+      "status".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("active"), json!("inactive"), json!("pending")],
+        ..Default::default()
+      }),
+    );
+    user_schema.required.push("status".to_string());
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("Status".to_string(), status_enum);
+    schemas.insert("User".to_string(), user_schema);
+
+    let spec = create_test_spec(schemas);
+    let graph = SchemaGraph::new(spec).unwrap();
+    let converter = SchemaConverter::new(&graph);
+
+    let result = converter
+      .convert_schema("User", graph.get_schema("User").unwrap())
+      .await
+      .unwrap();
+
+    let user_struct = result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) if def.name == "User" => Some(def),
+        _ => None,
+      })
+      .expect("User struct should be generated");
+
+    let status_field = user_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "status")
+      .expect("status field should exist");
+
+    assert_eq!(
+      status_field.rust_type.base_type,
+      RustPrimitive::Custom("Status".to_string()),
+      "Should match Status enum despite different value order"
+    );
+
+    assert!(
+      !result
+        .iter()
+        .any(|ty| matches!(ty, RustType::Enum(def) if def.name == "UserStatus")),
+      "UserStatus should not be generated - Status should be reused"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_base_discriminator_uses_skip_while_child_uses_skip_deserializing() {
+    let mut base_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    base_schema.properties.insert(
+      "@odata.type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    base_schema.properties.insert(
+      "id".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    base_schema.required.push("@odata.type".to_string());
+
+    let mut mapping = BTreeMap::new();
+    mapping.insert(
+      "#microsoft.graph.user".to_string(),
+      "#/components/schemas/User".to_string(),
+    );
+    base_schema.discriminator = Some(Discriminator {
+      property_name: "@odata.type".to_string(),
+      mapping: Some(mapping),
+    });
+
+    let mut user_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    user_schema.all_of.push(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/BaseEntity".to_string(),
+      summary: None,
+      description: None,
+    });
+    user_schema.all_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      properties: {
+        let mut props = BTreeMap::new();
+        props.insert(
+          "@odata.type".to_string(),
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            default: Some(json!("#microsoft.graph.user")),
+            ..Default::default()
+          }),
+        );
+        props.insert(
+          "displayName".to_string(),
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            ..Default::default()
+          }),
+        );
+        props
+      },
+      ..Default::default()
+    }));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("BaseEntity".to_string(), base_schema);
+    schemas.insert("User".to_string(), user_schema);
+
+    let spec = create_test_spec(schemas);
+    let mut graph = SchemaGraph::new(spec).unwrap();
+    graph.build_dependencies();
+    graph.detect_cycles();
+    let converter = SchemaConverter::new(&graph);
+
+    let base_result = converter
+      .convert_schema("BaseEntity", graph.get_schema("BaseEntity").unwrap())
+      .await
+      .unwrap();
+
+    let base_struct = base_result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) if def.name == "BaseEntityBase" => Some(def),
+        _ => None,
+      })
+      .expect("BaseEntityBase struct should be generated");
+
+    let base_disc_field = base_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "odata_type")
+      .expect("Base discriminator field should exist");
+
+    assert!(
+      base_disc_field.serde_attrs.iter().any(|attr| attr == "skip"),
+      "Base discriminator field should use 'skip' (not skip_deserializing)"
+    );
+    assert!(
+      !base_disc_field
+        .serde_attrs
+        .iter()
+        .any(|attr| attr == "skip_deserializing"),
+      "Base discriminator should NOT use skip_deserializing"
+    );
+    assert_eq!(
+      base_disc_field.default_value.as_ref(),
+      Some(&json!("")),
+      "Base discriminator should have empty string default"
+    );
+
+    let user_result = converter
+      .convert_schema("User", graph.get_schema("User").unwrap())
+      .await
+      .unwrap();
+
+    let user_struct = user_result
+      .iter()
+      .find_map(|ty| match ty {
+        RustType::Struct(def) if def.name == "User" => Some(def),
+        _ => None,
+      })
+      .expect("User struct should be generated");
+
+    let user_disc_field = user_struct
+      .fields
+      .iter()
+      .find(|f| f.name == "odata_type")
+      .expect("User discriminator field should exist");
+
+    assert!(
+      user_disc_field
+        .serde_attrs
+        .iter()
+        .any(|attr| attr == "skip_deserializing"),
+      "Child discriminator field should use 'skip_deserializing'"
+    );
+    assert!(
+      user_disc_field.serde_attrs.iter().any(|attr| attr == "default"),
+      "Child discriminator should have default attribute"
+    );
+    assert!(
+      !user_disc_field.serde_attrs.iter().any(|attr| attr == "skip"),
+      "Child discriminator should NOT use plain 'skip'"
+    );
+    assert_eq!(
+      user_disc_field.default_value.as_ref(),
+      Some(&json!("#microsoft.graph.user")),
+      "Child discriminator should have constant value as default"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_generated_code_output_for_discriminators() {
+    let mut base_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    base_schema.properties.insert(
+      "@odata.type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    );
+    base_schema.required.push("@odata.type".to_string());
+
+    let mut mapping = BTreeMap::new();
+    mapping.insert(
+      "#microsoft.graph.user".to_string(),
+      "#/components/schemas/User".to_string(),
+    );
+    base_schema.discriminator = Some(Discriminator {
+      property_name: "@odata.type".to_string(),
+      mapping: Some(mapping),
+    });
+
+    let mut user_schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      ..Default::default()
+    };
+    user_schema.all_of.push(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/BaseEntity".to_string(),
+      summary: None,
+      description: None,
+    });
+    user_schema.all_of.push(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+      properties: {
+        let mut props = BTreeMap::new();
+        props.insert(
+          "@odata.type".to_string(),
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            default: Some(json!("#microsoft.graph.user")),
+            ..Default::default()
+          }),
+        );
+        props
+      },
+      ..Default::default()
+    }));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("BaseEntity".to_string(), base_schema);
+    schemas.insert("User".to_string(), user_schema);
+
+    let spec = create_test_spec(schemas);
+    let mut graph = SchemaGraph::new(spec).unwrap();
+    graph.build_dependencies();
+    graph.detect_cycles();
+    let converter = SchemaConverter::new(&graph);
+
+    let base_result = converter
+      .convert_schema("BaseEntity", graph.get_schema("BaseEntity").unwrap())
+      .await
+      .unwrap();
+
+    let user_result = converter
+      .convert_schema("User", graph.get_schema("User").unwrap())
+      .await
+      .unwrap();
+
+    let mut all_types = Vec::new();
+    all_types.extend(base_result);
+    all_types.extend(user_result);
+
+    let type_usage = CodeBTreeMap::new();
+    let headers: Vec<&String> = vec![];
+    let generated = CodeGenerator::generate(&all_types, &type_usage, &headers, Visibility::Public);
+
+    let code = generated.to_string();
+
+    println!("\n=== GENERATED CODE ===\n{}\n=== END ===\n", code);
+
+    assert!(
+      code.contains("pub struct BaseEntityBase") && code.contains("# [serde (skip)]"),
+      "Base struct should have skip attribute"
+    );
+    assert!(
+      code.contains("pub struct User") && code.contains("# [serde (skip_deserializing)]"),
+      "Child struct should have skip_deserializing attribute"
+    );
+    assert!(
+      code.contains("# [default (\"#microsoft.graph.user\" . to_string ())]"),
+      "Child should have constant default value"
+    );
+    assert!(
+      code.contains("# [default (String :: new ())]"),
+      "Base should have empty default"
+    );
   }
 }
