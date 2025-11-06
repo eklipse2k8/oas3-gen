@@ -216,29 +216,7 @@ impl CodeGenerator {
             lookup.insert(key, const_name);
           }
         }
-        RustType::Enum(def) => {
-          for variant in &def.variants {
-            if let VariantContent::Struct(fields) = &variant.content {
-              for field in fields {
-                let Some(pattern) = &field.regex_validation else {
-                  continue;
-                };
-                let key = RegexKey::for_variant(&def.name, &variant.name, &field.name);
-                let pattern_key = pattern.clone();
-                let const_name = if let Some(existing) = pattern_to_const.get(&pattern_key) {
-                  existing.clone()
-                } else {
-                  let name = regex_const_name(&key.parts());
-                  pattern_to_const.insert(pattern_key.clone(), name.clone());
-                  const_defs.insert(name.clone(), pattern_key);
-                  name
-                };
-                lookup.insert(key, const_name);
-              }
-            }
-          }
-        }
-        RustType::TypeAlias(_) | RustType::DiscriminatedEnum(_) => {}
+        RustType::Enum(_) | RustType::TypeAlias(_) | RustType::DiscriminatedEnum(_) => {}
       }
     }
 
@@ -409,7 +387,7 @@ impl CodeGenerator {
   ) -> TokenStream {
     match rust_type {
       RustType::Struct(def) => Self::generate_struct(def, regex_lookup, type_usage, visibility),
-      RustType::Enum(def) => Self::generate_enum(def, regex_lookup, visibility),
+      RustType::Enum(def) => Self::generate_enum(def, visibility),
       RustType::TypeAlias(def) => Self::generate_type_alias(def, visibility),
       RustType::DiscriminatedEnum(def) => Self::generate_discriminated_enum(def, visibility),
     }
@@ -641,14 +619,14 @@ impl CodeGenerator {
     }
   }
 
-  fn generate_enum(def: &EnumDef, regex_lookup: &BTreeMap<RegexKey, String>, visibility: Visibility) -> TokenStream {
+  fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let docs = Self::generate_docs(&def.docs);
     let vis = visibility.to_tokens();
     let derives = Self::generate_derives(&def.derives);
     let outer_attrs = Self::generate_outer_attrs(&def.outer_attrs);
     let serde_attrs = Self::generate_enum_serde_attrs(def);
-    let variants = Self::generate_variants(&def.name, &def.variants, regex_lookup);
+    let variants = Self::generate_variants(&def.variants);
 
     quote! {
       #docs
@@ -912,11 +890,7 @@ impl CodeGenerator {
       .collect()
   }
 
-  fn generate_variants(
-    type_name: &str,
-    variants: &[VariantDef],
-    regex_lookup: &BTreeMap<RegexKey, String>,
-  ) -> Vec<TokenStream> {
+  fn generate_variants(variants: &[VariantDef]) -> Vec<TokenStream> {
     variants
       .iter()
       .enumerate()
@@ -945,18 +919,6 @@ impl CodeGenerator {
               .map(|t| Self::parse_type_string(&t.to_rust_type()))
               .collect();
             quote! { ( #(#type_tokens),* ) }
-          }
-          VariantContent::Struct(fields) => {
-            let field_tokens = Self::generate_fields_with_visibility(
-              type_name,
-              Some(&variant.name),
-              fields,
-              false,
-              false,
-              regex_lookup,
-              Visibility::File,
-            );
-            quote! { { #(#field_tokens),* } }
           }
         };
 

@@ -2,22 +2,31 @@
 use std::process::Stdio;
 
 #[cfg(feature = "mdformat")]
-use tokio::process::Command;
+use tokio::{process::Command, runtime::Handle};
 
-/// Convert a string into doc comment lines with `///` prefix
-pub(crate) async fn doc_comment_lines(input: &str) -> Vec<String> {
-  #[cfg(feature = "mdformat")]
-  let reformatted = if input.len() > 100 {
+#[cfg(feature = "mdformat")]
+#[inline]
+#[must_use]
+async fn build_async_format_with_mdformat(input: &str) -> String {
+  if input.len() > 100 {
     format_with_mdformat(input).await.unwrap_or_default()
   } else {
     input.to_string()
-  };
+  }
+}
 
-  #[cfg(not(feature = "mdformat"))]
-  let reformatted = input.to_string();
+#[cfg(feature = "mdformat")]
+#[inline]
+#[must_use]
+fn wrap_format_with_mdformat(input: &str) -> String {
+  tokio::task::block_in_place(|| Handle::current().block_on(async { build_async_format_with_mdformat(input).await }))
+}
 
-  let normalized = reformatted.replace("\\n", "\n");
-  normalized
+#[inline]
+#[must_use]
+fn split_lines(input: &str) -> Vec<String> {
+  input
+    .replace("\\n", "\n")
     .lines()
     .map(|line| {
       if line.is_empty() {
@@ -29,12 +38,23 @@ pub(crate) async fn doc_comment_lines(input: &str) -> Vec<String> {
     .collect()
 }
 
+#[inline]
+#[must_use]
+pub(crate) fn doc_comment_lines(input: &str) -> Vec<String> {
+  cfg_if! {
+    if #[cfg(feature = "mdformat")] {
+      split_lines(&wrap_format_with_mdformat(input))
+    } else {
+      split_lines(input)
+    }
+  }
+}
+
 #[cfg(feature = "mdformat")]
 async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
   use tokio::io::AsyncWriteExt;
 
-  let mut child = Command::new("uvx")
-    .arg("mdformat")
+  let mut child = Command::new("mdformat")
     .args(["--wrap", "100"])
     .args(["--end-of-line", "lf"])
     .arg("-")
@@ -61,16 +81,30 @@ async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
-  #[tokio::test]
   #[cfg(feature = "mdformat")]
-  async fn test_doc_comment_lines() {
-    let input = "This is a test.\n\nNew line here.\nLine with \n escaped newline.";
+  use super::{build_async_format_with_mdformat, split_lines};
+
+  #[cfg(feature = "mdformat")]
+  #[tokio::test]
+  async fn test_doc_comment_lines_with_mdformat() {
+    let input = r"## Blockquotes
+
+> Markdown is a lightweight markup language with plain-text-formatting syntax, created in 2004 by John Gruber with Aaron Swartz.
+>
+>> Markdown is often used to format readme files, for writing messages in online discussion forums, and to create rich text using a plain text editor.
+";
     let expected = vec![
-      "/// This is a test.".to_string(),
+      "/// ## Blockquotes".to_string(),
       "/// ".to_string(),
-      "/// New line here. Line with escaped newline.".to_string(),
+      "/// > Markdown is a lightweight markup language with plain-text-formatting syntax, created in 2004 by"
+        .to_string(),
+      "/// > John Gruber with Aaron Swartz.".to_string(),
+      "/// >".to_string(),
+      "/// > > Markdown is often used to format readme files, for writing messages in online discussion forums,"
+        .to_string(),
+      "/// > > and to create rich text using a plain text editor.".to_string(),
     ];
-    let result = doc_comment_lines(input).await;
+    let result = split_lines(&build_async_format_with_mdformat(input).await);
     assert_eq!(result, expected);
   }
 }

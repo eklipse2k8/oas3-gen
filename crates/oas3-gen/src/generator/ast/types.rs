@@ -42,6 +42,10 @@ impl TypeRef {
     self
   }
 
+  pub fn is_string_like(&self) -> bool {
+    matches!(self.base_type, RustPrimitive::String) && !self.is_array
+  }
+
   /// Get the full Rust type string
   pub fn to_rust_type(&self) -> String {
     let mut result = self.base_type.to_string();
@@ -305,7 +309,7 @@ mod tests {
     for primitive in primitives {
       let string = primitive.to_string();
       let parsed: RustPrimitive = string.parse().unwrap();
-      assert_eq!(parsed, primitive, "Round-trip failed for {:?}", primitive);
+      assert_eq!(parsed, primitive, "Round-trip failed for {primitive:?}");
     }
   }
 

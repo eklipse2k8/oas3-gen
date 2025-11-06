@@ -156,7 +156,6 @@ pub struct VariantDef {
 pub enum VariantContent {
   Unit,
   Tuple(Vec<TypeRef>),
-  Struct(Vec<FieldDef>),
 }
 
 /// Type alias definition

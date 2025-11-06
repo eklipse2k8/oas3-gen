@@ -1,7 +1,6 @@
 use crate::generator::{
   code_generator::{CodeGenerator, Visibility},
-  operation_converter::OperationConverter,
-  schema_converter::SchemaConverter,
+  converter::{SchemaConverter, operations::OperationConverter},
   schema_graph::SchemaGraph,
 };
 
@@ -94,7 +93,7 @@ impl Orchestrator {
   /// - Schema graph cannot be built
   /// - Code generation produces invalid Rust syntax
   /// - Code formatter fails
-  pub async fn generate(&self) -> anyhow::Result<(String, GenerationStats)> {
+  pub fn generate(&self) -> anyhow::Result<(String, GenerationStats)> {
     let mut graph = SchemaGraph::new(self.spec.clone())?;
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
@@ -105,7 +104,7 @@ impl Orchestrator {
 
     for schema_name in graph.schema_names() {
       if let Some(schema) = graph.get_schema(schema_name) {
-        match schema_converter.convert_schema(schema_name, schema).await {
+        match schema_converter.convert_schema(schema_name, schema) {
           Ok(types) => rust_types.extend(types),
           Err(e) => warnings.push(format!("Failed to convert schema {schema_name}: {e}")),
         }
@@ -121,10 +120,7 @@ impl Orchestrator {
           let method_str = method.as_str();
           let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
-          match operation_converter
-            .convert_operation(operation_id, method_str, path, operation)
-            .await
-          {
+          match operation_converter.convert(operation_id, method_str, path, operation) {
             Ok((types, op_info)) => {
               for warning in &op_info.warnings {
                 warnings.push(format!("[{}] {}", op_info.operation_id, warning));
@@ -178,8 +174,8 @@ impl Orchestrator {
   /// # Errors
   ///
   /// Returns the same errors as `generate()`.
-  pub async fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let (code, stats) = self.generate().await?;
+  pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
+    let (code, stats) = self.generate()?;
     let metadata = self.metadata();
 
     let description = metadata.description.as_ref().map_or_else(
@@ -235,8 +231,8 @@ mod tests {
     assert_eq!(metadata.version, "1.0.0");
   }
 
-  #[tokio::test]
-  async fn test_orchestrator_generate_empty() {
+  #[test]
+  fn test_orchestrator_generate_empty() {
     let spec_json = r#"{
       "openapi": "3.1.0",
       "info": {
@@ -248,7 +244,7 @@ mod tests {
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(spec, Visibility::default());
 
-    let result = orchestrator.generate().await;
+    let result = orchestrator.generate();
     assert!(result.is_ok());
 
     let (code, stats) = result.unwrap();
@@ -259,8 +255,8 @@ mod tests {
     assert_eq!(stats.warnings.len(), 0);
   }
 
-  #[tokio::test]
-  async fn test_orchestrator_generate_with_header() {
+  #[test]
+  fn test_orchestrator_generate_with_header() {
     let spec_json = r#"{
       "openapi": "3.1.0",
       "info": {
@@ -273,7 +269,7 @@ mod tests {
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(spec, Visibility::default());
 
-    let result = orchestrator.generate_with_header("/path/to/spec.json").await;
+    let result = orchestrator.generate_with_header("/path/to/spec.json");
     assert!(result.is_ok());
 
     let (code, _) = result.unwrap();

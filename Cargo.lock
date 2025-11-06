@@ -725,6 +725,7 @@ version = "0.11.0"
 dependencies = [
  "any_ascii",
  "anyhow",
+ "cfg-if",
  "chrono",
  "clap",
  "crossterm",

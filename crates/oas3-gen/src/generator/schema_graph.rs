@@ -262,6 +262,13 @@ impl SchemaGraph {
     ref_string.strip_prefix(SCHEMA_REF_PREFIX).map(ToString::to_string)
   }
 
+  pub(crate) fn extract_ref_name_from_ref(obj_ref: &ObjectOrReference<ObjectSchema>) -> Option<String> {
+    match obj_ref {
+      ObjectOrReference::Ref { ref_path, .. } => Self::extract_ref_name(ref_path),
+      ObjectOrReference::Object(_) => None,
+    }
+  }
+
   pub(crate) fn build_dependencies(&mut self) {
     self.dependency_graph.build(&self.repository);
   }
@@ -323,7 +330,7 @@ mod tests {
     properties.insert(
       "related".to_string(),
       ObjectOrReference::Ref {
-        ref_path: format!("{}{}", SCHEMA_REF_PREFIX, ref_name),
+        ref_path: format!("{SCHEMA_REF_PREFIX}{ref_name}"),
         summary: None,
         description: None,
       },
@@ -365,7 +372,7 @@ mod tests {
     properties.insert(
       "author".to_string(),
       ObjectOrReference::Ref {
-        ref_path: format!("{}User", SCHEMA_REF_PREFIX),
+        ref_path: format!("{SCHEMA_REF_PREFIX}User"),
         summary: None,
         description: None,
       },
@@ -373,7 +380,7 @@ mod tests {
     properties.insert(
       "category".to_string(),
       ObjectOrReference::Ref {
-        ref_path: format!("{}Category", SCHEMA_REF_PREFIX),
+        ref_path: format!("{SCHEMA_REF_PREFIX}Category"),
         summary: None,
         description: None,
       },
@@ -394,17 +401,17 @@ mod tests {
   #[test]
   fn test_reference_extractor_combinators() {
     let user_ref = ObjectOrReference::Ref {
-      ref_path: format!("{}User", SCHEMA_REF_PREFIX),
+      ref_path: format!("{SCHEMA_REF_PREFIX}User"),
       summary: None,
       description: None,
     };
     let post_ref = ObjectOrReference::Ref {
-      ref_path: format!("{}Post", SCHEMA_REF_PREFIX),
+      ref_path: format!("{SCHEMA_REF_PREFIX}Post"),
       summary: None,
       description: None,
     };
     let comment_ref = ObjectOrReference::Ref {
-      ref_path: format!("{}Comment", SCHEMA_REF_PREFIX),
+      ref_path: format!("{SCHEMA_REF_PREFIX}Comment"),
       summary: None,
       description: None,
     };
@@ -489,7 +496,7 @@ mod tests {
     user_schema.properties.insert(
       "posts".to_string(),
       ObjectOrReference::Ref {
-        ref_path: format!("{}Post", SCHEMA_REF_PREFIX),
+        ref_path: format!("{SCHEMA_REF_PREFIX}Post"),
         summary: None,
         description: None,
       },
@@ -498,7 +505,7 @@ mod tests {
     post_schema.properties.insert(
       "author".to_string(),
       ObjectOrReference::Ref {
-        ref_path: format!("{}User", SCHEMA_REF_PREFIX),
+        ref_path: format!("{SCHEMA_REF_PREFIX}User"),
         summary: None,
         description: None,
       },
