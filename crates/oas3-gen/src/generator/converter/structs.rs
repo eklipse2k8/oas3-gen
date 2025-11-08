@@ -252,7 +252,20 @@ impl<'a> StructConverter<'a> {
     let (base_type, generated_types) =
       self.resolve_field_type(parent_name, prop_name, &prop_schema, prop_schema_ref, policy)?;
 
-    let final_type = utils::apply_optionality(base_type, !is_required);
+    let has_discriminator_value = schema_name
+      .and_then(|name| utils::find_discriminator_mapping_value(self.graph, name))
+      .is_some_and(|(disc_prop, _)| disc_prop == prop_name);
+
+    let is_base_discriminator = schema
+      .discriminator
+      .as_ref()
+      .is_some_and(|d| d.property_name == prop_name);
+
+    let is_required_without_default =
+      is_required && prop_schema.default.is_none() && !has_discriminator_value && !is_base_discriminator;
+
+    let should_be_optional = !is_required || is_required_without_default;
+    let final_type = utils::apply_optionality(base_type, should_be_optional);
 
     let metadata = FieldMetadata::from_schema(prop_name, is_required, &prop_schema);
     let serde_attrs = utils::serde_renamed_if_needed(prop_name);
@@ -324,7 +337,7 @@ impl<'a> StructConverter<'a> {
       metadata.default_value = Some(serde_json::Value::String(disc_value));
       serde_attrs.push("skip_deserializing".to_string());
       serde_attrs.push("default".to_string());
-    } else {
+    } else if is_base_discriminator {
       serde_attrs.push("skip".to_string());
       if final_type.is_string_like() {
         metadata.default_value = Some(serde_json::Value::String(String::new()));

@@ -180,12 +180,12 @@ impl CodeGenerator {
   }
 
   /// Determine type priority for deduplication (lower = higher priority)
-  /// Priority: DiscriminatedEnum > Enum > Struct > TypeAlias
+  /// Priority: Struct > DiscriminatedEnum > Enum > TypeAlias
   fn type_priority(rust_type: &RustType) -> u8 {
     match rust_type {
-      RustType::DiscriminatedEnum(_) => 0, // Highest - references other types
-      RustType::Enum(_) => 1,              // High priority - most specific
-      RustType::Struct(_) => 2,            // Medium priority
+      RustType::Struct(_) => 0,            // Highest - top-level schema definitions
+      RustType::DiscriminatedEnum(_) => 1, // High - references other types
+      RustType::Enum(_) => 2,              // Medium - may be inline generated
       RustType::TypeAlias(_) => 3,         // Lowest priority
     }
   }
@@ -283,14 +283,14 @@ impl CodeGenerator {
       | RustPrimitive::I32
       | RustPrimitive::I64
       | RustPrimitive::I128
-      | RustPrimitive::Isize => Self::coerce_to_int(value),
+      | RustPrimitive::Isize => Self::coerce_to_int(value, rust_type),
       RustPrimitive::U8
       | RustPrimitive::U16
       | RustPrimitive::U32
       | RustPrimitive::U64
       | RustPrimitive::U128
-      | RustPrimitive::Usize => Self::coerce_to_uint(value),
-      RustPrimitive::F32 | RustPrimitive::F64 => Self::coerce_to_float(value),
+      | RustPrimitive::Usize => Self::coerce_to_uint(value, rust_type),
+      RustPrimitive::F32 | RustPrimitive::F64 => Self::coerce_to_float(value, rust_type),
       RustPrimitive::Bool => Self::coerce_to_bool(value),
       _ => quote! { Default::default() },
     }
@@ -314,51 +314,113 @@ impl CodeGenerator {
   }
 
   /// Coerce a JSON value to a Rust signed integer type
-  fn coerce_to_int(value: &serde_json::Value) -> TokenStream {
+  #[allow(clippy::match_same_arms)]
+  fn coerce_to_int(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
+    let type_suffix = match rust_type {
+      RustPrimitive::I8 => "i8",
+      RustPrimitive::I16 => "i16",
+      RustPrimitive::I32 => "i32",
+      RustPrimitive::I64 => "i64",
+      RustPrimitive::I128 => "i128",
+      RustPrimitive::Isize => "isize",
+      _ => "i64",
+    };
+
     match value {
-      serde_json::Value::Number(n) => n
-        .as_i64()
-        .map_or_else(|| quote! { Default::default() }, |i| quote! { #i }),
-      serde_json::Value::String(s) => s
-        .parse::<i64>()
-        .ok()
-        .map_or_else(|| quote! { Default::default() }, |i| quote! { #i }),
+      serde_json::Value::Number(n) => n.as_i64().map_or_else(
+        || quote! { Default::default() },
+        |i| {
+          let literal = format!("{i}{type_suffix}");
+          literal
+            .parse::<TokenStream>()
+            .unwrap_or_else(|_| quote! { Default::default() })
+        },
+      ),
+      serde_json::Value::String(s) => s.parse::<i64>().ok().map_or_else(
+        || quote! { Default::default() },
+        |i| {
+          let literal = format!("{i}{type_suffix}");
+          literal
+            .parse::<TokenStream>()
+            .unwrap_or_else(|_| quote! { Default::default() })
+        },
+      ),
       _ => quote! { Default::default() },
     }
   }
 
   /// Coerce a JSON value to a Rust unsigned integer type
-  fn coerce_to_uint(value: &serde_json::Value) -> TokenStream {
+  #[allow(clippy::match_same_arms)]
+  fn coerce_to_uint(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
+    let type_suffix = match rust_type {
+      RustPrimitive::U8 => "u8",
+      RustPrimitive::U16 => "u16",
+      RustPrimitive::U32 => "u32",
+      RustPrimitive::U64 => "u64",
+      RustPrimitive::U128 => "u128",
+      RustPrimitive::Usize => "usize",
+      _ => "u64",
+    };
+
     match value {
-      serde_json::Value::Number(n) => n
-        .as_u64()
-        .map_or_else(|| quote! { Default::default() }, |u| quote! { #u }),
-      serde_json::Value::String(s) => s
-        .parse::<u64>()
-        .ok()
-        .map_or_else(|| quote! { Default::default() }, |u| quote! { #u }),
+      serde_json::Value::Number(n) => n.as_u64().map_or_else(
+        || quote! { Default::default() },
+        |u| {
+          let literal = format!("{u}{type_suffix}");
+          literal
+            .parse::<TokenStream>()
+            .unwrap_or_else(|_| quote! { Default::default() })
+        },
+      ),
+      serde_json::Value::String(s) => s.parse::<u64>().ok().map_or_else(
+        || quote! { Default::default() },
+        |u| {
+          let literal = format!("{u}{type_suffix}");
+          literal
+            .parse::<TokenStream>()
+            .unwrap_or_else(|_| quote! { Default::default() })
+        },
+      ),
       _ => quote! { Default::default() },
     }
   }
 
   /// Coerce a JSON value to a Rust float type, handling integer-to-float conversion
-  fn coerce_to_float(value: &serde_json::Value) -> TokenStream {
+  fn coerce_to_float(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
+    #[allow(clippy::match_same_arms)]
+    let type_suffix = match rust_type {
+      RustPrimitive::F32 => "f32",
+      RustPrimitive::F64 => "f64",
+      _ => "f64",
+    };
+
     match value {
       serde_json::Value::Number(n) => {
         if let Some(f) = n.as_f64() {
-          quote! { #f }
+          let literal = format!("{f}{type_suffix}");
+          literal
+            .parse::<TokenStream>()
+            .unwrap_or_else(|_| quote! { Default::default() })
         } else if let Some(i) = n.as_i64() {
           #[allow(clippy::cast_precision_loss)]
           let f = i as f64;
-          quote! { #f }
+          let literal = format!("{f}{type_suffix}");
+          literal
+            .parse::<TokenStream>()
+            .unwrap_or_else(|_| quote! { Default::default() })
         } else {
           quote! { Default::default() }
         }
       }
-      serde_json::Value::String(s) => s
-        .parse::<f64>()
-        .ok()
-        .map_or_else(|| quote! { Default::default() }, |f| quote! { #f }),
+      serde_json::Value::String(s) => s.parse::<f64>().ok().map_or_else(
+        || quote! { Default::default() },
+        |f| {
+          let literal = format!("{f}{type_suffix}");
+          literal
+            .parse::<TokenStream>()
+            .unwrap_or_else(|_| quote! { Default::default() })
+        },
+      ),
       _ => quote! { Default::default() },
     }
   }
@@ -573,7 +635,7 @@ impl CodeGenerator {
             if let Some(values) = &self.#ident {
               for value in values {
                 prefix = if prefix == '\0' { '?' } else { '&' };
-                write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+                write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
               }
             }
           }
@@ -581,7 +643,7 @@ impl CodeGenerator {
           quote! {
             if let Some(values) = &self.#ident && !values.is_empty() {
               prefix = if prefix == '\0' { '?' } else { '&' };
-              let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
+              let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(v))).collect::<Vec<_>>().join(",");
               write!(&mut path, #param_equal, values).unwrap();
             }
           }
@@ -590,7 +652,7 @@ impl CodeGenerator {
         quote! {
           if let Some(value) = &self.#ident {
             prefix = if prefix == '\0' { '?' } else { '&' };
-            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
           }
         }
       }
@@ -599,14 +661,14 @@ impl CodeGenerator {
         quote! {
           for value in &self.#ident {
             prefix = if prefix == '\0' { '?' } else { '&' };
-            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
           }
         }
       } else {
         quote! {
           if !self.#ident.is_empty() {
             prefix = if prefix == '\0' { '?' } else { '&' };
-            let values = self.#ident.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
+            let values = self.#ident.iter().map(|v| oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(v))).collect::<Vec<_>>().join(",");
             write!(&mut path, #param_equal, values).unwrap();
           }
         }
@@ -614,7 +676,7 @@ impl CodeGenerator {
     } else {
       quote! {
         prefix = if prefix == '\0' { '?' } else { '&' };
-        write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&self.#ident.to_string())).unwrap();
+        write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident))).unwrap();
       }
     }
   }
@@ -942,6 +1004,8 @@ impl CodeGenerator {
 
 #[cfg(test)]
 mod tests {
+  use std::f64::consts::PI;
+
   use serde_json::json;
 
   use super::*;
@@ -1496,21 +1560,21 @@ mod tests {
   fn test_int_types_i32() {
     let value = json!(100);
     let rust_type = TypeRef::new("i32");
-    assert_conversion(&value, &rust_type, "100i64");
+    assert_conversion(&value, &rust_type, "100i32");
   }
 
   #[test]
   fn test_int_types_i16() {
     let value = json!(50);
     let rust_type = TypeRef::new("i16");
-    assert_conversion(&value, &rust_type, "50i64");
+    assert_conversion(&value, &rust_type, "50i16");
   }
 
   #[test]
   fn test_float_types_f32() {
     let value = json!(1.5);
     let rust_type = TypeRef::new("f32");
-    assert_conversion(&value, &rust_type, "1.5f64");
+    assert_conversion(&value, &rust_type, "1.5f32");
   }
 
   #[test]
@@ -1539,11 +1603,11 @@ mod tests {
   fn test_unsigned_from_number() {
     let value = json!(42);
     let rust_type = TypeRef::new("u32");
-    assert_conversion(&value, &rust_type, "42u64");
+    assert_conversion(&value, &rust_type, "42u32");
 
     let value = json!(255);
     let rust_type = TypeRef::new("u8");
-    assert_conversion(&value, &rust_type, "255u64");
+    assert_conversion(&value, &rust_type, "255u8");
   }
 
   #[test]
@@ -1564,10 +1628,56 @@ mod tests {
   fn test_format_based_type_coercion() {
     let value = json!(100);
     let rust_type = TypeRef::new("i32");
-    assert_conversion(&value, &rust_type, "100i64");
+    assert_conversion(&value, &rust_type, "100i32");
 
     let value = json!(1.5);
     let rust_type = TypeRef::new("f32");
-    assert_conversion(&value, &rust_type, "1.5f64");
+    assert_conversion(&value, &rust_type, "1.5f32");
+  }
+
+  #[test]
+  fn test_int_type_suffixes() {
+    let value = json!(42);
+    assert_conversion(&value, &TypeRef::new("i8"), "42i8");
+    assert_conversion(&value, &TypeRef::new("i16"), "42i16");
+    assert_conversion(&value, &TypeRef::new("i32"), "42i32");
+    assert_conversion(&value, &TypeRef::new("i64"), "42i64");
+    assert_conversion(&value, &TypeRef::new("i128"), "42i128");
+    assert_conversion(&value, &TypeRef::new("isize"), "42isize");
+  }
+
+  #[test]
+  fn test_uint_type_suffixes() {
+    let value = json!(42);
+    assert_conversion(&value, &TypeRef::new("u8"), "42u8");
+    assert_conversion(&value, &TypeRef::new("u16"), "42u16");
+    assert_conversion(&value, &TypeRef::new("u32"), "42u32");
+    assert_conversion(&value, &TypeRef::new("u64"), "42u64");
+    assert_conversion(&value, &TypeRef::new("u128"), "42u128");
+    assert_conversion(&value, &TypeRef::new("usize"), "42usize");
+  }
+
+  #[test]
+  fn test_float_type_suffixes() {
+    let value = json!(PI);
+    assert_conversion(&value, &TypeRef::new("f32"), "3.14f32");
+    assert_conversion(&value, &TypeRef::new("f64"), "3.14f64");
+  }
+
+  #[test]
+  fn test_nullable_with_correct_type_suffixes() {
+    let value = json!(25);
+    let mut rust_type = TypeRef::new("i32");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (25i32)");
+
+    let mut rust_type = TypeRef::new("u32");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (25u32)");
+
+    let value = json!(1.5);
+    let mut rust_type = TypeRef::new("f32");
+    rust_type.nullable = true;
+    assert_conversion(&value, &rust_type, "Some (1.5f32)");
   }
 }

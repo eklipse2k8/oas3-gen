@@ -196,3 +196,84 @@ fn test_anyof_with_no_resolvable_variants() {
   let result = resolver.try_convert_union_to_type_ref(&variants).unwrap();
   assert!(result.is_none());
 }
+
+#[test]
+fn test_array_with_items() {
+  let graph = create_test_graph(BTreeMap::new());
+  let resolver = TypeResolver::new(&graph);
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )))),
+    ..Default::default()
+  };
+
+  let result = resolver.schema_to_type_ref(&schema).unwrap();
+  assert_eq!(result.to_rust_type(), "Vec<String>");
+}
+
+#[test]
+fn test_array_without_items_fallback() {
+  let graph = create_test_graph(BTreeMap::new());
+  let resolver = TypeResolver::new(&graph);
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: None,
+    ..Default::default()
+  };
+
+  let result = resolver.schema_to_type_ref(&schema).unwrap();
+  assert_eq!(result.to_rust_type(), "Vec<serde_json::Value>");
+}
+
+#[test]
+fn test_array_with_boolean_schema_items() {
+  let graph = create_test_graph(BTreeMap::new());
+  let resolver = TypeResolver::new(&graph);
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true)))),
+    ..Default::default()
+  };
+
+  let result = resolver.schema_to_type_ref(&schema).unwrap();
+  assert_eq!(result.to_rust_type(), "Vec<serde_json::Value>");
+}
+
+#[test]
+fn test_array_with_ref_items() {
+  let custom_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "field".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
+  let resolver = TypeResolver::new(&graph);
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/CustomType".to_string(),
+      summary: None,
+      description: None,
+    })))),
+    ..Default::default()
+  };
+
+  let result = resolver.schema_to_type_ref(&schema).unwrap();
+  assert_eq!(result.to_rust_type(), "Vec<CustomType>");
+}

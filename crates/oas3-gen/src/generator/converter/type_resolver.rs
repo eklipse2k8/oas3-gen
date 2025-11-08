@@ -161,7 +161,7 @@ impl<'a> TypeResolver<'a> {
       let resolved = variant_ref
         .resolve(self.graph.spec())
         .map_err(|e| anyhow::anyhow!("Schema resolution failed for nullable union variant: {e}"))?;
-      if is_null_schema(&resolved) {
+      if is_null_or_nullable_object(&resolved) {
         has_null = true;
       } else {
         non_null_variant = Some(variant_ref);
@@ -286,14 +286,12 @@ impl<'a> TypeResolver<'a> {
   }
 
   fn convert_array_items(&self, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
-    let items_ref = schema
-      .items
-      .as_ref()
-      .and_then(|b| match b.as_ref() {
-        oas3::spec::Schema::Object(o) => Some(o),
-        oas3::spec::Schema::Boolean(_) => None,
-      })
-      .ok_or_else(|| anyhow::anyhow!("Array schema missing items"))?;
+    let Some(items_ref) = schema.items.as_ref().and_then(|b| match b.as_ref() {
+      oas3::spec::Schema::Object(o) => Some(o),
+      oas3::spec::Schema::Boolean(_) => None,
+    }) else {
+      return Ok(TypeRef::new(RustPrimitive::Value));
+    };
 
     if let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(items_ref) {
       return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
@@ -397,6 +395,20 @@ pub(crate) fn format_to_primitive(format: Option<&String>) -> Option<RustPrimiti
 
 fn is_null_schema(schema: &ObjectSchema) -> bool {
   schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null))
+}
+
+fn is_null_or_nullable_object(schema: &ObjectSchema) -> bool {
+  if is_null_schema(schema) {
+    return true;
+  }
+  if let Some(SchemaTypeSet::Multiple(types)) = &schema.schema_type {
+    types.contains(&SchemaType::Null)
+      && types.contains(&SchemaType::Object)
+      && schema.properties.is_empty()
+      && schema.additional_properties.is_none()
+  } else {
+    false
+  }
 }
 
 fn extract_all_variant_refs(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
