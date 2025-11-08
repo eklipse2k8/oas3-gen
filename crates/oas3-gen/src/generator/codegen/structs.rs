@@ -11,6 +11,7 @@ use super::{
   },
   coercion,
   constants::RegexKey,
+  derives::DeriveManager,
 };
 use crate::generator::ast::{
   FieldDef, PathSegment, QueryParameter, StructDef, StructKind, StructMethod, StructMethodKind,
@@ -26,54 +27,8 @@ pub(crate) fn generate_struct(
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
 
-  let derives = match def.kind {
-    StructKind::OperationRequest => {
-      let mut custom = vec!["Debug".to_string(), "Clone".to_string()];
-      custom.push("validator::Validate".to_string());
-      custom.push("oas3_gen_support::Default".to_string());
-      super::attributes::generate_derives_from_slice(&custom)
-    }
-    StructKind::RequestBody => {
-      let usage = type_usage.get(&def.name).unwrap_or(&TypeUsage::Bidirectional);
-      let mut custom = vec!["Debug".to_string(), "Clone".to_string()];
-      match usage {
-        TypeUsage::RequestOnly => {
-          custom.push("Serialize".to_string());
-          custom.push("validator::Validate".to_string());
-        }
-        TypeUsage::ResponseOnly => {
-          custom.push("Deserialize".to_string());
-        }
-        TypeUsage::Bidirectional => {
-          custom.push("Serialize".to_string());
-          custom.push("Deserialize".to_string());
-          custom.push("validator::Validate".to_string());
-        }
-      }
-      custom.push("oas3_gen_support::Default".to_string());
-      super::attributes::generate_derives_from_slice(&custom)
-    }
-    StructKind::Schema => {
-      let mut derives = def.derives.clone();
-      if let Some(usage) = type_usage.get(&def.name) {
-        match usage {
-          TypeUsage::RequestOnly => {
-            ensure_derive(&mut derives, "Serialize");
-            ensure_derive(&mut derives, "validator::Validate");
-          }
-          TypeUsage::ResponseOnly => {
-            ensure_derive(&mut derives, "Deserialize");
-          }
-          TypeUsage::Bidirectional => {
-            ensure_derive(&mut derives, "Serialize");
-            ensure_derive(&mut derives, "Deserialize");
-            ensure_derive(&mut derives, "validator::Validate");
-          }
-        }
-      }
-      super::attributes::generate_derives_from_slice(&derives)
-    }
-  };
+  let usage = type_usage.get(&def.name);
+  let derives = DeriveManager::for_struct(&def.derives, def.kind, usage).to_token_stream();
 
   let outer_attrs = generate_outer_attrs(&def.outer_attrs);
   let serde_attrs = generate_serde_attrs(&def.serde_attrs);
@@ -110,12 +65,6 @@ pub(crate) fn generate_struct(
         #(#methods)*
       }
     }
-  }
-}
-
-fn ensure_derive(derives: &mut Vec<String>, trait_name: &str) {
-  if !derives.iter().any(|existing| existing == trait_name) {
-    derives.push(trait_name.to_string());
   }
 }
 

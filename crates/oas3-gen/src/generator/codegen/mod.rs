@@ -8,6 +8,7 @@ use super::ast::{OperationInfo, RustType};
 pub mod attributes;
 pub mod coercion;
 pub mod constants;
+pub mod derives;
 pub mod enums;
 pub mod error_impls;
 pub mod structs;
