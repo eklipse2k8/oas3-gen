@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::generator::{code_generator::Visibility, orchestrator::Orchestrator};
+use crate::generator::{codegen::Visibility, orchestrator::Orchestrator};
 
 mod generator;
 mod reserved;

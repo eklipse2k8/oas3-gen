@@ -1,6 +1,6 @@
 use crate::generator::{
   analyzer::ErrorAnalyzer,
-  code_generator::{CodeGenerator, Visibility},
+  codegen::{self, Visibility},
   converter::{SchemaConverter, operations::OperationConverter},
   schema_graph::SchemaGraph,
 };
@@ -137,9 +137,9 @@ impl Orchestrator {
       }
     }
 
-    let type_usage = CodeGenerator::build_type_usage_map(&operations_info);
+    let type_usage = codegen::build_type_usage_map(&operations_info);
     let error_schemas = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
-    let code = CodeGenerator::generate(
+    let code = codegen::generate(
       &rust_types,
       &type_usage,
       &graph.all_headers(),
