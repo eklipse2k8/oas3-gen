@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -92,6 +92,8 @@ impl RegexKey {
 
 pub(crate) struct CodeGenerator;
 
+const FALLBACK_ERROR_MESSAGE: &str = "Error";
+
 impl CodeGenerator {
   fn ensure_derive(derives: &mut Vec<String>, trait_name: &str) {
     if !derives.iter().any(|existing| existing == trait_name) {
@@ -137,6 +139,7 @@ impl CodeGenerator {
     types: &[RustType],
     type_usage: &BTreeMap<String, TypeUsage>,
     headers: &[&String],
+    error_schemas: &HashSet<String>,
     visibility: Visibility,
   ) -> TokenStream {
     let ordered = Self::ordered_types(types);
@@ -144,7 +147,7 @@ impl CodeGenerator {
     let header_consts = Self::generate_header_constants(headers);
     let type_tokens: Vec<TokenStream> = ordered
       .iter()
-      .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage, visibility))
+      .map(|ty| Self::generate_type(ty, &regex_lookup, type_usage, error_schemas, visibility))
       .collect();
 
     quote! {
@@ -256,6 +259,124 @@ impl CodeGenerator {
       .collect();
 
     quote! { #(#const_tokens)* }
+  }
+
+  fn generate_error_struct_impl(def: &StructDef) -> Option<TokenStream> {
+    let type_ident = format_ident!("{}", &def.name);
+
+    if let Some(error_field) = Self::find_error_field(&def.fields) {
+      let field_ident = format_ident!("{}", error_field);
+      let fallback = FALLBACK_ERROR_MESSAGE;
+      return Some(quote! {
+        impl std::fmt::Display for #type_ident {
+          fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if let Some(ref err) = self.#field_ident {
+              write!(f, "{}", err)
+            } else {
+              write!(f, #fallback)
+            }
+          }
+        }
+
+        impl std::error::Error for #type_ident {
+          fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.#field_ident.as_ref().map(|e| e as &(dyn std::error::Error + 'static))
+          }
+        }
+      });
+    }
+
+    let message_field = Self::find_message_field(&def.fields)?;
+    let field_name = format_ident!("{}", message_field);
+
+    Some(quote! {
+      impl std::fmt::Display for #type_ident {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+          write!(f, "{}", self.#field_name)
+        }
+      }
+
+      impl std::error::Error for #type_ident {}
+    })
+  }
+
+  fn generate_error_enum_impl(def: &EnumDef) -> Option<TokenStream> {
+    if !Self::is_error_enum(def) {
+      return None;
+    }
+
+    let type_ident = format_ident!("{}", &def.name);
+    let (display_arms, source_arms) = Self::generate_enum_error_arms(def);
+
+    Some(quote! {
+      impl std::fmt::Display for #type_ident {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+          match self {
+            #(#display_arms)*
+          }
+        }
+      }
+
+      impl std::error::Error for #type_ident {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+          match self {
+            #(#source_arms)*
+          }
+        }
+      }
+    })
+  }
+
+  fn is_error_enum(def: &EnumDef) -> bool {
+    def.variants.iter().any(|v| match &v.content {
+      VariantContent::Tuple(types) => !types.is_empty(),
+      VariantContent::Unit => false,
+    })
+  }
+
+  fn generate_enum_error_arms(def: &EnumDef) -> (Vec<TokenStream>, Vec<TokenStream>) {
+    def
+      .variants
+      .iter()
+      .map(|variant| {
+        let variant_ident = format_ident!("{}", &variant.name);
+
+        match &variant.content {
+          VariantContent::Tuple(types) if !types.is_empty() => (
+            quote! { Self::#variant_ident(err) => write!(f, "{}", err), },
+            quote! { Self::#variant_ident(err) => Some(err as &(dyn std::error::Error + 'static)), },
+          ),
+          VariantContent::Tuple(_) | VariantContent::Unit => (
+            quote! { Self::#variant_ident => write!(f, "{}", stringify!(#variant_ident)), },
+            quote! { Self::#variant_ident => None, },
+          ),
+        }
+      })
+      .unzip()
+  }
+
+  fn find_error_field(fields: &[FieldDef]) -> Option<&str> {
+    fields.iter().find_map(|f| {
+      if f.name == "error" && matches!(f.rust_type.base_type, RustPrimitive::Custom(_)) {
+        Some(f.name.as_str())
+      } else {
+        None
+      }
+    })
+  }
+
+  fn find_message_field(fields: &[FieldDef]) -> Option<&str> {
+    const MESSAGE_FIELD_NAMES: &[&str] = &["message", "detail", "title"];
+
+    MESSAGE_FIELD_NAMES.iter().find_map(|&candidate| {
+      fields.iter().find_map(|f| {
+        if f.name == candidate && matches!(f.rust_type.base_type, RustPrimitive::String) {
+          Some(f.name.as_str())
+        } else {
+          None
+        }
+      })
+    })
   }
 
   /// Convert a JSON value to a Rust expression, dispatching on target Rust type for proper coercion
@@ -445,13 +566,31 @@ impl CodeGenerator {
     rust_type: &RustType,
     regex_lookup: &BTreeMap<RegexKey, String>,
     type_usage: &BTreeMap<String, TypeUsage>,
+    error_schemas: &HashSet<String>,
     visibility: Visibility,
   ) -> TokenStream {
-    match rust_type {
+    let type_tokens = match rust_type {
       RustType::Struct(def) => Self::generate_struct(def, regex_lookup, type_usage, visibility),
       RustType::Enum(def) => Self::generate_enum(def, visibility),
       RustType::TypeAlias(def) => Self::generate_type_alias(def, visibility),
       RustType::DiscriminatedEnum(def) => Self::generate_discriminated_enum(def, visibility),
+    };
+
+    if let Some(error_impl) = Self::try_generate_error_impl(rust_type, error_schemas) {
+      quote! {
+        #type_tokens
+        #error_impl
+      }
+    } else {
+      type_tokens
+    }
+  }
+
+  fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<String>) -> Option<TokenStream> {
+    match rust_type {
+      RustType::Struct(def) if error_schemas.contains(&def.name) => Self::generate_error_struct_impl(def),
+      RustType::Enum(def) if error_schemas.contains(&def.name) => Self::generate_error_enum_impl(def),
+      _ => None,
     }
   }
 
@@ -1004,8 +1143,6 @@ impl CodeGenerator {
 
 #[cfg(test)]
 mod tests {
-  use std::f64::consts::PI;
-
   use serde_json::json;
 
   use super::*;
@@ -1657,9 +1794,10 @@ mod tests {
     assert_conversion(&value, &TypeRef::new("usize"), "42usize");
   }
 
+  #[allow(clippy::approx_constant)]
   #[test]
   fn test_float_type_suffixes() {
-    let value = json!(PI);
+    let value = json!(3.14);
     assert_conversion(&value, &TypeRef::new("f32"), "3.14f32");
     assert_conversion(&value, &TypeRef::new("f64"), "3.14f64");
   }
@@ -1679,5 +1817,429 @@ mod tests {
     let mut rust_type = TypeRef::new("f32");
     rust_type.nullable = true;
     assert_conversion(&value, &rust_type, "Some (1.5f32)");
+  }
+
+  #[test]
+  fn test_find_error_field_with_error_field() {
+    let fields = vec![
+      FieldDef {
+        name: "error".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::Custom("ErrorType".to_string())),
+        ..Default::default()
+      },
+      FieldDef {
+        name: "code".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::I32),
+        ..Default::default()
+      },
+    ];
+
+    let result = CodeGenerator::find_error_field(&fields);
+    assert_eq!(result, Some("error"));
+  }
+
+  #[test]
+  fn test_find_error_field_without_error_field() {
+    let fields = vec![FieldDef {
+      name: "message".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }];
+
+    let result = CodeGenerator::find_error_field(&fields);
+    assert_eq!(result, None);
+  }
+
+  #[test]
+  fn test_find_error_field_with_non_custom_error() {
+    let fields = vec![FieldDef {
+      name: "error".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }];
+
+    let result = CodeGenerator::find_error_field(&fields);
+    assert_eq!(result, None, "Should only match custom types");
+  }
+
+  #[test]
+  fn test_find_message_field_with_message() {
+    let fields = vec![FieldDef {
+      name: "message".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }];
+
+    let result = CodeGenerator::find_message_field(&fields);
+    assert_eq!(result, Some("message"));
+  }
+
+  #[test]
+  fn test_find_message_field_with_detail() {
+    let fields = vec![FieldDef {
+      name: "detail".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }];
+
+    let result = CodeGenerator::find_message_field(&fields);
+    assert_eq!(result, Some("detail"));
+  }
+
+  #[test]
+  fn test_find_message_field_with_title() {
+    let fields = vec![FieldDef {
+      name: "title".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }];
+
+    let result = CodeGenerator::find_message_field(&fields);
+    assert_eq!(result, Some("title"));
+  }
+
+  #[test]
+  fn test_find_message_field_priority() {
+    let fields = vec![
+      FieldDef {
+        name: "title".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::String),
+        ..Default::default()
+      },
+      FieldDef {
+        name: "message".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::String),
+        ..Default::default()
+      },
+    ];
+
+    let result = CodeGenerator::find_message_field(&fields);
+    assert_eq!(result, Some("message"), "Should prioritize 'message' over 'title'");
+  }
+
+  #[test]
+  fn test_find_message_field_not_found() {
+    let fields = vec![FieldDef {
+      name: "description".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }];
+
+    let result = CodeGenerator::find_message_field(&fields);
+    assert_eq!(result, None);
+  }
+
+  #[test]
+  fn test_find_message_field_non_string_type() {
+    let fields = vec![FieldDef {
+      name: "message".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::I32),
+      ..Default::default()
+    }];
+
+    let result = CodeGenerator::find_message_field(&fields);
+    assert_eq!(result, None, "Should only match String fields");
+  }
+
+  #[test]
+  fn test_is_error_enum_with_tuple_variants() {
+    let enum_def = EnumDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      variants: vec![VariantDef {
+        name: "Error".to_string(),
+        docs: vec![],
+        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
+        serde_attrs: vec![],
+        deprecated: false,
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      discriminator: None,
+    };
+
+    assert!(CodeGenerator::is_error_enum(&enum_def));
+  }
+
+  #[test]
+  fn test_is_error_enum_with_unit_variants_only() {
+    let enum_def = EnumDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      variants: vec![VariantDef {
+        name: "Error".to_string(),
+        docs: vec![],
+        content: VariantContent::Unit,
+        serde_attrs: vec![],
+        deprecated: false,
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      discriminator: None,
+    };
+
+    assert!(!CodeGenerator::is_error_enum(&enum_def));
+  }
+
+  #[test]
+  fn test_is_error_enum_with_empty_tuple() {
+    let enum_def = EnumDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      variants: vec![VariantDef {
+        name: "Error".to_string(),
+        docs: vec![],
+        content: VariantContent::Tuple(vec![]),
+        serde_attrs: vec![],
+        deprecated: false,
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      discriminator: None,
+    };
+
+    assert!(
+      !CodeGenerator::is_error_enum(&enum_def),
+      "Empty tuples should not be error enums"
+    );
+  }
+
+  #[test]
+  fn test_is_error_enum_with_mixed_variants() {
+    let enum_def = EnumDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      variants: vec![
+        VariantDef {
+          name: "Unit".to_string(),
+          docs: vec![],
+          content: VariantContent::Unit,
+          serde_attrs: vec![],
+          deprecated: false,
+        },
+        VariantDef {
+          name: "Tuple".to_string(),
+          docs: vec![],
+          content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
+          serde_attrs: vec![],
+          deprecated: false,
+        },
+      ],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      discriminator: None,
+    };
+
+    assert!(
+      CodeGenerator::is_error_enum(&enum_def),
+      "Should be error enum if any tuple variant exists"
+    );
+  }
+
+  #[test]
+  fn test_generate_error_struct_impl_with_error_field() {
+    let struct_def = StructDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      fields: vec![FieldDef {
+        name: "error".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::Custom("InnerError".to_string())),
+        ..Default::default()
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind: StructKind::Schema,
+    };
+
+    let result = CodeGenerator::generate_error_struct_impl(&struct_def);
+    assert!(result.is_some());
+
+    let code = result.unwrap().to_string();
+    assert!(code.contains("impl std :: fmt :: Display for MyError"));
+    assert!(code.contains("impl std :: error :: Error for MyError"));
+    assert!(code.contains("self . error"));
+  }
+
+  #[test]
+  fn test_generate_error_struct_impl_with_message_field() {
+    let struct_def = StructDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      fields: vec![FieldDef {
+        name: "message".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::String),
+        ..Default::default()
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind: StructKind::Schema,
+    };
+
+    let result = CodeGenerator::generate_error_struct_impl(&struct_def);
+    assert!(result.is_some());
+
+    let code = result.unwrap().to_string();
+    assert!(code.contains("impl std :: fmt :: Display for MyError"));
+    assert!(code.contains("impl std :: error :: Error for MyError"));
+    assert!(code.contains("self . message"));
+  }
+
+  #[test]
+  fn test_generate_error_struct_impl_without_error_fields() {
+    let struct_def = StructDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      fields: vec![FieldDef {
+        name: "code".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::I32),
+        ..Default::default()
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind: StructKind::Schema,
+    };
+
+    let result = CodeGenerator::generate_error_struct_impl(&struct_def);
+    assert!(result.is_none());
+  }
+
+  #[test]
+  fn test_generate_error_enum_impl_with_tuple_variants() {
+    let enum_def = EnumDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      variants: vec![VariantDef {
+        name: "BadRequest".to_string(),
+        docs: vec![],
+        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
+        serde_attrs: vec![],
+        deprecated: false,
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      discriminator: None,
+    };
+
+    let result = CodeGenerator::generate_error_enum_impl(&enum_def);
+    assert!(result.is_some());
+
+    let code = result.unwrap().to_string();
+    assert!(code.contains("impl std :: fmt :: Display for MyError"));
+    assert!(code.contains("impl std :: error :: Error for MyError"));
+    assert!(code.contains("Self :: BadRequest (err)"));
+  }
+
+  #[test]
+  fn test_generate_error_enum_impl_with_unit_variants() {
+    let enum_def = EnumDef {
+      name: "MyError".to_string(),
+      docs: vec![],
+      variants: vec![VariantDef {
+        name: "NotFound".to_string(),
+        docs: vec![],
+        content: VariantContent::Unit,
+        serde_attrs: vec![],
+        deprecated: false,
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      discriminator: None,
+    };
+
+    let result = CodeGenerator::generate_error_enum_impl(&enum_def);
+    assert!(result.is_none());
+  }
+
+  #[test]
+  fn test_try_generate_error_impl_for_error_struct() {
+    use std::collections::HashSet;
+
+    let struct_def = StructDef {
+      name: "ApiError".to_string(),
+      docs: vec![],
+      fields: vec![FieldDef {
+        name: "message".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::String),
+        ..Default::default()
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind: StructKind::Schema,
+    };
+
+    let rust_type = RustType::Struct(struct_def);
+    let mut error_schemas = HashSet::new();
+    error_schemas.insert("ApiError".to_string());
+
+    let result = CodeGenerator::try_generate_error_impl(&rust_type, &error_schemas);
+    assert!(result.is_some());
+  }
+
+  #[test]
+  fn test_try_generate_error_impl_for_non_error_struct() {
+    use std::collections::HashSet;
+
+    let struct_def = StructDef {
+      name: "ApiError".to_string(),
+      docs: vec![],
+      fields: vec![FieldDef {
+        name: "message".to_string(),
+        rust_type: TypeRef::new(RustPrimitive::String),
+        ..Default::default()
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind: StructKind::Schema,
+    };
+
+    let rust_type = RustType::Struct(struct_def);
+    let error_schemas = HashSet::new();
+
+    let result = CodeGenerator::try_generate_error_impl(&rust_type, &error_schemas);
+    assert!(result.is_none(), "Should not generate impl for non-error schemas");
+  }
+
+  #[test]
+  fn test_try_generate_error_impl_for_error_enum() {
+    use std::collections::HashSet;
+
+    let enum_def = EnumDef {
+      name: "ApiError".to_string(),
+      docs: vec![],
+      variants: vec![VariantDef {
+        name: "Error".to_string(),
+        docs: vec![],
+        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
+        serde_attrs: vec![],
+        deprecated: false,
+      }],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      discriminator: None,
+    };
+
+    let rust_type = RustType::Enum(enum_def);
+    let mut error_schemas = HashSet::new();
+    error_schemas.insert("ApiError".to_string());
+
+    let result = CodeGenerator::try_generate_error_impl(&rust_type, &error_schemas);
+    assert!(result.is_some());
   }
 }

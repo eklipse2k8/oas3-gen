@@ -52,6 +52,8 @@ pub struct OperationInfo {
   pub request_type: Option<String>,
   pub response_type: Option<String>,
   pub request_body_types: Vec<String>,
+  pub success_response_types: Vec<String>,
+  pub error_response_types: Vec<String>,
   pub warnings: Vec<String>,
 }
 

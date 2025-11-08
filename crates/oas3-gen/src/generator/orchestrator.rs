@@ -1,4 +1,5 @@
 use crate::generator::{
+  analyzer::ErrorAnalyzer,
   code_generator::{CodeGenerator, Visibility},
   converter::{SchemaConverter, operations::OperationConverter},
   schema_graph::SchemaGraph,
@@ -137,7 +138,14 @@ impl Orchestrator {
     }
 
     let type_usage = CodeGenerator::build_type_usage_map(&operations_info);
-    let code = CodeGenerator::generate(&rust_types, &type_usage, &graph.all_headers(), self.visibility);
+    let error_schemas = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+    let code = CodeGenerator::generate(
+      &rust_types,
+      &type_usage,
+      &graph.all_headers(),
+      &error_schemas,
+      self.visibility,
+    );
     let syntax_tree = syn::parse2(code)?;
     let formatted = prettyplease::unparse(&syntax_tree);
 
