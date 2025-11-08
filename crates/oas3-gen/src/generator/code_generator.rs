@@ -264,37 +264,93 @@ impl CodeGenerator {
   fn generate_error_struct_impl(def: &StructDef) -> Option<TokenStream> {
     let type_ident = format_ident!("{}", &def.name);
 
-    if let Some(error_field) = Self::find_error_field(&def.fields) {
-      let field_ident = format_ident!("{}", error_field);
+    if let Some(error_field_name) = Self::find_error_field(&def.fields) {
+      let field = def.fields.iter().find(|f| f.name == error_field_name)?;
+      let field_ident = format_ident!("{}", error_field_name);
       let fallback = FALLBACK_ERROR_MESSAGE;
+
+      let (display_impl, source_impl) = if field.rust_type.is_array {
+        (
+          quote! {
+            impl std::fmt::Display for #type_ident {
+              fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                if let Some(ref errs) = self.#field_ident {
+                  if let Some(first) = errs.first() {
+                    write!(f, "{}", first)
+                  } else {
+                    write!(f, #fallback)
+                  }
+                } else {
+                  write!(f, #fallback)
+                }
+              }
+            }
+          },
+          quote! {
+            impl std::error::Error for #type_ident {
+              fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.#field_ident.as_ref()?.first().map(|e| e as &(dyn std::error::Error + 'static))
+              }
+            }
+          },
+        )
+      } else {
+        (
+          quote! {
+            impl std::fmt::Display for #type_ident {
+              fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                if let Some(ref err) = self.#field_ident {
+                  write!(f, "{}", err)
+                } else {
+                  write!(f, #fallback)
+                }
+              }
+            }
+          },
+          quote! {
+            impl std::error::Error for #type_ident {
+              fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.#field_ident.as_ref().map(|e| e as &(dyn std::error::Error + 'static))
+              }
+            }
+          },
+        )
+      };
+
       return Some(quote! {
+        #display_impl
+        #source_impl
+      });
+    }
+
+    let message_field = Self::find_message_field(&def.fields)?;
+    let field_name = format_ident!("{}", &message_field.name);
+    let fallback = FALLBACK_ERROR_MESSAGE;
+
+    let display_impl = if message_field.rust_type.nullable {
+      quote! {
         impl std::fmt::Display for #type_ident {
           fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            if let Some(ref err) = self.#field_ident {
-              write!(f, "{}", err)
+            if let Some(ref msg) = self.#field_name {
+              write!(f, "{}", msg)
             } else {
               write!(f, #fallback)
             }
           }
         }
-
-        impl std::error::Error for #type_ident {
-          fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            self.#field_ident.as_ref().map(|e| e as &(dyn std::error::Error + 'static))
+      }
+    } else {
+      quote! {
+        impl std::fmt::Display for #type_ident {
+          fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.#field_name)
           }
         }
-      });
-    }
-
-    let message_field = Self::find_message_field(&def.fields)?;
-    let field_name = format_ident!("{}", message_field);
+      }
+    };
 
     Some(quote! {
-      impl std::fmt::Display for #type_ident {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-          write!(f, "{}", self.#field_name)
-        }
-      }
+      #display_impl
 
       impl std::error::Error for #type_ident {}
     })
@@ -357,7 +413,9 @@ impl CodeGenerator {
 
   fn find_error_field(fields: &[FieldDef]) -> Option<&str> {
     fields.iter().find_map(|f| {
-      if f.name == "error" && matches!(f.rust_type.base_type, RustPrimitive::Custom(_)) {
+      let is_error_name = f.name == "error" || f.name == "errors";
+      let is_custom_type = matches!(f.rust_type.base_type, RustPrimitive::Custom(_));
+      if is_error_name && is_custom_type {
         Some(f.name.as_str())
       } else {
         None
@@ -365,17 +423,13 @@ impl CodeGenerator {
     })
   }
 
-  fn find_message_field(fields: &[FieldDef]) -> Option<&str> {
+  fn find_message_field(fields: &[FieldDef]) -> Option<&FieldDef> {
     const MESSAGE_FIELD_NAMES: &[&str] = &["message", "detail", "title"];
 
     MESSAGE_FIELD_NAMES.iter().find_map(|&candidate| {
-      fields.iter().find_map(|f| {
-        if f.name == candidate && matches!(f.rust_type.base_type, RustPrimitive::String) {
-          Some(f.name.as_str())
-        } else {
-          None
-        }
-      })
+      fields
+        .iter()
+        .find(|f| f.name == candidate && matches!(f.rust_type.base_type, RustPrimitive::String))
     })
   }
 
@@ -1871,7 +1925,7 @@ mod tests {
     }];
 
     let result = CodeGenerator::find_message_field(&fields);
-    assert_eq!(result, Some("message"));
+    assert_eq!(result.map(|f| f.name.as_str()), Some("message"));
   }
 
   #[test]
@@ -1883,7 +1937,7 @@ mod tests {
     }];
 
     let result = CodeGenerator::find_message_field(&fields);
-    assert_eq!(result, Some("detail"));
+    assert_eq!(result.map(|f| f.name.as_str()), Some("detail"));
   }
 
   #[test]
@@ -1895,7 +1949,7 @@ mod tests {
     }];
 
     let result = CodeGenerator::find_message_field(&fields);
-    assert_eq!(result, Some("title"));
+    assert_eq!(result.map(|f| f.name.as_str()), Some("title"));
   }
 
   #[test]
@@ -1914,7 +1968,11 @@ mod tests {
     ];
 
     let result = CodeGenerator::find_message_field(&fields);
-    assert_eq!(result, Some("message"), "Should prioritize 'message' over 'title'");
+    assert_eq!(
+      result.map(|f| f.name.as_str()),
+      Some("message"),
+      "Should prioritize 'message' over 'title'"
+    );
   }
 
   #[test]
@@ -1926,7 +1984,7 @@ mod tests {
     }];
 
     let result = CodeGenerator::find_message_field(&fields);
-    assert_eq!(result, None);
+    assert!(result.is_none());
   }
 
   #[test]
@@ -1938,7 +1996,7 @@ mod tests {
     }];
 
     let result = CodeGenerator::find_message_field(&fields);
-    assert_eq!(result, None, "Should only match String fields");
+    assert!(result.is_none(), "Should only match String fields");
   }
 
   #[test]
