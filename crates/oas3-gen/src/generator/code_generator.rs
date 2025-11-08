@@ -180,12 +180,12 @@ impl CodeGenerator {
   }
 
   /// Determine type priority for deduplication (lower = higher priority)
-  /// Priority: DiscriminatedEnum > Enum > Struct > TypeAlias
+  /// Priority: Struct > DiscriminatedEnum > Enum > TypeAlias
   fn type_priority(rust_type: &RustType) -> u8 {
     match rust_type {
-      RustType::DiscriminatedEnum(_) => 0, // Highest - references other types
-      RustType::Enum(_) => 1,              // High priority - most specific
-      RustType::Struct(_) => 2,            // Medium priority
+      RustType::Struct(_) => 0,            // Highest - top-level schema definitions
+      RustType::DiscriminatedEnum(_) => 1, // High - references other types
+      RustType::Enum(_) => 2,              // Medium - may be inline generated
       RustType::TypeAlias(_) => 3,         // Lowest priority
     }
   }
