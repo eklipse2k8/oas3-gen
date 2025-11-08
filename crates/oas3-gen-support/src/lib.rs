@@ -136,6 +136,11 @@ pub fn percent_encode_query_component(component: &str) -> String {
   utf8_percent_encode(component, QUERY_ENCODE_SET).to_string()
 }
 
+#[inline]
+pub fn serialize_query_param<T: serde::Serialize>(value: &T) -> String {
+  serde_plain::to_string(value).unwrap_or_else(|_| String::new())
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -396,5 +401,74 @@ mod tests {
     }));
 
     assert_eq!(node1, node2);
+  }
+
+  #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+  enum QueryParamTestEnum {
+    #[serde(rename = "value_1")]
+    Value1,
+    #[serde(rename = "value_2")]
+    Value2,
+    #[serde(rename = "0")]
+    Zero,
+    #[serde(rename = "1")]
+    One,
+  }
+
+  #[test]
+  fn test_serialize_query_param_string_enum() {
+    let value = QueryParamTestEnum::Value1;
+    let result = super::serialize_query_param(&value);
+    assert_eq!(result, "value_1");
+
+    let value = QueryParamTestEnum::Zero;
+    let result = super::serialize_query_param(&value);
+    assert_eq!(result, "0");
+  }
+
+  #[test]
+  #[allow(clippy::approx_constant)]
+  fn test_serialize_query_param_primitive_types() {
+    assert_eq!(super::serialize_query_param(&42), "42");
+    assert_eq!(super::serialize_query_param(&true), "true");
+    assert_eq!(super::serialize_query_param(&false), "false");
+    assert_eq!(super::serialize_query_param(&"hello"), "hello");
+    assert_eq!(super::serialize_query_param(&3.14), "3.14");
+  }
+
+  #[test]
+  fn test_serialize_query_param_option_types() {
+    let some_value: Option<i32> = Some(42);
+    let none_value: Option<i32> = None;
+    assert_eq!(super::serialize_query_param(&some_value), "42");
+    assert_eq!(super::serialize_query_param(&none_value), "");
+  }
+
+  #[test]
+  fn test_percent_encode_query_component() {
+    assert_eq!(super::percent_encode_query_component("hello world"), "hello%20world");
+    assert_eq!(super::percent_encode_query_component("a+b"), "a%2Bb");
+    assert_eq!(
+      super::percent_encode_query_component("test@example.com"),
+      "test%40example.com"
+    );
+    assert_eq!(super::percent_encode_query_component("simple"), "simple");
+    assert_eq!(
+      super::percent_encode_query_component("with-dash_underscore"),
+      "with-dash_underscore"
+    );
+  }
+
+  #[test]
+  fn test_serialize_and_encode_query_param() {
+    let value = QueryParamTestEnum::Value1;
+    let serialized = super::serialize_query_param(&value);
+    let encoded = super::percent_encode_query_component(&serialized);
+    assert_eq!(encoded, "value_1");
+
+    let value = "hello world";
+    let serialized = super::serialize_query_param(&value);
+    let encoded = super::percent_encode_query_component(&serialized);
+    assert_eq!(encoded, "hello%20world");
   }
 }

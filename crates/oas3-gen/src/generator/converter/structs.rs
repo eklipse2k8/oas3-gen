@@ -261,10 +261,8 @@ impl<'a> StructConverter<'a> {
       .as_ref()
       .is_some_and(|d| d.property_name == prop_name);
 
-    let is_required_without_default = is_required
-      && prop_schema.default.is_none()
-      && !has_discriminator_value
-      && !is_base_discriminator;
+    let is_required_without_default =
+      is_required && prop_schema.default.is_none() && !has_discriminator_value && !is_base_discriminator;
 
     let should_be_optional = !is_required || is_required_without_default;
     let final_type = utils::apply_optionality(base_type, should_be_optional);

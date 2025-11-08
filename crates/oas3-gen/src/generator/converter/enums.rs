@@ -49,19 +49,39 @@ impl<'a> EnumConverter<'a> {
     let mut seen_names = BTreeSet::new();
 
     for (i, value) in schema.enum_values.iter().enumerate() {
-      if let Some(str_val) = value.as_str() {
-        let mut variant_name = to_rust_type_name(str_val);
-        if !seen_names.insert(variant_name.clone()) {
-          variant_name = format!("{variant_name}{i}");
-        }
-        variants.push(VariantDef {
-          name: variant_name,
-          docs: vec![],
-          content: VariantContent::Unit,
-          serde_attrs: vec![format!(r#"rename = "{}""#, str_val)],
-          deprecated: false,
-        });
+      let (variant_name_base, rename_value) = if let Some(str_val) = value.as_str() {
+        (to_rust_type_name(str_val), str_val.to_string())
+      } else if let Some(num_val) = value.as_i64() {
+        (format!("Value{num_val}"), num_val.to_string())
+      } else if let Some(num_val) = value.as_f64() {
+        let normalized = format!("{num_val}");
+        (format!("Value{}", normalized.replace(['.', '-'], "_")), normalized)
+      } else if value.is_boolean() {
+        let bool_val = value.as_bool().unwrap();
+        (
+          if bool_val {
+            "True".to_string()
+          } else {
+            "False".to_string()
+          },
+          bool_val.to_string(),
+        )
+      } else {
+        continue;
+      };
+
+      let mut variant_name = variant_name_base;
+      if !seen_names.insert(variant_name.clone()) {
+        variant_name = format!("{variant_name}{i}");
       }
+
+      variants.push(VariantDef {
+        name: variant_name,
+        docs: vec![],
+        content: VariantContent::Unit,
+        serde_attrs: vec![format!(r#"rename = "{}""#, rename_value)],
+        deprecated: false,
+      });
     }
 
     RustType::Enum(EnumDef {
@@ -137,7 +157,8 @@ impl<'a> EnumConverter<'a> {
 
     utils::strip_common_affixes(&mut variants);
 
-    let (serde_attrs, derives) = if kind == UnionKind::AnyOf {
+    let has_discriminator = schema.discriminator.is_some();
+    let (serde_attrs, derives) = if kind == UnionKind::AnyOf && !has_discriminator {
       (vec!["untagged".into()], utils::derives_for_enum(false))
     } else {
       (vec![], utils::derives_for_enum(false))

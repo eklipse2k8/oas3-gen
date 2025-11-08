@@ -286,14 +286,12 @@ impl<'a> TypeResolver<'a> {
   }
 
   fn convert_array_items(&self, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
-    let items_ref = schema
-      .items
-      .as_ref()
-      .and_then(|b| match b.as_ref() {
-        oas3::spec::Schema::Object(o) => Some(o),
-        oas3::spec::Schema::Boolean(_) => None,
-      })
-      .ok_or_else(|| anyhow::anyhow!("Array schema missing items"))?;
+    let Some(items_ref) = schema.items.as_ref().and_then(|b| match b.as_ref() {
+      oas3::spec::Schema::Object(o) => Some(o),
+      oas3::spec::Schema::Boolean(_) => None,
+    }) else {
+      return Ok(TypeRef::new(RustPrimitive::Value));
+    };
 
     if let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(items_ref) {
       return Ok(TypeRef::new(to_rust_type_name(&ref_name)));

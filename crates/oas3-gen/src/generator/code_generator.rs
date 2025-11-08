@@ -573,7 +573,7 @@ impl CodeGenerator {
             if let Some(values) = &self.#ident {
               for value in values {
                 prefix = if prefix == '\0' { '?' } else { '&' };
-                write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+                write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
               }
             }
           }
@@ -581,7 +581,7 @@ impl CodeGenerator {
           quote! {
             if let Some(values) = &self.#ident && !values.is_empty() {
               prefix = if prefix == '\0' { '?' } else { '&' };
-              let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
+              let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(v))).collect::<Vec<_>>().join(",");
               write!(&mut path, #param_equal, values).unwrap();
             }
           }
@@ -590,7 +590,7 @@ impl CodeGenerator {
         quote! {
           if let Some(value) = &self.#ident {
             prefix = if prefix == '\0' { '?' } else { '&' };
-            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
           }
         }
       }
@@ -599,14 +599,14 @@ impl CodeGenerator {
         quote! {
           for value in &self.#ident {
             prefix = if prefix == '\0' { '?' } else { '&' };
-            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&value.to_string())).unwrap();
+            write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
           }
         }
       } else {
         quote! {
           if !self.#ident.is_empty() {
             prefix = if prefix == '\0' { '?' } else { '&' };
-            let values = self.#ident.iter().map(|v| oas3_gen_support::percent_encode_query_component(&v)).collect::<Vec<_>>().join(",");
+            let values = self.#ident.iter().map(|v| oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(v))).collect::<Vec<_>>().join(",");
             write!(&mut path, #param_equal, values).unwrap();
           }
         }
@@ -614,7 +614,7 @@ impl CodeGenerator {
     } else {
       quote! {
         prefix = if prefix == '\0' { '?' } else { '&' };
-        write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&self.#ident.to_string())).unwrap();
+        write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident))).unwrap();
       }
     }
   }
