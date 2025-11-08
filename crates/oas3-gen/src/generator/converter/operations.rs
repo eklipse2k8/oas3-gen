@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use oas3::{
   Spec,
   spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
@@ -71,6 +73,7 @@ impl<'a> OperationConverter<'a> {
     };
 
     let response_type_name = self.extract_response_type_name(operation);
+    let (success_response_types, error_response_types) = self.extract_all_response_types(operation);
 
     let op_info = OperationInfo {
       operation_id: operation.operation_id.clone().unwrap_or(base_name),
@@ -81,6 +84,8 @@ impl<'a> OperationConverter<'a> {
       request_type: request_type_name,
       response_type: response_type_name,
       request_body_types: body_info.type_usage,
+      success_response_types,
+      error_response_types,
       warnings,
     };
 
@@ -356,6 +361,38 @@ impl<'a> OperationConverter<'a> {
       .and_then(|(_, resp_ref)| resp_ref.resolve(self.spec).ok())
       .and_then(|resp| Self::extract_schema_name_from_response(&resp))
       .map(|s| to_rust_type_name(&s))
+  }
+
+  fn extract_all_response_types(&self, operation: &Operation) -> (Vec<String>, Vec<String>) {
+    let mut success_set = HashSet::new();
+    let mut error_set = HashSet::new();
+
+    let Some(responses) = operation.responses.as_ref() else {
+      return (Vec::new(), Vec::new());
+    };
+
+    for (code, resp_ref) in responses {
+      if let Ok(resp) = resp_ref.resolve(self.spec)
+        && let Some(schema_name) = Self::extract_schema_name_from_response(&resp)
+      {
+        let rust_name = to_rust_type_name(&schema_name);
+        if Self::is_success_code(code) {
+          success_set.insert(rust_name);
+        } else if Self::is_error_code(code) {
+          error_set.insert(rust_name);
+        }
+      }
+    }
+
+    (success_set.into_iter().collect(), error_set.into_iter().collect())
+  }
+
+  fn is_success_code(code: &str) -> bool {
+    code.starts_with('2')
+  }
+
+  fn is_error_code(code: &str) -> bool {
+    code.starts_with('4') || code.starts_with('5')
   }
 
   fn extract_schema_name_from_response(response: &oas3::spec::Response) -> Option<String> {

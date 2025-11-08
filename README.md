@@ -2,45 +2,34 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.11.0/status.svg)](https://deps.rs/crate/oas3-gen/0.11.0)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.12.0/status.svg)](https://deps.rs/crate/oas3-gen/0.12.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.1?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification)
 <!-- prettier-ignore-end -->
 
-`oas3-gen` is a command-line tool that generates idiomatic Rust type definitions from an OpenAPI v3.1.x specification. It is designed to create production-ready code that is easy to use and integrate into any Rust project.
+`oas3-gen` is a command-line interface (CLI) for generating idiomatic Rust type definitions from an OpenAPI v3.1.x specification. The tool produces clean, production-ready code designed for seamless integration into any Rust project. Its primary function is to provide a robust and reliable method for type generation, ensuring the resulting code is correct, efficient, and well-documented.
 
-The primary goal is to provide a robust and reliable way to generate Rust types from an OpenAPI specification, ensuring that the generated code is correct, efficient, and well-documented.
+## Quick Start
 
-## Key Features
+### 1. Installation
 
-- **OpenAPI 3.1 Support:** Full support for the latest OpenAPI specification.
-- **Idiomatic Rust Code:** Generates clean, readable, and idiomatic Rust structs and enums.
-- **Serde Integration:** Automatically derives `serde::Serialize` and `serde::Deserialize` for seamless JSON and other format integration.
-- **Documentation Generation:** Converts schema descriptions into Rust doc comments.
-- **Complex Schema Support:** Handles `allOf`, `oneOf`, and `anyOf` for complex type compositions.
-- **Cycle Detection:** Intelligently detects and handles cyclical dependencies between schemas.
-- **Naming Conventions:** Automatically detects `camelCase` and `snake_case` naming conventions and applies `#[serde(rename_all = "...")]`.
-- **Operation Generation:** Generates types for API operation parameters, request bodies, and responses.
-
-## Installation
-
-You can install `oas3-gen` directly from crates.io using `cargo`:
+Install the tool directly from crates.io using `cargo`.
 
 ```sh
 cargo install oas3-gen
 ```
 
-## Usage
+### 2. Generation
 
-To generate Rust types, provide the path to your OpenAPI specification file and the desired output file.
+Provide a path to an OpenAPI specification and specify an output file for the generated Rust code.
 
 ```sh
 oas3-gen --input <path/to/openapi.json> --output <path/to/generated_types.rs>
 ```
 
-### Example
+#### Example
 
-Given the following OpenAPI `schemas/pet.json`:
+Consider the following OpenAPI schema definition in `schemas/pet.json`:
 
 ```json
 {
@@ -67,7 +56,7 @@ Given the following OpenAPI `schemas/pet.json`:
 }
 ```
 
-Running `oas3-gen` will produce the following Rust code in `src/generated_types.rs`:
+Executing `oas3-gen` produces the corresponding Rust types.
 
 ```rust
 // src/generated_types.rs
@@ -87,6 +76,19 @@ pub struct Pet {
 }
 ```
 
+## Key Features
+
+- **Comprehensive OpenAPI 3.1 Support:** Parses schemas, parameters, request bodies, and responses from the latest OpenAPI specification.
+- **Idiomatic Code Generation:** Creates Rust structs and enums that follow common language conventions.
+- **Serde Integration:** Automatically derives `serde::Serialize` and `serde::Deserialize` for immediate use with JSON and other data formats.
+- **Documentation Generation:** Converts OpenAPI schema descriptions directly into Rust documentation comments.
+- **Complex Schema Resolution:** Correctly handles `allOf`, `oneOf`, and `anyOf` compositions to generate accurate and complex type definitions.
+- **Cycle Detection:** Intelligently detects and manages cyclical dependencies between schemas, preventing infinite recursion in type definitions.
+- **Convention-Aware Naming:** Detects `camelCase` and `snake_case` in the source schema and applies the appropriate `#[serde(rename_all = "...")]` attribute.
+- **Operation Scaffolding:** Generates types for API operation parameters, request bodies, and responses.
+- **Validation Support:** Translates OpenAPI constraints (e.g., `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`) into validation attributes.
+- **Enhanced CLI Experience:** Provides colored, timestamped output with automatic theme detection for improved readability in various terminal environments.
+
 ### Command-Line Options
 
 ```text
@@ -95,12 +97,37 @@ A rust type generator for OpenAPI v3.1.x specification.
 Usage: oas3-gen [OPTIONS] --input <FILE> --output <FILE>
 
 Options:
-  -i, --input <FILE>   Path to the OpenAPI JSON specification file
-  -o, --output <FILE>  Path where the generated Rust code will be written
-  -v, --verbose        Enable verbose output with detailed progress information
-  -q, --quiet          Suppress non-essential output (errors only)
-  -h, --help           Print help
-  -V, --version        Print version
+  -i, --input <FILE>             Path to the OpenAPI JSON specification file
+  -o, --output <FILE>            Path where the generated Rust code will be written
+      --visibility <VISIBILITY>  Visibility level for generated types [default: public]
+                                 [possible values: public, crate, file]
+  -v, --verbose                  Enable verbose output with detailed progress information
+  -q, --quiet                    Suppress non-essential output (errors only)
+      --color <COLOR>            Control color output [default: auto]
+                                 [possible values: always, auto, never]
+      --theme <THEME>            Terminal theme (dark or light background) [default: auto]
+                                 [possible values: dark, light, auto]
+  -h, --help                     Print help
+  -V, --version                  Print version
+```
+
+### Examples
+
+```sh
+# Basic usage with automatic color and theme detection
+oas3-gen -i openapi.json -o generated.rs
+
+# Verbose output showing detailed statistics
+oas3-gen -i openapi.json -o generated.rs --verbose
+
+# Force dark theme with always-on colors
+oas3-gen -i openapi.json -o generated.rs --theme dark --color always
+
+# Generate with crate-level visibility
+oas3-gen -i openapi.json -o generated.rs --visibility crate
+
+# Quiet mode (errors only)
+oas3-gen -i openapi.json -o generated.rs --quiet
 ```
 
 ## License
