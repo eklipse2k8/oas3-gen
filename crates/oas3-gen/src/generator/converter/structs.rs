@@ -337,7 +337,7 @@ impl<'a> StructConverter<'a> {
       metadata.default_value = Some(serde_json::Value::String(disc_value));
       serde_attrs.push("skip_deserializing".to_string());
       serde_attrs.push("default".to_string());
-    } else {
+    } else if is_base_discriminator {
       serde_attrs.push("skip".to_string());
       if final_type.is_string_like() {
         metadata.default_value = Some(serde_json::Value::String(String::new()));
