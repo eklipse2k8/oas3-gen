@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet},
+  collections::{BTreeMap, BTreeSet, HashMap},
   string::ToString,
 };
 
@@ -226,6 +226,7 @@ pub(crate) struct SchemaGraph {
   repository: SchemaRepository,
   dependency_graph: DependencyGraph,
   header_extractor: HeaderExtractor,
+  discriminator_cache: HashMap<String, (String, String)>,
   spec: Spec,
 }
 
@@ -233,13 +234,34 @@ impl SchemaGraph {
   pub(crate) fn new(spec: Spec) -> anyhow::Result<Self> {
     let repository = SchemaRepository::from_spec(&spec);
     let header_extractor = HeaderExtractor::from_spec(&spec)?;
+    let discriminator_cache = Self::build_discriminator_cache(&repository);
 
     Ok(Self {
       repository,
       dependency_graph: DependencyGraph::new(),
       header_extractor,
+      discriminator_cache,
       spec,
     })
+  }
+
+  fn build_discriminator_cache(repository: &SchemaRepository) -> HashMap<String, (String, String)> {
+    let mut cache = HashMap::new();
+
+    for candidate_name in repository.names() {
+      if let Some(candidate_schema) = repository.get(candidate_name)
+        && let Some(d) = &candidate_schema.discriminator
+        && let Some(mapping) = &d.mapping
+      {
+        for (val, ref_path) in mapping {
+          if let Some(schema_name) = ref_path.strip_prefix(SCHEMA_REF_PREFIX) {
+            cache.insert(schema_name.to_string(), (d.property_name.clone(), val.clone()));
+          }
+        }
+      }
+    }
+
+    cache
   }
 
   pub(crate) fn get_schema(&self, name: &str) -> Option<&ObjectSchema> {
@@ -279,6 +301,10 @@ impl SchemaGraph {
 
   pub(crate) fn is_cyclic(&self, schema_name: &str) -> bool {
     self.dependency_graph.is_cyclic(schema_name)
+  }
+
+  pub(crate) fn get_discriminator_mapping(&self, schema_name: &str) -> Option<&(String, String)> {
+    self.discriminator_cache.get(schema_name)
   }
 }
 

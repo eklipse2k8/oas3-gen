@@ -125,22 +125,6 @@ fn compute_inheritance_depth(graph: &SchemaGraph, schema_name: &str, memo: &mut 
   depth
 }
 
-pub(crate) fn find_discriminator_mapping_value(graph: &SchemaGraph, schema_name: &str) -> Option<(String, String)> {
-  for candidate_name in graph.schema_names() {
-    if let Some(candidate_schema) = graph.get_schema(candidate_name)
-      && let Some(d) = &candidate_schema.discriminator
-      && let Some(mapping) = &d.mapping
-    {
-      for (val, ref_path) in mapping {
-        if SchemaGraph::extract_ref_name(ref_path).as_deref() == Some(schema_name) {
-          return Some((d.property_name.clone(), val.clone()));
-        }
-      }
-    }
-  }
-  None
-}
-
 pub(crate) fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
   if !schema.enum_values.is_empty() {
     return "Enum".to_string();

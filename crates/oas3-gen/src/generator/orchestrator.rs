@@ -32,6 +32,9 @@ pub struct CodeMetadata {
 #[derive(Debug)]
 pub struct GenerationStats {
   pub types_generated: usize,
+  pub structs_generated: usize,
+  pub enums_generated: usize,
+  pub type_aliases_generated: usize,
   pub operations_converted: usize,
   pub cycles_detected: usize,
   pub cycle_details: Vec<Vec<String>>,
@@ -108,8 +111,23 @@ impl Orchestrator {
 
     let code = self.generate_code_from_artifacts(&graph, &rust_types, &operations_info);
 
+    let mut structs_generated = 0;
+    let mut enums_generated = 0;
+    let mut type_aliases_generated = 0;
+
+    for rust_type in &rust_types {
+      match rust_type {
+        RustType::Struct(_) => structs_generated += 1,
+        RustType::Enum(_) | RustType::DiscriminatedEnum(_) => enums_generated += 1,
+        RustType::TypeAlias(_) => type_aliases_generated += 1,
+      }
+    }
+
     let stats = GenerationStats {
       types_generated: rust_types.len(),
+      structs_generated,
+      enums_generated,
+      type_aliases_generated,
       operations_converted: operations_info.len(),
       cycles_detected: cycle_details.len(),
       cycle_details,
