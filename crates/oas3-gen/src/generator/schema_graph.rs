@@ -366,25 +366,12 @@ impl SchemaGraph {
     let mut to_visit: Vec<String> = initial_refs.iter().cloned().collect();
 
     while let Some(schema_name) = to_visit.pop() {
-      if expanded.insert(schema_name.clone()) {
-        if let Some(deps) = self.dependency_graph.dependencies.get(&schema_name) {
-          for dep in deps {
-            if !expanded.contains(dep) {
-              to_visit.push(dep.clone());
-            }
-          }
-        }
-
-        if let Some(schema) = self.get_schema(&schema_name)
-          && let Some(ref discriminator) = schema.discriminator
-          && let Some(ref mapping) = discriminator.mapping
-        {
-          for ref_path in mapping.values() {
-            if let Some(mapped_schema_name) = Self::extract_ref_name(ref_path)
-              && !expanded.contains(&mapped_schema_name)
-            {
-              to_visit.push(mapped_schema_name);
-            }
+      if expanded.insert(schema_name.clone())
+        && let Some(deps) = self.dependency_graph.dependencies.get(&schema_name)
+      {
+        for dep in deps {
+          if !expanded.contains(dep) {
+            to_visit.push(dep.clone());
           }
         }
       }

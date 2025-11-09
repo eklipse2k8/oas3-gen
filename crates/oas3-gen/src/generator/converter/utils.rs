@@ -85,7 +85,11 @@ pub(crate) fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {
     && !schema.properties.is_empty()
 }
 
-pub(crate) fn extract_discriminator_children(graph: &SchemaGraph, schema: &ObjectSchema) -> Vec<(String, String)> {
+pub(crate) fn extract_discriminator_children(
+  graph: &SchemaGraph,
+  schema: &ObjectSchema,
+  reachable_filter: Option<&std::collections::BTreeSet<String>>,
+) -> Vec<(String, String)> {
   let Some(mapping) = schema.discriminator.as_ref().and_then(|d| d.mapping.as_ref()) else {
     return vec![];
   };
@@ -93,6 +97,13 @@ pub(crate) fn extract_discriminator_children(graph: &SchemaGraph, schema: &Objec
   let mut children: Vec<_> = mapping
     .iter()
     .filter_map(|(val, ref_path)| SchemaGraph::extract_ref_name(ref_path).map(|name| (val.clone(), name)))
+    .filter(|(_, name)| {
+      if let Some(filter) = reachable_filter {
+        filter.contains(name)
+      } else {
+        true
+      }
+    })
     .collect();
 
   let mut depth_memo = HashMap::new();

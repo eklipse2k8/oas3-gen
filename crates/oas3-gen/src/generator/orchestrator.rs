@@ -128,7 +128,11 @@ impl Orchestrator {
       0
     };
 
-    let schema_converter = SchemaConverter::new(&graph);
+    let schema_converter = if let Some(ref reachable) = operation_reachable {
+      SchemaConverter::new_with_filter(&graph, reachable.clone())
+    } else {
+      SchemaConverter::new(&graph)
+    };
     let (schema_rust_types, schema_warnings) =
       Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
 
