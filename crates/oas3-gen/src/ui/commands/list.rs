@@ -3,46 +3,20 @@ use std::path::PathBuf;
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Row, Table};
 
 use crate::{
-  reserved::to_rust_field_name,
+  generator::operation_registry::OperationRegistry,
   ui::{Colors, colors::IntoComfyColor, term_width},
 };
-
-fn generate_operation_id(method: &str, path: &str) -> String {
-  let path_parts: Vec<&str> = path
-    .split('/')
-    .filter(|s| !s.is_empty())
-    .map(|s| {
-      if s.starts_with('{') && s.ends_with('}') {
-        "by_id"
-      } else {
-        s
-      }
-    })
-    .collect();
-
-  let method_lower = method.to_lowercase();
-  if path_parts.is_empty() {
-    method_lower
-  } else {
-    format!("{}_{}", method_lower, path_parts.join("_"))
-  }
-}
 
 pub async fn list_operations(input: &PathBuf, colors: &Colors) -> anyhow::Result<()> {
   let file_content = tokio::fs::read_to_string(input).await?;
   let spec: oas3::Spec = oas3::from_json(file_content)?;
 
-  let mut operations = Vec::new();
+  let registry = OperationRegistry::from_spec(&spec);
 
-  for (path, method, operation) in spec.operations() {
-    let id = operation
-      .operation_id
-      .clone()
-      .unwrap_or_else(|| generate_operation_id(method.as_str(), &path));
-
-    let id = to_rust_field_name(&id);
-    operations.push((id, method.as_str().to_string(), path));
-  }
+  let mut operations: Vec<_> = registry
+    .operations()
+    .map(|(id, location)| (id.to_string(), location.method.clone(), location.path.clone()))
+    .collect();
 
   operations.sort_by(|a, b| a.0.cmp(&b.0));
 

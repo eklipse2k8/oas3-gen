@@ -26,8 +26,12 @@ async fn main() -> anyhow::Result<()> {
       verbose,
       quiet,
       all_schemas,
+      only,
+      exclude,
     } => {
-      ui::commands::generate_code(input, output, visibility, verbose, quiet, all_schemas, &colors).await?;
+      let config =
+        ui::commands::GenerateConfig::new(input, output, &visibility, verbose, quiet, all_schemas, only, exclude);
+      ui::commands::generate_code(config, &colors).await?;
     }
   }
 

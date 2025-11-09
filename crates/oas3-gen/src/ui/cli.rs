@@ -52,6 +52,14 @@ pub enum Commands {
     /// Generate all schemas defined in the spec (default: only schemas referenced by operations)
     #[arg(long, default_value_t = false)]
     all_schemas: bool,
+
+    /// Include only specific operations for generation (comma-separated stable IDs)
+    #[arg(long, value_name = "IDS", value_delimiter = ',')]
+    only: Option<Vec<String>>,
+
+    /// Exclude specific operations from generation (comma-separated stable IDs)
+    #[arg(long, value_name = "IDS", value_delimiter = ',')]
+    exclude: Option<Vec<String>>,
   },
 }
 

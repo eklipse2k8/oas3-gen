@@ -307,15 +307,14 @@ impl SchemaGraph {
     self.discriminator_cache.get(schema_name)
   }
 
-  pub(crate) fn get_operation_reachable_schemas(&self) -> BTreeSet<String> {
+  pub(crate) fn get_operation_reachable_schemas(
+    &self,
+    operation_registry: &crate::generator::operation_registry::OperationRegistry,
+  ) -> BTreeSet<String> {
     let mut reachable = BTreeSet::new();
 
-    if let Some(ref paths) = self.spec.paths {
-      for path_item in paths.values() {
-        for (_, operation) in path_item.methods() {
-          Self::collect_refs_from_operation(operation, &self.spec, &mut reachable);
-        }
-      }
+    for (_stable_id, _method, _path, operation) in operation_registry.operations_with_details() {
+      Self::collect_refs_from_operation(operation, &self.spec, &mut reachable);
     }
 
     self.expand_with_dependencies(&reachable)
