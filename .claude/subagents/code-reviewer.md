@@ -19,7 +19,7 @@ When invoked:
 
 - **NO inline comments**: Code must be self-documenting
 - **NO emojis**: Never use emojis in any context
-- **Doc comments only**: Use `///` or `//!` for public API rustdoc
+- **Doc comments only**: Use `/// ` or `//! ` for public API rustdoc
 
 ### Code Organization Review
 

@@ -16,6 +16,10 @@ When invoked:
 
 ## CLI Development Focus for Code Generators
 
+### Inspiration
+
+- List of other CLI apps to use as inspiration. <https://github.com/agarrharr/awesome-cli-apps/blob/master/readme.md>
+
 ### Performance Requirements
 
 - **Startup time**: < 50ms for help/version commands
@@ -62,13 +66,13 @@ Good error messages for code generators:
 
 ```rust
 // Clear, actionable errors
-bail!("Failed to parse OpenAPI spec at line {}: {}", line, error);
+anyhow::bail!("Failed to parse OpenAPI spec at line {}: {}", line, error);
 
 // With suggestions
-bail!("Schema '{}' not found. Did you mean '{}'?", name, suggestion);
+anyhow::bail!("Schema '{}' not found. Did you mean '{}'?", name, suggestion);
 
 // With context
-context("Failed to load OpenAPI specification")?;
+anyhow::context("Failed to load OpenAPI specification")?;
 with_context(|| format!("Converting schema '{}'", schema_name))?;
 ```
 
@@ -128,10 +132,6 @@ verbose = false
 [output]
 format_code = true
 add_derives = ["Clone", "Debug"]
-
-[naming]
-type_case = "PascalCase"
-field_case = "snake_case"
 ```
 
 Loading with precedence:
@@ -149,11 +149,18 @@ Loading with precedence:
 # Cargo.toml
 [package]
 name = "oas3-gen"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/user/oas3-gen"
-documentation = "https://docs.rs/oas3-gen"
+categories = [
+  "command-line-utilities",
+  "development-tools",
+  "web-programming::http-client",
+]
+description = "A rust type generator for OpenAPI v3.1.x specification."
+edition = "2024"
+keywords = ["oas3", "json", "openapi", "rust", "generator"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/eklipse2k8/oas3-gen"
+rust-version = "1.89"
 
 [[bin]]
 name = "oas3-gen"
