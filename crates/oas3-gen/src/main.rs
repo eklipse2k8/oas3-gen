@@ -223,11 +223,26 @@ async fn main() -> anyhow::Result<()> {
   let orchestrator = Orchestrator::new(spec, visibility);
   let (code, stats) = orchestrator.generate_with_header(&cli.input.display().to_string())?;
 
-  if cli.verbose && !cli.quiet {
+  if !cli.quiet {
     println!(
       "            {:<25} {}",
       "Types generated:".with(colors.label()),
       stats.types_generated.to_string().with(colors.value())
+    );
+    println!(
+      "            {:<25}   {} structs",
+      "".with(colors.label()),
+      stats.structs_generated.to_string().with(colors.value())
+    );
+    println!(
+      "            {:<25}   {} enums",
+      "".with(colors.label()),
+      stats.enums_generated.to_string().with(colors.value())
+    );
+    println!(
+      "            {:<25}   {} type aliases",
+      "".with(colors.label()),
+      stats.type_aliases_generated.to_string().with(colors.value())
     );
     println!(
       "            {:<25} {}",
@@ -235,28 +250,31 @@ async fn main() -> anyhow::Result<()> {
       stats.operations_converted.to_string().with(colors.value())
     );
 
+    if !stats.warnings.is_empty() {
+      println!(
+        "            {:<25} {}",
+        "Warnings:".with(colors.label()),
+        stats.warnings.len().to_string().with(colors.value())
+      );
+    }
+
     if stats.cycles_detected > 0 {
       println!(
         "            {:<25} {}",
         "Cycles:".with(colors.label()),
         stats.cycles_detected.to_string().with(colors.value())
       );
-      for (i, cycle) in stats.cycle_details.iter().enumerate() {
-        println!(
-          "              {}: {}",
-          format!("Cycle {}", i + 1).with(colors.accent()),
-          cycle.join(" -> ").with(colors.info())
-        );
+
+      if cli.verbose {
+        for (i, cycle) in stats.cycle_details.iter().enumerate() {
+          println!(
+            "              {}: {}",
+            format!("Cycle {}", i + 1).with(colors.accent()),
+            cycle.join(" -> ").with(colors.info())
+          );
+        }
       }
     }
-  }
-
-  if stats.cycles_detected > 0 && !cli.verbose && !cli.quiet {
-    println!(
-      "{} {}",
-      format_timestamp().with(colors.timestamp()),
-      format!("Found {} cycles", stats.cycles_detected).with(colors.info())
-    );
   }
 
   if !stats.warnings.is_empty() && cli.verbose && !cli.quiet {
@@ -283,31 +301,6 @@ async fn main() -> anyhow::Result<()> {
       format_timestamp().with(colors.timestamp()),
       "Successfully generated Rust types".with(colors.success())
     );
-
-    if cli.verbose {
-      println!(
-        "            {:<25} {}",
-        "Input:".with(colors.label()),
-        cli.input.display().to_string().with(colors.value())
-      );
-      println!(
-        "            {:<25} {}",
-        "Output:".with(colors.label()),
-        cli.output.display().to_string().with(colors.value())
-      );
-      println!(
-        "            {:<25} {}",
-        "Types:".with(colors.label()),
-        stats.types_generated.to_string().with(colors.value())
-      );
-      if stats.cycles_detected > 0 {
-        println!(
-          "            {:<25} {}",
-          "Cycles:".with(colors.label()),
-          stats.cycles_detected.to_string().with(colors.value())
-        );
-      }
-    }
   }
 
   Ok(())
