@@ -55,6 +55,10 @@ struct Cli {
   #[arg(short, long, default_value_t = false)]
   quiet: bool,
 
+  /// Generate all schemas defined in the spec (default: only schemas referenced by operations)
+  #[arg(long, default_value_t = false)]
+  all_schemas: bool,
+
   /// Control color output
   #[arg(long, value_enum, default_value = "auto")]
   color: ColorMode,
@@ -220,7 +224,7 @@ async fn main() -> anyhow::Result<()> {
   let spec = oas3::from_json(file_content)?;
 
   log_info!(cli, colors, "Generating Rust types...");
-  let orchestrator = Orchestrator::new(spec, visibility);
+  let orchestrator = Orchestrator::new(spec, visibility, cli.all_schemas);
   let (code, stats) = orchestrator.generate_with_header(&cli.input.display().to_string())?;
 
   if !cli.quiet {
@@ -274,6 +278,14 @@ async fn main() -> anyhow::Result<()> {
           );
         }
       }
+    }
+
+    if stats.orphaned_schemas_count > 0 && cli.verbose {
+      println!(
+        "            {:<25} {}",
+        "Orphaned schemas:".with(colors.label()),
+        stats.orphaned_schemas_count.to_string().with(colors.value())
+      );
     }
   }
 

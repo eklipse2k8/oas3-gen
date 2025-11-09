@@ -306,6 +306,93 @@ impl SchemaGraph {
   pub(crate) fn get_discriminator_mapping(&self, schema_name: &str) -> Option<&(String, String)> {
     self.discriminator_cache.get(schema_name)
   }
+
+  pub(crate) fn get_operation_reachable_schemas(&self) -> BTreeSet<String> {
+    let mut reachable = BTreeSet::new();
+
+    if let Some(ref paths) = self.spec.paths {
+      for path_item in paths.values() {
+        for (_, operation) in path_item.methods() {
+          Self::collect_refs_from_operation(operation, &self.spec, &mut reachable);
+        }
+      }
+    }
+
+    self.expand_with_dependencies(&reachable)
+  }
+
+  fn collect_refs_from_operation(operation: &oas3::spec::Operation, spec: &Spec, refs: &mut BTreeSet<String>) {
+    for param in &operation.parameters {
+      if let Ok(resolved_param) = param.resolve(spec)
+        && let Some(ref schema_ref) = resolved_param.schema
+      {
+        Self::collect_refs_from_schema_ref(schema_ref, refs);
+      }
+    }
+
+    if let Some(ref request_body_ref) = operation.request_body
+      && let Ok(request_body) = request_body_ref.resolve(spec)
+    {
+      for media_type in request_body.content.values() {
+        if let Some(ref schema_ref) = media_type.schema {
+          Self::collect_refs_from_schema_ref(schema_ref, refs);
+        }
+      }
+    }
+
+    if let Some(ref responses) = operation.responses {
+      for response_ref in responses.values() {
+        if let Ok(response) = response_ref.resolve(spec) {
+          for media_type in response.content.values() {
+            if let Some(ref schema_ref) = media_type.schema {
+              Self::collect_refs_from_schema_ref(schema_ref, refs);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  fn collect_refs_from_schema_ref(schema_ref: &ObjectOrReference<ObjectSchema>, refs: &mut BTreeSet<String>) {
+    if let Some(ref_name) = Self::extract_ref_name_from_ref(schema_ref) {
+      refs.insert(ref_name);
+    } else if let ObjectOrReference::Object(inline_schema) = schema_ref {
+      let inline_refs = ReferenceExtractor::extract_from_schema(inline_schema);
+      refs.extend(inline_refs);
+    }
+  }
+
+  fn expand_with_dependencies(&self, initial_refs: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut expanded = BTreeSet::new();
+    let mut to_visit: Vec<String> = initial_refs.iter().cloned().collect();
+
+    while let Some(schema_name) = to_visit.pop() {
+      if expanded.insert(schema_name.clone()) {
+        if let Some(deps) = self.dependency_graph.dependencies.get(&schema_name) {
+          for dep in deps {
+            if !expanded.contains(dep) {
+              to_visit.push(dep.clone());
+            }
+          }
+        }
+
+        if let Some(schema) = self.get_schema(&schema_name)
+          && let Some(ref discriminator) = schema.discriminator
+          && let Some(ref mapping) = discriminator.mapping
+        {
+          for ref_path in mapping.values() {
+            if let Some(mapped_schema_name) = Self::extract_ref_name(ref_path)
+              && !expanded.contains(&mapped_schema_name)
+            {
+              to_visit.push(mapped_schema_name);
+            }
+          }
+        }
+      }
+    }
+
+    expanded
+  }
 }
 
 #[cfg(test)]

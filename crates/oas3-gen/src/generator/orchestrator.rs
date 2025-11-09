@@ -20,6 +20,7 @@ const CLIPPY_ALLOWS: &[&str] = &[
 pub struct Orchestrator {
   spec: oas3::Spec,
   visibility: Visibility,
+  include_unused_schemas: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +40,7 @@ pub struct GenerationStats {
   pub cycles_detected: usize,
   pub cycle_details: Vec<Vec<String>>,
   pub warnings: Vec<GenerationWarning>,
+  pub orphaned_schemas_count: usize,
 }
 
 #[derive(Debug)]
@@ -74,8 +76,12 @@ impl fmt::Display for GenerationWarning {
 
 impl Orchestrator {
   #[must_use]
-  pub const fn new(spec: oas3::Spec, visibility: Visibility) -> Self {
-    Self { spec, visibility }
+  pub const fn new(spec: oas3::Spec, visibility: Visibility, include_unused_schemas: bool) -> Self {
+    Self {
+      spec,
+      visibility,
+      include_unused_schemas,
+    }
   }
 
   pub fn metadata(&self) -> CodeMetadata {
@@ -99,8 +105,22 @@ impl Orchestrator {
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
+    let operation_reachable = if self.include_unused_schemas {
+      None
+    } else {
+      Some(graph.get_operation_reachable_schemas())
+    };
+
+    let total_schemas = graph.schema_names().len();
+    let orphaned_schemas_count = if let Some(ref reachable) = operation_reachable {
+      total_schemas.saturating_sub(reachable.len())
+    } else {
+      0
+    };
+
     let schema_converter = SchemaConverter::new(&graph);
-    let (schema_rust_types, schema_warnings) = Self::convert_all_schemas(&graph, &schema_converter);
+    let (schema_rust_types, schema_warnings) =
+      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
 
     let (op_rust_types, operations_info, op_warnings) = Self::convert_all_operations(&graph, &schema_converter);
 
@@ -132,6 +152,7 @@ impl Orchestrator {
       cycles_detected: cycle_details.len(),
       cycle_details,
       warnings,
+      orphaned_schemas_count,
     };
 
     Ok((code, stats))
@@ -140,11 +161,18 @@ impl Orchestrator {
   fn convert_all_schemas(
     graph: &SchemaGraph,
     schema_converter: &SchemaConverter,
+    operation_reachable: Option<&std::collections::BTreeSet<String>>,
   ) -> (Vec<RustType>, Vec<GenerationWarning>) {
     let mut rust_types = Vec::new();
     let mut warnings = Vec::new();
 
     for schema_name in graph.schema_names() {
+      if let Some(filter) = operation_reachable
+        && !filter.contains(schema_name.as_str())
+      {
+        continue;
+      }
+
       if let Some(schema) = graph.get_schema(schema_name) {
         match schema_converter.convert_schema(schema_name, schema) {
           Ok(types) => rust_types.extend(types),
@@ -276,7 +304,7 @@ mod tests {
   #[test]
   fn test_orchestrator_new_and_metadata() {
     let spec = create_empty_spec("Empty API", "1.0.0", Some("An empty spec."));
-    let orchestrator = Orchestrator::new(spec, Visibility::default());
+    let orchestrator = Orchestrator::new(spec, Visibility::default(), false);
 
     let metadata = orchestrator.metadata();
     assert_eq!(metadata.title, "Empty API");
@@ -287,7 +315,7 @@ mod tests {
   #[test]
   fn test_orchestrator_generate_with_header() {
     let spec = create_empty_spec("Test API", "2.0.0", Some("A test API."));
-    let orchestrator = Orchestrator::new(spec, Visibility::default());
+    let orchestrator = Orchestrator::new(spec, Visibility::default(), false);
 
     let result = orchestrator.generate_with_header("/path/to/spec.json");
     assert!(result.is_ok());
@@ -314,7 +342,7 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec, Visibility::default());
+    let orchestrator = Orchestrator::new(spec, Visibility::default(), false);
 
     let header = orchestrator.generate_header("test.yaml");
     assert!(header.contains("Multi\n//! line\n//! description."));
