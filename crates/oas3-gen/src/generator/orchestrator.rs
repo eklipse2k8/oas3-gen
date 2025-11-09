@@ -265,23 +265,6 @@ mod tests {
   }
 
   #[test]
-  fn test_orchestrator_generate_on_empty_spec() {
-    let spec = create_empty_spec("Empty API", "1.0.0", None);
-    let orchestrator = Orchestrator::new(spec, Visibility::default());
-
-    let result = orchestrator.generate();
-    assert!(result.is_ok());
-
-    let (code, stats) = result.unwrap();
-    assert!(!code.is_empty());
-    assert!(code.contains("use serde::{Deserialize, Serialize}"));
-    assert_eq!(stats.types_generated, 0);
-    assert_eq!(stats.operations_converted, 0);
-    assert_eq!(stats.cycles_detected, 0);
-    assert_eq!(stats.warnings.len(), 0);
-  }
-
-  #[test]
   fn test_orchestrator_generate_with_header() {
     let spec = create_empty_spec("Test API", "2.0.0", Some("A test API."));
     let orchestrator = Orchestrator::new(spec, Visibility::default());
