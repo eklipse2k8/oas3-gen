@@ -35,7 +35,7 @@ pub(crate) struct EnumConverter<'a> {
 
 impl<'a> EnumConverter<'a> {
   pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>) -> Self {
-    let struct_converter = StructConverter::new(graph, type_resolver.clone());
+    let struct_converter = StructConverter::new(graph, type_resolver.clone(), None);
     Self {
       graph,
       type_resolver,

@@ -21,6 +21,7 @@ anyhow.workspace = true
 cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
+comfy-table.workspace = true
 crossterm.workspace = true
 http.workspace = true
 inflections.workspace = true
@@ -40,6 +41,7 @@ percent-encoding.workspace = true
 [dev-dependencies]
 indexmap.workspace = true
 oas3-gen-support.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 tempfile.workspace = true
 uuid.workspace = true
 validator = { workspace = true, features = ["derive"] }

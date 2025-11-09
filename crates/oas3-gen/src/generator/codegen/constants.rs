@@ -68,7 +68,7 @@ pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTr
           lookup.insert(key, const_name);
         }
       }
-      RustType::Enum(_) | RustType::TypeAlias(_) | RustType::DiscriminatedEnum(_) => {}
+      RustType::Enum(_) | RustType::TypeAlias(_) | RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => {}
     }
   }
 

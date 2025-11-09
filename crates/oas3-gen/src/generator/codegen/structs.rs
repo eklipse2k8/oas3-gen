@@ -14,7 +14,7 @@ use super::{
   derives::DeriveManager,
 };
 use crate::generator::ast::{
-  FieldDef, PathSegment, QueryParameter, StructDef, StructKind, StructMethod, StructMethodKind,
+  FieldDef, PathSegment, QueryParameter, ResponseVariant, StructDef, StructKind, StructMethod, StructMethodKind,
 };
 
 pub(crate) fn generate_struct(
@@ -131,6 +131,14 @@ fn generate_struct_method(method: &StructMethod, visibility: Visibility) -> Toke
   let attrs = generate_outer_attrs(&method.attrs);
   let vis = visibility.to_tokens();
 
+  if let StructMethodKind::ParseResponse {
+    response_enum,
+    variants,
+  } = &method.kind
+  {
+    return generate_parse_response_method(&name, response_enum, variants, &docs, &attrs, visibility);
+  }
+
   let body = match &method.kind {
     StructMethodKind::RenderPath { segments, query_params } => {
       let mut format_string = String::new();
@@ -176,6 +184,7 @@ fn generate_struct_method(method: &StructMethod, visibility: Visibility) -> Toke
         }
       }
     }
+    StructMethodKind::ParseResponse { .. } => unreachable!("ParseResponse handled above"),
   };
 
   quote! {
@@ -241,6 +250,110 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
     quote! {
       prefix = if prefix == '\0' { '?' } else { '&' };
       write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident))).unwrap();
+    }
+  }
+}
+
+fn status_code_condition(status_code: &str) -> TokenStream {
+  if status_code.starts_with('2') {
+    return quote! { status.is_success() };
+  }
+
+  if status_code.to_uppercase().ends_with("XX") {
+    let prefix = &status_code[0..1];
+    return match prefix {
+      "1" => quote! { status.is_informational() },
+      "3" => quote! { status.is_redirection() },
+      "4" => quote! { status.is_client_error() },
+      "5" => quote! { status.is_server_error() },
+      _ => quote! { false },
+    };
+  }
+
+  if let Ok(code) = status_code.parse::<u16>() {
+    quote! { status.as_u16() == #code }
+  } else {
+    quote! { false }
+  }
+}
+
+fn generate_parse_response_method(
+  _name: &proc_macro2::Ident,
+  response_enum: &str,
+  variants: &[ResponseVariant],
+  docs: &TokenStream,
+  attrs: &TokenStream,
+  visibility: Visibility,
+) -> TokenStream {
+  let vis = visibility.to_tokens();
+  let response_enum_ident = format_ident!("{}", response_enum);
+
+  let mut status_matches: Vec<TokenStream> = Vec::new();
+  let mut default_variant: Option<&ResponseVariant> = None;
+
+  for variant in variants {
+    if variant.status_code == "default" {
+      default_variant = Some(variant);
+      continue;
+    }
+
+    let variant_name = format_ident!("{}", variant.variant_name);
+    let status_code = &variant.status_code;
+    let condition = status_code_condition(status_code);
+
+    if let Some(ref schema_type) = variant.schema_type {
+      let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
+      status_matches.push(quote! {
+        if #condition {
+          let data = req.json::<#type_token>().await?;
+          return Ok(#response_enum_ident::#variant_name(data));
+        }
+      });
+    } else {
+      status_matches.push(quote! {
+        if #condition {
+          let _ = req.bytes().await?;
+          return Ok(#response_enum_ident::#variant_name);
+        }
+      });
+    }
+  }
+
+  let has_status_checks = !status_matches.is_empty();
+  let status_decl = if has_status_checks {
+    quote! { let status = req.status(); }
+  } else {
+    quote! {}
+  };
+
+  let fallback = if let Some(default) = default_variant {
+    let variant_name = format_ident!("{}", default.variant_name);
+    if let Some(ref schema_type) = default.schema_type {
+      let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
+      quote! {
+        let data = req.json::<#type_token>().await?;
+        Ok(#response_enum_ident::#variant_name(data))
+      }
+    } else {
+      quote! {
+        let _ = req.bytes().await?;
+        Ok(#response_enum_ident::#variant_name)
+      }
+    }
+  } else {
+    quote! {
+      let _ = req.bytes().await?;
+      Ok(#response_enum_ident::Unknown)
+    }
+  };
+
+  quote! {
+    #docs
+    #attrs
+    #vis async fn parse_response(req: reqwest::Response) -> anyhow::Result<#response_enum_ident> {
+      #status_decl
+      #(#status_matches)*
+      #fallback
     }
   }
 }

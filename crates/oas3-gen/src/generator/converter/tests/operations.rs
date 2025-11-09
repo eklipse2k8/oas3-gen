@@ -72,8 +72,14 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
   assert_eq!(request_struct.fields.len(), 1);
   assert_eq!(request_struct.fields[0].name, "user_id");
 
-  let render_method = &request_struct.methods[0];
-  let crate::generator::ast::StructMethodKind::RenderPath { segments, .. } = &render_method.kind;
+  let render_method = request_struct
+    .methods
+    .iter()
+    .find(|m| m.name == "render_path")
+    .expect("render_path method not found");
+  let crate::generator::ast::StructMethodKind::RenderPath { segments, .. } = &render_method.kind else {
+    panic!("Expected RenderPath method kind");
+  };
   assert_eq!(segments.len(), 2);
   assert!(matches!(&segments[0], PathSegment::Literal(s) if s == "/users/"));
   assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == "user_id"));

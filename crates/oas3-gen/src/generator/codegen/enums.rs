@@ -7,7 +7,7 @@ use super::{
   coercion,
   derives::DeriveManager,
 };
-use crate::generator::ast::{DiscriminatedEnumDef, EnumDef, VariantContent, VariantDef};
+use crate::generator::ast::{DiscriminatedEnumDef, EnumDef, ResponseEnumDef, VariantContent, VariantDef};
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
   let name = format_ident!("{}", def.name);
@@ -133,5 +133,47 @@ fn generate_enum_serde_attrs(def: &EnumDef) -> TokenStream {
 
   quote! {
     #[serde(#(#attrs),*)]
+  }
+}
+
+pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibility) -> TokenStream {
+  let name = format_ident!("{}", def.name);
+  let docs = generate_docs(&def.docs);
+  let vis = visibility.to_tokens();
+
+  let variants: Vec<TokenStream> = def
+    .variants
+    .iter()
+    .map(|v| {
+      let variant_name = format_ident!("{}", v.variant_name);
+      let variant_docs = if let Some(ref desc) = v.description {
+        let doc_line = format!("{}: {}", v.status_code, desc);
+        quote! { #[doc = #doc_line] }
+      } else {
+        let doc_line = v.status_code.clone();
+        quote! { #[doc = #doc_line] }
+      };
+
+      if let Some(ref schema) = v.schema_type {
+        let type_token = coercion::parse_type_string(&schema.to_rust_type());
+        quote! {
+          #variant_docs
+          #variant_name(#type_token)
+        }
+      } else {
+        quote! {
+          #variant_docs
+          #variant_name
+        }
+      }
+    })
+    .collect();
+
+  quote! {
+    #docs
+    #[derive(Clone, Debug)]
+    #vis enum #name {
+      #(#variants),*
+    }
   }
 }

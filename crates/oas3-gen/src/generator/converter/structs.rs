@@ -37,13 +37,19 @@ pub(crate) struct StructConverter<'a> {
   graph: &'a SchemaGraph,
   type_resolver: TypeResolver<'a>,
   merged_schema_cache: RefCell<HashMap<String, ObjectSchema>>,
+  reachable_schemas: Option<std::collections::BTreeSet<String>>,
 }
 
 impl<'a> StructConverter<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>) -> Self {
+  pub(crate) fn new(
+    graph: &'a SchemaGraph,
+    type_resolver: TypeResolver<'a>,
+    reachable_schemas: Option<std::collections::BTreeSet<String>>,
+  ) -> Self {
     Self {
       graph,
       type_resolver,
+      reachable_schemas,
       merged_schema_cache: RefCell::new(HashMap::new()),
     }
   }
@@ -197,7 +203,7 @@ impl<'a> StructConverter<'a> {
       anyhow::bail!("Failed to find discriminator property for schema '{base_name}'");
     };
 
-    let children = utils::extract_discriminator_children(self.graph, schema);
+    let children = utils::extract_discriminator_children(self.graph, schema, self.reachable_schemas.as_ref());
     let enum_name = to_rust_type_name(base_name);
 
     let mut variants = Vec::new();
@@ -206,8 +212,14 @@ impl<'a> StructConverter<'a> {
       let variant_name = child_type_name
         .strip_prefix(&enum_name)
         .filter(|s| !s.is_empty())
-        .unwrap_or(&child_type_name)
-        .to_string();
+        .map(|s| {
+          let mut chars = s.chars();
+          match chars.next() {
+            None => String::new(),
+            Some(first) => first.to_uppercase().chain(chars).collect(),
+          }
+        })
+        .unwrap_or(child_type_name.clone());
 
       variants.push(DiscriminatedVariant {
         discriminator_value: disc_value,

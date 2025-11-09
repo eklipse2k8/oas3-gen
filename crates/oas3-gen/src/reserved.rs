@@ -1,4 +1,9 @@
-use std::{char::ToUppercase, collections::HashSet, iter::Peekable, sync::LazyLock};
+use std::{
+  char::{ToLowercase, ToUppercase},
+  collections::HashSet,
+  iter::Peekable,
+  sync::LazyLock,
+};
 
 use any_ascii::any_ascii;
 use inflections::Inflect;
@@ -132,11 +137,11 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
     // Apply conversion using capitalize_words for any string with separators or not in mixed case
     let ascii = any_ascii(name_without_minus);
 
-    // Use capitalize_words to handle capitalization, treating non-alphanumeric as separators
+    // Use capitalize_words to handle capitalization, treating non-alphanumeric and camelCase boundaries as separators
     ascii
       .chars()
-      .capitalize_words(|c| !c.is_ascii_alphanumeric())
-      .filter(char::is_ascii_alphanumeric) // Remove separators after capitalizing
+      .capitalize_words_with_boundaries()
+      .filter(char::is_ascii_alphanumeric)
       .collect()
   };
 
@@ -189,47 +194,43 @@ pub(crate) fn header_const_name(header: &str) -> String {
 
 /// An extension trait for char iterators to add word capitalization.
 pub trait CapitalizeWordsExt: Iterator<Item = char> {
-  fn capitalize_words<F>(self, is_separator: F) -> CapitalizeWords<Self, F>
+  fn capitalize_words_with_boundaries(self) -> CapitalizeWordsWithBoundaries<Self>
   where
-    Self: Sized,
-    F: Fn(char) -> bool;
+    Self: Sized;
 }
 
 impl<I> CapitalizeWordsExt for I
 where
   I: Iterator<Item = char>,
 {
-  fn capitalize_words<F>(self, is_separator: F) -> CapitalizeWords<Self, F>
+  fn capitalize_words_with_boundaries(self) -> CapitalizeWordsWithBoundaries<Self>
   where
     Self: Sized,
-    F: Fn(char) -> bool,
   {
-    CapitalizeWords {
+    CapitalizeWordsWithBoundaries {
       iter: self.peekable(),
-      is_separator,
       capitalize_next: true,
+      prev_was_lower: false,
       pending_upper: None,
+      pending_lower: None,
     }
   }
 }
 
-/// An iterator that capitalizes the first character of words in a char stream.
-#[derive(Clone)]
-pub struct CapitalizeWords<I, F>
+pub struct CapitalizeWordsWithBoundaries<I>
 where
   I: Iterator<Item = char>,
-  F: Fn(char) -> bool,
 {
   iter: Peekable<I>,
-  is_separator: F,
   capitalize_next: bool,
+  prev_was_lower: bool,
   pending_upper: Option<ToUppercase>,
+  pending_lower: Option<ToLowercase>,
 }
 
-impl<I, F> Iterator for CapitalizeWords<I, F>
+impl<I> Iterator for CapitalizeWordsWithBoundaries<I>
 where
   I: Iterator<Item = char>,
-  F: Fn(char) -> bool,
 {
   type Item = char;
 
@@ -242,17 +243,37 @@ where
       self.pending_upper = None;
     }
 
+    if let Some(ref mut lower_iter) = self.pending_lower {
+      if let Some(c) = lower_iter.next() {
+        return Some(c);
+      }
+      self.pending_lower = None;
+    }
+
     let c = self.iter.next()?;
 
-    if (self.is_separator)(c) {
-      self.capitalize_next = self.iter.peek().is_some_and(|next_c| !(self.is_separator)(*next_c));
-      Some(c)
-    } else if self.capitalize_next {
-      self.capitalize_next = false;
+    if !c.is_ascii_alphanumeric() {
+      self.capitalize_next = self.iter.peek().is_some_and(char::is_ascii_alphanumeric);
+      self.prev_was_lower = false;
+      return Some(c);
+    }
+
+    let is_lower = c.is_ascii_lowercase();
+    let is_upper = c.is_ascii_uppercase();
+
+    let should_capitalize = self.capitalize_next
+      || (self.prev_was_lower && is_upper)
+      || (is_upper && self.iter.peek().is_some_and(char::is_ascii_lowercase));
+
+    self.prev_was_lower = is_lower;
+    self.capitalize_next = false;
+
+    if should_capitalize {
       self.pending_upper = Some(c.to_uppercase());
       self.pending_upper.as_mut().unwrap().next()
     } else {
-      Some(c)
+      self.pending_lower = Some(c.to_lowercase());
+      self.pending_lower.as_mut().unwrap().next()
     }
   }
 }
@@ -282,7 +303,7 @@ mod tests {
   #[test]
   fn test_type_names() {
     assert_eq!(to_rust_type_name("oAuth"), "OAuth");
-    assert_eq!(to_rust_type_name("-INF"), "NegativeINF");
+    assert_eq!(to_rust_type_name("-INF"), "NegativeInf");
     assert_eq!(to_rust_type_name("123Response"), "T123Response");
     assert_eq!(to_rust_type_name(""), "Unnamed");
     assert_eq!(to_rust_type_name("  "), "Unnamed");
@@ -310,8 +331,24 @@ mod tests {
       to_rust_type_name("beta-response-mcp-tool-use-block"),
       "BetaResponseMcpToolUseBlock"
     );
-    assert_eq!(to_rust_type_name("beta_ResponseMCP"), "BetaResponseMCP");
-    assert_eq!(to_rust_type_name("Beta-Response-MCP"), "BetaResponseMCP");
+    assert_eq!(to_rust_type_name("beta_ResponseMCP"), "BetaResponseMcp");
+    assert_eq!(to_rust_type_name("Beta-Response-MCP"), "BetaResponseMcp");
+  }
+
+  #[test]
+  fn test_type_names_normalize_separated_uppercase() {
+    assert_eq!(to_rust_type_name("NOT_FORCED"), "NotForced");
+    assert_eq!(to_rust_type_name("ADD"), "Add");
+    assert_eq!(to_rust_type_name("DELETE"), "Delete");
+    assert_eq!(to_rust_type_name("PDF_FILE"), "PdfFile");
+    assert_eq!(to_rust_type_name("HTTP_URL"), "HttpUrl");
+  }
+
+  #[test]
+  fn test_type_names_preserve_mixed_case_no_separators() {
+    assert_eq!(to_rust_type_name("PDFFile"), "PDFFile");
+    assert_eq!(to_rust_type_name("HTTPConnection"), "HTTPConnection");
+    assert_eq!(to_rust_type_name("URLPath"), "URLPath");
   }
 
   #[test]

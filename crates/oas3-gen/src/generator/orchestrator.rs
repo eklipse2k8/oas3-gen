@@ -1,10 +1,11 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use crate::generator::{
   analyzer::ErrorAnalyzer,
   ast::{OperationInfo, RustType},
   codegen::{self, Visibility},
   converter::{SchemaConverter, operations::OperationConverter},
+  operation_registry::OperationRegistry,
   schema_graph::SchemaGraph,
 };
 
@@ -20,6 +21,8 @@ const CLIPPY_ALLOWS: &[&str] = &[
 pub struct Orchestrator {
   spec: oas3::Spec,
   visibility: Visibility,
+  include_unused_schemas: bool,
+  operation_registry: OperationRegistry,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +42,7 @@ pub struct GenerationStats {
   pub cycles_detected: usize,
   pub cycle_details: Vec<Vec<String>>,
   pub warnings: Vec<GenerationWarning>,
+  pub orphaned_schemas_count: usize,
 }
 
 #[derive(Debug)]
@@ -74,8 +78,20 @@ impl fmt::Display for GenerationWarning {
 
 impl Orchestrator {
   #[must_use]
-  pub const fn new(spec: oas3::Spec, visibility: Visibility) -> Self {
-    Self { spec, visibility }
+  pub fn new(
+    spec: oas3::Spec,
+    visibility: Visibility,
+    include_unused_schemas: bool,
+    only_operations: Option<&HashSet<String>>,
+    excluded_operations: Option<&HashSet<String>>,
+  ) -> Self {
+    let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
+    Self {
+      spec,
+      visibility,
+      include_unused_schemas,
+      operation_registry,
+    }
   }
 
   pub fn metadata(&self) -> CodeMetadata {
@@ -99,10 +115,28 @@ impl Orchestrator {
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
-    let schema_converter = SchemaConverter::new(&graph);
-    let (schema_rust_types, schema_warnings) = Self::convert_all_schemas(&graph, &schema_converter);
+    let operation_reachable = if self.include_unused_schemas {
+      None
+    } else {
+      Some(graph.get_operation_reachable_schemas(&self.operation_registry))
+    };
 
-    let (op_rust_types, operations_info, op_warnings) = Self::convert_all_operations(&graph, &schema_converter);
+    let total_schemas = graph.schema_names().len();
+    let orphaned_schemas_count = if let Some(ref reachable) = operation_reachable {
+      total_schemas.saturating_sub(reachable.len())
+    } else {
+      0
+    };
+
+    let schema_converter = if let Some(ref reachable) = operation_reachable {
+      SchemaConverter::new_with_filter(&graph, reachable.clone())
+    } else {
+      SchemaConverter::new(&graph)
+    };
+    let (schema_rust_types, schema_warnings) =
+      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
+
+    let (op_rust_types, operations_info, op_warnings) = self.convert_all_operations(&graph, &schema_converter);
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
@@ -118,7 +152,7 @@ impl Orchestrator {
     for rust_type in &rust_types {
       match rust_type {
         RustType::Struct(_) => structs_generated += 1,
-        RustType::Enum(_) | RustType::DiscriminatedEnum(_) => enums_generated += 1,
+        RustType::Enum(_) | RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => enums_generated += 1,
         RustType::TypeAlias(_) => type_aliases_generated += 1,
       }
     }
@@ -132,6 +166,7 @@ impl Orchestrator {
       cycles_detected: cycle_details.len(),
       cycle_details,
       warnings,
+      orphaned_schemas_count,
     };
 
     Ok((code, stats))
@@ -140,11 +175,18 @@ impl Orchestrator {
   fn convert_all_schemas(
     graph: &SchemaGraph,
     schema_converter: &SchemaConverter,
+    operation_reachable: Option<&std::collections::BTreeSet<String>>,
   ) -> (Vec<RustType>, Vec<GenerationWarning>) {
     let mut rust_types = Vec::new();
     let mut warnings = Vec::new();
 
     for schema_name in graph.schema_names() {
+      if let Some(filter) = operation_reachable
+        && !filter.contains(schema_name.as_str())
+      {
+        continue;
+      }
+
       if let Some(schema) = graph.get_schema(schema_name) {
         match schema_converter.convert_schema(schema_name, schema) {
           Ok(types) => rust_types.extend(types),
@@ -159,6 +201,7 @@ impl Orchestrator {
   }
 
   fn convert_all_operations(
+    &self,
     graph: &SchemaGraph,
     schema_converter: &SchemaConverter,
   ) -> (Vec<RustType>, Vec<OperationInfo>, Vec<GenerationWarning>) {
@@ -168,32 +211,29 @@ impl Orchestrator {
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
-    if let Some(ref paths) = graph.spec().paths {
-      for (path, path_item) in paths {
-        for (method, operation) in path_item.methods() {
-          let method_str = method.as_str();
-          let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
+    for (_stable_id, method, path, operation) in self.operation_registry.operations_with_details() {
+      let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
-          match operation_converter.convert(operation_id, method_str, path, operation) {
-            Ok((types, op_info)) => {
-              warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
-                operation_id: op_info.operation_id.clone(),
-                message: w.clone(),
-              }));
-              rust_types.extend(types);
-              operations_info.push(op_info);
-            }
-            Err(e) => {
-              warnings.push(GenerationWarning::OperationConversionFailed {
-                method: method_str.to_string(),
-                path: path.clone(),
-                error: e.to_string(),
-              });
-            }
-          }
+      match operation_converter.convert(operation_id, method, path, operation) {
+        Ok((types, op_info)) => {
+          warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
+            operation_id: op_info.operation_id.clone(),
+            message: w.clone(),
+          }));
+          rust_types.extend(types);
+          operations_info.push(op_info);
+        }
+        Err(e) => {
+          warnings.push(GenerationWarning::OperationConversionFailed {
+            method: method.to_string(),
+            path: path.to_string(),
+            error: e.to_string(),
+          });
         }
       }
     }
+
+    rust_types.extend(operation_converter.finish());
     (rust_types, operations_info, warnings)
   }
 
@@ -274,7 +314,7 @@ mod tests {
   #[test]
   fn test_orchestrator_new_and_metadata() {
     let spec = create_empty_spec("Empty API", "1.0.0", Some("An empty spec."));
-    let orchestrator = Orchestrator::new(spec, Visibility::default());
+    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, None);
 
     let metadata = orchestrator.metadata();
     assert_eq!(metadata.title, "Empty API");
@@ -285,7 +325,7 @@ mod tests {
   #[test]
   fn test_orchestrator_generate_with_header() {
     let spec = create_empty_spec("Test API", "2.0.0", Some("A test API."));
-    let orchestrator = Orchestrator::new(spec, Visibility::default());
+    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, None);
 
     let result = orchestrator.generate_with_header("/path/to/spec.json");
     assert!(result.is_ok());
@@ -312,9 +352,306 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec, Visibility::default());
+    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, None);
 
     let header = orchestrator.generate_header("test.yaml");
     assert!(header.contains("Multi\n//! line\n//! description."));
+  }
+
+  #[test]
+  fn test_operation_exclusion() {
+    let spec_json = r###"{
+      "openapi": "3.1.0",
+      "info": {
+        "title": "Test API",
+        "version": "1.0.0"
+      },
+      "paths": {
+        "/users": {
+          "get": {
+            "operationId": "listUsers",
+            "responses": {
+              "200": {
+                "description": "Success",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/UserList"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "post": {
+            "operationId": "createUser",
+            "responses": {
+              "201": {
+                "description": "Created",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "/posts": {
+          "get": {
+            "operationId": "listPosts",
+            "responses": {
+              "200": {
+                "description": "Success",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/PostList"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "User": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" }
+            }
+          },
+          "UserList": {
+            "type": "object",
+            "properties": {
+              "users": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          },
+          "Post": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "PostList": {
+            "type": "object",
+            "properties": {
+              "posts": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/Post" }
+              }
+            }
+          }
+        }
+      }
+    }"###;
+
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let mut excluded = HashSet::new();
+    excluded.insert("create_user".to_string());
+
+    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, Some(&excluded));
+    let result = orchestrator.generate_with_header("test.json");
+    assert!(result.is_ok());
+
+    let (code, stats) = result.unwrap();
+    assert_eq!(stats.operations_converted, 2);
+    assert!(!code.contains("create_user"));
+  }
+
+  #[test]
+  fn test_operation_exclusion_affects_schema_reachability() {
+    let spec_json = r###"{
+      "openapi": "3.1.0",
+      "info": {
+        "title": "Test API",
+        "version": "1.0.0"
+      },
+      "paths": {
+        "/users": {
+          "get": {
+            "operationId": "listUsers",
+            "responses": {
+              "200": {
+                "description": "Success",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/UserList"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "/admin": {
+          "post": {
+            "operationId": "adminAction",
+            "responses": {
+              "200": {
+                "description": "Success",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/AdminResponse"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "User": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" }
+            }
+          },
+          "UserList": {
+            "type": "object",
+            "properties": {
+              "users": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          },
+          "AdminResponse": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string" }
+            }
+          }
+        }
+      }
+    }"###;
+
+    let spec_full: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let orchestrator_full = Orchestrator::new(spec_full, Visibility::default(), false, None, None);
+    let result_full = orchestrator_full.generate_with_header("test.json");
+    assert!(result_full.is_ok());
+    let (code_full, stats_full) = result_full.unwrap();
+
+    let spec_filtered: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let mut excluded = HashSet::new();
+    excluded.insert("admin_action".to_string());
+    let orchestrator_filtered = Orchestrator::new(spec_filtered, Visibility::default(), false, None, Some(&excluded));
+    let result_filtered = orchestrator_filtered.generate_with_header("test.json");
+    assert!(result_filtered.is_ok());
+    let (code_filtered, stats_filtered) = result_filtered.unwrap();
+
+    assert_eq!(stats_full.operations_converted, 2);
+    assert_eq!(stats_filtered.operations_converted, 1);
+
+    assert!(code_full.contains("AdminResponse"));
+    assert!(!code_filtered.contains("AdminResponse"));
+    assert!(code_filtered.contains("UserList"));
+    assert!(code_filtered.contains("User"));
+  }
+
+  #[test]
+  fn test_all_schemas_overrides_operation_filtering() {
+    let spec_json = r###"{
+      "openapi": "3.1.0",
+      "info": {
+        "title": "Test API",
+        "version": "1.0.0"
+      },
+      "paths": {
+        "/users": {
+          "get": {
+            "operationId": "listUsers",
+            "responses": {
+              "200": {
+                "description": "Success",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/UserList"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "User": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" }
+            }
+          },
+          "UserList": {
+            "type": "object",
+            "properties": {
+              "users": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          },
+          "AdminResponse": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string" }
+            }
+          },
+          "UnreferencedSchema": {
+            "type": "object",
+            "properties": {
+              "data": { "type": "string" }
+            }
+          }
+        }
+      }
+    }"###;
+
+    let spec_without_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let mut only = HashSet::new();
+    only.insert("list_users".to_string());
+    let orchestrator_without = Orchestrator::new(spec_without_all, Visibility::default(), false, Some(&only), None);
+    let result_without = orchestrator_without.generate_with_header("test.json");
+    assert!(result_without.is_ok());
+    let (code_without, stats_without) = result_without.unwrap();
+
+    let spec_with_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let mut only = HashSet::new();
+    only.insert("list_users".to_string());
+    let orchestrator_with = Orchestrator::new(spec_with_all, Visibility::default(), true, Some(&only), None);
+    let result_with = orchestrator_with.generate_with_header("test.json");
+    assert!(result_with.is_ok());
+    let (code_with, stats_with) = result_with.unwrap();
+
+    assert_eq!(stats_without.operations_converted, 1);
+    assert_eq!(stats_with.operations_converted, 1);
+
+    assert!(code_without.contains("UserList"));
+    assert!(code_without.contains("User"));
+    assert!(!code_without.contains("AdminResponse"));
+    assert!(!code_without.contains("UnreferencedSchema"));
+
+    assert!(code_with.contains("UserList"));
+    assert!(code_with.contains("User"));
+    assert!(code_with.contains("AdminResponse"));
+    assert!(code_with.contains("UnreferencedSchema"));
+
+    assert_eq!(stats_without.orphaned_schemas_count, 2);
+    assert_eq!(stats_with.orphaned_schemas_count, 0);
   }
 }

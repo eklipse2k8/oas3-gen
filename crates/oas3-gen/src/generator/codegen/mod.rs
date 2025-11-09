@@ -132,9 +132,10 @@ fn deduplicate_and_order_types<'a>(types: &'a [RustType]) -> Vec<&'a RustType> {
 fn type_priority(rust_type: &RustType) -> u8 {
   match rust_type {
     RustType::Struct(_) => 0,
-    RustType::DiscriminatedEnum(_) => 1,
-    RustType::Enum(_) => 2,
-    RustType::TypeAlias(_) => 3,
+    RustType::ResponseEnum(_) => 1,
+    RustType::DiscriminatedEnum(_) => 2,
+    RustType::Enum(_) => 3,
+    RustType::TypeAlias(_) => 4,
   }
 }
 
@@ -150,6 +151,7 @@ fn generate_type(
     RustType::Enum(def) => enums::generate_enum(def, visibility),
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
     RustType::DiscriminatedEnum(def) => enums::generate_discriminated_enum(def, visibility),
+    RustType::ResponseEnum(def) => enums::generate_response_enum(def, visibility),
   };
 
   if let Some(error_impl) = try_generate_error_impl(rust_type, error_schemas) {

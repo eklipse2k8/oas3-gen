@@ -99,52 +99,76 @@ cargo build
 
 ### Run
 
-The application uses a CLI interface powered by `clap`:
+The application uses a CLI interface powered by `clap` with subcommands:
 
 ```bash
-# Basic usage
-cargo run -- --input spec.json --output generated.rs
-
-# Short flags
-cargo run -- -i spec.json -o output.rs
+# Generate Rust types from OpenAPI spec
+cargo run -- generate -i spec.json -o generated.rs
 
 # With verbose output (shows cycles, operations count, etc.)
-cargo run -- -i spec.json -o output.rs --verbose
+cargo run -- generate -i spec.json -o output.rs --verbose
 
 # Quiet mode (errors only)
-cargo run -- -i spec.json -o output.rs --quiet
+cargo run -- generate -i spec.json -o output.rs --quiet
+
+# Generate all schemas (default: only operation-referenced schemas)
+cargo run -- generate -i spec.json -o output.rs --all-schemas
 
 # Output to nested directory (creates parent directories automatically)
-cargo run -- -i spec.json -o output/types/generated.rs
+cargo run -- generate -i spec.json -o output/types/generated.rs
+
+# List all operations in the spec
+cargo run -- list operations -i spec.json
 
 # View help
 cargo run -- --help
+cargo run -- generate --help
+cargo run -- list --help
 ```
 
-**CLI Arguments:**
+**Subcommands:**
 
-- `--input` / `-i`: (Required) Path to OpenAPI JSON specification file
-- `--output` / `-o`: (Required) Path where generated Rust code will be written
-- `--visibility`: Visibility level for generated types (public, crate, or file; default: public)
-- `--verbose` / `-v`: Enable verbose output with detailed progress information
-- `--quiet` / `-q`: Suppress non-essential output (errors only)
+- `generate`: Generate Rust code from OpenAPI specification
+  - `--input` / `-i`: (Required) Path to OpenAPI JSON specification file
+  - `--output` / `-o`: (Required) Path where generated Rust code will be written
+  - `--visibility`: Visibility level for generated types (public, crate, or file; default: public)
+  - `--verbose` / `-v`: Enable verbose output with detailed progress information
+  - `--quiet` / `-q`: Suppress non-essential output (errors only)
+  - `--all-schemas`: Generate all schemas defined in spec (default: only schemas referenced by operations)
+
+- `list`: List information from OpenAPI specification
+  - `operations`: List all operations with their IDs, methods, and paths
+
+**Global Options:**
+
+- `--color`: Control color output (always, auto, never; default: auto)
+- `--theme`: Terminal theme (dark, light, auto; default: auto)
 
 ### Testing
 
 ```bash
+# Run all tests (tests both oas3-gen and oas3-gen-support crates)
 cargo test
 ```
 
-### Linting
+Note: Use `cargo test` without `--lib` to test the entire workspace. Using `cargo test --lib` only tests the oas3-gen-support library crate.
+
+### Linting (non-destructive)
 
 ```bash
-cargo clippy --fix --all --allow-dirty -- -W clippy::pedantic
+cargo clippy --all -- -W clippy::pedantic
+
+# Format code
 cargo +nightly fmt --all --check
 ```
 
-### Format Code
+### Linting (updates files)
 
 ```bash
+# Automatically fix most warnings, if possible
+cargo clippy --fix --allow-dirty --all -- -W clippy::pedantic
+
+# Cleanup any unformatted code
 cargo +nightly fmt --all 
 ```
 
@@ -172,7 +196,7 @@ cargo update
 cargo flamegraph -h
 
 # Default flamegraph execution of oas3-gen
-cargo flamegraph -o flamegraph.svg -- -i spec.json -o output.rs
+cargo flamegraph -o flamegraph.svg -- generate -i spec.json -o output.rs
 ```
 
 ### Debugging
@@ -204,9 +228,6 @@ cargo build -p oas3-gen-support
 cargo test -p oas3-gen
 cargo test -p oas3-gen-support
 
-# Run the CLI (from workspace root)
-cargo run -p oas3-gen -- -i spec.json -o output.rs
-
 # Check a specific crate
 cargo check -p oas3-gen-support
 ```
@@ -231,8 +252,16 @@ The codebase is organized as a Cargo workspace with two crates:
 │   ├── oas3-gen/                  - Main CLI tool
 │   │   ├── Cargo.toml             - Binary crate dependencies
 │   │   ├── src/
-│   │   │   ├── main.rs            - CLI entry point
+│   │   │   ├── main.rs            - CLI entry point (minimal, delegates to ui module)
 │   │   │   ├── reserved.rs        - Rust keyword handling and naming utilities
+│   │   │   ├── ui/                - User interface and CLI handling
+│   │   │   │   ├── mod.rs         - UI module exports
+│   │   │   │   ├── cli.rs         - CLI argument definitions and parsing
+│   │   │   │   ├── colors.rs      - Terminal color and theme handling
+│   │   │   │   └── commands/      - Command handlers
+│   │   │   │       ├── mod.rs     - Command module exports
+│   │   │   │       ├── generate.rs - Generate code command handler
+│   │   │   │       └── list.rs    - List operations command handler
 │   │   │   └── generator/         - Core generation logic
 │   │   │       ├── mod.rs         - Module definition and re-exports
 │   │   │       ├── orchestrator.rs - High-level generation orchestration
@@ -450,22 +479,44 @@ Converts Rust AST to actual source code (modularized code generation):
   - Documentation preservation
 - **tests/**: Codegen test suite
 
+**UI Module** (`crates/oas3-gen/src/ui/`)
+User interface and CLI handling organized into focused modules:
+
+- **ui/cli.rs** (66 lines): CLI argument definitions and subcommand structure
+  - Defines main CLI with global options (color, theme)
+  - `Commands` enum with `List` and `Generate` subcommands
+  - `ListCommands` enum with `Operations` subcommand
+  - Leverages clap's derive macros for argument parsing
+
+- **ui/colors.rs** (146 lines): Terminal color and theme detection
+  - `Colors` struct providing theme-aware color methods
+  - `ColorMode` enum (Always, Auto, Never)
+  - `ThemeMode` enum (Dark, Light, Auto)
+  - Automatic theme detection from terminal environment variables
+  - Color palettes optimized for both dark and light backgrounds
+
+- **ui/commands/generate.rs** (148 lines): Generate code command handler
+  - Loads OpenAPI spec from specified JSON file
+  - Creates Orchestrator with spec, visibility setting, and all_schemas flag
+  - Calls `generate_with_header()` to produce code and stats
+  - Reports statistics (types generated, operations converted, cycles detected, orphaned schemas)
+  - Creates parent directories if needed
+  - Writes output to user-specified path
+  - Provides structured logging with three levels (normal, verbose, quiet)
+
+- **ui/commands/list.rs** (67 lines): List operations command handler
+  - Parses OpenAPI spec and extracts all operations
+  - Generates operation IDs for operations lacking explicit IDs
+  - Displays operations in formatted table (METHOD, OPERATION ID, PATH)
+  - Sorts operations alphabetically by operation ID
+
 **Main Entry Point** (`crates/oas3-gen/src/main.rs`)
-CLI entry point that delegates to Orchestrator (115 lines):
+Minimal CLI entry point (35 lines):
 
-1. Parses CLI arguments using clap (input, output, visibility, verbose, quiet)
-2. Loads OpenAPI spec from specified JSON file
-3. Creates Orchestrator with spec and visibility setting
-4. Calls `generate_with_header()` to produce code and stats
-5. Reports statistics (types generated, operations converted, cycles detected)
-6. Creates parent directories if needed
-7. Writes output to user-specified path
-
-The CLI provides structured logging with three levels (using macros):
-
-- Normal: Key progress updates (default)
-- Verbose (`--verbose`): Detailed cycle information, operation counts, etc.
-- Quiet (`--quiet`): Errors only
+1. Parses CLI arguments using clap
+2. Initializes color/theme settings
+3. Dispatches to appropriate command handler based on subcommand
+4. All logic delegated to ui module for better organization
 
 #### oas3-gen-support Crate (Runtime Library)
 

@@ -7,6 +7,8 @@ mod structs;
 mod type_resolver;
 mod utils;
 
+use std::collections::BTreeSet;
+
 use oas3::spec::ObjectSchema;
 
 use self::{enums::EnumConverter, error::ConversionResult, structs::StructConverter, type_resolver::TypeResolver};
@@ -27,7 +29,16 @@ impl<'a> SchemaConverter<'a> {
     let type_resolver = TypeResolver::new(graph);
     Self {
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(graph, type_resolver.clone()),
+      struct_converter: StructConverter::new(graph, type_resolver.clone(), None),
+      enum_converter: EnumConverter::new(graph, type_resolver),
+    }
+  }
+
+  pub(crate) fn new_with_filter(graph: &'a SchemaGraph, reachable_schemas: BTreeSet<String>) -> Self {
+    let type_resolver = TypeResolver::new(graph);
+    Self {
+      type_resolver: type_resolver.clone(),
+      struct_converter: StructConverter::new(graph, type_resolver.clone(), Some(reachable_schemas)),
       enum_converter: EnumConverter::new(graph, type_resolver),
     }
   }
