@@ -206,8 +206,14 @@ impl<'a> StructConverter<'a> {
       let variant_name = child_type_name
         .strip_prefix(&enum_name)
         .filter(|s| !s.is_empty())
-        .unwrap_or(&child_type_name)
-        .to_string();
+        .map(|s| {
+          let mut chars = s.chars();
+          match chars.next() {
+            None => String::new(),
+            Some(first) => first.to_uppercase().chain(chars).collect(),
+          }
+        })
+        .unwrap_or(child_type_name.clone());
 
       variants.push(DiscriminatedVariant {
         discriminator_value: disc_value,

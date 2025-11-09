@@ -3,6 +3,14 @@ pub use http::Method;
 pub use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 pub use serde_with::skip_serializing_none;
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! discriminated_enum_default_helper {
+  ($fallback_type:ty, $constructor:expr) => {
+    $constructor(<$fallback_type>::default())
+  };
+}
+
 #[macro_export]
 macro_rules! discriminated_enum {
   (
@@ -24,6 +32,12 @@ macro_rules! discriminated_enum {
 
     impl $name {
       $vis const DISCRIMINATOR_FIELD: &'static str = $disc_field;
+    }
+
+    impl Default for $name {
+      fn default() -> Self {
+        $crate::discriminated_enum_default_helper!($fallback_type, Self::$fallback_variant)
+      }
     }
 
     impl serde::Serialize for $name {
@@ -219,6 +233,14 @@ mod tests {
     assert_eq!(deserialized, expected);
   }
 
+  #[test]
+  fn test_discriminated_enum_default() {
+    let default_value = TestEnum::default();
+    let expected = TestEnum::Parent(ParentType::default());
+
+    assert_eq!(default_value, expected);
+  }
+
   // Tests for Box variant support
 
   #[derive(super::Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -285,6 +307,14 @@ mod tests {
     let expected = BoxedEnum::Fallback(Box::new(BoxedFallback { id: 999 }));
 
     assert_eq!(deserialized, expected);
+  }
+
+  #[test]
+  fn test_boxed_enum_default() {
+    let default_value = BoxedEnum::default();
+    let expected = BoxedEnum::Fallback(Box::default());
+
+    assert_eq!(default_value, expected);
   }
 
   #[test]
