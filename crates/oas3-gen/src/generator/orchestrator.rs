@@ -118,7 +118,7 @@ impl Orchestrator {
     for rust_type in &rust_types {
       match rust_type {
         RustType::Struct(_) => structs_generated += 1,
-        RustType::Enum(_) | RustType::DiscriminatedEnum(_) => enums_generated += 1,
+        RustType::Enum(_) | RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => enums_generated += 1,
         RustType::TypeAlias(_) => type_aliases_generated += 1,
       }
     }
@@ -194,6 +194,8 @@ impl Orchestrator {
         }
       }
     }
+
+    rust_types.extend(operation_converter.finish());
     (rust_types, operations_info, warnings)
   }
 

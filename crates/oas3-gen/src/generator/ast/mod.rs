@@ -20,6 +20,24 @@ pub struct DiscriminatedEnumDef {
   pub fallback: Option<DiscriminatedVariant>,
 }
 
+/// Response enum variant definition
+#[derive(Debug, Clone)]
+pub struct ResponseVariant {
+  pub status_code: String,
+  pub variant_name: String,
+  pub description: Option<String>,
+  pub schema_type: Option<TypeRef>,
+}
+
+/// Response enum definition for operation responses
+#[derive(Debug, Clone)]
+pub struct ResponseEnumDef {
+  pub name: String,
+  pub docs: Vec<String>,
+  pub variants: Vec<ResponseVariant>,
+  pub request_type: String,
+}
+
 /// Top-level Rust type representation
 #[derive(Debug, Clone)]
 pub enum RustType {
@@ -27,6 +45,7 @@ pub enum RustType {
   Enum(EnumDef),
   TypeAlias(TypeAliasDef),
   DiscriminatedEnum(DiscriminatedEnumDef),
+  ResponseEnum(ResponseEnumDef),
 }
 
 impl RustType {
@@ -36,6 +55,7 @@ impl RustType {
       RustType::Enum(def) => &def.name,
       RustType::TypeAlias(def) => &def.name,
       RustType::DiscriminatedEnum(def) => &def.name,
+      RustType::ResponseEnum(def) => &def.name,
     }
   }
 }
@@ -51,6 +71,7 @@ pub struct OperationInfo {
   pub description: Option<String>,
   pub request_type: Option<String>,
   pub response_type: Option<String>,
+  pub response_enum: Option<String>,
   pub request_body_types: Vec<String>,
   pub success_response_types: Vec<String>,
   pub error_response_types: Vec<String>,
@@ -105,6 +126,10 @@ pub enum StructMethodKind {
   RenderPath {
     segments: Vec<PathSegment>,
     query_params: Vec<QueryParameter>,
+  },
+  ParseResponse {
+    response_enum: String,
+    variants: Vec<ResponseVariant>,
   },
 }
 

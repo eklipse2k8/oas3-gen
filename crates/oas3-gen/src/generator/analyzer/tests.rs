@@ -63,6 +63,7 @@ fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<
     description: None,
     request_type: None,
     response_type: None,
+    response_enum: None,
     request_body_types: vec![],
     success_response_types: success_types,
     error_response_types: error_types,
