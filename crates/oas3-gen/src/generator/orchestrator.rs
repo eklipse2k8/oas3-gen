@@ -561,4 +561,97 @@ mod tests {
     assert!(code_filtered.contains("UserList"));
     assert!(code_filtered.contains("User"));
   }
+
+  #[test]
+  fn test_all_schemas_overrides_operation_filtering() {
+    let spec_json = r###"{
+      "openapi": "3.1.0",
+      "info": {
+        "title": "Test API",
+        "version": "1.0.0"
+      },
+      "paths": {
+        "/users": {
+          "get": {
+            "operationId": "listUsers",
+            "responses": {
+              "200": {
+                "description": "Success",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/UserList"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "User": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" }
+            }
+          },
+          "UserList": {
+            "type": "object",
+            "properties": {
+              "users": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          },
+          "AdminResponse": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string" }
+            }
+          },
+          "UnreferencedSchema": {
+            "type": "object",
+            "properties": {
+              "data": { "type": "string" }
+            }
+          }
+        }
+      }
+    }"###;
+
+    let spec_without_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let mut only = HashSet::new();
+    only.insert("list_users".to_string());
+    let orchestrator_without = Orchestrator::new(spec_without_all, Visibility::default(), false, Some(&only), None);
+    let result_without = orchestrator_without.generate_with_header("test.json");
+    assert!(result_without.is_ok());
+    let (code_without, stats_without) = result_without.unwrap();
+
+    let spec_with_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let mut only = HashSet::new();
+    only.insert("list_users".to_string());
+    let orchestrator_with = Orchestrator::new(spec_with_all, Visibility::default(), true, Some(&only), None);
+    let result_with = orchestrator_with.generate_with_header("test.json");
+    assert!(result_with.is_ok());
+    let (code_with, stats_with) = result_with.unwrap();
+
+    assert_eq!(stats_without.operations_converted, 1);
+    assert_eq!(stats_with.operations_converted, 1);
+
+    assert!(code_without.contains("UserList"));
+    assert!(code_without.contains("User"));
+    assert!(!code_without.contains("AdminResponse"));
+    assert!(!code_without.contains("UnreferencedSchema"));
+
+    assert!(code_with.contains("UserList"));
+    assert!(code_with.contains("User"));
+    assert!(code_with.contains("AdminResponse"));
+    assert!(code_with.contains("UnreferencedSchema"));
+
+    assert_eq!(stats_without.orphaned_schemas_count, 2);
+    assert_eq!(stats_with.orphaned_schemas_count, 0);
+  }
 }

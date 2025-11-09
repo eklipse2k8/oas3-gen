@@ -49,7 +49,10 @@ pub enum Commands {
     #[arg(short, long, default_value_t = false)]
     quiet: bool,
 
-    /// Generate all schemas defined in the spec (default: only schemas referenced by operations)
+    /// Generate all schemas defined in the spec, including unreferenced schemas.
+    /// When combined with --only or --exclude, this includes all schemas even if they
+    /// are not referenced by the filtered operations (default: only schemas reachable
+    /// from included operations)
     #[arg(long, default_value_t = false)]
     all_schemas: bool,
 

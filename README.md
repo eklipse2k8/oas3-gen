@@ -2,7 +2,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.12.1/status.svg)](https://deps.rs/crate/oas3-gen/0.12.1)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.13.0/status.svg)](https://deps.rs/crate/oas3-gen/0.13.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.1?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification)
 <!-- prettier-ignore-end -->
@@ -24,7 +24,7 @@ cargo install oas3-gen
 Provide a path to an OpenAPI specification and specify an output file for the generated Rust code.
 
 ```sh
-oas3-gen --input <path/to/openapi.json> --output <path/to/generated_types.rs>
+oas3-gen generate --input <path/to/openapi.json> --output <path/to/generated_types.rs>
 ```
 
 #### Example
@@ -88,46 +88,96 @@ pub struct Pet {
 - **Operation Scaffolding:** Generates types for API operation parameters, request bodies, and responses.
 - **Validation Support:** Translates OpenAPI constraints (e.g., `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`) into validation attributes.
 - **Enhanced CLI Experience:** Provides colored, timestamped output with automatic theme detection for improved readability in various terminal environments.
+- **Operation Filtering:** Selectively generate code for specific operations using `--only` or exclude operations with `--exclude` for fine-grained control.
 
 ### Command-Line Options
 
 ```text
-A rust type generator for OpenAPI v3.1.x specification.
+OpenAPI to Rust code generator
 
-Usage: oas3-gen [OPTIONS] --input <FILE> --output <FILE>
+Usage: oas3-gen [OPTIONS] <COMMAND>
+
+Commands:
+  list      List information from OpenAPI specification
+  generate  Generate Rust code from OpenAPI specification
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --color <COLOR>  Control color output [default: auto] [possible values: always, auto, never]
+      --theme <THEME>  Terminal theme (dark or light background) [default: auto] [possible values: dark, light, auto]
+  -h, --help           Print help
+  -V, --version        Print version
+```
+
+#### Generate Command
+
+```text
+Generate Rust code from OpenAPI specification
+
+Usage: oas3-gen generate [OPTIONS] --input <FILE> --output <FILE>
 
 Options:
   -i, --input <FILE>             Path to the OpenAPI JSON specification file
   -o, --output <FILE>            Path where the generated Rust code will be written
       --visibility <VISIBILITY>  Visibility level for generated types [default: public]
-                                 [possible values: public, crate, file]
   -v, --verbose                  Enable verbose output with detailed progress information
   -q, --quiet                    Suppress non-essential output (errors only)
-      --color <COLOR>            Control color output [default: auto]
-                                 [possible values: always, auto, never]
-      --theme <THEME>            Terminal theme (dark or light background) [default: auto]
-                                 [possible values: dark, light, auto]
+      --all-schemas              Generate all schemas defined in the spec, including unreferenced schemas.
+                                 When combined with --only or --exclude, this includes all schemas even if
+                                 they are not referenced by the filtered operations (default: only schemas
+                                 reachable from included operations)
+      --only <IDS>               Include only specific operations for generation (comma-separated stable IDs)
+      --exclude <IDS>            Exclude specific operations from generation (comma-separated stable IDs)
   -h, --help                     Print help
-  -V, --version                  Print version
+```
+
+#### List Command
+
+```text
+List information from OpenAPI specification
+
+Usage: oas3-gen list <COMMAND>
+
+Commands:
+  operations  List all operations defined in the OpenAPI specification
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
 ```
 
 ### Examples
 
 ```sh
 # Basic usage with automatic color and theme detection
-oas3-gen -i openapi.json -o generated.rs
+oas3-gen generate -i openapi.json -o generated.rs
 
 # Verbose output showing detailed statistics
-oas3-gen -i openapi.json -o generated.rs --verbose
+oas3-gen generate -i openapi.json -o generated.rs --verbose
 
 # Force dark theme with always-on colors
-oas3-gen -i openapi.json -o generated.rs --theme dark --color always
+oas3-gen generate -i openapi.json -o generated.rs --theme dark --color always
 
 # Generate with crate-level visibility
-oas3-gen -i openapi.json -o generated.rs --visibility crate
+oas3-gen generate -i openapi.json -o generated.rs --visibility crate
 
 # Quiet mode (errors only)
-oas3-gen -i openapi.json -o generated.rs --quiet
+oas3-gen generate -i openapi.json -o generated.rs --quiet
+
+# Generate all schemas including unused ones
+oas3-gen generate -i openapi.json -o generated.rs --all-schemas
+
+# Generate code for specific operations only
+oas3-gen generate -i openapi.json -o generated.rs --only createUser,getUser,updateUser
+
+# Generate code excluding certain operations
+oas3-gen generate -i openapi.json -o generated.rs --exclude deleteUser,listUsers
+
+# Generate all schemas but only specific operations (includes unreferenced schemas)
+oas3-gen generate -i openapi.json -o generated.rs --all-schemas --only createUser
+
+# List all operations in the specification
+oas3-gen list operations -i openapi.json
 ```
 
 ## License
