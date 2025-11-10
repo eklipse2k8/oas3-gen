@@ -3,9 +3,10 @@ use quote::{format_ident, quote};
 
 use super::{
   Visibility,
-  attributes::{generate_deprecated_attr, generate_docs, generate_outer_attrs, generate_serde_attrs},
+  attributes::{
+    generate_deprecated_attr, generate_derives_from_slice, generate_docs, generate_outer_attrs, generate_serde_attrs,
+  },
   coercion,
-  derives::DeriveManager,
 };
 use crate::generator::ast::{DiscriminatedEnumDef, EnumDef, ResponseEnumDef, VariantContent, VariantDef};
 
@@ -13,7 +14,7 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
   let name = format_ident!("{}", def.name);
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
-  let derives = DeriveManager::for_enum(&def.derives).to_token_stream();
+  let derives = generate_derives_from_slice(&def.derives);
   let outer_attrs = generate_outer_attrs(&def.outer_attrs);
   let serde_attrs = generate_enum_serde_attrs(def);
   let variants = generate_variants(&def.variants);

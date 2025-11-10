@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::generator::{
   analyzer::{TypeUsage, build_type_usage_map},
   ast::{
@@ -5,6 +7,13 @@ use crate::generator::{
     VariantDef,
   },
 };
+
+fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<String, (bool, bool)> {
+  entries
+    .iter()
+    .map(|(name, flags)| ((*name).to_string(), *flags))
+    .collect()
+}
 
 #[test]
 fn test_dependency_graph_simple_struct() {
@@ -39,9 +48,8 @@ fn test_dependency_graph_simple_struct() {
   });
 
   let types = vec![user_struct, address_struct];
-  let operations = vec![];
 
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[]), &types);
 
   assert_eq!(usage_map.len(), 2);
   assert_eq!(usage_map.get("User"), Some(&TypeUsage::Bidirectional));
@@ -81,22 +89,7 @@ fn test_propagation_request_to_nested() {
   });
 
   let types = vec![request_struct, user_struct];
-  let operations = vec![crate::generator::ast::OperationInfo {
-    operation_id: "createUser".to_string(),
-    method: "POST".to_string(),
-    path: "/users".to_string(),
-    summary: None,
-    description: None,
-    request_type: None,
-    response_type: None,
-    response_enum: None,
-    request_body_types: vec!["CreateUserRequest".to_string()],
-    success_response_types: vec![],
-    error_response_types: vec![],
-    warnings: vec![],
-  }];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[("CreateUserRequest", (true, false))]), &types);
 
   assert_eq!(usage_map.get("CreateUserRequest"), Some(&TypeUsage::RequestOnly));
   assert_eq!(usage_map.get("User"), Some(&TypeUsage::RequestOnly));
@@ -135,22 +128,7 @@ fn test_propagation_response_to_nested() {
   });
 
   let types = vec![response_struct, user_struct];
-  let operations = vec![crate::generator::ast::OperationInfo {
-    operation_id: "getUser".to_string(),
-    method: "GET".to_string(),
-    path: "/users/{id}".to_string(),
-    summary: None,
-    description: None,
-    request_type: None,
-    response_type: Some("UserResponse".to_string()),
-    response_enum: None,
-    request_body_types: vec![],
-    success_response_types: vec![],
-    error_response_types: vec![],
-    warnings: vec![],
-  }];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[("UserResponse", (false, true))]), &types);
 
   assert_eq!(usage_map.get("UserResponse"), Some(&TypeUsage::ResponseOnly));
   assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
@@ -204,22 +182,10 @@ fn test_propagation_bidirectional() {
   });
 
   let types = vec![request_struct, response_struct, user_struct];
-  let operations = vec![crate::generator::ast::OperationInfo {
-    operation_id: "updateUser".to_string(),
-    method: "PUT".to_string(),
-    path: "/users/{id}".to_string(),
-    summary: None,
-    description: None,
-    request_type: None,
-    response_type: Some("UserResponse".to_string()),
-    response_enum: None,
-    request_body_types: vec!["UpdateUserRequest".to_string()],
-    success_response_types: vec![],
-    error_response_types: vec![],
-    warnings: vec![],
-  }];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(
+    seeds(&[("UpdateUserRequest", (true, false)), ("UserResponse", (false, true))]),
+    &types,
+  );
 
   assert_eq!(usage_map.get("UpdateUserRequest"), Some(&TypeUsage::RequestOnly));
   assert_eq!(usage_map.get("UserResponse"), Some(&TypeUsage::ResponseOnly));
@@ -274,22 +240,7 @@ fn test_transitive_dependency_chain() {
   });
 
   let types = vec![a_struct, b_struct, c_struct];
-  let operations = vec![crate::generator::ast::OperationInfo {
-    operation_id: "getA".to_string(),
-    method: "GET".to_string(),
-    path: "/a".to_string(),
-    summary: None,
-    description: None,
-    request_type: None,
-    response_type: Some("A".to_string()),
-    response_enum: None,
-    request_body_types: vec![],
-    success_response_types: vec![],
-    error_response_types: vec![],
-    warnings: vec![],
-  }];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[("A", (false, true))]), &types);
 
   assert_eq!(usage_map.get("A"), Some(&TypeUsage::ResponseOnly));
   assert_eq!(usage_map.get("B"), Some(&TypeUsage::ResponseOnly));
@@ -330,22 +281,7 @@ fn test_enum_with_tuple_variant() {
   });
 
   let types = vec![enum_def, user_struct];
-  let operations = vec![crate::generator::ast::OperationInfo {
-    operation_id: "getResult".to_string(),
-    method: "GET".to_string(),
-    path: "/result".to_string(),
-    summary: None,
-    description: None,
-    request_type: None,
-    response_type: Some("Result".to_string()),
-    response_enum: None,
-    request_body_types: vec![],
-    success_response_types: vec![],
-    error_response_types: vec![],
-    warnings: vec![],
-  }];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[("Result", (false, true))]), &types);
 
   assert_eq!(usage_map.get("Result"), Some(&TypeUsage::ResponseOnly));
   assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
@@ -375,22 +311,7 @@ fn test_type_alias_dependency() {
   });
 
   let types = vec![alias, user_struct];
-  let operations = vec![crate::generator::ast::OperationInfo {
-    operation_id: "getUserId".to_string(),
-    method: "GET".to_string(),
-    path: "/user-id".to_string(),
-    summary: None,
-    description: None,
-    request_type: None,
-    response_type: Some("UserId".to_string()),
-    response_enum: None,
-    request_body_types: vec![],
-    success_response_types: vec![],
-    error_response_types: vec![],
-    warnings: vec![],
-  }];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[("UserId", (false, true))]), &types);
 
   assert_eq!(usage_map.get("UserId"), Some(&TypeUsage::ResponseOnly));
   assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
@@ -425,9 +346,7 @@ fn test_no_propagation_without_operations() {
   });
 
   let types = vec![user_struct, address_struct];
-  let operations = vec![];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[]), &types);
 
   assert_eq!(usage_map.len(), 2);
   assert_eq!(usage_map.get("User"), Some(&TypeUsage::Bidirectional));
@@ -467,22 +386,7 @@ fn test_cyclic_dependency_handling() {
   });
 
   let types = vec![a_struct, b_struct];
-  let operations = vec![crate::generator::ast::OperationInfo {
-    operation_id: "getA".to_string(),
-    method: "GET".to_string(),
-    path: "/a".to_string(),
-    summary: None,
-    description: None,
-    request_type: None,
-    response_type: Some("A".to_string()),
-    response_enum: None,
-    request_body_types: vec![],
-    success_response_types: vec![],
-    error_response_types: vec![],
-    warnings: vec![],
-  }];
-
-  let usage_map = build_type_usage_map(&operations, &types);
+  let usage_map = build_type_usage_map(seeds(&[("A", (false, true))]), &types);
 
   assert_eq!(usage_map.get("A"), Some(&TypeUsage::ResponseOnly));
   assert_eq!(usage_map.get("B"), Some(&TypeUsage::ResponseOnly));

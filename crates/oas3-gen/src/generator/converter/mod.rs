@@ -5,11 +5,13 @@ mod metadata;
 pub(crate) mod operations;
 mod structs;
 mod type_resolver;
+mod type_usage_recorder;
 mod utils;
 
 use std::collections::BTreeSet;
 
 use oas3::spec::ObjectSchema;
+pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use self::{enums::EnumConverter, error::ConversionResult, structs::StructConverter, type_resolver::TypeResolver};
 use super::{

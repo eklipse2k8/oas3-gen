@@ -8,7 +8,7 @@ use oas3::spec::{
 use super::common::create_test_graph;
 use crate::generator::{
   ast::{PathSegment, RustType},
-  converter::{SchemaConverter, error::ConversionResult, operations::OperationConverter},
+  converter::{SchemaConverter, TypeUsageRecorder, error::ConversionResult, operations::OperationConverter},
 };
 
 #[test]
@@ -19,7 +19,8 @@ fn test_basic_get_operation() -> ConversionResult<()> {
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation::default();
-  let (types, info) = converter.convert("myOp", "GET", "/test", &operation)?;
+  let mut usage = TypeUsageRecorder::new();
+  let (types, info) = converter.convert("myOp", "GET", "/test", &operation, &mut usage)?;
 
   assert!(types.is_empty(), "Should generate no new types");
   assert_eq!(info.operation_id, "MyOp");
@@ -55,7 +56,8 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
     extensions: BTreeMap::default(),
   }));
 
-  let (types, info) = converter.convert("getUser", "GET", "/users/{userId}", &operation)?;
+  let mut usage = TypeUsageRecorder::new();
+  let (types, info) = converter.convert("getUser", "GET", "/users/{userId}", &operation, &mut usage)?;
 
   assert_eq!(types.len(), 1, "Should generate one request struct");
   let request_type_name = info.request_type.as_deref().expect("Request type should exist");
@@ -115,7 +117,8 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
     ..Default::default()
   };
 
-  let (types, info) = converter.convert("createUser", "POST", "/users", &operation)?;
+  let mut usage = TypeUsageRecorder::new();
+  let (types, info) = converter.convert("createUser", "POST", "/users", &operation, &mut usage)?;
 
   assert_eq!(types.len(), 2, "Should generate Request struct and RequestBody alias");
   assert!(
@@ -164,7 +167,8 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
     ..Default::default()
   };
 
-  let (_, info) = converter.convert("getUser", "GET", "/user", &operation)?;
+  let mut usage = TypeUsageRecorder::new();
+  let (_, info) = converter.convert("getUser", "GET", "/user", &operation, &mut usage)?;
 
   assert_eq!(info.response_type.as_deref(), Some("User"));
   Ok(())

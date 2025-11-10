@@ -19,13 +19,7 @@ pub(crate) enum InlinePolicy {
   InlineUnions,
 }
 
-const STRUCT_DERIVES: &[&str] = &[
-  "Debug",
-  "Clone",
-  "PartialEq",
-  "validator::Validate",
-  "oas3_gen_support::Default",
-];
+const STRUCT_DERIVES: &[&str] = &["Debug", "Clone", "PartialEq", "oas3_gen_support::Default"];
 
 const SIMPLE_ENUM_DERIVES: &[&str] = &[
   "Debug",

@@ -4,40 +4,33 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::{
-  TypeUsage, Visibility,
+  Visibility,
   attributes::{
     generate_deprecated_attr, generate_docs, generate_docs_for_field, generate_outer_attrs, generate_serde_attrs,
     generate_validation_attrs,
   },
   coercion,
   constants::RegexKey,
-  derives::DeriveManager,
 };
 use crate::generator::ast::{
-  FieldDef, PathSegment, QueryParameter, ResponseVariant, StructDef, StructKind, StructMethod, StructMethodKind,
+  FieldDef, PathSegment, QueryParameter, ResponseVariant, StructDef, StructMethod, StructMethodKind,
 };
 
 pub(crate) fn generate_struct(
   def: &StructDef,
   regex_lookup: &BTreeMap<RegexKey, String>,
-  type_usage: &BTreeMap<String, TypeUsage>,
   visibility: Visibility,
 ) -> TokenStream {
   let name = format_ident!("{}", def.name);
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
 
-  let usage = type_usage.get(&def.name);
-  let derives = DeriveManager::for_struct(&def.derives, def.kind, usage).to_token_stream();
+  let derives = super::attributes::generate_derives_from_slice(&def.derives);
 
   let outer_attrs = generate_outer_attrs(&def.outer_attrs);
   let serde_attrs = generate_serde_attrs(&def.serde_attrs);
 
-  let include_validation = match def.kind {
-    StructKind::RequestBody => !matches!(type_usage.get(&def.name), Some(TypeUsage::ResponseOnly)),
-    StructKind::OperationRequest | StructKind::Schema => true,
-  };
-  let fields = generate_fields(&def.name, &def.fields, include_validation, regex_lookup, visibility);
+  let fields = generate_fields(&def.name, &def.fields, regex_lookup, visibility);
 
   let struct_tokens = quote! {
     #docs
@@ -71,7 +64,6 @@ pub(crate) fn generate_struct(
 fn generate_fields(
   type_name: &str,
   fields: &[FieldDef],
-  include_validation: bool,
   regex_lookup: &BTreeMap<RegexKey, String>,
   visibility: Visibility,
 ) -> Vec<TokenStream> {
@@ -88,18 +80,14 @@ fn generate_fields(
         .filter_map(|attr| attr.parse::<TokenStream>().ok())
         .collect();
 
-      let regex_const = if include_validation && field.regex_validation.is_some() {
+      let regex_const = if field.regex_validation.is_some() {
         let key = RegexKey::for_struct(type_name, &field.name);
         regex_lookup.get(&key).map(std::string::String::as_str)
       } else {
         None
       };
 
-      let validation_attrs = if include_validation {
-        generate_validation_attrs(regex_const, &field.validation_attrs)
-      } else {
-        quote! {}
-      };
+      let validation_attrs = generate_validation_attrs(regex_const, &field.validation_attrs);
 
       let deprecated_attr = generate_deprecated_attr(field.deprecated);
 

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use super::dependency_graph::DependencyGraph;
-use crate::generator::ast::{OperationInfo, RustType};
+use crate::generator::ast::RustType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeUsage {
@@ -10,36 +10,10 @@ pub enum TypeUsage {
   Bidirectional,
 }
 
-pub(crate) fn build_type_usage_map(operations: &[OperationInfo], types: &[RustType]) -> BTreeMap<String, TypeUsage> {
-  let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new();
-
-  for op in operations {
-    if let Some(ref req_type) = op.request_type {
-      let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
-      entry.0 = true;
-    }
-
-    for body_type in &op.request_body_types {
-      let entry = usage_map.entry(body_type.clone()).or_insert((false, false));
-      entry.0 = true;
-    }
-
-    if let Some(ref resp_type) = op.response_type {
-      let entry = usage_map.entry(resp_type.clone()).or_insert((false, false));
-      entry.1 = true;
-    }
-
-    for success_type in &op.success_response_types {
-      let entry = usage_map.entry(success_type.clone()).or_insert((false, false));
-      entry.1 = true;
-    }
-
-    for error_type in &op.error_response_types {
-      let entry = usage_map.entry(error_type.clone()).or_insert((false, false));
-      entry.1 = true;
-    }
-  }
-
+pub(crate) fn build_type_usage_map(
+  mut usage_map: BTreeMap<String, (bool, bool)>,
+  types: &[RustType],
+) -> BTreeMap<String, TypeUsage> {
   let dep_graph = DependencyGraph::build(types);
   propagate_usage_to_all_dependencies(&mut usage_map, &dep_graph, types);
 
