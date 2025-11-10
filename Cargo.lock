@@ -855,9 +855,9 @@ dependencies = [
 
 [[package]]
 name = "oas3"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd09780430f4a2a496bd31609a04fae736a091f7e1d28ff11babd6c23cc0a171"
+checksum = "a2e9be2117da8473f5832dda83056d6bf3c42ec8adc613426f3bfde2d04c722d"
 dependencies = [
  "derive_more",
  "http",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen-support"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "better_default",
@@ -1344,9 +1344,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"
-version = "2.0.109"
+version = "2.0.110"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f17c7e013e88258aa9543dcbe81aca68a667a9ac37cd69c9fbc07858bfe0e2f"
+checksum = "a99801b5bd34ede4cf3fc688c5919368fea4e4814a4664359503e6015b280aea"
 dependencies = [
  "proc-macro2",
  "quote",
