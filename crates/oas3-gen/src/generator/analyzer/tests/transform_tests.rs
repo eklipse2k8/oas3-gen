@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
-  ast::{FieldDef, RustType, StructDef, StructKind, TypeRef},
+  ast::{EnumDef, FieldDef, RustType, StructDef, StructKind, TypeRef, VariantContent, VariantDef},
 };
 
 fn run_transform(mut rust_types: Vec<RustType>, usage: &[(&str, TypeUsage)]) -> StructDef {
@@ -133,4 +133,54 @@ fn operation_request_always_validates_without_serialization() {
   assert!(!def.derives.iter().any(|d| d == "Serialize"));
   assert!(!def.derives.iter().any(|d| d == "Deserialize"));
   assert!(def.fields[0].validation_attrs.is_empty() == false);
+}
+
+fn enum_type(name: &str) -> EnumDef {
+  EnumDef {
+    name: name.to_string(),
+    docs: vec![],
+    variants: vec![VariantDef {
+      name: "Variant".to_string(),
+      docs: vec![],
+      content: VariantContent::Unit,
+      serde_attrs: vec![],
+      deprecated: false,
+    }],
+    discriminator: None,
+    derives: vec![
+      "Debug".to_string(),
+      "Clone".to_string(),
+      "PartialEq".to_string(),
+      "Serialize".to_string(),
+      "Deserialize".to_string(),
+      "oas3_gen_support::Default".to_string(),
+    ],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+  }
+}
+
+fn run_enum_transform(name: &str, usage: TypeUsage) -> EnumDef {
+  let enum_def = enum_type(name);
+  let usage_map = BTreeMap::from([(name.to_string(), usage)]);
+  let mut rust_types = vec![RustType::Enum(enum_def)];
+  update_derives_from_usage(&mut rust_types, &usage_map);
+  match rust_types.into_iter().next().unwrap() {
+    RustType::Enum(def) => def,
+    _ => panic!("expected enum"),
+  }
+}
+
+#[test]
+fn response_only_enum_drops_serialize() {
+  let def = run_enum_transform("ResponseEnum", TypeUsage::ResponseOnly);
+  assert!(def.derives.iter().any(|d| d == "Deserialize"));
+  assert!(!def.derives.iter().any(|d| d == "Serialize"));
+}
+
+#[test]
+fn request_only_enum_drops_deserialize() {
+  let def = run_enum_transform("RequestEnum", TypeUsage::RequestOnly);
+  assert!(def.derives.iter().any(|d| d == "Serialize"));
+  assert!(!def.derives.iter().any(|d| d == "Deserialize"));
 }
