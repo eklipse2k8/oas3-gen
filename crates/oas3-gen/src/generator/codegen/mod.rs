@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::ast::{OperationInfo, RustType};
+use super::{analyzer::TypeUsage, ast::RustType};
 
 pub mod attributes;
 pub mod coercion;
@@ -42,46 +42,6 @@ impl Visibility {
       Visibility::File => quote! {},
     }
   }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TypeUsage {
-  RequestOnly,
-  ResponseOnly,
-  Bidirectional,
-}
-
-pub(crate) fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
-  let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new();
-
-  for op in operations {
-    if let Some(ref req_type) = op.request_type {
-      let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
-      entry.0 = true;
-    }
-
-    for body_type in &op.request_body_types {
-      let entry = usage_map.entry(body_type.clone()).or_insert((false, false));
-      entry.0 = true;
-    }
-
-    if let Some(ref resp_type) = op.response_type {
-      let entry = usage_map.entry(resp_type.clone()).or_insert((false, false));
-      entry.1 = true;
-    }
-  }
-
-  usage_map
-    .into_iter()
-    .map(|(type_name, (in_request, in_response))| {
-      let usage = match (in_request, in_response) {
-        (true, false) => TypeUsage::RequestOnly,
-        (false, true) => TypeUsage::ResponseOnly,
-        (true, true) | (false, false) => TypeUsage::Bidirectional,
-      };
-      (type_name, usage)
-    })
-    .collect()
 }
 
 pub(crate) fn generate(

@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt};
 
 use crate::generator::{
-  analyzer::ErrorAnalyzer,
+  analyzer::{self, ErrorAnalyzer},
   ast::{OperationInfo, RustType},
   codegen::{self, Visibility},
   converter::{SchemaConverter, operations::OperationConverter},
@@ -143,8 +143,6 @@ impl Orchestrator {
     let mut warnings = schema_warnings;
     warnings.extend(op_warnings);
 
-    let code = self.generate_code_from_artifacts(&graph, &rust_types, &operations_info);
-
     let mut structs_generated = 0;
     let mut enums_generated = 0;
     let mut type_aliases_generated = 0;
@@ -157,8 +155,11 @@ impl Orchestrator {
       }
     }
 
+    let types_generated = structs_generated + enums_generated + type_aliases_generated;
+    let code = self.generate_code_from_artifacts(&graph, rust_types, &operations_info);
+
     let stats = GenerationStats {
-      types_generated: rust_types.len(),
+      types_generated,
       structs_generated,
       enums_generated,
       type_aliases_generated,
@@ -240,14 +241,15 @@ impl Orchestrator {
   fn generate_code_from_artifacts(
     &self,
     graph: &SchemaGraph,
-    rust_types: &[RustType],
+    mut rust_types: Vec<RustType>,
     operations_info: &[OperationInfo],
   ) -> proc_macro2::TokenStream {
-    let type_usage = codegen::build_type_usage_map(operations_info);
-    let error_schemas = ErrorAnalyzer::build_error_schema_set(operations_info, rust_types);
+    let type_usage = analyzer::build_type_usage_map(operations_info, &rust_types);
+    analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
+    let error_schemas = ErrorAnalyzer::build_error_schema_set(operations_info, &rust_types);
 
     codegen::generate(
-      rust_types,
+      &rust_types,
       &type_usage,
       &graph.all_headers(),
       &error_schemas,
