@@ -1,10 +1,10 @@
 use std::{collections::HashSet, fmt};
 
 use crate::generator::{
-  analyzer::ErrorAnalyzer,
+  analyzer::{self, ErrorAnalyzer},
   ast::{OperationInfo, RustType},
   codegen::{self, Visibility},
-  converter::{SchemaConverter, operations::OperationConverter},
+  converter::{SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
   operation_registry::OperationRegistry,
   schema_graph::SchemaGraph,
 };
@@ -136,14 +136,13 @@ impl Orchestrator {
     let (schema_rust_types, schema_warnings) =
       Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
 
-    let (op_rust_types, operations_info, op_warnings) = self.convert_all_operations(&graph, &schema_converter);
+    let (op_rust_types, operations_info, op_warnings, usage_recorder) =
+      self.convert_all_operations(&graph, &schema_converter);
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
     let mut warnings = schema_warnings;
     warnings.extend(op_warnings);
-
-    let code = self.generate_code_from_artifacts(&graph, &rust_types, &operations_info);
 
     let mut structs_generated = 0;
     let mut enums_generated = 0;
@@ -157,8 +156,11 @@ impl Orchestrator {
       }
     }
 
+    let types_generated = structs_generated + enums_generated + type_aliases_generated;
+    let code = self.generate_code_from_artifacts(&graph, rust_types, &operations_info, usage_recorder);
+
     let stats = GenerationStats {
-      types_generated: rust_types.len(),
+      types_generated,
       structs_generated,
       enums_generated,
       type_aliases_generated,
@@ -204,17 +206,23 @@ impl Orchestrator {
     &self,
     graph: &SchemaGraph,
     schema_converter: &SchemaConverter,
-  ) -> (Vec<RustType>, Vec<OperationInfo>, Vec<GenerationWarning>) {
+  ) -> (
+    Vec<RustType>,
+    Vec<OperationInfo>,
+    Vec<GenerationWarning>,
+    TypeUsageRecorder,
+  ) {
     let mut rust_types = Vec::new();
     let mut operations_info = Vec::new();
     let mut warnings = Vec::new();
+    let mut usage_recorder = TypeUsageRecorder::new();
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
     for (_stable_id, method, path, operation) in self.operation_registry.operations_with_details() {
       let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
-      match operation_converter.convert(operation_id, method, path, operation) {
+      match operation_converter.convert(operation_id, method, path, operation, &mut usage_recorder) {
         Ok((types, op_info)) => {
           warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
             operation_id: op_info.operation_id.clone(),
@@ -234,25 +242,22 @@ impl Orchestrator {
     }
 
     rust_types.extend(operation_converter.finish());
-    (rust_types, operations_info, warnings)
+    (rust_types, operations_info, warnings, usage_recorder)
   }
 
   fn generate_code_from_artifacts(
     &self,
     graph: &SchemaGraph,
-    rust_types: &[RustType],
+    mut rust_types: Vec<RustType>,
     operations_info: &[OperationInfo],
+    usage_recorder: TypeUsageRecorder,
   ) -> proc_macro2::TokenStream {
-    let type_usage = codegen::build_type_usage_map(operations_info);
-    let error_schemas = ErrorAnalyzer::build_error_schema_set(operations_info, rust_types);
+    let seed_map = usage_recorder.into_usage_map();
+    let type_usage = analyzer::build_type_usage_map(seed_map, &rust_types);
+    analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
+    let error_schemas = ErrorAnalyzer::build_error_schema_set(operations_info, &rust_types);
 
-    codegen::generate(
-      rust_types,
-      &type_usage,
-      &graph.all_headers(),
-      &error_schemas,
-      self.visibility,
-    )
+    codegen::generate(&rust_types, &graph.all_headers(), &error_schemas, self.visibility)
   }
 
   fn format_code(code: &proc_macro2::TokenStream) -> anyhow::Result<String> {

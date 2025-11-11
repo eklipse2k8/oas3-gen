@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use crate::generator::ast::{OperationInfo, RustPrimitive, RustType, VariantContent};
+use super::dependency_graph::DependencyGraph;
+use crate::generator::ast::{OperationInfo, RustType};
 
 pub(crate) struct ErrorAnalyzer;
 
@@ -31,47 +32,23 @@ impl ErrorAnalyzer {
     rust_types: &[RustType],
     success_schemas: &HashSet<String>,
   ) -> HashSet<String> {
-    let type_map: HashMap<&str, &RustType> = rust_types.iter().map(|t| (t.type_name(), t)).collect();
+    let dep_graph = DependencyGraph::build(rust_types);
 
     let mut result = roots.clone();
-    let mut queue: Vec<&str> = roots.iter().map(String::as_str).collect();
+    let mut queue: Vec<String> = roots.iter().cloned().collect();
     let mut visited = HashSet::new();
 
     while let Some(type_name) = queue.pop() {
-      if !visited.insert(type_name) {
+      if !visited.insert(type_name.clone()) {
         continue;
       }
 
-      let Some(&rust_type) = type_map.get(type_name) else {
-        continue;
-      };
-
-      match rust_type {
-        RustType::Struct(def) => {
-          for field in &def.fields {
-            if let RustPrimitive::Custom(nested_type) = &field.rust_type.base_type
-              && !success_schemas.contains(nested_type)
-              && result.insert(nested_type.clone())
-            {
-              queue.push(nested_type);
-            }
+      if let Some(deps) = dep_graph.get_dependencies(&type_name) {
+        for nested_type in deps {
+          if !success_schemas.contains(nested_type) && result.insert(nested_type.clone()) {
+            queue.push(nested_type.clone());
           }
         }
-        RustType::Enum(def) => {
-          for variant in &def.variants {
-            if let VariantContent::Tuple(types) = &variant.content {
-              for type_ref in types {
-                if let RustPrimitive::Custom(nested_type) = &type_ref.base_type
-                  && !success_schemas.contains(nested_type)
-                  && result.insert(nested_type.clone())
-                {
-                  queue.push(nested_type);
-                }
-              }
-            }
-          }
-        }
-        _ => {}
       }
     }
 

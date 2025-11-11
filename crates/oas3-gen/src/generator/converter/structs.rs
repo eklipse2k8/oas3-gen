@@ -30,6 +30,7 @@ struct FieldProcessingContext<'a> {
 struct DiscriminatorInfo {
   value: Option<String>,
   is_base: bool,
+  has_enum: bool,
 }
 
 #[derive(Clone)]
@@ -308,7 +309,7 @@ impl<'a> StructConverter<'a> {
       ctx.policy,
     )?;
 
-    let discriminator_info = Self::get_discriminator_info(ctx, discriminator_mapping);
+    let discriminator_info = Self::get_discriminator_info(ctx, discriminator_mapping, &prop_schema);
 
     let should_be_optional = Self::compute_field_optionality(is_required, &prop_schema, discriminator_info.as_ref());
     let final_type = utils::apply_optionality(base_type, should_be_optional);
@@ -337,6 +338,7 @@ impl<'a> StructConverter<'a> {
   fn get_discriminator_info(
     ctx: &FieldProcessingContext,
     discriminator_mapping: Option<&(String, String)>,
+    prop_schema: &ObjectSchema,
   ) -> Option<DiscriminatorInfo> {
     let is_child_discriminator = discriminator_mapping
       .as_ref()
@@ -348,16 +350,20 @@ impl<'a> StructConverter<'a> {
       .as_ref()
       .is_some_and(|d| d.property_name == ctx.prop_name);
 
+    let has_enum = !prop_schema.enum_values.is_empty();
+
     if is_child_discriminator {
       let (_, value) = discriminator_mapping?;
       Some(DiscriminatorInfo {
         value: Some(value.clone()),
         is_base: false,
+        has_enum,
       })
     } else if is_base_discriminator {
       Some(DiscriminatorInfo {
         value: None,
         is_base: true,
+        has_enum,
       })
     } else {
       None
@@ -407,22 +413,27 @@ impl<'a> StructConverter<'a> {
       return (metadata, serde_attrs, Vec::new(), regex);
     };
 
-    metadata.docs.clear();
-    metadata.validation_attrs.clear();
-    let extra_attrs = vec![doc_attrs::HIDDEN.to_string()];
-
     if let Some(ref disc_value) = disc_info.value {
+      metadata.docs.clear();
+      metadata.validation_attrs.clear();
+      let extra_attrs = vec![doc_attrs::HIDDEN.to_string()];
       metadata.default_value = Some(serde_json::Value::String(disc_value.clone()));
       serde_attrs.push(serde_attrs::SKIP_DESERIALIZING.to_string());
       serde_attrs.push(serde_attrs::DEFAULT.to_string());
-    } else if disc_info.is_base {
+      (metadata, serde_attrs, extra_attrs, None)
+    } else if disc_info.is_base && !disc_info.has_enum {
+      metadata.docs.clear();
+      metadata.validation_attrs.clear();
+      let extra_attrs = vec![doc_attrs::HIDDEN.to_string()];
       serde_attrs.push(serde_attrs::SKIP.to_string());
       if final_type.is_string_like() {
         metadata.default_value = Some(serde_json::Value::String(String::new()));
       }
+      (metadata, serde_attrs, extra_attrs, None)
+    } else {
+      let regex = metadata.regex_validation.clone();
+      (metadata, serde_attrs, Vec::new(), regex)
     }
-
-    (metadata, serde_attrs, extra_attrs, None)
   }
 
   fn prepare_additional_properties(&self, schema: &ObjectSchema) -> ConversionResult<(Vec<String>, Option<FieldDef>)> {

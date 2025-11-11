@@ -3,12 +3,11 @@ use std::collections::{BTreeMap, HashSet};
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::ast::{OperationInfo, RustType};
+use super::ast::RustType;
 
 pub mod attributes;
 pub mod coercion;
 pub mod constants;
-pub mod derives;
 pub mod enums;
 pub mod error_impls;
 pub mod structs;
@@ -44,49 +43,8 @@ impl Visibility {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TypeUsage {
-  RequestOnly,
-  ResponseOnly,
-  Bidirectional,
-}
-
-pub(crate) fn build_type_usage_map(operations: &[OperationInfo]) -> BTreeMap<String, TypeUsage> {
-  let mut usage_map: BTreeMap<String, (bool, bool)> = BTreeMap::new();
-
-  for op in operations {
-    if let Some(ref req_type) = op.request_type {
-      let entry = usage_map.entry(req_type.clone()).or_insert((false, false));
-      entry.0 = true;
-    }
-
-    for body_type in &op.request_body_types {
-      let entry = usage_map.entry(body_type.clone()).or_insert((false, false));
-      entry.0 = true;
-    }
-
-    if let Some(ref resp_type) = op.response_type {
-      let entry = usage_map.entry(resp_type.clone()).or_insert((false, false));
-      entry.1 = true;
-    }
-  }
-
-  usage_map
-    .into_iter()
-    .map(|(type_name, (in_request, in_response))| {
-      let usage = match (in_request, in_response) {
-        (true, false) => TypeUsage::RequestOnly,
-        (false, true) => TypeUsage::ResponseOnly,
-        (true, true) | (false, false) => TypeUsage::Bidirectional,
-      };
-      (type_name, usage)
-    })
-    .collect()
-}
-
 pub(crate) fn generate(
   types: &[RustType],
-  type_usage: &BTreeMap<String, TypeUsage>,
   headers: &[&String],
   error_schemas: &HashSet<String>,
   visibility: Visibility,
@@ -94,13 +52,14 @@ pub(crate) fn generate(
   let ordered = deduplicate_and_order_types(types);
   let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
   let header_consts = constants::generate_header_constants(headers);
+  let serde_use = compute_serde_use(&ordered);
   let type_tokens: Vec<TokenStream> = ordered
     .iter()
-    .map(|ty| generate_type(ty, &regex_lookup, type_usage, error_schemas, visibility))
+    .map(|ty| generate_type(ty, &regex_lookup, error_schemas, visibility))
     .collect();
 
   quote! {
-    use serde::{Deserialize, Serialize};
+    #serde_use
 
     #regex_consts
 
@@ -142,12 +101,11 @@ fn type_priority(rust_type: &RustType) -> u8 {
 fn generate_type(
   rust_type: &RustType,
   regex_lookup: &BTreeMap<constants::RegexKey, String>,
-  type_usage: &BTreeMap<String, TypeUsage>,
   error_schemas: &HashSet<String>,
   visibility: Visibility,
 ) -> TokenStream {
   let type_tokens = match rust_type {
-    RustType::Struct(def) => structs::generate_struct(def, regex_lookup, type_usage, visibility),
+    RustType::Struct(def) => structs::generate_struct(def, regex_lookup, visibility),
     RustType::Enum(def) => enums::generate_enum(def, visibility),
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
     RustType::DiscriminatedEnum(def) => enums::generate_discriminated_enum(def, visibility),
@@ -170,4 +128,34 @@ fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<String>
     RustType::Enum(def) if error_schemas.contains(&def.name) => error_impls::generate_error_impl(rust_type),
     _ => None,
   }
+}
+
+fn compute_serde_use(types: &[&RustType]) -> TokenStream {
+  let mut needs_serialize = false;
+  let mut needs_deserialize = false;
+
+  for ty in types {
+    match ty {
+      RustType::Struct(def) => {
+        needs_serialize |= derives_include(&def.derives, "Serialize");
+        needs_deserialize |= derives_include(&def.derives, "Deserialize");
+      }
+      RustType::Enum(def) => {
+        needs_serialize |= derives_include(&def.derives, "Serialize");
+        needs_deserialize |= derives_include(&def.derives, "Deserialize");
+      }
+      RustType::ResponseEnum(_) | RustType::DiscriminatedEnum(_) | RustType::TypeAlias(_) => {}
+    }
+  }
+
+  match (needs_serialize, needs_deserialize) {
+    (true, true) => quote! { use serde::{Deserialize, Serialize}; },
+    (true, false) => quote! { use serde::Serialize; },
+    (false, true) => quote! { use serde::Deserialize; },
+    (false, false) => quote! {},
+  }
+}
+
+fn derives_include(derives: &[String], target: &str) -> bool {
+  derives.iter().any(|derive| derive == target)
 }

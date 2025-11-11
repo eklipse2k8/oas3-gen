@@ -19,15 +19,7 @@ pub(crate) enum InlinePolicy {
   InlineUnions,
 }
 
-const STRUCT_DERIVES: &[&str] = &[
-  "Debug",
-  "Clone",
-  "PartialEq",
-  "validator::Validate",
-  "oas3_gen_support::Default",
-];
-const SERIALIZE_DERIVE: &str = "Serialize";
-const DESERIALIZE_DERIVE: &str = "Deserialize";
+const STRUCT_DERIVES: &[&str] = &["Debug", "Clone", "PartialEq", "oas3_gen_support::Default"];
 
 const SIMPLE_ENUM_DERIVES: &[&str] = &[
   "Debug",
@@ -48,15 +40,8 @@ const COMPLEX_ENUM_DERIVES: &[&str] = &[
   "oas3_gen_support::Default",
 ];
 
-pub(crate) fn derives_for_struct(all_read_only: bool, all_write_only: bool) -> Vec<String> {
-  let mut derives: Vec<String> = STRUCT_DERIVES.iter().map(|s| (*s).to_string()).collect();
-  if !all_read_only {
-    derives.push(SERIALIZE_DERIVE.to_string());
-  }
-  if !all_write_only {
-    derives.push(DESERIALIZE_DERIVE.to_string());
-  }
-  derives
+pub(crate) fn derives_for_struct(_all_read_only: bool, _all_write_only: bool) -> Vec<String> {
+  STRUCT_DERIVES.iter().map(|s| (*s).to_string()).collect()
 }
 
 pub(crate) fn derives_for_enum(is_simple: bool) -> Vec<String> {
@@ -68,12 +53,8 @@ pub(crate) fn derives_for_enum(is_simple: bool) -> Vec<String> {
   base.iter().map(|s| (*s).to_string()).collect()
 }
 
-pub(crate) fn container_outer_attrs(fields: &[FieldDef]) -> Vec<String> {
-  if fields.iter().any(|field| field.rust_type.nullable) {
-    vec!["oas3_gen_support::skip_serializing_none".into()]
-  } else {
-    Vec::new()
-  }
+pub(crate) fn container_outer_attrs(_fields: &[FieldDef]) -> Vec<String> {
+  Vec::new()
 }
 
 pub(crate) fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {

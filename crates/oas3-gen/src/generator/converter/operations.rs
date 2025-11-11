@@ -5,7 +5,7 @@ use oas3::{
   spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn},
 };
 
-use super::{SchemaConverter, error::ConversionResult, metadata};
+use super::{SchemaConverter, TypeUsageRecorder, error::ConversionResult, metadata};
 use crate::{
   generator::{
     ast::{
@@ -35,6 +35,12 @@ struct RequestBodyInfo {
 struct ParameterMappings {
   path: Vec<path_renderer::PathParamMapping>,
   query: Vec<path_renderer::QueryParamMapping>,
+}
+
+struct ProcessingContext<'a> {
+  type_usage: &'a mut Vec<String>,
+  generated_types: &'a mut Vec<RustType>,
+  usage: &'a mut TypeUsageRecorder,
 }
 
 struct SharedSchemaCache {
@@ -207,14 +213,16 @@ impl<'a> OperationConverter<'a> {
     method: &str,
     path: &str,
     operation: &Operation,
+    usage: &mut TypeUsageRecorder,
   ) -> ConversionResult<(Vec<RustType>, OperationInfo)> {
     let base_name = to_rust_type_name(operation_id);
 
     let mut warnings = Vec::new();
     let mut types = Vec::new();
 
-    let body_info = self.prepare_request_body(&base_name, operation, path)?;
+    let body_info = self.prepare_request_body(&base_name, operation, path, usage)?;
     types.extend(body_info.generated_types);
+    usage.mark_request_iter(&body_info.type_usage);
 
     let response_enum_info = if operation.responses.is_some() {
       let response_name = format!("{base_name}{RESPONSE_SUFFIX}");
@@ -236,6 +244,8 @@ impl<'a> OperationConverter<'a> {
       )?;
 
       warnings.extend(request_warnings);
+      let rust_request_name = request_struct.name.clone();
+      usage.mark_request(&rust_request_name);
       types.push(RustType::Struct(request_struct));
       Some(request_name)
     } else {
@@ -244,6 +254,12 @@ impl<'a> OperationConverter<'a> {
 
     let response_enum_name = if let Some((name, mut def)) = response_enum_info {
       def.request_type = request_type_name.clone().unwrap_or_default();
+      usage.mark_response(&def.name);
+      for variant in &def.variants {
+        if let Some(schema_type) = &variant.schema_type {
+          usage.mark_response_type_ref(schema_type);
+        }
+      }
       types.push(RustType::ResponseEnum(def));
       Some(name)
     } else {
@@ -252,6 +268,11 @@ impl<'a> OperationConverter<'a> {
 
     let response_type_name = self.extract_response_type_name(operation);
     let (success_response_types, error_response_types) = self.extract_all_response_types(operation);
+    if let Some(name) = &response_type_name {
+      usage.mark_response(name);
+    }
+    usage.mark_response_iter(&success_response_types);
+    usage.mark_response_iter(&error_response_types);
 
     let op_info = OperationInfo {
       operation_id: operation.operation_id.clone().unwrap_or(base_name),
@@ -318,12 +339,7 @@ impl<'a> OperationConverter<'a> {
       name: to_rust_type_name(name),
       docs,
       fields,
-      derives: vec![
-        "Clone".into(),
-        "Debug".into(),
-        "validator::Validate".into(),
-        "oas3_gen_support::Default".into(),
-      ],
+      derives: vec!["Debug".into(), "Clone".into(), "oas3_gen_support::Default".into()],
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods,
@@ -338,6 +354,7 @@ impl<'a> OperationConverter<'a> {
     base_name: &str,
     operation: &Operation,
     path: &str,
+    usage: &mut TypeUsageRecorder,
   ) -> ConversionResult<RequestBodyInfo> {
     let mut generated_types = Vec::new();
     let mut type_usage = Vec::new();
@@ -368,13 +385,17 @@ impl<'a> OperationConverter<'a> {
     };
 
     let raw_body_type_name = format!("{base_name}{REQUEST_BODY_SUFFIX}");
+    let mut ctx = ProcessingContext {
+      type_usage: &mut type_usage,
+      generated_types: &mut generated_types,
+      usage,
+    };
     let body_type = self.process_request_body_schema(
       schema_ref,
       &raw_body_type_name,
-      &mut type_usage,
       path,
-      &mut generated_types,
       body.description.as_ref(),
+      &mut ctx,
     )?;
 
     Ok(RequestBodyInfo {
@@ -388,10 +409,9 @@ impl<'a> OperationConverter<'a> {
     &self,
     schema_ref: &ObjectOrReference<oas3::spec::ObjectSchema>,
     type_name: &str,
-    type_usage: &mut Vec<String>,
     path: &str,
-    generated_types: &mut Vec<RustType>,
     description: Option<&String>,
+    ctx: &mut ProcessingContext,
   ) -> ConversionResult<Option<TypeRef>> {
     let rust_type_name = to_rust_type_name(type_name);
 
@@ -410,7 +430,8 @@ impl<'a> OperationConverter<'a> {
           StructKind::RequestBody,
         )?;
 
-        type_usage.push(cached_type_name.clone());
+        ctx.type_usage.push(cached_type_name.clone());
+        ctx.usage.mark_request(&cached_type_name);
         Ok(Some(TypeRef::new(cached_type_name)))
       }
       ObjectOrReference::Ref { ref_path, .. } => {
@@ -423,9 +444,11 @@ impl<'a> OperationConverter<'a> {
           docs: metadata::extract_docs(description),
           target: TypeRef::new(target_rust_name.clone()),
         };
-        generated_types.push(RustType::TypeAlias(alias));
-        type_usage.push(target_rust_name);
-        type_usage.push(rust_type_name.clone());
+        ctx.generated_types.push(RustType::TypeAlias(alias));
+        ctx.type_usage.push(target_rust_name.clone());
+        ctx.type_usage.push(rust_type_name.clone());
+        ctx.usage.mark_request(&target_rust_name);
+        ctx.usage.mark_request(&rust_type_name);
         Ok(Some(TypeRef::new(rust_type_name)))
       }
     }
@@ -665,12 +688,25 @@ impl<'a> OperationConverter<'a> {
       "201" => "Created".to_string(),
       "202" => "Accepted".to_string(),
       "204" => "NoContent".to_string(),
+      "301" => "MovedPermanently".to_string(),
+      "302" => "Found".to_string(),
+      "304" => "NotModified".to_string(),
       "400" => "BadRequest".to_string(),
       "401" => "Unauthorized".to_string(),
       "403" => "Forbidden".to_string(),
       "404" => "NotFound".to_string(),
+      "405" => "MethodNotAllowed".to_string(),
+      "406" => "NotAcceptable".to_string(),
+      "408" => "RequestTimeout".to_string(),
       "409" => "Conflict".to_string(),
+      "410" => "Gone".to_string(),
+      "422" => "UnprocessableEntity".to_string(),
+      "429" => "TooManyRequests".to_string(),
       "500" => "InternalServerError".to_string(),
+      "501" => "NotImplemented".to_string(),
+      "502" => "BadGateway".to_string(),
+      "503" => "ServiceUnavailable".to_string(),
+      "504" => "GatewayTimeout".to_string(),
       "1XX" => "Informational".to_string(),
       "2XX" => "Success".to_string(),
       "3XX" => "Redirection".to_string(),
