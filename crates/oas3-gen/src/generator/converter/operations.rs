@@ -207,6 +207,28 @@ impl<'a> OperationConverter<'a> {
     self.schema_cache.into_inner().into_types()
   }
 
+  fn generate_unique_response_name(&self, base_name: &str) -> String {
+    let mut response_name = format!("{base_name}{RESPONSE_SUFFIX}");
+    let rust_response_name = to_rust_type_name(&response_name);
+
+    if self.schema_converter.is_schema_name(&rust_response_name) {
+      response_name = format!("{base_name}{RESPONSE_SUFFIX}Enum");
+    }
+
+    response_name
+  }
+
+  fn generate_unique_request_name(&self, base_name: &str) -> String {
+    let mut request_name = format!("{base_name}{REQUEST_SUFFIX}");
+    let rust_request_name = to_rust_type_name(&request_name);
+
+    if self.schema_converter.is_schema_name(&rust_request_name) {
+      request_name = format!("{base_name}{REQUEST_SUFFIX}Params");
+    }
+
+    request_name
+  }
+
   pub(crate) fn convert(
     &self,
     operation_id: &str,
@@ -225,7 +247,7 @@ impl<'a> OperationConverter<'a> {
     usage.mark_request_iter(&body_info.type_usage);
 
     let response_enum_info = if operation.responses.is_some() {
-      let response_name = format!("{base_name}{RESPONSE_SUFFIX}");
+      let response_name = self.generate_unique_response_name(&base_name);
       self
         .build_response_enum(&response_name, None, operation, path)
         .map(|def| (response_name, def))
@@ -234,7 +256,7 @@ impl<'a> OperationConverter<'a> {
     };
 
     let request_type_name = if self.operation_has_parameters(path, operation) || body_info.body_type.is_some() {
-      let request_name = format!("{base_name}{REQUEST_SUFFIX}");
+      let request_name = self.generate_unique_request_name(&base_name);
       let (request_struct, request_warnings) = self.build_request_struct(
         &request_name,
         path,

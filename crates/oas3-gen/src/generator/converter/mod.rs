@@ -21,6 +21,7 @@ use super::{
 use crate::reserved::to_rust_type_name;
 
 pub(crate) struct SchemaConverter<'a> {
+  graph: &'a SchemaGraph,
   type_resolver: TypeResolver<'a>,
   struct_converter: StructConverter<'a>,
   enum_converter: EnumConverter<'a>,
@@ -30,6 +31,7 @@ impl<'a> SchemaConverter<'a> {
   pub(crate) fn new(graph: &'a SchemaGraph) -> Self {
     let type_resolver = TypeResolver::new(graph);
     Self {
+      graph,
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, type_resolver.clone(), None),
       enum_converter: EnumConverter::new(graph, type_resolver),
@@ -39,6 +41,7 @@ impl<'a> SchemaConverter<'a> {
   pub(crate) fn new_with_filter(graph: &'a SchemaGraph, reachable_schemas: BTreeSet<String>) -> Self {
     let type_resolver = TypeResolver::new(graph);
     Self {
+      graph,
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, type_resolver.clone(), Some(reachable_schemas)),
       enum_converter: EnumConverter::new(graph, type_resolver),
@@ -105,6 +108,13 @@ impl<'a> SchemaConverter<'a> {
 
   pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
     metadata::extract_default_value(schema)
+  }
+
+  pub(crate) fn is_schema_name(&self, name: &str) -> bool {
+    self.graph.schema_names().iter().any(|schema_name| {
+      let rust_schema_name = to_rust_type_name(schema_name);
+      rust_schema_name == name || **schema_name == name
+    })
   }
 }
 

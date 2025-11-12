@@ -77,6 +77,10 @@ pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s Object
         return None;
       }
 
+      if !schema.enum_values.is_empty() {
+        return None;
+      }
+
       if Regex::new(pattern).is_ok() {
         Some(pattern)
       } else {
