@@ -380,9 +380,11 @@ impl<'a> StructConverter<'a> {
     }
 
     let has_default = prop_schema.default.is_some();
-    let is_discriminator_field = discriminator_info.is_some();
+    let is_discriminator_without_enum = discriminator_info
+      .as_ref()
+      .is_some_and(|info| !info.has_enum);
 
-    !has_default && !is_discriminator_field
+    has_default || is_discriminator_without_enum
   }
 
   fn resolve_field_type(

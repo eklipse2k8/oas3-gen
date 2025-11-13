@@ -177,3 +177,83 @@ fn test_discriminator_without_enum_is_hidden() -> ConversionResult<()> {
 
   Ok(())
 }
+
+#[test]
+fn test_required_fields_are_not_optional() -> ConversionResult<()> {
+  let mut pet_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+  pet_schema.properties.insert(
+    "id".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+      ..Default::default()
+    }),
+  );
+  pet_schema.properties.insert(
+    "name".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+  pet_schema.properties.insert(
+    "tag".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+  pet_schema.required = vec!["id".to_string(), "name".to_string()];
+
+  let graph = create_test_graph(BTreeMap::from([("Pet".to_string(), pet_schema)]));
+  let converter = SchemaConverter::new(&graph);
+  let result = converter.convert_schema("Pet", graph.get_schema("Pet").unwrap())?;
+
+  let struct_def = result
+    .iter()
+    .find_map(|ty| match ty {
+      RustType::Struct(def) => Some(def),
+      _ => None,
+    })
+    .expect("Pet struct should be present");
+
+  let id_field = struct_def
+    .fields
+    .iter()
+    .find(|f| f.name == "id")
+    .expect("id field should exist");
+
+  let name_field = struct_def
+    .fields
+    .iter()
+    .find(|f| f.name == "name")
+    .expect("name field should exist");
+
+  let tag_field = struct_def
+    .fields
+    .iter()
+    .find(|f| f.name == "tag")
+    .expect("tag field should exist");
+
+  assert!(
+    !id_field.rust_type.to_rust_type().starts_with("Option<"),
+    "Required field 'id' should not be wrapped in Option<T>, got: {}",
+    id_field.rust_type.to_rust_type()
+  );
+
+  assert!(
+    !name_field.rust_type.to_rust_type().starts_with("Option<"),
+    "Required field 'name' should not be wrapped in Option<T>, got: {}",
+    name_field.rust_type.to_rust_type()
+  );
+
+  assert!(
+    tag_field.rust_type.to_rust_type().starts_with("Option<"),
+    "Optional field 'tag' should be wrapped in Option<T>, got: {}",
+    tag_field.rust_type.to_rust_type()
+  );
+
+  Ok(())
+}

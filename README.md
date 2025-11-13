@@ -24,7 +24,7 @@ cargo install oas3-gen
 Provide a path to an OpenAPI specification and specify an output file for the generated Rust code.
 
 ```sh
-oas3-gen generate --input <path/to/openapi.json> --output <path/to/generated_types.rs>
+oas3-gen generate --input <path/to/openapi.json> --output <path/to/generated_types.rs> --all-schemas
 ```
 
 #### Example
@@ -33,27 +33,38 @@ Consider the following OpenAPI schema definition in `schemas/pet.json`:
 
 ```json
 {
-  "Pet": {
-    "type": "object",
-    "description": "Represents a pet in the store.",
-    "required": ["id", "name"],
-    "properties": {
-      "id": {
-        "type": "integer",
-        "format": "int64",
-        "description": "The unique identifier for the pet."
-      },
-      "name": {
-        "type": "string",
-        "description": "The name of the pet."
-      },
-      "tag": {
-        "type": "string",
-        "description": "An optional tag for the pet."
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Sample API",
+    "version": "1.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Pet": {
+        "type": "object",
+        "description": "Represents a pet in the store.",
+        "required": ["id", "name"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The unique identifier for the pet."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name of the pet."
+          },
+          "tag": {
+            "type": "string",
+            "description": "An optional tag for the pet."
+          }
+        }
       }
     }
   }
 }
+
 ```
 
 Executing `oas3-gen` produces the corresponding Rust types.
