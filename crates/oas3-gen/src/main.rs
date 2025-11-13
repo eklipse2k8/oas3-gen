@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         mode,
         input,
         output,
-        &visibility,
+        visibility,
         verbose,
         quiet,
         all_schemas,

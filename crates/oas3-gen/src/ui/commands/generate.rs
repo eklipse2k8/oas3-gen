@@ -34,14 +34,13 @@ impl GenerateConfig {
     mode: GenerateMode,
     input: PathBuf,
     output: PathBuf,
-    visibility: &str,
+    visibility: Visibility,
     verbose: bool,
     quiet: bool,
     all_schemas: bool,
     only_operations: Option<Vec<String>>,
     excluded_operations: Option<Vec<String>>,
   ) -> Self {
-    let visibility = Visibility::parse(visibility).unwrap_or(Visibility::Public);
     let only_operations = only_operations.map(|ops| ops.into_iter().collect());
     let excluded_operations = excluded_operations.map(|ops| ops.into_iter().collect());
     Self {
