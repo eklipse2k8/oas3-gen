@@ -64,6 +64,7 @@ impl RustType {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct OperationInfo {
+  pub stable_id: String,
   pub operation_id: String,
   pub method: String,
   pub path: String,
@@ -76,6 +77,31 @@ pub struct OperationInfo {
   pub success_response_types: Vec<String>,
   pub error_response_types: Vec<String>,
   pub warnings: Vec<String>,
+  pub parameters: Vec<OperationParameter>,
+  pub body: Option<OperationBody>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParameterLocation {
+  Path,
+  Query,
+  Header,
+  Cookie,
+}
+
+#[derive(Debug, Clone)]
+pub struct OperationParameter {
+  pub original_name: String,
+  pub rust_field: String,
+  pub location: ParameterLocation,
+  pub required: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct OperationBody {
+  pub field_name: String,
+  pub optional: bool,
+  pub content_type: Option<String>,
 }
 
 /// Semantic kind of a struct to determine code generation behavior

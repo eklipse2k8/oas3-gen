@@ -9,8 +9,8 @@ use super::{SchemaConverter, TypeUsageRecorder, error::ConversionResult, metadat
 use crate::{
   generator::{
     ast::{
-      FieldDef, OperationInfo, PathSegment, QueryParameter, ResponseEnumDef, ResponseVariant, RustType, StructDef,
-      StructKind, TypeAliasDef, TypeRef,
+      FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, PathSegment, QueryParameter,
+      ResponseEnumDef, ResponseVariant, RustType, StructDef, StructKind, TypeAliasDef, TypeRef,
     },
     schema_graph::SchemaGraph,
   },
@@ -29,6 +29,9 @@ struct RequestBodyInfo {
   body_type: Option<TypeRef>,
   generated_types: Vec<RustType>,
   type_usage: Vec<String>,
+  field_name: Option<String>,
+  optional: bool,
+  content_type: Option<String>,
 }
 
 #[derive(Default)]
@@ -231,6 +234,7 @@ impl<'a> OperationConverter<'a> {
 
   pub(crate) fn convert(
     &self,
+    stable_id: &str,
     operation_id: &str,
     method: &str,
     path: &str,
@@ -238,6 +242,7 @@ impl<'a> OperationConverter<'a> {
     usage: &mut TypeUsageRecorder,
   ) -> ConversionResult<(Vec<RustType>, OperationInfo)> {
     let base_name = to_rust_type_name(operation_id);
+    let stable_id = stable_id.to_string();
 
     let mut warnings = Vec::new();
     let mut types = Vec::new();
@@ -246,7 +251,7 @@ impl<'a> OperationConverter<'a> {
     types.extend(body_info.generated_types);
     usage.mark_request_iter(&body_info.type_usage);
 
-    let response_enum_info = if operation.responses.is_some() {
+    let mut response_enum_info = if operation.responses.is_some() {
       let response_name = self.generate_unique_response_name(&base_name);
       self
         .build_response_enum(&response_name, None, operation, path)
@@ -255,27 +260,32 @@ impl<'a> OperationConverter<'a> {
       None
     };
 
-    let request_type_name = if self.operation_has_parameters(path, operation) || body_info.body_type.is_some() {
-      let request_name = self.generate_unique_request_name(&base_name);
-      let (request_struct, request_warnings) = self.build_request_struct(
-        &request_name,
-        path,
-        operation,
-        body_info.body_type,
-        response_enum_info.as_ref(),
-      )?;
+    let request_name = self.generate_unique_request_name(&base_name);
+    let (request_struct, request_warnings, parameter_metadata) = self.build_request_struct(
+      &request_name,
+      path,
+      operation,
+      body_info.body_type.clone(),
+      response_enum_info.as_ref(),
+    )?;
 
-      warnings.extend(request_warnings);
+    warnings.extend(request_warnings);
+    let has_fields = !request_struct.fields.is_empty();
+    let should_generate_request_struct = has_fields || response_enum_info.is_some();
+
+    let mut request_type_name = None;
+    if should_generate_request_struct {
       let rust_request_name = request_struct.name.clone();
       usage.mark_request(&rust_request_name);
       types.push(RustType::Struct(request_struct));
-      Some(request_name)
-    } else {
-      None
-    };
+      request_type_name = Some(rust_request_name);
+    }
 
-    let response_enum_name = if let Some((name, mut def)) = response_enum_info {
+    if let Some((_, def)) = response_enum_info.as_mut() {
       def.request_type = request_type_name.clone().unwrap_or_default();
+    }
+
+    let response_enum_name = if let Some((name, def)) = response_enum_info {
       usage.mark_response(&def.name);
       for variant in &def.variants {
         if let Some(schema_type) = &variant.schema_type {
@@ -296,8 +306,17 @@ impl<'a> OperationConverter<'a> {
     usage.mark_response_iter(&success_response_types);
     usage.mark_response_iter(&error_response_types);
 
+    let body_metadata = body_info.field_name.as_ref().map(|field_name| OperationBody {
+      field_name: field_name.clone(),
+      optional: body_info.optional,
+      content_type: body_info.content_type.clone(),
+    });
+
+    let final_operation_id = operation.operation_id.clone().unwrap_or(base_name);
+
     let op_info = OperationInfo {
-      operation_id: operation.operation_id.clone().unwrap_or(base_name),
+      stable_id,
+      operation_id: final_operation_id,
       method: method.to_string(),
       path: path.to_string(),
       summary: operation.summary.clone(),
@@ -309,6 +328,8 @@ impl<'a> OperationConverter<'a> {
       success_response_types,
       error_response_types,
       warnings,
+      parameters: parameter_metadata,
+      body: body_metadata,
     };
 
     Ok((types, op_info))
@@ -321,15 +342,17 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
     body_type: Option<TypeRef>,
     response_enum_info: Option<&(String, ResponseEnumDef)>,
-  ) -> ConversionResult<(StructDef, Vec<String>)> {
+  ) -> ConversionResult<(StructDef, Vec<String>, Vec<OperationParameter>)> {
     let mut warnings = Vec::new();
     let mut fields = Vec::new();
     let mut param_mappings = ParameterMappings::default();
+    let mut parameter_info = Vec::new();
 
     for param in self.collect_parameters(path, operation) {
-      let field = self.convert_parameter(&param, &mut warnings)?;
+      let (field, meta) = self.convert_parameter(&param, &mut warnings)?;
       Self::map_parameter(&param, &field, &mut param_mappings);
       fields.push(field);
+      parameter_info.push(meta);
     }
 
     if let Some(body_type_ref) = body_type
@@ -368,7 +391,7 @@ impl<'a> OperationConverter<'a> {
       kind: StructKind::OperationRequest,
     };
 
-    Ok((struct_def, warnings))
+    Ok((struct_def, warnings, parameter_info))
   }
 
   fn prepare_request_body(
@@ -386,15 +409,23 @@ impl<'a> OperationConverter<'a> {
         body_type: None,
         generated_types,
         type_usage,
+        field_name: None,
+        optional: true,
+        content_type: None,
       });
     };
 
     let body = body_ref.resolve(self.spec)?;
+    let is_required = body.required.unwrap_or(false);
+
     let Some((_content_type, media_type)) = body.content.iter().next() else {
       return Ok(RequestBodyInfo {
         body_type: None,
         generated_types,
         type_usage,
+        field_name: None,
+        optional: !is_required,
+        content_type: None,
       });
     };
 
@@ -403,6 +434,9 @@ impl<'a> OperationConverter<'a> {
         body_type: None,
         generated_types,
         type_usage,
+        field_name: None,
+        optional: !is_required,
+        content_type: None,
       });
     };
 
@@ -420,10 +454,16 @@ impl<'a> OperationConverter<'a> {
       &mut ctx,
     )?;
 
+    let content_type = body.content.keys().next().cloned();
+    let field_name = body_type.as_ref().map(|_| BODY_FIELD_NAME.to_string());
+
     Ok(RequestBodyInfo {
       body_type,
       generated_types,
       type_usage,
+      field_name,
+      optional: !is_required,
+      content_type,
     })
   }
 
@@ -522,7 +562,11 @@ impl<'a> OperationConverter<'a> {
     params
   }
 
-  fn convert_parameter(&self, param: &Parameter, warnings: &mut Vec<String>) -> ConversionResult<FieldDef> {
+  fn convert_parameter(
+    &self,
+    param: &Parameter,
+    warnings: &mut Vec<String>,
+  ) -> ConversionResult<(FieldDef, OperationParameter)> {
     let (rust_type, validation_attrs, regex_validation, default_value) =
       self.extract_parameter_type_and_validation(param, warnings)?;
 
@@ -530,19 +574,39 @@ impl<'a> OperationConverter<'a> {
     let mut docs = metadata::extract_docs(param.description.as_ref());
     docs.push(format!("/// (Location: {:?})", param.location));
 
-    Ok(FieldDef {
-      name: to_rust_field_name(&param.name),
+    let rust_field = to_rust_field_name(&param.name);
+
+    let final_rust_type = if is_required {
+      rust_type
+    } else {
+      rust_type.with_option()
+    };
+
+    let field = FieldDef {
+      name: rust_field.clone(),
       docs,
-      rust_type: if is_required {
-        rust_type
-      } else {
-        rust_type.with_option()
-      },
+      rust_type: final_rust_type,
       validation_attrs,
       regex_validation,
       default_value,
       ..Default::default()
-    })
+    };
+
+    let location = match param.location {
+      ParameterIn::Path => ParameterLocation::Path,
+      ParameterIn::Query => ParameterLocation::Query,
+      ParameterIn::Header => ParameterLocation::Header,
+      ParameterIn::Cookie => ParameterLocation::Cookie,
+    };
+
+    let metadata = OperationParameter {
+      original_name: param.name.clone(),
+      rust_field,
+      location,
+      required: is_required,
+    };
+
+    Ok((field, metadata))
   }
 
   fn extract_parameter_type_and_validation(
@@ -583,16 +647,6 @@ impl<'a> OperationConverter<'a> {
       }),
       _ => {}
     }
-  }
-
-  fn operation_has_parameters(&self, path: &str, operation: &Operation) -> bool {
-    !operation.parameters.is_empty()
-      || self
-        .spec
-        .paths
-        .as_ref()
-        .and_then(|p| p.get(path))
-        .is_some_and(|item| !item.parameters.is_empty())
   }
 
   fn extract_response_type_name(&self, operation: &Operation) -> Option<String> {

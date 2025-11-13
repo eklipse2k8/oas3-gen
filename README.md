@@ -2,7 +2,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.14.0/status.svg)](https://deps.rs/crate/oas3-gen/0.14.0)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.15.0/status.svg)](https://deps.rs/crate/oas3-gen/0.15.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.1?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification)
 <!-- prettier-ignore-end -->
@@ -15,7 +15,7 @@
 
 Install the tool directly from crates.io using `cargo`.
 
-```sh
+```zsh
 cargo install oas3-gen
 ```
 
@@ -23,8 +23,12 @@ cargo install oas3-gen
 
 Provide a path to an OpenAPI specification and specify an output file for the generated Rust code.
 
-```sh
-oas3-gen generate --input <path/to/openapi.json> --output <path/to/generated_types.rs>
+```zsh
+# generate types (structs and enums)
+oas3-gen generate -i path/to/openapi.json -o path/to/types.rs
+
+# generate client operations
+oas3-gen generate client -i path/to/openapi.json -o path/to/client.rs
 ```
 
 #### Example
@@ -59,20 +63,25 @@ Consider the following OpenAPI schema definition in `schemas/pet.json`:
 Executing `oas3-gen` produces the corresponding Rust types.
 
 ```rust
-// src/generated_types.rs
+// src/types.rs
 
 use serde::{Deserialize, Serialize};
 
-/// Represents a pet in the store.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Pet {
-    /// The unique identifier for the pet.
-    pub id: i64,
-    /// The name of the pet.
-    pub name: String,
-    /// An optional tag for the pet.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default, Deserialize)]
+#[serde(default)]
+pub struct FileListResponse {
+    /// List of file metadata objects.
+    pub data: Option<Vec<FileMetadataSchema>>,
+
+    /// ID of the first file in this page of results.
+    pub first_id: Option<String>,
+
+    /// Whether there are more results available.
+    #[default(Some(false))]
+    pub has_more: Option<bool>,
+
+    /// ID of the last file in this page of results.
+    pub last_id: Option<String>,
 }
 ```
 
@@ -99,36 +108,39 @@ Usage: oas3-gen [OPTIONS] <COMMAND>
 
 Commands:
   list      List information from OpenAPI specification
-  generate  Generate Rust code from OpenAPI specification
+  generate  Generates idiomatic, type-safe Rust code from an OpenAPI v3.1 (OAS31) specification
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --color <COLOR>  Control color output [default: auto] [possible values: always, auto, never]
-      --theme <THEME>  Terminal theme (dark or light background) [default: auto] [possible values: dark, light, auto]
-  -h, --help           Print help
-  -V, --version        Print version
+  -h, --help     Print help
+  -V, --version  Print version
+
+Terminal Output:
+      --color <WHEN>   Coloring [default: auto] [possible values: always, auto, never]
+      --theme <THEME>  Theme [default: auto] [possible values: dark, light, auto]
 ```
 
 #### Generate Command
 
 ```text
-Generate Rust code from OpenAPI specification
+Generates idiomatic, type-safe Rust code from an OpenAPI v3.1 (OAS31) specification
 
-Usage: oas3-gen generate [OPTIONS] --input <FILE> --output <FILE>
+Usage: oas3-gen generate [OPTIONS] --input <FILE> --output <FILE> [MODE]
 
-Options:
-  -i, --input <FILE>             Path to the OpenAPI JSON specification file
-  -o, --output <FILE>            Path where the generated Rust code will be written
-      --visibility <VISIBILITY>  Visibility level for generated types [default: public]
-  -v, --verbose                  Enable verbose output with detailed progress information
-  -q, --quiet                    Suppress non-essential output (errors only)
-      --all-schemas              Generate all schemas defined in the spec, including unreferenced schemas.
-                                 When combined with --only or --exclude, this includes all schemas even if
-                                 they are not referenced by the filtered operations (default: only schemas
-                                 reachable from included operations)
-      --only <IDS>               Include only specific operations for generation (comma-separated stable IDs)
-      --exclude <IDS>            Exclude specific operations from generation (comma-separated stable IDs)
-  -h, --help                     Print help
+Arguments:
+  [MODE]  Sets the generation mode [default: types] [possible values: types, client]
+
+Required:
+  -i, --input <FILE>   Path to the OpenAPI specification file
+  -o, --output <FILE>  Path for the generated rust output file
+
+Code Generation:
+  -C, --visibility <PUB>  Module visibility for generated items [default: public] [possible values: public, crate, file]
+
+Operation Filtering:
+      --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
+      --exclude <id_1,id_2,...>  Exclude the specified comma-separated operation IDs
+      --all-schemas              Generate all schemas, even those unreferenced by selected operations
 ```
 
 #### List Command
@@ -148,33 +160,27 @@ Options:
 
 ### Examples
 
-```sh
-# Basic usage with automatic color and theme detection
-oas3-gen generate -i openapi.json -o generated.rs
+```zsh
+# Basic usage to generate types
+oas3-gen generate types -i openapi.json -o types.rs
 
-# Verbose output showing detailed statistics
-oas3-gen generate -i openapi.json -o generated.rs --verbose
+# Basic usage to generate companion client
+oas3-gen generate client -i openapi.json -o client.rs
 
-# Force dark theme with always-on colors
-oas3-gen generate -i openapi.json -o generated.rs --theme dark --color always
+# Generate types with crate-level visibility
+oas3-gen generate -i openapi.json -o types.rs -C crate
 
-# Generate with crate-level visibility
-oas3-gen generate -i openapi.json -o generated.rs --visibility crate
+# Generate all schemas types including unused ones
+oas3-gen generate -i openapi.json -o types.rs --all-schemas
 
-# Quiet mode (errors only)
-oas3-gen generate -i openapi.json -o generated.rs --quiet
+# Generate code for specific operation types only
+oas3-gen generate -i openapi.json -o types.rs --only create_user,get_user,update_user
 
-# Generate all schemas including unused ones
-oas3-gen generate -i openapi.json -o generated.rs --all-schemas
+# Generate code excluding certain operation types
+oas3-gen generate -i openapi.json -o types.rs --exclude delete_user,list_users
 
-# Generate code for specific operations only
-oas3-gen generate -i openapi.json -o generated.rs --only createUser,getUser,updateUser
-
-# Generate code excluding certain operations
-oas3-gen generate -i openapi.json -o generated.rs --exclude deleteUser,listUsers
-
-# Generate all schemas but only specific operations (includes unreferenced schemas)
-oas3-gen generate -i openapi.json -o generated.rs --all-schemas --only createUser
+# Generate all schemas but only specific operation types (includes unreferenced schemas)
+oas3-gen generate -i openapi.json -o types.rs --all-schemas --only create_user
 
 # List all operations in the specification
 oas3-gen list operations -i openapi.json

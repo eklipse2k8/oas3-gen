@@ -1,22 +1,43 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum, ValueHint, builder::Styles};
 
 use super::colors::{ColorMode, ThemeMode};
+use crate::{generator::codegen::Visibility, ui::Colors};
+
+const DARK_STYLE: Styles = Colors::clap_styles();
 
 #[derive(Parser, Debug)]
 #[command(name = "oas3-gen")]
 #[command(author, version, about = "OpenAPI to Rust code generator")]
+#[command(propagate_version = true)]
+#[command(styles = DARK_STYLE)]
 pub struct Cli {
   #[command(subcommand)]
   pub command: Commands,
 
-  /// Control color output
-  #[arg(long, value_enum, default_value = "auto", global = true)]
+  /// Coloring
+  #[arg(
+    long,
+    value_enum,
+    value_name = "WHEN",
+    default_value = "auto",
+    global = true,
+    display_order = 100,
+    help_heading = "Terminal Output"
+  )]
   pub color: ColorMode,
 
-  /// Terminal theme (dark or light background)
-  #[arg(long, value_enum, default_value = "auto", global = true)]
+  /// Theme
+  #[arg(
+    long,
+    value_enum,
+    value_name = "THEME",
+    default_value = "auto",
+    global = true,
+    display_order = 100,
+    help_heading = "Terminal Output"
+  )]
   pub theme: ThemeMode,
 }
 
@@ -27,43 +48,105 @@ pub enum Commands {
     #[command(subcommand)]
     list_command: ListCommands,
   },
-  /// Generate Rust code from OpenAPI specification
+  /// Generates idiomatic, type-safe Rust code from an OpenAPI v3.1 (OAS31) specification.
   Generate {
-    /// Path to the OpenAPI JSON specification file
-    #[arg(short, long, value_name = "FILE")]
+    /// Sets the generation mode
+    #[arg(value_enum, default_value = "types")]
+    mode: GenerateMode,
+
+    /// Path to the OpenAPI specification file
+    #[arg(
+      short,
+      long,
+      value_name = "FILE",
+      value_hint = ValueHint::AnyPath,
+      display_order = 0,
+      help_heading = "Required"
+    )]
     input: PathBuf,
 
-    /// Path where the generated Rust code will be written
-    #[arg(short, long, value_name = "FILE")]
+    /// Path for the generated rust output file
+    #[arg(
+      short,
+      long,
+      value_name = "FILE",
+      value_hint = ValueHint::AnyPath,
+      display_order = 0,
+      help_heading = "Required"
+    )]
     output: PathBuf,
 
-    /// Visibility level for generated types
-    #[arg(long, value_name = "VISIBILITY", default_value = "public")]
-    visibility: String,
+    /// Module visibility for generated items
+    #[arg(
+      short = 'C',
+      long,
+      value_name = "PUB",
+      default_value = "public",
+      display_order = 10,
+      help_heading = "Code Generation"
+    )]
+    visibility: Visibility,
+
+    /// Generate all schemas, even those unreferenced by selected operations
+    #[arg(
+      group = "filter",
+      long,
+      default_value_t = false,
+      display_order = 22,
+      help_heading = "Operation Filtering"
+    )]
+    all_schemas: bool,
+
+    /// Include only the specified comma-separated operation IDs
+    #[arg(
+      group = "filter",
+      long, action = ArgAction::Append,
+      value_name = "id_1,id_2,...",
+      value_delimiter = ',',
+      display_order = 20,
+      help_heading = "Operation Filtering"
+    )]
+    only: Option<Vec<String>>,
+
+    /// Exclude the specified comma-separated operation IDs
+    #[arg(
+      group = "filter",
+      long, action = ArgAction::Append,
+      value_name = "id_1,id_2,...",
+      value_delimiter = ',',
+      display_order = 21,
+      help_heading = "Operation Filtering"
+    )]
+    exclude: Option<Vec<String>>,
 
     /// Enable verbose output with detailed progress information
-    #[arg(short, long, default_value_t = false)]
+    #[arg(
+      short,
+      long,
+      default_value_t = false,
+      global = true,
+      display_order = 100,
+      help_heading = "Terminal Output"
+    )]
     verbose: bool,
 
     /// Suppress non-essential output (errors only)
-    #[arg(short, long, default_value_t = false)]
+    #[arg(
+      short,
+      long,
+      default_value_t = false,
+      global = true,
+      display_order = 101,
+      help_heading = "Terminal Output"
+    )]
     quiet: bool,
-
-    /// Generate all schemas defined in the spec, including unreferenced schemas.
-    /// When combined with --only or --exclude, this includes all schemas even if they
-    /// are not referenced by the filtered operations (default: only schemas reachable
-    /// from included operations)
-    #[arg(long, default_value_t = false)]
-    all_schemas: bool,
-
-    /// Include only specific operations for generation (comma-separated stable IDs)
-    #[arg(long, value_name = "IDS", value_delimiter = ',')]
-    only: Option<Vec<String>>,
-
-    /// Exclude specific operations from generation (comma-separated stable IDs)
-    #[arg(long, value_name = "IDS", value_delimiter = ',')]
-    exclude: Option<Vec<String>>,
   },
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum GenerateMode {
+  Types,
+  Client,
 }
 
 #[derive(Subcommand, Debug)]
@@ -71,7 +154,7 @@ pub enum ListCommands {
   /// List all operations defined in the OpenAPI specification
   Operations {
     /// Path to the OpenAPI JSON specification file
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(short, long, value_name = "FILE", value_hint = ValueHint::AnyPath)]
     input: PathBuf,
   },
 }

@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
       ListCommands::Operations { input } => ui::commands::list_operations(&input, &colors).await?,
     },
     Commands::Generate {
+      mode,
       input,
       output,
       visibility,
@@ -29,8 +30,17 @@ async fn main() -> anyhow::Result<()> {
       only,
       exclude,
     } => {
-      let config =
-        ui::commands::GenerateConfig::new(input, output, &visibility, verbose, quiet, all_schemas, only, exclude);
+      let config = ui::commands::GenerateConfig::new(
+        mode,
+        input,
+        output,
+        visibility,
+        verbose,
+        quiet,
+        all_schemas,
+        only,
+        exclude,
+      );
       ui::commands::generate_code(config, &colors).await?;
     }
   }
