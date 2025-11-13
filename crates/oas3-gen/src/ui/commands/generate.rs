@@ -8,7 +8,7 @@ use crate::{
     codegen::Visibility,
     orchestrator::{GenerationStats, Orchestrator},
   },
-  ui::Colors,
+  ui::{Colors, GenerateMode},
 };
 
 fn format_timestamp() -> String {
@@ -17,6 +17,7 @@ fn format_timestamp() -> String {
 }
 
 pub struct GenerateConfig {
+  pub mode: GenerateMode,
   pub input: PathBuf,
   pub output: PathBuf,
   pub visibility: Visibility,
@@ -30,6 +31,7 @@ pub struct GenerateConfig {
 impl GenerateConfig {
   #[allow(clippy::too_many_arguments)]
   pub fn new(
+    mode: GenerateMode,
     input: PathBuf,
     output: PathBuf,
     visibility: &str,
@@ -43,6 +45,7 @@ impl GenerateConfig {
     let only_operations = only_operations.map(|ops| ops.into_iter().collect());
     let excluded_operations = excluded_operations.map(|ops| ops.into_iter().collect());
     Self {
+      mode,
       input,
       output,
       visibility,
@@ -102,10 +105,14 @@ impl<'a> GenerateLogger<'a> {
   fn log_generating(&self) {
     if !self.config.quiet {
       let timestamp = format_timestamp();
+      let message = match self.config.mode {
+        GenerateMode::Types => "Generating Rust types...".to_string(),
+        GenerateMode::Client => "Generating Rust client...".to_string(),
+      };
       println!(
         "{} {}",
         timestamp.with(self.colors.timestamp()),
-        "Generating Rust types...".with(self.colors.primary())
+        message.with(self.colors.primary())
       );
     }
   }
@@ -216,11 +223,15 @@ impl<'a> GenerateLogger<'a> {
 
   fn log_success(&self) {
     if !self.config.quiet {
+      let message = match self.config.mode {
+        GenerateMode::Types => "Successfully generated Rust types",
+        GenerateMode::Client => "Successfully generated Rust client",
+      };
       println!();
       println!(
         "{} {}",
         format_timestamp().with(self.colors.timestamp()),
-        "Successfully generated Rust types".with(self.colors.success())
+        message.with(self.colors.success())
       );
     }
   }
@@ -234,7 +245,11 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
 
   logger.log_generating();
   let orchestrator = config.create_orchestrator(spec);
-  let (code, stats) = orchestrator.generate_with_header(&config.input.display().to_string())?;
+  let source_path = config.input.display().to_string();
+  let (code, stats) = match config.mode {
+    GenerateMode::Types => orchestrator.generate_with_header(&source_path)?,
+    GenerateMode::Client => orchestrator.generate_client_with_header(&source_path)?,
+  };
 
   logger.print_statistics(&stats);
   logger.print_warnings(&stats);

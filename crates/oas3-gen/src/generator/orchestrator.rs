@@ -45,6 +45,14 @@ pub struct GenerationStats {
   pub orphaned_schemas_count: usize,
 }
 
+struct GenerationArtifacts {
+  graph: SchemaGraph,
+  rust_types: Vec<RustType>,
+  operations_info: Vec<OperationInfo>,
+  usage_recorder: TypeUsageRecorder,
+  stats: GenerationStats,
+}
+
 #[derive(Debug)]
 pub enum GenerationWarning {
   SchemaConversionFailed {
@@ -94,6 +102,19 @@ impl Orchestrator {
     }
   }
 
+  pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
+    let artifacts = self.collect_generation_artifacts()?;
+    let GenerationArtifacts {
+      operations_info, stats, ..
+    } = artifacts;
+
+    let client_tokens = codegen::client::generate_client(&self.spec, &operations_info)?;
+    let formatted_code = Self::format_code(&client_tokens)?;
+    let header = self.generate_header(source_path);
+    let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
+    Ok((final_code, stats))
+  }
+
   pub fn metadata(&self) -> CodeMetadata {
     CodeMetadata {
       title: self.spec.info.title.clone(),
@@ -103,14 +124,23 @@ impl Orchestrator {
   }
 
   pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let (code_tokens, stats) = self.run_generation_pipeline()?;
+    let artifacts = self.collect_generation_artifacts()?;
+    let GenerationArtifacts {
+      graph,
+      rust_types,
+      operations_info,
+      usage_recorder,
+      stats,
+    } = artifacts;
+
+    let code_tokens = self.generate_code_from_artifacts(&graph, rust_types, &operations_info, usage_recorder);
     let formatted_code = Self::format_code(&code_tokens)?;
     let header = self.generate_header(source_path);
     let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
     Ok((final_code, stats))
   }
 
-  fn run_generation_pipeline(&self) -> anyhow::Result<(proc_macro2::TokenStream, GenerationStats)> {
+  fn collect_generation_artifacts(&self) -> anyhow::Result<GenerationArtifacts> {
     let mut graph = SchemaGraph::new(self.spec.clone())?;
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
@@ -157,7 +187,6 @@ impl Orchestrator {
     }
 
     let types_generated = structs_generated + enums_generated + type_aliases_generated;
-    let code = self.generate_code_from_artifacts(&graph, rust_types, &operations_info, usage_recorder);
 
     let stats = GenerationStats {
       types_generated,
@@ -171,7 +200,13 @@ impl Orchestrator {
       orphaned_schemas_count,
     };
 
-    Ok((code, stats))
+    Ok(GenerationArtifacts {
+      graph,
+      rust_types,
+      operations_info,
+      usage_recorder,
+      stats,
+    })
   }
 
   fn convert_all_schemas(
@@ -219,10 +254,10 @@ impl Orchestrator {
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
-    for (_stable_id, method, path, operation) in self.operation_registry.operations_with_details() {
+    for (stable_id, method, path, operation) in self.operation_registry.operations_with_details() {
       let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
-      match operation_converter.convert(operation_id, method, path, operation, &mut usage_recorder) {
+      match operation_converter.convert(stable_id, operation_id, method, path, operation, &mut usage_recorder) {
         Ok((types, op_info)) => {
           warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
             operation_id: op_info.operation_id.clone(),

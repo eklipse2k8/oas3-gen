@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use super::colors::{ColorMode, ThemeMode};
 
@@ -29,6 +29,10 @@ pub enum Commands {
   },
   /// Generate Rust code from OpenAPI specification
   Generate {
+    /// Generation mode (types or client)
+    #[arg(short, long, value_enum, default_value = "types")]
+    mode: GenerateMode,
+
     /// Path to the OpenAPI JSON specification file
     #[arg(short, long, value_name = "FILE")]
     input: PathBuf,
@@ -64,6 +68,12 @@ pub enum Commands {
     #[arg(long, value_name = "IDS", value_delimiter = ',')]
     exclude: Option<Vec<String>>,
   },
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum GenerateMode {
+  Types,
+  Client,
 }
 
 #[derive(Subcommand, Debug)]

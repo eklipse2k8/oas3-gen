@@ -6,6 +6,7 @@ use quote::quote;
 use super::ast::RustType;
 
 pub mod attributes;
+pub mod client;
 pub mod coercion;
 pub mod constants;
 pub mod enums;
