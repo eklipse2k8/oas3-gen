@@ -153,7 +153,7 @@ fn build_body_for_content_type(body: &OperationBody) -> TokenStream {
   } else if content_type.contains("text/plain") || content_type.contains("text/html") {
     build_text_body(&field_ident, body.optional)
   } else if content_type.contains("octet-stream")
-    || content_type.starts_with("application/") && !content_type.contains("json")
+    || (content_type.starts_with("application/") && !content_type.contains("json"))
   {
     build_binary_body(&field_ident, body.optional)
   } else if content_type.contains("xml") {
