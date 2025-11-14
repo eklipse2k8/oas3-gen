@@ -1,6 +1,6 @@
 use std::io::IsTerminal;
 
-use clap::ValueEnum;
+use clap::{ValueEnum, builder::styling::Ansi256Color};
 use comfy_table::Color as ComfyColor;
 use crossterm::style::Color;
 
@@ -59,11 +59,11 @@ impl IntoComfyColor for Color {
 }
 
 impl Colors {
-  pub fn new(enabled: bool, theme: Theme) -> Self {
+  pub const fn new(enabled: bool, theme: Theme) -> Self {
     Self { enabled, theme }
   }
 
-  pub fn timestamp(&self) -> Color {
+  pub const fn timestamp(&self) -> Color {
     if !self.enabled {
       return Color::Reset;
     }
@@ -74,7 +74,7 @@ impl Colors {
     }
   }
 
-  pub fn primary(&self) -> Color {
+  pub const fn primary(&self) -> Color {
     if !self.enabled {
       return Color::Reset;
     }
@@ -85,7 +85,7 @@ impl Colors {
     }
   }
 
-  pub fn accent(&self) -> Color {
+  pub const fn accent(&self) -> Color {
     if !self.enabled {
       return Color::Reset;
     }
@@ -96,7 +96,7 @@ impl Colors {
     }
   }
 
-  pub fn info(&self) -> Color {
+  pub const fn info(&self) -> Color {
     if !self.enabled {
       return Color::Reset;
     }
@@ -107,7 +107,7 @@ impl Colors {
     }
   }
 
-  pub fn success(&self) -> Color {
+  pub const fn success(&self) -> Color {
     if !self.enabled {
       return Color::Reset;
     }
@@ -118,7 +118,7 @@ impl Colors {
     }
   }
 
-  pub fn label(&self) -> Color {
+  pub const fn label(&self) -> Color {
     if !self.enabled {
       return Color::Reset;
     }
@@ -129,7 +129,7 @@ impl Colors {
     }
   }
 
-  pub fn value(&self) -> Color {
+  pub const fn value(&self) -> Color {
     if !self.enabled {
       return Color::Reset;
     }
@@ -138,6 +138,40 @@ impl Colors {
       Theme::Dark => Color::Rgb { r: 242, g: 211, b: 56 },
       Theme::Light => Color::Rgb { r: 199, g: 146, b: 76 },
     }
+  }
+
+  const fn to_clap(color: Color) -> Option<clap::builder::styling::Color> {
+    use clap::builder::styling::{AnsiColor, Color as ClapColor, RgbColor};
+
+    match color {
+      Color::Black => Some(ClapColor::Ansi(AnsiColor::Black)),
+      Color::Blue | Color::DarkBlue => Some(ClapColor::Ansi(AnsiColor::Blue)),
+      Color::Cyan | Color::DarkCyan => Some(ClapColor::Ansi(AnsiColor::Cyan)),
+      Color::DarkGreen | Color::Green => Some(ClapColor::Ansi(AnsiColor::Green)),
+      Color::DarkGrey | Color::Grey => Some(ClapColor::Ansi(AnsiColor::BrightBlack)),
+      Color::DarkMagenta | Color::Magenta => Some(ClapColor::Ansi(AnsiColor::Magenta)),
+      Color::DarkRed | Color::Red => Some(ClapColor::Ansi(AnsiColor::Red)),
+      Color::DarkYellow | Color::Yellow => Some(ClapColor::Ansi(AnsiColor::Yellow)),
+      Color::White => Some(ClapColor::Ansi(AnsiColor::White)),
+      Color::AnsiValue(val) => Some(ClapColor::Ansi256(Ansi256Color(val))),
+      Color::Rgb { r, g, b } => Some(ClapColor::Rgb(RgbColor(r, g, b))),
+      Color::Reset => None,
+    }
+  }
+
+  pub const fn clap_styles() -> clap::builder::Styles {
+    use clap::builder::styling::{Style, Styles};
+
+    let colors = Self::new(true, Theme::Dark);
+
+    Styles::styled()
+      .header(Style::new().bold().underline().fg_color(Self::to_clap(colors.label())))
+      .usage(Style::new().bold().fg_color(Self::to_clap(colors.label())))
+      .literal(Style::new().fg_color(Self::to_clap(colors.success())))
+      .placeholder(Style::new().fg_color(Self::to_clap(colors.info())))
+      .error(Style::new().bold().fg_color(Self::to_clap(colors.accent())))
+      .valid(Style::new().fg_color(Self::to_clap(colors.success())))
+      .invalid(Style::new().bold().fg_color(Self::to_clap(colors.accent())))
   }
 }
 

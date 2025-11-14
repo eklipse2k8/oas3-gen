@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, HashSet};
 
+use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::quote;
 
 use super::ast::RustType;
 
 pub mod attributes;
+pub mod client;
 pub mod coercion;
 pub mod constants;
 pub mod enums;
@@ -16,7 +18,7 @@ pub mod type_aliases;
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Visibility {
   #[default]
   Public,
@@ -25,15 +27,6 @@ pub enum Visibility {
 }
 
 impl Visibility {
-  pub fn parse(s: &str) -> Option<Self> {
-    match s {
-      "public" => Some(Visibility::Public),
-      "crate" => Some(Visibility::Crate),
-      "file" => Some(Visibility::File),
-      _ => None,
-    }
-  }
-
   pub(crate) fn to_tokens(self) -> TokenStream {
     match self {
       Visibility::Public => quote! { pub },

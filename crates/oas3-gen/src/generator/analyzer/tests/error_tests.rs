@@ -56,6 +56,7 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
 
 fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<String>) -> OperationInfo {
   OperationInfo {
+    stable_id: id.to_string(),
     operation_id: id.to_string(),
     method: "GET".to_string(),
     path: "/test".to_string(),
@@ -68,6 +69,8 @@ fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<
     success_response_types: success_types,
     error_response_types: error_types,
     warnings: vec![],
+    parameters: vec![],
+    body: None,
   }
 }
 

@@ -20,7 +20,7 @@ fn test_basic_get_operation() -> ConversionResult<()> {
 
   let operation = Operation::default();
   let mut usage = TypeUsageRecorder::new();
-  let (types, info) = converter.convert("myOp", "GET", "/test", &operation, &mut usage)?;
+  let (types, info) = converter.convert("my_op", "myOp", "GET", "/test", &operation, &mut usage)?;
 
   assert!(types.is_empty(), "Should generate no new types");
   assert_eq!(info.operation_id, "MyOp");
@@ -57,7 +57,7 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
   }));
 
   let mut usage = TypeUsageRecorder::new();
-  let (types, info) = converter.convert("getUser", "GET", "/users/{userId}", &operation, &mut usage)?;
+  let (types, info) = converter.convert("get_user", "getUser", "GET", "/users/{userId}", &operation, &mut usage)?;
 
   assert_eq!(types.len(), 1, "Should generate one request struct");
   let request_type_name = info.request_type.as_deref().expect("Request type should exist");
@@ -118,7 +118,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
   };
 
   let mut usage = TypeUsageRecorder::new();
-  let (types, info) = converter.convert("createUser", "POST", "/users", &operation, &mut usage)?;
+  let (types, info) = converter.convert("create_user", "createUser", "POST", "/users", &operation, &mut usage)?;
 
   assert_eq!(types.len(), 2, "Should generate Request struct and RequestBody alias");
   assert!(
@@ -168,7 +168,7 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
   };
 
   let mut usage = TypeUsageRecorder::new();
-  let (_, info) = converter.convert("getUser", "GET", "/user", &operation, &mut usage)?;
+  let (_, info) = converter.convert("get_user", "getUser", "GET", "/user", &operation, &mut usage)?;
 
   assert_eq!(info.response_type.as_deref(), Some("User"));
   Ok(())
