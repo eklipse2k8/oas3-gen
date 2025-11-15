@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a fully-functional OpenAPI-to-Rust code generator that parses OpenAPI 3.x specifications and generates comprehensive Rust type definitions with validation. The tool reads OpenAPI JSON files and generates idiomatic Rust code including structs, enums, type aliases, validation attributes, and Default implementations.
+This is a fully-functional OpenAPI-to-Rust code generator that parses OpenAPI 3.1 specifications and generates comprehensive Rust type definitions with validation. The tool reads OpenAPI JSON files and generates idiomatic Rust code including structs, enums, type aliases, validation attributes, and Default implementations.
 
 The project is organized as a Cargo workspace with two crates:
 
@@ -88,6 +88,72 @@ These subagents are designed to work together:
 - **Doc comments only**: Only use proper Rust doc comments (`///` or `//!`) for public API documentation that will be part of generated rustdoc.
 
 This project prioritizes token efficiency. Every inline comment and emoji wastes tokens that could be used for actual code or logic.
+
+### Naming Conventions
+
+Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/naming.html). Prioritize clarity over brevity (prefer `request` over `req`).
+
+**Casing:**
+
+| Identifier Type                       | Convention           | Examples                                 |
+| ------------------------------------- | -------------------- | ---------------------------------------- |
+| Crates                                | `kebab-case`         | `oas3-gen`, `oas3-gen-support`           |
+| Modules                               | `snake_case`         | `schema_graph`, `operation_registry`     |
+| Structs, Enums, Traits, Type Aliases  | `UpperCamelCase`     | `SchemaConverter`, `GenerateMode`        |
+| Enum Variants                         | `UpperCamelCase`     | `RequestOnly`, `Bidirectional`           |
+| Functions, Methods                    | `snake_case`         | `generate_code`, `convert_schema`        |
+| Variables, Fields, Parameters         | `snake_case`         | `spec`, `visibility`, `only_operations`  |
+| Constants, Statics                    | `UPPER_SNAKE_CASE`   | `REQUEST_SUFFIX`, `CLIPPY_ALLOWS`        |
+| Generic Type Parameters               | `UpperCamelCase`     | `T`, `E`, `IntoSchema`                   |
+| Macros                                | `snake_case!`        | `discriminated_enum!`                    |
+
+**Type Suffixes:**
+
+- `...Converter`: Type conversion | `...Analyzer`: Data inspection | `...Registry`: Collection storage
+- `...Graph`: Graph structures | `...Config`: Configuration | `...Builder`: Builder pattern
+- `...Def`: AST nodes (StructDef, EnumDef, TypeAliasDef)
+
+**Function Patterns:**
+
+- Constructors: `new()`, `with_<property>()`, `from_<source>()`
+- Getters: `<property>()` (no `get_` prefix)
+- Conversions: `to_<type>()` (non-consuming), `into_<type>()` (consuming)
+- Predicates: `is_<condition>()`, `has_<property>()`
+
+**Generated Code:**
+
+- Distinguish OpenAPI (source) from Rust AST (target) concepts
+- Operation types: `...Request`, `...RequestBody`, `...Response`
+- Fields: `snake_case` with keyword escaping (`r#type`)
+
+### Design Principles and Code Quality
+
+**SOLID Principles:**
+
+- Single Responsibility: One concern per module/struct/function
+- Open/Closed: Extend via composition, not modification
+- Liskov Substitution: Subtypes fully replace base types
+- Interface Segregation: Focused traits over monolithic ones
+- Dependency Inversion: Depend on abstractions
+
+**Avoid Duplication:**
+
+- Never duplicate logic; extract to reusable functions/traits/generics
+- Search for existing implementations before writing new code
+- Refactor duplicated patterns immediately upon discovery
+
+**Code Placement Strategy:**
+
+1. Review pipeline architecture: Parse/Analyze → Convert (AST) → Generate (Rust source)
+2. Identify stage: analyzer/, converter/, or codegen/
+3. Locate module: enums, structs, operations, type_resolver, attributes, etc.
+4. Check utilities for cross-cutting concerns: reserved.rs, utils.rs
+
+**Test Coverage:**
+
+- All code changes require unit tests in `#[cfg(test)]` modules
+- Cover: happy paths, edge cases (empty/boundary/special chars), error conditions
+- Run `cargo test` before committing
 
 ## Build and Development Commands
 
@@ -234,490 +300,111 @@ cargo check -p oas3-gen-support
 
 ## Architecture
 
-The codebase is organized as a Cargo workspace with two crates:
+Cargo workspace with two crates following a three-stage pipeline: **Parse OpenAPI → Convert to AST → Generate Rust Code**
 
 ```text
-.
-├── .claude/                       - Claude Code configuration
-│   ├── commands/                  - Custom slash commands
-│   │   └── refactor.md           - Refactoring command
-│   ├── subagents/                - Specialized agent configurations
-│   │   ├── cli-developer.md      - CLI development agent
-│   │   ├── code-reviewer.md      - Code review agent
-│   │   ├── documentation-expert.md - Documentation agent
-│   │   ├── performance-engineer.md - Performance optimization agent
-│   │   └── test-automator.md     - Test automation agent
-│   └── settings.local.json       - Local settings
-├── crates/
-│   ├── oas3-gen/                  - Main CLI tool
-│   │   ├── Cargo.toml             - Binary crate dependencies
-│   │   ├── src/
-│   │   │   ├── main.rs            - CLI entry point (minimal, delegates to ui module)
-│   │   │   ├── reserved.rs        - Rust keyword handling and naming utilities
-│   │   │   ├── ui/                - User interface and CLI handling
-│   │   │   │   ├── mod.rs         - UI module exports
-│   │   │   │   ├── cli.rs         - CLI argument definitions and parsing
-│   │   │   │   ├── colors.rs      - Terminal color and theme handling
-│   │   │   │   └── commands/      - Command handlers
-│   │   │   │       ├── mod.rs     - Command module exports
-│   │   │   │       ├── generate.rs - Generate code command handler
-│   │   │   │       └── list.rs    - List operations command handler
-│   │   │   └── generator/         - Core generation logic
-│   │   │       ├── mod.rs         - Module definition and re-exports
-│   │   │       ├── orchestrator.rs - High-level generation orchestration
-│   │   │       ├── utils.rs       - Helper functions
-│   │   │       ├── schema_graph.rs - Dependency tracking and cycle detection
-│   │   │       ├── analyzer/      - Schema analysis and validation
-│   │   │       │   ├── mod.rs     - Analyzer module exports
-│   │   │       │   ├── errors.rs  - Error types for analysis
-│   │   │       │   └── tests.rs   - Analyzer tests
-│   │   │       ├── ast/           - AST type definitions
-│   │   │       │   ├── mod.rs     - AST module exports
-│   │   │       │   └── types.rs   - Type reference definitions
-│   │   │       ├── codegen/       - Code generation from AST
-│   │   │       │   ├── mod.rs     - Codegen module exports
-│   │   │       │   ├── attributes.rs - Attribute generation
-│   │   │       │   ├── coercion.rs - Type coercion logic
-│   │   │       │   ├── constants.rs - Constants generation
-│   │   │       │   ├── derives.rs - Derive attribute generation
-│   │   │       │   ├── enums.rs   - Enum code generation
-│   │   │       │   ├── error_impls.rs - Error trait implementations
-│   │   │       │   ├── structs.rs - Struct code generation
-│   │   │       │   ├── type_aliases.rs - Type alias generation
-│   │   │       │   └── tests/     - Codegen tests
-│   │   │       │       ├── mod.rs - Test module exports
-│   │   │       │       ├── coercion_tests.rs - Type coercion tests
-│   │   │       │       ├── error_impl_tests.rs - Error impl tests
-│   │   │       │       └── struct_tests.rs - Struct generation tests
-│   │   │       └── converter/     - Schema to AST conversion
-│   │   │           ├── mod.rs     - Converter module exports
-│   │   │           ├── enums.rs   - Enum conversion logic
-│   │   │           ├── error.rs   - Conversion error types
-│   │   │           ├── metadata.rs - Metadata extraction
-│   │   │           ├── operations.rs - Operation conversion
-│   │   │           ├── structs.rs - Struct conversion
-│   │   │           ├── type_resolver.rs - Type resolution
-│   │   │           ├── utils.rs   - Converter utilities
-│   │   │           └── tests/     - Converter tests
-│   │   │               ├── mod.rs - Test module exports
-│   │   │               ├── common.rs - Shared test utilities
-│   │   │               ├── enums.rs - Enum conversion tests
-│   │   │               ├── operations.rs - Operation conversion tests
-│   │   │               ├── structs.rs - Struct conversion tests
-│   │   │               └── type_resolution.rs - Type resolution tests
-│   │   ├── examples/              - Example generated code
-│   │   │   └── generated_types.rs
-│   └── oas3-gen-support/          - Runtime support library
-│       ├── Cargo.toml             - Library crate (rlib + cdylib)
-│       └── src/
-│           └── lib.rs             - Macros and runtime utilities
-├── Cargo.toml                     - Workspace configuration
-├── Cargo.lock                     - Dependency lock file
-├── rustfmt.toml                   - Rust formatting configuration
-├── deny.toml                      - Cargo deny configuration
-├── cliff.toml                     - Changelog generation configuration
-├── README.md                      - Project documentation
-├── CHANGELOG.md                   - Version history
-├── CONTRIBUTING.md                - Contribution guidelines
-└── LICENSE.md                     - License information
+crates/
+├── oas3-gen/                      # CLI tool (binary)
+│   └── src/
+│       ├── main.rs                # Entry point
+│       ├── reserved.rs            # Rust keyword handling and identifier sanitization
+│       ├── ui/                    # CLI interface
+│       │   ├── cli.rs             # Argument definitions
+│       │   ├── colors.rs          # Terminal theming
+│       │   └── commands/          # Command handlers (generate, list)
+│       └── generator/             # Core generation pipeline
+│           ├── orchestrator.rs    # Main pipeline coordinator
+│           ├── schema_graph.rs    # Dependency tracking and cycle detection
+│           ├── utils.rs           # Doc comment utilities
+│           ├── analyzer/          # Schema validation
+│           ├── ast/               # AST type definitions (RustType, StructDef, EnumDef, etc.)
+│           ├── converter/         # OpenAPI → AST
+│           │   ├── enums.rs       # oneOf/anyOf/allOf conversion
+│           │   ├── structs.rs     # Object schema conversion
+│           │   ├── operations.rs  # Request/response type generation
+│           │   └── type_resolver.rs # Type mapping and nullable patterns
+│           └── codegen/           # AST → Rust source
+│               ├── attributes.rs  # Serde and validation attributes
+│               ├── constants.rs   # Regex and header constants
+│               ├── derives.rs     # Derive attribute selection
+│               ├── enums.rs       # Enum code generation
+│               ├── structs.rs     # Struct code generation
+│               └── error_impls.rs # Error trait implementations
+└── oas3-gen-support/              # Runtime library (rlib + cdylib)
+    └── src/
+        └── lib.rs                 # discriminated_enum! macro and utilities
 ```
 
-### Module Structure
+**Generation Pipeline:**
 
-#### oas3-gen Crate (CLI Tool)
+1. **Parse**: Load OpenAPI spec via `oas3` crate
+2. **Analyze**: Build schema dependency graph, detect cycles
+3. **Convert**: Transform schemas to AST (`converter/`)
+4. **Generate**: Produce formatted Rust code (`codegen/`)
 
-**generator/mod.rs** (`crates/oas3-gen/src/generator/mod.rs`)
+**Key Files:**
 
-- Module declarations and visibility control
-- Re-exports: `orchestrator` module (public API)
-- Internal modules: `analyzer`, `ast`, `codegen`, `converter`, `schema_graph`, `utils`
-
-**generator/utils.rs** (`crates/oas3-gen/src/generator/utils.rs`)
-
-- `doc_comment_lines()`: Converts strings to Rust doc comment lines
-- `doc_comment_block()`: Creates full doc comment blocks
-
-**generator/orchestrator.rs** (`crates/oas3-gen/src/generator/orchestrator.rs`)
-High-level orchestration for code generation:
-
-- `Orchestrator`: Main coordinator for the generation pipeline
-- `CodeMetadata`: API metadata (title, version, description) for file headers
-- `GenerationStats`: Statistics about generation (types count, cycles, warnings)
-- Key methods:
-  - `new()`: Creates orchestrator from OpenAPI spec and visibility setting
-  - `generate()`: Runs full pipeline and returns formatted code + stats
-  - `generate_with_header()`: Generates code with auto-generated file header
-  - `metadata()`: Extracts API metadata from spec
-
-**generator/ast/** (`crates/oas3-gen/src/generator/ast/`)
-Intermediate representation types organized in a module:
-
-- **ast/mod.rs**: Re-exports and additional AST types
-  - `DiscriminatedEnumDef`: Discriminated union enum using macro
-  - `DiscriminatedVariant`: Variant mapping for discriminated enums
-  - `RustType`: Top-level enum (Struct, Enum, TypeAlias, DiscriminatedEnum)
-  - `OperationInfo`: Metadata about API operations
-  - `StructKind`: Semantic categorization (Schema, OperationRequest, RequestBody)
-  - `StructDef`: Struct definition with fields, methods, derives, and serde attributes
-  - `StructMethod`: Associated method definition (e.g., render_path)
-  - `StructMethodKind`: Method type (RenderPath with segments and query params)
-  - `PathSegment`: Path segment (Literal or Parameter)
-  - `QueryParameter`: Query parameter metadata for URL rendering
-  - `FieldDef`: Field definition with type, docs, validation, and default values
-  - `EnumDef`: Enum definition with variants and optional discriminator
-  - `VariantDef`: Enum variant (Unit, Tuple, or Struct content)
-  - `VariantContent`: Content type for enum variants
-  - `TypeAliasDef`: Type alias definition
-
-- **ast/types.rs**: Type reference system
-  - `TypeRef`: Type reference with support for wrappers (Box, Option, Vec, etc.)
-  - `RustPrimitive`: Primitive type representation
-
-**generator/schema_graph.rs** (`crates/oas3-gen/src/generator/schema_graph.rs`)
-Schema dependency management and cycle detection (564 lines):
-
-- `SchemaGraph`: Main public API for schema management
-  - Manages all schemas from OpenAPI spec
-  - Tracks dependencies and detects cycles
-  - Extracts header parameters from spec
-  - Key methods:
-    - `new()`: Creates graph from OpenAPI spec
-    - `build_dependencies()`: Builds dependency graph
-    - `detect_cycles()`: Identifies circular schema references
-    - `is_cyclic()`: Checks if schema is part of cycle
-    - `get_schema()`: Retrieves schema by name
-    - `schema_names()`: Lists all schema names
-    - `all_headers()`: Lists all header parameter names
-    - `extract_ref_name()`: Parses $ref strings
-
-- Internal helper structures:
-  - `SchemaRepository`: Schema storage and retrieval
-  - `ReferenceExtractor`: Extracts schema references from schemas
-  - `DependencyGraph`: Manages dependency relationships and cyclic detection
-  - `CycleDetector`: DFS-based cycle detection algorithm
-  - `HeaderExtractor`: Extracts header parameters from operations
-
-**generator/analyzer/** (`crates/oas3-gen/src/generator/analyzer/`)
-Schema analysis and validation system:
-
-- **mod.rs**: Module exports and analyzer API
-  - Schema validation and error detection
-  - Compatibility checks
-  - Pattern analysis
-- **errors.rs**: Error types for analysis
-  - Validation errors
-  - Schema incompatibilities
-  - Missing reference errors
-- **tests.rs**: Analyzer test suite
-  - Edge case testing
-  - Error scenario validation
-
-**generator/converter/** (`crates/oas3-gen/src/generator/converter/`)
-Converts OpenAPI schemas to Rust AST (modularized converter system):
-
-- **mod.rs**: Module exports and public API
-- **enums.rs**: Enum conversion logic
-  - Handles oneOf/anyOf/allOf patterns
-  - Discriminated unions with discriminator support
-  - Untagged enums for anyOf
-  - Forward-compatible enums with catch-all variants
-  - Simple string enums
-- **structs.rs**: Object schema to struct conversion
-  - Field extraction and naming
-  - Required/optional field handling
-  - Validation attribute extraction
-  - Default value handling
-- **operations.rs**: API operation conversion
-  - Request type generation with parameters
-  - Response type extraction
-  - Path template parsing
-  - Query parameter handling
-- **type_resolver.rs**: Type reference resolution
-  - Handles nullable patterns (anyOf with null → Option)
-  - Manages cyclic references with Box wrappers
-  - Maps OpenAPI types to Rust types
-  - Inline enum generation
-- **metadata.rs**: Metadata extraction from specs
-- **error.rs**: Conversion error types
-- **utils.rs**: Shared converter utilities
-- **tests/**: Comprehensive test suite
-
-**generator/codegen/** (`crates/oas3-gen/src/generator/codegen/`)
-Converts Rust AST to actual source code (modularized code generation):
-
-- **mod.rs**: Module exports and main generation entry point
-  - `Visibility` enum: Controls visibility level (Public, Crate, File)
-  - `generate()`: Main code generation orchestration
-  - Type deduplication and ordering
-- **attributes.rs**: Attribute generation
-  - Serde attributes (rename, tag, untagged, skip_serializing_if)
-  - Validation attributes from OpenAPI constraints
-  - Default value attributes
-- **coercion.rs**: Type coercion logic
-  - Handles type conversions and transformations
-  - JSON to Rust expression conversion
-- **constants.rs**: Static constant generation
-  - Regex validation constants with LazyLock pattern
-  - HTTP header name constants
-  - Format strings for validation patterns
-- **derives.rs**: Derive attribute generation
-  - Smart derive selection based on type usage
-  - Optimized for request/response patterns
-- **enums.rs**: Enum code generation
-  - Simple enums with variants
-  - Discriminated enums using discriminated_enum! macro
-  - Untagged and internally tagged enums
-- **error_impls.rs**: Error trait implementations
-  - Display and Error trait implementations
-  - Error conversion helpers
-- **structs.rs**: Struct code generation
-  - Field generation with proper visibility
-  - Method generation (render_path for requests)
-  - Default trait implementations
-- **type_aliases.rs**: Type alias generation
-  - Simple type alias definitions
-  - Documentation preservation
-- **tests/**: Codegen test suite
-
-**UI Module** (`crates/oas3-gen/src/ui/`)
-User interface and CLI handling organized into focused modules:
-
-- **ui/cli.rs** (66 lines): CLI argument definitions and subcommand structure
-  - Defines main CLI with global options (color, theme)
-  - `Commands` enum with `List` and `Generate` subcommands
-  - `ListCommands` enum with `Operations` subcommand
-  - Leverages clap's derive macros for argument parsing
-
-- **ui/colors.rs** (146 lines): Terminal color and theme detection
-  - `Colors` struct providing theme-aware color methods
-  - `ColorMode` enum (Always, Auto, Never)
-  - `ThemeMode` enum (Dark, Light, Auto)
-  - Automatic theme detection from terminal environment variables
-  - Color palettes optimized for both dark and light backgrounds
-
-- **ui/commands/generate.rs** (148 lines): Generate code command handler
-  - Loads OpenAPI spec from specified JSON file
-  - Creates Orchestrator with spec, visibility setting, and all_schemas flag
-  - Calls `generate_with_header()` to produce code and stats
-  - Reports statistics (types generated, operations converted, cycles detected, orphaned schemas)
-  - Creates parent directories if needed
-  - Writes output to user-specified path
-  - Provides structured logging with three levels (normal, verbose, quiet)
-
-- **ui/commands/list.rs** (67 lines): List operations command handler
-  - Parses OpenAPI spec and extracts all operations
-  - Generates operation IDs for operations lacking explicit IDs
-  - Displays operations in formatted table (METHOD, OPERATION ID, PATH)
-  - Sorts operations alphabetically by operation ID
-
-**Main Entry Point** (`crates/oas3-gen/src/main.rs`)
-Minimal CLI entry point (35 lines):
-
-1. Parses CLI arguments using clap
-2. Initializes color/theme settings
-3. Dispatches to appropriate command handler based on subcommand
-4. All logic delegated to ui module for better organization
-
-#### oas3-gen-support Crate (Runtime Library)
-
-**lib.rs** (`crates/oas3-gen-support/src/lib.rs`)
-Provides runtime support for generated code:
-
-- **`discriminated_enum!` macro**: Declarative macro for discriminated union deserialization
-  - Supports discriminator field-based routing
-  - Optional fallback variant for unknown discriminator values
-  - Custom serialize/deserialize implementations
-  - Used for oneOf/anyOf with discriminator in generated code
-- **`better_default::Default` re-export**: Enables `#[default(value)]` attribute on struct fields
-  - Allows inline default value specification
-  - Generates Default trait implementations automatically
-
-**Additional Dependencies:**
-
-- **http** (1.3): HTTP types for Method enum re-export
-- **percent-encoding** (2.3): URL encoding for query parameters
-- **serde_plain** (1): Plain text serialization for query parameters
-- **num-format** (0.4): Number formatting utilities
-- **crossterm** (0.29): Terminal interaction utilities
-- **serde_with** (3.15): Additional serde utilities with chrono support
+- [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator
+- [schema_graph.rs](crates/oas3-gen/src/generator/schema_graph.rs): Dependency and cycle management
+- [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
+- [reserved.rs](crates/oas3-gen/src/reserved.rs): Identifier sanitization and keyword handling
 
 ### Key Dependencies
 
 All dependencies are managed at the workspace level in the root `Cargo.toml` and inherited by crates.
 
-**Core Generation Dependencies (oas3-gen):**
+**Code Generation:**
 
-- **oas3** (0.19): OpenAPI 3.x specification parsing library
-- **oas3-gen-support**: Workspace crate providing runtime support utilities
-- **quote** (1.0): Quasi-quoting for generating Rust token streams
-- **proc-macro2** (1.0): Standalone proc-macro API for token manipulation
-- **syn** (2.0, features: full, parsing): Rust syntax parsing for code formatting
-- **prettyplease** (0.2): Pretty-printing generated Rust code with proper formatting
+- **oas3** (0.20): OpenAPI 3.1 spec parser
+- **quote** (1.0): Token stream generation
+- **proc-macro2** (1.0): Token manipulation
+- **syn** (2.0): Rust syntax parser
+- **prettyplease** (0.2): Code formatter
 
-**CLI and I/O:**
+**CLI & Terminal:**
 
-- **clap** (4.5, features: derive): Command-line argument parsing with derive macros
-- **tokio** (1.48, features: rt-multi-thread, fs, macros): Async runtime for file I/O
-- **anyhow** (1.0): Flexible error handling
-
-**Serialization:**
-
-- **serde** (1.0, features: derive): Serialization framework
-- **serde_json** (1.0, features: preserve_order): JSON serialization with field order preservation
-
-**String Processing:**
-
-- **inflections** (1.1): Case conversion utilities (PascalCase, snake_case, camelCase)
-- **any_ascii** (0.3): ASCII transliteration for identifier sanitization
-
-**Validation:**
-
-- **validator** (0.20, features: derive): Runtime validation attributes and traits
-- **regex** (1.11): Regular expression validation support
-
-**Runtime Support Dependencies (oas3-gen-support):**
-
-- **better_default** (1.0): Provides `#[default(value)]` attribute for struct fields
-- **serde/serde_json**: For custom discriminated enum serialization
-- **regex** (1.11): Shared validation support
-- **validator** (0.20): Shared validation framework
-- **chrono** (>=0.4.20, features: std, clock, serde): Date/time types for OpenAPI date-time format
-- **indexmap** (2.12, features: serde): Ordered map for unique array items
-- **uuid** (1.18, features: serde): UUID types for OpenAPI uuid format
-- **http** (1.3): HTTP types for Method enum
-- **percent-encoding** (2.3): URL encoding utilities
-- **serde_with** (3.15): Additional serde utilities
+- **clap** (4.5): Argument parsing with derives
+- **tokio** (1.48): Async runtime for file I/O
 - **anyhow** (1.0): Error handling
-- **oas3** (0.19): OpenAPI spec types
-- **prettyplease** (0.2): Code formatting
-- **proc-macro2** (1.0): Token stream manipulation
-- **quote** (1.0): Code generation
-- **syn** (2.0): Rust syntax parsing
+- **crossterm** (0.29): Terminal interaction
+- **comfy-table** (7.2): Table formatting
+- **num-format** (0.4): Number formatting
+- **cfg-if** (1.0): Conditional compilation
 
-**Dev Dependencies (oas3-gen):**
+**Serialization & Data:**
 
-- **chrono**: For testing generated date-time types
-- **indexmap**: For testing generated unique array types
-- **uuid**: For testing generated UUID types
-- **tempfile** (3.14): For creating temporary test files
-- **oas3-gen-support**: For testing generated code that uses support library
-- **validator** (with derive feature): For testing validation attributes
+- **serde** (1.0): Serialization framework
+- **serde_json** (1.0): JSON with order preservation
+- **serde_with** (3.15): Enhanced serde utilities
+- **serde_plain** (1.0): Plain text serialization
 
-### Type Mapping System
+**Validation & Patterns:**
 
-The type resolver in `converter/type_resolver.rs` (`crates/oas3-gen/src/generator/converter/type_resolver.rs`) maps OpenAPI types to Rust:
+- **validator** (0.20): Validation attributes
+- **regex** (1.12): Pattern matching
 
-**Primitive Types:**
+**Type System Support:**
 
-- String → String
-- Number → f64
-- Integer → i64
-- Boolean → bool
-- Null → Option<()>
-- Object (without schema) → serde_json::Value
+- **better_default** (1.0): `#[default(value)]` attribute
+- **chrono** (0.4.42+): Date/time types
+- **uuid** (1.18): UUID type support
+- **indexmap** (2.12): Ordered maps
+- **http** (1.3): HTTP primitives
 
-**Complex Types:**
+**String & Identifier Processing:**
 
-- Array → Vec (where T is derived from items schema)
-- Object (with schema) → Named struct type
-- oneOf → Discriminated enum (with discriminator) or tagged enum
-- anyOf → Untagged enum (or nullable pattern detection)
-- Enums → String enums with serde rename attributes
-- Inline enums → Generated inline enum types within schemas
+- **inflections** (1.1): Case conversions
+- **any_ascii** (0.3): ASCII transliteration
+- **percent-encoding** (2.3): URL encoding
 
-**Special Patterns:**
+**HTTP Client:**
 
-- `anyOf: [T, null]` → Option (nullable pattern)
-- Forward-compatible enums → Enum with catch-all variant
-- Cyclic references → Box wrapper
-- Discriminated unions → discriminated_enum! macro with fallback support
-- Operation requests → Struct with render_path() method for URL construction
+- **reqwest** (0.12): HTTP client for remote specs
 
-### Validation Features
+**Runtime Support:**
 
-The generator extracts OpenAPI validation constraints and converts them to Rust validator attributes:
+- **oas3-gen-support** (0.16.0): Workspace runtime library with macros and utilities
 
-**String Validation:**
+**Development & Testing:**
 
-- `minLength`/`maxLength` → `#[validate(length(min = X, max = Y))]`
-- `pattern` → Generates regex constant + `#[validate(regex(path = "CONST_NAME"))]`
-- `format: email` → `#[validate(email)]`
-- `format: uri` → `#[validate(url)]`
-
-**Numeric Validation:**
-
-- `minimum`/`maximum` → `#[validate(range(min = X, max = Y))]`
-- `exclusiveMinimum`/`exclusiveMaximum` → `#[validate(range(exclusive_min = X, ...))]`
-
-**Array Validation:**
-
-- `minItems`/`maxItems` → `#[validate(length(min = X, max = Y))]`
-
-**Default Values:**
-
-- Generates `impl Default` for structs/enums with default values
-- Converts JSON defaults to Rust expressions
-
-### Naming and Formatting
-
-**Identifier Handling** (`crates/oas3-gen/src/reserved.rs`):
-
-- Converts OpenAPI names to valid Rust identifiers
-- Replaces invalid characters (-, ., spaces) with underscores
-- Handles Rust keyword conflicts with r# prefix
-- ASCII transliteration for international characters using `any_ascii`
-- Key functions:
-  - `to_rust_type_name()`: Converts names to PascalCase for types
-  - `to_rust_field_name()`: Converts names to snake_case for fields
-  - `regex_const_name()`: Generates unique constant names for regex validators
-  - `header_const_name()`: Generates constant names for HTTP headers
-
-**Type Names:**
-
-- Converts schema names to PascalCase
-- Handles keyword conflicts (Self, Type, etc.) with r# prefix
-- Ensures uniqueness in enum variant names
-
-**Field Names:**
-
-- Converts property names to snake_case
-- Adds `serde(rename = "...")` when Rust name differs from OpenAPI name
-- Automatically handles: keywords (type → r#type), special chars (user-id → user_id), case changes (userId → user_id)
-
-### Code Generation Features
-
-**Request Type Generation:**
-
-- Operation request structs include all parameters (path, query, header, cookie)
-- Generates `render_path(&self) -> String` method for URL construction
-- Handles query parameter encoding with explode and style support
-- Uses percent-encoding for safe URL construction
-- Parameters ordered by location for consistent code generation
-
-**Header Constants:**
-
-- Generates static constants for HTTP header names used in operations
-- Format: `pub static HEADER_X_API_KEY: &str = "x-api-key";`
-- Normalized to lowercase for consistency
-
-**Visibility Control:**
-
-- Three visibility levels: public (default), crate, or file-private
-- Applied to all generated types consistently
-- Configurable via `--visibility` CLI flag
-
-### Documentation Generation
-
-**Doc Comments** (`crates/oas3-gen/src/generator/utils.rs`):
-
-- `doc_comment_lines()`: Converts OpenAPI descriptions to Rust doc comments (`///`)
-- Handles literal `\n` escape sequences by normalizing to actual newlines
-- Preserves multi-line documentation with proper formatting
-- Empty lines converted to `///` with trailing space (maintains doc comment continuity)
-- Used throughout generated code for structs, enums, fields, and variants
-
-**Location Hints** (`crates/oas3-gen/src/generator/converter/operations.rs`):
-
-- Adds parameter location hints to generated request structs
-- Format: `/// Path parameter`, `/// Query parameter`, etc.
-- Helps developers understand parameter usage in API requests
+- **tempfile** (3.23): Temporary test files
