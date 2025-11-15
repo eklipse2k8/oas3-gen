@@ -1,6 +1,7 @@
 mod constants;
 mod enums;
 mod error;
+mod field_optionality;
 mod metadata;
 pub(crate) mod operations;
 mod structs;
@@ -10,6 +11,7 @@ mod utils;
 
 use std::collections::BTreeSet;
 
+pub(crate) use field_optionality::FieldOptionalityPolicy;
 use oas3::spec::ObjectSchema;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
@@ -28,22 +30,31 @@ pub(crate) struct SchemaConverter<'a> {
 }
 
 impl<'a> SchemaConverter<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph) -> Self {
+  pub(crate) fn new(graph: &'a SchemaGraph, optionality_policy: FieldOptionalityPolicy) -> Self {
     let type_resolver = TypeResolver::new(graph);
     Self {
       graph,
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(graph, type_resolver.clone(), None),
+      struct_converter: StructConverter::new(graph, type_resolver.clone(), None, optionality_policy),
       enum_converter: EnumConverter::new(graph, type_resolver),
     }
   }
 
-  pub(crate) fn new_with_filter(graph: &'a SchemaGraph, reachable_schemas: BTreeSet<String>) -> Self {
+  pub(crate) fn new_with_filter(
+    graph: &'a SchemaGraph,
+    reachable_schemas: BTreeSet<String>,
+    optionality_policy: FieldOptionalityPolicy,
+  ) -> Self {
     let type_resolver = TypeResolver::new(graph);
     Self {
       graph,
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(graph, type_resolver.clone(), Some(reachable_schemas)),
+      struct_converter: StructConverter::new(
+        graph,
+        type_resolver.clone(),
+        Some(reachable_schemas),
+        optionality_policy,
+      ),
       enum_converter: EnumConverter::new(graph, type_resolver),
     }
   }

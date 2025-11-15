@@ -6,6 +6,7 @@ use crossterm::style::Stylize;
 use crate::{
   generator::{
     codegen::Visibility,
+    converter::FieldOptionalityPolicy,
     orchestrator::{GenerationStats, Orchestrator},
   },
   ui::{Colors, GenerateMode},
@@ -24,6 +25,7 @@ pub struct GenerateConfig {
   pub verbose: bool,
   pub quiet: bool,
   pub all_schemas: bool,
+  pub odata_support: bool,
   pub only_operations: Option<HashSet<String>>,
   pub excluded_operations: Option<HashSet<String>>,
 }
@@ -38,6 +40,7 @@ impl GenerateConfig {
     verbose: bool,
     quiet: bool,
     all_schemas: bool,
+    odata_support: bool,
     only_operations: Option<Vec<String>>,
     excluded_operations: Option<Vec<String>>,
   ) -> Self {
@@ -51,6 +54,7 @@ impl GenerateConfig {
       verbose,
       quiet,
       all_schemas,
+      odata_support,
       only_operations,
       excluded_operations,
     }
@@ -62,12 +66,19 @@ impl GenerateConfig {
   }
 
   fn create_orchestrator(&self, spec: oas3::Spec) -> Orchestrator {
+    let optionality_policy = if self.odata_support {
+      FieldOptionalityPolicy::with_odata_support()
+    } else {
+      FieldOptionalityPolicy::standard()
+    };
+
     Orchestrator::new(
       spec,
       self.visibility,
       self.all_schemas,
       self.only_operations.as_ref(),
       self.excluded_operations.as_ref(),
+      optionality_policy,
     )
   }
 

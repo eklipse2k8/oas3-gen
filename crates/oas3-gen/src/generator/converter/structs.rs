@@ -8,6 +8,7 @@ use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
 use super::{
   constants::{doc_attrs, serde_attrs},
   error::ConversionResult,
+  field_optionality::{FieldOptionalityContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
   utils,
@@ -39,6 +40,7 @@ pub(crate) struct StructConverter<'a> {
   type_resolver: TypeResolver<'a>,
   merged_schema_cache: RefCell<HashMap<String, ObjectSchema>>,
   reachable_schemas: Option<std::collections::BTreeSet<String>>,
+  optionality_policy: FieldOptionalityPolicy,
 }
 
 impl<'a> StructConverter<'a> {
@@ -46,12 +48,14 @@ impl<'a> StructConverter<'a> {
     graph: &'a SchemaGraph,
     type_resolver: TypeResolver<'a>,
     reachable_schemas: Option<std::collections::BTreeSet<String>>,
+    optionality_policy: FieldOptionalityPolicy,
   ) -> Self {
     Self {
       graph,
       type_resolver,
       reachable_schemas,
       merged_schema_cache: RefCell::new(HashMap::new()),
+      optionality_policy,
     }
   }
 
@@ -311,7 +315,13 @@ impl<'a> StructConverter<'a> {
 
     let discriminator_info = Self::get_discriminator_info(ctx, discriminator_mapping, &prop_schema);
 
-    let should_be_optional = Self::compute_field_optionality(is_required, &prop_schema, discriminator_info.as_ref());
+    let should_be_optional = self.compute_field_optionality(
+      ctx.prop_name,
+      ctx.schema,
+      &prop_schema,
+      is_required,
+      discriminator_info.as_ref(),
+    );
     let final_type = utils::apply_optionality(base_type, should_be_optional);
 
     let metadata = FieldMetadata::from_schema(ctx.prop_name, is_required, &prop_schema);
@@ -371,18 +381,23 @@ impl<'a> StructConverter<'a> {
   }
 
   fn compute_field_optionality(
-    is_required: bool,
+    &self,
+    prop_name: &str,
+    parent_schema: &ObjectSchema,
     prop_schema: &ObjectSchema,
+    is_required: bool,
     discriminator_info: Option<&DiscriminatorInfo>,
   ) -> bool {
-    if !is_required {
-      return true;
-    }
+    let ctx = FieldOptionalityContext {
+      prop_name,
+      parent_schema,
+      is_required,
+      has_default: prop_schema.default.is_some(),
+      is_discriminator_field: discriminator_info.is_some(),
+      discriminator_has_enum: discriminator_info.as_ref().is_some_and(|info| info.has_enum),
+    };
 
-    let has_default = prop_schema.default.is_some();
-    let is_discriminator_field = discriminator_info.is_some();
-
-    !has_default && !is_discriminator_field
+    self.optionality_policy.compute_optionality(&ctx)
   }
 
   fn resolve_field_type(

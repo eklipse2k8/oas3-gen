@@ -132,7 +132,7 @@ fn operation_request_always_validates_without_serialization() {
   assert!(def.derives.iter().any(|d| d == "validator::Validate"));
   assert!(!def.derives.iter().any(|d| d == "Serialize"));
   assert!(!def.derives.iter().any(|d| d == "Deserialize"));
-  assert!(def.fields[0].validation_attrs.is_empty() == false);
+  assert!(!def.fields[0].validation_attrs.is_empty());
 }
 
 fn enum_type(name: &str) -> EnumDef {

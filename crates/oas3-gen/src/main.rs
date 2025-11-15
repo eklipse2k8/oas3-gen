@@ -1,4 +1,5 @@
 #![allow(clippy::doc_markdown)]
+#![allow(clippy::too_many_lines)]
 use clap::Parser;
 
 use crate::ui::{Cli, Colors, Commands, ListCommands, colors};
@@ -24,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
       input,
       output,
       visibility,
+      odata_support,
       verbose,
       quiet,
       all_schemas,
@@ -38,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
         verbose,
         quiet,
         all_schemas,
+        odata_support,
         only,
         exclude,
       );

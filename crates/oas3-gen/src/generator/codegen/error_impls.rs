@@ -21,33 +21,57 @@ fn generate_for_struct(def: &crate::generator::ast::StructDef) -> Option<TokenSt
     let field = def.fields.iter().find(|f| f.name == error_field_name)?;
     let field_ident = format_ident!("{}", error_field_name);
     let fallback = FALLBACK_ERROR_MESSAGE;
+    let is_optional = field.rust_type.nullable;
 
     let (display_impl, source_impl) = if field.rust_type.is_array {
-      (
-        quote! {
-          impl std::fmt::Display for #type_ident {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-              if let Some(ref errs) = self.#field_ident {
-                if let Some(first) = errs.first() {
+      if is_optional {
+        (
+          quote! {
+            impl std::fmt::Display for #type_ident {
+              fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                if let Some(ref errs) = self.#field_ident {
+                  if let Some(first) = errs.first() {
+                    write!(f, "{}", first)
+                  } else {
+                    write!(f, #fallback)
+                  }
+                } else {
+                  write!(f, #fallback)
+                }
+              }
+            }
+          },
+          quote! {
+            impl std::error::Error for #type_ident {
+              fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.#field_ident.as_ref()?.first().map(|e| e as &(dyn std::error::Error + 'static))
+              }
+            }
+          },
+        )
+      } else {
+        (
+          quote! {
+            impl std::fmt::Display for #type_ident {
+              fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                if let Some(first) = self.#field_ident.first() {
                   write!(f, "{}", first)
                 } else {
                   write!(f, #fallback)
                 }
-              } else {
-                write!(f, #fallback)
               }
             }
-          }
-        },
-        quote! {
-          impl std::error::Error for #type_ident {
-            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-              self.#field_ident.as_ref()?.first().map(|e| e as &(dyn std::error::Error + 'static))
+          },
+          quote! {
+            impl std::error::Error for #type_ident {
+              fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.#field_ident.first().map(|e| e as &(dyn std::error::Error + 'static))
+              }
             }
-          }
-        },
-      )
-    } else {
+          },
+        )
+      }
+    } else if is_optional {
       (
         quote! {
           impl std::fmt::Display for #type_ident {
@@ -64,6 +88,23 @@ fn generate_for_struct(def: &crate::generator::ast::StructDef) -> Option<TokenSt
           impl std::error::Error for #type_ident {
             fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
               self.#field_ident.as_ref().map(|e| e as &(dyn std::error::Error + 'static))
+            }
+          }
+        },
+      )
+    } else {
+      (
+        quote! {
+          impl std::fmt::Display for #type_ident {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+              write!(f, "{}", self.#field_ident)
+            }
+          }
+        },
+        quote! {
+          impl std::error::Error for #type_ident {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+              Some(&self.#field_ident as &(dyn std::error::Error + 'static))
             }
           }
         },
