@@ -4,7 +4,7 @@ use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
   ast::{OperationInfo, RustType},
   codegen::{self, Visibility},
-  converter::{SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
+  converter::{FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
   operation_registry::OperationRegistry,
   schema_graph::SchemaGraph,
 };
@@ -23,6 +23,7 @@ pub struct Orchestrator {
   visibility: Visibility,
   include_unused_schemas: bool,
   operation_registry: OperationRegistry,
+  optionality_policy: FieldOptionalityPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +47,6 @@ pub struct GenerationStats {
 }
 
 struct GenerationArtifacts {
-  graph: SchemaGraph,
   rust_types: Vec<RustType>,
   operations_info: Vec<OperationInfo>,
   usage_recorder: TypeUsageRecorder,
@@ -92,6 +92,7 @@ impl Orchestrator {
     include_unused_schemas: bool,
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
+    optionality_policy: FieldOptionalityPolicy,
   ) -> Self {
     let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
     Self {
@@ -99,11 +100,12 @@ impl Orchestrator {
       visibility,
       include_unused_schemas,
       operation_registry,
+      optionality_policy,
     }
   }
 
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let artifacts = self.collect_generation_artifacts()?;
+    let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
       operations_info, stats, ..
     } = artifacts;
@@ -124,24 +126,23 @@ impl Orchestrator {
   }
 
   pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let artifacts = self.collect_generation_artifacts()?;
+    let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
-      graph,
       rust_types,
       operations_info,
       usage_recorder,
       stats,
     } = artifacts;
 
-    let code_tokens = self.generate_code_from_artifacts(&graph, rust_types, &operations_info, usage_recorder);
+    let code_tokens = self.generate_code_from_artifacts(rust_types, &operations_info, usage_recorder);
     let formatted_code = Self::format_code(&code_tokens)?;
     let header = self.generate_header(source_path);
     let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
     Ok((final_code, stats))
   }
 
-  fn collect_generation_artifacts(&self) -> anyhow::Result<GenerationArtifacts> {
-    let mut graph = SchemaGraph::new(self.spec.clone())?;
+  fn collect_generation_artifacts(&self) -> GenerationArtifacts {
+    let mut graph = SchemaGraph::new(self.spec.clone());
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
@@ -159,9 +160,9 @@ impl Orchestrator {
     };
 
     let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone())
+      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy.clone())
     } else {
-      SchemaConverter::new(&graph)
+      SchemaConverter::new(&graph, self.optionality_policy.clone())
     };
     let (schema_rust_types, schema_warnings) =
       Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
@@ -200,13 +201,12 @@ impl Orchestrator {
       orphaned_schemas_count,
     };
 
-    Ok(GenerationArtifacts {
-      graph,
+    GenerationArtifacts {
       rust_types,
       operations_info,
       usage_recorder,
       stats,
-    })
+    }
   }
 
   fn convert_all_schemas(
@@ -282,7 +282,6 @@ impl Orchestrator {
 
   fn generate_code_from_artifacts(
     &self,
-    graph: &SchemaGraph,
     mut rust_types: Vec<RustType>,
     operations_info: &[OperationInfo],
     usage_recorder: TypeUsageRecorder,
@@ -292,7 +291,7 @@ impl Orchestrator {
     analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
     let error_schemas = ErrorAnalyzer::build_error_schema_set(operations_info, &rust_types);
 
-    codegen::generate(&rust_types, &graph.all_headers(), &error_schemas, self.visibility)
+    codegen::generate(&rust_types, &error_schemas, self.visibility)
   }
 
   fn format_code(code: &proc_macro2::TokenStream) -> anyhow::Result<String> {
@@ -354,7 +353,14 @@ mod tests {
   #[test]
   fn test_orchestrator_new_and_metadata() {
     let spec = create_empty_spec("Empty API", "1.0.0", Some("An empty spec."));
-    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, None);
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+    );
 
     let metadata = orchestrator.metadata();
     assert_eq!(metadata.title, "Empty API");
@@ -365,7 +371,14 @@ mod tests {
   #[test]
   fn test_orchestrator_generate_with_header() {
     let spec = create_empty_spec("Test API", "2.0.0", Some("A test API."));
-    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, None);
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+    );
 
     let result = orchestrator.generate_with_header("/path/to/spec.json");
     assert!(result.is_ok());
@@ -392,7 +405,14 @@ mod tests {
       "paths": {}
     }"#;
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, None);
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+    );
 
     let header = orchestrator.generate_header("test.yaml");
     assert!(header.contains("Multi\n//! line\n//! description."));
@@ -400,7 +420,7 @@ mod tests {
 
   #[test]
   fn test_operation_exclusion() {
-    let spec_json = r###"{
+    let spec_json = r##"{
       "openapi": "3.1.0",
       "info": {
         "title": "Test API",
@@ -493,13 +513,20 @@ mod tests {
           }
         }
       }
-    }"###;
+    }"##;
 
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut excluded = HashSet::new();
     excluded.insert("create_user".to_string());
 
-    let orchestrator = Orchestrator::new(spec, Visibility::default(), false, None, Some(&excluded));
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      Some(&excluded),
+      FieldOptionalityPolicy::standard(),
+    );
     let result = orchestrator.generate_with_header("test.json");
     assert!(result.is_ok());
 
@@ -510,7 +537,7 @@ mod tests {
 
   #[test]
   fn test_operation_exclusion_affects_schema_reachability() {
-    let spec_json = r###"{
+    let spec_json = r##"{
       "openapi": "3.1.0",
       "info": {
         "title": "Test API",
@@ -577,10 +604,17 @@ mod tests {
           }
         }
       }
-    }"###;
+    }"##;
 
     let spec_full: oas3::Spec = oas3::from_json(spec_json).unwrap();
-    let orchestrator_full = Orchestrator::new(spec_full, Visibility::default(), false, None, None);
+    let orchestrator_full = Orchestrator::new(
+      spec_full,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+    );
     let result_full = orchestrator_full.generate_with_header("test.json");
     assert!(result_full.is_ok());
     let (code_full, stats_full) = result_full.unwrap();
@@ -588,7 +622,14 @@ mod tests {
     let spec_filtered: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut excluded = HashSet::new();
     excluded.insert("admin_action".to_string());
-    let orchestrator_filtered = Orchestrator::new(spec_filtered, Visibility::default(), false, None, Some(&excluded));
+    let orchestrator_filtered = Orchestrator::new(
+      spec_filtered,
+      Visibility::default(),
+      false,
+      None,
+      Some(&excluded),
+      FieldOptionalityPolicy::standard(),
+    );
     let result_filtered = orchestrator_filtered.generate_with_header("test.json");
     assert!(result_filtered.is_ok());
     let (code_filtered, stats_filtered) = result_filtered.unwrap();
@@ -604,7 +645,7 @@ mod tests {
 
   #[test]
   fn test_all_schemas_overrides_operation_filtering() {
-    let spec_json = r###"{
+    let spec_json = r##"{
       "openapi": "3.1.0",
       "info": {
         "title": "Test API",
@@ -660,12 +701,19 @@ mod tests {
           }
         }
       }
-    }"###;
+    }"##;
 
     let spec_without_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut only = HashSet::new();
     only.insert("list_users".to_string());
-    let orchestrator_without = Orchestrator::new(spec_without_all, Visibility::default(), false, Some(&only), None);
+    let orchestrator_without = Orchestrator::new(
+      spec_without_all,
+      Visibility::default(),
+      false,
+      Some(&only),
+      None,
+      FieldOptionalityPolicy::standard(),
+    );
     let result_without = orchestrator_without.generate_with_header("test.json");
     assert!(result_without.is_ok());
     let (code_without, stats_without) = result_without.unwrap();
@@ -673,7 +721,14 @@ mod tests {
     let spec_with_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut only = HashSet::new();
     only.insert("list_users".to_string());
-    let orchestrator_with = Orchestrator::new(spec_with_all, Visibility::default(), true, Some(&only), None);
+    let orchestrator_with = Orchestrator::new(
+      spec_with_all,
+      Visibility::default(),
+      true,
+      Some(&only),
+      None,
+      FieldOptionalityPolicy::standard(),
+    );
     let result_with = orchestrator_with.generate_with_header("test.json");
     assert!(result_with.is_ok());
     let (code_with, stats_with) = result_with.unwrap();

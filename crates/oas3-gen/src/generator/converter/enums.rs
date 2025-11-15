@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
-use super::{error::ConversionResult, metadata, structs::StructConverter, type_resolver::TypeResolver, utils};
+use super::{
+  error::ConversionResult, field_optionality::FieldOptionalityPolicy, metadata, structs::StructConverter,
+  type_resolver::TypeResolver, utils,
+};
 use crate::{
   generator::{
     ast::{EnumDef, RustType, TypeRef, VariantContent, VariantDef},
@@ -35,7 +38,7 @@ pub(crate) struct EnumConverter<'a> {
 
 impl<'a> EnumConverter<'a> {
   pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>) -> Self {
-    let struct_converter = StructConverter::new(graph, type_resolver.clone(), None);
+    let struct_converter = StructConverter::new(graph, type_resolver.clone(), None, FieldOptionalityPolicy::standard());
     Self {
       graph,
       type_resolver,

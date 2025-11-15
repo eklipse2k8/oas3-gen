@@ -128,7 +128,7 @@ mod tests {
   use super::*;
 
   fn create_test_spec(operations: Vec<(&str, &str, Option<&str>)>) -> Spec {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, fmt::Write};
 
     let mut paths_map: HashMap<&str, Vec<(&str, Option<&str>)>> = HashMap::new();
 
@@ -136,7 +136,7 @@ mod tests {
       paths_map.entry(path).or_default().push((method, operation_id));
     }
 
-    let mut paths_json = String::from(r#"{"#);
+    let mut paths_json = String::from(r"{");
     let mut first_path = true;
 
     for (path, methods) in paths_map {
@@ -145,7 +145,7 @@ mod tests {
       }
       first_path = false;
 
-      paths_json.push_str(&format!(r#""{}": {{"#, path));
+      write!(paths_json, r#""{path}": {{"#).unwrap();
 
       let mut first_method = true;
       for (method, operation_id) in methods {
@@ -154,9 +154,9 @@ mod tests {
         }
         first_method = false;
 
-        let op_id_json = operation_id.map_or_else(|| String::from(""), |id| format!(r#""operationId": "{}""#, id));
+        let op_id_json = operation_id.map_or_else(String::new, |id| format!(r#""operationId": "{id}""#));
 
-        paths_json.push_str(&format!(r#""{}": {{ {} }}"#, method, op_id_json));
+        write!(paths_json, r#""{method}": {{ {op_id_json} }}"#).unwrap();
       }
 
       paths_json.push('}');
@@ -171,9 +171,8 @@ mod tests {
           "title": "Test API",
           "version": "1.0.0"
         }},
-        "paths": {}
-      }}"#,
-      paths_json
+        "paths": {paths_json}
+      }}"#
     );
 
     oas3::from_json(&spec_json).expect("Failed to parse test spec")

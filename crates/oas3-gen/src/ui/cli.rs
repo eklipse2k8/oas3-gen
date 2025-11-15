@@ -87,6 +87,10 @@ pub enum Commands {
     )]
     visibility: Visibility,
 
+    /// Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types)
+    #[arg(long, default_value_t = false, display_order = 11, help_heading = "Code Generation")]
+    odata_support: bool,
+
     /// Generate all schemas, even those unreferenced by selected operations
     #[arg(
       group = "filter",

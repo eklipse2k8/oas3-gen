@@ -36,15 +36,9 @@ impl Visibility {
   }
 }
 
-pub(crate) fn generate(
-  types: &[RustType],
-  headers: &[&String],
-  error_schemas: &HashSet<String>,
-  visibility: Visibility,
-) -> TokenStream {
+pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<String>, visibility: Visibility) -> TokenStream {
   let ordered = deduplicate_and_order_types(types);
   let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
-  let header_consts = constants::generate_header_constants(headers);
   let serde_use = compute_serde_use(&ordered);
   let type_tokens: Vec<TokenStream> = ordered
     .iter()
@@ -55,8 +49,6 @@ pub(crate) fn generate(
     #serde_use
 
     #regex_consts
-
-    #header_consts
 
     #(#type_tokens)*
   }

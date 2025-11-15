@@ -5,7 +5,7 @@ use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, 
 use super::common::create_test_graph;
 use crate::generator::{
   ast::RustType,
-  converter::{SchemaConverter, error::ConversionResult},
+  converter::{FieldOptionalityPolicy, SchemaConverter, error::ConversionResult},
 };
 
 #[test]
@@ -38,7 +38,7 @@ fn test_discriminated_base_struct_renamed() -> ConversionResult<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap())?;
 
   let struct_def = result
@@ -86,7 +86,7 @@ fn test_discriminator_with_enum_remains_visible() -> ConversionResult<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let converter = SchemaConverter::new(&graph);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
   let result = converter.convert_schema("Message", graph.get_schema("Message").unwrap())?;
 
   let struct_def = result
@@ -149,7 +149,7 @@ fn test_discriminator_without_enum_is_hidden() -> ConversionResult<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap())?;
 
   let struct_def = result

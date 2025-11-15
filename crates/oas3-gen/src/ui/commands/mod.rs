@@ -1,3 +1,6 @@
+#![allow(clippy::fn_params_excessive_bools)]
+#![allow(clippy::struct_excessive_bools)]
+
 pub mod generate;
 pub mod list;
 

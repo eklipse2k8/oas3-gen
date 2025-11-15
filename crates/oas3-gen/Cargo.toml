@@ -41,7 +41,7 @@ percent-encoding.workspace = true
 [dev-dependencies]
 indexmap.workspace = true
 oas3-gen-support.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "multipart"] }
 tempfile.workspace = true
 uuid.workspace = true
 validator = { workspace = true, features = ["derive"] }
