@@ -145,7 +145,7 @@ fn generate_render_path_method(
   quote! {
     #docs
     #attrs
-    #vis fn #name(&self) -> String {
+    #vis fn #name(&self) -> anyhow::Result<String> {
       #body
     }
   }
@@ -154,7 +154,7 @@ fn generate_render_path_method(
 fn build_render_path_body(segments: &[PathSegment], query_params: &[QueryParameter]) -> TokenStream {
   let path_expr = build_path_expression(segments);
   if query_params.is_empty() {
-    path_expr
+    quote! { Ok(#path_expr) }
   } else {
     append_query_params(&path_expr, query_params)
   }
@@ -200,7 +200,7 @@ fn append_query_params(path_expr: &TokenStream, query_params: &[QueryParameter])
     let mut path = #path_expr;
     let mut prefix = '\0';
     #(#query_statements)*
-    path
+    Ok(path)
   }
 }
 
@@ -216,7 +216,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
           if let Some(values) = &self.#ident {
             for value in values {
               prefix = if prefix == '\0' { '?' } else { '&' };
-              write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
+              write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value)?)).unwrap();
             }
           }
         }
@@ -224,7 +224,8 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
         quote! {
           if let Some(values) = &self.#ident && !values.is_empty() {
             prefix = if prefix == '\0' { '?' } else { '&' };
-            let values = values.iter().map(|v| oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(v))).collect::<Vec<_>>().join(",");
+            let values = values.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
+            let values = values.join(",");
             write!(&mut path, #param_equal, values).unwrap();
           }
         }
@@ -233,7 +234,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
       quote! {
         if let Some(value) = &self.#ident {
           prefix = if prefix == '\0' { '?' } else { '&' };
-          write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
+          write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value)?)).unwrap();
         }
       }
     }
@@ -242,14 +243,15 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
       quote! {
         for value in &self.#ident {
           prefix = if prefix == '\0' { '?' } else { '&' };
-          write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value))).unwrap();
+          write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value)?)).unwrap();
         }
       }
     } else {
       quote! {
         if !self.#ident.is_empty() {
           prefix = if prefix == '\0' { '?' } else { '&' };
-          let values = self.#ident.iter().map(|v| oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(v))).collect::<Vec<_>>().join(",");
+          let values = self.#ident.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
+          let values = values.join(",");
           write!(&mut path, #param_equal, values).unwrap();
         }
       }
@@ -257,7 +259,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
   } else {
     quote! {
       prefix = if prefix == '\0' { '?' } else { '&' };
-      write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident))).unwrap();
+      write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident)?)).unwrap();
     }
   }
 }

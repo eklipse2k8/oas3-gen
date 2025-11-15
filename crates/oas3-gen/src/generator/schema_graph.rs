@@ -8,6 +8,8 @@ use oas3::{
   spec::{ObjectOrReference, ObjectSchema, Schema},
 };
 
+use super::orchestrator::GenerationWarning;
+
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
 #[derive(Debug)]
@@ -16,18 +18,27 @@ struct SchemaRepository {
 }
 
 impl SchemaRepository {
-  fn from_spec(spec: &Spec) -> Self {
+  fn from_spec(spec: &Spec) -> (Self, Vec<GenerationWarning>) {
     let mut schemas = BTreeMap::new();
+    let mut warnings = Vec::new();
 
     if let Some(components) = &spec.components {
       for (name, schema_ref) in &components.schemas {
-        if let Ok(schema) = schema_ref.resolve(spec) {
-          schemas.insert(name.clone(), schema);
+        match schema_ref.resolve(spec) {
+          Ok(schema) => {
+            schemas.insert(name.clone(), schema);
+          }
+          Err(error) => {
+            warnings.push(GenerationWarning::SchemaConversionFailed {
+              schema_name: name.clone(),
+              error: error.to_string(),
+            });
+          }
         }
       }
     }
 
-    Self { schemas }
+    (Self { schemas }, warnings)
   }
 
   fn get(&self, name: &str) -> Option<&ObjectSchema> {
@@ -204,16 +215,19 @@ pub(crate) struct SchemaGraph {
 }
 
 impl SchemaGraph {
-  pub(crate) fn new(spec: Spec) -> Self {
-    let repository = SchemaRepository::from_spec(&spec);
+  pub(crate) fn new(spec: Spec) -> (Self, Vec<GenerationWarning>) {
+    let (repository, warnings) = SchemaRepository::from_spec(&spec);
     let discriminator_cache = Self::build_discriminator_cache(&repository);
 
-    Self {
-      repository,
-      dependency_graph: DependencyGraph::new(),
-      discriminator_cache,
-      spec,
-    }
+    (
+      Self {
+        repository,
+        dependency_graph: DependencyGraph::new(),
+        discriminator_cache,
+        spec,
+      },
+      warnings,
+    )
   }
 
   fn build_discriminator_cache(repository: &SchemaRepository) -> HashMap<String, (String, String)> {
@@ -415,7 +429,7 @@ mod tests {
     schemas.insert("Post".to_string(), ObjectOrReference::Object(create_simple_schema()));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let repo = SchemaRepository::from_spec(&spec);
+    let (repo, _warnings) = SchemaRepository::from_spec(&spec);
 
     assert!(repo.get("User").is_some());
     assert!(repo.get("Post").is_some());
@@ -545,7 +559,7 @@ mod tests {
     );
 
     let spec = create_test_spec_with_schemas(schemas);
-    let repo = SchemaRepository::from_spec(&spec);
+    let (repo, _warnings) = SchemaRepository::from_spec(&spec);
 
     let mut graph = DependencyGraph::new();
     graph.build(&repo);
@@ -581,7 +595,7 @@ mod tests {
     schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let repo = SchemaRepository::from_spec(&spec);
+    let (repo, _warnings) = SchemaRepository::from_spec(&spec);
 
     let mut graph = DependencyGraph::new();
     graph.build(&repo);
@@ -602,7 +616,7 @@ mod tests {
     );
 
     let spec = create_test_spec_with_schemas(schemas);
-    let mut graph = SchemaGraph::new(spec);
+    let (mut graph, _warnings) = SchemaGraph::new(spec);
 
     assert!(graph.get_schema("User").is_some());
     assert!(graph.get_schema("Post").is_some());

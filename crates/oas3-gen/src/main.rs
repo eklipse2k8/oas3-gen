@@ -1,4 +1,5 @@
 #![allow(clippy::doc_markdown)]
+#![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
 use clap::Parser;
 

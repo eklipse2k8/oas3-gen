@@ -1,9 +1,14 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+  collections::{HashMap, HashSet, hash_map::DefaultHasher},
+  hash::{Hash, Hasher},
+};
 
+use anyhow::Context;
 use oas3::{
   Spec,
   spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn},
 };
+use serde_json::Value;
 
 use super::{SchemaConverter, TypeUsageRecorder, error::ConversionResult, metadata};
 use crate::{
@@ -23,7 +28,7 @@ const RESPONSE_SUFFIX: &str = "Response";
 const BODY_FIELD_NAME: &str = "body";
 const SUCCESS_RESPONSE_PREFIX: char = '2';
 
-type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<serde_json::Value>);
+type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);
 
 struct RequestBodyInfo {
   body_type: Option<TypeRef>,
@@ -69,7 +74,7 @@ impl SharedSchemaCache {
     context: &str,
     kind: StructKind,
   ) -> ConversionResult<String> {
-    let schema_hash = Self::hash_schema(schema);
+    let schema_hash = Self::hash_schema(schema)?;
 
     if let Some(existing_type) = self.schema_to_type.get(&schema_hash) {
       return Ok(existing_type.clone());
@@ -164,26 +169,50 @@ impl SharedSchemaCache {
     format!("{base}{suffix}")
   }
 
-  fn hash_schema(schema: &ObjectSchema) -> String {
-    let Ok(mut value) = serde_json::to_value(schema) else {
-      return String::new();
-    };
+  fn hash_schema(schema: &ObjectSchema) -> ConversionResult<String> {
+    let mut value = serde_json::to_value(schema).context("Failed to serialize schema for hashing")?;
 
-    if let serde_json::Value::Object(map) = &mut value
-      && let Some(serde_json::Value::Array(required_list)) = map.get_mut("required")
-    {
-      let mut strings: Vec<String> = required_list
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
+    Self::canonicalize_json(&mut value);
 
-      if strings.len() == required_list.len() {
-        strings.sort_unstable();
-        *required_list = strings.into_iter().map(serde_json::Value::String).collect();
+    let canonical_json = serde_json::to_string(&value).context("Failed to serialize canonical JSON for hashing")?;
+
+    let mut hasher = DefaultHasher::new();
+    canonical_json.hash(&mut hasher);
+    Ok(format!("{:x}", hasher.finish()))
+  }
+
+  fn canonicalize_json(value: &mut Value) {
+    match value {
+      Value::Object(map) => {
+        if let Some(Value::Array(required_list)) = map.get_mut("required") {
+          let mut strings: Vec<String> = required_list
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+
+          if strings.len() == required_list.len() {
+            strings.sort_unstable();
+            *required_list = strings.into_iter().map(Value::String).collect();
+          }
+        }
+
+        if let Some(Value::Object(props)) = map.get_mut("properties") {
+          for prop_value in props.values_mut() {
+            Self::canonicalize_json(prop_value);
+          }
+        }
+
+        for value in map.values_mut() {
+          Self::canonicalize_json(value);
+        }
       }
+      Value::Array(arr) => {
+        for item in arr {
+          Self::canonicalize_json(item);
+        }
+      }
+      _ => {}
     }
-
-    serde_json::to_string(&value).unwrap_or_default()
   }
 
   fn into_types(self) -> Vec<RustType> {

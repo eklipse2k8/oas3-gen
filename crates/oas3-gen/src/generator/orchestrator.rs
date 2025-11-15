@@ -142,7 +142,7 @@ impl Orchestrator {
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
-    let mut graph = SchemaGraph::new(self.spec.clone());
+    let (mut graph, mut warnings) = SchemaGraph::new(self.spec.clone());
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
@@ -172,7 +172,7 @@ impl Orchestrator {
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
-    let mut warnings = schema_warnings;
+    warnings.extend(schema_warnings);
     warnings.extend(op_warnings);
 
     let mut structs_generated = 0;
