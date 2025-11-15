@@ -1,16 +1,15 @@
-use std::{
-  collections::{HashMap, HashSet, hash_map::DefaultHasher},
-  hash::{Hash, Hasher},
-};
+use std::collections::HashSet;
 
-use anyhow::Context;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn},
+  spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
 };
 use serde_json::Value;
 
-use super::{SchemaConverter, TypeUsageRecorder, error::ConversionResult, metadata};
+use super::{
+  BODY_FIELD_NAME, REQUEST_BODY_SUFFIX, REQUEST_SUFFIX, RESPONSE_SUFFIX, SUCCESS_RESPONSE_PREFIX, SchemaConverter,
+  TypeUsageRecorder, cache::SharedSchemaCache, error::ConversionResult, metadata,
+};
 use crate::{
   generator::{
     ast::{
@@ -21,12 +20,6 @@ use crate::{
   },
   reserved::{to_rust_field_name, to_rust_type_name},
 };
-
-const REQUEST_SUFFIX: &str = "Request";
-const REQUEST_BODY_SUFFIX: &str = "RequestBody";
-const RESPONSE_SUFFIX: &str = "Response";
-const BODY_FIELD_NAME: &str = "body";
-const SUCCESS_RESPONSE_PREFIX: char = '2';
 
 type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);
 
@@ -49,175 +42,6 @@ struct ProcessingContext<'a> {
   type_usage: &'a mut Vec<String>,
   generated_types: &'a mut Vec<RustType>,
   usage: &'a mut TypeUsageRecorder,
-}
-
-struct SharedSchemaCache {
-  schema_to_type: HashMap<String, String>,
-  generated_types: Vec<RustType>,
-  used_names: HashSet<String>,
-}
-
-impl SharedSchemaCache {
-  fn new() -> Self {
-    Self {
-      schema_to_type: HashMap::new(),
-      generated_types: Vec::new(),
-      used_names: HashSet::new(),
-    }
-  }
-
-  fn get_or_create_type(
-    &mut self,
-    schema: &ObjectSchema,
-    converter: &SchemaConverter,
-    path: &str,
-    context: &str,
-    kind: StructKind,
-  ) -> ConversionResult<String> {
-    let schema_hash = Self::hash_schema(schema)?;
-
-    if let Some(existing_type) = self.schema_to_type.get(&schema_hash) {
-      return Ok(existing_type.clone());
-    }
-
-    let base_name = Self::infer_name_from_context(schema, path, context);
-    let type_name = self.make_unique_name(base_name);
-    let rust_type_name = to_rust_type_name(&type_name);
-
-    let (body_struct, mut nested_types) = converter.convert_struct(&type_name, schema, Some(kind))?;
-
-    self.generated_types.append(&mut nested_types);
-    self.generated_types.push(body_struct);
-    self.schema_to_type.insert(schema_hash, rust_type_name.clone());
-    self.used_names.insert(rust_type_name.clone());
-
-    Ok(rust_type_name)
-  }
-
-  fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
-    if schema.properties.len() == 1
-      && let Some((prop_name, _)) = schema.properties.iter().next()
-    {
-      let singular = Self::singularize(prop_name);
-      if context == REQUEST_BODY_SUFFIX {
-        return singular;
-      }
-      return format!("{singular}Response");
-    }
-
-    let path_segments: Vec<&str> = path
-      .split('/')
-      .filter(|s| !s.is_empty() && !s.starts_with('{'))
-      .collect();
-
-    if let Some(last_segment) = path_segments.last() {
-      let singular = Self::singularize(last_segment);
-      if context == REQUEST_BODY_SUFFIX {
-        return format!("{singular}RequestBody");
-      }
-      return format!("{singular}{context}Response");
-    }
-
-    if let Some(first_segment) = path_segments.first() {
-      if context == REQUEST_BODY_SUFFIX {
-        return format!("{first_segment}RequestBody");
-      }
-      return format!("{first_segment}{context}Response");
-    }
-
-    if context == REQUEST_BODY_SUFFIX {
-      return REQUEST_BODY_SUFFIX.to_string();
-    }
-    format!("Response{context}")
-  }
-
-  fn singularize(word: &str) -> String {
-    if let Some(stem) = word.strip_suffix("ies") {
-      return format!("{stem}y");
-    }
-    if let Some(stem) = word.strip_suffix("sses") {
-      return format!("{stem}ss");
-    }
-    if let Some(stem) = word.strip_suffix("xes") {
-      return format!("{stem}x");
-    }
-    if let Some(stem) = word.strip_suffix("ches") {
-      return format!("{stem}ch");
-    }
-    if let Some(stem) = word.strip_suffix("shes") {
-      return format!("{stem}sh");
-    }
-    if let Some(stem) = word.strip_suffix('s')
-      && !stem.is_empty()
-      && !stem.ends_with('s')
-    {
-      return stem.to_string();
-    }
-    word.to_string()
-  }
-
-  fn make_unique_name(&mut self, base: String) -> String {
-    let rust_name = to_rust_type_name(&base);
-    if !self.used_names.contains(&rust_name) {
-      return base;
-    }
-
-    let mut suffix = 2;
-    while self.used_names.contains(&to_rust_type_name(&format!("{base}{suffix}"))) {
-      suffix += 1;
-    }
-    format!("{base}{suffix}")
-  }
-
-  fn hash_schema(schema: &ObjectSchema) -> ConversionResult<String> {
-    let mut value = serde_json::to_value(schema).context("Failed to serialize schema for hashing")?;
-
-    Self::canonicalize_json(&mut value);
-
-    let canonical_json = serde_json::to_string(&value).context("Failed to serialize canonical JSON for hashing")?;
-
-    let mut hasher = DefaultHasher::new();
-    canonical_json.hash(&mut hasher);
-    Ok(format!("{:x}", hasher.finish()))
-  }
-
-  fn canonicalize_json(value: &mut Value) {
-    match value {
-      Value::Object(map) => {
-        if let Some(Value::Array(required_list)) = map.get_mut("required") {
-          let mut strings: Vec<String> = required_list
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect();
-
-          if strings.len() == required_list.len() {
-            strings.sort_unstable();
-            *required_list = strings.into_iter().map(Value::String).collect();
-          }
-        }
-
-        if let Some(Value::Object(props)) = map.get_mut("properties") {
-          for prop_value in props.values_mut() {
-            Self::canonicalize_json(prop_value);
-          }
-        }
-
-        for value in map.values_mut() {
-          Self::canonicalize_json(value);
-        }
-      }
-      Value::Array(arr) => {
-        for item in arr {
-          Self::canonicalize_json(item);
-        }
-      }
-      _ => {}
-    }
-  }
-
-  fn into_types(self) -> Vec<RustType> {
-    self.generated_types
-  }
 }
 
 pub(crate) struct OperationConverter<'a> {

@@ -1,8 +1,11 @@
-use std::{collections::HashSet, fmt};
+use std::{
+  collections::{BTreeSet, HashSet},
+  fmt,
+};
 
 use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
-  ast::{OperationInfo, RustType},
+  ast::{OperationInfo, ParameterLocation, RustType},
   codegen::{self, Visibility},
   converter::{FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
   operation_registry::OperationRegistry,
@@ -44,6 +47,8 @@ pub struct GenerationStats {
   pub cycle_details: Vec<Vec<String>>,
   pub warnings: Vec<GenerationWarning>,
   pub orphaned_schemas_count: usize,
+  pub client_methods_generated: Option<usize>,
+  pub client_headers_generated: Option<usize>,
 }
 
 struct GenerationArtifacts {
@@ -107,13 +112,19 @@ impl Orchestrator {
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
-      operations_info, stats, ..
+      operations_info,
+      mut stats,
+      ..
     } = artifacts;
+
+    let header_count = Self::count_unique_headers(&operations_info);
+    stats.client_methods_generated = Some(operations_info.len());
+    stats.client_headers_generated = Some(header_count);
 
     let client_tokens = codegen::client::generate_client(&self.spec, &operations_info)?;
     let formatted_code = Self::format_code(&client_tokens)?;
     let header = self.generate_header(source_path);
-    let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
+    let final_code = format!("{header}\n\n{formatted_code}\n");
     Ok((final_code, stats))
   }
 
@@ -199,6 +210,8 @@ impl Orchestrator {
       cycle_details,
       warnings,
       orphaned_schemas_count,
+      client_methods_generated: None,
+      client_headers_generated: None,
     };
 
     GenerationArtifacts {
@@ -297,6 +310,16 @@ impl Orchestrator {
   fn format_code(code: &proc_macro2::TokenStream) -> anyhow::Result<String> {
     let syntax_tree = syn::parse2(code.clone())?;
     Ok(prettyplease::unparse(&syntax_tree))
+  }
+
+  fn count_unique_headers(operations: &[OperationInfo]) -> usize {
+    operations
+      .iter()
+      .flat_map(|op| &op.parameters)
+      .filter(|param| matches!(param.location, ParameterLocation::Header))
+      .map(|param| param.original_name.to_ascii_lowercase())
+      .collect::<BTreeSet<_>>()
+      .len()
   }
 
   fn generate_header(&self, source_path: &str) -> String {

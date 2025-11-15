@@ -10,7 +10,7 @@ feature-depth = 1
 ignore = []
 
 [licenses]
-allow = ["ISC", "MIT", "Apache-2.0", "Unicode-3.0"]
+allow = ["BSD-2-Clause", "ISC", "MIT", "Apache-2.0", "Unicode-3.0"]
 exceptions = []
 
 [bans]
@@ -19,9 +19,7 @@ wildcards = "deny"
 highlight = "simplest-path"
 workspace-default-features = "allow"
 external-default-features = "allow"
-allow = [
-
-]
+allow = []
 deny = []
 skip = [
   # Duplicated from validation crate

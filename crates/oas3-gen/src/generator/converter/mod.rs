@@ -1,3 +1,4 @@
+mod cache;
 mod constants;
 mod enums;
 mod error;
@@ -21,6 +22,12 @@ use super::{
   schema_graph::SchemaGraph,
 };
 use crate::reserved::to_rust_type_name;
+
+pub(crate) const REQUEST_SUFFIX: &str = "Request";
+pub(crate) const REQUEST_BODY_SUFFIX: &str = "RequestBody";
+pub(crate) const RESPONSE_SUFFIX: &str = "Response";
+pub(crate) const BODY_FIELD_NAME: &str = "body";
+pub(crate) const SUCCESS_RESPONSE_PREFIX: char = '2';
 
 pub(crate) struct SchemaConverter<'a> {
   graph: &'a SchemaGraph,
