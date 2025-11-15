@@ -23,7 +23,7 @@ pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec 
 
 pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> SchemaGraph {
   let spec = create_test_spec(schemas);
-  let mut graph = SchemaGraph::new(spec).unwrap();
+  let mut graph = SchemaGraph::new(spec);
   graph.build_dependencies();
   graph.detect_cycles();
   graph

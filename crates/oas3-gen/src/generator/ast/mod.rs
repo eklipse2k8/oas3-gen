@@ -95,6 +95,7 @@ pub struct OperationParameter {
   pub rust_field: String,
   pub location: ParameterLocation,
   pub required: bool,
+  pub rust_type: TypeRef,
 }
 
 #[derive(Debug, Clone)]

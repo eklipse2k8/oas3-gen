@@ -94,7 +94,7 @@ impl SharedSchemaCache {
       && let Some((prop_name, _)) = schema.properties.iter().next()
     {
       let singular = Self::singularize(prop_name);
-      if context == "RequestBody" {
+      if context == REQUEST_BODY_SUFFIX {
         return singular;
       }
       return format!("{singular}Response");
@@ -107,21 +107,21 @@ impl SharedSchemaCache {
 
     if let Some(last_segment) = path_segments.last() {
       let singular = Self::singularize(last_segment);
-      if context == "RequestBody" {
+      if context == REQUEST_BODY_SUFFIX {
         return format!("{singular}RequestBody");
       }
       return format!("{singular}{context}Response");
     }
 
     if let Some(first_segment) = path_segments.first() {
-      if context == "RequestBody" {
+      if context == REQUEST_BODY_SUFFIX {
         return format!("{first_segment}RequestBody");
       }
       return format!("{first_segment}{context}Response");
     }
 
-    if context == "RequestBody" {
-      return "RequestBody".to_string();
+    if context == REQUEST_BODY_SUFFIX {
+      return REQUEST_BODY_SUFFIX.to_string();
     }
     format!("Response{context}")
   }
@@ -585,7 +585,7 @@ impl<'a> OperationConverter<'a> {
     let field = FieldDef {
       name: rust_field.clone(),
       docs,
-      rust_type: final_rust_type,
+      rust_type: final_rust_type.clone(),
       validation_attrs,
       regex_validation,
       default_value,
@@ -604,6 +604,7 @@ impl<'a> OperationConverter<'a> {
       rust_field,
       location,
       required: is_required,
+      rust_type: final_rust_type,
     };
 
     Ok((field, metadata))

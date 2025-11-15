@@ -5,7 +5,7 @@ use std::{
 
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, ParameterIn, Schema},
+  spec::{ObjectOrReference, ObjectSchema, Schema},
 };
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
@@ -194,55 +194,26 @@ impl<'a> CycleDetector<'a> {
   }
 }
 
-#[derive(Debug)]
-struct HeaderExtractor {
-  headers: BTreeSet<String>,
-}
-
-impl HeaderExtractor {
-  fn from_spec(spec: &Spec) -> anyhow::Result<Self> {
-    let mut headers = BTreeSet::new();
-
-    for (_, _, operation) in spec.operations() {
-      for parameter in &operation.parameters {
-        let resolved = parameter.resolve(spec)?;
-        if matches!(resolved.location, ParameterIn::Header) {
-          headers.insert(resolved.name.to_lowercase());
-        }
-      }
-    }
-
-    Ok(Self { headers })
-  }
-
-  fn all(&self) -> impl Iterator<Item = &String> {
-    self.headers.iter()
-  }
-}
-
 /// Graph structure for managing OpenAPI schemas and their dependencies
 #[derive(Debug)]
 pub(crate) struct SchemaGraph {
   repository: SchemaRepository,
   dependency_graph: DependencyGraph,
-  header_extractor: HeaderExtractor,
   discriminator_cache: HashMap<String, (String, String)>,
   spec: Spec,
 }
 
 impl SchemaGraph {
-  pub(crate) fn new(spec: Spec) -> anyhow::Result<Self> {
+  pub(crate) fn new(spec: Spec) -> Self {
     let repository = SchemaRepository::from_spec(&spec);
-    let header_extractor = HeaderExtractor::from_spec(&spec)?;
     let discriminator_cache = Self::build_discriminator_cache(&repository);
 
-    Ok(Self {
+    Self {
       repository,
       dependency_graph: DependencyGraph::new(),
-      header_extractor,
       discriminator_cache,
       spec,
-    })
+    }
   }
 
   fn build_discriminator_cache(repository: &SchemaRepository) -> HashMap<String, (String, String)> {
@@ -270,10 +241,6 @@ impl SchemaGraph {
 
   pub(crate) fn schema_names(&self) -> Vec<&String> {
     self.repository.names().collect()
-  }
-
-  pub(crate) fn all_headers(&self) -> Vec<&String> {
-    self.header_extractor.all().collect()
   }
 
   pub(crate) fn spec(&self) -> &Spec {
@@ -635,7 +602,7 @@ mod tests {
     );
 
     let spec = create_test_spec_with_schemas(schemas);
-    let mut graph = SchemaGraph::new(spec).unwrap();
+    let mut graph = SchemaGraph::new(spec);
 
     assert!(graph.get_schema("User").is_some());
     assert!(graph.get_schema("Post").is_some());
@@ -659,12 +626,5 @@ mod tests {
     );
     assert_eq!(SchemaGraph::extract_ref_name("#/other/path"), None);
     assert_eq!(SchemaGraph::extract_ref_name("InvalidRef"), None);
-  }
-
-  #[test]
-  fn test_header_extractor_empty_spec() {
-    let spec = create_test_spec_with_schemas(BTreeMap::new());
-    let extractor = HeaderExtractor::from_spec(&spec).unwrap();
-    assert_eq!(extractor.all().count(), 0);
   }
 }

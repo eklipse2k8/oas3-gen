@@ -1,7 +1,15 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::{generator::ast::OperationInfo, reserved::to_rust_type_name};
+use crate::{
+  generator::{
+    ast::{OperationInfo, ParameterLocation},
+    codegen::constants,
+  },
+  reserved::to_rust_type_name,
+};
 
 mod methods;
 
@@ -19,6 +27,10 @@ pub fn generate_client(spec: &oas3::Spec, operations: &[OperationInfo]) -> anyho
     .first()
     .map_or_else(|| "https://example.com/".to_string(), |server| server.url.clone());
   let base_url_lit = syn::LitStr::new(&base_url, proc_macro2::Span::call_site());
+
+  let header_names = extract_header_names(operations);
+  let header_refs: Vec<&String> = header_names.iter().collect();
+  let header_consts = constants::generate_header_constants(&header_refs);
 
   let mut method_tokens = Vec::new();
   for operation in operations {
@@ -39,6 +51,9 @@ pub fn generate_client(spec: &oas3::Spec, operations: &[OperationInfo]) -> anyho
 
     const BASE_URL: &str = #base_url_lit;
 
+    #header_consts
+
+    #[derive(Debug, Clone)]
     pub struct #client_ident {
       client: Client,
       base_url: Url,
@@ -94,4 +109,13 @@ fn extract_metadata(spec: &oas3::Spec) -> Metadata {
   Metadata {
     title: spec.info.title.clone(),
   }
+}
+
+fn extract_header_names(operations: &[OperationInfo]) -> BTreeSet<String> {
+  operations
+    .iter()
+    .flat_map(|op| &op.parameters)
+    .filter(|param| matches!(param.location, ParameterLocation::Header))
+    .map(|param| param.original_name.to_ascii_lowercase().clone())
+    .collect()
 }

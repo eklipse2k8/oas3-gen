@@ -2,7 +2,10 @@ use anyhow::anyhow;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::generator::ast::{OperationBody, OperationInfo, ParameterLocation};
+use crate::{
+  generator::ast::{OperationBody, OperationInfo, ParameterLocation, TypeRef},
+  reserved::header_const_name,
+};
 
 struct TypeInfo {
   request_ident: syn::Ident,
@@ -107,25 +110,77 @@ fn build_header_statements(operation: &OperationInfo) -> Vec<TokenStream> {
     .iter()
     .filter(|param| matches!(param.location, ParameterLocation::Header))
     .map(|param| {
-      let header_name = param.original_name.clone();
+      let const_name = header_const_name(&param.original_name);
+      let const_ident = format_ident!("{const_name}");
       let field_ident = format_ident!("{}", param.rust_field);
+
+      let value_conversion = build_header_value_conversion(&param.rust_type, &field_ident, param.required);
+
       if param.required {
         quote! {
           {
-            let header_value = HeaderValue::from_str(&request.#field_ident.to_string())?;
-            req_builder = req_builder.header(#header_name, header_value);
+            #value_conversion
+            req_builder = req_builder.header(#const_ident, header_value);
           }
         }
       } else {
         quote! {
           if let Some(value) = request.#field_ident.as_ref() {
-            let header_value = HeaderValue::from_str(&value.to_string())?;
-            req_builder = req_builder.header(#header_name, header_value);
+            #value_conversion
+            req_builder = req_builder.header(#const_ident, header_value);
           }
         }
       }
     })
     .collect()
+}
+
+fn build_header_value_conversion(rust_type: &TypeRef, field_ident: &syn::Ident, required: bool) -> TokenStream {
+  let value_expr = if required {
+    quote! { request.#field_ident }
+  } else {
+    quote! { value }
+  };
+
+  if is_string_type(rust_type) {
+    quote! {
+      let header_value = HeaderValue::from_str(#value_expr.as_str())?;
+    }
+  } else if is_primitive_type(rust_type) {
+    quote! {
+      let header_value = HeaderValue::from_str(&(#value_expr).to_string())?;
+    }
+  } else {
+    quote! {
+      let header_value = HeaderValue::from_str(&serde_plain::to_string(&#value_expr)?)?;
+    }
+  }
+}
+
+fn is_string_type(type_ref: &TypeRef) -> bool {
+  matches!(type_ref.base_type, crate::generator::ast::RustPrimitive::String) && !type_ref.is_array
+}
+
+fn is_primitive_type(type_ref: &TypeRef) -> bool {
+  use crate::generator::ast::RustPrimitive;
+  matches!(
+    type_ref.base_type,
+    RustPrimitive::I8
+      | RustPrimitive::I16
+      | RustPrimitive::I32
+      | RustPrimitive::I64
+      | RustPrimitive::I128
+      | RustPrimitive::Isize
+      | RustPrimitive::U8
+      | RustPrimitive::U16
+      | RustPrimitive::U32
+      | RustPrimitive::U64
+      | RustPrimitive::U128
+      | RustPrimitive::Usize
+      | RustPrimitive::F32
+      | RustPrimitive::F64
+      | RustPrimitive::Bool
+  ) && !type_ref.is_array
 }
 
 fn build_body_statement(operation: &OperationInfo) -> TokenStream {

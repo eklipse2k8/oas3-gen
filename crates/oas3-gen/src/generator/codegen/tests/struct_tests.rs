@@ -120,9 +120,8 @@ fn codegen_emits_only_deserialize_when_needed() {
     derives: vec!["Debug".into(), "Deserialize".into()],
     ..base_struct(StructKind::Schema)
   };
-  let headers: [&String; 0] = [];
   let errors = std::collections::HashSet::new();
-  let tokens = codegen::generate(&[RustType::Struct(def)], &headers, &errors, Visibility::Public);
+  let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
   let code = tokens.to_string();
   assert!(code.contains("use serde :: Deserialize"));
   assert!(!code.contains("Serialize"));
@@ -134,9 +133,8 @@ fn codegen_emits_both_serde_traits_when_required() {
     derives: vec!["Debug".into(), "Serialize".into(), "Deserialize".into()],
     ..base_struct(StructKind::Schema)
   };
-  let headers: [&String; 0] = [];
   let errors = std::collections::HashSet::new();
-  let tokens = codegen::generate(&[RustType::Struct(def)], &headers, &errors, Visibility::Public);
+  let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
   let code = tokens.to_string();
   assert!(code.contains("use serde :: { Deserialize , Serialize }"));
 }

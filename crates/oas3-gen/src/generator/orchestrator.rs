@@ -47,7 +47,6 @@ pub struct GenerationStats {
 }
 
 struct GenerationArtifacts {
-  graph: SchemaGraph,
   rust_types: Vec<RustType>,
   operations_info: Vec<OperationInfo>,
   usage_recorder: TypeUsageRecorder,
@@ -106,7 +105,7 @@ impl Orchestrator {
   }
 
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let artifacts = self.collect_generation_artifacts()?;
+    let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
       operations_info, stats, ..
     } = artifacts;
@@ -127,24 +126,23 @@ impl Orchestrator {
   }
 
   pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let artifacts = self.collect_generation_artifacts()?;
+    let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
-      graph,
       rust_types,
       operations_info,
       usage_recorder,
       stats,
     } = artifacts;
 
-    let code_tokens = self.generate_code_from_artifacts(&graph, rust_types, &operations_info, usage_recorder);
+    let code_tokens = self.generate_code_from_artifacts(rust_types, &operations_info, usage_recorder);
     let formatted_code = Self::format_code(&code_tokens)?;
     let header = self.generate_header(source_path);
     let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
     Ok((final_code, stats))
   }
 
-  fn collect_generation_artifacts(&self) -> anyhow::Result<GenerationArtifacts> {
-    let mut graph = SchemaGraph::new(self.spec.clone())?;
+  fn collect_generation_artifacts(&self) -> GenerationArtifacts {
+    let mut graph = SchemaGraph::new(self.spec.clone());
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
@@ -203,13 +201,12 @@ impl Orchestrator {
       orphaned_schemas_count,
     };
 
-    Ok(GenerationArtifacts {
-      graph,
+    GenerationArtifacts {
       rust_types,
       operations_info,
       usage_recorder,
       stats,
-    })
+    }
   }
 
   fn convert_all_schemas(
@@ -285,7 +282,6 @@ impl Orchestrator {
 
   fn generate_code_from_artifacts(
     &self,
-    graph: &SchemaGraph,
     mut rust_types: Vec<RustType>,
     operations_info: &[OperationInfo],
     usage_recorder: TypeUsageRecorder,
@@ -295,7 +291,7 @@ impl Orchestrator {
     analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
     let error_schemas = ErrorAnalyzer::build_error_schema_set(operations_info, &rust_types);
 
-    codegen::generate(&rust_types, &graph.all_headers(), &error_schemas, self.visibility)
+    codegen::generate(&rust_types, &error_schemas, self.visibility)
   }
 
   fn format_code(code: &proc_macro2::TokenStream) -> anyhow::Result<String> {

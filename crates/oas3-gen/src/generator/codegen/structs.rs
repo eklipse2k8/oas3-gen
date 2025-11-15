@@ -114,66 +114,33 @@ fn generate_fields(
 }
 
 fn generate_struct_method(method: &StructMethod, visibility: Visibility) -> TokenStream {
-  let docs = generate_docs(&method.docs);
+  match &method.kind {
+    StructMethodKind::ParseResponse {
+      response_enum,
+      variants,
+    } => {
+      let name = format_ident!("{}", method.name);
+      let docs = generate_docs(&method.docs);
+      let attrs = generate_outer_attrs(&method.attrs);
+      generate_parse_response_method(&name, response_enum, variants, &docs, &attrs, visibility)
+    }
+    StructMethodKind::RenderPath { segments, query_params } => {
+      generate_render_path_method(method, segments, query_params, visibility)
+    }
+  }
+}
+
+fn generate_render_path_method(
+  method: &StructMethod,
+  segments: &[PathSegment],
+  query_params: &[QueryParameter],
+  visibility: Visibility,
+) -> TokenStream {
   let name = format_ident!("{}", method.name);
+  let docs = generate_docs(&method.docs);
   let attrs = generate_outer_attrs(&method.attrs);
   let vis = visibility.to_tokens();
-
-  if let StructMethodKind::ParseResponse {
-    response_enum,
-    variants,
-  } = &method.kind
-  {
-    return generate_parse_response_method(&name, response_enum, variants, &docs, &attrs, visibility);
-  }
-
-  let body = match &method.kind {
-    StructMethodKind::RenderPath { segments, query_params } => {
-      let mut format_string = String::new();
-      let mut fallback_string = String::new();
-      let mut args: Vec<TokenStream> = Vec::new();
-
-      for segment in segments {
-        match segment {
-          PathSegment::Literal(lit) => {
-            let escaped = lit.replace('{', "{{").replace('}', "}}");
-            format_string.push_str(&escaped);
-            fallback_string.push_str(lit);
-          }
-          PathSegment::Parameter { field } => {
-            format_string.push_str("{}");
-            fallback_string.push_str("{}");
-            let ident = format_ident!("{}", field);
-            args.push(quote! {
-              oas3_gen_support::percent_encode_path_segment(&self.#ident.to_string())
-            });
-          }
-        }
-      }
-
-      let path_expr = if args.is_empty() {
-        quote! { #fallback_string.to_string() }
-      } else {
-        let args_tokens = args;
-        quote! { format!(#format_string, #(#args_tokens),*) }
-      };
-
-      if query_params.is_empty() {
-        path_expr
-      } else {
-        let query_statements: Vec<TokenStream> = query_params.iter().map(generate_query_param_statement).collect();
-
-        quote! {
-          use std::fmt::Write as _;
-          let mut path = #path_expr;
-          let mut prefix = '\0';
-          #(#query_statements)*
-          path
-        }
-      }
-    }
-    StructMethodKind::ParseResponse { .. } => unreachable!("ParseResponse handled above"),
-  };
+  let body = build_render_path_body(segments, query_params);
 
   quote! {
     #docs
@@ -181,6 +148,59 @@ fn generate_struct_method(method: &StructMethod, visibility: Visibility) -> Toke
     #vis fn #name(&self) -> String {
       #body
     }
+  }
+}
+
+fn build_render_path_body(segments: &[PathSegment], query_params: &[QueryParameter]) -> TokenStream {
+  let path_expr = build_path_expression(segments);
+  if query_params.is_empty() {
+    path_expr
+  } else {
+    append_query_params(&path_expr, query_params)
+  }
+}
+
+fn build_path_expression(segments: &[PathSegment]) -> TokenStream {
+  let mut format_string = String::new();
+  let mut fallback_string = String::new();
+  let mut args = Vec::new();
+
+  for (i, segment) in segments.iter().enumerate() {
+    match segment {
+      PathSegment::Literal(lit) => {
+        // path will be joined with base URL, so skip leading slash for first segment
+        let lit_str = if i == 0 && lit.starts_with('/') { &lit[1..] } else { lit };
+        let escaped = lit_str.replace('{', "{{").replace('}', "}}");
+        format_string.push_str(&escaped);
+        fallback_string.push_str(lit_str);
+      }
+      PathSegment::Parameter { field } => {
+        format_string.push_str("{}");
+        fallback_string.push_str("{}");
+        let ident = format_ident!("{field}");
+        args.push(quote! {
+          oas3_gen_support::percent_encode_path_segment(&self.#ident.clone())
+        });
+      }
+    }
+  }
+
+  if args.is_empty() {
+    quote! { #fallback_string.to_string() }
+  } else {
+    quote! { format!(#format_string, #(#args),*) }
+  }
+}
+
+fn append_query_params(path_expr: &TokenStream, query_params: &[QueryParameter]) -> TokenStream {
+  let query_statements: Vec<TokenStream> = query_params.iter().map(generate_query_param_statement).collect();
+
+  quote! {
+    use std::fmt::Write as _;
+    let mut path = #path_expr;
+    let mut prefix = '\0';
+    #(#query_statements)*
+    path
   }
 }
 
