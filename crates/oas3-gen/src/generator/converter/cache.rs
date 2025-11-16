@@ -6,7 +6,7 @@ use json_canon::to_string as to_canonical_json;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
-use super::{REQUEST_BODY_SUFFIX, RESPONSE_SUFFIX, SchemaConverter, error::ConversionResult};
+use super::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX, SchemaConverter, error::ConversionResult};
 use crate::{
   generator::ast::{RustType, StructKind},
   reserved::to_rust_type_name,
@@ -90,7 +90,7 @@ impl SharedSchemaCache {
         if is_request {
           REQUEST_BODY_SUFFIX.to_string()
         } else {
-          format!("Response{context}")
+          format!("{RESPONSE_PREFIX}{context}")
         }
       })
   }

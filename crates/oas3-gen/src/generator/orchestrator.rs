@@ -3,6 +3,7 @@ use std::{
   fmt,
 };
 
+use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
   ast::{OperationInfo, ParameterLocation, RustType},
@@ -264,13 +265,22 @@ impl Orchestrator {
     let mut operations_info = Vec::new();
     let mut warnings = Vec::new();
     let mut usage_recorder = TypeUsageRecorder::new();
+    let mut schema_cache = SharedSchemaCache::new();
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
     for (stable_id, method, path, operation) in self.operation_registry.operations_with_details() {
       let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
-      match operation_converter.convert(stable_id, operation_id, method, path, operation, &mut usage_recorder) {
+      match operation_converter.convert(
+        stable_id,
+        operation_id,
+        method,
+        path,
+        operation,
+        &mut usage_recorder,
+        &mut schema_cache,
+      ) {
         Ok((types, op_info)) => {
           warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
             operation_id: op_info.operation_id.clone(),
@@ -289,7 +299,7 @@ impl Orchestrator {
       }
     }
 
-    rust_types.extend(operation_converter.finish());
+    rust_types.extend(schema_cache.into_types());
     (rust_types, operations_info, warnings, usage_recorder)
   }
 

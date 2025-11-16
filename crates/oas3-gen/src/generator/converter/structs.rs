@@ -1,11 +1,9 @@
-use std::{
-  cell::RefCell,
-  collections::{BTreeMap, BTreeSet, HashMap},
-};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
 
 use super::{
+  DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX,
   constants::{doc_attrs, serde_attrs},
   error::ConversionResult,
   field_optionality::{FieldOptionalityContext, FieldOptionalityPolicy},
@@ -38,7 +36,6 @@ struct DiscriminatorInfo {
 pub(crate) struct StructConverter<'a> {
   graph: &'a SchemaGraph,
   type_resolver: TypeResolver<'a>,
-  merged_schema_cache: RefCell<HashMap<String, ObjectSchema>>,
   reachable_schemas: Option<std::collections::BTreeSet<String>>,
   optionality_policy: FieldOptionalityPolicy,
 }
@@ -54,14 +51,15 @@ impl<'a> StructConverter<'a> {
       graph,
       type_resolver,
       reachable_schemas,
-      merged_schema_cache: RefCell::new(HashMap::new()),
       optionality_policy,
     }
   }
 
   pub(crate) fn convert_all_of_schema(&self, name: &str, schema: &ObjectSchema) -> ConversionResult<Vec<RustType>> {
-    if let Some((_, parent_schema)) = self.detect_discriminated_parent(schema) {
-      return self.convert_discriminated_child(name, schema, &parent_schema);
+    let mut merged_schema_cache = HashMap::new();
+
+    if let Some((_, parent_schema)) = self.detect_discriminated_parent(schema, &mut merged_schema_cache) {
+      return self.convert_discriminated_child(name, schema, &parent_schema, &mut merged_schema_cache);
     }
 
     let merged_schema = self.merge_all_of_schema(schema)?;
@@ -78,7 +76,7 @@ impl<'a> StructConverter<'a> {
   ) -> ConversionResult<(RustType, Vec<RustType>)> {
     let is_discriminated = utils::is_discriminated_base_type(schema);
     let struct_name = if is_discriminated {
-      format!("{}Base", to_rust_type_name(name))
+      format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))
     } else {
       to_rust_type_name(name)
     };
@@ -123,6 +121,7 @@ impl<'a> StructConverter<'a> {
     name: &str,
     schema: &ObjectSchema,
     parent_schema: &ObjectSchema,
+    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
   ) -> ConversionResult<Vec<RustType>> {
     if parent_schema.discriminator.is_none() {
       anyhow::bail!("Parent schema for discriminated child '{name}' is not a valid discriminator base");
@@ -130,12 +129,12 @@ impl<'a> StructConverter<'a> {
 
     let struct_name = to_rust_type_name(name);
 
-    let cache_key = format!("{name}_merged");
-    let merged_schema = if let Some(cached) = self.merged_schema_cache.borrow().get(&cache_key) {
+    let cache_key = format!("{name}{MERGED_SCHEMA_CACHE_SUFFIX}");
+    let merged_schema = if let Some(cached) = merged_schema_cache.get(&cache_key) {
       cached.clone()
     } else {
       let merged = self.merge_child_schema_with_parent(schema, parent_schema)?;
-      self.merged_schema_cache.borrow_mut().insert(cache_key, merged.clone());
+      merged_schema_cache.insert(cache_key, merged.clone());
       merged
     };
 
@@ -187,7 +186,7 @@ impl<'a> StructConverter<'a> {
     if is_discriminated {
       let base_struct_name = match &main_type {
         RustType::Struct(def) => def.name.clone(),
-        _ => format!("{}Base", to_rust_type_name(name)),
+        _ => format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)),
       };
       let discriminated_enum = self.create_discriminated_enum(name, schema, &base_struct_name)?;
       all_types.push(discriminated_enum);
@@ -258,7 +257,7 @@ impl<'a> StructConverter<'a> {
     schema_name: Option<&str>,
   ) -> ConversionResult<(Vec<FieldDef>, Vec<RustType>)> {
     let num_properties = schema.properties.len();
-    let use_vec_lookup = num_properties < 10;
+    let required_set: std::collections::HashSet<&String> = schema.required.iter().collect();
 
     let discriminator_mapping = schema_name.and_then(|name| self.graph.get_discriminator_mapping(name));
 
@@ -270,11 +269,7 @@ impl<'a> StructConverter<'a> {
         continue;
       }
 
-      let is_required = if use_vec_lookup {
-        schema.required.iter().any(|r| r == prop_name)
-      } else {
-        schema.required.contains(prop_name)
-      };
+      let is_required = required_set.contains(prop_name);
 
       let ctx = FieldProcessingContext {
         parent_name,
@@ -559,20 +554,26 @@ impl<'a> StructConverter<'a> {
     Ok(())
   }
 
-  fn get_merged_schema(&self, schema_name: &str, schema: &ObjectSchema) -> ConversionResult<ObjectSchema> {
-    if let Some(cached) = self.merged_schema_cache.borrow().get(schema_name) {
+  fn get_merged_schema(
+    &self,
+    schema_name: &str,
+    schema: &ObjectSchema,
+    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
+  ) -> ConversionResult<ObjectSchema> {
+    if let Some(cached) = merged_schema_cache.get(schema_name) {
       return Ok(cached.clone());
     }
 
     let merged = self.merge_all_of_schema(schema)?;
-    self
-      .merged_schema_cache
-      .borrow_mut()
-      .insert(schema_name.to_string(), merged.clone());
+    merged_schema_cache.insert(schema_name.to_string(), merged.clone());
     Ok(merged)
   }
 
-  fn detect_discriminated_parent(&self, schema: &ObjectSchema) -> Option<(String, ObjectSchema)> {
+  fn detect_discriminated_parent(
+    &self,
+    schema: &ObjectSchema,
+    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
+  ) -> Option<(String, ObjectSchema)> {
     if schema.all_of.is_empty() {
       return None;
     }
@@ -586,7 +587,9 @@ impl<'a> StructConverter<'a> {
 
       parent_schema.discriminator.as_ref()?;
 
-      let merged_parent = self.get_merged_schema(&parent_name, parent_schema).ok()?;
+      let merged_parent = self
+        .get_merged_schema(&parent_name, parent_schema, merged_schema_cache)
+        .ok()?;
       if utils::is_discriminated_base_type(&merged_parent) {
         Some((parent_name, merged_parent))
       } else {
