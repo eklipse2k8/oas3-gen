@@ -2,7 +2,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.16.0/status.svg)](https://deps.rs/crate/oas3-gen/0.16.0)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.17.0/status.svg)](https://deps.rs/crate/oas3-gen/0.17.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.1?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification)
 <!-- prettier-ignore-end -->
@@ -33,28 +33,24 @@ oas3-gen generate client -i path/to/openapi.json -o path/to/client.rs
 
 #### Example
 
-Consider the following OpenAPI schema definition in `schemas/pet.json`:
+Consider the following Pet OpenAPI schema definition in `fixtures/petstore.json`:
 
 ```json
 {
   "Pet": {
     "type": "object",
-    "description": "Represents a pet in the store.",
     "required": ["id", "name"],
     "properties": {
-      "id": {
-        "type": "integer",
-        "format": "int64",
-        "description": "The unique identifier for the pet."
-      },
-      "name": {
-        "type": "string",
-        "description": "The name of the pet."
-      },
-      "tag": {
-        "type": "string",
-        "description": "An optional tag for the pet."
-      }
+     "id": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "name": {
+      "type": "string"
+     },
+     "tag": {
+      "type": "string"
+     }
     }
   }
 }
@@ -65,23 +61,13 @@ Executing `oas3-gen` produces the corresponding Rust types.
 ```rust
 // src/types.rs
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default, Deserialize)]
-#[serde(default)]
-pub struct FileListResponse {
-    /// List of file metadata objects.
-    pub data: Option<Vec<FileMetadataSchema>>,
-
-    /// ID of the first file in this page of results.
-    pub first_id: Option<String>,
-
-    /// Whether there are more results available.
-    #[default(Some(false))]
-    pub has_more: Option<bool>,
-
-    /// ID of the last file in this page of results.
-    pub last_id: Option<String>,
+pub struct Pet {
+  pub id: i64,
+  pub name: String,
+  pub tag: Option<String>,
 }
 ```
 

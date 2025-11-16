@@ -1,4 +1,5 @@
 #![allow(clippy::doc_markdown)]
+#![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
 use clap::Parser;
 
@@ -26,6 +27,7 @@ async fn main() -> anyhow::Result<()> {
       output,
       visibility,
       odata_support,
+      preserve_case_variants,
       verbose,
       quiet,
       all_schemas,
@@ -41,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         quiet,
         all_schemas,
         odata_support,
+        preserve_case_variants,
         only,
         exclude,
       );

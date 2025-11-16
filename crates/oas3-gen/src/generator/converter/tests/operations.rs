@@ -9,7 +9,8 @@ use super::common::create_test_graph;
 use crate::generator::{
   ast::{PathSegment, RustType},
   converter::{
-    FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, error::ConversionResult, operations::OperationConverter,
+    ConversionResult, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
+    operations::OperationConverter,
   },
 };
 
@@ -17,12 +18,13 @@ use crate::generator::{
 fn test_basic_get_operation() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation::default();
   let mut usage = TypeUsageRecorder::new();
-  let (types, info) = converter.convert("my_op", "myOp", "GET", "/test", &operation, &mut usage)?;
+  let mut cache = SharedSchemaCache::new();
+  let (types, info) = converter.convert("my_op", "myOp", "GET", "/test", &operation, &mut usage, &mut cache)?;
 
   assert!(types.is_empty(), "Should generate no new types");
   assert_eq!(info.operation_id, "MyOp");
@@ -35,7 +37,7 @@ fn test_basic_get_operation() -> ConversionResult<()> {
 fn test_operation_with_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -59,7 +61,16 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
   }));
 
   let mut usage = TypeUsageRecorder::new();
-  let (types, info) = converter.convert("get_user", "getUser", "GET", "/users/{userId}", &operation, &mut usage)?;
+  let mut cache = SharedSchemaCache::new();
+  let (types, info) = converter.convert(
+    "get_user",
+    "getUser",
+    "GET",
+    "/users/{userId}",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
 
   assert_eq!(types.len(), 1, "Should generate one request struct");
   let request_type_name = info.request_type.as_deref().expect("Request type should exist");
@@ -98,7 +109,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
   };
   let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation {
@@ -120,7 +131,16 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
   };
 
   let mut usage = TypeUsageRecorder::new();
-  let (types, info) = converter.convert("create_user", "createUser", "POST", "/users", &operation, &mut usage)?;
+  let mut cache = SharedSchemaCache::new();
+  let (types, info) = converter.convert(
+    "create_user",
+    "createUser",
+    "POST",
+    "/users",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
 
   assert_eq!(types.len(), 2, "Should generate Request struct and RequestBody alias");
   assert!(
@@ -145,7 +165,7 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
   };
   let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation {
@@ -170,7 +190,10 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
   };
 
   let mut usage = TypeUsageRecorder::new();
-  let (_, info) = converter.convert("get_user", "getUser", "GET", "/user", &operation, &mut usage)?;
+  let mut cache = SharedSchemaCache::new();
+  let (_, info) = converter.convert(
+    "get_user", "getUser", "GET", "/user", &operation, &mut usage, &mut cache,
+  )?;
 
   assert_eq!(info.response_type.as_deref(), Some("User"));
   Ok(())

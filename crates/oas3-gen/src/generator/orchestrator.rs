@@ -1,8 +1,12 @@
-use std::{collections::HashSet, fmt};
+use std::{
+  collections::{BTreeSet, HashSet},
+  fmt,
+};
 
+use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
-  ast::{OperationInfo, RustType},
+  ast::{OperationInfo, ParameterLocation, RustType},
   codegen::{self, Visibility},
   converter::{FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
   operation_registry::OperationRegistry,
@@ -24,6 +28,7 @@ pub struct Orchestrator {
   include_unused_schemas: bool,
   operation_registry: OperationRegistry,
   optionality_policy: FieldOptionalityPolicy,
+  preserve_case_variants: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +49,8 @@ pub struct GenerationStats {
   pub cycle_details: Vec<Vec<String>>,
   pub warnings: Vec<GenerationWarning>,
   pub orphaned_schemas_count: usize,
+  pub client_methods_generated: Option<usize>,
+  pub client_headers_generated: Option<usize>,
 }
 
 struct GenerationArtifacts {
@@ -93,6 +100,7 @@ impl Orchestrator {
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
     optionality_policy: FieldOptionalityPolicy,
+    preserve_case_variants: bool,
   ) -> Self {
     let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
     Self {
@@ -101,19 +109,26 @@ impl Orchestrator {
       include_unused_schemas,
       operation_registry,
       optionality_policy,
+      preserve_case_variants,
     }
   }
 
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
-      operations_info, stats, ..
+      operations_info,
+      mut stats,
+      ..
     } = artifacts;
+
+    let header_count = Self::count_unique_headers(&operations_info);
+    stats.client_methods_generated = Some(operations_info.len());
+    stats.client_headers_generated = Some(header_count);
 
     let client_tokens = codegen::client::generate_client(&self.spec, &operations_info)?;
     let formatted_code = Self::format_code(&client_tokens)?;
     let header = self.generate_header(source_path);
-    let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
+    let final_code = format!("{header}\n\n{formatted_code}\n");
     Ok((final_code, stats))
   }
 
@@ -137,12 +152,12 @@ impl Orchestrator {
     let code_tokens = self.generate_code_from_artifacts(rust_types, &operations_info, usage_recorder);
     let formatted_code = Self::format_code(&code_tokens)?;
     let header = self.generate_header(source_path);
-    let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
+    let final_code = format!("{header}\n\n{formatted_code}\n");
     Ok((final_code, stats))
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
-    let mut graph = SchemaGraph::new(self.spec.clone());
+    let (mut graph, mut warnings) = SchemaGraph::new(self.spec.clone());
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
@@ -160,9 +175,14 @@ impl Orchestrator {
     };
 
     let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy.clone())
+      SchemaConverter::new_with_filter(
+        &graph,
+        reachable.clone(),
+        self.optionality_policy.clone(),
+        self.preserve_case_variants,
+      )
     } else {
-      SchemaConverter::new(&graph, self.optionality_policy.clone())
+      SchemaConverter::new(&graph, self.optionality_policy.clone(), self.preserve_case_variants)
     };
     let (schema_rust_types, schema_warnings) =
       Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
@@ -172,7 +192,7 @@ impl Orchestrator {
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
-    let mut warnings = schema_warnings;
+    warnings.extend(schema_warnings);
     warnings.extend(op_warnings);
 
     let mut structs_generated = 0;
@@ -199,6 +219,8 @@ impl Orchestrator {
       cycle_details,
       warnings,
       orphaned_schemas_count,
+      client_methods_generated: None,
+      client_headers_generated: None,
     };
 
     GenerationArtifacts {
@@ -251,13 +273,22 @@ impl Orchestrator {
     let mut operations_info = Vec::new();
     let mut warnings = Vec::new();
     let mut usage_recorder = TypeUsageRecorder::new();
+    let mut schema_cache = SharedSchemaCache::new();
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
     for (stable_id, method, path, operation) in self.operation_registry.operations_with_details() {
       let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
-      match operation_converter.convert(stable_id, operation_id, method, path, operation, &mut usage_recorder) {
+      match operation_converter.convert(
+        stable_id,
+        operation_id,
+        method,
+        path,
+        operation,
+        &mut usage_recorder,
+        &mut schema_cache,
+      ) {
         Ok((types, op_info)) => {
           warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
             operation_id: op_info.operation_id.clone(),
@@ -276,7 +307,7 @@ impl Orchestrator {
       }
     }
 
-    rust_types.extend(operation_converter.finish());
+    rust_types.extend(schema_cache.into_types());
     (rust_types, operations_info, warnings, usage_recorder)
   }
 
@@ -297,6 +328,16 @@ impl Orchestrator {
   fn format_code(code: &proc_macro2::TokenStream) -> anyhow::Result<String> {
     let syntax_tree = syn::parse2(code.clone())?;
     Ok(prettyplease::unparse(&syntax_tree))
+  }
+
+  fn count_unique_headers(operations: &[OperationInfo]) -> usize {
+    operations
+      .iter()
+      .flat_map(|op| &op.parameters)
+      .filter(|param| matches!(param.location, ParameterLocation::Header))
+      .map(|param| param.original_name.to_ascii_lowercase())
+      .collect::<BTreeSet<_>>()
+      .len()
   }
 
   fn generate_header(&self, source_path: &str) -> String {
@@ -332,78 +373,9 @@ impl Orchestrator {
 mod tests {
   use super::*;
 
-  fn create_empty_spec(title: &str, version: &str, description: Option<&str>) -> oas3::Spec {
-    let spec_json = format!(
-      r#"{{
-        "openapi": "3.1.0",
-        "info": {{
-          "title": "{}",
-          "version": "{}",
-          "description": "{}"
-        }},
-        "paths": {{}}
-      }}"#,
-      title,
-      version,
-      description.unwrap_or("")
-    );
-    oas3::from_json(&spec_json).unwrap()
-  }
-
   #[test]
   fn test_orchestrator_new_and_metadata() {
-    let spec = create_empty_spec("Empty API", "1.0.0", Some("An empty spec."));
-    let orchestrator = Orchestrator::new(
-      spec,
-      Visibility::default(),
-      false,
-      None,
-      None,
-      FieldOptionalityPolicy::standard(),
-    );
-
-    let metadata = orchestrator.metadata();
-    assert_eq!(metadata.title, "Empty API");
-    assert_eq!(metadata.version, "1.0.0");
-    assert_eq!(metadata.description.as_deref(), Some("An empty spec."));
-  }
-
-  #[test]
-  fn test_orchestrator_generate_with_header() {
-    let spec = create_empty_spec("Test API", "2.0.0", Some("A test API."));
-    let orchestrator = Orchestrator::new(
-      spec,
-      Visibility::default(),
-      false,
-      None,
-      None,
-      FieldOptionalityPolicy::standard(),
-    );
-
-    let result = orchestrator.generate_with_header("/path/to/spec.json");
-    assert!(result.is_ok());
-
-    let (code, _) = result.unwrap();
-    assert!(code.contains("AUTO-GENERATED CODE - DO NOT EDIT!"));
-    assert!(code.contains("//! Test API"));
-    assert!(code.contains("//! Source: /path/to/spec.json"));
-    assert!(code.contains("//! Version: 2.0.0"));
-    assert!(code.contains("//! A test API."));
-    assert!(code.contains("fn main()"));
-    assert!(code.contains("#![allow(clippy::doc_markdown)]"));
-  }
-
-  #[test]
-  fn test_header_generation_with_multiline_description() {
-    let spec_json = r#"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0",
-        "description": "Multi\nline\ndescription."
-      },
-      "paths": {}
-    }"#;
+    let spec_json = include_str!("../../fixtures/basic_api.json");
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(
       spec,
@@ -412,109 +384,65 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
+    );
+
+    let metadata = orchestrator.metadata();
+    assert_eq!(metadata.title, "Basic Test API");
+    assert_eq!(metadata.version, "1.0.0");
+    assert_eq!(
+      metadata.description.as_deref(),
+      Some("A test API.\nWith multiple lines.\nFor testing documentation.")
+    );
+  }
+
+  #[test]
+  fn test_orchestrator_generate_with_header() {
+    let spec_json = include_str!("../../fixtures/basic_api.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+      false,
+    );
+
+    let result = orchestrator.generate_with_header("/path/to/spec.json");
+    assert!(result.is_ok());
+
+    let (code, _) = result.unwrap();
+    assert!(code.contains("AUTO-GENERATED CODE - DO NOT EDIT!"));
+    assert!(code.contains("//! Basic Test API"));
+    assert!(code.contains("//! Source: /path/to/spec.json"));
+    assert!(code.contains("//! Version: 1.0.0"));
+    assert!(code.contains("//! A test API."));
+    assert!(code.contains("#![allow(clippy::doc_markdown)]"));
+  }
+
+  #[test]
+  fn test_header_generation_with_multiline_description() {
+    let spec_json = include_str!("../../fixtures/basic_api.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+      false,
     );
 
     let header = orchestrator.generate_header("test.yaml");
-    assert!(header.contains("Multi\n//! line\n//! description."));
+    assert!(header.contains("A test API.\n//! With multiple lines.\n//! For testing documentation."));
   }
 
   #[test]
   fn test_operation_exclusion() {
-    let spec_json = r##"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0"
-      },
-      "paths": {
-        "/users": {
-          "get": {
-            "operationId": "listUsers",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/UserList"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "post": {
-            "operationId": "createUser",
-            "responses": {
-              "201": {
-                "description": "Created",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/User"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "/posts": {
-          "get": {
-            "operationId": "listPosts",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/PostList"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "User": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "name": { "type": "string" }
-            }
-          },
-          "UserList": {
-            "type": "object",
-            "properties": {
-              "users": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/User" }
-              }
-            }
-          },
-          "Post": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" }
-            }
-          },
-          "PostList": {
-            "type": "object",
-            "properties": {
-              "posts": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/Post" }
-              }
-            }
-          }
-        }
-      }
-    }"##;
-
+    let spec_json = include_str!("../../fixtures/operation_filtering.json");
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut excluded = HashSet::new();
     excluded.insert("create_user".to_string());
@@ -526,6 +454,7 @@ mod tests {
       None,
       Some(&excluded),
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result = orchestrator.generate_with_header("test.json");
     assert!(result.is_ok());
@@ -537,75 +466,7 @@ mod tests {
 
   #[test]
   fn test_operation_exclusion_affects_schema_reachability() {
-    let spec_json = r##"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0"
-      },
-      "paths": {
-        "/users": {
-          "get": {
-            "operationId": "listUsers",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/UserList"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "/admin": {
-          "post": {
-            "operationId": "adminAction",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/AdminResponse"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "User": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" }
-            }
-          },
-          "UserList": {
-            "type": "object",
-            "properties": {
-              "users": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/User" }
-              }
-            }
-          },
-          "AdminResponse": {
-            "type": "object",
-            "properties": {
-              "status": { "type": "string" }
-            }
-          }
-        }
-      }
-    }"##;
-
+    let spec_json = include_str!("../../fixtures/operation_filtering.json");
     let spec_full: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator_full = Orchestrator::new(
       spec_full,
@@ -614,6 +475,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_full = orchestrator_full.generate_with_header("test.json");
     assert!(result_full.is_ok());
@@ -629,13 +491,14 @@ mod tests {
       None,
       Some(&excluded),
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_filtered = orchestrator_filtered.generate_with_header("test.json");
     assert!(result_filtered.is_ok());
     let (code_filtered, stats_filtered) = result_filtered.unwrap();
 
-    assert_eq!(stats_full.operations_converted, 2);
-    assert_eq!(stats_filtered.operations_converted, 1);
+    assert_eq!(stats_full.operations_converted, 3);
+    assert_eq!(stats_filtered.operations_converted, 2);
 
     assert!(code_full.contains("AdminResponse"));
     assert!(!code_filtered.contains("AdminResponse"));
@@ -645,64 +508,7 @@ mod tests {
 
   #[test]
   fn test_all_schemas_overrides_operation_filtering() {
-    let spec_json = r##"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0"
-      },
-      "paths": {
-        "/users": {
-          "get": {
-            "operationId": "listUsers",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/UserList"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "User": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" }
-            }
-          },
-          "UserList": {
-            "type": "object",
-            "properties": {
-              "users": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/User" }
-              }
-            }
-          },
-          "AdminResponse": {
-            "type": "object",
-            "properties": {
-              "status": { "type": "string" }
-            }
-          },
-          "UnreferencedSchema": {
-            "type": "object",
-            "properties": {
-              "data": { "type": "string" }
-            }
-          }
-        }
-      }
-    }"##;
-
+    let spec_json = include_str!("../../fixtures/operation_filtering.json");
     let spec_without_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut only = HashSet::new();
     only.insert("list_users".to_string());
@@ -713,6 +519,7 @@ mod tests {
       Some(&only),
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_without = orchestrator_without.generate_with_header("test.json");
     assert!(result_without.is_ok());
@@ -728,6 +535,7 @@ mod tests {
       Some(&only),
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_with = orchestrator_with.generate_with_header("test.json");
     assert!(result_with.is_ok());

@@ -26,6 +26,7 @@ pub struct GenerateConfig {
   pub quiet: bool,
   pub all_schemas: bool,
   pub odata_support: bool,
+  pub preserve_case_variants: bool,
   pub only_operations: Option<HashSet<String>>,
   pub excluded_operations: Option<HashSet<String>>,
 }
@@ -41,6 +42,7 @@ impl GenerateConfig {
     quiet: bool,
     all_schemas: bool,
     odata_support: bool,
+    preserve_case_variants: bool,
     only_operations: Option<Vec<String>>,
     excluded_operations: Option<Vec<String>>,
   ) -> Self {
@@ -55,6 +57,7 @@ impl GenerateConfig {
       quiet,
       all_schemas,
       odata_support,
+      preserve_case_variants,
       only_operations,
       excluded_operations,
     }
@@ -79,6 +82,7 @@ impl GenerateConfig {
       self.only_operations.as_ref(),
       self.excluded_operations.as_ref(),
       optionality_policy,
+      self.preserve_case_variants,
     )
   }
 
@@ -138,31 +142,44 @@ impl<'a> GenerateLogger<'a> {
   }
 
   fn print_basic_stats(&self, stats: &GenerationStats) {
-    println!(
-      "            {:<25} {}",
-      "Types generated:".with(self.colors.label()),
-      stats.types_generated.to_string().with(self.colors.value())
-    );
-    println!(
-      "            {:<25}   {} structs",
-      "".with(self.colors.label()),
-      stats.structs_generated.to_string().with(self.colors.value())
-    );
-    println!(
-      "            {:<25}   {} enums",
-      "".with(self.colors.label()),
-      stats.enums_generated.to_string().with(self.colors.value())
-    );
-    println!(
-      "            {:<25}   {} type aliases",
-      "".with(self.colors.label()),
-      stats.type_aliases_generated.to_string().with(self.colors.value())
-    );
-    println!(
-      "            {:<25} {}",
-      "Operations converted:".with(self.colors.label()),
-      stats.operations_converted.to_string().with(self.colors.value())
-    );
+    if let (Some(methods), Some(headers)) = (stats.client_methods_generated, stats.client_headers_generated) {
+      println!(
+        "            {:<25} {}",
+        "Methods generated:".with(self.colors.label()),
+        methods.to_string().with(self.colors.value())
+      );
+      println!(
+        "            {:<25} {}",
+        "Headers generated:".with(self.colors.label()),
+        headers.to_string().with(self.colors.value())
+      );
+    } else {
+      println!(
+        "            {:<25} {}",
+        "Types generated:".with(self.colors.label()),
+        stats.types_generated.to_string().with(self.colors.value())
+      );
+      println!(
+        "            {:<25}   {} structs",
+        "".with(self.colors.label()),
+        stats.structs_generated.to_string().with(self.colors.value())
+      );
+      println!(
+        "            {:<25}   {} enums",
+        "".with(self.colors.label()),
+        stats.enums_generated.to_string().with(self.colors.value())
+      );
+      println!(
+        "            {:<25}   {} type aliases",
+        "".with(self.colors.label()),
+        stats.type_aliases_generated.to_string().with(self.colors.value())
+      );
+      println!(
+        "            {:<25} {}",
+        "Operations converted:".with(self.colors.label()),
+        stats.operations_converted.to_string().with(self.colors.value())
+      );
+    }
 
     if !stats.warnings.is_empty() {
       println!(

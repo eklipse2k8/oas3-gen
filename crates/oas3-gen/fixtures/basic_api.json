@@ -1,0 +1,9 @@
+{
+	"openapi": "3.1.0",
+	"info": {
+		"title": "Basic Test API",
+		"version": "1.0.0",
+		"description": "A test API.\nWith multiple lines.\nFor testing documentation."
+	},
+	"paths": {}
+}

@@ -1,11 +1,22 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn},
+  spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
 };
+use serde_json::Value;
 
-use super::{SchemaConverter, TypeUsageRecorder, error::ConversionResult, metadata};
+use super::{
+  BODY_FIELD_NAME, ConversionResult, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT, REQUEST_BODY_SUFFIX,
+  REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_SUFFIX, STATUS_ACCEPTED, STATUS_BAD_GATEWAY,
+  STATUS_BAD_REQUEST, STATUS_CLIENT_ERROR, STATUS_CONFLICT, STATUS_CREATED, STATUS_FORBIDDEN, STATUS_FOUND,
+  STATUS_GATEWAY_TIMEOUT, STATUS_GONE, STATUS_INFORMATIONAL, STATUS_INTERNAL_SERVER_ERROR, STATUS_METHOD_NOT_ALLOWED,
+  STATUS_MOVED_PERMANENTLY, STATUS_NO_CONTENT, STATUS_NOT_ACCEPTABLE, STATUS_NOT_FOUND, STATUS_NOT_IMPLEMENTED,
+  STATUS_NOT_MODIFIED, STATUS_OK, STATUS_PREFIX, STATUS_REDIRECTION, STATUS_REQUEST_TIMEOUT, STATUS_SERVER_ERROR,
+  STATUS_SERVICE_UNAVAILABLE, STATUS_SUCCESS, STATUS_TOO_MANY_REQUESTS, STATUS_UNAUTHORIZED,
+  STATUS_UNPROCESSABLE_ENTITY, SUCCESS_RESPONSE_PREFIX, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
+  metadata,
+};
 use crate::{
   generator::{
     ast::{
@@ -17,13 +28,7 @@ use crate::{
   reserved::{to_rust_field_name, to_rust_type_name},
 };
 
-const REQUEST_SUFFIX: &str = "Request";
-const REQUEST_BODY_SUFFIX: &str = "RequestBody";
-const RESPONSE_SUFFIX: &str = "Response";
-const BODY_FIELD_NAME: &str = "body";
-const SUCCESS_RESPONSE_PREFIX: char = '2';
-
-type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<serde_json::Value>);
+type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);
 
 struct RequestBodyInfo {
   body_type: Option<TypeRef>,
@@ -44,170 +49,17 @@ struct ProcessingContext<'a> {
   type_usage: &'a mut Vec<String>,
   generated_types: &'a mut Vec<RustType>,
   usage: &'a mut TypeUsageRecorder,
-}
-
-struct SharedSchemaCache {
-  schema_to_type: HashMap<String, String>,
-  generated_types: Vec<RustType>,
-  used_names: HashSet<String>,
-}
-
-impl SharedSchemaCache {
-  fn new() -> Self {
-    Self {
-      schema_to_type: HashMap::new(),
-      generated_types: Vec::new(),
-      used_names: HashSet::new(),
-    }
-  }
-
-  fn get_or_create_type(
-    &mut self,
-    schema: &ObjectSchema,
-    converter: &SchemaConverter,
-    path: &str,
-    context: &str,
-    kind: StructKind,
-  ) -> ConversionResult<String> {
-    let schema_hash = Self::hash_schema(schema);
-
-    if let Some(existing_type) = self.schema_to_type.get(&schema_hash) {
-      return Ok(existing_type.clone());
-    }
-
-    let base_name = Self::infer_name_from_context(schema, path, context);
-    let type_name = self.make_unique_name(base_name);
-    let rust_type_name = to_rust_type_name(&type_name);
-
-    let (body_struct, mut nested_types) = converter.convert_struct(&type_name, schema, Some(kind))?;
-
-    self.generated_types.append(&mut nested_types);
-    self.generated_types.push(body_struct);
-    self.schema_to_type.insert(schema_hash, rust_type_name.clone());
-    self.used_names.insert(rust_type_name.clone());
-
-    Ok(rust_type_name)
-  }
-
-  fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
-    if schema.properties.len() == 1
-      && let Some((prop_name, _)) = schema.properties.iter().next()
-    {
-      let singular = Self::singularize(prop_name);
-      if context == REQUEST_BODY_SUFFIX {
-        return singular;
-      }
-      return format!("{singular}Response");
-    }
-
-    let path_segments: Vec<&str> = path
-      .split('/')
-      .filter(|s| !s.is_empty() && !s.starts_with('{'))
-      .collect();
-
-    if let Some(last_segment) = path_segments.last() {
-      let singular = Self::singularize(last_segment);
-      if context == REQUEST_BODY_SUFFIX {
-        return format!("{singular}RequestBody");
-      }
-      return format!("{singular}{context}Response");
-    }
-
-    if let Some(first_segment) = path_segments.first() {
-      if context == REQUEST_BODY_SUFFIX {
-        return format!("{first_segment}RequestBody");
-      }
-      return format!("{first_segment}{context}Response");
-    }
-
-    if context == REQUEST_BODY_SUFFIX {
-      return REQUEST_BODY_SUFFIX.to_string();
-    }
-    format!("Response{context}")
-  }
-
-  fn singularize(word: &str) -> String {
-    if let Some(stem) = word.strip_suffix("ies") {
-      return format!("{stem}y");
-    }
-    if let Some(stem) = word.strip_suffix("sses") {
-      return format!("{stem}ss");
-    }
-    if let Some(stem) = word.strip_suffix("xes") {
-      return format!("{stem}x");
-    }
-    if let Some(stem) = word.strip_suffix("ches") {
-      return format!("{stem}ch");
-    }
-    if let Some(stem) = word.strip_suffix("shes") {
-      return format!("{stem}sh");
-    }
-    if let Some(stem) = word.strip_suffix('s')
-      && !stem.is_empty()
-      && !stem.ends_with('s')
-    {
-      return stem.to_string();
-    }
-    word.to_string()
-  }
-
-  fn make_unique_name(&mut self, base: String) -> String {
-    let rust_name = to_rust_type_name(&base);
-    if !self.used_names.contains(&rust_name) {
-      return base;
-    }
-
-    let mut suffix = 2;
-    while self.used_names.contains(&to_rust_type_name(&format!("{base}{suffix}"))) {
-      suffix += 1;
-    }
-    format!("{base}{suffix}")
-  }
-
-  fn hash_schema(schema: &ObjectSchema) -> String {
-    let Ok(mut value) = serde_json::to_value(schema) else {
-      return String::new();
-    };
-
-    if let serde_json::Value::Object(map) = &mut value
-      && let Some(serde_json::Value::Array(required_list)) = map.get_mut("required")
-    {
-      let mut strings: Vec<String> = required_list
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-
-      if strings.len() == required_list.len() {
-        strings.sort_unstable();
-        *required_list = strings.into_iter().map(serde_json::Value::String).collect();
-      }
-    }
-
-    serde_json::to_string(&value).unwrap_or_default()
-  }
-
-  fn into_types(self) -> Vec<RustType> {
-    self.generated_types
-  }
+  schema_cache: &'a mut SharedSchemaCache,
 }
 
 pub(crate) struct OperationConverter<'a> {
   schema_converter: &'a SchemaConverter<'a>,
   spec: &'a Spec,
-  schema_cache: std::cell::RefCell<SharedSchemaCache>,
 }
 
 impl<'a> OperationConverter<'a> {
   pub(crate) fn new(schema_converter: &'a SchemaConverter<'a>, spec: &'a Spec) -> Self {
-    Self {
-      schema_converter,
-      spec,
-      schema_cache: std::cell::RefCell::new(SharedSchemaCache::new()),
-    }
-  }
-
-  pub(crate) fn finish(self) -> Vec<RustType> {
-    self.schema_cache.into_inner().into_types()
+    Self { schema_converter, spec }
   }
 
   fn generate_unique_response_name(&self, base_name: &str) -> String {
@@ -215,7 +67,7 @@ impl<'a> OperationConverter<'a> {
     let rust_response_name = to_rust_type_name(&response_name);
 
     if self.schema_converter.is_schema_name(&rust_response_name) {
-      response_name = format!("{base_name}{RESPONSE_SUFFIX}Enum");
+      response_name = format!("{base_name}{RESPONSE_SUFFIX}{RESPONSE_ENUM_SUFFIX}");
     }
 
     response_name
@@ -226,12 +78,13 @@ impl<'a> OperationConverter<'a> {
     let rust_request_name = to_rust_type_name(&request_name);
 
     if self.schema_converter.is_schema_name(&rust_request_name) {
-      request_name = format!("{base_name}{REQUEST_SUFFIX}Params");
+      request_name = format!("{base_name}{REQUEST_SUFFIX}{REQUEST_PARAMS_SUFFIX}");
     }
 
     request_name
   }
 
+  #[allow(clippy::too_many_arguments)]
   pub(crate) fn convert(
     &self,
     stable_id: &str,
@@ -240,6 +93,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     operation: &Operation,
     usage: &mut TypeUsageRecorder,
+    schema_cache: &mut SharedSchemaCache,
   ) -> ConversionResult<(Vec<RustType>, OperationInfo)> {
     let base_name = to_rust_type_name(operation_id);
     let stable_id = stable_id.to_string();
@@ -247,14 +101,14 @@ impl<'a> OperationConverter<'a> {
     let mut warnings = Vec::new();
     let mut types = Vec::new();
 
-    let body_info = self.prepare_request_body(&base_name, operation, path, usage)?;
+    let body_info = self.prepare_request_body(&base_name, operation, path, usage, schema_cache)?;
     types.extend(body_info.generated_types);
     usage.mark_request_iter(&body_info.type_usage);
 
     let mut response_enum_info = if operation.responses.is_some() {
       let response_name = self.generate_unique_response_name(&base_name);
       self
-        .build_response_enum(&response_name, None, operation, path)
+        .build_response_enum(&response_name, None, operation, path, schema_cache)
         .map(|def| (response_name, def))
     } else {
       None
@@ -400,6 +254,7 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
     path: &str,
     usage: &mut TypeUsageRecorder,
+    schema_cache: &mut SharedSchemaCache,
   ) -> ConversionResult<RequestBodyInfo> {
     let mut generated_types = Vec::new();
     let mut type_usage = Vec::new();
@@ -445,6 +300,7 @@ impl<'a> OperationConverter<'a> {
       type_usage: &mut type_usage,
       generated_types: &mut generated_types,
       usage,
+      schema_cache,
     };
     let body_type = self.process_request_body_schema(
       schema_ref,
@@ -483,8 +339,7 @@ impl<'a> OperationConverter<'a> {
           return Ok(None);
         }
 
-        let mut cache = self.schema_cache.borrow_mut();
-        let cached_type_name = cache.get_or_create_type(
+        let cached_type_name = ctx.schema_cache.get_or_create_type(
           inline_schema,
           self.schema_converter,
           path,
@@ -712,6 +567,7 @@ impl<'a> OperationConverter<'a> {
     request_type: Option<&String>,
     operation: &Operation,
     path: &str,
+    schema_cache: &mut SharedSchemaCache,
   ) -> Option<ResponseEnumDef> {
     let responses = operation.responses.as_ref()?;
 
@@ -725,7 +581,7 @@ impl<'a> OperationConverter<'a> {
 
       let variant_name = Self::status_code_to_variant_name(status_code, &response);
       let schema_type = self
-        .extract_response_schema_type(&response, path, status_code)
+        .extract_response_schema_type(&response, path, status_code, schema_cache)
         .ok()
         .flatten();
 
@@ -745,8 +601,8 @@ impl<'a> OperationConverter<'a> {
     if !has_default {
       variants.push(ResponseVariant {
         status_code: "default".to_string(),
-        variant_name: "Unknown".to_string(),
-        description: Some("Unknown response".to_string()),
+        variant_name: DEFAULT_RESPONSE_VARIANT.to_string(),
+        description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
         schema_type: None,
       });
     }
@@ -761,43 +617,43 @@ impl<'a> OperationConverter<'a> {
 
   fn status_code_to_variant_name(status_code: &str, response: &oas3::spec::Response) -> String {
     match status_code {
-      "200" => "Ok".to_string(),
-      "201" => "Created".to_string(),
-      "202" => "Accepted".to_string(),
-      "204" => "NoContent".to_string(),
-      "301" => "MovedPermanently".to_string(),
-      "302" => "Found".to_string(),
-      "304" => "NotModified".to_string(),
-      "400" => "BadRequest".to_string(),
-      "401" => "Unauthorized".to_string(),
-      "403" => "Forbidden".to_string(),
-      "404" => "NotFound".to_string(),
-      "405" => "MethodNotAllowed".to_string(),
-      "406" => "NotAcceptable".to_string(),
-      "408" => "RequestTimeout".to_string(),
-      "409" => "Conflict".to_string(),
-      "410" => "Gone".to_string(),
-      "422" => "UnprocessableEntity".to_string(),
-      "429" => "TooManyRequests".to_string(),
-      "500" => "InternalServerError".to_string(),
-      "501" => "NotImplemented".to_string(),
-      "502" => "BadGateway".to_string(),
-      "503" => "ServiceUnavailable".to_string(),
-      "504" => "GatewayTimeout".to_string(),
-      "1XX" => "Informational".to_string(),
-      "2XX" => "Success".to_string(),
-      "3XX" => "Redirection".to_string(),
-      "4XX" => "ClientError".to_string(),
-      "5XX" => "ServerError".to_string(),
+      "200" => STATUS_OK.to_string(),
+      "201" => STATUS_CREATED.to_string(),
+      "202" => STATUS_ACCEPTED.to_string(),
+      "204" => STATUS_NO_CONTENT.to_string(),
+      "301" => STATUS_MOVED_PERMANENTLY.to_string(),
+      "302" => STATUS_FOUND.to_string(),
+      "304" => STATUS_NOT_MODIFIED.to_string(),
+      "400" => STATUS_BAD_REQUEST.to_string(),
+      "401" => STATUS_UNAUTHORIZED.to_string(),
+      "403" => STATUS_FORBIDDEN.to_string(),
+      "404" => STATUS_NOT_FOUND.to_string(),
+      "405" => STATUS_METHOD_NOT_ALLOWED.to_string(),
+      "406" => STATUS_NOT_ACCEPTABLE.to_string(),
+      "408" => STATUS_REQUEST_TIMEOUT.to_string(),
+      "409" => STATUS_CONFLICT.to_string(),
+      "410" => STATUS_GONE.to_string(),
+      "422" => STATUS_UNPROCESSABLE_ENTITY.to_string(),
+      "429" => STATUS_TOO_MANY_REQUESTS.to_string(),
+      "500" => STATUS_INTERNAL_SERVER_ERROR.to_string(),
+      "501" => STATUS_NOT_IMPLEMENTED.to_string(),
+      "502" => STATUS_BAD_GATEWAY.to_string(),
+      "503" => STATUS_SERVICE_UNAVAILABLE.to_string(),
+      "504" => STATUS_GATEWAY_TIMEOUT.to_string(),
+      "1XX" => STATUS_INFORMATIONAL.to_string(),
+      "2XX" => STATUS_SUCCESS.to_string(),
+      "3XX" => STATUS_REDIRECTION.to_string(),
+      "4XX" => STATUS_CLIENT_ERROR.to_string(),
+      "5XX" => STATUS_SERVER_ERROR.to_string(),
       code if code.ends_with("XX") || code.ends_with("xx") => {
         let prefix = &code[0..1];
         match prefix {
-          "1" => "Informational".to_string(),
-          "2" => "Success".to_string(),
-          "3" => "Redirection".to_string(),
-          "4" => "ClientError".to_string(),
-          "5" => "ServerError".to_string(),
-          _ => format!("Status{}", code.replace(['X', 'x'], "")),
+          "1" => STATUS_INFORMATIONAL.to_string(),
+          "2" => STATUS_SUCCESS.to_string(),
+          "3" => STATUS_REDIRECTION.to_string(),
+          "4" => STATUS_CLIENT_ERROR.to_string(),
+          "5" => STATUS_SERVER_ERROR.to_string(),
+          _ => format!("{STATUS_PREFIX}{}", code.replace(['X', 'x'], "")),
         }
       }
       code => {
@@ -811,7 +667,7 @@ impl<'a> OperationConverter<'a> {
             return to_rust_type_name(&words.join("_"));
           }
         }
-        format!("Status{code}")
+        format!("{STATUS_PREFIX}{code}")
       }
     }
   }
@@ -821,6 +677,7 @@ impl<'a> OperationConverter<'a> {
     response: &oas3::spec::Response,
     path: &str,
     status_code: &str,
+    schema_cache: &mut SharedSchemaCache,
   ) -> ConversionResult<Option<TypeRef>> {
     let Some(media_type) = response.content.values().next() else {
       return Ok(None);
@@ -841,8 +698,7 @@ impl<'a> OperationConverter<'a> {
           return Ok(None);
         }
 
-        let mut cache = self.schema_cache.borrow_mut();
-        let rust_type_name = cache.get_or_create_type(
+        let rust_type_name = schema_cache.get_or_create_type(
           inline_schema,
           self.schema_converter,
           path,
@@ -924,7 +780,7 @@ mod path_renderer {
         segments: parse_path_segments(path, path_params),
         query_params: query_parameters,
       },
-      attrs: vec!["must_use".to_string()],
+      attrs: vec![],
     }
   }
 
