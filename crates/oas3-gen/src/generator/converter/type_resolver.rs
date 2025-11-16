@@ -4,8 +4,8 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
+  ConversionResult,
   enums::{self, EnumConverter},
-  error::ConversionResult,
 };
 use crate::{
   generator::{

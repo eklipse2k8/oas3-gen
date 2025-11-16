@@ -3,9 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
 
 use super::{
-  DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX,
+  ConversionResult, DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX,
   constants::{doc_attrs, serde_attrs},
-  error::ConversionResult,
   field_optionality::{FieldOptionalityContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,

@@ -5,7 +5,7 @@ use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, 
 use super::common::create_test_graph;
 use crate::generator::{
   ast::RustType,
-  converter::{FieldOptionalityPolicy, SchemaConverter, error::ConversionResult},
+  converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
 };
 
 #[test]

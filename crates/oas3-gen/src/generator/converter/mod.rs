@@ -1,7 +1,6 @@
 pub(crate) mod cache;
 mod constants;
 mod enums;
-mod error;
 mod field_optionality;
 mod metadata;
 pub(crate) mod operations;
@@ -16,7 +15,7 @@ pub(crate) use field_optionality::FieldOptionalityPolicy;
 use oas3::spec::ObjectSchema;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
-use self::{enums::EnumConverter, error::ConversionResult, structs::StructConverter, type_resolver::TypeResolver};
+use self::{enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
 use super::{
   ast::{RustType, StructKind, TypeAliasDef, TypeRef},
   schema_graph::SchemaGraph,
@@ -68,6 +67,8 @@ pub(crate) const STATUS_REDIRECTION: &str = "Redirection";
 pub(crate) const STATUS_CLIENT_ERROR: &str = "ClientError";
 pub(crate) const STATUS_SERVER_ERROR: &str = "ServerError";
 pub(crate) const STATUS_PREFIX: &str = "Status";
+
+pub(crate) type ConversionResult<T> = anyhow::Result<T>;
 
 pub(crate) struct SchemaConverter<'a> {
   graph: &'a SchemaGraph,

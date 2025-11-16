@@ -9,7 +9,7 @@ use super::common::create_test_graph;
 use crate::generator::{
   ast::{PathSegment, RustType},
   converter::{
-    FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, error::ConversionResult,
+    ConversionResult, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
     operations::OperationConverter,
   },
 };

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  error::ConversionResult, field_optionality::FieldOptionalityPolicy, metadata, structs::StructConverter,
+  ConversionResult, field_optionality::FieldOptionalityPolicy, metadata, structs::StructConverter,
   type_resolver::TypeResolver, utils,
 };
 use crate::{
