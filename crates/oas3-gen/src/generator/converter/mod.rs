@@ -94,10 +94,11 @@ impl<'a> SchemaConverter<'a> {
         .finalize_struct_types(name, schema, main_type, inline_types);
     }
 
+    let type_ref = self.type_resolver.schema_to_type_ref(schema)?;
     let alias = RustType::TypeAlias(TypeAliasDef {
       name: to_rust_type_name(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
-      target: TypeRef::new("serde_json::Value"),
+      target: type_ref,
     });
 
     Ok(vec![alias])

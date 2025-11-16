@@ -1,6 +1,16 @@
+# Common Rust ignores
 /target
-generated_types.rs
-.claude/settings.local.json
-*.json
+
+# No macOS system files
+.DS_Store
+
+# Avoid committing OpenAPI specs
 /specs
+
+# No custom agent settings
+.claude/settings.local.json
+
+# No IDE files
+.idea/
+.vscode/
 .zed/

@@ -1,0 +1,90 @@
+{
+	"openapi": "3.1.0",
+	"info": {
+		"title": "Operation Filtering Test API",
+		"version": "1.0.0"
+	},
+	"paths": {
+		"/users": {
+			"get": {
+				"operationId": "listUsers",
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UserList"
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "createUser",
+				"responses": {
+					"201": {
+						"description": "Created",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/User"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/admin": {
+			"post": {
+				"operationId": "adminAction",
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/AdminResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"User": {
+				"type": "object",
+				"properties": {
+					"id": { "type": "string" },
+					"name": { "type": "string" }
+				}
+			},
+			"UserList": {
+				"type": "object",
+				"properties": {
+					"users": {
+						"type": "array",
+						"items": { "$ref": "#/components/schemas/User" }
+					}
+				}
+			},
+			"AdminResponse": {
+				"type": "object",
+				"properties": {
+					"status": { "type": "string" }
+				}
+			},
+			"UnreferencedSchema": {
+				"type": "object",
+				"properties": {
+					"data": { "type": "string" }
+				}
+			}
+		}
+	}
+}

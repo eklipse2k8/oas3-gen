@@ -393,6 +393,6 @@ fn test_empty_enum_converts_to_string() -> ConversionResult<()> {
   };
 
   assert_eq!(alias.name, "EmptyEnum");
-  assert_eq!(alias.target.to_rust_type(), "serde_json::Value");
+  assert_eq!(alias.target.to_rust_type(), "String");
   Ok(())
 }

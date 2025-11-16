@@ -6,7 +6,7 @@ use json_canon::to_string as to_canonical_json;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
-use super::{REQUEST_BODY_SUFFIX, SchemaConverter, error::ConversionResult};
+use super::{REQUEST_BODY_SUFFIX, RESPONSE_SUFFIX, SchemaConverter, error::ConversionResult};
 use crate::{
   generator::ast::{RustType, StructKind},
   reserved::to_rust_type_name,
@@ -56,40 +56,43 @@ impl SharedSchemaCache {
   }
 
   fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
+    let is_request = context == REQUEST_BODY_SUFFIX;
+
+    let with_suffix = |base: &str| {
+      if is_request {
+        format!("{base}{REQUEST_BODY_SUFFIX}")
+      } else {
+        format!("{base}{context}{RESPONSE_SUFFIX}")
+      }
+    };
+
     if schema.properties.len() == 1
       && let Some((prop_name, _)) = schema.properties.iter().next()
     {
       let singular = cruet::to_singular(prop_name);
-      if context == REQUEST_BODY_SUFFIX {
-        return singular;
-      }
-      return format!("{singular}Response");
+      return if is_request {
+        singular
+      } else {
+        format!("{singular}{RESPONSE_SUFFIX}")
+      };
     }
 
-    let path_segments: Vec<&str> = path
+    let segments: Vec<_> = path
       .split('/')
       .filter(|s| !s.is_empty() && !s.starts_with('{'))
       .collect();
 
-    if let Some(last_segment) = path_segments.last() {
-      let singular = cruet::to_singular(last_segment);
-      if context == REQUEST_BODY_SUFFIX {
-        return format!("{singular}RequestBody");
-      }
-      return format!("{singular}{context}Response");
-    }
-
-    if let Some(first_segment) = path_segments.first() {
-      if context == REQUEST_BODY_SUFFIX {
-        return format!("{first_segment}RequestBody");
-      }
-      return format!("{first_segment}{context}Response");
-    }
-
-    if context == REQUEST_BODY_SUFFIX {
-      return REQUEST_BODY_SUFFIX.to_string();
-    }
-    format!("Response{context}")
+    segments
+      .last()
+      .map(|&s| with_suffix(&cruet::to_singular(s)))
+      .or_else(|| segments.first().map(|&s| with_suffix(s)))
+      .unwrap_or_else(|| {
+        if is_request {
+          REQUEST_BODY_SUFFIX.to_string()
+        } else {
+          format!("Response{context}")
+        }
+      })
   }
 
   fn make_unique_name(&mut self, base: String) -> String {

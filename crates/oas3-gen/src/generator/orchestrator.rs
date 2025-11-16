@@ -148,7 +148,7 @@ impl Orchestrator {
     let code_tokens = self.generate_code_from_artifacts(rust_types, &operations_info, usage_recorder);
     let formatted_code = Self::format_code(&code_tokens)?;
     let header = self.generate_header(source_path);
-    let final_code = format!("{header}\n\n{formatted_code}\n\nfn main() {{}}\n");
+    let final_code = format!("{header}\n\n{formatted_code}\n");
     Ok((final_code, stats))
   }
 
@@ -355,27 +355,10 @@ impl Orchestrator {
 mod tests {
   use super::*;
 
-  fn create_empty_spec(title: &str, version: &str, description: Option<&str>) -> oas3::Spec {
-    let spec_json = format!(
-      r#"{{
-        "openapi": "3.1.0",
-        "info": {{
-          "title": "{}",
-          "version": "{}",
-          "description": "{}"
-        }},
-        "paths": {{}}
-      }}"#,
-      title,
-      version,
-      description.unwrap_or("")
-    );
-    oas3::from_json(&spec_json).unwrap()
-  }
-
   #[test]
   fn test_orchestrator_new_and_metadata() {
-    let spec = create_empty_spec("Empty API", "1.0.0", Some("An empty spec."));
+    let spec_json = include_str!("../../fixtures/basic_api.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(
       spec,
       Visibility::default(),
@@ -386,14 +369,18 @@ mod tests {
     );
 
     let metadata = orchestrator.metadata();
-    assert_eq!(metadata.title, "Empty API");
+    assert_eq!(metadata.title, "Basic Test API");
     assert_eq!(metadata.version, "1.0.0");
-    assert_eq!(metadata.description.as_deref(), Some("An empty spec."));
+    assert_eq!(
+      metadata.description.as_deref(),
+      Some("A test API.\nWith multiple lines.\nFor testing documentation.")
+    );
   }
 
   #[test]
   fn test_orchestrator_generate_with_header() {
-    let spec = create_empty_spec("Test API", "2.0.0", Some("A test API."));
+    let spec_json = include_str!("../../fixtures/basic_api.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(
       spec,
       Visibility::default(),
@@ -408,25 +395,16 @@ mod tests {
 
     let (code, _) = result.unwrap();
     assert!(code.contains("AUTO-GENERATED CODE - DO NOT EDIT!"));
-    assert!(code.contains("//! Test API"));
+    assert!(code.contains("//! Basic Test API"));
     assert!(code.contains("//! Source: /path/to/spec.json"));
-    assert!(code.contains("//! Version: 2.0.0"));
+    assert!(code.contains("//! Version: 1.0.0"));
     assert!(code.contains("//! A test API."));
-    assert!(code.contains("fn main()"));
     assert!(code.contains("#![allow(clippy::doc_markdown)]"));
   }
 
   #[test]
   fn test_header_generation_with_multiline_description() {
-    let spec_json = r#"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0",
-        "description": "Multi\nline\ndescription."
-      },
-      "paths": {}
-    }"#;
+    let spec_json = include_str!("../../fixtures/basic_api.json");
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = Orchestrator::new(
       spec,
@@ -438,106 +416,12 @@ mod tests {
     );
 
     let header = orchestrator.generate_header("test.yaml");
-    assert!(header.contains("Multi\n//! line\n//! description."));
+    assert!(header.contains("A test API.\n//! With multiple lines.\n//! For testing documentation."));
   }
 
   #[test]
   fn test_operation_exclusion() {
-    let spec_json = r##"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0"
-      },
-      "paths": {
-        "/users": {
-          "get": {
-            "operationId": "listUsers",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/UserList"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "post": {
-            "operationId": "createUser",
-            "responses": {
-              "201": {
-                "description": "Created",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/User"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "/posts": {
-          "get": {
-            "operationId": "listPosts",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/PostList"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "User": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "name": { "type": "string" }
-            }
-          },
-          "UserList": {
-            "type": "object",
-            "properties": {
-              "users": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/User" }
-              }
-            }
-          },
-          "Post": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" }
-            }
-          },
-          "PostList": {
-            "type": "object",
-            "properties": {
-              "posts": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/Post" }
-              }
-            }
-          }
-        }
-      }
-    }"##;
-
+    let spec_json = include_str!("../../fixtures/operation_filtering.json");
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut excluded = HashSet::new();
     excluded.insert("create_user".to_string());
@@ -560,75 +444,7 @@ mod tests {
 
   #[test]
   fn test_operation_exclusion_affects_schema_reachability() {
-    let spec_json = r##"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0"
-      },
-      "paths": {
-        "/users": {
-          "get": {
-            "operationId": "listUsers",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/UserList"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "/admin": {
-          "post": {
-            "operationId": "adminAction",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/AdminResponse"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "User": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" }
-            }
-          },
-          "UserList": {
-            "type": "object",
-            "properties": {
-              "users": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/User" }
-              }
-            }
-          },
-          "AdminResponse": {
-            "type": "object",
-            "properties": {
-              "status": { "type": "string" }
-            }
-          }
-        }
-      }
-    }"##;
-
+    let spec_json = include_str!("../../fixtures/operation_filtering.json");
     let spec_full: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator_full = Orchestrator::new(
       spec_full,
@@ -657,8 +473,8 @@ mod tests {
     assert!(result_filtered.is_ok());
     let (code_filtered, stats_filtered) = result_filtered.unwrap();
 
-    assert_eq!(stats_full.operations_converted, 2);
-    assert_eq!(stats_filtered.operations_converted, 1);
+    assert_eq!(stats_full.operations_converted, 3);
+    assert_eq!(stats_filtered.operations_converted, 2);
 
     assert!(code_full.contains("AdminResponse"));
     assert!(!code_filtered.contains("AdminResponse"));
@@ -668,64 +484,7 @@ mod tests {
 
   #[test]
   fn test_all_schemas_overrides_operation_filtering() {
-    let spec_json = r##"{
-      "openapi": "3.1.0",
-      "info": {
-        "title": "Test API",
-        "version": "1.0.0"
-      },
-      "paths": {
-        "/users": {
-          "get": {
-            "operationId": "listUsers",
-            "responses": {
-              "200": {
-                "description": "Success",
-                "content": {
-                  "application/json": {
-                    "schema": {
-                      "$ref": "#/components/schemas/UserList"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "User": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" }
-            }
-          },
-          "UserList": {
-            "type": "object",
-            "properties": {
-              "users": {
-                "type": "array",
-                "items": { "$ref": "#/components/schemas/User" }
-              }
-            }
-          },
-          "AdminResponse": {
-            "type": "object",
-            "properties": {
-              "status": { "type": "string" }
-            }
-          },
-          "UnreferencedSchema": {
-            "type": "object",
-            "properties": {
-              "data": { "type": "string" }
-            }
-          }
-        }
-      }
-    }"##;
-
+    let spec_json = include_str!("../../fixtures/operation_filtering.json");
     let spec_without_all: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let mut only = HashSet::new();
     only.insert("list_users".to_string());
