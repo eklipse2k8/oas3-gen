@@ -384,7 +384,7 @@ fn assemble_method_tokens(
       request.validate().context("parameter validation")?;
       let url = self
         .base_url
-        .join(&request.render_path())
+        .join(&request.render_path()?)
         .context("constructing request url")?;
       let mut req_builder = #builder_init;
       #(#header_statements)*

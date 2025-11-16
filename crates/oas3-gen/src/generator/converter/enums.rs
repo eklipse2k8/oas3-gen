@@ -50,13 +50,13 @@ impl<'a> EnumConverter<'a> {
 
   pub(crate) fn convert_simple_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
     if self.preserve_case_variants {
-      self.convert_simple_enum_with_case_preservation(name, schema)
+      Self::convert_simple_enum_with_case_preservation(name, schema)
     } else {
-      self.convert_simple_enum_with_case_deduplication(name, schema)
+      Self::convert_simple_enum_with_case_deduplication(name, schema)
     }
   }
 
-  fn convert_simple_enum_with_case_preservation(&self, name: &str, schema: &ObjectSchema) -> RustType {
+  fn convert_simple_enum_with_case_preservation(name: &str, schema: &ObjectSchema) -> RustType {
     let mut variants = Vec::new();
     let mut seen_names = BTreeSet::new();
 
@@ -107,7 +107,7 @@ impl<'a> EnumConverter<'a> {
     })
   }
 
-  fn convert_simple_enum_with_case_deduplication(&self, name: &str, schema: &ObjectSchema) -> RustType {
+  fn convert_simple_enum_with_case_deduplication(name: &str, schema: &ObjectSchema) -> RustType {
     let mut variants: Vec<VariantDef> = Vec::new();
     let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
 

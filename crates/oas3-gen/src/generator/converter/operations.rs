@@ -780,7 +780,7 @@ mod path_renderer {
         segments: parse_path_segments(path, path_params),
         query_params: query_parameters,
       },
-      attrs: vec!["must_use".to_string()],
+      attrs: vec![],
     }
   }
 
