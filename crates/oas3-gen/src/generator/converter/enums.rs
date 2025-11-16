@@ -34,20 +34,29 @@ pub(crate) struct EnumConverter<'a> {
   graph: &'a SchemaGraph,
   type_resolver: TypeResolver<'a>,
   struct_converter: StructConverter<'a>,
+  preserve_case_variants: bool,
 }
 
 impl<'a> EnumConverter<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>) -> Self {
+  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>, preserve_case_variants: bool) -> Self {
     let struct_converter = StructConverter::new(graph, type_resolver.clone(), None, FieldOptionalityPolicy::standard());
     Self {
       graph,
       type_resolver,
       struct_converter,
+      preserve_case_variants,
     }
   }
 
-  #[allow(clippy::unused_self)]
   pub(crate) fn convert_simple_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
+    if self.preserve_case_variants {
+      self.convert_simple_enum_with_case_preservation(name, schema)
+    } else {
+      self.convert_simple_enum_with_case_deduplication(name, schema)
+    }
+  }
+
+  fn convert_simple_enum_with_case_preservation(&self, name: &str, schema: &ObjectSchema) -> RustType {
     let mut variants = Vec::new();
     let mut seen_names = BTreeSet::new();
 
@@ -85,6 +94,58 @@ impl<'a> EnumConverter<'a> {
         serde_attrs: vec![format!(r#"rename = "{}""#, rename_value)],
         deprecated: false,
       });
+    }
+
+    RustType::Enum(EnumDef {
+      name: to_rust_type_name(name),
+      docs: metadata::extract_docs(schema.description.as_ref()),
+      variants,
+      discriminator: None,
+      derives: utils::derives_for_enum(true),
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+    })
+  }
+
+  fn convert_simple_enum_with_case_deduplication(&self, name: &str, schema: &ObjectSchema) -> RustType {
+    let mut variants: Vec<VariantDef> = Vec::new();
+    let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
+
+    for value in &schema.enum_values {
+      let (variant_name_base, rename_value) = if let Some(str_val) = value.as_str() {
+        (to_rust_type_name(str_val), str_val.to_string())
+      } else if let Some(num_val) = value.as_i64() {
+        (format!("Value{num_val}"), num_val.to_string())
+      } else if let Some(num_val) = value.as_f64() {
+        let normalized = format!("{num_val}");
+        (format!("Value{}", normalized.replace(['.', '-'], "_")), normalized)
+      } else if value.is_boolean() {
+        let bool_val = value.as_bool().unwrap();
+        (
+          if bool_val {
+            "True".to_string()
+          } else {
+            "False".to_string()
+          },
+          bool_val.to_string(),
+        )
+      } else {
+        continue;
+      };
+
+      if let Some(&idx) = seen_names.get(&variant_name_base) {
+        variants[idx].serde_attrs.push(format!(r#"alias = "{rename_value}""#));
+      } else {
+        let idx = variants.len();
+        seen_names.insert(variant_name_base.clone(), idx);
+        variants.push(VariantDef {
+          name: variant_name_base,
+          docs: vec![],
+          content: VariantContent::Unit,
+          serde_attrs: vec![format!(r#"rename = "{}""#, rename_value)],
+          deprecated: false,
+        });
+      }
     }
 
     RustType::Enum(EnumDef {

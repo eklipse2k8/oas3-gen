@@ -91,6 +91,10 @@ pub enum Commands {
     #[arg(long, default_value_t = false, display_order = 11, help_heading = "Code Generation")]
     odata_support: bool,
 
+    /// Preserve case-variant duplicates as separate enum values (e.g., "ITEM" and "item" become Item and Item1)
+    #[arg(long, default_value_t = false, display_order = 12, help_heading = "Code Generation")]
+    preserve_case_variants: bool,
+
     /// Generate all schemas, even those unreferenced by selected operations
     #[arg(
       group = "filter",

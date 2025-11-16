@@ -18,11 +18,15 @@ use crate::{
 #[derive(Clone)]
 pub(crate) struct TypeResolver<'a> {
   graph: &'a SchemaGraph,
+  preserve_case_variants: bool,
 }
 
 impl<'a> TypeResolver<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph) -> Self {
-    Self { graph }
+  pub(crate) fn new(graph: &'a SchemaGraph, preserve_case_variants: bool) -> Self {
+    Self {
+      graph,
+      preserve_case_variants,
+    }
   }
 
   pub(crate) fn schema_to_type_ref(&self, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
@@ -95,7 +99,7 @@ impl<'a> TypeResolver<'a> {
     }
 
     let enum_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
-    let enum_converter = EnumConverter::new(self.graph, self.clone());
+    let enum_converter = EnumConverter::new(self.graph, self.clone(), self.preserve_case_variants);
     let inline_enum = enum_converter.convert_simple_enum(&enum_name, prop_schema);
 
     Ok((TypeRef::new(RustPrimitive::Custom(enum_name)), vec![inline_enum]))
@@ -127,7 +131,7 @@ impl<'a> TypeResolver<'a> {
     }
 
     let enum_name = format!("{parent_name}{}", prop_name.to_pascal_case());
-    let enum_converter = EnumConverter::new(self.graph, self.clone());
+    let enum_converter = EnumConverter::new(self.graph, self.clone(), self.preserve_case_variants);
     let kind = if uses_one_of {
       enums::UnionKind::OneOf
     } else {

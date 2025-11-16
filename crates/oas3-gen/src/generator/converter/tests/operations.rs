@@ -18,7 +18,7 @@ use crate::generator::{
 fn test_basic_get_operation() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation::default();
@@ -37,7 +37,7 @@ fn test_basic_get_operation() -> ConversionResult<()> {
 fn test_operation_with_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -109,7 +109,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
   };
   let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation {
@@ -165,7 +165,7 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
   };
   let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard());
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation {

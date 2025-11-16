@@ -28,6 +28,7 @@ pub struct Orchestrator {
   include_unused_schemas: bool,
   operation_registry: OperationRegistry,
   optionality_policy: FieldOptionalityPolicy,
+  preserve_case_variants: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +100,7 @@ impl Orchestrator {
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
     optionality_policy: FieldOptionalityPolicy,
+    preserve_case_variants: bool,
   ) -> Self {
     let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
     Self {
@@ -107,6 +109,7 @@ impl Orchestrator {
       include_unused_schemas,
       operation_registry,
       optionality_policy,
+      preserve_case_variants,
     }
   }
 
@@ -172,9 +175,14 @@ impl Orchestrator {
     };
 
     let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy.clone())
+      SchemaConverter::new_with_filter(
+        &graph,
+        reachable.clone(),
+        self.optionality_policy.clone(),
+        self.preserve_case_variants,
+      )
     } else {
-      SchemaConverter::new(&graph, self.optionality_policy.clone())
+      SchemaConverter::new(&graph, self.optionality_policy.clone(), self.preserve_case_variants)
     };
     let (schema_rust_types, schema_warnings) =
       Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
@@ -376,6 +384,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
 
     let metadata = orchestrator.metadata();
@@ -398,6 +407,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
 
     let result = orchestrator.generate_with_header("/path/to/spec.json");
@@ -423,6 +433,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
 
     let header = orchestrator.generate_header("test.yaml");
@@ -443,6 +454,7 @@ mod tests {
       None,
       Some(&excluded),
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result = orchestrator.generate_with_header("test.json");
     assert!(result.is_ok());
@@ -463,6 +475,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_full = orchestrator_full.generate_with_header("test.json");
     assert!(result_full.is_ok());
@@ -478,6 +491,7 @@ mod tests {
       None,
       Some(&excluded),
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_filtered = orchestrator_filtered.generate_with_header("test.json");
     assert!(result_filtered.is_ok());
@@ -505,6 +519,7 @@ mod tests {
       Some(&only),
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_without = orchestrator_without.generate_with_header("test.json");
     assert!(result_without.is_ok());
@@ -520,6 +535,7 @@ mod tests {
       Some(&only),
       None,
       FieldOptionalityPolicy::standard(),
+      false,
     );
     let result_with = orchestrator_with.generate_with_header("test.json");
     assert!(result_with.is_ok());
