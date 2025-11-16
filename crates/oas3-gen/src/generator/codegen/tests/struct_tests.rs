@@ -138,3 +138,184 @@ fn codegen_emits_both_serde_traits_when_required() {
   let code = tokens.to_string();
   assert!(code.contains("use serde :: { Deserialize , Serialize }"));
 }
+
+#[test]
+fn renders_path_with_integer_parameter() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.fields = vec![FieldDef {
+    name: "id".to_string(),
+    rust_type: TypeRef::new("i64"),
+    serde_attrs: vec![],
+    extra_attrs: vec![],
+    validation_attrs: vec![],
+    regex_validation: None,
+    default_value: None,
+    ..Default::default()
+  }];
+  def.methods.push(StructMethod {
+    name: "render_path".to_string(),
+    docs: vec!["/// Render path with integer parameter".to_string()],
+    kind: StructMethodKind::RenderPath {
+      segments: vec![
+        PathSegment::Literal("/users/".to_string()),
+        PathSegment::Parameter { field: "id".to_string() },
+      ],
+      query_params: vec![],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("fn render_path"));
+  assert!(code.contains("serialize_query_param"));
+  assert!(code.contains("percent_encode_path_segment"));
+}
+
+#[test]
+fn renders_path_with_boolean_parameter() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.fields = vec![FieldDef {
+    name: "active".to_string(),
+    rust_type: TypeRef::new("bool"),
+    serde_attrs: vec![],
+    extra_attrs: vec![],
+    validation_attrs: vec![],
+    regex_validation: None,
+    default_value: None,
+    ..Default::default()
+  }];
+  def.methods.push(StructMethod {
+    name: "render_path".to_string(),
+    docs: vec!["/// Render path with boolean parameter".to_string()],
+    kind: StructMethodKind::RenderPath {
+      segments: vec![
+        PathSegment::Literal("/items/".to_string()),
+        PathSegment::Parameter {
+          field: "active".to_string(),
+        },
+      ],
+      query_params: vec![],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("serialize_query_param (& self . active)"));
+  assert!(code.contains("percent_encode_path_segment"));
+}
+
+#[test]
+fn renders_path_with_float_parameter() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.fields = vec![FieldDef {
+    name: "amount".to_string(),
+    rust_type: TypeRef::new("f64"),
+    serde_attrs: vec![],
+    extra_attrs: vec![],
+    validation_attrs: vec![],
+    regex_validation: None,
+    default_value: None,
+    ..Default::default()
+  }];
+  def.methods.push(StructMethod {
+    name: "render_path".to_string(),
+    docs: vec!["/// Render path with float parameter".to_string()],
+    kind: StructMethodKind::RenderPath {
+      segments: vec![
+        PathSegment::Literal("/prices/".to_string()),
+        PathSegment::Parameter {
+          field: "amount".to_string(),
+        },
+      ],
+      query_params: vec![],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("serialize_query_param (& self . amount)"));
+  assert!(code.contains("percent_encode_path_segment"));
+}
+
+#[test]
+fn renders_path_with_uuid_parameter() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.fields = vec![FieldDef {
+    name: "uuid".to_string(),
+    rust_type: TypeRef::new("uuid::Uuid"),
+    serde_attrs: vec![],
+    extra_attrs: vec![],
+    validation_attrs: vec![],
+    regex_validation: None,
+    default_value: None,
+    ..Default::default()
+  }];
+  def.methods.push(StructMethod {
+    name: "render_path".to_string(),
+    docs: vec!["/// Render path with UUID parameter".to_string()],
+    kind: StructMethodKind::RenderPath {
+      segments: vec![
+        PathSegment::Literal("/entities/".to_string()),
+        PathSegment::Parameter {
+          field: "uuid".to_string(),
+        },
+      ],
+      query_params: vec![],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("serialize_query_param (& self . uuid)"));
+  assert!(code.contains("percent_encode_path_segment"));
+}
+
+#[test]
+fn renders_path_with_mixed_parameters() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.fields = vec![
+    FieldDef {
+      name: "user_id".to_string(),
+      rust_type: TypeRef::new("i64"),
+      serde_attrs: vec![],
+      extra_attrs: vec![],
+      validation_attrs: vec![],
+      regex_validation: None,
+      default_value: None,
+      ..Default::default()
+    },
+    FieldDef {
+      name: "post_slug".to_string(),
+      rust_type: TypeRef::new("String"),
+      serde_attrs: vec![],
+      extra_attrs: vec![],
+      validation_attrs: vec![],
+      regex_validation: None,
+      default_value: None,
+      ..Default::default()
+    },
+  ];
+  def.methods.push(StructMethod {
+    name: "render_path".to_string(),
+    docs: vec!["/// Render path with mixed parameters".to_string()],
+    kind: StructMethodKind::RenderPath {
+      segments: vec![
+        PathSegment::Literal("/users/".to_string()),
+        PathSegment::Parameter {
+          field: "user_id".to_string(),
+        },
+        PathSegment::Literal("/posts/".to_string()),
+        PathSegment::Parameter {
+          field: "post_slug".to_string(),
+        },
+      ],
+      query_params: vec![],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("serialize_query_param (& self . user_id)"));
+  assert!(code.contains("serialize_query_param (& self . post_slug)"));
+  assert_eq!(code.matches("percent_encode_path_segment").count(), 2);
+}

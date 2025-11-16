@@ -179,7 +179,7 @@ fn build_path_expression(segments: &[PathSegment]) -> TokenStream {
         fallback_string.push_str("{}");
         let ident = format_ident!("{field}");
         args.push(quote! {
-          oas3_gen_support::percent_encode_path_segment(&self.#ident.clone())
+          oas3_gen_support::percent_encode_path_segment(&oas3_gen_support::serialize_query_param(&self.#ident)?)
         });
       }
     }
