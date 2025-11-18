@@ -315,7 +315,9 @@ fn generate_parse_response_method(
       let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
       status_matches.push(quote! {
         if #condition {
-          let data = req.json::<#type_token>().await?;
+          // application/json
+          use oas3_gen_support::Diagnostics as _;
+          let data = req.json_with_diagnostics::<#type_token>().await?;
           return Ok(#response_enum_ident::#variant_name(data));
         }
       });
