@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet, HashMap},
+  collections::{BTreeMap, BTreeSet},
   string::ToString,
 };
 
@@ -210,7 +210,7 @@ impl<'a> CycleDetector<'a> {
 pub(crate) struct SchemaGraph {
   repository: SchemaRepository,
   dependency_graph: DependencyGraph,
-  discriminator_cache: HashMap<String, (String, String)>,
+  discriminator_cache: BTreeMap<String, (String, String)>,
   spec: Spec,
 }
 
@@ -230,8 +230,8 @@ impl SchemaGraph {
     )
   }
 
-  fn build_discriminator_cache(repository: &SchemaRepository) -> HashMap<String, (String, String)> {
-    let mut cache = HashMap::new();
+  fn build_discriminator_cache(repository: &SchemaRepository) -> BTreeMap<String, (String, String)> {
+    let mut cache = BTreeMap::new();
 
     for candidate_name in repository.names() {
       if let Some(candidate_schema) = repository.get(candidate_name)

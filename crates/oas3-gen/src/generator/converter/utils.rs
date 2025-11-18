@@ -1,6 +1,6 @@
 use std::{
   cmp::Reverse,
-  collections::{BTreeSet, HashMap, HashSet},
+  collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 };
 
 use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
@@ -247,7 +247,7 @@ pub(crate) fn apply_optionality(rust_type: TypeRef, is_optional: bool) -> TypeRe
 }
 
 pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
-  let mut name_counts: HashMap<String, usize> = HashMap::new();
+  let mut name_counts: BTreeMap<String, usize> = BTreeMap::new();
   for field in &*fields {
     *name_counts.entry(field.name.clone()).or_default() += 1;
   }

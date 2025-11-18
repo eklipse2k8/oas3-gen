@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Context;
 use blake3::Hasher;
@@ -13,17 +13,17 @@ use crate::{
 };
 
 pub(crate) struct SharedSchemaCache {
-  schema_to_type: HashMap<String, String>,
+  schema_to_type: BTreeMap<String, String>,
   generated_types: Vec<RustType>,
-  used_names: HashSet<String>,
+  used_names: BTreeSet<String>,
 }
 
 impl SharedSchemaCache {
   pub(crate) fn new() -> Self {
     Self {
-      schema_to_type: HashMap::new(),
+      schema_to_type: BTreeMap::new(),
       generated_types: Vec::new(),
-      used_names: HashSet::new(),
+      used_names: BTreeSet::new(),
     }
   }
 
