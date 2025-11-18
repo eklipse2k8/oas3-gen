@@ -431,6 +431,7 @@ mod tests {
     assert_eq!(format_example_value(&example, &type_ref), "42i32");
   }
 
+  #[allow(clippy::approx_constant)]
   #[test]
   fn test_format_example_number_f64() {
     let type_ref = TypeRef::new(RustPrimitive::F64);
