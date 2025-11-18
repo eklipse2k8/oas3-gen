@@ -296,7 +296,7 @@ fn generate_parse_response_method(
   visibility: Visibility,
 ) -> TokenStream {
   let vis = visibility.to_tokens();
-  let response_enum_ident = format_ident!("{}", response_enum);
+  let response_enum_ident = format_ident!("{response_enum}");
 
   let mut status_matches: Vec<TokenStream> = Vec::new();
   let mut default_variant: Option<&ResponseVariant> = None;

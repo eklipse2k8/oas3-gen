@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+use indexmap::IndexMap;
 use oas3::Spec;
 
 use crate::reserved::to_rust_field_name;
@@ -12,7 +13,7 @@ pub struct OperationLocation {
 
 #[derive(Debug)]
 pub struct OperationRegistry {
-  id_to_location: HashMap<String, OperationLocation>,
+  id_to_location: IndexMap<String, OperationLocation>,
   spec: Spec,
 }
 
@@ -26,7 +27,7 @@ impl OperationRegistry {
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
   ) -> Self {
-    let mut id_to_location = HashMap::new();
+    let mut id_to_location = IndexMap::new();
 
     for (path, method, operation) in spec.operations() {
       let stable_id = compute_stable_id(method.as_str(), &path, operation);

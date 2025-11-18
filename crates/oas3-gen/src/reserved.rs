@@ -379,4 +379,23 @@ mod tests {
     assert_eq!(header_const_name("123-custom"), "_123_CUSTOM");
     assert_eq!(header_const_name(""), "HEADER");
   }
+
+  #[test]
+  fn test_header_const_name_case_insensitive() {
+    assert_eq!(
+      header_const_name("X-API-Key"),
+      header_const_name("x-api-key"),
+      "header constant names should be case-insensitive"
+    );
+    assert_eq!(
+      header_const_name("Content-Type"),
+      header_const_name("content-type"),
+      "header constant names should be case-insensitive"
+    );
+    assert_eq!(
+      header_const_name("AUTHORIZATION"),
+      header_const_name("authorization"),
+      "header constant names should be case-insensitive"
+    );
+  }
 }

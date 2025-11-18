@@ -26,6 +26,7 @@ comfy-table.workspace = true
 crossterm.workspace = true
 cruet.workspace = true
 http.workspace = true
+indexmap.workspace = true
 inflections.workspace = true
 json-canon.workspace = true
 num-format.workspace = true
@@ -42,7 +43,6 @@ syn.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-indexmap.workspace = true
 oas3-gen-support.workspace = true
 reqwest = { workspace = true, features = ["json", "multipart"] }
 tempfile.workspace = true

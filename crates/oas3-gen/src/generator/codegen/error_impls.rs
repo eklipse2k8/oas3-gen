@@ -19,7 +19,7 @@ fn generate_for_struct(def: &crate::generator::ast::StructDef) -> Option<TokenSt
 
   if let Some(error_field_name) = find_error_field(&def.fields) {
     let field = def.fields.iter().find(|f| f.name == error_field_name)?;
-    let field_ident = format_ident!("{}", error_field_name);
+    let field_ident = format_ident!("{error_field_name}");
     let fallback = FALLBACK_ERROR_MESSAGE;
     let is_optional = field.rust_type.nullable;
 

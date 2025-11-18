@@ -126,6 +126,31 @@ Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/naming.h
 - Operation types: `...Request`, `...RequestBody`, `...Response`
 - Fields: `snake_case` with keyword escaping (`r#type`)
 
+### Collection Types for Deterministic Generation
+
+CRITICAL: Choose collection types carefully to ensure deterministic code generation.
+
+**IndexMap/IndexSet** (insertion order):
+- `OperationRegistry`: Preserves operation order from OpenAPI spec for logical client method ordering
+- Use when spec author's ordering is meaningful and should be reflected in generated code
+- Operations should appear in client in same order as spec
+
+**BTreeMap/BTreeSet** (sorted order):
+- Schema storage, type generation, dependency graphs
+- Produces alphabetically sorted output independent of spec ordering
+- More stable across spec changes (reordering schemas doesn't change generated output)
+- Makes generated code easier to navigate and review
+- Example: `deduplicate_and_order_types()` intentionally uses BTreeMap for sorting
+
+**HashMap/HashSet** (non-deterministic):
+- NEVER use for anything that affects code generation order
+- Only acceptable for internal logic where order doesn't matter (e.g., temporary deduplication)
+
+**Rule of thumb:**
+- Operations/endpoints → IndexMap (spec order matters)
+- Types/schemas/dependencies → BTreeMap (alphabetical is better)
+- Internal bookkeeping → HashMap only if order truly doesn't matter
+
 ### Design Principles and Code Quality
 
 **SOLID Principles:**

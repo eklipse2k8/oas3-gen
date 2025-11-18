@@ -20,7 +20,7 @@ pub fn generate_client(spec: &oas3::Spec, operations: &[OperationInfo]) -> anyho
   } else {
     to_rust_type_name(&metadata.title)
   };
-  let client_ident = format_ident!("{}Client", client_name);
+  let client_ident = format_ident!("{client_name}Client");
 
   let base_url = spec
     .servers

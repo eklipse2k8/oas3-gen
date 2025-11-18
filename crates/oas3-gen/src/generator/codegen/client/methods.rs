@@ -50,7 +50,7 @@ fn extract_type_info(operation: &OperationInfo) -> anyhow::Result<TypeInfo> {
       operation.operation_id
     )
   })?;
-  let request_ident = format_ident!("{}", request_type_name);
+  let request_ident = format_ident!("{request_type_name}");
 
   let response_enum = operation
     .response_enum
@@ -88,6 +88,7 @@ fn build_http_method_init(method: &str) -> TokenStream {
 
 fn build_doc_attributes(operation: &OperationInfo) -> Vec<TokenStream> {
   let mut doc_attrs = Vec::new();
+
   if let Some(summary) = &operation.summary {
     for line in summary.lines() {
       let trimmed = line.trim();
@@ -97,6 +98,22 @@ fn build_doc_attributes(operation: &OperationInfo) -> Vec<TokenStream> {
       }
     }
   }
+
+  if let Some(description) = &operation.description {
+    if operation.summary.is_some() {
+      doc_attrs.push(quote! { #[doc = ""] });
+    }
+    for line in description.lines() {
+      let trimmed = line.trim();
+      let lit = syn::LitStr::new(trimmed, proc_macro2::Span::call_site());
+      doc_attrs.push(quote! { #[doc = #lit] });
+    }
+  }
+
+  if operation.summary.is_some() || operation.description.is_some() {
+    doc_attrs.push(quote! { #[doc = ""] });
+  }
+
   let signature_doc = format!("{} {}", operation.method.to_uppercase(), operation.path);
   let signature_lit = syn::LitStr::new(&signature_doc, proc_macro2::Span::call_site());
   doc_attrs.push(quote! { #[doc = #signature_lit] });
@@ -110,7 +127,7 @@ fn build_header_statements(operation: &OperationInfo) -> Vec<TokenStream> {
     .iter()
     .filter(|param| matches!(param.location, ParameterLocation::Header))
     .map(|param| {
-      let const_name = header_const_name(&param.original_name);
+      let const_name = header_const_name(&param.original_name.to_ascii_lowercase());
       let const_ident = format_ident!("{const_name}");
       let field_ident = format_ident!("{}", param.rust_field);
 
@@ -397,4 +414,94 @@ fn assemble_method_tokens(
 
 fn parse_type(type_name: &str) -> anyhow::Result<syn::Type> {
   syn::parse_str(type_name).map_err(|err| anyhow!("failed to parse type `{type_name}`: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn create_test_operation(summary: Option<&str>, description: Option<&str>) -> OperationInfo {
+    OperationInfo {
+      stable_id: "test_operation".to_string(),
+      operation_id: "testOperation".to_string(),
+      method: "GET".to_string(),
+      path: "/test".to_string(),
+      summary: summary.map(String::from),
+      description: description.map(String::from),
+      request_type: Some("TestRequest".to_string()),
+      response_type: Some("TestResponse".to_string()),
+      response_enum: None,
+      request_body_types: vec![],
+      success_response_types: vec![],
+      error_response_types: vec![],
+      warnings: vec![],
+      parameters: vec![],
+      body: None,
+    }
+  }
+
+  #[test]
+  fn test_build_doc_attributes_with_summary_only() {
+    let operation = create_test_operation(Some("Test summary"), None);
+    let doc_attrs = build_doc_attributes(&operation);
+
+    let output = quote! { #(#doc_attrs)* }.to_string();
+
+    assert!(output.contains("Test summary"));
+    assert!(output.contains("GET /test"));
+    assert!(!output.contains("Test description"));
+  }
+
+  #[test]
+  fn test_build_doc_attributes_with_description_only() {
+    let operation = create_test_operation(None, Some("Test description"));
+    let doc_attrs = build_doc_attributes(&operation);
+
+    let output = quote! { #(#doc_attrs)* }.to_string();
+
+    assert!(output.contains("Test description"));
+    assert!(output.contains("GET /test"));
+  }
+
+  #[test]
+  fn test_build_doc_attributes_with_both_summary_and_description() {
+    let operation = create_test_operation(Some("Test summary"), Some("Test description"));
+    let doc_attrs = build_doc_attributes(&operation);
+
+    let output = quote! { #(#doc_attrs)* }.to_string();
+
+    assert!(output.contains("Test summary"));
+    assert!(output.contains("Test description"));
+    assert!(output.contains("GET /test"));
+
+    let summary_pos = output.find("Test summary").unwrap();
+    let description_pos = output.find("Test description").unwrap();
+    let signature_pos = output.find("GET /test").unwrap();
+
+    assert!(summary_pos < description_pos);
+    assert!(description_pos < signature_pos);
+  }
+
+  #[test]
+  fn test_build_doc_attributes_with_multiline_description() {
+    let operation = create_test_operation(Some("Test summary"), Some("Line 1\nLine 2\nLine 3"));
+    let doc_attrs = build_doc_attributes(&operation);
+
+    let output = quote! { #(#doc_attrs)* }.to_string();
+
+    assert!(output.contains("Line 1"));
+    assert!(output.contains("Line 2"));
+    assert!(output.contains("Line 3"));
+  }
+
+  #[test]
+  fn test_build_doc_attributes_with_neither_summary_nor_description() {
+    let operation = create_test_operation(None, None);
+    let doc_attrs = build_doc_attributes(&operation);
+
+    let output = quote! { #(#doc_attrs)* }.to_string();
+
+    assert!(output.contains("GET /test"));
+    assert_eq!(doc_attrs.len(), 1);
+  }
 }

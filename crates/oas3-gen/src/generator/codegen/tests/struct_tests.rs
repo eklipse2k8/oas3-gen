@@ -158,7 +158,9 @@ fn renders_path_with_integer_parameter() {
     kind: StructMethodKind::RenderPath {
       segments: vec![
         PathSegment::Literal("/users/".to_string()),
-        PathSegment::Parameter { field: "id".to_string() },
+        PathSegment::Parameter {
+          field: "id".to_string(),
+        },
       ],
       query_params: vec![],
     },

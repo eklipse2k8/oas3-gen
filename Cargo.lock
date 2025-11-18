@@ -184,9 +184,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.51"
+version = "4.5.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c26d721170e0295f191a69bd9a1f93efcdb0aff38684b61ab5750468972e5f5"
+checksum = "aa8120877db0e5c011242f96806ce3c94e0737ab8108532a76a3300a01db2ab8"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -194,9 +194,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.51"
+version = "4.5.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75835f0c7bf681bfd05abe44e965760fea999a5286c6eb2d59883634fd02011a"
+checksum = "02576b399397b659c26064fbc92a75fede9d18ffd5f80ca1cd74ddab167016e1"
 dependencies = [
  "anstream",
  "anstyle",
@@ -917,9 +917,9 @@ dependencies = [
 
 [[package]]
 name = "oas3"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2e9be2117da8473f5832dda83056d6bf3c42ec8adc613426f3bfde2d04c722d"
+checksum = "16f67c885c7b19aaf652e84102035258ecb4e0425a4f71037e187798e367bd87"
 dependencies = [
  "derive_more",
  "http",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen-support"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "anyhow",
  "better_default",

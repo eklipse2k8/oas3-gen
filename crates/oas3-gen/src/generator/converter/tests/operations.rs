@@ -229,8 +229,15 @@ fn test_operation_with_integer_path_parameter() -> ConversionResult<()> {
 
   let mut usage = TypeUsageRecorder::new();
   let mut cache = SharedSchemaCache::new();
-  let (types, info) =
-    converter.convert("get_by_id", "getById", "GET", "/items/{id}", &operation, &mut usage, &mut cache)?;
+  let (types, info) = converter.convert(
+    "get_by_id",
+    "getById",
+    "GET",
+    "/items/{id}",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
 
   assert_eq!(types.len(), 1);
   let request_type_name = info.request_type.as_deref().expect("Request type should exist");
@@ -509,7 +516,10 @@ fn test_operation_with_date_time_path_parameter() -> ConversionResult<()> {
     .expect("Request struct not found");
 
   assert_eq!(request_struct.fields[0].name, "timestamp");
-  assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "chrono::DateTime<chrono::Utc>");
+  assert_eq!(
+    request_struct.fields[0].rust_type.to_rust_type(),
+    "chrono::DateTime<chrono::Utc>"
+  );
   Ok(())
 }
 

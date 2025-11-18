@@ -79,7 +79,7 @@ pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTr
   let regex_defs: Vec<TokenStream> = const_defs
     .into_iter()
     .map(|(name, pattern)| {
-      let ident = format_ident!("{}", name);
+      let ident = format_ident!("{name}");
       quote! {
         static #ident: std::sync::LazyLock<regex::Regex> =
           std::sync::LazyLock::new(|| regex::Regex::new(#pattern).expect("invalid regex"));
@@ -99,7 +99,7 @@ pub(crate) fn generate_header_constants(headers: &[&String]) -> TokenStream {
     .iter()
     .map(|header| {
       let const_name = header_const_name(header);
-      let ident = format_ident!("{}", const_name);
+      let ident = format_ident!("{const_name}");
       quote! {
         pub const #ident: http::HeaderName = http::HeaderName::from_static(#header);
       }
