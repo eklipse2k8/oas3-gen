@@ -28,6 +28,7 @@ pub struct ResponseVariant {
   pub variant_name: String,
   pub description: Option<String>,
   pub schema_type: Option<TypeRef>,
+  pub content_type: Option<String>,
 }
 
 /// Response enum definition for operation responses

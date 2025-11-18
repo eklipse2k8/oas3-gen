@@ -594,16 +594,17 @@ impl<'a> OperationConverter<'a> {
       };
 
       let variant_name = Self::status_code_to_variant_name(status_code, &response);
-      let schema_type = self
-        .extract_response_schema_type(&response, path, status_code, schema_cache)
+      let (schema_type, content_type) = self
+        .extract_response_schema_info(&response, path, status_code, schema_cache)
         .ok()
-        .flatten();
+        .unwrap_or((None, None));
 
       variants.push(ResponseVariant {
         status_code: status_code.clone(),
         variant_name,
         description: response.description.clone(),
         schema_type,
+        content_type,
       });
     }
 
@@ -618,6 +619,7 @@ impl<'a> OperationConverter<'a> {
         variant_name: DEFAULT_RESPONSE_VARIANT.to_string(),
         description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
         schema_type: None,
+        content_type: None,
       });
     }
 
@@ -686,30 +688,33 @@ impl<'a> OperationConverter<'a> {
     }
   }
 
-  fn extract_response_schema_type(
+  fn extract_response_schema_info(
     &self,
     response: &oas3::spec::Response,
     path: &str,
     status_code: &str,
     schema_cache: &mut SharedSchemaCache,
-  ) -> ConversionResult<Option<TypeRef>> {
-    let Some(media_type) = response.content.values().next() else {
-      return Ok(None);
+  ) -> ConversionResult<(Option<TypeRef>, Option<String>)> {
+    let Some((content_type, media_type)) = response.content.iter().next() else {
+      return Ok((None, None));
     };
     let Some(schema_ref) = media_type.schema.as_ref() else {
-      return Ok(None);
+      return Ok((None, Some(content_type.clone())));
     };
 
     match schema_ref {
       ObjectOrReference::Ref { ref_path, .. } => {
         let Some(schema_name) = SchemaGraph::extract_ref_name(ref_path) else {
-          return Ok(None);
+          return Ok((None, Some(content_type.clone())));
         };
-        Ok(Some(TypeRef::new(to_rust_type_name(&schema_name))))
+        Ok((
+          Some(TypeRef::new(to_rust_type_name(&schema_name))),
+          Some(content_type.clone()),
+        ))
       }
       ObjectOrReference::Object(inline_schema) => {
         if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() {
-          return Ok(None);
+          return Ok((None, Some(content_type.clone())));
         }
 
         let rust_type_name = schema_cache.get_or_create_type(
@@ -720,7 +725,7 @@ impl<'a> OperationConverter<'a> {
           StructKind::Schema,
         )?;
 
-        Ok(Some(TypeRef::new(rust_type_name)))
+        Ok((Some(TypeRef::new(rust_type_name)), Some(content_type.clone())))
       }
     }
   }

@@ -557,4 +557,34 @@ mod tests {
     assert_eq!(stats_without.orphaned_schemas_count, 2);
     assert_eq!(stats_with.orphaned_schemas_count, 0);
   }
+
+  #[test]
+  fn test_content_types_generation() {
+    let spec_json = include_str!("../../fixtures/content_types.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+      false,
+    );
+
+    let result = orchestrator.generate_with_header("test.json");
+    assert!(result.is_ok());
+
+    let (code, _) = result.unwrap();
+
+    // Check for JSON handling (default assumption usually, but checked via logic)
+    // We expect 'json_with_diagnostics' for the 200 response which is application/json
+    assert!(code.contains("json_with_diagnostics"));
+
+    // Check for Text handling for 201 text/plain
+    assert!(code.contains("req.text().await?"));
+
+    // Check for Binary handling for 202 image/png (fallback to bytes)
+    assert!(code.contains("req.bytes().await?"));
+  }
 }
