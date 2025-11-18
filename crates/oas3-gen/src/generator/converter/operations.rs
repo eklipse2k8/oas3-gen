@@ -154,6 +154,7 @@ impl<'a> OperationConverter<'a> {
     };
 
     let response_type_name = self.extract_response_type_name(operation);
+    let response_content_type = self.extract_response_content_type(operation);
     let (success_response_types, error_response_types) = self.extract_all_response_types(operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
@@ -179,6 +180,7 @@ impl<'a> OperationConverter<'a> {
       request_type: request_type_name,
       response_type: response_type_name,
       response_enum: response_enum_name,
+      response_content_type,
       request_body_types: body_info.type_usage,
       success_response_types,
       error_response_types,
@@ -516,6 +518,16 @@ impl<'a> OperationConverter<'a> {
       .and_then(|(_, resp_ref)| resp_ref.resolve(self.spec).ok())
       .and_then(|resp| Self::extract_schema_name_from_response(&resp))
       .map(|s| to_rust_type_name(&s))
+  }
+
+  fn extract_response_content_type(&self, operation: &Operation) -> Option<String> {
+    let responses = operation.responses.as_ref()?;
+    responses
+      .iter()
+      .find(|(code, _)| code.starts_with(SUCCESS_RESPONSE_PREFIX))
+      .or_else(|| responses.iter().next())
+      .and_then(|(_, resp_ref)| resp_ref.resolve(self.spec).ok())
+      .and_then(|resp| resp.content.keys().next().cloned())
   }
 
   fn extract_all_response_types(&self, operation: &Operation) -> (Vec<String>, Vec<String>) {

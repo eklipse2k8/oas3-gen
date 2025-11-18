@@ -12,6 +12,7 @@ struct TypeInfo {
   request_ident: syn::Ident,
   response_enum: Option<syn::Type>,
   response_type: Option<syn::Type>,
+  response_content_type: Option<String>,
 }
 
 struct MethodComponents {
@@ -68,6 +69,7 @@ fn extract_type_info(operation: &OperationInfo) -> anyhow::Result<TypeInfo> {
     request_ident,
     response_enum,
     response_type,
+    response_content_type: operation.response_content_type.clone(),
   })
 }
 
@@ -374,13 +376,36 @@ fn build_response_handling(type_info: &TypeInfo) -> (TokenStream, TokenStream) {
   }
 
   if let Some(response_ty) = &type_info.response_type {
-    return (
-      quote! { #response_ty },
-      quote! {
-        let parsed = response.json::<#response_ty>().await?;
-        Ok(parsed)
-      },
-    );
+    let content_type = type_info
+      .response_content_type
+      .as_deref()
+      .unwrap_or("application/json")
+      .to_ascii_lowercase();
+
+    if content_type.contains("json") {
+      return (
+        quote! { #response_ty },
+        quote! {
+          let parsed = response.json::<#response_ty>().await?;
+          Ok(parsed)
+        },
+      );
+    } else if content_type.contains("text/plain") || content_type.contains("text/html") {
+      return (
+        quote! { String },
+        quote! {
+          let text = response.text().await?;
+          Ok(text)
+        },
+      );
+    } else if content_type.starts_with("image/")
+      || content_type.starts_with("video/")
+      || content_type.starts_with("audio/")
+      || content_type == "application/octet-stream"
+      || content_type.starts_with("application/pdf")
+    {
+      return (quote! { reqwest::Response }, quote! { Ok(response) });
+    }
   }
 
   (quote! { reqwest::Response }, quote! { Ok(response) })
@@ -434,6 +459,7 @@ mod tests {
       request_type: Some("TestRequest".to_string()),
       response_type: Some("TestResponse".to_string()),
       response_enum: None,
+      response_content_type: None,
       request_body_types: vec![],
       success_response_types: vec![],
       error_response_types: vec![],
@@ -506,5 +532,168 @@ mod tests {
 
     assert!(output.contains("GET /test"));
     assert_eq!(doc_attrs.len(), 1);
+  }
+
+  #[test]
+  fn test_response_handling_with_json_content_type() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("application/json".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert!(return_ty_str.contains("TestResponse"));
+    assert!(response_str.contains("json"));
+    assert!(response_str.contains("TestResponse"));
+  }
+
+  #[test]
+  fn test_response_handling_with_text_content_type() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("text/plain".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert_eq!(return_ty_str, "String");
+    assert!(response_str.contains("text"));
+  }
+
+  #[test]
+  fn test_response_handling_with_binary_content_type() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("application/octet-stream".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert_eq!(return_ty_str, "reqwest :: Response");
+    assert!(response_str.contains("Ok (response)"));
+  }
+
+  #[test]
+  fn test_response_handling_no_content_type_defaults_to_json() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: None,
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert!(return_ty_str.contains("TestResponse"));
+    assert!(response_str.contains("json"));
+  }
+
+  #[test]
+  fn test_response_handling_with_response_enum() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: Some(syn::parse_str("TestResponseEnum").unwrap()),
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("application/json".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert!(return_ty_str.contains("TestResponseEnum"));
+    assert!(response_str.contains("parse_response"));
+  }
+
+  #[test]
+  fn test_response_handling_with_image_png() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("image/png".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert_eq!(return_ty_str, "reqwest :: Response");
+    assert!(response_str.contains("Ok (response)"));
+  }
+
+  #[test]
+  fn test_response_handling_with_image_jpeg() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("image/jpeg".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert_eq!(return_ty_str, "reqwest :: Response");
+    assert!(response_str.contains("Ok (response)"));
+  }
+
+  #[test]
+  fn test_response_handling_with_video_content() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("video/mp4".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert_eq!(return_ty_str, "reqwest :: Response");
+    assert!(response_str.contains("Ok (response)"));
+  }
+
+  #[test]
+  fn test_response_handling_with_pdf() {
+    let type_info = TypeInfo {
+      request_ident: format_ident!("TestRequest"),
+      response_enum: None,
+      response_type: Some(syn::parse_str("TestResponse").unwrap()),
+      response_content_type: Some("application/pdf".to_string()),
+    };
+
+    let (return_ty, response_handling) = build_response_handling(&type_info);
+
+    let return_ty_str = return_ty.to_string();
+    let response_str = response_handling.to_string();
+
+    assert_eq!(return_ty_str, "reqwest :: Response");
+    assert!(response_str.contains("Ok (response)"));
   }
 }

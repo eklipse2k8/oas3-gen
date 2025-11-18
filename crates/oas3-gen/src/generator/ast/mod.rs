@@ -74,6 +74,7 @@ pub struct OperationInfo {
   pub request_type: Option<String>,
   pub response_type: Option<String>,
   pub response_enum: Option<String>,
+  pub response_content_type: Option<String>,
   pub request_body_types: Vec<String>,
   pub success_response_types: Vec<String>,
   pub error_response_types: Vec<String>,
