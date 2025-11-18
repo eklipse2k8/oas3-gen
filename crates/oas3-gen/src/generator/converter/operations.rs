@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use http::Method;
 use oas3::{
   Spec,
   spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
@@ -89,7 +90,7 @@ impl<'a> OperationConverter<'a> {
     &self,
     stable_id: &str,
     operation_id: &str,
-    method: &str,
+    method: &Method,
     path: &str,
     operation: &Operation,
     usage: &mut TypeUsageRecorder,
@@ -171,7 +172,7 @@ impl<'a> OperationConverter<'a> {
     let op_info = OperationInfo {
       stable_id,
       operation_id: final_operation_id,
-      method: method.to_string(),
+      method: method.clone(),
       path: path.to_string(),
       summary: operation.summary.clone(),
       description: operation.description.clone(),

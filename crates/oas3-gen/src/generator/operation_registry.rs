@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use http::Method;
 use indexmap::IndexMap;
 use oas3::Spec;
 
@@ -7,7 +8,7 @@ use crate::reserved::to_rust_field_name;
 
 #[derive(Debug, Clone)]
 pub struct OperationLocation {
-  pub method: String,
+  pub method: Method,
   pub path: String,
 }
 
@@ -45,7 +46,7 @@ impl OperationRegistry {
       }
 
       let location = OperationLocation {
-        method: method.as_str().to_string(),
+        method: method.clone(),
         path,
       };
       id_to_location.insert(stable_id, location);
@@ -61,29 +62,24 @@ impl OperationRegistry {
     self.id_to_location.iter().map(|(id, loc)| (id.as_str(), loc))
   }
 
-  pub fn operations_with_details(&self) -> impl Iterator<Item = (&str, &str, &str, &oas3::spec::Operation)> + '_ {
+  pub fn operations_with_details(&self) -> impl Iterator<Item = (&str, &Method, &str, &oas3::spec::Operation)> + '_ {
     self.id_to_location.iter().filter_map(|(stable_id, location)| {
       let paths = self.spec.paths.as_ref()?;
       let path_item = paths.get(&location.path)?;
 
-      let operation = match location.method.to_uppercase().as_str() {
-        "GET" => path_item.get.as_ref(),
-        "POST" => path_item.post.as_ref(),
-        "PUT" => path_item.put.as_ref(),
-        "DELETE" => path_item.delete.as_ref(),
-        "PATCH" => path_item.patch.as_ref(),
-        "OPTIONS" => path_item.options.as_ref(),
-        "HEAD" => path_item.head.as_ref(),
-        "TRACE" => path_item.trace.as_ref(),
+      let operation = match location.method {
+        Method::GET => path_item.get.as_ref(),
+        Method::POST => path_item.post.as_ref(),
+        Method::PUT => path_item.put.as_ref(),
+        Method::DELETE => path_item.delete.as_ref(),
+        Method::PATCH => path_item.patch.as_ref(),
+        Method::OPTIONS => path_item.options.as_ref(),
+        Method::HEAD => path_item.head.as_ref(),
+        Method::TRACE => path_item.trace.as_ref(),
         _ => None,
       }?;
 
-      Some((
-        stable_id.as_str(),
-        location.method.as_str(),
-        location.path.as_str(),
-        operation,
-      ))
+      Some((stable_id.as_str(), &location.method, location.path.as_str(), operation))
     })
   }
 

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeMap as ResponseMap};
 
+use http::Method;
 use oas3::spec::{
   MediaType, ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, RequestBody, Response, SchemaType,
   SchemaTypeSet,
@@ -24,7 +25,15 @@ fn test_basic_get_operation() -> ConversionResult<()> {
   let operation = Operation::default();
   let mut usage = TypeUsageRecorder::new();
   let mut cache = SharedSchemaCache::new();
-  let (types, info) = converter.convert("my_op", "myOp", "GET", "/test", &operation, &mut usage, &mut cache)?;
+  let (types, info) = converter.convert(
+    "my_op",
+    "myOp",
+    &Method::GET,
+    "/test",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
 
   assert!(types.is_empty(), "Should generate no new types");
   assert_eq!(info.operation_id, "MyOp");
@@ -65,7 +74,7 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
   let (types, info) = converter.convert(
     "get_user",
     "getUser",
-    "GET",
+    &Method::GET,
     "/users/{userId}",
     &operation,
     &mut usage,
@@ -135,7 +144,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
   let (types, info) = converter.convert(
     "create_user",
     "createUser",
-    "POST",
+    &Method::POST,
     "/users",
     &operation,
     &mut usage,
@@ -192,7 +201,13 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
   let mut usage = TypeUsageRecorder::new();
   let mut cache = SharedSchemaCache::new();
   let (_, info) = converter.convert(
-    "get_user", "getUser", "GET", "/user", &operation, &mut usage, &mut cache,
+    "get_user",
+    "getUser",
+    &Method::GET,
+    "/user",
+    &operation,
+    &mut usage,
+    &mut cache,
   )?;
 
   assert_eq!(info.response_type.as_deref(), Some("User"));
@@ -232,7 +247,7 @@ fn test_operation_with_integer_path_parameter() -> ConversionResult<()> {
   let (types, info) = converter.convert(
     "get_by_id",
     "getById",
-    "GET",
+    &Method::GET,
     "/items/{id}",
     &operation,
     &mut usage,
@@ -289,7 +304,7 @@ fn test_operation_with_int32_path_parameter() -> ConversionResult<()> {
   let (types, _) = converter.convert(
     "get_by_count",
     "getByCount",
-    "GET",
+    &Method::GET,
     "/items/{count}",
     &operation,
     &mut usage,
@@ -342,7 +357,7 @@ fn test_operation_with_number_path_parameter() -> ConversionResult<()> {
   let (types, _) = converter.convert(
     "get_by_amount",
     "getByAmount",
-    "GET",
+    &Method::GET,
     "/items/{amount}",
     &operation,
     &mut usage,
@@ -394,7 +409,7 @@ fn test_operation_with_boolean_path_parameter() -> ConversionResult<()> {
   let (types, _) = converter.convert(
     "get_by_active",
     "getByActive",
-    "GET",
+    &Method::GET,
     "/items/{active}",
     &operation,
     &mut usage,
@@ -447,7 +462,7 @@ fn test_operation_with_uuid_path_parameter() -> ConversionResult<()> {
   let (types, _) = converter.convert(
     "get_by_uuid",
     "getByUuid",
-    "GET",
+    &Method::GET,
     "/items/{uuid}",
     &operation,
     &mut usage,
@@ -500,7 +515,7 @@ fn test_operation_with_date_time_path_parameter() -> ConversionResult<()> {
   let (types, _) = converter.convert(
     "get_by_timestamp",
     "getByTimestamp",
-    "GET",
+    &Method::GET,
     "/items/{timestamp}",
     &operation,
     &mut usage,
@@ -575,7 +590,7 @@ fn test_operation_with_multiple_path_parameters() -> ConversionResult<()> {
   let (types, _info) = converter.convert(
     "get_user_post",
     "getUserPost",
-    "GET",
+    &Method::GET,
     "/users/{userId}/posts/{postId}",
     &operation,
     &mut usage,

@@ -1,5 +1,6 @@
 pub(super) mod types;
 
+use http::Method;
 pub use types::{RustPrimitive, TypeRef};
 
 /// Discriminated enum variant mapping
@@ -66,7 +67,7 @@ impl RustType {
 pub struct OperationInfo {
   pub stable_id: String,
   pub operation_id: String,
-  pub method: String,
+  pub method: Method,
   pub path: String,
   pub summary: Option<String>,
   pub description: Option<String>,

@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use http::Method;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -70,18 +71,20 @@ fn extract_type_info(operation: &OperationInfo) -> anyhow::Result<TypeInfo> {
   })
 }
 
-fn build_http_method_init(method: &str) -> TokenStream {
-  let method_lower = method.to_ascii_lowercase();
-  match method_lower.as_str() {
-    "get" => quote! { self.client.get(url) },
-    "post" => quote! { self.client.post(url) },
-    "put" => quote! { self.client.put(url) },
-    "delete" => quote! { self.client.delete(url) },
-    "patch" => quote! { self.client.patch(url) },
-    "head" => quote! { self.client.head(url) },
+fn build_http_method_init(method: &Method) -> TokenStream {
+  match *method {
+    Method::GET => quote! { self.client.get(url) },
+    Method::POST => quote! { self.client.post(url) },
+    Method::PUT => quote! { self.client.put(url) },
+    Method::DELETE => quote! { self.client.delete(url) },
+    Method::PATCH => quote! { self.client.patch(url) },
+    Method::HEAD => quote! { self.client.head(url) },
     _ => {
-      let method_upper = syn::Ident::new(&method_lower.to_ascii_uppercase(), proc_macro2::Span::call_site());
-      quote! { self.client.request(reqwest::Method::#method_upper, url) }
+      let method = format_ident!("reqwest::Method::{}", method.as_str());
+      quote! {
+        // Using request for uncommon HTTP method
+        self.client.request(#method, url)
+      }
     }
   }
 }
@@ -114,7 +117,7 @@ fn build_doc_attributes(operation: &OperationInfo) -> Vec<TokenStream> {
     doc_attrs.push(quote! { #[doc = ""] });
   }
 
-  let signature_doc = format!("{} {}", operation.method.to_uppercase(), operation.path);
+  let signature_doc = format!("{} {}", operation.method.as_str(), operation.path);
   let signature_lit = syn::LitStr::new(&signature_doc, proc_macro2::Span::call_site());
   doc_attrs.push(quote! { #[doc = #signature_lit] });
 
@@ -424,7 +427,7 @@ mod tests {
     OperationInfo {
       stable_id: "test_operation".to_string(),
       operation_id: "testOperation".to_string(),
-      method: "GET".to_string(),
+      method: Method::GET,
       path: "/test".to_string(),
       summary: summary.map(String::from),
       description: description.map(String::from),
