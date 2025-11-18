@@ -81,7 +81,7 @@ pub struct OperationInfo {
   pub body: Option<OperationBody>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParameterLocation {
   Path,
   Query,
@@ -177,6 +177,8 @@ pub struct FieldDef {
   pub validation_attrs: Vec<String>,
   pub regex_validation: Option<String>,
   pub default_value: Option<serde_json::Value>,
+  pub example_value: Option<serde_json::Value>,
+  pub parameter_location: Option<ParameterLocation>,
   pub read_only: bool,
   pub write_only: bool,
   pub deprecated: bool,

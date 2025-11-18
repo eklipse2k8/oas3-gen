@@ -426,15 +426,21 @@ impl<'a> OperationConverter<'a> {
       self.extract_parameter_type_and_validation(param, warnings)?;
 
     let is_required = param.required.unwrap_or(false);
-    let mut docs = metadata::extract_docs(param.description.as_ref());
-    docs.push(format!("/// (Location: {:?})", param.location));
+    let docs = metadata::extract_docs(param.description.as_ref());
+
+    let final_rust_type = if is_required {
+      rust_type.clone()
+    } else {
+      rust_type.clone().with_option()
+    };
 
     let rust_field = to_rust_field_name(&param.name);
 
-    let final_rust_type = if is_required {
-      rust_type
-    } else {
-      rust_type.with_option()
+    let location = match param.location {
+      ParameterIn::Path => ParameterLocation::Path,
+      ParameterIn::Query => ParameterLocation::Query,
+      ParameterIn::Header => ParameterLocation::Header,
+      ParameterIn::Cookie => ParameterLocation::Cookie,
     };
 
     let field = FieldDef {
@@ -444,14 +450,9 @@ impl<'a> OperationConverter<'a> {
       validation_attrs,
       regex_validation,
       default_value,
+      example_value: param.example.clone(),
+      parameter_location: Some(location),
       ..Default::default()
-    };
-
-    let location = match param.location {
-      ParameterIn::Path => ParameterLocation::Path,
-      ParameterIn::Query => ParameterLocation::Query,
-      ParameterIn::Header => ParameterLocation::Header,
-      ParameterIn::Cookie => ParameterLocation::Cookie,
     };
 
     let metadata = OperationParameter {

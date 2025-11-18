@@ -300,6 +300,8 @@ pub(crate) fn build_field_def(
     validation_attrs: metadata.validation_attrs,
     regex_validation,
     default_value: metadata.default_value,
+    example_value: None,
+    parameter_location: None,
     read_only: metadata.read_only,
     write_only: metadata.write_only,
     deprecated: metadata.deprecated,

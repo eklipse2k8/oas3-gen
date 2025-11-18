@@ -2,7 +2,7 @@ pub(crate) mod cache;
 mod constants;
 mod enums;
 mod field_optionality;
-mod metadata;
+pub(crate) mod metadata;
 pub(crate) mod operations;
 mod structs;
 mod type_resolver;
