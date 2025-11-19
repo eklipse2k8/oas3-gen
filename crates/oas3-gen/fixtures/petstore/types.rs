@@ -30,7 +30,8 @@ impl CreatePetsRequest {
             let _ = req.bytes().await?;
             return Ok(CreatePetsResponse::Created);
         }
-        let data = req.json::<Error>().await?;
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req)
+            .await?;
         Ok(CreatePetsResponse::UnexpectedError(data))
     }
 }
@@ -77,10 +78,12 @@ impl ListPetsRequest {
     ) -> anyhow::Result<ListPetsResponse> {
         let status = req.status();
         if status.is_success() {
-            let data = req.json::<Pets>().await?;
+            let data = oas3_gen_support::Diagnostics::<Pets>::json_with_diagnostics(req)
+                .await?;
             return Ok(ListPetsResponse::Ok(data));
         }
-        let data = req.json::<Error>().await?;
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req)
+            .await?;
         Ok(ListPetsResponse::UnexpectedError(data))
     }
 }
@@ -123,10 +126,12 @@ impl ShowPetByIdRequest {
     ) -> anyhow::Result<ShowPetByIdResponse> {
         let status = req.status();
         if status.is_success() {
-            let data = req.json::<Pet>().await?;
+            let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req)
+                .await?;
             return Ok(ShowPetByIdResponse::Ok(data));
         }
-        let data = req.json::<Error>().await?;
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req)
+            .await?;
         Ok(ShowPetByIdResponse::UnexpectedError(data))
     }
 }
