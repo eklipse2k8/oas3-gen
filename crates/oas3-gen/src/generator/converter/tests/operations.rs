@@ -8,7 +8,7 @@ use oas3::spec::{
 
 use super::common::create_test_graph;
 use crate::generator::{
-  ast::{PathSegment, RustType},
+  ast::{PathSegment, RustType, StructMethodKind},
   converter::{
     ConversionResult, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
     operations::OperationConverter,
@@ -101,7 +101,7 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
     .iter()
     .find(|m| m.name == "render_path")
     .expect("render_path method not found");
-  let crate::generator::ast::StructMethodKind::RenderPath { segments, .. } = &render_method.kind else {
+  let StructMethodKind::RenderPath { segments, .. } = &render_method.kind else {
     panic!("Expected RenderPath method kind");
   };
   assert_eq!(segments.len(), 2);
@@ -616,7 +616,7 @@ fn test_operation_with_multiple_path_parameters() -> ConversionResult<()> {
     .iter()
     .find(|m| m.name == "render_path")
     .expect("render_path method not found");
-  let crate::generator::ast::StructMethodKind::RenderPath { segments, .. } = &render_method.kind else {
+  let StructMethodKind::RenderPath { segments, .. } = &render_method.kind else {
     panic!("Expected RenderPath method kind");
   };
   assert_eq!(segments.len(), 4);

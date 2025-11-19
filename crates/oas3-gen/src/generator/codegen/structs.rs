@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use oas3::spec::ParameterStyle;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -13,7 +14,8 @@ use super::{
   constants::RegexKey,
 };
 use crate::generator::ast::{
-  FieldDef, PathSegment, QueryParameter, ResponseVariant, StructDef, StructMethod, StructMethodKind,
+  FieldDef, PathSegment, QueryParameter, ResponseVariant, RustPrimitive, StructDef, StructMethod, StructMethodKind,
+  TypeRef,
 };
 
 pub(crate) fn generate_struct(
@@ -208,10 +210,19 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
   let ident = format_ident!("{}", param.field);
   let key = &param.encoded_name;
   let param_equal = format!("{{prefix}}{key}={{}}");
+  let style = param.style.unwrap_or(ParameterStyle::Form);
+
+  // Determine separator for unexploded arrays
+  let delimiter = match style {
+    ParameterStyle::SpaceDelimited => "%20",
+    ParameterStyle::PipeDelimited => "|",
+    _ => ",", // Form default
+  };
 
   if param.optional {
     if param.is_array {
       if param.explode {
+        // Exploded array: key=val1&key=val2
         quote! {
           if let Some(values) = &self.#ident {
             for value in values {
@@ -221,16 +232,18 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
           }
         }
       } else {
+        // Unexploded array: key=val1,val2 (or other delimiter)
         quote! {
           if let Some(values) = &self.#ident && !values.is_empty() {
             prefix = if prefix == '\0' { '?' } else { '&' };
             let values = values.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
-            let values = values.join(",");
+            let values = values.join(#delimiter);
             write!(&mut path, #param_equal, values).unwrap();
           }
         }
       }
     } else {
+      // Optional scalar
       quote! {
         if let Some(value) = &self.#ident {
           prefix = if prefix == '\0' { '?' } else { '&' };
@@ -240,6 +253,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
     }
   } else if param.is_array {
     if param.explode {
+      // Exploded array (required)
       quote! {
         for value in &self.#ident {
           prefix = if prefix == '\0' { '?' } else { '&' };
@@ -247,16 +261,18 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
         }
       }
     } else {
+      // Unexploded array (required)
       quote! {
         if !self.#ident.is_empty() {
           prefix = if prefix == '\0' { '?' } else { '&' };
           let values = self.#ident.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
-          let values = values.join(",");
+          let values = values.join(#delimiter);
           write!(&mut path, #param_equal, values).unwrap();
         }
       }
     }
   } else {
+    // Required scalar
     quote! {
       prefix = if prefix == '\0' { '?' } else { '&' };
       write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident)?)).unwrap();
@@ -356,7 +372,7 @@ fn generate_parse_response_method(
 fn generate_variant_block(
   enum_name: &proc_macro2::Ident,
   variant_name: &str,
-  schema: Option<&crate::generator::ast::TypeRef>,
+  schema: Option<&TypeRef>,
   content_type: Option<&str>,
   is_specific_variant: bool,
 ) -> TokenStream {
@@ -388,7 +404,7 @@ fn generate_variant_block(
   }
 }
 
-fn generate_data_expression(schema_type: &crate::generator::ast::TypeRef, content_type: Option<&str>) -> TokenStream {
+fn generate_data_expression(schema_type: &TypeRef, content_type: Option<&str>) -> TokenStream {
   let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
   let ct = content_type.unwrap_or("application/json");
 
@@ -404,7 +420,7 @@ fn generate_data_expression(schema_type: &crate::generator::ast::TypeRef, conten
     quote! { req.bytes().await?.to_vec() }
   } else {
     // Fallback: Check if the target type is explicitly binary
-    if schema_type.base_type == crate::generator::ast::RustPrimitive::Bytes {
+    if schema_type.base_type == RustPrimitive::Bytes {
       quote! { req.bytes().await?.to_vec() }
     } else {
       // If not binary, assume structured data (JSON) even if content-type is weird/missing

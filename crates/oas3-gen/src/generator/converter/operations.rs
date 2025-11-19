@@ -22,7 +22,8 @@ use crate::{
   generator::{
     ast::{
       FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, PathSegment, QueryParameter,
-      ResponseEnumDef, ResponseVariant, RustType, StructDef, StructKind, TypeAliasDef, TypeRef,
+      ResponseEnumDef, ResponseVariant, RustType, StructDef, StructKind, StructMethod, StructMethodKind, TypeAliasDef,
+      TypeRef,
     },
     schema_graph::SchemaGraph,
   },
@@ -502,6 +503,7 @@ impl<'a> OperationConverter<'a> {
         rust_field: field.name.clone(),
         original_name: param.name.clone(),
         explode: path_renderer::query_param_explode(param),
+        style: param.style,
         optional: field.rust_type.nullable,
         is_array: field.rust_type.is_array,
       }),
@@ -730,12 +732,7 @@ impl<'a> OperationConverter<'a> {
     }
   }
 
-  fn build_parse_response_method(
-    response_enum_name: &str,
-    variants: &[ResponseVariant],
-  ) -> crate::generator::ast::StructMethod {
-    use crate::generator::ast::{StructMethod, StructMethodKind};
-
+  fn build_parse_response_method(response_enum_name: &str, variants: &[ResponseVariant]) -> StructMethod {
     StructMethod {
       name: "parse_response".to_string(),
       docs: vec!["/// Parse the HTTP response into the response enum.".to_string()],
@@ -755,7 +752,7 @@ mod path_renderer {
   use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
   use super::{PathSegment, QueryParameter};
-  use crate::generator::ast::StructMethod;
+  use crate::generator::ast::{StructMethod, StructMethodKind};
 
   const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
@@ -770,6 +767,7 @@ mod path_renderer {
     pub rust_field: String,
     pub original_name: String,
     pub explode: bool,
+    pub style: Option<ParameterStyle>,
     pub optional: bool,
     pub is_array: bool,
   }
@@ -779,8 +777,6 @@ mod path_renderer {
     path_params: &[PathParamMapping],
     query_params: &[QueryParamMapping],
   ) -> StructMethod {
-    use crate::generator::ast::StructMethodKind;
-
     let query_parameters = query_params
       .iter()
       .map(|m| QueryParameter {
@@ -789,6 +785,7 @@ mod path_renderer {
         explode: m.explode,
         optional: m.optional,
         is_array: m.is_array,
+        style: m.style,
       })
       .collect();
 

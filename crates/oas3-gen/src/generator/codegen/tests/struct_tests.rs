@@ -81,6 +81,7 @@ fn renders_struct_methods() {
         explode: false,
         optional: false,
         is_array: false,
+        style: None,
       }],
     },
     attrs: vec![],

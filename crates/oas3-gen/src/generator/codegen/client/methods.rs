@@ -4,7 +4,9 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use crate::{
-  generator::ast::{OperationBody, OperationInfo, ParameterLocation, TypeRef},
+  generator::ast::{
+    FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef, TypeRef,
+  },
   reserved::header_const_name,
 };
 
@@ -24,7 +26,7 @@ struct MethodComponents {
   response_handling: TokenStream,
 }
 
-pub(super) fn build_method_tokens(operation: &OperationInfo) -> anyhow::Result<TokenStream> {
+pub(super) fn build_method_tokens(operation: &OperationInfo, rust_types: &[RustType]) -> anyhow::Result<TokenStream> {
   let type_info = extract_type_info(operation)?;
   let method_name = format_ident!("{}", operation.stable_id);
 
@@ -33,7 +35,7 @@ pub(super) fn build_method_tokens(operation: &OperationInfo) -> anyhow::Result<T
     doc_attrs: build_doc_attributes(operation),
     builder_init: build_http_method_init(&operation.method),
     header_statements: build_header_statements(operation),
-    body_statement: build_body_statement(operation),
+    body_statement: build_body_statement(operation, rust_types),
     return_ty,
     response_handling,
   };
@@ -180,11 +182,10 @@ fn build_header_value_conversion(rust_type: &TypeRef, field_ident: &syn::Ident, 
 }
 
 fn is_string_type(type_ref: &TypeRef) -> bool {
-  matches!(type_ref.base_type, crate::generator::ast::RustPrimitive::String) && !type_ref.is_array
+  matches!(type_ref.base_type, RustPrimitive::String) && !type_ref.is_array
 }
 
 fn is_primitive_type(type_ref: &TypeRef) -> bool {
-  use crate::generator::ast::RustPrimitive;
   matches!(
     type_ref.base_type,
     RustPrimitive::I8
@@ -205,15 +206,19 @@ fn is_primitive_type(type_ref: &TypeRef) -> bool {
   ) && !type_ref.is_array
 }
 
-fn build_body_statement(operation: &OperationInfo) -> TokenStream {
+fn build_body_statement(operation: &OperationInfo, rust_types: &[RustType]) -> TokenStream {
   operation
     .body
     .as_ref()
-    .map(build_body_for_content_type)
+    .map(|body| build_body_for_content_type(body, operation, rust_types))
     .unwrap_or_default()
 }
 
-fn build_body_for_content_type(body: &OperationBody) -> TokenStream {
+fn build_body_for_content_type(
+  body: &OperationBody,
+  operation: &OperationInfo,
+  rust_types: &[RustType],
+) -> TokenStream {
   let field_ident = format_ident!("{}", body.field_name);
   let content_type = body
     .content_type
@@ -226,7 +231,7 @@ fn build_body_for_content_type(body: &OperationBody) -> TokenStream {
   } else if content_type.contains("x-www-form-urlencoded") {
     build_form_body(&field_ident, body.optional)
   } else if content_type.contains("multipart") {
-    build_multipart_body(&field_ident, body.optional)
+    build_multipart_body(&field_ident, body.optional, operation, rust_types)
   } else if content_type.contains("text/plain") || content_type.contains("text/html") {
     build_text_body(&field_ident, body.optional)
   } else if content_type.contains("octet-stream")
@@ -268,8 +273,84 @@ fn build_form_body(field_ident: &syn::Ident, optional: bool) -> TokenStream {
   }
 }
 
-fn build_multipart_body(field_ident: &syn::Ident, optional: bool) -> TokenStream {
-  let multipart_logic = quote! {
+fn build_multipart_body(
+  field_ident: &syn::Ident,
+  optional: bool,
+  operation: &OperationInfo,
+  rust_types: &[RustType],
+) -> TokenStream {
+  let multipart_logic = resolve_multipart_struct(operation, rust_types, field_ident)
+    .map_or_else(generate_fallback_multipart, generate_strict_multipart);
+
+  if optional {
+    quote! {
+      if let Some(body) = request.#field_ident.as_ref() {
+        #multipart_logic
+      }
+    }
+  } else {
+    quote! {
+      let body = &request.#field_ident;
+      #multipart_logic
+    }
+  }
+}
+
+fn resolve_multipart_struct<'a>(
+  operation: &OperationInfo,
+  rust_types: &'a [RustType],
+  field_ident: &syn::Ident,
+) -> Option<&'a StructDef> {
+  let req_type = operation.request_type.as_ref()?;
+  let req_struct = find_struct_by_name(req_type, rust_types)?;
+  let field_def = req_struct.fields.iter().find(|f| *field_ident == f.name)?;
+  find_struct_by_name(&field_def.rust_type.base_type.to_string(), rust_types)
+}
+
+fn find_struct_by_name<'a>(name: &str, types: &'a [RustType]) -> Option<&'a StructDef> {
+  types.iter().find_map(|t| match t {
+    RustType::Struct(s) if s.name == name => Some(s),
+    _ => None,
+  })
+}
+
+fn generate_strict_multipart(body_struct: &StructDef) -> TokenStream {
+  let parts = body_struct.fields.iter().map(generate_multipart_part);
+  quote! {
+    let mut form = reqwest::multipart::Form::new();
+    #(#parts)*
+    req_builder = req_builder.multipart(form);
+  }
+}
+
+fn generate_multipart_part(field: &FieldDef) -> TokenStream {
+  let ident = format_ident!("{}", field.name);
+  let name = &field.name;
+  let is_bytes = matches!(field.rust_type.base_type, RustPrimitive::Bytes);
+
+  let value_to_part = |val: TokenStream| {
+    if is_bytes {
+      quote! { Part::bytes(std::borrow::Cow::from(#val.clone())) }
+    } else {
+      quote! { Part::text(#val.to_string()) }
+    }
+  };
+
+  if field.rust_type.nullable {
+    let part = value_to_part(quote! { val });
+    quote! {
+      if let Some(val) = &body.#ident {
+        form = form.part(#name, #part);
+      }
+    }
+  } else {
+    let part = value_to_part(quote! { body.#ident });
+    quote! { form = form.part(#name, #part); }
+  }
+}
+
+fn generate_fallback_multipart() -> TokenStream {
+  quote! {
     let json_value = serde_json::to_value(body)?;
     let mut form = reqwest::multipart::Form::new();
     if let serde_json::Value::Object(map) = json_value {
@@ -285,19 +366,6 @@ fn build_multipart_body(field_ident: &syn::Ident, optional: bool) -> TokenStream
       }
     }
     req_builder = req_builder.multipart(form);
-  };
-
-  if optional {
-    quote! {
-      if let Some(body) = request.#field_ident.as_ref() {
-        #multipart_logic
-      }
-    }
-  } else {
-    quote! {
-      let body = &request.#field_ident;
-      #multipart_logic
-    }
   }
 }
 
@@ -447,6 +515,7 @@ fn parse_type(type_name: &str) -> anyhow::Result<syn::Type> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::generator::ast::{FieldDef, RustPrimitive, RustType, StructDef, StructKind, TypeRef};
 
   fn create_test_operation(summary: Option<&str>, description: Option<&str>) -> OperationInfo {
     OperationInfo {
@@ -695,5 +764,134 @@ mod tests {
 
     assert_eq!(return_ty_str, "reqwest :: Response");
     assert!(response_str.contains("Ok (response)"));
+  }
+
+  #[test]
+  fn test_multipart_generation_strict_with_binary_and_text() {
+    let binary_field = FieldDef {
+      name: "file".to_string(),
+      rust_type: TypeRef {
+        base_type: RustPrimitive::Bytes,
+        is_array: false,
+        nullable: false,
+        boxed: false,
+        unique_items: false,
+      },
+      ..Default::default()
+    };
+
+    let text_field = FieldDef {
+      name: "description".to_string(),
+      rust_type: TypeRef {
+        base_type: RustPrimitive::String,
+        is_array: false,
+        nullable: false,
+        boxed: false,
+        unique_items: false,
+      },
+      ..Default::default()
+    };
+
+    let body_struct = StructDef {
+      name: "MultipartBody".to_string(),
+      fields: vec![binary_field, text_field],
+      docs: vec![],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind: StructKind::RequestBody,
+    };
+
+    let request_struct = StructDef {
+      name: "UploadRequest".to_string(),
+      fields: vec![FieldDef {
+        name: "body".to_string(),
+        rust_type: TypeRef {
+          base_type: RustPrimitive::Custom("MultipartBody".to_string()),
+          is_array: false,
+          nullable: false,
+          boxed: false,
+          unique_items: false,
+        },
+        ..Default::default()
+      }],
+      docs: vec![],
+      derives: vec![],
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      methods: vec![],
+      kind: StructKind::OperationRequest,
+    };
+
+    let rust_types = vec![RustType::Struct(request_struct), RustType::Struct(body_struct)];
+
+    let operation = OperationInfo {
+      stable_id: "upload".to_string(),
+      operation_id: "upload".to_string(),
+      method: Method::POST,
+      path: "/upload".to_string(),
+      summary: None,
+      description: None,
+      request_type: Some("UploadRequest".to_string()),
+      response_type: None,
+      response_enum: None,
+      response_content_type: None,
+      request_body_types: vec![],
+      success_response_types: vec![],
+      error_response_types: vec![],
+      warnings: vec![],
+      parameters: vec![],
+      body: Some(OperationBody {
+        field_name: "body".to_string(),
+        optional: false,
+        content_type: Some("multipart/form-data".to_string()),
+      }),
+    };
+
+    let field_ident = format_ident!("body");
+    let tokens = build_multipart_body(&field_ident, false, &operation, &rust_types);
+    let code = tokens.to_string();
+
+    assert!(code.contains("Part :: bytes")); // For binary field
+    assert!(code.contains("Part :: text")); // For text field
+    assert!(code.contains("form . part (\"file\""));
+    assert!(code.contains("form . part (\"description\""));
+    assert!(!code.contains("serde_json :: to_value")); // Should NOT fallback
+  }
+
+  #[test]
+  fn test_multipart_generation_fallback() {
+    let rust_types = vec![]; // No structs defined
+    let operation = OperationInfo {
+      stable_id: "upload".to_string(),
+      operation_id: "upload".to_string(),
+      method: Method::POST,
+      path: "/upload".to_string(),
+      summary: None,
+      description: None,
+      request_type: Some("UnknownRequest".to_string()), // Unknown type
+      response_type: None,
+      response_enum: None,
+      response_content_type: None,
+      request_body_types: vec![],
+      success_response_types: vec![],
+      error_response_types: vec![],
+      warnings: vec![],
+      parameters: vec![],
+      body: Some(OperationBody {
+        field_name: "body".to_string(),
+        optional: false,
+        content_type: Some("multipart/form-data".to_string()),
+      }),
+    };
+
+    let field_ident = format_ident!("body");
+    let tokens = build_multipart_body(&field_ident, false, &operation, &rust_types);
+    let code = tokens.to_string();
+
+    assert!(code.contains("serde_json :: to_value")); // Should use fallback
+    assert!(code.contains("form . text"));
+    assert!(!code.contains("Part :: bytes"));
   }
 }

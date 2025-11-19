@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::generator::ast::{EnumDef, FieldDef, RustPrimitive, RustType, VariantContent};
+use crate::generator::ast::{EnumDef, FieldDef, RustPrimitive, RustType, StructDef, VariantContent};
 
 const FALLBACK_ERROR_MESSAGE: &str = "Error";
 const MESSAGE_FIELD_NAMES: &[&str] = &["message", "detail", "title"];
@@ -14,7 +14,7 @@ pub(crate) fn generate_error_impl(rust_type: &RustType) -> Option<TokenStream> {
   }
 }
 
-fn generate_for_struct(def: &crate::generator::ast::StructDef) -> Option<TokenStream> {
+fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
   let type_ident = format_ident!("{}", &def.name);
 
   if let Some(error_field_name) = find_error_field(&def.fields) {

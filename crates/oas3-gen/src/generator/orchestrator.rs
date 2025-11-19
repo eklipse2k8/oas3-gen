@@ -135,7 +135,7 @@ impl Orchestrator {
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(header_count);
 
-    let client_tokens = codegen::client::generate_client(&self.spec, &operations_info)?;
+    let client_tokens = codegen::client::generate_client(&self.spec, &operations_info, &rust_types)?;
     let formatted_code = Self::format_code(&client_tokens)?;
     let header = self.generate_header(source_path);
     let final_code = format!("{header}\n\n{formatted_code}\n");

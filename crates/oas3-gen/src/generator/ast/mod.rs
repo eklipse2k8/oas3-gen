@@ -149,6 +149,7 @@ pub struct QueryParameter {
   pub explode: bool,
   pub optional: bool,
   pub is_array: bool,
+  pub style: Option<oas3::spec::ParameterStyle>,
 }
 
 #[derive(Debug, Clone)]
