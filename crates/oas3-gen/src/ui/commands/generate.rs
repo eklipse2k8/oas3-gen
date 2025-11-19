@@ -11,7 +11,7 @@ use crate::{
     converter::FieldOptionalityPolicy,
     orchestrator::{GenerationStats, Orchestrator},
   },
-  ui::{Colors, GenerateMode},
+  ui::{Colors, EnumCaseMode, GenerateMode},
 };
 
 fn format_timestamp() -> String {
@@ -45,13 +45,19 @@ impl GenerateConfig {
     quiet: bool,
     all_schemas: bool,
     odata_support: bool,
-    preserve_case_variants: bool,
-    case_insensitive_enums: bool,
+    enum_mode: &EnumCaseMode,
     only_operations: Option<Vec<String>>,
     excluded_operations: Option<Vec<String>>,
   ) -> Self {
     let only_operations = only_operations.map(|ops| ops.into_iter().collect());
     let excluded_operations = excluded_operations.map(|ops| ops.into_iter().collect());
+
+    let (preserve_case_variants, case_insensitive_enums) = match enum_mode {
+      EnumCaseMode::Merge => (false, false),
+      EnumCaseMode::Preserve => (true, false),
+      EnumCaseMode::Relaxed => (false, true),
+    };
+
     Self {
       mode,
       input,
