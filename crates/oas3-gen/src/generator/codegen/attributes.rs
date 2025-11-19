@@ -1,10 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::{
-  ast::{FieldDef, ParameterLocation},
-  converter::metadata::format_example_value,
-};
+use crate::generator::ast::{FieldDef, ParameterLocation};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -34,7 +31,7 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
   }
 
   if let Some(ref example) = field.example_value {
-    let mut formatted_example = format_example_value(example, &field.rust_type);
+    let mut formatted_example = field.rust_type.format_example(example);
     if field.rust_type.is_string_like() && !formatted_example.ends_with(".to_string()") {
       formatted_example = format!("{formatted_example}.to_string()");
     }

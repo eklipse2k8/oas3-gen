@@ -318,7 +318,7 @@ impl<'a> StructConverter<'a> {
     );
     let final_type = utils::apply_optionality(base_type, should_be_optional);
 
-    let metadata = FieldMetadata::from_schema(ctx.prop_name, is_required, &prop_schema);
+    let metadata = FieldMetadata::from_schema(ctx.prop_name, is_required, &prop_schema, &final_type);
     let serde_attrs = utils::serde_renamed_if_needed(ctx.prop_name);
 
     let (metadata, serde_attrs, extra_attrs, regex_validation) =
