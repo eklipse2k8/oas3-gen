@@ -9,6 +9,7 @@ use oas3::{
 };
 
 use super::orchestrator::GenerationWarning;
+use crate::generator::operation_registry::OperationRegistry;
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
@@ -288,10 +289,7 @@ impl SchemaGraph {
     self.discriminator_cache.get(schema_name)
   }
 
-  pub(crate) fn get_operation_reachable_schemas(
-    &self,
-    operation_registry: &crate::generator::operation_registry::OperationRegistry,
-  ) -> BTreeSet<String> {
+  pub(crate) fn get_operation_reachable_schemas(&self, operation_registry: &OperationRegistry) -> BTreeSet<String> {
     let mut reachable = BTreeSet::new();
 
     for (_stable_id, _method, _path, operation) in operation_registry.operations_with_details() {

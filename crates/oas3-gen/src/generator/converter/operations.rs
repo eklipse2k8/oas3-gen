@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use http::Method;
 use oas3::{
   Spec,
   spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
@@ -21,7 +22,8 @@ use crate::{
   generator::{
     ast::{
       FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, PathSegment, QueryParameter,
-      ResponseEnumDef, ResponseVariant, RustType, StructDef, StructKind, TypeAliasDef, TypeRef,
+      ResponseEnumDef, ResponseVariant, RustType, StructDef, StructKind, StructMethod, StructMethodKind, TypeAliasDef,
+      TypeRef,
     },
     schema_graph::SchemaGraph,
   },
@@ -89,7 +91,7 @@ impl<'a> OperationConverter<'a> {
     &self,
     stable_id: &str,
     operation_id: &str,
-    method: &str,
+    method: &Method,
     path: &str,
     operation: &Operation,
     usage: &mut TypeUsageRecorder,
@@ -153,6 +155,7 @@ impl<'a> OperationConverter<'a> {
     };
 
     let response_type_name = self.extract_response_type_name(operation);
+    let response_content_type = self.extract_response_content_type(operation);
     let (success_response_types, error_response_types) = self.extract_all_response_types(operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
@@ -171,13 +174,14 @@ impl<'a> OperationConverter<'a> {
     let op_info = OperationInfo {
       stable_id,
       operation_id: final_operation_id,
-      method: method.to_string(),
+      method: method.clone(),
       path: path.to_string(),
       summary: operation.summary.clone(),
       description: operation.description.clone(),
       request_type: request_type_name,
       response_type: response_type_name,
       response_enum: response_enum_name,
+      response_content_type,
       request_body_types: body_info.type_usage,
       success_response_types,
       error_response_types,
@@ -426,15 +430,21 @@ impl<'a> OperationConverter<'a> {
       self.extract_parameter_type_and_validation(param, warnings)?;
 
     let is_required = param.required.unwrap_or(false);
-    let mut docs = metadata::extract_docs(param.description.as_ref());
-    docs.push(format!("/// (Location: {:?})", param.location));
+    let docs = metadata::extract_docs(param.description.as_ref());
+
+    let final_rust_type = if is_required {
+      rust_type.clone()
+    } else {
+      rust_type.clone().with_option()
+    };
 
     let rust_field = to_rust_field_name(&param.name);
 
-    let final_rust_type = if is_required {
-      rust_type
-    } else {
-      rust_type.with_option()
+    let location = match param.location {
+      ParameterIn::Path => ParameterLocation::Path,
+      ParameterIn::Query => ParameterLocation::Query,
+      ParameterIn::Header => ParameterLocation::Header,
+      ParameterIn::Cookie => ParameterLocation::Cookie,
     };
 
     let field = FieldDef {
@@ -444,14 +454,9 @@ impl<'a> OperationConverter<'a> {
       validation_attrs,
       regex_validation,
       default_value,
+      example_value: param.example.clone(),
+      parameter_location: Some(location),
       ..Default::default()
-    };
-
-    let location = match param.location {
-      ParameterIn::Path => ParameterLocation::Path,
-      ParameterIn::Query => ParameterLocation::Query,
-      ParameterIn::Header => ParameterLocation::Header,
-      ParameterIn::Cookie => ParameterLocation::Cookie,
     };
 
     let metadata = OperationParameter {
@@ -481,7 +486,7 @@ impl<'a> OperationConverter<'a> {
     let schema = schema_ref.resolve(self.spec)?;
     let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
     let is_required = param.required.unwrap_or(false);
-    let validation = SchemaConverter::extract_validation_attrs(&param.name, is_required, &schema);
+    let validation = SchemaConverter::extract_validation_attrs(&param.name, is_required, &schema, &type_ref);
     let regex = SchemaConverter::extract_validation_pattern(&param.name, &schema).cloned();
     let default = SchemaConverter::extract_default_value(&schema);
 
@@ -498,6 +503,7 @@ impl<'a> OperationConverter<'a> {
         rust_field: field.name.clone(),
         original_name: param.name.clone(),
         explode: path_renderer::query_param_explode(param),
+        style: param.style,
         optional: field.rust_type.nullable,
         is_array: field.rust_type.is_array,
       }),
@@ -514,6 +520,16 @@ impl<'a> OperationConverter<'a> {
       .and_then(|(_, resp_ref)| resp_ref.resolve(self.spec).ok())
       .and_then(|resp| Self::extract_schema_name_from_response(&resp))
       .map(|s| to_rust_type_name(&s))
+  }
+
+  fn extract_response_content_type(&self, operation: &Operation) -> Option<String> {
+    let responses = operation.responses.as_ref()?;
+    responses
+      .iter()
+      .find(|(code, _)| code.starts_with(SUCCESS_RESPONSE_PREFIX))
+      .or_else(|| responses.iter().next())
+      .and_then(|(_, resp_ref)| resp_ref.resolve(self.spec).ok())
+      .and_then(|resp| resp.content.keys().next().cloned())
   }
 
   fn extract_all_response_types(&self, operation: &Operation) -> (Vec<String>, Vec<String>) {
@@ -580,16 +596,17 @@ impl<'a> OperationConverter<'a> {
       };
 
       let variant_name = Self::status_code_to_variant_name(status_code, &response);
-      let schema_type = self
-        .extract_response_schema_type(&response, path, status_code, schema_cache)
+      let (schema_type, content_type) = self
+        .extract_response_schema_info(&response, path, status_code, schema_cache)
         .ok()
-        .flatten();
+        .unwrap_or((None, None));
 
       variants.push(ResponseVariant {
         status_code: status_code.clone(),
         variant_name,
         description: response.description.clone(),
         schema_type,
+        content_type,
       });
     }
 
@@ -604,6 +621,7 @@ impl<'a> OperationConverter<'a> {
         variant_name: DEFAULT_RESPONSE_VARIANT.to_string(),
         description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
         schema_type: None,
+        content_type: None,
       });
     }
 
@@ -672,30 +690,33 @@ impl<'a> OperationConverter<'a> {
     }
   }
 
-  fn extract_response_schema_type(
+  fn extract_response_schema_info(
     &self,
     response: &oas3::spec::Response,
     path: &str,
     status_code: &str,
     schema_cache: &mut SharedSchemaCache,
-  ) -> ConversionResult<Option<TypeRef>> {
-    let Some(media_type) = response.content.values().next() else {
-      return Ok(None);
+  ) -> ConversionResult<(Option<TypeRef>, Option<String>)> {
+    let Some((content_type, media_type)) = response.content.iter().next() else {
+      return Ok((None, None));
     };
     let Some(schema_ref) = media_type.schema.as_ref() else {
-      return Ok(None);
+      return Ok((None, Some(content_type.clone())));
     };
 
     match schema_ref {
       ObjectOrReference::Ref { ref_path, .. } => {
         let Some(schema_name) = SchemaGraph::extract_ref_name(ref_path) else {
-          return Ok(None);
+          return Ok((None, Some(content_type.clone())));
         };
-        Ok(Some(TypeRef::new(to_rust_type_name(&schema_name))))
+        Ok((
+          Some(TypeRef::new(to_rust_type_name(&schema_name))),
+          Some(content_type.clone()),
+        ))
       }
       ObjectOrReference::Object(inline_schema) => {
         if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() {
-          return Ok(None);
+          return Ok((None, Some(content_type.clone())));
         }
 
         let rust_type_name = schema_cache.get_or_create_type(
@@ -706,17 +727,12 @@ impl<'a> OperationConverter<'a> {
           StructKind::Schema,
         )?;
 
-        Ok(Some(TypeRef::new(rust_type_name)))
+        Ok((Some(TypeRef::new(rust_type_name)), Some(content_type.clone())))
       }
     }
   }
 
-  fn build_parse_response_method(
-    response_enum_name: &str,
-    variants: &[ResponseVariant],
-  ) -> crate::generator::ast::StructMethod {
-    use crate::generator::ast::{StructMethod, StructMethodKind};
-
+  fn build_parse_response_method(response_enum_name: &str, variants: &[ResponseVariant]) -> StructMethod {
     StructMethod {
       name: "parse_response".to_string(),
       docs: vec!["/// Parse the HTTP response into the response enum.".to_string()],
@@ -736,7 +752,7 @@ mod path_renderer {
   use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
   use super::{PathSegment, QueryParameter};
-  use crate::generator::ast::StructMethod;
+  use crate::generator::ast::{StructMethod, StructMethodKind};
 
   const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
@@ -751,6 +767,7 @@ mod path_renderer {
     pub rust_field: String,
     pub original_name: String,
     pub explode: bool,
+    pub style: Option<ParameterStyle>,
     pub optional: bool,
     pub is_array: bool,
   }
@@ -760,8 +777,6 @@ mod path_renderer {
     path_params: &[PathParamMapping],
     query_params: &[QueryParamMapping],
   ) -> StructMethod {
-    use crate::generator::ast::StructMethodKind;
-
     let query_parameters = query_params
       .iter()
       .map(|m| QueryParameter {
@@ -770,6 +785,7 @@ mod path_renderer {
         explode: m.explode,
         optional: m.optional,
         is_array: m.is_array,
+        style: m.style,
       })
       .collect();
 

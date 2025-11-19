@@ -2,7 +2,7 @@ pub(crate) mod cache;
 mod constants;
 mod enums;
 mod field_optionality;
-mod metadata;
+pub(crate) mod metadata;
 pub(crate) mod operations;
 mod structs;
 mod type_resolver;
@@ -165,8 +165,13 @@ impl<'a> SchemaConverter<'a> {
     self.type_resolver.schema_to_type_ref(schema)
   }
 
-  pub(crate) fn extract_validation_attrs(_prop_name: &str, is_required: bool, schema: &ObjectSchema) -> Vec<String> {
-    metadata::extract_validation_attrs(is_required, schema)
+  pub(crate) fn extract_validation_attrs(
+    _prop_name: &str,
+    is_required: bool,
+    schema: &ObjectSchema,
+    type_ref: &TypeRef,
+  ) -> Vec<String> {
+    metadata::extract_validation_attrs(is_required, schema, type_ref)
   }
 
   pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {

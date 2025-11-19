@@ -1,5 +1,6 @@
 pub(super) mod types;
 
+use http::Method;
 pub use types::{RustPrimitive, TypeRef};
 
 /// Discriminated enum variant mapping
@@ -27,6 +28,7 @@ pub struct ResponseVariant {
   pub variant_name: String,
   pub description: Option<String>,
   pub schema_type: Option<TypeRef>,
+  pub content_type: Option<String>,
 }
 
 /// Response enum definition for operation responses
@@ -66,13 +68,14 @@ impl RustType {
 pub struct OperationInfo {
   pub stable_id: String,
   pub operation_id: String,
-  pub method: String,
+  pub method: Method,
   pub path: String,
   pub summary: Option<String>,
   pub description: Option<String>,
   pub request_type: Option<String>,
   pub response_type: Option<String>,
   pub response_enum: Option<String>,
+  pub response_content_type: Option<String>,
   pub request_body_types: Vec<String>,
   pub success_response_types: Vec<String>,
   pub error_response_types: Vec<String>,
@@ -81,7 +84,7 @@ pub struct OperationInfo {
   pub body: Option<OperationBody>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParameterLocation {
   Path,
   Query,
@@ -146,6 +149,7 @@ pub struct QueryParameter {
   pub explode: bool,
   pub optional: bool,
   pub is_array: bool,
+  pub style: Option<oas3::spec::ParameterStyle>,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +181,8 @@ pub struct FieldDef {
   pub validation_attrs: Vec<String>,
   pub regex_validation: Option<String>,
   pub default_value: Option<serde_json::Value>,
+  pub example_value: Option<serde_json::Value>,
+  pub parameter_location: Option<ParameterLocation>,
   pub read_only: bool,
   pub write_only: bool,
   pub deprecated: bool,

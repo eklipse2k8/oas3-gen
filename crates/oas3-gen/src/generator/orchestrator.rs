@@ -1,12 +1,12 @@
 use std::{
-  collections::{BTreeSet, HashSet},
+  collections::{BTreeMap, BTreeSet, HashSet},
   fmt,
 };
 
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
-  ast::{OperationInfo, ParameterLocation, RustType},
+  ast::{OperationInfo, ParameterLocation, RustType, StructMethodKind, TypeRef},
   codegen::{self, Visibility},
   converter::{FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
   operation_registry::OperationRegistry,
@@ -58,6 +58,13 @@ struct GenerationArtifacts {
   operations_info: Vec<OperationInfo>,
   usage_recorder: TypeUsageRecorder,
   stats: GenerationStats,
+}
+
+type ResponseEnumSignature = Vec<(String, String, String, Option<String>)>;
+
+struct DuplicateCandidate {
+  index: usize,
+  name: String,
 }
 
 #[derive(Debug)]
@@ -116,16 +123,19 @@ impl Orchestrator {
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
-      operations_info,
+      mut rust_types,
+      mut operations_info,
       mut stats,
       ..
     } = artifacts;
+
+    Self::deduplicate_response_enums(&mut rust_types, &mut operations_info);
 
     let header_count = Self::count_unique_headers(&operations_info);
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(header_count);
 
-    let client_tokens = codegen::client::generate_client(&self.spec, &operations_info)?;
+    let client_tokens = codegen::client::generate_client(&self.spec, &operations_info, &rust_types)?;
     let formatted_code = Self::format_code(&client_tokens)?;
     let header = self.generate_header(source_path);
     let final_code = format!("{header}\n\n{formatted_code}\n");
@@ -144,12 +154,12 @@ impl Orchestrator {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
       rust_types,
-      operations_info,
+      mut operations_info,
       usage_recorder,
       stats,
     } = artifacts;
 
-    let code_tokens = self.generate_code_from_artifacts(rust_types, &operations_info, usage_recorder);
+    let code_tokens = self.generate_code_from_artifacts(rust_types, &mut operations_info, usage_recorder);
     let formatted_code = Self::format_code(&code_tokens)?;
     let header = self.generate_header(source_path);
     let final_code = format!("{header}\n\n{formatted_code}\n");
@@ -314,15 +324,100 @@ impl Orchestrator {
   fn generate_code_from_artifacts(
     &self,
     mut rust_types: Vec<RustType>,
-    operations_info: &[OperationInfo],
+    operations_info: &mut [OperationInfo],
     usage_recorder: TypeUsageRecorder,
   ) -> proc_macro2::TokenStream {
+    Self::deduplicate_response_enums(&mut rust_types, operations_info);
     let seed_map = usage_recorder.into_usage_map();
     let type_usage = analyzer::build_type_usage_map(seed_map, &rust_types);
     analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
     let error_schemas = ErrorAnalyzer::build_error_schema_set(operations_info, &rust_types);
 
     codegen::generate(&rust_types, &error_schemas, self.visibility)
+  }
+
+  fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operations_info: &mut [OperationInfo]) {
+    // Map signature -> list of candidates
+    // Signature tuple: (status_code, variant_name, schema_type_string, content_type)
+    let mut signature_map: BTreeMap<ResponseEnumSignature, Vec<DuplicateCandidate>> = BTreeMap::new();
+
+    for (i, rt) in rust_types.iter().enumerate() {
+      if let RustType::ResponseEnum(def) = rt {
+        let mut signature: Vec<_> = def
+          .variants
+          .iter()
+          .map(|v| {
+            (
+              v.status_code.clone(),
+              v.variant_name.clone(),
+              v.schema_type
+                .as_ref()
+                .map_or_else(|| "None".to_string(), TypeRef::to_rust_type),
+              v.content_type.clone(),
+            )
+          })
+          .collect();
+        // Sort to ensure order independence (variants set equality)
+        signature.sort();
+
+        signature_map.entry(signature).or_default().push(DuplicateCandidate {
+          index: i,
+          name: def.name.clone(),
+        });
+      }
+    }
+
+    let mut replacements: BTreeMap<String, String> = BTreeMap::new();
+    let mut indices_to_remove = BTreeSet::new();
+
+    for group in signature_map.values() {
+      if group.len() > 1 {
+        // Find canonical name (shortest, then lexicographically first)
+        // Safe to unwrap because group.len() > 1
+        let canonical = group
+          .iter()
+          .min_by(|a, b| a.name.len().cmp(&b.name.len()).then(a.name.cmp(&b.name)))
+          .unwrap();
+
+        for candidate in group {
+          if candidate.name != canonical.name {
+            replacements.insert(candidate.name.clone(), canonical.name.clone());
+            indices_to_remove.insert(candidate.index);
+          }
+        }
+      }
+    }
+
+    if replacements.is_empty() {
+      return;
+    }
+
+    // Remove duplicates (in reverse order to preserve indices)
+    for &idx in indices_to_remove.iter().rev() {
+      rust_types.remove(idx);
+    }
+
+    // Update operations info
+    for op in operations_info.iter_mut() {
+      if let Some(ref current_name) = op.response_enum
+        && let Some(new_name) = replacements.get(current_name)
+      {
+        op.response_enum = Some(new_name.clone());
+      }
+    }
+
+    // Update StructDefs (ParseResponse methods)
+    for rt in rust_types.iter_mut() {
+      if let RustType::Struct(def) = rt {
+        for method in &mut def.methods {
+          if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
+            && let Some(new_name) = replacements.get(response_enum)
+          {
+            *response_enum = new_name.clone();
+          }
+        }
+      }
+    }
   }
 
   fn format_code(code: &proc_macro2::TokenStream) -> anyhow::Result<String> {
@@ -556,5 +651,35 @@ mod tests {
 
     assert_eq!(stats_without.orphaned_schemas_count, 2);
     assert_eq!(stats_with.orphaned_schemas_count, 0);
+  }
+
+  #[test]
+  fn test_content_types_generation() {
+    let spec_json = include_str!("../../fixtures/content_types.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      false,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+      false,
+    );
+
+    let result = orchestrator.generate_with_header("test.json");
+    assert!(result.is_ok());
+
+    let (code, _) = result.unwrap();
+
+    // Check for JSON handling (default assumption usually, but checked via logic)
+    // We expect 'json_with_diagnostics' for the 200 response which is application/json
+    assert!(code.contains("json_with_diagnostics"));
+
+    // Check for Text handling for 201 text/plain
+    assert!(code.contains("req.text().await?"));
+
+    // Check for Binary handling for 202 image/png (fallback to bytes)
+    assert!(code.contains("req.bytes().await?"));
   }
 }

@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen"
-version = "0.17.3"
+version = "0.18.0"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen-support"
-version = "0.17.3"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "better_default",
@@ -986,9 +986,11 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "serde_plain",
  "serde_with",
  "syn",
+ "thiserror",
  "uuid",
  "validator",
 ]
@@ -1321,6 +1323,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_plain"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1457,6 +1470,26 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

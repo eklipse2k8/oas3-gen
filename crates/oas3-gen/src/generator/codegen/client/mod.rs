@@ -5,7 +5,7 @@ use quote::{format_ident, quote};
 
 use crate::{
   generator::{
-    ast::{OperationInfo, ParameterLocation},
+    ast::{OperationInfo, ParameterLocation, RustType},
     codegen::constants,
   },
   reserved::to_rust_type_name,
@@ -13,7 +13,11 @@ use crate::{
 
 mod methods;
 
-pub fn generate_client(spec: &oas3::Spec, operations: &[OperationInfo]) -> anyhow::Result<TokenStream> {
+pub fn generate_client(
+  spec: &oas3::Spec,
+  operations: &[OperationInfo],
+  rust_types: &[RustType],
+) -> anyhow::Result<TokenStream> {
   let metadata = extract_metadata(spec);
   let client_name = if metadata.title.is_empty() {
     "Api".to_string()
@@ -34,7 +38,7 @@ pub fn generate_client(spec: &oas3::Spec, operations: &[OperationInfo]) -> anyho
 
   let mut method_tokens = Vec::new();
   for operation in operations {
-    method_tokens.push(methods::build_method_tokens(operation)?);
+    method_tokens.push(methods::build_method_tokens(operation, rust_types)?);
   }
 
   Ok(quote! {

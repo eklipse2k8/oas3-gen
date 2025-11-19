@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::FieldDef;
+use crate::generator::ast::{FieldDef, ParameterLocation};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -19,9 +19,34 @@ pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
 
 pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
   let mut docs = field.docs.clone();
+
+  if let Some(ref location) = field.parameter_location {
+    let location_str = match location {
+      ParameterLocation::Path => "`Path`",
+      ParameterLocation::Query => "`Query`",
+      ParameterLocation::Header => "`Header`",
+      ParameterLocation::Cookie => "`Cookie`",
+    };
+    docs.push(format!("/// - Location: {location_str}"));
+  }
+
+  if let Some(ref example) = field.example_value {
+    let mut formatted_example = field.rust_type.format_example(example);
+    if field.rust_type.is_string_like() && !formatted_example.ends_with(".to_string()") {
+      formatted_example = format!("{formatted_example}.to_string()");
+    }
+    let display_example = if field.rust_type.nullable {
+      format!("Some({formatted_example})")
+    } else {
+      formatted_example
+    };
+    docs.push(format!("/// - Example: `{display_example}`"));
+  }
+
   if let Some(ref multiple_of) = field.multiple_of {
     docs.push(format!("/// Validation: Must be a multiple of {multiple_of}"));
   }
+
   generate_docs(&docs)
 }
 

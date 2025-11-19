@@ -81,6 +81,7 @@ fn renders_struct_methods() {
         explode: false,
         optional: false,
         is_array: false,
+        style: None,
       }],
     },
     attrs: vec![],
@@ -104,6 +105,7 @@ fn renders_response_parser_method() {
         variant_name: "Ok".to_string(),
         description: None,
         schema_type: None,
+        content_type: None,
       }],
     },
     attrs: vec![],
@@ -112,6 +114,124 @@ fn renders_response_parser_method() {
   let code = tokens.to_string();
   assert!(code.contains("fn parse_response"));
   assert!(code.contains("ResponseEnum"));
+}
+
+#[test]
+fn renders_text_response_parser_method() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.methods.push(StructMethod {
+    name: "parse_response".to_string(),
+    docs: vec!["/// Parse response".to_string()],
+    kind: StructMethodKind::ParseResponse {
+      response_enum: "ResponseEnum".to_string(),
+      variants: vec![ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new("String")),
+        content_type: Some("text/plain".to_string()),
+      }],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("req . text () . await ?"));
+  assert!(code.contains("Ok (ResponseEnum :: Ok (data))"));
+}
+
+#[test]
+fn renders_text_response_parser_with_integer_parsing() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.methods.push(StructMethod {
+    name: "parse_response".to_string(),
+    docs: vec!["/// Parse response".to_string()],
+    kind: StructMethodKind::ParseResponse {
+      response_enum: "ResponseEnum".to_string(),
+      variants: vec![ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new("i32")),
+        content_type: Some("text/plain".to_string()),
+      }],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("req . text () . await ? . parse :: < i32 > () ?"));
+  assert!(code.contains("Ok (ResponseEnum :: Ok (data))"));
+}
+
+#[test]
+fn renders_default_json_parser_for_unknown_content_type() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.methods.push(StructMethod {
+    name: "parse_response".to_string(),
+    docs: vec!["/// Parse response".to_string()],
+    kind: StructMethodKind::ParseResponse {
+      response_enum: "ResponseEnum".to_string(),
+      variants: vec![ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new("MyStruct")),
+        content_type: Some("application/octet-stream".to_string()),
+      }],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("json_with_diagnostics"));
+  assert!(code.contains("MyStruct"));
+}
+
+#[test]
+fn renders_binary_parser_for_images() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.methods.push(StructMethod {
+    name: "parse_response".to_string(),
+    docs: vec!["/// Parse response".to_string()],
+    kind: StructMethodKind::ParseResponse {
+      response_enum: "ResponseEnum".to_string(),
+      variants: vec![ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new("Vec<u8>")),
+        content_type: Some("image/png".to_string()),
+      }],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("req . bytes () . await ? . to_vec ()"));
+}
+
+#[test]
+fn renders_binary_parser_for_pdf() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.methods.push(StructMethod {
+    name: "parse_response".to_string(),
+    docs: vec!["/// Parse response".to_string()],
+    kind: StructMethodKind::ParseResponse {
+      response_enum: "ResponseEnum".to_string(),
+      variants: vec![ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new("Vec<u8>")),
+        content_type: Some("application/pdf".to_string()),
+      }],
+    },
+    attrs: vec![],
+  });
+  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("req . bytes () . await ? . to_vec ()"));
 }
 
 #[test]

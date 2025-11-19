@@ -3,7 +3,6 @@ use std::sync::LazyLock;
 use num_format::{CustomFormat, Grouping, ToFormattedString};
 use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 use regex::Regex;
-use serde_json::Number;
 
 use crate::generator::{
   ast::{RustPrimitive, TypeRef},
@@ -31,10 +30,10 @@ pub(crate) struct FieldMetadata {
 }
 
 impl FieldMetadata {
-  pub(crate) fn from_schema(prop_name: &str, is_required: bool, schema: &ObjectSchema) -> Self {
+  pub(crate) fn from_schema(prop_name: &str, is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Self {
     Self {
       docs: extract_docs(schema.description.as_ref()),
-      validation_attrs: extract_validation_attrs(is_required, schema),
+      validation_attrs: extract_validation_attrs(is_required, schema, type_ref),
       regex_validation: extract_validation_pattern(prop_name, schema).cloned(),
       default_value: extract_default_value(schema),
       read_only: schema.read_only.unwrap_or(false),
@@ -99,7 +98,7 @@ pub(crate) fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>
   }
 }
 
-pub(crate) fn extract_validation_attrs(is_required: bool, schema: &ObjectSchema) -> Vec<String> {
+pub(crate) fn extract_validation_attrs(is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Vec<String> {
   let mut attrs = Vec::new();
 
   if let Some(ref format) = schema.format {
@@ -114,7 +113,7 @@ pub(crate) fn extract_validation_attrs(is_required: bool, schema: &ObjectSchema)
     if matches!(
       schema_type,
       SchemaTypeSet::Single(SchemaType::Number | SchemaType::Integer)
-    ) && let Some(range_attr) = build_range_validation_attr(schema, schema_type)
+    ) && let Some(range_attr) = build_range_validation_attr(schema, type_ref)
     {
       attrs.push(range_attr);
     }
@@ -136,25 +135,21 @@ pub(crate) fn extract_validation_attrs(is_required: bool, schema: &ObjectSchema)
   attrs
 }
 
-fn build_range_validation_attr(schema: &ObjectSchema, schema_type: &SchemaTypeSet) -> Option<String> {
-  let primitive = if matches!(schema_type, SchemaTypeSet::Single(SchemaType::Number)) {
-    super::type_resolver::format_to_primitive(schema.format.as_ref()).unwrap_or(RustPrimitive::F64)
-  } else {
-    super::type_resolver::format_to_primitive(schema.format.as_ref()).unwrap_or(RustPrimitive::I64)
-  };
+fn build_range_validation_attr(schema: &ObjectSchema, type_ref: &TypeRef) -> Option<String> {
+  let primitive = &type_ref.base_type;
 
   let mut parts = Vec::<String>::new();
   if let Some(v) = schema.exclusive_minimum.as_ref() {
-    parts.push(format!("exclusive_min = {}", render_number(&primitive, v)));
+    parts.push(format!("exclusive_min = {}", primitive.format_number(v)));
   }
   if let Some(v) = schema.exclusive_maximum.as_ref() {
-    parts.push(format!("exclusive_max = {}", render_number(&primitive, v)));
+    parts.push(format!("exclusive_max = {}", primitive.format_number(v)));
   }
   if let Some(v) = schema.minimum.as_ref() {
-    parts.push(format!("min = {}", render_number(&primitive, v)));
+    parts.push(format!("min = {}", primitive.format_number(v)));
   }
   if let Some(v) = schema.maximum.as_ref() {
-    parts.push(format!("max = {}", render_number(&primitive, v)));
+    parts.push(format!("max = {}", primitive.format_number(v)));
   }
 
   if parts.is_empty() {
@@ -195,47 +190,5 @@ fn build_length_attribute(min: Option<String>, max: Option<String>, is_required_
     (None, Some(max)) => Some(format!("length(max = {max})")),
     (None, None) if is_required_non_empty => Some("length(min = 1)".to_string()),
     _ => None,
-  }
-}
-
-fn render_number(primitive: &RustPrimitive, num: &Number) -> String {
-  if primitive.is_float() {
-    let s = num.to_string();
-    if s.contains('.') { s } else { format!("{s}.0") }
-  } else if let Some(value) = num.as_i64() {
-    render_integer(primitive, value)
-  } else if let Some(value) = num.as_u64() {
-    render_unsigned_integer(primitive, value)
-  } else {
-    num.to_string()
-  }
-}
-
-fn render_integer(primitive: &RustPrimitive, value: i64) -> String {
-  match primitive {
-    RustPrimitive::I8 if value <= i64::from(i8::MIN) => "i8::MIN".to_string(),
-    RustPrimitive::I8 if value >= i64::from(i8::MAX) => "i8::MAX".to_string(),
-    RustPrimitive::I8 => format!("{}i8", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::I16 if value <= i64::from(i16::MIN) => "i16::MIN".to_string(),
-    RustPrimitive::I16 if value >= i64::from(i16::MAX) => "i16::MAX".to_string(),
-    RustPrimitive::I16 => format!("{}i16", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::I32 if value <= i64::from(i32::MIN) => "i32::MIN".to_string(),
-    RustPrimitive::I32 if value >= i64::from(i32::MAX) => "i32::MAX".to_string(),
-    RustPrimitive::I32 => format!("{}i32", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::I64 => format!("{}i64", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    _ => value.to_string(),
-  }
-}
-
-fn render_unsigned_integer(primitive: &RustPrimitive, value: u64) -> String {
-  match primitive {
-    RustPrimitive::U8 if value >= u64::from(u8::MAX) => "u8::MAX".to_string(),
-    RustPrimitive::U8 => format!("{}u8", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::U16 if value >= u64::from(u16::MAX) => "u16::MAX".to_string(),
-    RustPrimitive::U16 => format!("{}u16", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::U32 if value >= u64::from(u32::MAX) => "u32::MAX".to_string(),
-    RustPrimitive::U32 => format!("{}u32", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::U64 => format!("{}u64", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    _ => value.to_string(),
   }
 }

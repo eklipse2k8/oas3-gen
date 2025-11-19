@@ -262,9 +262,27 @@ impl<'a> TypeResolver<'a> {
 
   fn map_single_primitive_type(&self, schema_type: SchemaType, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
     Ok(match schema_type {
-      SchemaType::String => TypeRef::new(format_to_primitive(schema.format.as_ref()).unwrap_or(RustPrimitive::String)),
-      SchemaType::Number => TypeRef::new(format_to_primitive(schema.format.as_ref()).unwrap_or(RustPrimitive::F64)),
-      SchemaType::Integer => TypeRef::new(format_to_primitive(schema.format.as_ref()).unwrap_or(RustPrimitive::I64)),
+      SchemaType::String => TypeRef::new(
+        schema
+          .format
+          .as_ref()
+          .and_then(|f| RustPrimitive::from_format(f))
+          .unwrap_or(RustPrimitive::String),
+      ),
+      SchemaType::Number => TypeRef::new(
+        schema
+          .format
+          .as_ref()
+          .and_then(|f| RustPrimitive::from_format(f))
+          .unwrap_or(RustPrimitive::F64),
+      ),
+      SchemaType::Integer => TypeRef::new(
+        schema
+          .format
+          .as_ref()
+          .and_then(|f| RustPrimitive::from_format(f))
+          .unwrap_or(RustPrimitive::I64),
+      ),
       SchemaType::Boolean => TypeRef::new(RustPrimitive::Bool),
       SchemaType::Array => {
         let item_type = self.convert_array_items(schema)?;
@@ -372,28 +390,6 @@ impl<'a> TypeResolver<'a> {
     variants
       .iter()
       .find(|v| v.resolve(self.graph.spec()).ok().is_some_and(|s| !is_null_schema(&s)))
-  }
-}
-
-pub(crate) fn format_to_primitive(format: Option<&String>) -> Option<RustPrimitive> {
-  match format?.as_str() {
-    "int8" => Some(RustPrimitive::I8),
-    "int16" => Some(RustPrimitive::I16),
-    "int32" => Some(RustPrimitive::I32),
-    "int64" => Some(RustPrimitive::I64),
-    "uint8" => Some(RustPrimitive::U8),
-    "uint16" => Some(RustPrimitive::U16),
-    "uint32" => Some(RustPrimitive::U32),
-    "uint64" => Some(RustPrimitive::U64),
-    "float" => Some(RustPrimitive::F32),
-    "double" => Some(RustPrimitive::F64),
-    "date" => Some(RustPrimitive::Date),
-    "date-time" => Some(RustPrimitive::DateTime),
-    "time" => Some(RustPrimitive::Time),
-    "duration" => Some(RustPrimitive::Duration),
-    "byte" | "binary" => Some(RustPrimitive::Bytes),
-    "uuid" => Some(RustPrimitive::Uuid),
-    _ => None,
   }
 }
 

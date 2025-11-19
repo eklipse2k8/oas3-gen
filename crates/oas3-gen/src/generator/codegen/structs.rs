@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use oas3::spec::ParameterStyle;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -13,7 +14,8 @@ use super::{
   constants::RegexKey,
 };
 use crate::generator::ast::{
-  FieldDef, PathSegment, QueryParameter, ResponseVariant, StructDef, StructMethod, StructMethodKind,
+  FieldDef, PathSegment, QueryParameter, ResponseVariant, RustPrimitive, StructDef, StructMethod, StructMethodKind,
+  TypeRef,
 };
 
 pub(crate) fn generate_struct(
@@ -208,10 +210,19 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
   let ident = format_ident!("{}", param.field);
   let key = &param.encoded_name;
   let param_equal = format!("{{prefix}}{key}={{}}");
+  let style = param.style.unwrap_or(ParameterStyle::Form);
+
+  // Determine separator for unexploded arrays
+  let delimiter = match style {
+    ParameterStyle::SpaceDelimited => "%20",
+    ParameterStyle::PipeDelimited => "|",
+    _ => ",", // Form default
+  };
 
   if param.optional {
     if param.is_array {
       if param.explode {
+        // Exploded array: key=val1&key=val2
         quote! {
           if let Some(values) = &self.#ident {
             for value in values {
@@ -221,16 +232,18 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
           }
         }
       } else {
+        // Unexploded array: key=val1,val2 (or other delimiter)
         quote! {
           if let Some(values) = &self.#ident && !values.is_empty() {
             prefix = if prefix == '\0' { '?' } else { '&' };
             let values = values.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
-            let values = values.join(",");
+            let values = values.join(#delimiter);
             write!(&mut path, #param_equal, values).unwrap();
           }
         }
       }
     } else {
+      // Optional scalar
       quote! {
         if let Some(value) = &self.#ident {
           prefix = if prefix == '\0' { '?' } else { '&' };
@@ -240,6 +253,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
     }
   } else if param.is_array {
     if param.explode {
+      // Exploded array (required)
       quote! {
         for value in &self.#ident {
           prefix = if prefix == '\0' { '?' } else { '&' };
@@ -247,16 +261,18 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
         }
       }
     } else {
+      // Unexploded array (required)
       quote! {
         if !self.#ident.is_empty() {
           prefix = if prefix == '\0' { '?' } else { '&' };
           let values = self.#ident.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
-          let values = values.join(",");
+          let values = values.join(#delimiter);
           write!(&mut path, #param_equal, values).unwrap();
         }
       }
     }
   } else {
+    // Required scalar
     quote! {
       prefix = if prefix == '\0' { '?' } else { '&' };
       write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident)?)).unwrap();
@@ -298,36 +314,27 @@ fn generate_parse_response_method(
   let vis = visibility.to_tokens();
   let response_enum_ident = format_ident!("{response_enum}");
 
-  let mut status_matches: Vec<TokenStream> = Vec::new();
-  let mut default_variant: Option<&ResponseVariant> = None;
+  let (defaults, specifics): (Vec<_>, Vec<_>) = variants.iter().partition(|v| v.status_code == "default");
+  let default_variant = defaults.first();
 
-  for variant in variants {
-    if variant.status_code == "default" {
-      default_variant = Some(variant);
-      continue;
-    }
-
-    let variant_name = format_ident!("{}", variant.variant_name);
-    let status_code = &variant.status_code;
-    let condition = status_code_condition(status_code);
-
-    if let Some(ref schema_type) = variant.schema_type {
-      let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
-      status_matches.push(quote! {
+  let status_matches: Vec<TokenStream> = specifics
+    .iter()
+    .map(|variant| {
+      let condition = status_code_condition(&variant.status_code);
+      let block = generate_variant_block(
+        &response_enum_ident,
+        &variant.variant_name,
+        variant.schema_type.as_ref(),
+        variant.content_type.as_deref(),
+        true,
+      );
+      quote! {
         if #condition {
-          let data = req.json::<#type_token>().await?;
-          return Ok(#response_enum_ident::#variant_name(data));
+          #block
         }
-      });
-    } else {
-      status_matches.push(quote! {
-        if #condition {
-          let _ = req.bytes().await?;
-          return Ok(#response_enum_ident::#variant_name);
-        }
-      });
-    }
-  }
+      }
+    })
+    .collect();
 
   let has_status_checks = !status_matches.is_empty();
   let status_decl = if has_status_checks {
@@ -337,19 +344,13 @@ fn generate_parse_response_method(
   };
 
   let fallback = if let Some(default) = default_variant {
-    let variant_name = format_ident!("{}", default.variant_name);
-    if let Some(ref schema_type) = default.schema_type {
-      let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
-      quote! {
-        let data = req.json::<#type_token>().await?;
-        Ok(#response_enum_ident::#variant_name(data))
-      }
-    } else {
-      quote! {
-        let _ = req.bytes().await?;
-        Ok(#response_enum_ident::#variant_name)
-      }
-    }
+    generate_variant_block(
+      &response_enum_ident,
+      &default.variant_name,
+      default.schema_type.as_ref(),
+      default.content_type.as_deref(),
+      false,
+    )
   } else {
     quote! {
       let _ = req.bytes().await?;
@@ -364,6 +365,66 @@ fn generate_parse_response_method(
       #status_decl
       #(#status_matches)*
       #fallback
+    }
+  }
+}
+
+fn generate_variant_block(
+  enum_name: &proc_macro2::Ident,
+  variant_name: &str,
+  schema: Option<&TypeRef>,
+  content_type: Option<&str>,
+  is_specific_variant: bool,
+) -> TokenStream {
+  let variant_ident = format_ident!("{variant_name}");
+
+  let result_statement = if schema.is_some() {
+    if is_specific_variant {
+      quote! { return Ok(#enum_name::#variant_ident(data)); }
+    } else {
+      quote! { Ok(#enum_name::#variant_ident(data)) }
+    }
+  } else if is_specific_variant {
+    quote! { return Ok(#enum_name::#variant_ident); }
+  } else {
+    quote! { Ok(#enum_name::#variant_ident) }
+  };
+
+  if let Some(schema_type) = schema {
+    let extraction = generate_data_expression(schema_type, content_type);
+    quote! {
+      let data = #extraction;
+      #result_statement
+    }
+  } else {
+    quote! {
+      let _ = req.bytes().await?;
+      #result_statement
+    }
+  }
+}
+
+fn generate_data_expression(schema_type: &TypeRef, content_type: Option<&str>) -> TokenStream {
+  let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
+  let ct = content_type.unwrap_or("application/json");
+
+  if ct.contains("json") {
+    quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
+  } else if ct.starts_with("text/") {
+    if schema_type.is_string_like() {
+      quote! { req.text().await? }
+    } else {
+      quote! { req.text().await?.parse::<#type_token>()? }
+    }
+  } else if ct.starts_with("image/") || ct == "application/pdf" {
+    quote! { req.bytes().await?.to_vec() }
+  } else {
+    // Fallback: Check if the target type is explicitly binary
+    if schema_type.base_type == RustPrimitive::Bytes {
+      quote! { req.bytes().await?.to_vec() }
+    } else {
+      // If not binary, assume structured data (JSON) even if content-type is weird/missing
+      quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
     }
   }
 }

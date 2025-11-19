@@ -1,3 +1,5 @@
+use http::Method;
+
 use crate::generator::{
   analyzer::ErrorAnalyzer,
   ast::{
@@ -58,13 +60,14 @@ fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<
   OperationInfo {
     stable_id: id.to_string(),
     operation_id: id.to_string(),
-    method: "GET".to_string(),
+    method: Method::GET,
     path: "/test".to_string(),
     summary: None,
     description: None,
     request_type: None,
     response_type: None,
     response_enum: None,
+    response_content_type: None,
     request_body_types: vec![],
     success_response_types: success_types,
     error_response_types: error_types,
