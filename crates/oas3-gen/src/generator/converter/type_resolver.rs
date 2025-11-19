@@ -65,6 +65,9 @@ impl<'a> TypeResolver<'a> {
     if let ObjectOrReference::Ref { ref_path, .. } = prop_schema_ref
       && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
     {
+      if Self::is_primitive_schema(prop_schema) {
+        return Ok((self.schema_to_type_ref(prop_schema)?, vec![]));
+      }
       let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
       if self.graph.is_cyclic(&ref_name) {
         type_ref = type_ref.with_boxed();
@@ -82,6 +85,14 @@ impl<'a> TypeResolver<'a> {
     }
 
     Ok((self.schema_to_type_ref(prop_schema)?, vec![]))
+  }
+
+  fn is_primitive_schema(schema: &ObjectSchema) -> bool {
+    schema.properties.is_empty()
+      && schema.one_of.is_empty()
+      && schema.any_of.is_empty()
+      && schema.all_of.is_empty()
+      && (schema.schema_type.is_some() || schema.enum_values.len() <= 1)
   }
 
   fn handle_inline_enum(

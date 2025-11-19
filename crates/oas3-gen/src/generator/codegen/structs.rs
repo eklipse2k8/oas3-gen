@@ -413,18 +413,14 @@ fn generate_data_expression(schema_type: &TypeRef, content_type: Option<&str>) -
   } else if ct.starts_with("text/") {
     if schema_type.is_string_like() {
       quote! { req.text().await? }
+    } else if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
+      quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
     } else {
       quote! { req.text().await?.parse::<#type_token>()? }
     }
-  } else if ct.starts_with("image/") || ct == "application/pdf" {
+  } else if ct.starts_with("image/") || ct == "application/pdf" || schema_type.base_type == RustPrimitive::Bytes {
     quote! { req.bytes().await?.to_vec() }
   } else {
-    // Fallback: Check if the target type is explicitly binary
-    if schema_type.base_type == RustPrimitive::Bytes {
-      quote! { req.bytes().await?.to_vec() }
-    } else {
-      // If not binary, assume structured data (JSON) even if content-type is weird/missing
-      quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
-    }
+    quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
   }
 }

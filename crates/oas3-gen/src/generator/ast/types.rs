@@ -273,7 +273,7 @@ impl RustPrimitive {
       RustPrimitive::Date => format_date_constructor(s),
       RustPrimitive::DateTime => format_datetime_constructor(s),
       RustPrimitive::Time => format_time_constructor(s),
-      RustPrimitive::Uuid => format!("uuid::Uuid::parse_str(\"{}\").unwrap()", escape_string_literal(s)),
+      RustPrimitive::Uuid => format!("uuid::Uuid::parse_str(\"{}\")?", escape_string_literal(s)),
       _ => format!("\"{}\"", escape_string_literal(s)),
     }
   }
@@ -351,10 +351,10 @@ fn escape_string_literal(s: &str) -> String {
 
 fn format_date_constructor(date_str: &str) -> String {
   if let Some((year, month, day)) = parse_date_parts(date_str) {
-    format!("chrono::NaiveDate::from_ymd_opt({year}, {month}, {day}).unwrap()")
+    format!("chrono::NaiveDate::from_ymd_opt({year}, {month}, {day})?")
   } else {
     format!(
-      "chrono::NaiveDate::parse_from_str(\"{}\", \"%Y-%m-%d\").unwrap()",
+      "chrono::NaiveDate::parse_from_str(\"{}\", \"%Y-%m-%d\")?",
       escape_string_literal(date_str)
     )
   }
@@ -362,17 +362,17 @@ fn format_date_constructor(date_str: &str) -> String {
 
 fn format_datetime_constructor(datetime_str: &str) -> String {
   format!(
-    "chrono::DateTime::parse_from_rfc3339(\"{}\").unwrap().with_timezone(&chrono::Utc)",
+    "chrono::DateTime::parse_from_rfc3339(\"{}\")?.with_timezone(&chrono::Utc)",
     escape_string_literal(datetime_str)
   )
 }
 
 fn format_time_constructor(time_str: &str) -> String {
   if let Some((hour, minute, second)) = parse_time_parts(time_str) {
-    format!("chrono::NaiveTime::from_hms_opt({hour}, {minute}, {second}).unwrap()")
+    format!("chrono::NaiveTime::from_hms_opt({hour}, {minute}, {second})?")
   } else {
     format!(
-      "chrono::NaiveTime::parse_from_str(\"{}\", \"%H:%M:%S\").unwrap()",
+      "chrono::NaiveTime::parse_from_str(\"{}\", \"%H:%M:%S\")?",
       escape_string_literal(time_str)
     )
   }
@@ -652,7 +652,7 @@ mod tests {
     let example = serde_json::Value::String("2024-01-15".to_string());
     assert_eq!(
       type_ref.format_example(&example),
-      "chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()"
+      "chrono::NaiveDate::from_ymd_opt(2024, 1, 15)?"
     );
   }
 
@@ -669,7 +669,7 @@ mod tests {
     let example = serde_json::Value::String("2024-01-15T10:30:00Z".to_string());
     assert_eq!(
       type_ref.format_example(&example),
-      "chrono::DateTime::parse_from_rfc3339(\"2024-01-15T10:30:00Z\").unwrap().with_timezone(&chrono::Utc)"
+      "chrono::DateTime::parse_from_rfc3339(\"2024-01-15T10:30:00Z\")?.with_timezone(&chrono::Utc)"
     );
   }
 
@@ -679,7 +679,7 @@ mod tests {
     let example = serde_json::Value::String("14:30:00".to_string());
     assert_eq!(
       type_ref.format_example(&example),
-      "chrono::NaiveTime::from_hms_opt(14, 30, 0).unwrap()"
+      "chrono::NaiveTime::from_hms_opt(14, 30, 0)?"
     );
   }
 
@@ -689,7 +689,7 @@ mod tests {
     let example = serde_json::Value::String("550e8400-e29b-41d4-a716-446655440000".to_string());
     assert_eq!(
       type_ref.format_example(&example),
-      "uuid::Uuid::parse_str(\"550e8400-e29b-41d4-a716-446655440000\").unwrap()"
+      "uuid::Uuid::parse_str(\"550e8400-e29b-41d4-a716-446655440000\")?"
     );
   }
 
@@ -699,8 +699,8 @@ mod tests {
     let example = serde_json::json!(["2024-01-15", "2024-02-20"]);
     assert_eq!(
       type_ref.format_example(&example),
-      "vec![chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(), \
-       chrono::NaiveDate::from_ymd_opt(2024, 2, 20).unwrap()]"
+      "vec![chrono::NaiveDate::from_ymd_opt(2024, 1, 15)?, \
+       chrono::NaiveDate::from_ymd_opt(2024, 2, 20)?]"
     );
   }
 
@@ -787,7 +787,7 @@ mod tests {
     let example = serde_json::Value::String("\"550e8400-e29b-41d4-a716-446655440000\"".to_string());
     assert_eq!(
       type_ref.format_example(&example),
-      "uuid::Uuid::parse_str(\"\\\"550e8400-e29b-41d4-a716-446655440000\\\"\").unwrap()"
+      "uuid::Uuid::parse_str(\"\\\"550e8400-e29b-41d4-a716-446655440000\\\"\")?"
     );
   }
 

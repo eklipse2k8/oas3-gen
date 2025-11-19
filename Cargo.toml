@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.18.0"
+version = "0.18.1"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -24,19 +24,20 @@ debug = true
 debug-assertions = false
 lto = "fat"
 opt-level = 3
+panic = "abort"
 split-debuginfo = "packed"
 strip = "symbols"
 
 [profile.dev]
 debug = true
-debug-assertions = false
+debug-assertions = true
 opt-level = 0
 panic = "unwind"
 split-debuginfo = "unpacked"
 
 [workspace.dependencies]
 # Workspace Members
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.18.0" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.18.1" }
 
 # External Dependencies
 any_ascii = { version = "0.3" }
@@ -48,7 +49,8 @@ chrono = { version = ">=0.4.42", default-features = false, features = ["std", "c
 clap = { version = "4.5", features = ["derive", "color"] }
 comfy-table = { version = "7.2" }
 crossterm = { version = "0.29", default-features = false }
-cruet = { version = "0.15.0" }
+cruet = { version = "0.15" }
+fmmap = { version = "0.4", features = ["tokio"] }
 http = { version = "1.3" }
 indexmap = { version = "2.12", features = ["serde"] }
 inflections = { version = "1.1" }

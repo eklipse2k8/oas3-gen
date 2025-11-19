@@ -2,6 +2,8 @@ use std::{collections::HashSet, path::PathBuf};
 
 use chrono::{Local, Timelike};
 use crossterm::style::Stylize;
+use fmmap::tokio::{AsyncMmapFile, AsyncMmapFileExt};
+use oas3::OpenApiV3Spec;
 
 use crate::{
   generator::{
@@ -64,8 +66,9 @@ impl GenerateConfig {
   }
 
   async fn load_spec(&self) -> anyhow::Result<oas3::Spec> {
-    let file_content = tokio::fs::read_to_string(&self.input).await?;
-    Ok(oas3::from_json(file_content)?)
+    let file = AsyncMmapFile::open(&self.input).await?;
+    let spec = serde_json::from_slice::<OpenApiV3Spec>(file.as_slice())?;
+    Ok(spec)
   }
 
   fn create_orchestrator(&self, spec: oas3::Spec) -> Orchestrator {

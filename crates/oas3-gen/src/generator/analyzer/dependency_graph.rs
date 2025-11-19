@@ -15,7 +15,10 @@ impl DependencyGraph {
     for rust_type in types {
       let type_name = rust_type.type_name().to_string();
       let deps = Self::extract_dependencies(rust_type);
-      dependencies.insert(type_name, deps);
+      dependencies
+        .entry(type_name)
+        .and_modify(|existing: &mut BTreeSet<String>| existing.extend(deps.clone()))
+        .or_insert(deps);
     }
 
     Self { dependencies }

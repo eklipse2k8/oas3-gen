@@ -25,6 +25,7 @@ clap.workspace = true
 comfy-table.workspace = true
 crossterm.workspace = true
 cruet.workspace = true
+fmmap.workspace = true
 http.workspace = true
 indexmap.workspace = true
 inflections.workspace = true
