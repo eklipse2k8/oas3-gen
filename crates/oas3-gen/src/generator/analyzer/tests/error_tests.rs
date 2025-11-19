@@ -53,6 +53,7 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
     serde_attrs: vec![],
     outer_attrs: vec![],
     discriminator: None,
+    case_insensitive: false,
   })
 }
 
@@ -176,6 +177,7 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
       serde_attrs: vec![],
       outer_attrs: vec![],
       discriminator: None,
+      case_insensitive: false,
     }),
     create_test_struct("InnerError", RustPrimitive::String),
   ];

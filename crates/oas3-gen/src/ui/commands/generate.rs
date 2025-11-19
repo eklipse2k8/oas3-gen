@@ -29,6 +29,7 @@ pub struct GenerateConfig {
   pub all_schemas: bool,
   pub odata_support: bool,
   pub preserve_case_variants: bool,
+  pub case_insensitive_enums: bool,
   pub only_operations: Option<HashSet<String>>,
   pub excluded_operations: Option<HashSet<String>>,
 }
@@ -45,6 +46,7 @@ impl GenerateConfig {
     all_schemas: bool,
     odata_support: bool,
     preserve_case_variants: bool,
+    case_insensitive_enums: bool,
     only_operations: Option<Vec<String>>,
     excluded_operations: Option<Vec<String>>,
   ) -> Self {
@@ -60,6 +62,7 @@ impl GenerateConfig {
       all_schemas,
       odata_support,
       preserve_case_variants,
+      case_insensitive_enums,
       only_operations,
       excluded_operations,
     }
@@ -86,6 +89,7 @@ impl GenerateConfig {
       self.excluded_operations.as_ref(),
       optionality_policy,
       self.preserve_case_variants,
+      self.case_insensitive_enums,
     )
   }
 

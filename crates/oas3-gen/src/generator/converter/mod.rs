@@ -82,13 +82,14 @@ impl<'a> SchemaConverter<'a> {
     graph: &'a SchemaGraph,
     optionality_policy: FieldOptionalityPolicy,
     preserve_case_variants: bool,
+    case_insensitive_enums: bool,
   ) -> Self {
-    let type_resolver = TypeResolver::new(graph, preserve_case_variants);
+    let type_resolver = TypeResolver::new(graph, preserve_case_variants, case_insensitive_enums);
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, type_resolver.clone(), None, optionality_policy),
-      enum_converter: EnumConverter::new(graph, type_resolver, preserve_case_variants),
+      enum_converter: EnumConverter::new(graph, type_resolver, preserve_case_variants, case_insensitive_enums),
       cached_schema_names,
     }
   }
@@ -98,8 +99,9 @@ impl<'a> SchemaConverter<'a> {
     reachable_schemas: BTreeSet<String>,
     optionality_policy: FieldOptionalityPolicy,
     preserve_case_variants: bool,
+    case_insensitive_enums: bool,
   ) -> Self {
-    let type_resolver = TypeResolver::new(graph, preserve_case_variants);
+    let type_resolver = TypeResolver::new(graph, preserve_case_variants, case_insensitive_enums);
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
@@ -109,7 +111,7 @@ impl<'a> SchemaConverter<'a> {
         Some(reachable_schemas),
         optionality_policy,
       ),
-      enum_converter: EnumConverter::new(graph, type_resolver, preserve_case_variants),
+      enum_converter: EnumConverter::new(graph, type_resolver, preserve_case_variants, case_insensitive_enums),
       cached_schema_names,
     }
   }

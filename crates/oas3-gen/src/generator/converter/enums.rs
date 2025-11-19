@@ -35,28 +35,35 @@ pub(crate) struct EnumConverter<'a> {
   type_resolver: TypeResolver<'a>,
   struct_converter: StructConverter<'a>,
   preserve_case_variants: bool,
+  case_insensitive_enums: bool,
 }
 
 impl<'a> EnumConverter<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>, preserve_case_variants: bool) -> Self {
+  pub(crate) fn new(
+    graph: &'a SchemaGraph,
+    type_resolver: TypeResolver<'a>,
+    preserve_case_variants: bool,
+    case_insensitive_enums: bool,
+  ) -> Self {
     let struct_converter = StructConverter::new(graph, type_resolver.clone(), None, FieldOptionalityPolicy::standard());
     Self {
       graph,
       type_resolver,
       struct_converter,
       preserve_case_variants,
+      case_insensitive_enums,
     }
   }
 
   pub(crate) fn convert_simple_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
     if self.preserve_case_variants {
-      Self::convert_simple_enum_with_case_preservation(name, schema)
+      self.convert_simple_enum_with_case_preservation(name, schema)
     } else {
-      Self::convert_simple_enum_with_case_deduplication(name, schema)
+      self.convert_simple_enum_with_case_deduplication(name, schema)
     }
   }
 
-  fn convert_simple_enum_with_case_preservation(name: &str, schema: &ObjectSchema) -> RustType {
+  fn convert_simple_enum_with_case_preservation(&self, name: &str, schema: &ObjectSchema) -> RustType {
     let mut variants = Vec::new();
     let mut seen_names = BTreeSet::new();
 
@@ -104,10 +111,11 @@ impl<'a> EnumConverter<'a> {
       derives: utils::derives_for_enum(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
+      case_insensitive: self.case_insensitive_enums,
     })
   }
 
-  fn convert_simple_enum_with_case_deduplication(name: &str, schema: &ObjectSchema) -> RustType {
+  fn convert_simple_enum_with_case_deduplication(&self, name: &str, schema: &ObjectSchema) -> RustType {
     let mut variants: Vec<VariantDef> = Vec::new();
     let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -156,6 +164,7 @@ impl<'a> EnumConverter<'a> {
       derives: utils::derives_for_enum(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
+      case_insensitive: self.case_insensitive_enums,
     })
   }
 
@@ -236,6 +245,7 @@ impl<'a> EnumConverter<'a> {
       derives,
       serde_attrs,
       outer_attrs: vec![],
+      case_insensitive: false,
     });
 
     inline_types.push(main_enum);
@@ -358,7 +368,7 @@ impl<'a> EnumConverter<'a> {
       return Ok(None);
     }
 
-    Ok(Some(Self::convert_string_enum_with_catch_all(
+    Ok(Some(self.convert_string_enum_with_catch_all(
       name,
       schema,
       &known_values,
@@ -366,6 +376,7 @@ impl<'a> EnumConverter<'a> {
   }
 
   fn convert_string_enum_with_catch_all(
+    &self,
     name: &str,
     schema: &ObjectSchema,
     const_values: &[(String, Option<String>, bool)],
@@ -397,6 +408,7 @@ impl<'a> EnumConverter<'a> {
       derives: utils::derives_for_enum(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
+      case_insensitive: self.case_insensitive_enums,
     });
 
     let outer_variants = vec![
@@ -424,6 +436,7 @@ impl<'a> EnumConverter<'a> {
       derives: utils::derives_for_enum(false),
       serde_attrs: vec!["untagged".into()],
       outer_attrs: vec![],
+      case_insensitive: false,
     });
 
     vec![inner_enum, outer_enum]

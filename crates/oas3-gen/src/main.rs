@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
       visibility,
       odata_support,
       preserve_case_variants,
+      case_insensitive_enums,
       verbose,
       quiet,
       all_schemas,
@@ -44,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         all_schemas,
         odata_support,
         preserve_case_variants,
+        case_insensitive_enums,
         only,
         exclude,
       );

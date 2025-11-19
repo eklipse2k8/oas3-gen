@@ -95,6 +95,10 @@ pub enum Commands {
     #[arg(long, default_value_t = false, display_order = 12, help_heading = "Code Generation")]
     preserve_case_variants: bool,
 
+    /// Generate case-insensitive deserialization for simple enums
+    #[arg(long, default_value_t = false, display_order = 13, help_heading = "Code Generation")]
+    case_insensitive_enums: bool,
+
     /// Generate all schemas, even those unreferenced by selected operations
     #[arg(
       group = "filter",

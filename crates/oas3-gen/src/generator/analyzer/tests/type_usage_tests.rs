@@ -263,6 +263,7 @@ fn test_enum_with_tuple_variant() {
     derives: vec!["Debug".to_string()],
     serde_attrs: vec![],
     outer_attrs: vec![],
+    case_insensitive: false,
   });
 
   let user_struct = RustType::Struct(StructDef {

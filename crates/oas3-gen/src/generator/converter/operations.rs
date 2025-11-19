@@ -719,6 +719,13 @@ impl<'a> OperationConverter<'a> {
           return Ok((None, Some(content_type.clone())));
         }
 
+        if inline_schema.properties.is_empty()
+          && let Ok(type_ref) = self.schema_converter.schema_to_type_ref(inline_schema)
+          && !matches!(type_ref.base_type, crate::generator::ast::RustPrimitive::Custom(_))
+        {
+          return Ok((Some(type_ref), Some(content_type.clone())));
+        }
+
         let rust_type_name = schema_cache.get_or_create_type(
           inline_schema,
           self.schema_converter,
