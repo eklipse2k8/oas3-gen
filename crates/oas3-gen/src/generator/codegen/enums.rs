@@ -8,7 +8,7 @@ use super::{
   },
   coercion,
 };
-use crate::generator::ast::{DiscriminatedEnumDef, EnumDef, ResponseEnumDef, VariantContent, VariantDef};
+use crate::generator::ast::{DeriveTrait, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, VariantContent, VariantDef};
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
   let name = format_ident!("{}", def.name);
@@ -17,7 +17,7 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
 
   let mut derives_list = def.derives.clone();
   if def.case_insensitive {
-    derives_list.retain(|d| d != "Deserialize");
+    derives_list.remove(&DeriveTrait::Deserialize);
   }
   let derives = generate_derives_from_slice(&derives_list);
 

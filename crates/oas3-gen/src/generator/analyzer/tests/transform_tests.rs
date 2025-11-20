@@ -1,141 +1,36 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
-  ast::{EnumDef, FieldDef, RustType, StructDef, StructKind, TypeRef, VariantContent, VariantDef},
+  ast::{DeriveTrait, EnumDef, FieldDef, RustType, StructDef, StructKind, TypeRef, VariantContent, VariantDef},
 };
 
-fn run_transform(mut rust_types: Vec<RustType>, usage: &[(&str, TypeUsage)]) -> StructDef {
-  let mut usage_map = BTreeMap::new();
-  for (name, typ) in usage {
-    usage_map.insert((*name).to_string(), *typ);
-  }
-  update_derives_from_usage(&mut rust_types, &usage_map);
-  match rust_types.into_iter().next().unwrap() {
-    RustType::Struct(def) => def,
-    _ => panic!("expected struct type"),
-  }
-}
+// --- Helpers ---
 
-fn schema_struct(name: &str, field: FieldDef) -> StructDef {
-  StructDef {
-    name: name.to_string(),
-    docs: vec![],
-    fields: vec![field],
-    derives: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
-    kind: StructKind::Schema,
-  }
-}
-
-fn operation_request_struct(name: &str) -> StructDef {
+fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
   StructDef {
     name: name.to_string(),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "id".to_string(),
-      rust_type: TypeRef::new("String"),
+      name: "field".to_string(),
+      rust_type: if nullable {
+        TypeRef::new("String").with_option()
+      } else {
+        TypeRef::new("String")
+      },
       validation_attrs: vec!["length(min = 1)".to_string()],
+      regex_validation: Some("regex".to_string()),
       ..Default::default()
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
-    kind: StructKind::OperationRequest,
+    kind,
   }
 }
 
-#[test]
-fn response_only_removes_validation_and_skip_attr() {
-  let field = FieldDef {
-    name: "name".to_string(),
-    rust_type: TypeRef::new("String"),
-    validation_attrs: vec!["length(min = 1)".to_string()],
-    regex_validation: Some("NAME_REGEX".to_string()),
-    ..Default::default()
-  };
-  let mut def = schema_struct("ResponseType", field);
-  def
-    .outer_attrs
-    .push("oas3_gen_support::skip_serializing_none".to_string());
-
-  let def = run_transform(
-    vec![RustType::Struct(def)],
-    &[("ResponseType", TypeUsage::ResponseOnly)],
-  );
-
-  assert!(def.derives.contains(&"Deserialize".to_string()));
-  assert!(!def.derives.iter().any(|d| d == "Serialize"));
-  assert!(!def.derives.iter().any(|d| d == "validator::Validate"));
-  assert!(def.outer_attrs.is_empty(), "skip_serializing_none should be removed");
-  let field = &def.fields[0];
-  assert!(field.validation_attrs.is_empty());
-  assert!(field.regex_validation.is_none());
-}
-
-#[test]
-fn request_only_adds_serialize_and_validate() {
-  let field = FieldDef {
-    name: "value".to_string(),
-    rust_type: TypeRef::new("String"),
-    validation_attrs: vec!["length(min = 1)".to_string()],
-    ..Default::default()
-  };
-  let def = schema_struct("RequestType", field);
-
-  let def = run_transform(vec![RustType::Struct(def)], &[("RequestType", TypeUsage::RequestOnly)]);
-
-  assert!(def.derives.iter().any(|d| d == "Serialize"));
-  assert!(def.derives.iter().any(|d| d == "validator::Validate"));
-  assert!(
-    !def
-      .outer_attrs
-      .iter()
-      .any(|attr| attr.contains("skip_serializing_none"))
-  );
-}
-
-#[test]
-fn bidirectional_adds_serialization_and_validation() {
-  let field = FieldDef {
-    name: "optional".to_string(),
-    rust_type: TypeRef::new("String").with_option(),
-    validation_attrs: vec!["length(min = 1)".to_string()],
-    ..Default::default()
-  };
-  let def = schema_struct("BothWays", field);
-
-  let def = run_transform(vec![RustType::Struct(def)], &[("BothWays", TypeUsage::Bidirectional)]);
-
-  assert!(def.derives.iter().any(|d| d == "Serialize"));
-  assert!(def.derives.iter().any(|d| d == "Deserialize"));
-  assert!(def.derives.iter().any(|d| d == "validator::Validate"));
-  assert!(
-    def
-      .outer_attrs
-      .iter()
-      .any(|attr| attr == "oas3_gen_support::skip_serializing_none")
-  );
-}
-
-#[test]
-fn operation_request_always_validates_without_serialization() {
-  let def = operation_request_struct("GetItemRequest");
-  let def = run_transform(
-    vec![RustType::Struct(def)],
-    &[("GetItemRequest", TypeUsage::RequestOnly)],
-  );
-
-  assert!(def.derives.iter().any(|d| d == "validator::Validate"));
-  assert!(!def.derives.iter().any(|d| d == "Serialize"));
-  assert!(!def.derives.iter().any(|d| d == "Deserialize"));
-  assert!(!def.fields[0].validation_attrs.is_empty());
-}
-
-fn enum_type(name: &str) -> EnumDef {
+fn create_enum(name: &str) -> EnumDef {
   EnumDef {
     name: name.to_string(),
     docs: vec![],
@@ -147,41 +42,132 @@ fn enum_type(name: &str) -> EnumDef {
       deprecated: false,
     }],
     discriminator: None,
-    derives: vec![
-      "Debug".to_string(),
-      "Clone".to_string(),
-      "PartialEq".to_string(),
-      "Serialize".to_string(),
-      "Deserialize".to_string(),
-      "oas3_gen_support::Default".to_string(),
-    ],
+    // Default derives usually present on enums
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
   }
 }
 
-fn run_enum_transform(name: &str, usage: TypeUsage) -> EnumDef {
-  let enum_def = enum_type(name);
-  let usage_map = BTreeMap::from([(name.to_string(), usage)]);
-  let mut rust_types = vec![RustType::Enum(enum_def)];
+fn process_struct_helper(def: StructDef, usage: TypeUsage) -> StructDef {
+  let mut usage_map = BTreeMap::new();
+  usage_map.insert(def.name.clone(), usage);
+  let mut rust_types = vec![RustType::Struct(def)];
   update_derives_from_usage(&mut rust_types, &usage_map);
   match rust_types.into_iter().next().unwrap() {
-    RustType::Enum(def) => def,
-    _ => panic!("expected enum"),
+    RustType::Struct(d) => d,
+    _ => panic!("Expected Struct"),
   }
 }
 
+fn process_enum_helper(def: EnumDef, usage: TypeUsage) -> EnumDef {
+  let mut usage_map = BTreeMap::new();
+  usage_map.insert(def.name.clone(), usage);
+  let mut rust_types = vec![RustType::Enum(def)];
+  update_derives_from_usage(&mut rust_types, &usage_map);
+  match rust_types.into_iter().next().unwrap() {
+    RustType::Enum(d) => d,
+    _ => panic!("Expected Enum"),
+  }
+}
+
+const ATTR_SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
+
+// --- Tests ---
+
 #[test]
-fn response_only_enum_drops_serialize() {
-  let def = run_enum_transform("ResponseEnum", TypeUsage::ResponseOnly);
-  assert!(def.derives.iter().any(|d| d == "Deserialize"));
-  assert!(!def.derives.iter().any(|d| d == "Serialize"));
+fn test_schema_request_only() {
+  let def = create_struct("User", StructKind::Schema, true);
+  let def = process_struct_helper(def, TypeUsage::RequestOnly);
+
+  assert!(def.derives.contains(&DeriveTrait::Serialize));
+  assert!(def.derives.contains(&DeriveTrait::Validate));
+  assert!(!def.derives.contains(&DeriveTrait::Deserialize));
+  assert!(def.derives.contains(&DeriveTrait::Debug));
+
+  // Check Attributes (Request needs skip_serializing_none if nullable)
+  assert!(def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+
+  // Check Validation (Should remain)
+  assert!(!def.fields[0].validation_attrs.is_empty());
 }
 
 #[test]
-fn request_only_enum_drops_deserialize() {
-  let def = run_enum_transform("RequestEnum", TypeUsage::RequestOnly);
-  assert!(def.derives.iter().any(|d| d == "Serialize"));
-  assert!(!def.derives.iter().any(|d| d == "Deserialize"));
+fn test_schema_response_only() {
+  let def = create_struct("UserResponse", StructKind::Schema, true);
+  let def = process_struct_helper(def, TypeUsage::ResponseOnly);
+
+  assert!(def.derives.contains(&DeriveTrait::Deserialize));
+  assert!(!def.derives.contains(&DeriveTrait::Serialize));
+  assert!(!def.derives.contains(&DeriveTrait::Validate));
+
+  // Check Attributes (Response does NOT need skip_serializing_none)
+  assert!(!def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+
+  // Check Validation (Should be stripped)
+  assert!(def.fields[0].validation_attrs.is_empty());
+  assert!(def.fields[0].regex_validation.is_none());
+}
+
+#[test]
+fn test_schema_bidirectional() {
+  let def = create_struct("UserDto", StructKind::Schema, true);
+  let def = process_struct_helper(def, TypeUsage::Bidirectional);
+
+  assert!(def.derives.contains(&DeriveTrait::Serialize));
+  assert!(def.derives.contains(&DeriveTrait::Deserialize));
+  assert!(def.derives.contains(&DeriveTrait::Validate));
+
+  // Should have skip attribute
+  assert!(def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+}
+
+#[test]
+fn test_operation_request_special_handling() {
+  let def = create_struct("OpReq", StructKind::OperationRequest, true);
+  // Even if we say RequestOnly, OperationRequest has specific base derives
+  let def = process_struct_helper(def, TypeUsage::RequestOnly);
+
+  // OpRequest always has Validate
+  assert!(def.derives.contains(&DeriveTrait::Validate));
+  // OpRequest does NOT get Serialize/Deserialize from the standard flow for Schema
+  assert!(!def.derives.contains(&DeriveTrait::Serialize));
+
+  // OpRequest explicitly excludes skip_serializing_none
+  assert!(!def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+}
+
+#[test]
+fn test_enum_processing_request_only() {
+  let def = create_enum("Status");
+  let def = process_enum_helper(def, TypeUsage::RequestOnly);
+
+  assert!(def.derives.contains(&DeriveTrait::Debug)); // Preserved
+  assert!(def.derives.contains(&DeriveTrait::Serialize)); // Added
+  assert!(def.derives.contains(&DeriveTrait::Validate)); // Added
+  assert!(!def.derives.contains(&DeriveTrait::Deserialize));
+}
+
+#[test]
+fn test_enum_processing_response_only() {
+  let def = create_enum("StatusResp");
+  let def = process_enum_helper(def, TypeUsage::ResponseOnly);
+
+  assert!(def.derives.contains(&DeriveTrait::Debug)); // Preserved
+  assert!(def.derives.contains(&DeriveTrait::Deserialize)); // Added
+  assert!(!def.derives.contains(&DeriveTrait::Serialize));
+}
+
+#[test]
+fn test_skip_serializing_none_logic() {
+  // Case 1: Not nullable -> No attribute
+  let def = create_struct("Strict", StructKind::Schema, false);
+  let def = process_struct_helper(def, TypeUsage::RequestOnly);
+  assert!(def.outer_attrs.is_empty());
+
+  // Case 2: Nullable + Request -> Attribute
+  let def2 = create_struct("Loose", StructKind::Schema, true);
+  let def2 = process_struct_helper(def2, TypeUsage::RequestOnly);
+  assert!(def2.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
 }

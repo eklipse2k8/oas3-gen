@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::generator::{
   ast::{
-    FieldDef, PathSegment, QueryParameter, ResponseVariant, RustType, StructDef, StructKind, StructMethod,
+    DeriveTrait, FieldDef, PathSegment, QueryParameter, ResponseVariant, RustType, StructDef, StructKind, StructMethod,
     StructMethodKind, TypeRef,
   },
   codegen::{self, Visibility, structs},
@@ -22,7 +22,7 @@ fn base_struct(kind: StructKind) -> StructDef {
       default_value: None,
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -33,7 +33,7 @@ fn base_struct(kind: StructKind) -> StructDef {
 #[test]
 fn generates_struct_with_supplied_derives() {
   let def = StructDef {
-    derives: vec!["Debug".into(), "Clone".into(), "Serialize".into()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Serialize]),
     ..base_struct(StructKind::Schema)
   };
   let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
@@ -237,7 +237,7 @@ fn renders_binary_parser_for_pdf() {
 #[test]
 fn codegen_emits_only_deserialize_when_needed() {
   let def = StructDef {
-    derives: vec!["Debug".into(), "Deserialize".into()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Deserialize]),
     ..base_struct(StructKind::Schema)
   };
   let errors = std::collections::HashSet::new();
@@ -250,7 +250,7 @@ fn codegen_emits_only_deserialize_when_needed() {
 #[test]
 fn codegen_emits_both_serde_traits_when_required() {
   let def = StructDef {
-    derives: vec!["Debug".into(), "Serialize".into(), "Deserialize".into()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Serialize, DeriveTrait::Deserialize]),
     ..base_struct(StructKind::Schema)
   };
   let errors = std::collections::HashSet::new();

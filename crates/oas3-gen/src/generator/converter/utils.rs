@@ -19,40 +19,6 @@ pub(crate) enum InlinePolicy {
   InlineUnions,
 }
 
-const STRUCT_DERIVES: &[&str] = &["Debug", "Clone", "PartialEq", "oas3_gen_support::Default"];
-
-const SIMPLE_ENUM_DERIVES: &[&str] = &[
-  "Debug",
-  "Clone",
-  "PartialEq",
-  "Eq",
-  "Hash",
-  "Serialize",
-  "Deserialize",
-  "oas3_gen_support::Default",
-];
-const COMPLEX_ENUM_DERIVES: &[&str] = &[
-  "Debug",
-  "Clone",
-  "PartialEq",
-  "Serialize",
-  "Deserialize",
-  "oas3_gen_support::Default",
-];
-
-pub(crate) fn derives_for_struct(_all_read_only: bool, _all_write_only: bool) -> Vec<String> {
-  STRUCT_DERIVES.iter().map(|s| (*s).to_string()).collect()
-}
-
-pub(crate) fn derives_for_enum(is_simple: bool) -> Vec<String> {
-  let base = if is_simple {
-    SIMPLE_ENUM_DERIVES
-  } else {
-    COMPLEX_ENUM_DERIVES
-  };
-  base.iter().map(|s| (*s).to_string()).collect()
-}
-
 pub(crate) fn container_outer_attrs(_fields: &[FieldDef]) -> Vec<String> {
   Vec::new()
 }
@@ -302,8 +268,6 @@ pub(crate) fn build_field_def(
     default_value: metadata.default_value,
     example_value: None,
     parameter_location: None,
-    read_only: metadata.read_only,
-    write_only: metadata.write_only,
     deprecated: metadata.deprecated,
     multiple_of: metadata.multiple_of,
   }

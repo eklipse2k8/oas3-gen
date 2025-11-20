@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::{FieldDef, ParameterLocation};
+use crate::generator::ast::{DeriveTrait, FieldDef, ParameterLocation};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -50,11 +52,11 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
   generate_docs(&docs)
 }
 
-pub(crate) fn generate_derives_from_slice(derives: &[String]) -> TokenStream {
+pub(crate) fn generate_derives_from_slice(derives: &BTreeSet<DeriveTrait>) -> TokenStream {
   if derives.is_empty() {
     return quote! {};
   }
-  let derive_idents = derives.iter().filter_map(|d| d.parse::<TokenStream>().ok());
+  let derive_idents = derives.iter().filter_map(|d| d.to_string().parse::<TokenStream>().ok());
   quote! { #[derive(#(#derive_idents),*)] }
 }
 

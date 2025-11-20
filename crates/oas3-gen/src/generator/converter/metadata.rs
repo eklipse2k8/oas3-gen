@@ -23,8 +23,6 @@ pub(crate) struct FieldMetadata {
   pub validation_attrs: Vec<String>,
   pub regex_validation: Option<String>,
   pub default_value: Option<serde_json::Value>,
-  pub read_only: bool,
-  pub write_only: bool,
   pub deprecated: bool,
   pub multiple_of: Option<serde_json::Number>,
 }
@@ -36,8 +34,6 @@ impl FieldMetadata {
       validation_attrs: extract_validation_attrs(is_required, schema, type_ref),
       regex_validation: extract_validation_pattern(prop_name, schema).cloned(),
       default_value: extract_default_value(schema),
-      read_only: schema.read_only.unwrap_or(false),
-      write_only: schema.write_only.unwrap_or(false),
       deprecated: schema.deprecated.unwrap_or(false),
       multiple_of: schema.multiple_of.clone(),
     }

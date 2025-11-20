@@ -1,5 +1,9 @@
+mod derives;
 pub(super) mod types;
 
+use std::collections::BTreeSet;
+
+pub use derives::{DeriveTrait, default_enum_derives, default_struct_derives};
 use http::Method;
 pub use types::{RustPrimitive, TypeRef};
 
@@ -126,7 +130,7 @@ pub struct StructDef {
   pub name: String,
   pub docs: Vec<String>,
   pub fields: Vec<FieldDef>,
-  pub derives: Vec<String>,
+  pub derives: BTreeSet<DeriveTrait>,
   pub serde_attrs: Vec<String>,
   pub outer_attrs: Vec<String>,
   pub methods: Vec<StructMethod>,
@@ -183,8 +187,6 @@ pub struct FieldDef {
   pub default_value: Option<serde_json::Value>,
   pub example_value: Option<serde_json::Value>,
   pub parameter_location: Option<ParameterLocation>,
-  pub read_only: bool,
-  pub write_only: bool,
   pub deprecated: bool,
   pub multiple_of: Option<serde_json::Number>,
 }
@@ -196,7 +198,7 @@ pub struct EnumDef {
   pub docs: Vec<String>,
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
-  pub derives: Vec<String>,
+  pub derives: BTreeSet<DeriveTrait>,
   pub serde_attrs: Vec<String>,
   pub outer_attrs: Vec<String>,
   pub case_insensitive: bool,

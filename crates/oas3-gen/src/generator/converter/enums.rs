@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
   generator::{
-    ast::{EnumDef, RustType, TypeRef, VariantContent, VariantDef},
+    ast::{EnumDef, RustType, TypeRef, VariantContent, VariantDef, default_enum_derives},
     schema_graph::SchemaGraph,
   },
   reserved::to_rust_type_name,
@@ -108,7 +108,7 @@ impl<'a> EnumConverter<'a> {
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,
-      derives: utils::derives_for_enum(true),
+      derives: default_enum_derives(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
       case_insensitive: self.case_insensitive_enums,
@@ -161,7 +161,7 @@ impl<'a> EnumConverter<'a> {
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,
-      derives: utils::derives_for_enum(true),
+      derives: default_enum_derives(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
       case_insensitive: self.case_insensitive_enums,
@@ -233,9 +233,9 @@ impl<'a> EnumConverter<'a> {
 
     let has_discriminator = schema.discriminator.is_some();
     let (serde_attrs, derives) = if kind == UnionKind::AnyOf && !has_discriminator {
-      (vec!["untagged".into()], utils::derives_for_enum(false))
+      (vec!["untagged".into()], default_enum_derives(false))
     } else {
-      (vec![], utils::derives_for_enum(false))
+      (vec![], default_enum_derives(false))
     };
 
     let main_enum = RustType::Enum(EnumDef {
@@ -426,7 +426,7 @@ impl<'a> EnumConverter<'a> {
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants: outer_variants,
       discriminator: None,
-      derives: utils::derives_for_enum(false),
+      derives: default_enum_derives(false),
       serde_attrs: vec!["untagged".into()],
       outer_attrs: vec![],
       case_insensitive: false,
@@ -463,7 +463,7 @@ impl<'a> EnumConverter<'a> {
       docs: vec!["/// Known values for the string enum.".to_string()],
       variants,
       discriminator: None,
-      derives: utils::derives_for_enum(true),
+      derives: default_enum_derives(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
       case_insensitive: self.case_insensitive_enums,

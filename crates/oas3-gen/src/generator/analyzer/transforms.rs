@@ -1,101 +1,78 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::type_usage::TypeUsage;
-use crate::generator::ast::{EnumDef, FieldDef, RustType, StructDef, StructKind};
+use crate::generator::ast::{DeriveTrait, EnumDef, FieldDef, RustType, StructDef, StructKind, default_struct_derives};
 
-const SERIALIZE: &str = "Serialize";
-const DESERIALIZE: &str = "Deserialize";
-const VALIDATE: &str = "validator::Validate";
 const SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
 
 pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage: &BTreeMap<String, TypeUsage>) {
   for rust_type in rust_types {
     match rust_type {
-      RustType::Struct(def) => apply_struct_usage_policy(def, type_usage),
-      RustType::Enum(def) => apply_enum_usage_policy(def, type_usage),
+      RustType::Struct(def) => process_struct(def, type_usage),
+      RustType::Enum(def) => process_enum(def, type_usage),
       _ => {}
     }
   }
 }
 
-fn apply_struct_usage_policy(def: &mut StructDef, type_usage: &BTreeMap<String, TypeUsage>) {
-  let usage = type_usage.get(&def.name).copied().unwrap_or(TypeUsage::Bidirectional);
-  let mut derives = base_struct_derives(def.kind);
+fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<String, TypeUsage>) {
+  let usage = get_usage(&def.name, type_usage);
 
-  match def.kind {
-    StructKind::OperationRequest => {
-      push_unique(&mut derives, VALIDATE);
-    }
-    StructKind::RequestBody | StructKind::Schema => match usage {
-      TypeUsage::RequestOnly => {
-        push_unique(&mut derives, SERIALIZE);
-        push_unique(&mut derives, VALIDATE);
-      }
-      TypeUsage::ResponseOnly => {
-        push_unique(&mut derives, DESERIALIZE);
-      }
-      TypeUsage::Bidirectional => {
-        push_unique(&mut derives, SERIALIZE);
-        push_unique(&mut derives, DESERIALIZE);
-        push_unique(&mut derives, VALIDATE);
-      }
-    },
-  }
-
+  let derives = calculate_struct_derives(def.kind, usage);
   def.derives = derives;
 
-  if matches!(usage, TypeUsage::ResponseOnly) {
+  if usage == TypeUsage::ResponseOnly {
     strip_validation_attrs(&mut def.fields);
   }
 
-  adjust_skip_serializing_none(def, matches!(usage, TypeUsage::RequestOnly | TypeUsage::Bidirectional));
+  let needs_serialization = matches!(usage, TypeUsage::RequestOnly | TypeUsage::Bidirectional);
+  adjust_skip_serializing_none(def, needs_serialization);
 }
 
-fn base_struct_derives(kind: StructKind) -> Vec<String> {
-  match kind {
-    StructKind::Schema | StructKind::RequestBody => vec![
-      "Debug".to_string(),
-      "Clone".to_string(),
-      "PartialEq".to_string(),
-      "oas3_gen_support::Default".to_string(),
-    ],
-    StructKind::OperationRequest => vec![
-      "Debug".to_string(),
-      "Clone".to_string(),
-      "oas3_gen_support::Default".to_string(),
-    ],
-  }
-}
+fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<String, TypeUsage>) {
+  let usage = get_usage(&def.name, type_usage);
 
-fn push_unique(target: &mut Vec<String>, derive: &str) {
-  if !target.iter().any(|existing| existing == derive) {
-    target.push(derive.to_string());
-  }
-}
+  let mut derives = def.derives.clone();
+  derives.remove(&DeriveTrait::Serialize);
+  derives.remove(&DeriveTrait::Deserialize);
 
-fn apply_enum_usage_policy(def: &mut EnumDef, type_usage: &BTreeMap<String, TypeUsage>) {
-  let usage = type_usage.get(&def.name).copied().unwrap_or(TypeUsage::Bidirectional);
-  let mut derives = def
-    .derives
-    .iter()
-    .filter(|d| d.as_str() != SERIALIZE && d.as_str() != DESERIALIZE)
-    .cloned()
-    .collect::<Vec<_>>();
-
-  match usage {
-    TypeUsage::RequestOnly => {
-      push_unique(&mut derives, SERIALIZE);
-    }
-    TypeUsage::ResponseOnly => {
-      push_unique(&mut derives, DESERIALIZE);
-    }
-    TypeUsage::Bidirectional => {
-      push_unique(&mut derives, SERIALIZE);
-      push_unique(&mut derives, DESERIALIZE);
-    }
-  }
+  apply_usage_derives(&mut derives, usage);
 
   def.derives = derives;
+}
+
+fn get_usage(name: &str, map: &BTreeMap<String, TypeUsage>) -> TypeUsage {
+  map.get(name).copied().unwrap_or(TypeUsage::Bidirectional)
+}
+
+fn calculate_struct_derives(kind: StructKind, usage: TypeUsage) -> BTreeSet<DeriveTrait> {
+  let mut derives = default_struct_derives();
+
+  if kind == StructKind::OperationRequest {
+    derives.remove(&DeriveTrait::PartialEq);
+    derives.insert(DeriveTrait::Validate);
+  } else {
+    apply_usage_derives(&mut derives, usage);
+  }
+
+  derives
+}
+
+fn apply_usage_derives(derives: &mut BTreeSet<DeriveTrait>, usage: TypeUsage) {
+  match usage {
+    TypeUsage::RequestOnly => {
+      derives.insert(DeriveTrait::Serialize);
+      derives.insert(DeriveTrait::Validate);
+    }
+    TypeUsage::ResponseOnly => {
+      derives.insert(DeriveTrait::Deserialize);
+    }
+    TypeUsage::Bidirectional => {
+      derives.insert(DeriveTrait::Serialize);
+      derives.insert(DeriveTrait::Deserialize);
+      derives.insert(DeriveTrait::Validate);
+    }
+  }
 }
 
 fn strip_validation_attrs(fields: &mut [FieldDef]) {

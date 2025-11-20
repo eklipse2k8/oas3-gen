@@ -10,7 +10,7 @@ use crate::generator::{
   codegen::{self, Visibility},
   converter::{
     FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, naming::InlineTypeScanner,
-    operations::OperationConverter,
+    operations::OperationConverter, type_resolver::TypeResolver,
   },
   operation_registry::OperationRegistry,
   schema_graph::SchemaGraph,
@@ -208,11 +208,7 @@ impl Orchestrator {
       )
     };
 
-    let type_resolver = crate::generator::converter::type_resolver::TypeResolver::new(
-      &graph,
-      self.preserve_case_variants,
-      self.case_insensitive_enums,
-    );
+    let type_resolver = TypeResolver::new(&graph, self.preserve_case_variants, self.case_insensitive_enums);
     let scanner = InlineTypeScanner::new(&graph, type_resolver);
     let scan_result = scanner.scan_and_compute_names().unwrap_or_default();
 

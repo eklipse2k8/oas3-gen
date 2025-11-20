@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::ast::RustType;
+use super::ast::{DeriveTrait, RustType};
 
 pub mod attributes;
 pub mod client;
@@ -122,12 +122,12 @@ fn compute_serde_use(types: &[&RustType]) -> TokenStream {
   for ty in types {
     match ty {
       RustType::Struct(def) => {
-        needs_serialize |= derives_include(&def.derives, "Serialize");
-        needs_deserialize |= derives_include(&def.derives, "Deserialize");
+        needs_serialize |= derives_include(&def.derives, DeriveTrait::Serialize);
+        needs_deserialize |= derives_include(&def.derives, DeriveTrait::Deserialize);
       }
       RustType::Enum(def) => {
-        needs_serialize |= derives_include(&def.derives, "Serialize");
-        needs_deserialize |= derives_include(&def.derives, "Deserialize") || def.case_insensitive;
+        needs_serialize |= derives_include(&def.derives, DeriveTrait::Serialize);
+        needs_deserialize |= derives_include(&def.derives, DeriveTrait::Deserialize) || def.case_insensitive;
       }
       RustType::ResponseEnum(_) | RustType::DiscriminatedEnum(_) | RustType::TypeAlias(_) => {}
     }
@@ -141,6 +141,6 @@ fn compute_serde_use(types: &[&RustType]) -> TokenStream {
   }
 }
 
-fn derives_include(derives: &[String], target: &str) -> bool {
-  derives.iter().any(|derive| derive == target)
+fn derives_include(derives: &BTreeSet<DeriveTrait>, target: DeriveTrait) -> bool {
+  derives.contains(&target)
 }

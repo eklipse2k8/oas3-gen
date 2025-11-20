@@ -21,9 +21,9 @@ use super::{
 use crate::{
   generator::{
     ast::{
-      FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, PathSegment, QueryParameter,
-      ResponseEnumDef, ResponseVariant, RustType, StructDef, StructKind, StructMethod, StructMethodKind, TypeAliasDef,
-      TypeRef,
+      DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, PathSegment,
+      QueryParameter, ResponseEnumDef, ResponseVariant, RustPrimitive, RustType, StructDef, StructKind, StructMethod,
+      StructMethodKind, TypeAliasDef, TypeRef,
     },
     schema_graph::SchemaGraph,
   },
@@ -242,7 +242,9 @@ impl<'a> OperationConverter<'a> {
       name: to_rust_type_name(name),
       docs,
       fields,
-      derives: vec!["Debug".into(), "Clone".into(), "oas3_gen_support::Default".into()],
+      derives: [DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Default]
+        .into_iter()
+        .collect(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods,
@@ -734,7 +736,7 @@ impl<'a> OperationConverter<'a> {
 
         if inline_schema.properties.is_empty()
           && let Ok(type_ref) = self.schema_converter.schema_to_type_ref(inline_schema)
-          && !matches!(type_ref.base_type, crate::generator::ast::RustPrimitive::Custom(_))
+          && !matches!(type_ref.base_type, RustPrimitive::Custom(_))
         {
           return Ok((Some(type_ref), Some(content_type.clone())));
         }

@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::common::create_test_graph;
 use crate::generator::{
-  ast::RustType,
+  ast::{DeriveTrait, RustType},
   converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
 };
 
@@ -27,8 +27,8 @@ fn test_simple_string_enum() -> ConversionResult<()> {
 
   assert_eq!(enum_def.name, "SimpleEnum");
   assert_eq!(enum_def.variants.len(), 2);
-  assert!(enum_def.derives.contains(&"Eq".to_string()));
-  assert!(enum_def.derives.contains(&"Hash".to_string()));
+  assert!(enum_def.derives.contains(&DeriveTrait::Eq));
+  assert!(enum_def.derives.contains(&DeriveTrait::Hash));
   Ok(())
 }
 

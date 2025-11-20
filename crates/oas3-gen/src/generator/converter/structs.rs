@@ -14,7 +14,10 @@ use super::{
 };
 use crate::{
   generator::{
-    ast::{DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, RustType, StructDef, StructKind, TypeRef},
+    ast::{
+      DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, RustType, StructDef, StructKind, TypeRef,
+      default_struct_derives,
+    },
     schema_graph::SchemaGraph,
   },
   reserved::to_rust_type_name,
@@ -106,15 +109,13 @@ impl<'a> StructConverter<'a> {
       serde_attrs.push(serde_attrs::DEFAULT.to_string());
     }
 
-    let all_read_only = !fields.is_empty() && fields.iter().all(|f| f.read_only);
-    let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
     let outer_attrs = utils::container_outer_attrs(&fields);
 
     let struct_type = RustType::Struct(StructDef {
       name: struct_name,
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
-      derives: utils::derives_for_struct(all_read_only, all_write_only),
+      derives: default_struct_derives(),
       serde_attrs,
       outer_attrs,
       methods: vec![],
@@ -162,8 +163,6 @@ impl<'a> StructConverter<'a> {
       fields.push(field);
     }
 
-    let all_read_only = !fields.is_empty() && fields.iter().all(|f| f.read_only);
-    let all_write_only = !fields.is_empty() && fields.iter().all(|f| f.write_only);
     let outer_attrs = utils::container_outer_attrs(&fields);
 
     let mut all_types = Vec::with_capacity(1 + inline_types.len());
@@ -171,7 +170,7 @@ impl<'a> StructConverter<'a> {
       name: struct_name,
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
-      derives: utils::derives_for_struct(all_read_only, all_write_only),
+      derives: default_struct_derives(),
       serde_attrs,
       outer_attrs,
       methods: vec![],

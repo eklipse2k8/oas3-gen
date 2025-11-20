@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
+
 use crate::generator::{
-  ast::{EnumDef, VariantContent, VariantDef},
+  ast::{DeriveTrait, EnumDef, VariantContent, VariantDef},
   codegen::{Visibility, enums::generate_enum},
 };
 
@@ -25,12 +27,12 @@ fn test_case_insensitive_enum_generation() {
       },
     ],
     discriminator: None,
-    derives: vec![
-      "Debug".to_string(),
-      "Clone".to_string(),
-      "Serialize".to_string(),
-      "Deserialize".to_string(),
-    ],
+    derives: BTreeSet::from([
+      DeriveTrait::Debug,
+      DeriveTrait::Clone,
+      DeriveTrait::Serialize,
+      DeriveTrait::Deserialize,
+    ]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
