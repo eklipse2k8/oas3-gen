@@ -7,7 +7,10 @@ use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
 use super::{ConversionResult, REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX};
-use crate::{generator::ast::RustType, reserved::to_rust_type_name};
+use crate::{
+  generator::ast::RustType,
+  reserved::{sanitize, to_rust_type_name},
+};
 
 pub(crate) struct SharedSchemaCache {
   schema_to_type: BTreeMap<String, String>,
@@ -69,7 +72,7 @@ impl SharedSchemaCache {
     if let Some(name) = self.precomputed_names.get(&schema_hash) {
       return Ok(name.clone());
     }
-    Ok(self.make_unique_name(base_name.to_string()))
+    Ok(self.make_unique_name(base_name))
   }
 
   pub(crate) fn register_type(
@@ -107,7 +110,7 @@ impl SharedSchemaCache {
       if let Some(existing_name) = self.schema_to_type.get(&schema_hash) {
         return Ok(existing_name.clone());
       }
-      name = self.make_unique_name(name);
+      name = self.make_unique_name(&name);
     }
 
     self.used_names.insert(name.clone());
@@ -142,10 +145,11 @@ impl SharedSchemaCache {
     let is_request = context == REQUEST_BODY_SUFFIX;
 
     let with_suffix = |base: &str| {
+      let sanitized_base = sanitize(base);
       if is_request {
-        format!("{base}{REQUEST_BODY_SUFFIX}")
+        format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
       } else {
-        format!("{base}{context}{RESPONSE_SUFFIX}")
+        format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
       }
     };
 
@@ -153,10 +157,11 @@ impl SharedSchemaCache {
       && let Some((prop_name, _)) = schema.properties.iter().next()
     {
       let singular = cruet::to_singular(prop_name);
+      let sanitized_singular = sanitize(&singular);
       return if is_request {
-        singular
+        sanitized_singular
       } else {
-        format!("{singular}{RESPONSE_SUFFIX}")
+        format!("{sanitized_singular}{RESPONSE_SUFFIX}")
       };
     }
 
@@ -178,17 +183,21 @@ impl SharedSchemaCache {
       })
   }
 
-  pub(crate) fn make_unique_name(&self, base: String) -> String {
-    let rust_name = to_rust_type_name(&base);
+  pub(crate) fn make_unique_name(&self, base: &str) -> String {
+    let rust_name = to_rust_type_name(base);
     if !self.used_names.contains(&rust_name) {
-      return base;
+      return rust_name;
     }
 
     let mut suffix = 2;
-    while self.used_names.contains(&to_rust_type_name(&format!("{base}{suffix}"))) {
+    loop {
+      let candidate_base = format!("{base}{suffix}");
+      let candidate_rust = to_rust_type_name(&candidate_base);
+      if !self.used_names.contains(&candidate_rust) {
+        return candidate_rust;
+      }
       suffix += 1;
     }
-    format!("{base}{suffix}")
   }
 
   pub(crate) fn hash_schema(schema: &ObjectSchema) -> ConversionResult<String> {
@@ -313,5 +322,113 @@ mod tests {
       hash1, hash2,
       "Required array order should not affect hash due to RFC 8785 canonicalization"
     );
+  }
+
+  #[test]
+  fn test_infer_name_from_context_sanitizes_hyphens() {
+    let schema = ObjectSchema::default();
+
+    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/check-access-by-email", "200");
+
+    assert_eq!(result, "check_access_by_email200Response");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+  }
+
+  #[test]
+  fn test_infer_name_from_context_sanitizes_multiple_separators() {
+    let schema = ObjectSchema::default();
+
+    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
+
+    assert_eq!(result, "foo_bar_baz_qux201Response");
+    assert!(
+      !result.contains('-') && !result.contains('.'),
+      "Result should not contain hyphens or dots: {result}"
+    );
+  }
+
+  #[test]
+  fn test_infer_name_from_context_with_request_body() {
+    let schema = ObjectSchema::default();
+
+    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
+
+    assert_eq!(result, "create_userRequestBody");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+  }
+
+  #[test]
+  fn test_infer_name_from_context_single_property_response() {
+    let mut schema = ObjectSchema::default();
+    schema.properties.insert(
+      "user".to_string(),
+      oas3::spec::ObjectOrReference::Object(ObjectSchema::default()),
+    );
+
+    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/check-access", "200");
+
+    assert_eq!(result, "userResponse");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+  }
+
+  #[test]
+  fn test_make_unique_name_returns_pascal_case() {
+    let cache = SharedSchemaCache::new();
+
+    let result = cache.make_unique_name("check_access_by_email200Response");
+
+    assert_eq!(result, "CheckAccessByEmail200Response");
+    assert!(
+      result.chars().next().unwrap().is_uppercase(),
+      "Result should start with uppercase: {result}"
+    );
+  }
+
+  #[test]
+  fn test_make_unique_name_handles_collisions() {
+    let mut cache = SharedSchemaCache::new();
+    cache.used_names.insert("UserResponse".to_string());
+
+    let result = cache.make_unique_name("user_response");
+
+    assert_eq!(result, "UserResponse2");
+    assert!(
+      result.chars().next().unwrap().is_uppercase(),
+      "Result should start with uppercase: {result}"
+    );
+  }
+
+  #[test]
+  fn test_make_unique_name_handles_multiple_collisions() {
+    let mut cache = SharedSchemaCache::new();
+    cache.used_names.insert("UserResponse".to_string());
+    cache.used_names.insert("UserResponse2".to_string());
+    cache.used_names.insert("UserResponse3".to_string());
+
+    let result = cache.make_unique_name("user_response");
+
+    assert_eq!(result, "UserResponse4");
+  }
+
+  #[test]
+  fn test_make_unique_name_with_leading_digit() {
+    let cache = SharedSchemaCache::new();
+
+    let result = cache.make_unique_name("200_response");
+
+    assert_eq!(result, "T200Response");
+    assert!(
+      result.starts_with('T'),
+      "Result should be prefixed with T when starting with digit: {result}"
+    );
+  }
+
+  #[test]
+  fn test_make_unique_name_preserves_mixed_case() {
+    let cache = SharedSchemaCache::new();
+
+    let result = cache.make_unique_name("XMLHttpRequest");
+
+    assert_eq!(result, "XMLHttpRequest");
   }
 }

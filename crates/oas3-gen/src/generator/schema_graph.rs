@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet},
+  collections::{BTreeMap, BTreeSet, HashMap},
   string::ToString,
 };
 
@@ -55,43 +55,77 @@ impl SchemaRepository {
 struct ReferenceExtractor;
 
 impl ReferenceExtractor {
-  fn extract_from_schema(schema: &ObjectSchema) -> BTreeSet<String> {
+  fn extract_from_schema(
+    schema: &ObjectSchema,
+    fingerprints: Option<&HashMap<BTreeSet<String>, String>>,
+  ) -> BTreeSet<String> {
     let mut refs = BTreeSet::new();
 
-    Self::collect_from_properties(schema, &mut refs);
-    Self::collect_from_combinators(schema, &mut refs);
-    Self::collect_from_items(schema, &mut refs);
+    Self::collect_from_properties(schema, &mut refs, fingerprints);
+    Self::collect_from_combinators(schema, &mut refs, fingerprints);
+    Self::collect_from_items(schema, &mut refs, fingerprints);
 
     refs
   }
 
-  fn collect_from_properties(schema: &ObjectSchema, refs: &mut BTreeSet<String>) {
+  fn collect_from_properties(
+    schema: &ObjectSchema,
+    refs: &mut BTreeSet<String>,
+    fingerprints: Option<&HashMap<BTreeSet<String>, String>>,
+  ) {
     for prop_schema in schema.properties.values() {
-      Self::extract_from_schema_ref(prop_schema, refs);
+      Self::extract_from_schema_ref(prop_schema, refs, fingerprints);
     }
   }
 
-  fn collect_from_combinators(schema: &ObjectSchema, refs: &mut BTreeSet<String>) {
+  fn collect_from_combinators(
+    schema: &ObjectSchema,
+    refs: &mut BTreeSet<String>,
+    fingerprints: Option<&HashMap<BTreeSet<String>, String>>,
+  ) {
     for schema_ref in schema.one_of.iter().chain(&schema.any_of).chain(&schema.all_of) {
-      Self::extract_from_schema_ref(schema_ref, refs);
+      Self::extract_from_schema_ref(schema_ref, refs, fingerprints);
+    }
+
+    if let Some(map) = fingerprints {
+      if !schema.one_of.is_empty() {
+        let fp = SchemaGraph::extract_fingerprint(&schema.one_of);
+        if let Some(name) = map.get(&fp) {
+          refs.insert(name.clone());
+        }
+      }
+      if !schema.any_of.is_empty() {
+        let fp = SchemaGraph::extract_fingerprint(&schema.any_of);
+        if let Some(name) = map.get(&fp) {
+          refs.insert(name.clone());
+        }
+      }
     }
   }
 
-  fn collect_from_items(schema: &ObjectSchema, refs: &mut BTreeSet<String>) {
+  fn collect_from_items(
+    schema: &ObjectSchema,
+    refs: &mut BTreeSet<String>,
+    fingerprints: Option<&HashMap<BTreeSet<String>, String>>,
+  ) {
     if let Some(ref items_box) = schema.items
       && let Schema::Object(ref schema_ref) = **items_box
     {
-      Self::extract_from_schema_ref(schema_ref, refs);
+      Self::extract_from_schema_ref(schema_ref, refs, fingerprints);
     }
   }
 
-  fn extract_from_schema_ref(schema_ref: &ObjectOrReference<ObjectSchema>, refs: &mut BTreeSet<String>) {
+  fn extract_from_schema_ref(
+    schema_ref: &ObjectOrReference<ObjectSchema>,
+    refs: &mut BTreeSet<String>,
+    fingerprints: Option<&HashMap<BTreeSet<String>, String>>,
+  ) {
     if let Some(ref_name) = Self::extract_ref_name_from_obj_ref(schema_ref) {
       refs.insert(ref_name);
     }
 
     if let ObjectOrReference::Object(inline_schema) = schema_ref {
-      let inline_refs = Self::extract_from_schema(inline_schema);
+      let inline_refs = Self::extract_from_schema(inline_schema, fingerprints);
       refs.extend(inline_refs);
     }
   }
@@ -118,11 +152,11 @@ impl DependencyGraph {
     }
   }
 
-  fn build(&mut self, repository: &SchemaRepository) {
+  fn build(&mut self, repository: &SchemaRepository, fingerprints: &HashMap<BTreeSet<String>, String>) {
     for schema_name in repository.names() {
       let deps = repository
         .get(schema_name)
-        .map(ReferenceExtractor::extract_from_schema)
+        .map(|s| ReferenceExtractor::extract_from_schema(s, Some(fingerprints)))
         .unwrap_or_default();
 
       self.dependencies.insert(schema_name.clone(), deps);
@@ -213,12 +247,14 @@ pub(crate) struct SchemaGraph {
   dependency_graph: DependencyGraph,
   discriminator_cache: BTreeMap<String, (String, String)>,
   spec: Spec,
+  union_fingerprints: HashMap<BTreeSet<String>, String>,
 }
 
 impl SchemaGraph {
   pub(crate) fn new(spec: Spec) -> (Self, Vec<GenerationWarning>) {
     let (repository, warnings) = SchemaRepository::from_spec(&spec);
     let discriminator_cache = Self::build_discriminator_cache(&repository);
+    let union_fingerprints = Self::build_union_fingerprints(&repository);
 
     (
       Self {
@@ -226,6 +262,7 @@ impl SchemaGraph {
         dependency_graph: DependencyGraph::new(),
         discriminator_cache,
         spec,
+        union_fingerprints,
       },
       warnings,
     )
@@ -248,6 +285,26 @@ impl SchemaGraph {
     }
 
     cache
+  }
+
+  fn build_union_fingerprints(repository: &SchemaRepository) -> HashMap<BTreeSet<String>, String> {
+    let mut map = HashMap::new();
+    for (name, schema) in &repository.schemas {
+      let fp_one = Self::extract_fingerprint(&schema.one_of);
+      if fp_one.len() >= 2 {
+        map.entry(fp_one).or_insert(name.clone());
+      }
+
+      let fp_any = Self::extract_fingerprint(&schema.any_of);
+      if fp_any.len() >= 2 {
+        map.entry(fp_any).or_insert(name.clone());
+      }
+    }
+    map
+  }
+
+  pub(crate) fn extract_fingerprint(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
+    variants.iter().filter_map(Self::extract_ref_name_from_ref).collect()
   }
 
   pub(crate) fn get_schema(&self, name: &str) -> Option<&ObjectSchema> {
@@ -274,7 +331,7 @@ impl SchemaGraph {
   }
 
   pub(crate) fn build_dependencies(&mut self) {
-    self.dependency_graph.build(&self.repository);
+    self.dependency_graph.build(&self.repository, &self.union_fingerprints);
   }
 
   pub(crate) fn detect_cycles(&mut self) -> Vec<Vec<String>> {
@@ -293,18 +350,23 @@ impl SchemaGraph {
     let mut reachable = BTreeSet::new();
 
     for (_stable_id, _method, _path, operation) in operation_registry.operations_with_details() {
-      Self::collect_refs_from_operation(operation, &self.spec, &mut reachable);
+      Self::collect_refs_from_operation(operation, &self.spec, &mut reachable, &self.union_fingerprints);
     }
 
     self.expand_with_dependencies(&reachable)
   }
 
-  fn collect_refs_from_operation(operation: &oas3::spec::Operation, spec: &Spec, refs: &mut BTreeSet<String>) {
+  fn collect_refs_from_operation(
+    operation: &oas3::spec::Operation,
+    spec: &Spec,
+    refs: &mut BTreeSet<String>,
+    fingerprints: &HashMap<BTreeSet<String>, String>,
+  ) {
     for param in &operation.parameters {
       if let Ok(resolved_param) = param.resolve(spec)
         && let Some(ref schema_ref) = resolved_param.schema
       {
-        Self::collect_refs_from_schema_ref(schema_ref, refs);
+        Self::collect_refs_from_schema_ref(schema_ref, refs, fingerprints);
       }
     }
 
@@ -313,7 +375,7 @@ impl SchemaGraph {
     {
       for media_type in request_body.content.values() {
         if let Some(ref schema_ref) = media_type.schema {
-          Self::collect_refs_from_schema_ref(schema_ref, refs);
+          Self::collect_refs_from_schema_ref(schema_ref, refs, fingerprints);
         }
       }
     }
@@ -323,7 +385,7 @@ impl SchemaGraph {
         if let Ok(response) = response_ref.resolve(spec) {
           for media_type in response.content.values() {
             if let Some(ref schema_ref) = media_type.schema {
-              Self::collect_refs_from_schema_ref(schema_ref, refs);
+              Self::collect_refs_from_schema_ref(schema_ref, refs, fingerprints);
             }
           }
         }
@@ -331,11 +393,15 @@ impl SchemaGraph {
     }
   }
 
-  fn collect_refs_from_schema_ref(schema_ref: &ObjectOrReference<ObjectSchema>, refs: &mut BTreeSet<String>) {
+  fn collect_refs_from_schema_ref(
+    schema_ref: &ObjectOrReference<ObjectSchema>,
+    refs: &mut BTreeSet<String>,
+    fingerprints: &HashMap<BTreeSet<String>, String>,
+  ) {
     if let Some(ref_name) = Self::extract_ref_name_from_ref(schema_ref) {
       refs.insert(ref_name);
     } else if let ObjectOrReference::Object(inline_schema) = schema_ref {
-      let inline_refs = ReferenceExtractor::extract_from_schema(inline_schema);
+      let inline_refs = ReferenceExtractor::extract_from_schema(inline_schema, Some(fingerprints));
       refs.extend(inline_refs);
     }
   }
@@ -438,7 +504,7 @@ mod tests {
   #[test]
   fn test_reference_extractor_simple_ref() {
     let schema = create_schema_with_ref("User");
-    let refs = ReferenceExtractor::extract_from_schema(&schema);
+    let refs = ReferenceExtractor::extract_from_schema(&schema, None);
 
     assert_eq!(refs.len(), 1);
     assert!(refs.contains("User"));
@@ -469,7 +535,7 @@ mod tests {
       properties,
       ..Default::default()
     };
-    let refs = ReferenceExtractor::extract_from_schema(&schema);
+    let refs = ReferenceExtractor::extract_from_schema(&schema, None);
 
     assert_eq!(refs.len(), 2);
     assert!(refs.contains("User"));
@@ -502,7 +568,7 @@ mod tests {
       ..Default::default()
     };
 
-    let refs = ReferenceExtractor::extract_from_schema(&schema);
+    let refs = ReferenceExtractor::extract_from_schema(&schema, None);
 
     assert_eq!(refs.len(), 3);
     assert!(refs.contains("User"));
@@ -560,7 +626,7 @@ mod tests {
     let (repo, _warnings) = SchemaRepository::from_spec(&spec);
 
     let mut graph = DependencyGraph::new();
-    graph.build(&repo);
+    graph.build(&repo, &HashMap::new());
 
     assert_eq!(graph.dependencies.len(), 2);
     assert!(graph.dependencies.get("User").unwrap().is_empty());
@@ -596,7 +662,7 @@ mod tests {
     let (repo, _warnings) = SchemaRepository::from_spec(&spec);
 
     let mut graph = DependencyGraph::new();
-    graph.build(&repo);
+    graph.build(&repo, &HashMap::new());
     let cycles = graph.detect_cycles();
 
     assert!(!cycles.is_empty());

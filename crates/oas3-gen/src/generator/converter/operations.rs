@@ -349,7 +349,7 @@ impl<'a> OperationConverter<'a> {
           name
         } else {
           let base_name = SharedSchemaCache::infer_name_from_context(inline_schema, path, "RequestBody");
-          let unique_name = ctx.schema_cache.make_unique_name(base_name);
+          let unique_name = ctx.schema_cache.make_unique_name(&base_name);
 
           // Pass cache down for recursive deduplication
           let (body_struct, nested_types) = self.schema_converter.convert_struct(
@@ -745,7 +745,7 @@ impl<'a> OperationConverter<'a> {
           name
         } else {
           let base_name = SharedSchemaCache::infer_name_from_context(inline_schema, path, status_code);
-          let unique_name = schema_cache.make_unique_name(base_name);
+          let unique_name = schema_cache.make_unique_name(&base_name);
 
           let (body_struct, nested_types) = self.schema_converter.convert_struct(
             &unique_name,

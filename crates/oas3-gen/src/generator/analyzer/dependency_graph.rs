@@ -70,7 +70,6 @@ impl DependencyGraph {
   }
 
   fn extract_from_response_enum(def: &ResponseEnumDef, deps: &mut BTreeSet<String>) {
-    deps.insert(def.request_type.clone());
     for variant in &def.variants {
       if let Some(type_ref) = &variant.schema_type {
         Self::extract_from_type_ref(type_ref, deps);

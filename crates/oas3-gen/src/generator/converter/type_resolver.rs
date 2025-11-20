@@ -150,7 +150,7 @@ impl<'a> TypeResolver<'a> {
         // Unless it's a new schema not in the graph?
         // Just use get_preferred_name as fallback.
         c.get_preferred_name(prop_schema, &base_name)
-          .unwrap_or_else(|_| c.make_unique_name(base_name.clone()))
+          .unwrap_or_else(|_| c.make_unique_name(&base_name))
       })
     } else {
       base_name

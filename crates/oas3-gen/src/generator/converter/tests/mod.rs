@@ -1,5 +1,6 @@
 mod common;
 mod enums;
+mod implicit_dependencies;
 mod inline_objects;
 mod operations;
 mod structs;

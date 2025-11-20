@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use crate::generator::{
   analyzer::{TypeUsage, build_type_usage_map},
   ast::{
-    EnumDef, FieldDef, RustPrimitive, RustType, StructDef, StructKind, TypeAliasDef, TypeRef, VariantContent,
-    VariantDef,
+    EnumDef, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive, RustType, StructDef, StructKind,
+    TypeAliasDef, TypeRef, VariantContent, VariantDef,
   },
 };
 
@@ -391,4 +391,331 @@ fn test_cyclic_dependency_handling() {
 
   assert_eq!(usage_map.get("A"), Some(&TypeUsage::ResponseOnly));
   assert_eq!(usage_map.get("B"), Some(&TypeUsage::ResponseOnly));
+}
+
+#[test]
+fn test_response_enum_does_not_propagate_to_request_type() {
+  let request_struct = RustType::Struct(StructDef {
+    name: "CreateUserRequestParams".to_string(),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: "name".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }],
+    derives: vec!["Debug".to_string()],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::OperationRequest,
+  });
+
+  let response_struct = RustType::Struct(StructDef {
+    name: "User".to_string(),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: "id".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::String),
+      ..Default::default()
+    }],
+    derives: vec!["Debug".to_string()],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::Schema,
+  });
+
+  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
+    name: "CreateUserResponseEnum".to_string(),
+    docs: vec![],
+    request_type: "CreateUserRequestParams".to_string(),
+    variants: vec![ResponseVariant {
+      status_code: "200".to_string(),
+      variant_name: "Ok".to_string(),
+      description: None,
+      schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".to_string()))),
+      content_type: None,
+    }],
+  });
+
+  let types = vec![request_struct, response_struct, response_enum];
+  let seed = seeds(&[
+    ("CreateUserRequestParams", (true, false)),
+    ("CreateUserResponseEnum", (false, true)),
+  ]);
+  let usage_map = build_type_usage_map(seed, &types);
+
+  assert_eq!(usage_map.get("CreateUserRequestParams"), Some(&TypeUsage::RequestOnly));
+  assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get("CreateUserResponseEnum"), Some(&TypeUsage::ResponseOnly));
+}
+
+#[test]
+fn test_response_enum_propagates_to_variant_types_only() {
+  let response_a = RustType::Struct(StructDef {
+    name: "ResponseA".to_string(),
+    docs: vec![],
+    fields: vec![],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::Schema,
+  });
+
+  let response_b = RustType::Struct(StructDef {
+    name: "ResponseB".to_string(),
+    docs: vec![],
+    fields: vec![],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::Schema,
+  });
+
+  let request_struct = RustType::Struct(StructDef {
+    name: "RequestParams".to_string(),
+    docs: vec![],
+    fields: vec![],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::OperationRequest,
+  });
+
+  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
+    name: "MyResponseEnum".to_string(),
+    docs: vec![],
+    request_type: "RequestParams".to_string(),
+    variants: vec![
+      ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".to_string()))),
+        content_type: None,
+      },
+      ResponseVariant {
+        status_code: "400".to_string(),
+        variant_name: "BadRequest".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".to_string()))),
+        content_type: None,
+      },
+    ],
+  });
+
+  let types = vec![response_a, response_b, request_struct, response_enum];
+  let seed = seeds(&[
+    ("RequestParams", (true, false)),
+    ("MyResponseEnum", (false, true)),
+  ]);
+  let usage_map = build_type_usage_map(seed, &types);
+
+  assert_eq!(usage_map.get("RequestParams"), Some(&TypeUsage::RequestOnly));
+  assert_eq!(usage_map.get("ResponseA"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get("ResponseB"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get("MyResponseEnum"), Some(&TypeUsage::ResponseOnly));
+}
+
+#[test]
+fn test_request_body_chain_with_response_enum() {
+  let request_body_struct = RustType::Struct(StructDef {
+    name: "CreateChatCompletionRequest".to_string(),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: "model".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::Custom("ModelIds".to_string())),
+      ..Default::default()
+    }],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::Schema,
+  });
+
+  let model_enum = RustType::Enum(EnumDef {
+    name: "ModelIds".to_string(),
+    docs: vec![],
+    variants: vec![VariantDef {
+      name: "Gpt4".to_string(),
+      docs: vec![],
+      content: VariantContent::Unit,
+      serde_attrs: vec![],
+      deprecated: false,
+    }],
+    discriminator: None,
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+  });
+
+  let request_body_alias = RustType::TypeAlias(TypeAliasDef {
+    name: "CreateChatCompletionRequestBody".to_string(),
+    docs: vec![],
+    target: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequest".to_string())),
+  });
+
+  let request_params = RustType::Struct(StructDef {
+    name: "CreateChatCompletionRequestParams".to_string(),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: "body".to_string(),
+      rust_type: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequestBody".to_string())),
+      ..Default::default()
+    }],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::OperationRequest,
+  });
+
+  let response_struct = RustType::Struct(StructDef {
+    name: "CreateChatCompletionResponse".to_string(),
+    docs: vec![],
+    fields: vec![],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::Schema,
+  });
+
+  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
+    name: "CreateChatCompletionResponseEnum".to_string(),
+    docs: vec![],
+    request_type: "CreateChatCompletionRequestParams".to_string(),
+    variants: vec![ResponseVariant {
+      status_code: "200".to_string(),
+      variant_name: "Ok".to_string(),
+      description: None,
+      schema_type: Some(TypeRef::new(RustPrimitive::Custom("CreateChatCompletionResponse".to_string()))),
+      content_type: None,
+    }],
+  });
+
+  let types = vec![
+    request_body_struct,
+    model_enum,
+    request_body_alias,
+    request_params,
+    response_struct,
+    response_enum,
+  ];
+
+  let seed = seeds(&[
+    ("CreateChatCompletionRequest", (true, false)),
+    ("CreateChatCompletionRequestBody", (true, false)),
+    ("CreateChatCompletionRequestParams", (true, false)),
+    ("CreateChatCompletionResponseEnum", (false, true)),
+  ]);
+
+  let usage_map = build_type_usage_map(seed, &types);
+
+  assert_eq!(
+    usage_map.get("CreateChatCompletionRequest"),
+    Some(&TypeUsage::RequestOnly),
+    "Request body schema should remain request-only"
+  );
+  assert_eq!(
+    usage_map.get("ModelIds"),
+    Some(&TypeUsage::RequestOnly),
+    "Model enum should remain request-only"
+  );
+  assert_eq!(
+    usage_map.get("CreateChatCompletionRequestBody"),
+    Some(&TypeUsage::RequestOnly),
+    "Request body alias should remain request-only"
+  );
+  assert_eq!(
+    usage_map.get("CreateChatCompletionRequestParams"),
+    Some(&TypeUsage::RequestOnly),
+    "Request params should remain request-only despite ResponseEnum reference"
+  );
+  assert_eq!(
+    usage_map.get("CreateChatCompletionResponse"),
+    Some(&TypeUsage::ResponseOnly),
+    "Response should be response-only"
+  );
+  assert_eq!(
+    usage_map.get("CreateChatCompletionResponseEnum"),
+    Some(&TypeUsage::ResponseOnly),
+    "Response enum should be response-only"
+  );
+}
+
+#[test]
+fn test_response_enum_dependency_extraction() {
+  use crate::generator::analyzer::dependency_graph::DependencyGraph;
+
+  let request_struct = RustType::Struct(StructDef {
+    name: "RequestParams".to_string(),
+    docs: vec![],
+    fields: vec![],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::OperationRequest,
+  });
+
+  let response_a = RustType::Struct(StructDef {
+    name: "ResponseA".to_string(),
+    docs: vec![],
+    fields: vec![],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::Schema,
+  });
+
+  let response_b = RustType::Struct(StructDef {
+    name: "ResponseB".to_string(),
+    docs: vec![],
+    fields: vec![],
+    derives: vec![],
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    methods: vec![],
+    kind: StructKind::Schema,
+  });
+
+  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
+    name: "MyResponseEnum".to_string(),
+    docs: vec![],
+    request_type: "RequestParams".to_string(),
+    variants: vec![
+      ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".to_string()))),
+        content_type: None,
+      },
+      ResponseVariant {
+        status_code: "400".to_string(),
+        variant_name: "BadRequest".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".to_string()))),
+        content_type: None,
+      },
+    ],
+  });
+
+  let types = vec![request_struct, response_a, response_b, response_enum];
+  let dep_graph = DependencyGraph::build(&types);
+
+  let response_enum_deps = dep_graph.get_dependencies("MyResponseEnum");
+  assert!(response_enum_deps.is_some(), "ResponseEnum should have dependencies");
+
+  let deps = response_enum_deps.unwrap();
+  assert!(deps.contains("ResponseA"), "Should depend on ResponseA variant");
+  assert!(deps.contains("ResponseB"), "Should depend on ResponseB variant");
+  assert!(!deps.contains("RequestParams"), "Should NOT depend on request_type field - this was the bug!");
 }

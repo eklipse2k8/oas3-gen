@@ -755,8 +755,7 @@ mod tests {
     let usage_count = code.matches("status: Option<Status>").count();
     assert!(
       usage_count >= 2,
-      "Multiple structs should use Status (found {})",
-      usage_count
+      "Multiple structs should use Status (found {usage_count})"
     );
 
     // StructC should also use Status (values are sorted same)
@@ -793,7 +792,7 @@ mod tests {
     );
 
     if !code.contains("Known(Status)") {
-      println!("Generated Code:\n{}", code);
+      println!("Generated Code:\n{code}");
     }
     // 4. Verify usage: Known variant should wrap Status
     // "Known(Status)"
