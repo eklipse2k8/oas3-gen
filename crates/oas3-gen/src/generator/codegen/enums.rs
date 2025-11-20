@@ -14,12 +14,18 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
   let name = format_ident!("{}", def.name);
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
-  let derives = generate_derives_from_slice(&def.derives);
+
+  let mut derives_list = def.derives.clone();
+  if def.case_insensitive {
+    derives_list.retain(|d| d != "Deserialize");
+  }
+  let derives = generate_derives_from_slice(&derives_list);
+
   let outer_attrs = generate_outer_attrs(&def.outer_attrs);
   let serde_attrs = generate_enum_serde_attrs(def);
   let variants = generate_variants(&def.variants);
 
-  quote! {
+  let enum_def = quote! {
     #docs
     #outer_attrs
     #derives
@@ -27,6 +33,16 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
     #vis enum #name {
       #(#variants),*
     }
+  };
+
+  if def.case_insensitive {
+    let deserialize_impl = generate_case_insensitive_deserialize(def);
+    quote! {
+      #enum_def
+      #deserialize_impl
+    }
+  } else {
+    enum_def
   }
 }
 
@@ -175,6 +191,72 @@ pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibili
     #[derive(Clone, Debug)]
     #vis enum #name {
       #(#variants),*
+    }
+  }
+}
+
+fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
+  let name = format_ident!("{}", def.name);
+
+  let match_arms: Vec<TokenStream> = def
+    .variants
+    .iter()
+    .map(|v| {
+      let variant_name = format_ident!("{}", v.name);
+      let mut rename = v.name.clone();
+      for attr in &v.serde_attrs {
+        if let Some(val) = attr.strip_prefix("rename = \"")
+          && let Some(end) = val.strip_suffix("\"")
+        {
+          rename = end.to_string();
+        }
+      }
+      let lower_val = rename.to_ascii_lowercase();
+      quote! {
+        #lower_val => Ok(#name::#variant_name),
+      }
+    })
+    .collect();
+
+  let error_variants_list: Vec<String> = def
+    .variants
+    .iter()
+    .map(|v| {
+      let mut rename = v.name.clone();
+      for attr in &v.serde_attrs {
+        if let Some(val) = attr.strip_prefix("rename = \"")
+          && let Some(end) = val.strip_suffix("\"")
+        {
+          rename = end.to_string();
+        }
+      }
+      rename
+    })
+    .collect();
+
+  let error_variants_list_tokens = quote! { &[ #(#error_variants_list),* ] };
+
+  // Check for fallback variant (Unknown/Other)
+  let fallback_arm =
+    if let Some(unknown_variant) = def.variants.iter().find(|v| v.name == "Unknown" || v.name == "Other") {
+      let variant_name = format_ident!("{}", unknown_variant.name);
+      quote! { _ => Ok(#name::#variant_name), }
+    } else {
+      quote! { _ => Err(serde::de::Error::unknown_variant(&s, #error_variants_list_tokens)), }
+    };
+
+  quote! {
+    impl<'de> serde::Deserialize<'de> for #name {
+      fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+      where
+        D: serde::Deserializer<'de>,
+      {
+        let s = String::deserialize(deserializer)?;
+        match s.to_ascii_lowercase().as_str() {
+          #(#match_arms)*
+          #fallback_arm
+        }
+      }
     }
   }
 }

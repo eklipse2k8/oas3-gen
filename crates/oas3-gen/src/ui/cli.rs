@@ -91,9 +91,15 @@ pub enum Commands {
     #[arg(long, default_value_t = false, display_order = 11, help_heading = "Code Generation")]
     odata_support: bool,
 
-    /// Preserve case-variant duplicates as separate enum values (e.g., "ITEM" and "item" become Item and Item1)
-    #[arg(long, default_value_t = false, display_order = 12, help_heading = "Code Generation")]
-    preserve_case_variants: bool,
+    /// Specifies how to handle enum case sensitivity and duplicates
+    #[arg(
+      long,
+      value_enum,
+      default_value_t,
+      display_order = 12,
+      help_heading = "Code Generation"
+    )]
+    enum_mode: EnumCaseMode,
 
     /// Generate all schemas, even those unreferenced by selected operations
     #[arg(
@@ -155,6 +161,17 @@ pub enum Commands {
 pub enum GenerateMode {
   Types,
   Client,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum EnumCaseMode {
+  #[default]
+  /// Merge duplicates with strict matching (e.g., "ITEM" and "item" become "Item")
+  Merge,
+  /// Preserve case-variant duplicates as separate enum values
+  Preserve,
+  /// Merge duplicates and enable relaxed (case-insensitive) deserialization
+  Relaxed,
 }
 
 #[derive(Subcommand, Debug)]

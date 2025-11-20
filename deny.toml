@@ -27,7 +27,7 @@ skip = [
   "darling_core:<0.21",
   "darling_macro:<0.21",
 ]
-skip-tree = []
+skip-tree = ["rustix"]
 
 [sources]
 unknown-registry = "deny"

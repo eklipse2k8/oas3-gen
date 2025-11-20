@@ -17,8 +17,8 @@ fn test_simple_string_enum() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("SimpleEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("SimpleEnum", graph.get_schema("SimpleEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("SimpleEnum", graph.get_schema("SimpleEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -88,8 +88,8 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> ConversionResult<()> {
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum as last type")
@@ -157,8 +157,8 @@ fn test_anyof_without_discriminator_has_no_rename_attrs() -> ConversionResult<()
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum as last type")
@@ -228,8 +228,8 @@ fn test_anyof_with_discriminator_no_untagged() -> ConversionResult<()> {
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum as last type")
@@ -249,8 +249,8 @@ fn test_integer_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("IntEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("IntEnum", graph.get_schema("IntEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("IntEnum", graph.get_schema("IntEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -294,8 +294,8 @@ fn test_float_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("FloatEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("FloatEnum", graph.get_schema("FloatEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("FloatEnum", graph.get_schema("FloatEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -327,8 +327,8 @@ fn test_boolean_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("BoolEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("BoolEnum", graph.get_schema("BoolEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("BoolEnum", graph.get_schema("BoolEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -359,8 +359,8 @@ fn test_mixed_type_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("MixedEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("MixedEnum", graph.get_schema("MixedEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("MixedEnum", graph.get_schema("MixedEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -384,8 +384,8 @@ fn test_empty_enum_converts_to_string() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("EmptyEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("EmptyEnum", graph.get_schema("EmptyEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("EmptyEnum", graph.get_schema("EmptyEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -405,8 +405,8 @@ fn test_case_insensitive_duplicates_with_deduplication() -> ConversionResult<()>
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false);
-  let result = converter.convert_schema("CaseEnum", graph.get_schema("CaseEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let result = converter.convert_schema("CaseEnum", graph.get_schema("CaseEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -448,8 +448,8 @@ fn test_case_insensitive_duplicates_with_preservation() -> ConversionResult<()> 
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), true);
-  let result = converter.convert_schema("CaseEnum", graph.get_schema("CaseEnum").unwrap())?;
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), true, false);
+  let result = converter.convert_schema("CaseEnum", graph.get_schema("CaseEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {

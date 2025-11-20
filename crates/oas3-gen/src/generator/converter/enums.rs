@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  ConversionResult, field_optionality::FieldOptionalityPolicy, metadata, structs::StructConverter,
-  type_resolver::TypeResolver, utils,
+  ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
+  structs::StructConverter, type_resolver::TypeResolver, utils,
 };
 use crate::{
   generator::{
@@ -35,28 +35,35 @@ pub(crate) struct EnumConverter<'a> {
   type_resolver: TypeResolver<'a>,
   struct_converter: StructConverter<'a>,
   preserve_case_variants: bool,
+  case_insensitive_enums: bool,
 }
 
 impl<'a> EnumConverter<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>, preserve_case_variants: bool) -> Self {
+  pub(crate) fn new(
+    graph: &'a SchemaGraph,
+    type_resolver: TypeResolver<'a>,
+    preserve_case_variants: bool,
+    case_insensitive_enums: bool,
+  ) -> Self {
     let struct_converter = StructConverter::new(graph, type_resolver.clone(), None, FieldOptionalityPolicy::standard());
     Self {
       graph,
       type_resolver,
       struct_converter,
       preserve_case_variants,
+      case_insensitive_enums,
     }
   }
 
   pub(crate) fn convert_simple_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
     if self.preserve_case_variants {
-      Self::convert_simple_enum_with_case_preservation(name, schema)
+      self.convert_simple_enum_with_case_preservation(name, schema)
     } else {
-      Self::convert_simple_enum_with_case_deduplication(name, schema)
+      self.convert_simple_enum_with_case_deduplication(name, schema)
     }
   }
 
-  fn convert_simple_enum_with_case_preservation(name: &str, schema: &ObjectSchema) -> RustType {
+  fn convert_simple_enum_with_case_preservation(&self, name: &str, schema: &ObjectSchema) -> RustType {
     let mut variants = Vec::new();
     let mut seen_names = BTreeSet::new();
 
@@ -104,10 +111,11 @@ impl<'a> EnumConverter<'a> {
       derives: utils::derives_for_enum(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
+      case_insensitive: self.case_insensitive_enums,
     })
   }
 
-  fn convert_simple_enum_with_case_deduplication(name: &str, schema: &ObjectSchema) -> RustType {
+  fn convert_simple_enum_with_case_deduplication(&self, name: &str, schema: &ObjectSchema) -> RustType {
     let mut variants: Vec<VariantDef> = Vec::new();
     let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -156,6 +164,7 @@ impl<'a> EnumConverter<'a> {
       derives: utils::derives_for_enum(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
+      case_insensitive: self.case_insensitive_enums,
     })
   }
 
@@ -164,9 +173,10 @@ impl<'a> EnumConverter<'a> {
     name: &str,
     schema: &ObjectSchema,
     kind: UnionKind,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<Vec<RustType>> {
     if kind == UnionKind::AnyOf
-      && let Some(result) = self.try_convert_string_catch_all(name, schema)?
+      && let Some(result) = self.try_convert_string_catch_all(name, schema, cache.as_deref_mut())?
     {
       return Ok(result);
     }
@@ -214,7 +224,7 @@ impl<'a> EnumConverter<'a> {
         has_discriminator,
         discriminator_map: &discriminator_map,
       };
-      let (variant, mut generated_types) = self.process_union_variant(&ctx, &mut seen_names)?;
+      let (variant, mut generated_types) = self.process_union_variant(&ctx, &mut seen_names, cache.as_deref_mut())?;
       variants.push(variant);
       inline_types.append(&mut generated_types);
     }
@@ -236,6 +246,7 @@ impl<'a> EnumConverter<'a> {
       derives,
       serde_attrs,
       outer_attrs: vec![],
+      case_insensitive: false,
     });
 
     inline_types.push(main_enum);
@@ -246,6 +257,7 @@ impl<'a> EnumConverter<'a> {
     &self,
     ctx: &VariantContext<'_>,
     seen_names: &mut BTreeSet<String>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
     let ref_schema_name = SchemaGraph::extract_ref_name_from_ref(ctx.variant_ref);
 
@@ -286,6 +298,7 @@ impl<'a> EnumConverter<'a> {
         &format!("{}{variant_name}", ctx.parent_name),
         ctx.resolved_schema,
         None,
+        cache,
       )?;
       let struct_name = match &struct_def {
         RustType::Struct(s) => s.name.clone(),
@@ -307,7 +320,12 @@ impl<'a> EnumConverter<'a> {
   }
 
   #[allow(clippy::unnecessary_wraps)]
-  fn try_convert_string_catch_all(&self, name: &str, schema: &ObjectSchema) -> ConversionResult<Option<Vec<RustType>>> {
+  fn try_convert_string_catch_all(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    mut cache: Option<&mut SharedSchemaCache>,
+  ) -> ConversionResult<Option<Vec<RustType>>> {
     let has_freeform_string = schema.any_of.iter().any(|s| {
       s.resolve(self.graph.spec()).ok().is_some_and(|resolved| {
         resolved.const_value.is_none()
@@ -358,53 +376,40 @@ impl<'a> EnumConverter<'a> {
       return Ok(None);
     }
 
-    Ok(Some(Self::convert_string_enum_with_catch_all(
-      name,
-      schema,
-      &known_values,
-    )))
-  }
-
-  fn convert_string_enum_with_catch_all(
-    name: &str,
-    schema: &ObjectSchema,
-    const_values: &[(String, Option<String>, bool)],
-  ) -> Vec<RustType> {
     let base_name = to_rust_type_name(name);
-    let known_name = format!("{base_name}Known");
-    let mut seen_names = BTreeSet::new();
+    let mut cache_key_values: Vec<String> = known_values.iter().map(|(v, _, _)| v.clone()).collect();
+    cache_key_values.sort();
 
-    let known_variants = const_values
-      .iter()
-      .enumerate()
-      .map(|(i, (value, description, deprecated))| {
-        let variant_name = utils::unique_variant_name(&to_rust_type_name(value), i, &mut seen_names);
-        VariantDef {
-          name: variant_name,
-          docs: metadata::extract_docs(description.as_ref()),
-          content: VariantContent::Unit,
-          serde_attrs: vec![format!(r#"rename = "{}""#, value)],
-          deprecated: *deprecated,
+    let known_name;
+    let inner_enum_type;
+
+    if let Some(ref mut c) = cache {
+      if let Some(existing) = c.get_enum_name(&cache_key_values) {
+        known_name = existing;
+        if c.is_enum_generated(&cache_key_values) {
+          inner_enum_type = None;
+        } else {
+          inner_enum_type = Some(self.build_known_enum(&known_name, &known_values));
+          c.register_enum(cache_key_values, known_name.clone());
+          c.mark_name_used(known_name.clone());
         }
-      })
-      .collect();
-
-    let inner_enum = RustType::Enum(EnumDef {
-      name: known_name.clone(),
-      docs: vec!["/// Known values for the string enum.".to_string()],
-      variants: known_variants,
-      discriminator: None,
-      derives: utils::derives_for_enum(true),
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-    });
+      } else {
+        known_name = format!("{base_name}Known");
+        inner_enum_type = Some(self.build_known_enum(&known_name, &known_values));
+        c.register_enum(cache_key_values, known_name.clone());
+        c.mark_name_used(known_name.clone());
+      }
+    } else {
+      known_name = format!("{base_name}Known");
+      inner_enum_type = Some(self.build_known_enum(&known_name, &known_values));
+    }
 
     let outer_variants = vec![
       VariantDef {
         name: "Known".to_string(),
         docs: vec!["/// A known value.".to_string()],
         content: VariantContent::Tuple(vec![TypeRef::new(&known_name)]),
-        serde_attrs: vec![],
+        serde_attrs: vec![format!("default")],
         deprecated: false,
       },
       VariantDef {
@@ -424,8 +429,44 @@ impl<'a> EnumConverter<'a> {
       derives: utils::derives_for_enum(false),
       serde_attrs: vec!["untagged".into()],
       outer_attrs: vec![],
+      case_insensitive: false,
     });
 
-    vec![inner_enum, outer_enum]
+    let mut types = Vec::new();
+    if let Some(ie) = inner_enum_type {
+      types.push(ie);
+    }
+    types.push(outer_enum);
+
+    Ok(Some(types))
+  }
+
+  fn build_known_enum(&self, name: &str, values: &[(String, Option<String>, bool)]) -> RustType {
+    let mut seen_names = BTreeSet::new();
+    let variants = values
+      .iter()
+      .enumerate()
+      .map(|(i, (value, description, deprecated))| {
+        let variant_name = utils::unique_variant_name(&to_rust_type_name(value), i, &mut seen_names);
+        VariantDef {
+          name: variant_name,
+          docs: metadata::extract_docs(description.as_ref()),
+          content: VariantContent::Unit,
+          serde_attrs: vec![format!(r#"rename = "{}""#, value)],
+          deprecated: *deprecated,
+        }
+      })
+      .collect();
+
+    RustType::Enum(EnumDef {
+      name: name.to_string(),
+      docs: vec!["/// Known values for the string enum.".to_string()],
+      variants,
+      discriminator: None,
+      derives: utils::derives_for_enum(true),
+      serde_attrs: vec![],
+      outer_attrs: vec![],
+      case_insensitive: self.case_insensitive_enums,
+    })
   }
 }

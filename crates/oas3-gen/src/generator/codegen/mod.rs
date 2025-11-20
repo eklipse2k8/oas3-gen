@@ -127,7 +127,7 @@ fn compute_serde_use(types: &[&RustType]) -> TokenStream {
       }
       RustType::Enum(def) => {
         needs_serialize |= derives_include(&def.derives, "Serialize");
-        needs_deserialize |= derives_include(&def.derives, "Deserialize");
+        needs_deserialize |= derives_include(&def.derives, "Deserialize") || def.case_insensitive;
       }
       RustType::ResponseEnum(_) | RustType::DiscriminatedEnum(_) | RustType::TypeAlias(_) => {}
     }

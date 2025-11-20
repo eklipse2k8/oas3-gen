@@ -199,6 +199,7 @@ pub struct EnumDef {
   pub derives: Vec<String>,
   pub serde_attrs: Vec<String>,
   pub outer_attrs: Vec<String>,
+  pub case_insensitive: bool,
 }
 
 /// Rust enum variant definition

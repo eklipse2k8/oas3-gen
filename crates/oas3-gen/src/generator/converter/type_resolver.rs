@@ -5,6 +5,7 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
   ConversionResult,
+  cache::SharedSchemaCache,
   enums::{self, EnumConverter},
 };
 use crate::{
@@ -19,13 +20,15 @@ use crate::{
 pub(crate) struct TypeResolver<'a> {
   graph: &'a SchemaGraph,
   preserve_case_variants: bool,
+  case_insensitive_enums: bool,
 }
 
 impl<'a> TypeResolver<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, preserve_case_variants: bool) -> Self {
+  pub(crate) fn new(graph: &'a SchemaGraph, preserve_case_variants: bool, case_insensitive_enums: bool) -> Self {
     Self {
       graph,
       preserve_case_variants,
+      case_insensitive_enums,
     }
   }
 
@@ -61,6 +64,7 @@ impl<'a> TypeResolver<'a> {
     prop_name: &str,
     prop_schema: &ObjectSchema,
     prop_schema_ref: &ObjectOrReference<ObjectSchema>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
     if let ObjectOrReference::Ref { ref_path, .. } = prop_schema_ref
       && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
@@ -76,18 +80,18 @@ impl<'a> TypeResolver<'a> {
     }
 
     if !prop_schema.enum_values.is_empty() {
-      return self.handle_inline_enum(parent_name, prop_name, prop_schema);
+      return self.handle_inline_enum(parent_name, prop_name, prop_schema, cache);
     }
 
     let has_one_of = !prop_schema.one_of.is_empty();
     if has_one_of || !prop_schema.any_of.is_empty() {
-      return self.convert_inline_union_type(parent_name, prop_name, prop_schema, has_one_of);
+      return self.convert_inline_union_type(parent_name, prop_name, prop_schema, has_one_of, cache);
     }
 
     Ok((self.schema_to_type_ref(prop_schema)?, vec![]))
   }
 
-  fn is_primitive_schema(schema: &ObjectSchema) -> bool {
+  pub(crate) fn is_primitive_schema(schema: &ObjectSchema) -> bool {
     schema.properties.is_empty()
       && schema.one_of.is_empty()
       && schema.any_of.is_empty()
@@ -100,18 +104,79 @@ impl<'a> TypeResolver<'a> {
     parent_name: &str,
     prop_name: &str,
     prop_schema: &ObjectSchema,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
     if prop_schema.enum_values.len() == 1 {
       return Ok((self.schema_to_type_ref(prop_schema)?, vec![]));
     }
 
-    if let Some(name) = self.find_matching_enum_schema(&prop_schema.enum_values) {
-      return Ok((TypeRef::new(to_rust_type_name(&name)), vec![]));
+    if let Some(ref cache) = cache
+      && let Some(existing_name) = cache.get_type_name(prop_schema)?
+    {
+      return Ok((TypeRef::new(existing_name), vec![]));
     }
 
-    let enum_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
-    let enum_converter = EnumConverter::new(self.graph, self.clone(), self.preserve_case_variants);
+    // Check for value-based deduplication
+    if let Some(ref cache) = cache {
+      let mut values: Vec<String> = prop_schema
+        .enum_values
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+      values.sort();
+
+      if let Some(name) = cache.get_enum_name(&values)
+        && cache.is_enum_generated(&values)
+      {
+        return Ok((TypeRef::new(name), vec![]));
+      }
+      // If not generated yet, we will generate it using this name.
+    }
+
+    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
+    // Use value-based preferred name if available, otherwise schema-based
+    let enum_name = if let Some(ref mut c) = cache {
+      let mut values: Vec<String> = prop_schema
+        .enum_values
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+      values.sort();
+      c.get_enum_name(&values).unwrap_or_else(|| {
+        // Fallback to schema-based preferred name (or uniqueify base_name)
+        // Note: get_preferred_name uses schema hash.
+        // If we are here, we didn't find a precomputed enum name?
+        // But InlineTypeScanner should have found it.
+        // Unless it's a new schema not in the graph?
+        // Just use get_preferred_name as fallback.
+        c.get_preferred_name(prop_schema, &base_name)
+          .unwrap_or_else(|_| c.make_unique_name(base_name.clone()))
+      })
+    } else {
+      base_name
+    };
+
+    let enum_converter = EnumConverter::new(
+      self.graph,
+      self.clone(),
+      self.preserve_case_variants,
+      self.case_insensitive_enums,
+    );
     let inline_enum = enum_converter.convert_simple_enum(&enum_name, prop_schema);
+
+    if let Some(c) = cache {
+      let type_name = c.register_type(prop_schema, &enum_name, vec![], inline_enum.clone())?;
+      // Also register by values
+      let mut values: Vec<String> = prop_schema
+        .enum_values
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+      values.sort();
+      c.register_enum(values, type_name.clone());
+
+      return Ok((TypeRef::new(type_name), vec![]));
+    }
 
     Ok((TypeRef::new(RustPrimitive::Custom(enum_name)), vec![inline_enum]))
   }
@@ -122,6 +187,7 @@ impl<'a> TypeResolver<'a> {
     prop_name: &str,
     prop_schema: &ObjectSchema,
     uses_one_of: bool,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
     let variants = if uses_one_of {
       &prop_schema.one_of
@@ -133,6 +199,12 @@ impl<'a> TypeResolver<'a> {
       return Ok((type_ref, vec![]));
     }
 
+    if let Some(ref cache) = cache
+      && let Some(existing_name) = cache.get_type_name(prop_schema)?
+    {
+      return Ok((TypeRef::new(existing_name), vec![]));
+    }
+
     if let Some(name) = self.find_matching_union_schema(variants) {
       let mut type_ref = TypeRef::new(to_rust_type_name(&name));
       if self.graph.is_cyclic(&name) {
@@ -141,14 +213,25 @@ impl<'a> TypeResolver<'a> {
       return Ok((type_ref, vec![]));
     }
 
-    let enum_name = format!("{parent_name}{}", prop_name.to_pascal_case());
-    let enum_converter = EnumConverter::new(self.graph, self.clone(), self.preserve_case_variants);
+    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
+    let enum_name = if let Some(ref mut c) = cache {
+      c.get_preferred_name(prop_schema, &base_name)?
+    } else {
+      base_name
+    };
+
+    let enum_converter = EnumConverter::new(
+      self.graph,
+      self.clone(),
+      self.preserve_case_variants,
+      self.case_insensitive_enums,
+    );
     let kind = if uses_one_of {
       enums::UnionKind::OneOf
     } else {
       enums::UnionKind::AnyOf
     };
-    let enum_types = enum_converter.convert_union_enum(&enum_name, prop_schema, kind)?;
+    let mut enum_types = enum_converter.convert_union_enum(&enum_name, prop_schema, kind, cache.as_deref_mut())?;
 
     let type_name = enum_types
       .iter()
@@ -157,6 +240,21 @@ impl<'a> TypeResolver<'a> {
         _ => None,
       })
       .unwrap_or_else(|| to_rust_type_name(&enum_name));
+
+    if let Some(c) = cache {
+      let (main_type, nested_types) = if let Some(pos) = enum_types.iter().position(|t| match t {
+        RustType::Enum(e) => e.name == type_name,
+        _ => false,
+      }) {
+        let main = enum_types.remove(pos);
+        (main, enum_types)
+      } else {
+        let main = enum_types.pop().expect("generated empty types");
+        (main, enum_types)
+      };
+      let registered_name = c.register_type(prop_schema, &enum_name, nested_types, main_type)?;
+      return Ok((TypeRef::new(registered_name), vec![]));
+    }
 
     Ok((TypeRef::new(type_name), enum_types))
   }
@@ -362,24 +460,6 @@ impl<'a> TypeResolver<'a> {
         self.graph.get_schema(name).is_some_and(|s| {
           (!s.one_of.is_empty() && extract_all_variant_refs(&s.one_of) == variant_refs)
             || (!s.any_of.is_empty() && extract_all_variant_refs(&s.any_of) == variant_refs)
-        })
-      })
-      .map(|s| (*s).clone())
-  }
-
-  fn find_matching_enum_schema(&self, enum_values: &[serde_json::Value]) -> Option<String> {
-    let enum_set: BTreeSet<_> = enum_values.iter().filter_map(|v| v.as_str()).collect();
-    if enum_set.is_empty() {
-      return None;
-    }
-    self
-      .graph
-      .schema_names()
-      .iter()
-      .find(|&&name| {
-        self.graph.get_schema(name).is_some_and(|s| {
-          let schema_enum_set: BTreeSet<_> = s.enum_values.iter().filter_map(|v| v.as_str()).collect();
-          schema_enum_set == enum_set
         })
       })
       .map(|s| (*s).clone())

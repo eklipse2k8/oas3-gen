@@ -1,0 +1,28 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Relaxed Enum Deduplication Test",
+    "version": "1.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Status": {
+        "type": "string",
+        "enum": ["active", "inactive", "pending"]
+      },
+      "ComplexStatus": {
+        "type": "object",
+        "properties": {
+            "status": {
+                "description": "A relaxed enum that should reuse Status",
+                "anyOf": [
+                    { "type": "string" },
+                    { "type": "string", "enum": ["active", "inactive", "pending"] }
+                ]
+            }
+        }
+      }
+    }
+  }
+}

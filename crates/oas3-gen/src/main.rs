@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
       output,
       visibility,
       odata_support,
-      preserve_case_variants,
+      enum_mode,
       verbose,
       quiet,
       all_schemas,
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         quiet,
         all_schemas,
         odata_support,
-        preserve_case_variants,
+        &enum_mode,
         only,
         exclude,
       );

@@ -157,6 +157,7 @@ fn enum_type(name: &str) -> EnumDef {
     ],
     serde_attrs: vec![],
     outer_attrs: vec![],
+    case_insensitive: false,
   }
 }
 
