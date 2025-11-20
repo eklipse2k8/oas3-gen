@@ -343,17 +343,30 @@ impl<'a> OperationConverter<'a> {
           return Ok(None);
         }
 
-        let cached_type_name = ctx.schema_cache.get_or_create_type(
-          inline_schema,
-          self.schema_converter,
-          path,
-          "RequestBody",
-          StructKind::RequestBody,
-        )?;
+        let cached_type_name = ctx.schema_cache.get_type_name(inline_schema)?;
 
-        ctx.type_usage.push(cached_type_name.clone());
-        ctx.usage.mark_request(&cached_type_name);
-        Ok(Some(TypeRef::new(cached_type_name)))
+        let final_type_name = if let Some(name) = cached_type_name {
+          name
+        } else {
+          let base_name = SharedSchemaCache::infer_name_from_context(inline_schema, path, "RequestBody");
+          let unique_name = ctx.schema_cache.make_unique_name(base_name);
+
+          // Pass cache down for recursive deduplication
+          let (body_struct, nested_types) = self.schema_converter.convert_struct(
+            &unique_name,
+            inline_schema,
+            Some(StructKind::RequestBody),
+            Some(ctx.schema_cache),
+          )?;
+
+          ctx
+            .schema_cache
+            .register_type(inline_schema, &unique_name, nested_types, body_struct)?
+        };
+
+        ctx.type_usage.push(final_type_name.clone());
+        ctx.usage.mark_request(&final_type_name);
+        Ok(Some(TypeRef::new(final_type_name)))
       }
       ObjectOrReference::Ref { ref_path, .. } => {
         let Some(target_name) = SchemaGraph::extract_ref_name(ref_path) else {
@@ -726,13 +739,23 @@ impl<'a> OperationConverter<'a> {
           return Ok((Some(type_ref), Some(content_type.clone())));
         }
 
-        let rust_type_name = schema_cache.get_or_create_type(
-          inline_schema,
-          self.schema_converter,
-          path,
-          status_code,
-          StructKind::Schema,
-        )?;
+        let cached_type_name = schema_cache.get_type_name(inline_schema)?;
+
+        let rust_type_name = if let Some(name) = cached_type_name {
+          name
+        } else {
+          let base_name = SharedSchemaCache::infer_name_from_context(inline_schema, path, status_code);
+          let unique_name = schema_cache.make_unique_name(base_name);
+
+          let (body_struct, nested_types) = self.schema_converter.convert_struct(
+            &unique_name,
+            inline_schema,
+            Some(StructKind::Schema),
+            Some(schema_cache),
+          )?;
+
+          schema_cache.register_type(inline_schema, &unique_name, nested_types, body_struct)?
+        };
 
         Ok((Some(TypeRef::new(rust_type_name)), Some(content_type.clone())))
       }

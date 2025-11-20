@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use inflections::Inflect;
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
 
 use super::{
   ConversionResult, DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX,
+  cache::SharedSchemaCache,
   constants::{doc_attrs, serde_attrs},
   field_optionality::{FieldOptionalityContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
@@ -54,15 +56,20 @@ impl<'a> StructConverter<'a> {
     }
   }
 
-  pub(crate) fn convert_all_of_schema(&self, name: &str, schema: &ObjectSchema) -> ConversionResult<Vec<RustType>> {
+  pub(crate) fn convert_all_of_schema(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> ConversionResult<Vec<RustType>> {
     let mut merged_schema_cache = HashMap::new();
 
     if let Some((_, parent_schema)) = self.detect_discriminated_parent(schema, &mut merged_schema_cache) {
-      return self.convert_discriminated_child(name, schema, &parent_schema, &mut merged_schema_cache);
+      return self.convert_discriminated_child(name, schema, &parent_schema, &mut merged_schema_cache, cache);
     }
 
     let merged_schema = self.merge_all_of_schema(schema)?;
-    let (main_type, inline_types) = self.convert_struct(name, &merged_schema, None)?;
+    let (main_type, inline_types) = self.convert_struct(name, &merged_schema, None, cache)?;
 
     self.finalize_struct_types(name, &merged_schema, main_type, inline_types)
   }
@@ -72,6 +79,7 @@ impl<'a> StructConverter<'a> {
     name: &str,
     schema: &ObjectSchema,
     kind: Option<StructKind>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(RustType, Vec<RustType>)> {
     let is_discriminated = utils::is_discriminated_base_type(schema);
     let struct_name = if is_discriminated {
@@ -86,6 +94,7 @@ impl<'a> StructConverter<'a> {
       utils::InlinePolicy::InlineUnions,
       None,
       Some(name),
+      cache,
     )?;
 
     let (mut serde_attrs, additional_field) = self.prepare_additional_properties(schema)?;
@@ -121,6 +130,7 @@ impl<'a> StructConverter<'a> {
     schema: &ObjectSchema,
     parent_schema: &ObjectSchema,
     merged_schema_cache: &mut HashMap<String, ObjectSchema>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<Vec<RustType>> {
     if parent_schema.discriminator.is_none() {
       anyhow::bail!("Parent schema for discriminated child '{name}' is not a valid discriminator base");
@@ -143,6 +153,7 @@ impl<'a> StructConverter<'a> {
       utils::InlinePolicy::InlineUnions,
       None,
       Some(name),
+      cache,
     )?;
 
     let (serde_attrs, additional_field) = self.prepare_additional_properties(&merged_schema)?;
@@ -254,6 +265,7 @@ impl<'a> StructConverter<'a> {
     policy: utils::InlinePolicy,
     exclude_field: Option<&str>,
     schema_name: Option<&str>,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(Vec<FieldDef>, Vec<RustType>)> {
     let num_properties = schema.properties.len();
     let required_set: std::collections::HashSet<&String> = schema.required.iter().collect();
@@ -277,8 +289,10 @@ impl<'a> StructConverter<'a> {
         policy,
       };
 
+      let cache_borrow = cache.as_deref_mut();
+
       let (field, mut generated_types) =
-        self.process_single_field(&ctx, prop_schema_ref, is_required, discriminator_mapping)?;
+        self.process_single_field(&ctx, prop_schema_ref, is_required, discriminator_mapping, cache_borrow)?;
 
       fields.push(field);
       inline_types.append(&mut generated_types);
@@ -294,6 +308,7 @@ impl<'a> StructConverter<'a> {
     prop_schema_ref: &ObjectOrReference<ObjectSchema>,
     is_required: bool,
     discriminator_mapping: Option<&(String, String)>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(FieldDef, Vec<RustType>)> {
     let prop_schema = prop_schema_ref
       .resolve(self.graph.spec())
@@ -305,6 +320,7 @@ impl<'a> StructConverter<'a> {
       &prop_schema,
       prop_schema_ref,
       ctx.policy,
+      cache,
     )?;
 
     let discriminator_info = Self::get_discriminator_info(ctx, discriminator_mapping, &prop_schema);
@@ -401,14 +417,83 @@ impl<'a> StructConverter<'a> {
     prop_schema: &ObjectSchema,
     prop_schema_ref: &ObjectOrReference<ObjectSchema>,
     policy: utils::InlinePolicy,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
-    match policy {
-      utils::InlinePolicy::InlineUnions => {
-        self
-          .type_resolver
-          .resolve_property_type_with_inlines(parent_name, prop_name, prop_schema, prop_schema_ref)
-      }
+    if Self::is_inline_struct(prop_schema_ref, prop_schema) {
+      return self.generate_inline_struct(parent_name, prop_name, prop_schema, cache);
     }
+
+    match policy {
+      utils::InlinePolicy::InlineUnions => self.type_resolver.resolve_property_type_with_inlines(
+        parent_name,
+        prop_name,
+        prop_schema,
+        prop_schema_ref,
+        cache,
+      ),
+    }
+  }
+
+  fn is_inline_struct(prop_schema_ref: &ObjectOrReference<ObjectSchema>, schema: &ObjectSchema) -> bool {
+    if matches!(prop_schema_ref, ObjectOrReference::Ref { .. }) {
+      return false;
+    }
+
+    if !schema.enum_values.is_empty() {
+      return false;
+    }
+
+    if !schema.one_of.is_empty() || !schema.any_of.is_empty() {
+      return false;
+    }
+
+    if schema.schema_type == Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Array)) {
+      return false;
+    }
+
+    if TypeResolver::is_primitive_schema(schema) {
+      return false;
+    }
+
+    !schema.properties.is_empty()
+  }
+
+  fn generate_inline_struct(
+    &self,
+    parent_name: &str,
+    prop_name: &str,
+    schema: &ObjectSchema,
+    mut cache: Option<&mut SharedSchemaCache>,
+  ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
+    if let Some(ref cache) = cache
+      && let Some(existing_name) = cache.get_type_name(schema)?
+    {
+      return Ok((TypeRef::new(existing_name), vec![]));
+    }
+
+    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
+    let struct_name = if let Some(ref mut c) = cache {
+      c.get_preferred_name(schema, &base_name)?
+    } else {
+      base_name
+    };
+
+    let (struct_type, mut inline_types) = if let Some(ref mut c) = cache {
+      self.convert_struct(&struct_name, schema, None, Some(c))?
+    } else {
+      self.convert_struct(&struct_name, schema, None, None)?
+    };
+
+    if let Some(c) = cache {
+      let type_name = c.register_type(schema, &struct_name, inline_types, struct_type.clone())?;
+      return Ok((TypeRef::new(type_name), vec![]));
+    }
+
+    // Fallback: no cache. Return everything.
+    let mut all_types = vec![struct_type];
+    all_types.append(&mut inline_types);
+
+    Ok((TypeRef::new(struct_name), all_types))
   }
 
   fn apply_discriminator_attributes(

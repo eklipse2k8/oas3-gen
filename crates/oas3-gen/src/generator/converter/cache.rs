@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use anyhow::Context;
 use blake3::Hasher;
@@ -6,56 +6,139 @@ use json_canon::to_string as to_canonical_json;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
-use super::{ConversionResult, REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX, SchemaConverter};
-use crate::{
-  generator::ast::{RustType, StructKind},
-  reserved::to_rust_type_name,
-};
+use super::{ConversionResult, REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX};
+use crate::{generator::ast::RustType, reserved::to_rust_type_name};
 
 pub(crate) struct SharedSchemaCache {
   schema_to_type: BTreeMap<String, String>,
+  enum_to_type: HashMap<Vec<String>, String>,
   generated_types: Vec<RustType>,
   used_names: BTreeSet<String>,
+  precomputed_names: BTreeMap<String, String>,
+  precomputed_enum_names: HashMap<Vec<String>, String>,
 }
 
 impl SharedSchemaCache {
   pub(crate) fn new() -> Self {
     Self {
       schema_to_type: BTreeMap::new(),
+      enum_to_type: HashMap::new(),
       generated_types: Vec::new(),
       used_names: BTreeSet::new(),
+      precomputed_names: BTreeMap::new(),
+      precomputed_enum_names: HashMap::new(),
     }
   }
 
-  pub(crate) fn get_or_create_type(
+  pub(crate) fn set_precomputed_names(
+    &mut self,
+    names: BTreeMap<String, String>,
+    enum_names: HashMap<Vec<String>, String>,
+  ) {
+    self.precomputed_names = names;
+    self.precomputed_enum_names = enum_names;
+  }
+
+  pub(crate) fn get_type_name(&self, schema: &ObjectSchema) -> ConversionResult<Option<String>> {
+    let schema_hash = Self::hash_schema(schema)?;
+    Ok(self.schema_to_type.get(&schema_hash).cloned())
+  }
+
+  pub(crate) fn get_enum_name(&self, values: &[String]) -> Option<String> {
+    if let Some(name) = self.enum_to_type.get(values) {
+      Some(name.clone())
+    } else {
+      self.precomputed_enum_names.get(values).cloned()
+    }
+  }
+
+  pub(crate) fn is_enum_generated(&self, values: &[String]) -> bool {
+    self.enum_to_type.contains_key(values)
+  }
+
+  pub(crate) fn register_enum(&mut self, values: Vec<String>, name: String) {
+    self.enum_to_type.insert(values, name);
+  }
+
+  pub(crate) fn mark_name_used(&mut self, name: String) {
+    self.used_names.insert(name);
+  }
+
+  pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> ConversionResult<String> {
+    let schema_hash = Self::hash_schema(schema)?;
+    if let Some(name) = self.precomputed_names.get(&schema_hash) {
+      return Ok(name.clone());
+    }
+    Ok(self.make_unique_name(base_name.to_string()))
+  }
+
+  pub(crate) fn register_type(
     &mut self,
     schema: &ObjectSchema,
-    converter: &SchemaConverter,
-    path: &str,
-    context: &str,
-    kind: StructKind,
+    base_name: &str,
+    mut nested_types: Vec<RustType>,
+    type_def: RustType,
   ) -> ConversionResult<String> {
     let schema_hash = Self::hash_schema(schema)?;
+    let mut name = base_name.to_string();
 
-    if let Some(existing_type) = self.schema_to_type.get(&schema_hash) {
-      return Ok(existing_type.clone());
+    if self.used_names.contains(&name) {
+      // Check if it's an enum reuse case
+      let mut reused = false;
+      if !schema.enum_values.is_empty() {
+        let mut values: Vec<String> = schema
+          .enum_values
+          .iter()
+          .filter_map(|v| v.as_str().map(String::from))
+          .collect();
+        values.sort();
+        if let Some(existing_name) = self.enum_to_type.get(&values)
+          && existing_name == &name
+        {
+          reused = true;
+        }
+      }
+
+      if reused {
+        self.schema_to_type.insert(schema_hash, name.clone());
+        return Ok(name);
+      }
+
+      if let Some(existing_name) = self.schema_to_type.get(&schema_hash) {
+        return Ok(existing_name.clone());
+      }
+      name = self.make_unique_name(name);
     }
 
-    let base_name = Self::infer_name_from_context(schema, path, context);
-    let type_name = self.make_unique_name(base_name);
-    let rust_type_name = to_rust_type_name(&type_name);
+    self.used_names.insert(name.clone());
+    self.schema_to_type.insert(schema_hash, name.clone());
 
-    let (body_struct, mut nested_types) = converter.convert_struct(&type_name, schema, Some(kind))?;
+    // If this is an enum, register its values too (if not already)
+    if !schema.enum_values.is_empty() {
+      let mut values: Vec<String> = schema
+        .enum_values
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+      values.sort();
+      self.enum_to_type.insert(values, name.clone());
+    }
+
+    // Update the name in the struct/enum definition if we renamed it
+    let mut final_type_def = type_def;
+    match &mut final_type_def {
+      RustType::Struct(s) => s.name.clone_from(&name),
+      RustType::Enum(e) => e.name.clone_from(&name),
+      _ => {}
+    }
 
     self.generated_types.append(&mut nested_types);
-    self.generated_types.push(body_struct);
-    self.schema_to_type.insert(schema_hash, rust_type_name.clone());
-    self.used_names.insert(rust_type_name.clone());
+    self.generated_types.push(final_type_def);
 
-    Ok(rust_type_name)
+    Ok(name)
   }
 
-  fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
+  pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
     let is_request = context == REQUEST_BODY_SUFFIX;
 
     let with_suffix = |base: &str| {
@@ -95,7 +178,7 @@ impl SharedSchemaCache {
       })
   }
 
-  fn make_unique_name(&mut self, base: String) -> String {
+  pub(crate) fn make_unique_name(&self, base: String) -> String {
     let rust_name = to_rust_type_name(&base);
     if !self.used_names.contains(&rust_name) {
       return base;
@@ -135,6 +218,10 @@ impl SharedSchemaCache {
         }
 
         if let Some(Value::Array(arr)) = map.get_mut("type") {
+          Self::sort_string_array_in_place(arr);
+        }
+
+        if let Some(Value::Array(arr)) = map.get_mut("enum") {
           Self::sort_string_array_in_place(arr);
         }
 

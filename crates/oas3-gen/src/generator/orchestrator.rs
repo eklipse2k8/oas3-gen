@@ -8,7 +8,10 @@ use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
   ast::{OperationInfo, ParameterLocation, RustType, StructMethodKind, TypeRef},
   codegen::{self, Visibility},
-  converter::{FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
+  converter::{
+    FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, naming::InlineTypeScanner,
+    operations::OperationConverter,
+  },
   operation_registry::OperationRegistry,
   schema_graph::SchemaGraph,
 };
@@ -204,14 +207,29 @@ impl Orchestrator {
         self.case_insensitive_enums,
       )
     };
+
+    let type_resolver = crate::generator::converter::type_resolver::TypeResolver::new(
+      &graph,
+      self.preserve_case_variants,
+      self.case_insensitive_enums,
+    );
+    let scanner = InlineTypeScanner::new(&graph, type_resolver);
+    let scan_result = scanner.scan_and_compute_names().unwrap_or_default();
+
+    let mut cache = SharedSchemaCache::new();
+    cache.set_precomputed_names(scan_result.names, scan_result.enum_names);
+
     let (schema_rust_types, schema_warnings) =
-      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref());
+      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref(), &mut cache);
 
     let (op_rust_types, operations_info, op_warnings, usage_recorder) =
-      self.convert_all_operations(&graph, &schema_converter);
+      self.convert_all_operations(&graph, &schema_converter, &mut cache);
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
+    // Add types generated from cache (inline structs)
+    rust_types.extend(cache.into_types());
+
     warnings.extend(schema_warnings);
     warnings.extend(op_warnings);
 
@@ -255,6 +273,7 @@ impl Orchestrator {
     graph: &SchemaGraph,
     schema_converter: &SchemaConverter,
     operation_reachable: Option<&std::collections::BTreeSet<String>>,
+    cache: &mut SharedSchemaCache,
   ) -> (Vec<RustType>, Vec<GenerationWarning>) {
     let mut rust_types = Vec::new();
     let mut warnings = Vec::new();
@@ -267,7 +286,7 @@ impl Orchestrator {
       }
 
       if let Some(schema) = graph.get_schema(schema_name) {
-        match schema_converter.convert_schema(schema_name, schema) {
+        match schema_converter.convert_schema(schema_name, schema, Some(cache)) {
           Ok(types) => rust_types.extend(types),
           Err(e) => warnings.push(GenerationWarning::SchemaConversionFailed {
             schema_name: schema_name.clone(),
@@ -283,6 +302,7 @@ impl Orchestrator {
     &self,
     graph: &SchemaGraph,
     schema_converter: &SchemaConverter,
+    cache: &mut SharedSchemaCache,
   ) -> (
     Vec<RustType>,
     Vec<OperationInfo>,
@@ -293,7 +313,6 @@ impl Orchestrator {
     let mut operations_info = Vec::new();
     let mut warnings = Vec::new();
     let mut usage_recorder = TypeUsageRecorder::new();
-    let mut schema_cache = SharedSchemaCache::new();
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
@@ -307,7 +326,7 @@ impl Orchestrator {
         path,
         operation,
         &mut usage_recorder,
-        &mut schema_cache,
+        cache,
       ) {
         Ok((types, op_info)) => {
           warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
@@ -327,7 +346,6 @@ impl Orchestrator {
       }
     }
 
-    rust_types.extend(schema_cache.into_types());
     (rust_types, operations_info, warnings, usage_recorder)
   }
 
@@ -700,5 +718,85 @@ mod tests {
 
     // Check for Binary handling for 202 image/png (fallback to bytes)
     assert!(code.contains("req.bytes().await?"));
+  }
+
+  #[test]
+  fn test_enum_deduplication() {
+    let spec_json = include_str!("../../fixtures/enum_deduplication.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      true,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+      false,
+      false,
+    );
+
+    let (code, _) = orchestrator.generate_with_header("test.json").unwrap();
+
+    // Should contain "pub enum Status" exactly once (definition)
+    // But string matching "pub enum Status" might appear multiple times if I'm not careful?
+    // No, definition appears once.
+    assert_eq!(
+      code.matches("pub enum Status").count(),
+      1,
+      "Status enum defined multiple times"
+    );
+
+    // StructA should use Status
+    // "pub status: Option<Status>,"
+    assert!(code.contains("pub status: Option<Status>"), "StructA should use Status");
+
+    // StructB should use Status
+    // Note: count matches for "status: Option<Status>" to ensure multiple uses
+    let usage_count = code.matches("status: Option<Status>").count();
+    assert!(
+      usage_count >= 2,
+      "Multiple structs should use Status (found {})",
+      usage_count
+    );
+
+    // StructC should also use Status (values are sorted same)
+    assert!(usage_count >= 3, "StructC should also use Status");
+  }
+
+  #[test]
+  fn test_relaxed_enum_deduplication() {
+    let spec_json = include_str!("../../fixtures/relaxed_enum_deduplication.json");
+    let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+    let orchestrator = Orchestrator::new(
+      spec,
+      Visibility::default(),
+      true,
+      None,
+      None,
+      FieldOptionalityPolicy::standard(),
+      false,
+      false,
+    );
+
+    let (code, _) = orchestrator.generate_with_header("test.json").unwrap();
+
+    // 1. Verify Status is defined
+    assert!(code.contains("pub enum Status"), "Status enum missing");
+
+    // 2. Verify ComplexStatusStatus is defined (outer enum)
+    assert!(code.contains("pub enum ComplexStatusStatus"), "Outer enum missing");
+
+    // 3. Verify inner enum "ComplexStatusStatusKnown" is NOT defined (deduplicated)
+    assert!(
+      !code.contains("pub enum ComplexStatusStatusKnown"),
+      "Inner enum should be deduplicated"
+    );
+
+    if !code.contains("Known(Status)") {
+      println!("Generated Code:\n{}", code);
+    }
+    // 4. Verify usage: Known variant should wrap Status
+    // "Known(Status)"
+    assert!(code.contains("Known(Status)"), "Outer enum should wrap Status");
   }
 }

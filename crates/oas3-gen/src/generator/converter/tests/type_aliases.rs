@@ -47,7 +47,7 @@ fn test_array_type_alias_with_ref_items() -> ConversionResult<()> {
   ]));
 
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
-  let result = converter.convert_schema("Pets", graph.get_schema("Pets").unwrap())?;
+  let result = converter.convert_schema("Pets", graph.get_schema("Pets").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -74,7 +74,7 @@ fn test_array_type_alias_with_primitive_items() -> ConversionResult<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Strings".to_string(), strings_schema)]));
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
-  let result = converter.convert_schema("Strings", graph.get_schema("Strings").unwrap())?;
+  let result = converter.convert_schema("Strings", graph.get_schema("Strings").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -95,7 +95,7 @@ fn test_primitive_type_alias() -> ConversionResult<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Identifier".to_string(), identifier_schema)]));
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
-  let result = converter.convert_schema("Identifier", graph.get_schema("Identifier").unwrap())?;
+  let result = converter.convert_schema("Identifier", graph.get_schema("Identifier").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -117,7 +117,7 @@ fn test_integer_type_alias_with_format() -> ConversionResult<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Timestamp".to_string(), timestamp_schema)]));
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
-  let result = converter.convert_schema("Timestamp", graph.get_schema("Timestamp").unwrap())?;
+  let result = converter.convert_schema("Timestamp", graph.get_schema("Timestamp").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -139,7 +139,7 @@ fn test_array_with_no_items_falls_back() -> ConversionResult<()> {
 
   let graph = create_test_graph(BTreeMap::from([("UntypedArray".to_string(), untyped_array_schema)]));
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
-  let result = converter.convert_schema("UntypedArray", graph.get_schema("UntypedArray").unwrap())?;
+  let result = converter.convert_schema("UntypedArray", graph.get_schema("UntypedArray").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -172,7 +172,7 @@ fn test_nested_array_type_alias() -> ConversionResult<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Matrix".to_string(), matrix_schema)]));
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
-  let result = converter.convert_schema("Matrix", graph.get_schema("Matrix").unwrap())?;
+  let result = converter.convert_schema("Matrix", graph.get_schema("Matrix").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {

@@ -3,9 +3,10 @@ mod constants;
 mod enums;
 mod field_optionality;
 pub(crate) mod metadata;
+pub(crate) mod naming;
 pub(crate) mod operations;
 mod structs;
-mod type_resolver;
+pub(crate) mod type_resolver;
 mod type_usage_recorder;
 mod utils;
 
@@ -15,7 +16,7 @@ pub(crate) use field_optionality::FieldOptionalityPolicy;
 use oas3::spec::ObjectSchema;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
-use self::{enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
+use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
 use super::{
   ast::{RustType, StructKind, TypeAliasDef, TypeRef},
   schema_graph::SchemaGraph,
@@ -116,21 +117,31 @@ impl<'a> SchemaConverter<'a> {
     }
   }
 
-  pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> ConversionResult<Vec<RustType>> {
+  pub(crate) fn convert_schema(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    mut cache: Option<&mut SharedSchemaCache>,
+  ) -> ConversionResult<Vec<RustType>> {
     if !schema.all_of.is_empty() {
-      return self.struct_converter.convert_all_of_schema(name, schema);
+      let cache_reborrow = cache.as_deref_mut();
+      return self
+        .struct_converter
+        .convert_all_of_schema(name, schema, cache_reborrow);
     }
 
     if !schema.one_of.is_empty() {
+      let cache_reborrow = cache.as_deref_mut();
       return self
         .enum_converter
-        .convert_union_enum(name, schema, enums::UnionKind::OneOf);
+        .convert_union_enum(name, schema, enums::UnionKind::OneOf, cache_reborrow);
     }
 
     if !schema.any_of.is_empty() {
+      let cache_reborrow = cache.as_deref_mut();
       return self
         .enum_converter
-        .convert_union_enum(name, schema, enums::UnionKind::AnyOf);
+        .convert_union_enum(name, schema, enums::UnionKind::AnyOf, cache_reborrow);
     }
 
     if !schema.enum_values.is_empty() {
@@ -138,7 +149,10 @@ impl<'a> SchemaConverter<'a> {
     }
 
     if !schema.properties.is_empty() || schema.additional_properties.is_some() {
-      let (main_type, inline_types) = self.struct_converter.convert_struct(name, schema, None)?;
+      let cache_reborrow = cache;
+      let (main_type, inline_types) = self
+        .struct_converter
+        .convert_struct(name, schema, None, cache_reborrow)?;
       return self
         .struct_converter
         .finalize_struct_types(name, schema, main_type, inline_types);
@@ -159,8 +173,9 @@ impl<'a> SchemaConverter<'a> {
     name: &str,
     schema: &ObjectSchema,
     kind: Option<StructKind>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(RustType, Vec<RustType>)> {
-    self.struct_converter.convert_struct(name, schema, kind)
+    self.struct_converter.convert_struct(name, schema, kind, cache)
   }
 
   pub(crate) fn schema_to_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
