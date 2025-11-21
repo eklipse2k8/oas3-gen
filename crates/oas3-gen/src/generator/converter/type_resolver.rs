@@ -5,7 +5,7 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  ConversionResult,
+  CodegenConfig, ConversionResult,
   cache::SharedSchemaCache,
   enums::{EnumConverter, UnionKind},
 };
@@ -72,14 +72,16 @@ pub(crate) struct TypeResolver<'a> {
   graph: &'a SchemaGraph,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
+  pub(crate) no_helpers: bool,
 }
 
 impl<'a> TypeResolver<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, preserve_case_variants: bool, case_insensitive_enums: bool) -> Self {
+  pub(crate) fn new(graph: &'a SchemaGraph, config: CodegenConfig) -> Self {
     Self {
       graph,
-      preserve_case_variants,
-      case_insensitive_enums,
+      preserve_case_variants: config.preserve_case_variants,
+      case_insensitive_enums: config.case_insensitive_enums,
+      no_helpers: config.no_helpers,
     }
   }
 
@@ -194,12 +196,12 @@ impl<'a> TypeResolver<'a> {
     let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
     let enum_name = Self::determine_enum_name(prop_schema, &base_name, &enum_values, &cache)?;
 
-    let converter = EnumConverter::new(
-      self.graph,
-      self.clone(),
-      self.preserve_case_variants,
-      self.case_insensitive_enums,
-    );
+    let config = CodegenConfig {
+      preserve_case_variants: self.preserve_case_variants,
+      case_insensitive_enums: self.case_insensitive_enums,
+      no_helpers: self.no_helpers,
+    };
+    let converter = EnumConverter::new(self.graph, self.clone(), config);
     let inline_enum = converter.convert_simple_enum(&enum_name, prop_schema);
 
     if let Some(c) = cache {
@@ -271,12 +273,12 @@ impl<'a> TypeResolver<'a> {
       base_name
     };
 
-    let converter = EnumConverter::new(
-      self.graph,
-      self.clone(),
-      self.preserve_case_variants,
-      self.case_insensitive_enums,
-    );
+    let config = CodegenConfig {
+      preserve_case_variants: self.preserve_case_variants,
+      case_insensitive_enums: self.case_insensitive_enums,
+      no_helpers: self.no_helpers,
+    };
+    let converter = EnumConverter::new(self.graph, self.clone(), config);
     let kind = if uses_one_of {
       UnionKind::OneOf
     } else {

@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
       visibility,
       odata_support,
       enum_mode,
+      no_helpers,
       verbose,
       quiet,
       all_schemas,
@@ -44,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         all_schemas,
         odata_support,
         &enum_mode,
+        no_helpers,
         only,
         exclude,
       );

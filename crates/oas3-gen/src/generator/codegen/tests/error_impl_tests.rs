@@ -95,6 +95,7 @@ fn test_generate_error_enum_impl_with_tuple_variants() {
     outer_attrs: vec![],
     discriminator: None,
     case_insensitive: false,
+    methods: vec![],
   };
 
   let result = error_impls::generate_error_impl(&RustType::Enum(enum_def));
@@ -123,6 +124,7 @@ fn test_generate_error_enum_impl_with_unit_variants() {
     outer_attrs: vec![],
     discriminator: None,
     case_insensitive: false,
+    methods: vec![],
   };
 
   let result = error_impls::generate_error_impl(&RustType::Enum(enum_def));
@@ -171,6 +173,7 @@ fn test_try_generate_error_impl_for_error_enum() {
     outer_attrs: vec![],
     discriminator: None,
     case_insensitive: false,
+    methods: vec![],
   };
 
   let rust_type = RustType::Enum(enum_def);

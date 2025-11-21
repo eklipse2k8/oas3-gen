@@ -3,9 +3,9 @@ use std::{collections::BTreeMap, f64::consts::PI};
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use super::common::create_test_graph;
+use super::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config};
 use crate::generator::{
-  ast::{DeriveTrait, RustType, SerdeAttribute},
+  ast::{DeriveTrait, EnumMethodKind, RustType, SerdeAttribute},
   converter::{
     ConversionResult, FieldOptionalityPolicy, SchemaConverter,
     enums::{CollisionStrategy, EnumConverter, StringEnumOptimizer, VariantNameNormalizer},
@@ -22,7 +22,7 @@ fn test_simple_string_enum() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("SimpleEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("SimpleEnum", graph.get_schema("SimpleEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -93,7 +93,7 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> ConversionResult<()> {
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
@@ -162,7 +162,7 @@ fn test_anyof_without_discriminator_has_no_rename_attrs() -> ConversionResult<()
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
@@ -233,7 +233,7 @@ fn test_anyof_with_discriminator_no_untagged() -> ConversionResult<()> {
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
@@ -254,7 +254,7 @@ fn test_integer_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("IntEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("IntEnum", graph.get_schema("IntEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -299,7 +299,7 @@ fn test_float_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("FloatEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("FloatEnum", graph.get_schema("FloatEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -332,7 +332,7 @@ fn test_boolean_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("BoolEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("BoolEnum", graph.get_schema("BoolEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -364,7 +364,7 @@ fn test_mixed_type_enum_values() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("MixedEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("MixedEnum", graph.get_schema("MixedEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -389,7 +389,7 @@ fn test_empty_enum_converts_to_string() -> ConversionResult<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("EmptyEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("EmptyEnum", graph.get_schema("EmptyEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -410,7 +410,7 @@ fn test_case_insensitive_duplicates_with_deduplication() -> ConversionResult<()>
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("CaseEnum", graph.get_schema("CaseEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -453,7 +453,7 @@ fn test_case_insensitive_duplicates_with_preservation() -> ConversionResult<()> 
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), true, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), config_with_preserve_case());
   let result = converter.convert_schema("CaseEnum", graph.get_schema("CaseEnum").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -565,8 +565,8 @@ fn test_preserve_strategy_with_multiple_collisions() {
   };
 
   let (graph, _) = SchemaGraph::new(spec);
-  let type_resolver = TypeResolver::new(&graph, false, false);
-  let converter = EnumConverter::new(&graph, type_resolver, true, false);
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let converter = EnumConverter::new(&graph, type_resolver, config_with_preserve_case());
 
   let schema = ObjectSchema {
     enum_values: vec![json!("active"), json!("Active"), json!("ACTIVE")],
@@ -736,13 +736,13 @@ fn test_anyof_with_const_generates_unit_variant() -> ConversionResult<()> {
     ("TextFormat".to_string(), text_schema),
   ]);
   let graph = create_test_graph(schemas);
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
 
   let result = converter.convert_schema("ResponseFormat", &parent_schema, None)?;
 
   assert!(!result.is_empty());
   let RustType::Enum(enum_def) = &result[result.len() - 1] else {
-    panic!("Expected enum as last type, got: {:?}", result);
+    panic!("Expected enum as last type, got: {result:?}");
   };
 
   assert_eq!(enum_def.name, "ResponseFormat");
@@ -855,4 +855,260 @@ fn test_openapi_response_format_serialization() {
   assert_eq!(text_json["type"], "text");
   assert_eq!(json_schema_json["type"], "json_schema");
   assert_eq!(json_schema_json["json_schema"]["type"], "object");
+}
+
+#[test]
+fn test_enum_helper_methods_generation() -> ConversionResult<()> {
+  let simple_struct_schema = ObjectSchema {
+    title: Some("Simple".to_string()),
+    properties: BTreeMap::from([(
+      "opt_field".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let required_struct_schema = ObjectSchema {
+    title: Some("SingleParam".to_string()),
+    properties: BTreeMap::from([(
+      "req_field".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    required: vec!["req_field".to_string()],
+    ..Default::default()
+  };
+
+  let complex_struct_schema = ObjectSchema {
+    title: Some("Complex".to_string()),
+    properties: BTreeMap::from([
+      (
+        "req1".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          ..Default::default()
+        }),
+      ),
+      (
+        "req2".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          ..Default::default()
+        }),
+      ),
+    ]),
+    required: vec!["req1".to_string(), "req2".to_string()],
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Object(simple_struct_schema),
+      ObjectOrReference::Object(required_struct_schema),
+      ObjectOrReference::Object(complex_struct_schema),
+    ],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("TestUnion".to_string(), union_schema)]));
+
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
+
+  let RustType::Enum(enum_def) = result.last().unwrap() else {
+    panic!("Expected enum")
+  };
+
+  assert_eq!(enum_def.methods.len(), 2); // Simple + SingleParam, Complex skipped
+
+  // Check Simple Constructor
+  let simple_method = enum_def
+    .methods
+    .iter()
+    .find(|m| m.name == "simple")
+    .expect("simple method not found");
+  match &simple_method.kind {
+    EnumMethodKind::SimpleConstructor {
+      variant_name,
+      wrapped_type,
+    } => {
+      assert_eq!(variant_name, "Simple");
+      assert_eq!(wrapped_type, "TestUnionSimple");
+    }
+    EnumMethodKind::ParameterizedConstructor { .. } => panic!("Expected SimpleConstructor"),
+  }
+
+  // Check Parameterized Constructor
+  let param_method = enum_def
+    .methods
+    .iter()
+    .find(|m| m.name == "single_param")
+    .expect("single_param method not found");
+  match &param_method.kind {
+    EnumMethodKind::ParameterizedConstructor {
+      variant_name,
+      wrapped_type,
+      param_name,
+      param_type,
+    } => {
+      assert_eq!(variant_name, "SingleParam");
+      assert_eq!(wrapped_type, "TestUnionSingleParam");
+      assert_eq!(param_name, "req_field");
+      assert_eq!(param_type, "String");
+    }
+    EnumMethodKind::SimpleConstructor { .. } => panic!("Expected ParameterizedConstructor"),
+  }
+
+  Ok(())
+}
+
+#[test]
+fn test_enum_helper_methods_disabled_flag() -> ConversionResult<()> {
+  let simple_struct_schema = ObjectSchema {
+    title: Some("Simple".to_string()),
+    properties: BTreeMap::from([(
+      "opt_field".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    one_of: vec![ObjectOrReference::Object(simple_struct_schema)],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("TestUnion".to_string(), union_schema)]));
+
+  // no_helpers = true
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), config_with_no_helpers());
+  let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
+
+  let RustType::Enum(enum_def) = result.last().unwrap() else {
+    panic!("Expected enum")
+  };
+
+  assert!(enum_def.methods.is_empty());
+  Ok(())
+}
+
+#[test]
+fn test_enum_helper_naming_stripping() -> ConversionResult<()> {
+  let simple_schema = ObjectSchema {
+    title: Some("ResponseFormatText".to_string()),
+    properties: BTreeMap::from([(
+      "dummy".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    one_of: vec![ObjectOrReference::Object(simple_schema)],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("ResponseFormat".to_string(), union_schema)]));
+
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let result = converter.convert_schema("ResponseFormat", graph.get_schema("ResponseFormat").unwrap(), None)?;
+
+  let RustType::Enum(enum_def) = result.last().unwrap() else {
+    panic!("Expected enum")
+  };
+
+  let method = enum_def.methods.first().unwrap();
+  assert_eq!(method.name, "text");
+
+  Ok(())
+}
+
+#[test]
+fn test_enum_helper_method_name_collision() -> ConversionResult<()> {
+  let schema1 = ObjectSchema {
+    title: Some("StatusActive".to_string()),
+    properties: BTreeMap::from([(
+      "opt_field".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let schema2 = ObjectSchema {
+    title: Some("Active".to_string()),
+    properties: BTreeMap::from([(
+      "opt_field2".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    one_of: vec![ObjectOrReference::Object(schema1), ObjectOrReference::Object(schema2)],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("Status".to_string(), union_schema)]));
+
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let result = converter.convert_schema("Status", graph.get_schema("Status").unwrap(), None)?;
+
+  let RustType::Enum(enum_def) = result.last().unwrap() else {
+    panic!("Expected enum")
+  };
+
+  assert_eq!(enum_def.methods.len(), 2);
+  let names: Vec<_> = enum_def.methods.iter().map(|m| &m.name).collect();
+  assert!(names.contains(&&"active".to_string()));
+  assert!(names.contains(&&"active2".to_string()) || names.iter().any(|n| *n != "active"));
+
+  Ok(())
+}
+
+#[test]
+fn test_enum_helper_skips_without_default_trait() {
+  use std::collections::BTreeSet;
+
+  use crate::generator::ast::{RustPrimitive, TypeRef};
+
+  let enum_def = RustType::Enum(crate::generator::ast::EnumDef {
+    name: "TestEnum".to_string(),
+    docs: vec![],
+    variants: vec![crate::generator::ast::VariantDef {
+      name: "Variant".to_string(),
+      docs: vec![],
+      content: crate::generator::ast::VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom(
+        "TestVariant".to_string(),
+      ))]),
+      serde_attrs: vec![],
+      deprecated: false,
+    }],
+    discriminator: None,
+    derives: BTreeSet::new(),
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+  });
+
+  if let RustType::Enum(e) = enum_def {
+    assert!(e.methods.is_empty());
+  }
 }

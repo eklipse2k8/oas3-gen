@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use super::common::create_test_graph;
+use super::common::{create_test_graph, default_config};
 use crate::generator::{
   converter::type_resolver::{SchemaExt, TypeResolver},
   schema_graph::SchemaGraph,
@@ -24,7 +24,7 @@ fn test_title_ignored_when_schema_type_present() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     title: Some("Message".to_string()),
@@ -51,7 +51,7 @@ fn test_title_used_when_no_schema_type() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     title: Some("CustomType".to_string()),
@@ -149,7 +149,7 @@ fn test_anyof_with_nested_oneof_resolves_to_ref() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CacheControlEphemeral".to_string(), cache_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let inner_schema = ObjectSchema {
     one_of: vec![ObjectOrReference::Ref {
@@ -179,7 +179,7 @@ fn test_anyof_with_nested_oneof_resolves_to_ref() {
 #[test]
 fn test_anyof_with_no_resolvable_variants() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let null_schema1 = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
@@ -203,7 +203,7 @@ fn test_anyof_with_no_resolvable_variants() {
 #[test]
 fn test_array_with_items() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -223,7 +223,7 @@ fn test_array_with_items() {
 #[test]
 fn test_array_without_items_fallback() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -238,7 +238,7 @@ fn test_array_without_items_fallback() {
 #[test]
 fn test_array_with_boolean_schema_items() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -265,7 +265,7 @@ fn test_array_with_ref_items() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -323,7 +323,7 @@ fn test_schema_ext_is_primitive() {
 #[test]
 fn test_resolve_simple_primitive() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
@@ -338,7 +338,7 @@ fn test_resolve_simple_primitive() {
 #[test]
 fn test_resolve_nullable_primitive() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Null])),
@@ -352,7 +352,7 @@ fn test_resolve_nullable_primitive() {
 #[test]
 fn test_resolve_array() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let item_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),

@@ -19,6 +19,7 @@ fn test_implicit_dependency_via_union_fingerprint() {
     FieldOptionalityPolicy::standard(),
     false,
     false,
+    false,
   );
 
   let (code, _) = orchestrator.generate_with_header("test.json").unwrap();

@@ -9,7 +9,7 @@ use crate::generator::{
   ast::{OperationInfo, ParameterLocation, RustType, StructMethodKind, TypeRef},
   codegen::{self, Visibility},
   converter::{
-    FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, naming::InlineTypeScanner,
+    CodegenConfig, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, naming::InlineTypeScanner,
     operations::OperationConverter, type_resolver::TypeResolver,
   },
   operation_registry::OperationRegistry,
@@ -33,6 +33,7 @@ pub struct Orchestrator {
   optionality_policy: FieldOptionalityPolicy,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
+  no_helpers: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +105,7 @@ impl fmt::Display for GenerationWarning {
 
 impl Orchestrator {
   #[allow(clippy::too_many_arguments)]
+  #[allow(clippy::fn_params_excessive_bools)]
   #[must_use]
   pub fn new(
     spec: oas3::Spec,
@@ -114,6 +116,7 @@ impl Orchestrator {
     optionality_policy: FieldOptionalityPolicy,
     preserve_case_variants: bool,
     case_insensitive_enums: bool,
+    no_helpers: bool,
   ) -> Self {
     let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
     Self {
@@ -124,6 +127,7 @@ impl Orchestrator {
       optionality_policy,
       preserve_case_variants,
       case_insensitive_enums,
+      no_helpers,
     }
   }
 
@@ -191,24 +195,19 @@ impl Orchestrator {
       0
     };
 
-    let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(
-        &graph,
-        reachable.clone(),
-        self.optionality_policy.clone(),
-        self.preserve_case_variants,
-        self.case_insensitive_enums,
-      )
-    } else {
-      SchemaConverter::new(
-        &graph,
-        self.optionality_policy.clone(),
-        self.preserve_case_variants,
-        self.case_insensitive_enums,
-      )
+    let config = CodegenConfig {
+      preserve_case_variants: self.preserve_case_variants,
+      case_insensitive_enums: self.case_insensitive_enums,
+      no_helpers: self.no_helpers,
     };
 
-    let type_resolver = TypeResolver::new(&graph, self.preserve_case_variants, self.case_insensitive_enums);
+    let schema_converter = if let Some(ref reachable) = operation_reachable {
+      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy.clone(), config)
+    } else {
+      SchemaConverter::new(&graph, self.optionality_policy.clone(), config)
+    };
+
+    let type_resolver = TypeResolver::new(&graph, config);
     let scanner = InlineTypeScanner::new(&graph, type_resolver);
     let scan_result = scanner.scan_and_compute_names().unwrap_or_default();
 
@@ -505,6 +504,7 @@ mod tests {
       FieldOptionalityPolicy::standard(),
       false,
       false,
+      false,
     );
 
     let metadata = orchestrator.metadata();
@@ -527,6 +527,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
       false,
       false,
     );
@@ -556,6 +557,7 @@ mod tests {
       FieldOptionalityPolicy::standard(),
       false,
       false,
+      false,
     );
 
     let header = orchestrator.generate_header("test.yaml");
@@ -576,6 +578,7 @@ mod tests {
       None,
       Some(&excluded),
       FieldOptionalityPolicy::standard(),
+      false,
       false,
       false,
     );
@@ -600,6 +603,7 @@ mod tests {
       FieldOptionalityPolicy::standard(),
       false,
       false,
+      false,
     );
     let result_full = orchestrator_full.generate_with_header("test.json");
     assert!(result_full.is_ok());
@@ -615,6 +619,7 @@ mod tests {
       None,
       Some(&excluded),
       FieldOptionalityPolicy::standard(),
+      false,
       false,
       false,
     );
@@ -646,6 +651,7 @@ mod tests {
       FieldOptionalityPolicy::standard(),
       false,
       false,
+      false,
     );
     let result_without = orchestrator_without.generate_with_header("test.json");
     assert!(result_without.is_ok());
@@ -661,6 +667,7 @@ mod tests {
       Some(&only),
       None,
       FieldOptionalityPolicy::standard(),
+      false,
       false,
       false,
     );
@@ -698,6 +705,7 @@ mod tests {
       FieldOptionalityPolicy::standard(),
       false,
       false,
+      false,
     );
 
     let result = orchestrator.generate_with_header("test.json");
@@ -727,6 +735,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
       false,
       false,
     );
@@ -769,6 +778,7 @@ mod tests {
       None,
       None,
       FieldOptionalityPolicy::standard(),
+      false,
       false,
       false,
     );

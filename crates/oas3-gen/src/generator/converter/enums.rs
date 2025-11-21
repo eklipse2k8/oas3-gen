@@ -4,12 +4,15 @@ use anyhow::Context;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata, naming,
-  structs::StructConverter, type_resolver::TypeResolver,
+  CodegenConfig, ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
+  naming, structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::{
   generator::{
-    ast::{EnumDef, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
+    ast::{
+      EnumDef, EnumMethod, EnumMethodKind, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+      default_enum_derives,
+    },
     schema_graph::SchemaGraph,
   },
   reserved::to_rust_type_name,
@@ -44,22 +47,19 @@ pub(crate) struct EnumConverter<'a> {
   struct_converter: StructConverter<'a>,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
+  pub(crate) no_helpers: bool,
 }
 
 impl<'a> EnumConverter<'a> {
-  pub(crate) fn new(
-    graph: &'a SchemaGraph,
-    type_resolver: TypeResolver<'a>,
-    preserve_case_variants: bool,
-    case_insensitive_enums: bool,
-  ) -> Self {
+  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>, config: CodegenConfig) -> Self {
     let struct_converter = StructConverter::new(graph, type_resolver.clone(), None, FieldOptionalityPolicy::standard());
     Self {
       graph,
       type_resolver,
       struct_converter,
-      preserve_case_variants,
-      case_insensitive_enums,
+      preserve_case_variants: config.preserve_case_variants,
+      case_insensitive_enums: config.case_insensitive_enums,
+      no_helpers: config.no_helpers,
     }
   }
 
@@ -131,6 +131,7 @@ impl<'a> EnumConverter<'a> {
       serde_attrs: vec![],
       outer_attrs: vec![],
       case_insensitive: self.case_insensitive_enums,
+      methods: vec![],
     })
   }
 
@@ -251,10 +252,113 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
 
     strip_common_affixes(&mut variants);
 
-    let main_enum = self.build_enum_def(variants);
+    let methods = if self.converter.no_helpers {
+      Vec::new()
+    } else {
+      self.generate_methods(&variants, &inline_types)
+    };
+
+    let main_enum = self.build_enum_def(variants, methods);
     inline_types.push(main_enum);
 
     Ok(inline_types)
+  }
+
+  fn generate_methods(&self, variants: &[VariantDef], inline_types: &[RustType]) -> Vec<EnumMethod> {
+    let mut methods = Vec::new();
+    let mut seen_names = BTreeSet::new();
+    let enum_name = to_rust_type_name(self.name);
+
+    let struct_map: BTreeMap<_, _> = inline_types
+      .iter()
+      .filter_map(|t| match t {
+        RustType::Struct(s) => Some((&s.name, s)),
+        _ => None,
+      })
+      .collect();
+
+    for variant in variants {
+      let VariantContent::Tuple(types) = &variant.content else {
+        continue;
+      };
+
+      if types.len() != 1 {
+        continue;
+      }
+
+      let type_ref = &types[0];
+      let type_name = type_ref.to_rust_type();
+
+      let Some(&struct_def) = struct_map.get(&type_name) else {
+        continue;
+      };
+
+      if !struct_def
+        .derives
+        .contains(&crate::generator::ast::DeriveTrait::Default)
+      {
+        continue;
+      }
+
+      let required_fields: Vec<_> = struct_def
+        .fields
+        .iter()
+        .filter(|f| f.default_value.is_none() && !f.rust_type.nullable)
+        .collect();
+
+      let base_method_name = naming::derive_method_name(&enum_name, &variant.name);
+      let method_name = naming::ensure_unique(&base_method_name, &seen_names);
+      seen_names.insert(method_name.clone());
+
+      let docs = Self::generate_method_docs(
+        &variant.name,
+        &struct_def.docs,
+        required_fields.is_empty(),
+        required_fields.first().map(|f| f.name.as_str()),
+      );
+
+      if required_fields.is_empty() {
+        methods.push(EnumMethod {
+          name: method_name,
+          docs,
+          kind: EnumMethodKind::SimpleConstructor {
+            variant_name: variant.name.clone(),
+            wrapped_type: type_name.clone(),
+          },
+        });
+      } else if required_fields.len() == 1 {
+        let field = required_fields[0];
+        methods.push(EnumMethod {
+          name: method_name,
+          docs,
+          kind: EnumMethodKind::ParameterizedConstructor {
+            variant_name: variant.name.clone(),
+            wrapped_type: type_name.clone(),
+            param_name: field.name.clone(),
+            param_type: field.rust_type.to_rust_type(),
+          },
+        });
+      }
+    }
+
+    methods
+  }
+
+  fn generate_method_docs(
+    variant_name: &str,
+    struct_docs: &[String],
+    is_simple: bool,
+    param_name: Option<&str>,
+  ) -> Vec<String> {
+    if is_simple {
+      vec![format!("Creates a `{variant_name}` variant with default values.")]
+    } else if let Some(param) = param_name {
+      vec![format!(
+        "Creates a `{variant_name}` variant with the specified `{param}`."
+      )]
+    } else {
+      struct_docs.to_vec()
+    }
   }
 
   fn process_single_variant(
@@ -313,7 +417,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
     if let Some(const_value) = &resolved_schema.const_value {
-      return self.create_const_variant(const_value, resolved_schema, seen_names);
+      return Self::create_const_variant(const_value, resolved_schema, seen_names);
     }
 
     let base_name = resolved_schema
@@ -354,7 +458,6 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
   }
 
   fn create_const_variant(
-    &self,
     const_value: &serde_json::Value,
     resolved_schema: &ObjectSchema,
     seen_names: &mut BTreeSet<String>,
@@ -375,7 +478,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     Ok((variant, vec![]))
   }
 
-  fn build_enum_def(&self, variants: Vec<VariantDef>) -> RustType {
+  fn build_enum_def(&self, variants: Vec<VariantDef>, methods: Vec<EnumMethod>) -> RustType {
     let has_discriminator = self.schema.discriminator.is_some();
 
     // If AnyOf and no discriminator, we use untagged to allow Serde to try matching fields
@@ -394,6 +497,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       serde_attrs,
       outer_attrs: vec![],
       case_insensitive: false,
+      methods,
     })
   }
 }
@@ -567,6 +671,7 @@ impl<'a> StringEnumOptimizer<'a> {
       serde_attrs: vec![],
       outer_attrs: vec![],
       case_insensitive: self.case_insensitive,
+      methods: vec![],
     })
   }
 
@@ -597,6 +702,7 @@ impl<'a> StringEnumOptimizer<'a> {
       serde_attrs: vec![SerdeAttribute::Untagged],
       outer_attrs: vec![],
       case_insensitive: false,
+      methods: vec![],
     })
   }
 }

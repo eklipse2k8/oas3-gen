@@ -176,6 +176,28 @@ pub enum PathSegment {
   Parameter { field: String },
 }
 
+/// Associated method definition for an enum
+#[derive(Debug, Clone)]
+pub struct EnumMethod {
+  pub name: String,
+  pub docs: Vec<String>,
+  pub kind: EnumMethodKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum EnumMethodKind {
+  SimpleConstructor {
+    variant_name: String,
+    wrapped_type: String,
+  },
+  ParameterizedConstructor {
+    variant_name: String,
+    wrapped_type: String,
+    param_name: String,
+    param_type: String,
+  },
+}
+
 /// Rust struct field definition
 #[derive(Debug, Clone, Default)]
 pub struct FieldDef {
@@ -204,6 +226,7 @@ pub struct EnumDef {
   pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<String>,
   pub case_insensitive: bool,
+  pub methods: Vec<EnumMethod>,
 }
 
 /// Rust enum variant definition

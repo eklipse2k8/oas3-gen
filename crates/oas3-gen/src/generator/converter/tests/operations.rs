@@ -6,7 +6,7 @@ use oas3::spec::{
   SchemaTypeSet,
 };
 
-use super::common::create_test_graph;
+use super::common::{create_test_graph, default_config};
 use crate::generator::{
   ast::{PathSegment, RustType, StructMethodKind},
   converter::{
@@ -19,7 +19,7 @@ use crate::generator::{
 fn test_basic_get_operation() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation::default();
@@ -46,7 +46,7 @@ fn test_basic_get_operation() -> ConversionResult<()> {
 fn test_operation_with_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -118,7 +118,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
   };
   let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation {
@@ -174,7 +174,7 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
   };
   let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
 
   let operation = Operation {
@@ -218,7 +218,7 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
 fn test_operation_with_integer_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -275,7 +275,7 @@ fn test_operation_with_integer_path_parameter() -> ConversionResult<()> {
 fn test_operation_with_int32_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -328,7 +328,7 @@ fn test_operation_with_int32_path_parameter() -> ConversionResult<()> {
 fn test_operation_with_number_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -381,7 +381,7 @@ fn test_operation_with_number_path_parameter() -> ConversionResult<()> {
 fn test_operation_with_boolean_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -433,7 +433,7 @@ fn test_operation_with_boolean_path_parameter() -> ConversionResult<()> {
 fn test_operation_with_uuid_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -486,7 +486,7 @@ fn test_operation_with_uuid_path_parameter() -> ConversionResult<()> {
 fn test_operation_with_date_time_path_parameter() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {
@@ -542,7 +542,7 @@ fn test_operation_with_date_time_path_parameter() -> ConversionResult<()> {
 fn test_operation_with_multiple_path_parameters() -> ConversionResult<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let converter = OperationConverter::new(&schema_converter, &spec);
   let mut operation = Operation::default();
   operation.parameters.push(ObjectOrReference::Object(Parameter {

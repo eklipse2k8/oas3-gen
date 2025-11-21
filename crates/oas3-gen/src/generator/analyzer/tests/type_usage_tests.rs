@@ -264,6 +264,7 @@ fn test_enum_with_tuple_variant() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
+    methods: vec![],
   });
 
   let user_struct = RustType::Struct(StructDef {
@@ -549,6 +550,7 @@ fn test_request_body_chain_with_response_enum() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
+    methods: vec![],
   });
 
   let request_body_alias = RustType::TypeAlias(TypeAliasDef {

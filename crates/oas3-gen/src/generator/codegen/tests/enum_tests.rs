@@ -36,6 +36,7 @@ fn test_case_insensitive_enum_generation() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
+    methods: vec![],
   };
 
   let tokens = generate_enum(&def, Visibility::Public);

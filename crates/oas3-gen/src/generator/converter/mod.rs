@@ -70,6 +70,13 @@ pub(crate) const STATUS_PREFIX: &str = "Status";
 
 pub(crate) type ConversionResult<T> = anyhow::Result<T>;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CodegenConfig {
+  pub preserve_case_variants: bool,
+  pub case_insensitive_enums: bool,
+  pub no_helpers: bool,
+}
+
 pub(crate) struct SchemaConverter<'a> {
   type_resolver: TypeResolver<'a>,
   struct_converter: StructConverter<'a>,
@@ -78,18 +85,13 @@ pub(crate) struct SchemaConverter<'a> {
 }
 
 impl<'a> SchemaConverter<'a> {
-  pub(crate) fn new(
-    graph: &'a SchemaGraph,
-    optionality_policy: FieldOptionalityPolicy,
-    preserve_case_variants: bool,
-    case_insensitive_enums: bool,
-  ) -> Self {
-    let type_resolver = TypeResolver::new(graph, preserve_case_variants, case_insensitive_enums);
+  pub(crate) fn new(graph: &'a SchemaGraph, optionality_policy: FieldOptionalityPolicy, config: CodegenConfig) -> Self {
+    let type_resolver = TypeResolver::new(graph, config);
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, type_resolver.clone(), None, optionality_policy),
-      enum_converter: EnumConverter::new(graph, type_resolver, preserve_case_variants, case_insensitive_enums),
+      enum_converter: EnumConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
   }
@@ -98,10 +100,9 @@ impl<'a> SchemaConverter<'a> {
     graph: &'a SchemaGraph,
     reachable_schemas: BTreeSet<String>,
     optionality_policy: FieldOptionalityPolicy,
-    preserve_case_variants: bool,
-    case_insensitive_enums: bool,
+    config: CodegenConfig,
   ) -> Self {
-    let type_resolver = TypeResolver::new(graph, preserve_case_variants, case_insensitive_enums);
+    let type_resolver = TypeResolver::new(graph, config);
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
@@ -111,7 +112,7 @@ impl<'a> SchemaConverter<'a> {
         Some(reachable_schemas),
         optionality_policy,
       ),
-      enum_converter: EnumConverter::new(graph, type_resolver, preserve_case_variants, case_insensitive_enums),
+      enum_converter: EnumConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
   }

@@ -303,6 +303,64 @@ pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> S
   }
 }
 
+/// Derives a method name for an enum variant helper by stripping common prefix/suffix
+/// between the enum name and variant name.
+pub(crate) fn derive_method_name(enum_name: &str, variant_name: &str) -> String {
+  let variant_words = split_pascal_case(variant_name);
+  let enum_words = split_pascal_case(enum_name);
+
+  let mut start = 0;
+  while start < variant_words.len() && start < enum_words.len() && variant_words[start] == enum_words[start] {
+    start += 1;
+  }
+
+  let mut end = variant_words.len();
+  let mut enum_end = enum_words.len();
+  while end > start && enum_end > 0 && variant_words[end - 1] == enum_words[enum_end - 1] {
+    end -= 1;
+    enum_end -= 1;
+  }
+
+  if start >= end {
+    return to_snake_case(variant_name);
+  }
+
+  let stripped = &variant_words[start..end];
+  to_snake_case(&stripped.join(""))
+}
+
+fn split_pascal_case(name: &str) -> Vec<String> {
+  if name.is_empty() {
+    return Vec::new();
+  }
+
+  let mut words = Vec::new();
+  let mut current_word = String::new();
+  let chars: Vec<char> = name.chars().collect();
+
+  for i in 0..chars.len() {
+    let ch = chars[i];
+    let prev_is_lower = i > 0 && chars[i - 1].is_lowercase();
+    let next_is_lower = i + 1 < chars.len() && chars[i + 1].is_lowercase();
+
+    if ch.is_uppercase() && !current_word.is_empty() && (prev_is_lower || next_is_lower) {
+      words.push(std::mem::take(&mut current_word));
+    }
+
+    current_word.push(ch);
+  }
+
+  if !current_word.is_empty() {
+    words.push(current_word);
+  }
+
+  words
+}
+
+fn to_snake_case(name: &str) -> String {
+  name.to_snake_case()
+}
+
 #[cfg(test)]
 mod tests {
   use std::collections::BTreeSet;
@@ -360,5 +418,63 @@ mod tests {
     used.insert("Value3".to_string());
     let result = ensure_unique("Value", &used);
     assert_eq!(result, "Value2");
+  }
+
+  #[test]
+  fn test_split_pascal_case_simple() {
+    assert_eq!(split_pascal_case("UserName"), vec!["User", "Name"]);
+    assert_eq!(split_pascal_case("SimpleTest"), vec!["Simple", "Test"]);
+  }
+
+  #[test]
+  fn test_split_pascal_case_with_acronyms() {
+    assert_eq!(split_pascal_case("HTTPSConnection"), vec!["HTTPS", "Connection"]);
+    assert_eq!(split_pascal_case("XMLParser"), vec!["XML", "Parser"]);
+    assert_eq!(split_pascal_case("JSONResponse"), vec!["JSON", "Response"]);
+    assert_eq!(split_pascal_case("HTTPStatus"), vec!["HTTP", "Status"]);
+  }
+
+  #[test]
+  fn test_split_pascal_case_all_caps() {
+    assert_eq!(split_pascal_case("HTTPS"), vec!["HTTPS"]);
+    assert_eq!(split_pascal_case("XML"), vec!["XML"]);
+  }
+
+  #[test]
+  fn test_split_pascal_case_single_word() {
+    assert_eq!(split_pascal_case("User"), vec!["User"]);
+    assert_eq!(split_pascal_case("Status"), vec!["Status"]);
+  }
+
+  #[test]
+  fn test_derive_method_name_strips_common_prefix() {
+    assert_eq!(derive_method_name("ResponseFormat", "ResponseFormatText"), "text");
+    assert_eq!(derive_method_name("Status", "StatusActive"), "active");
+  }
+
+  #[test]
+  fn test_derive_method_name_strips_common_suffix() {
+    assert_eq!(derive_method_name("TextFormat", "PlainTextFormat"), "plain");
+  }
+
+  #[test]
+  fn test_derive_method_name_identical_names() {
+    assert_eq!(derive_method_name("Status", "Status"), "status");
+  }
+
+  #[test]
+  fn test_derive_method_name_with_acronyms() {
+    assert_eq!(derive_method_name("ResponseFormat", "ResponseFormatHTTPS"), "https");
+    assert_eq!(derive_method_name("APIResponse", "APIResponseJSON"), "json");
+  }
+
+  #[test]
+  fn test_split_pascal_case_empty_string() {
+    assert_eq!(split_pascal_case(""), Vec::<String>::new());
+  }
+
+  #[test]
+  fn test_derive_method_name_empty_variant() {
+    assert_eq!(derive_method_name("Status", ""), "");
   }
 }

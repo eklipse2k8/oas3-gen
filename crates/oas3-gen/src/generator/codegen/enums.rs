@@ -9,7 +9,8 @@ use super::{
   coercion,
 };
 use crate::generator::ast::{
-  DeriveTrait, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeAttribute, VariantContent, VariantDef,
+  DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute, VariantContent,
+  VariantDef,
 };
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
@@ -26,6 +27,7 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
   let outer_attrs = generate_outer_attrs(&def.outer_attrs);
   let serde_attrs = generate_enum_serde_attrs(def);
   let variants = generate_variants(&def.variants);
+  let methods = generate_enum_methods(def, visibility);
 
   let enum_def = quote! {
     #docs
@@ -35,6 +37,7 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
     #vis enum #name {
       #(#variants),*
     }
+    #methods
   };
 
   if def.case_insensitive {
@@ -45,6 +48,62 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
     }
   } else {
     enum_def
+  }
+}
+
+fn generate_enum_methods(def: &EnumDef, visibility: Visibility) -> TokenStream {
+  if def.methods.is_empty() {
+    return quote! {};
+  }
+
+  let name = format_ident!("{}", def.name);
+  let vis = visibility.to_tokens();
+
+  let methods = def.methods.iter().map(|m| {
+    let method_name = format_ident!("{}", m.name);
+    let docs = generate_docs(&m.docs);
+
+    match &m.kind {
+      EnumMethodKind::SimpleConstructor {
+        variant_name,
+        wrapped_type,
+      } => {
+        let variant = format_ident!("{}", variant_name);
+        let type_name = coercion::parse_type_string(wrapped_type);
+        quote! {
+          #docs
+          #vis fn #method_name() -> Self {
+            Self::#variant(#type_name::default())
+          }
+        }
+      }
+      EnumMethodKind::ParameterizedConstructor {
+        variant_name,
+        wrapped_type,
+        param_name,
+        param_type,
+      } => {
+        let variant = format_ident!("{}", variant_name);
+        let type_name = coercion::parse_type_string(wrapped_type);
+        let param_ident = format_ident!("{}", param_name);
+        let param_ty = coercion::parse_type_string(param_type);
+        quote! {
+          #docs
+          #vis fn #method_name(#param_ident: #param_ty) -> Self {
+            Self::#variant(#type_name {
+              #param_ident,
+              ..Default::default()
+            })
+          }
+        }
+      }
+    }
+  });
+
+  quote! {
+    impl #name {
+      #(#methods)*
+    }
   }
 }
 
