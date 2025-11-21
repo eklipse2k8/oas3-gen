@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
@@ -18,7 +18,7 @@ pub(crate) struct InlineTypeScanner<'a> {
 #[derive(Default)]
 pub(crate) struct ScanResult {
   pub(crate) names: BTreeMap<String, String>,
-  pub(crate) enum_names: HashMap<Vec<String>, String>,
+  pub(crate) enum_names: BTreeMap<Vec<String>, String>,
 }
 
 impl<'a> InlineTypeScanner<'a> {
@@ -30,7 +30,7 @@ impl<'a> InlineTypeScanner<'a> {
     // Map<Hash, Set<CandidateName>>
     let mut candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     // Map<EnumValues, Set<CandidateName>>
-    let mut enum_candidates: HashMap<Vec<String>, BTreeSet<String>> = HashMap::new();
+    let mut enum_candidates: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
 
     // Iterate over all schemas in the graph
     for schema_name in self.graph.schema_names() {
@@ -48,7 +48,7 @@ impl<'a> InlineTypeScanner<'a> {
     }
 
     let mut final_names = BTreeMap::new();
-    let mut final_enum_names = HashMap::new();
+    let mut final_enum_names = BTreeMap::new();
     let mut used_names = self.get_existing_names();
 
     // Process enums first to claim best names
@@ -87,7 +87,7 @@ impl<'a> InlineTypeScanner<'a> {
     parent_name: &str,
     schema: &ObjectSchema,
     candidates: &mut BTreeMap<String, BTreeSet<String>>,
-    enum_candidates: &mut HashMap<Vec<String>, BTreeSet<String>>,
+    enum_candidates: &mut BTreeMap<Vec<String>, BTreeSet<String>>,
   ) -> anyhow::Result<()> {
     // Check properties
     for (prop_name, prop_schema_ref) in &schema.properties {
@@ -208,7 +208,7 @@ impl<'a> InlineTypeScanner<'a> {
       if !used_names.contains(name) || candidates.contains(name) {
         return name.clone();
       }
-      return Self::ensure_unique(name, used_names);
+      return ensure_unique(name, used_names);
     }
 
     // Prioritize candidates that match existing schema names (e.g. "Status" vs "InlineStatus")
@@ -234,7 +234,7 @@ impl<'a> InlineTypeScanner<'a> {
       if !used_names.contains(&lcs) || candidates.contains(&lcs) {
         return lcs;
       }
-      let unique_lcs = Self::ensure_unique(&lcs, used_names);
+      let unique_lcs = ensure_unique(&lcs, used_names);
       return unique_lcs;
     }
 
@@ -244,7 +244,7 @@ impl<'a> InlineTypeScanner<'a> {
     if !used_names.contains(first) || candidates.contains(first) {
       return first.clone();
     }
-    Self::ensure_unique(first, used_names)
+    ensure_unique(first, used_names)
   }
   fn longest_common_suffix(strings: &[&String]) -> String {
     if strings.is_empty() {
@@ -283,22 +283,82 @@ impl<'a> InlineTypeScanner<'a> {
 
     true
   }
+}
 
-  fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
-    if !used_names.contains(base_name) {
-      return base_name.to_string();
-    }
+pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
+  if !used_names.contains(base_name) {
+    return base_name.to_string();
+  }
 
-    // Collision resolution: append suffix
-    // This is slightly imperfect because "Name2" might collide with an existing "Name2"
-    // but we iterate
-    let mut i = 2;
-    loop {
-      let new_name = format!("{base_name}{i}");
-      if !used_names.contains(&new_name) {
-        return new_name;
-      }
-      i += 1;
+  // Collision resolution: append suffix
+  // This is slightly imperfect because "Name2" might collide with an existing "Name2"
+  // but we iterate
+  let mut i = 2;
+  loop {
+    let new_name = format!("{base_name}{i}");
+    if !used_names.contains(&new_name) {
+      return new_name;
     }
+    i += 1;
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::collections::BTreeSet;
+
+  use super::*;
+
+  #[test]
+  fn test_ensure_unique_handles_collisions() {
+    let mut used = BTreeSet::new();
+    used.insert("UserResponse".to_string());
+
+    let result = ensure_unique("UserResponse", &used);
+
+    assert_eq!(result, "UserResponse2");
+  }
+
+  #[test]
+  fn test_ensure_unique_handles_multiple_collisions() {
+    let mut used = BTreeSet::new();
+    used.insert("UserResponse".to_string());
+    used.insert("UserResponse2".to_string());
+    used.insert("UserResponse3".to_string());
+
+    let result = ensure_unique("UserResponse", &used);
+
+    assert_eq!(result, "UserResponse4");
+  }
+
+  #[test]
+  fn test_ensure_unique_with_empty_string() {
+    let used = BTreeSet::new();
+    let result = ensure_unique("", &used);
+    assert_eq!(result, "");
+  }
+
+  #[test]
+  fn test_ensure_unique_with_suffixed_collision() {
+    let mut used = BTreeSet::new();
+    used.insert("Name2".to_string());
+    let result = ensure_unique("Name", &used);
+    assert_eq!(result, "Name");
+  }
+
+  #[test]
+  fn test_ensure_unique_no_collision() {
+    let used = BTreeSet::new();
+    let result = ensure_unique("UniqueName", &used);
+    assert_eq!(result, "UniqueName");
+  }
+
+  #[test]
+  fn test_ensure_unique_skips_to_available_suffix() {
+    let mut used = BTreeSet::new();
+    used.insert("Value".to_string());
+    used.insert("Value3".to_string());
+    let result = ensure_unique("Value", &used);
+    assert_eq!(result, "Value2");
   }
 }

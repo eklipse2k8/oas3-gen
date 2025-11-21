@@ -4,12 +4,12 @@ use anyhow::Context;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
-  structs::StructConverter, type_resolver::TypeResolver, utils,
+  ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata, naming,
+  structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::{
   generator::{
-    ast::{EnumDef, RustType, TypeRef, VariantContent, VariantDef, default_enum_derives},
+    ast::{EnumDef, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
     schema_graph::SchemaGraph,
   },
   reserved::to_rust_type_name,
@@ -106,7 +106,7 @@ impl<'a> EnumConverter<'a> {
         Some(&existing_idx) if strategy == CollisionStrategy::Deduplicate => {
           variants[existing_idx]
             .serde_attrs
-            .push(format!(r#"alias = "{}""#, normalized.rename_value));
+            .push(SerdeAttribute::Alias(normalized.rename_value));
         }
         Some(_) => {
           let unique_name = format!("{}{}", normalized.name, i);
@@ -139,7 +139,7 @@ impl<'a> EnumConverter<'a> {
       name,
       docs: vec![],
       content: VariantContent::Unit,
-      serde_attrs: vec![format!(r#"rename = "{}""#, rename)],
+      serde_attrs: vec![SerdeAttribute::Rename(rename.to_string())],
       deprecated: false,
     });
   }
@@ -249,7 +249,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       inline_types.append(&mut generated);
     }
 
-    utils::strip_common_affixes(&mut variants);
+    strip_common_affixes(&mut variants);
 
     let main_enum = self.build_enum_def(variants);
     inline_types.push(main_enum);
@@ -267,7 +267,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
   ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
     // Case A: It's a Reference (e.g., $ref: "#/components/schemas/User")
     if let Some(schema_name) = SchemaGraph::extract_ref_name_from_ref(variant_ref) {
-      return Ok(self.create_ref_variant(index, &schema_name, resolved_schema, seen_names));
+      return Ok(self.create_ref_variant(&schema_name, resolved_schema, seen_names));
     }
 
     // Case B: It's an Inline Schema
@@ -276,7 +276,6 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
 
   fn create_ref_variant(
     &self,
-    index: usize,
     schema_name: &str,
     resolved_schema: &ObjectSchema,
     seen_names: &mut BTreeSet<String>,
@@ -288,11 +287,11 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       type_ref = type_ref.with_boxed();
     }
 
-    let variant_name = utils::unique_variant_name(&rust_type_name, index, seen_names);
+    let variant_name = naming::ensure_unique(&rust_type_name, seen_names);
 
     let mut serde_attrs = Vec::new();
     if let Some(disc_value) = self.discriminator_map.get(schema_name) {
-      serde_attrs.push(format!(r#"rename = "{disc_value}""#));
+      serde_attrs.push(SerdeAttribute::Rename(disc_value.clone()));
     }
 
     let variant = VariantDef {
@@ -313,11 +312,11 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     seen_names: &mut BTreeSet<String>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
-    let base_name = resolved_schema.title.as_ref().map_or_else(
-      || utils::infer_variant_name(resolved_schema, index),
-      |t| to_rust_type_name(t),
-    );
-    let variant_name = utils::unique_variant_name(&base_name, index, seen_names);
+    let base_name = resolved_schema
+      .title
+      .as_ref()
+      .map_or_else(|| infer_variant_name(resolved_schema, index), |t| to_rust_type_name(t));
+    let variant_name = naming::ensure_unique(&base_name, seen_names);
 
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
       let type_ref = self.converter.type_resolver.schema_to_type_ref(resolved_schema)?;
@@ -355,7 +354,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
 
     // If AnyOf and no discriminator, we use untagged to allow Serde to try matching fields
     let (serde_attrs, derives) = if self.kind == UnionKind::AnyOf && !has_discriminator {
-      (vec!["untagged".into()], default_enum_derives(false))
+      (vec![SerdeAttribute::Untagged], default_enum_derives(false))
     } else {
       (vec![], default_enum_derives(false))
     };
@@ -517,20 +516,21 @@ impl<'a> StringEnumOptimizer<'a> {
 
   fn build_known_enum(&self, name: &str, values: &[(String, Option<String>, bool)]) -> RustType {
     let mut seen_names = BTreeSet::new();
-    let variants = values
-      .iter()
-      .enumerate()
-      .map(|(i, (value, description, deprecated))| {
-        let variant_name = utils::unique_variant_name(&to_rust_type_name(value), i, &mut seen_names);
-        VariantDef {
-          name: variant_name,
-          docs: metadata::extract_docs(description.as_ref()),
-          content: VariantContent::Unit,
-          serde_attrs: vec![format!(r#"rename = "{}""#, value)],
-          deprecated: *deprecated,
-        }
-      })
-      .collect();
+    let mut variants = Vec::new();
+
+    for (value, description, deprecated) in values {
+      let base_name = to_rust_type_name(value);
+      let variant_name = naming::ensure_unique(&base_name, &seen_names);
+      seen_names.insert(variant_name.clone());
+
+      variants.push(VariantDef {
+        name: variant_name,
+        docs: metadata::extract_docs(description.as_ref()),
+        content: VariantContent::Unit,
+        serde_attrs: vec![SerdeAttribute::Rename(value.clone())],
+        deprecated: *deprecated,
+      });
+    }
 
     RustType::Enum(EnumDef {
       name: name.to_string(),
@@ -550,7 +550,7 @@ impl<'a> StringEnumOptimizer<'a> {
         name: "Known".to_string(),
         docs: vec!["/// A known value.".to_string()],
         content: VariantContent::Tuple(vec![TypeRef::new(known_type_name)]),
-        serde_attrs: vec!["default".into()],
+        serde_attrs: vec![SerdeAttribute::Default],
         deprecated: false,
       },
       VariantDef {
@@ -568,9 +568,111 @@ impl<'a> StringEnumOptimizer<'a> {
       variants,
       discriminator: None,
       derives: default_enum_derives(false),
-      serde_attrs: vec!["untagged".into()],
+      serde_attrs: vec![SerdeAttribute::Untagged],
       outer_attrs: vec![],
       case_insensitive: false,
     })
   }
+}
+
+pub(crate) fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
+  if !schema.enum_values.is_empty() {
+    return "Enum".to_string();
+  }
+  if let Some(ref schema_type) = schema.schema_type {
+    match schema_type {
+      SchemaTypeSet::Single(typ) => match typ {
+        SchemaType::String => "String".to_string(),
+        SchemaType::Number => "Number".to_string(),
+        SchemaType::Integer => "Integer".to_string(),
+        SchemaType::Boolean => "Boolean".to_string(),
+        SchemaType::Array => "Array".to_string(),
+        SchemaType::Object => "Object".to_string(),
+        SchemaType::Null => "Null".to_string(),
+      },
+      SchemaTypeSet::Multiple(_) => "Mixed".to_string(),
+    }
+  } else {
+    format!("Variant{index}")
+  }
+}
+
+pub(crate) fn strip_common_affixes(variants: &mut [VariantDef]) {
+  let variant_names: Vec<_> = variants.iter().map(|v| v.name.clone()).collect();
+  if variant_names.len() < 2 {
+    return;
+  }
+
+  let split_names: Vec<Vec<String>> = variant_names.iter().map(|n| split_pascal_case(n)).collect();
+
+  let common_prefix_len = find_common_prefix_len(&split_names);
+  let common_suffix_len = find_common_suffix_len(&split_names);
+
+  let mut stripped_names = Vec::new();
+  for words in &split_names {
+    let start = common_prefix_len;
+    let end = words.len().saturating_sub(common_suffix_len);
+    if start >= end {
+      stripped_names.push(words.join(""));
+    } else {
+      stripped_names.push(words[start..end].join(""));
+    }
+  }
+
+  let mut seen = BTreeSet::new();
+  if stripped_names.iter().any(|n| n.is_empty() || !seen.insert(n)) {
+    return;
+  }
+
+  for (variant, new_name) in variants.iter_mut().zip(stripped_names) {
+    variant.name = new_name;
+  }
+}
+
+fn find_common_prefix_len(split_names: &[Vec<String>]) -> usize {
+  let Some(first) = split_names.first() else {
+    return 0;
+  };
+  let mut len = 0;
+  'outer: for (i, word) in first.iter().enumerate() {
+    for other in &split_names[1..] {
+      if other.get(i) != Some(word) {
+        break 'outer;
+      }
+    }
+    len = i + 1;
+  }
+  len
+}
+
+fn find_common_suffix_len(split_names: &[Vec<String>]) -> usize {
+  let Some(first) = split_names.first() else {
+    return 0;
+  };
+  let mut len = 0;
+  'outer: for i in 1..=first.len() {
+    let word = &first[first.len() - i];
+    for other in &split_names[1..] {
+      if other.len() < i || &other[other.len() - i] != word {
+        break 'outer;
+      }
+    }
+    len = i;
+  }
+  len
+}
+
+fn split_pascal_case(name: &str) -> Vec<String> {
+  let mut words = Vec::new();
+  let mut current_word = String::new();
+  for (i, ch) in name.chars().enumerate() {
+    if ch.is_uppercase() && i > 0 && !current_word.is_empty() {
+      words.push(std::mem::take(&mut current_word));
+    }
+    current_word.push(ch);
+  }
+  if !current_word.is_empty() {
+    words.push(current_word);
+  }
+  words
 }

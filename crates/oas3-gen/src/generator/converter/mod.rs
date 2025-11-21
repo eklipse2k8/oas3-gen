@@ -8,7 +8,6 @@ pub(crate) mod operations;
 mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
-mod utils;
 
 use std::collections::{BTreeSet, HashSet};
 

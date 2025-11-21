@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+  cmp::Reverse,
+  collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+};
 
 use inflections::Inflect;
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
@@ -6,28 +9,27 @@ use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
 use super::{
   ConversionResult, DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX,
   cache::SharedSchemaCache,
-  constants::{doc_attrs, serde_attrs},
+  constants::doc_attrs,
   field_optionality::{FieldOptionalityContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
-  utils,
 };
 use crate::{
   generator::{
     ast::{
-      DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, RustType, StructDef, StructKind, TypeRef,
+      DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, RustType, SerdeAttribute, StructDef, StructKind, TypeRef,
       default_struct_derives,
     },
     schema_graph::SchemaGraph,
   },
-  reserved::to_rust_type_name,
+  reserved::{to_rust_field_name, to_rust_type_name},
 };
 
 struct FieldProcessingContext<'a> {
   parent_name: &'a str,
   prop_name: &'a str,
   schema: &'a ObjectSchema,
-  policy: utils::InlinePolicy,
+  policy: InlinePolicy,
 }
 
 struct DiscriminatorInfo {
@@ -84,7 +86,7 @@ impl<'a> StructConverter<'a> {
     kind: Option<StructKind>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(RustType, Vec<RustType>)> {
-    let is_discriminated = utils::is_discriminated_base_type(schema);
+    let is_discriminated = is_discriminated_base_type(schema);
     let struct_name = if is_discriminated {
       format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))
     } else {
@@ -94,7 +96,7 @@ impl<'a> StructConverter<'a> {
     let (mut fields, inline_types) = self.convert_fields_core(
       &struct_name,
       schema,
-      utils::InlinePolicy::InlineUnions,
+      InlinePolicy::InlineUnions,
       None,
       Some(name),
       cache,
@@ -106,10 +108,10 @@ impl<'a> StructConverter<'a> {
     }
 
     if fields.iter().any(|f| f.default_value.is_some()) {
-      serde_attrs.push(serde_attrs::DEFAULT.to_string());
+      serde_attrs.push(SerdeAttribute::Default);
     }
 
-    let outer_attrs = utils::container_outer_attrs(&fields);
+    let outer_attrs = container_outer_attrs(&fields);
 
     let struct_type = RustType::Struct(StructDef {
       name: struct_name,
@@ -151,7 +153,7 @@ impl<'a> StructConverter<'a> {
     let (fields, mut inline_types) = self.convert_fields_core(
       &struct_name,
       &merged_schema,
-      utils::InlinePolicy::InlineUnions,
+      InlinePolicy::InlineUnions,
       None,
       Some(name),
       cache,
@@ -163,7 +165,7 @@ impl<'a> StructConverter<'a> {
       fields.push(field);
     }
 
-    let outer_attrs = utils::container_outer_attrs(&fields);
+    let outer_attrs = container_outer_attrs(&fields);
 
     let mut all_types = Vec::with_capacity(1 + inline_types.len());
     all_types.push(RustType::Struct(StructDef {
@@ -188,7 +190,7 @@ impl<'a> StructConverter<'a> {
     main_type: RustType,
     mut inline_types: Vec<RustType>,
   ) -> ConversionResult<Vec<RustType>> {
-    let is_discriminated = utils::is_discriminated_base_type(schema);
+    let is_discriminated = is_discriminated_base_type(schema);
     let capacity = if is_discriminated { 2 } else { 1 } + inline_types.len();
     let mut all_types = Vec::with_capacity(capacity);
 
@@ -216,7 +218,7 @@ impl<'a> StructConverter<'a> {
       anyhow::bail!("Failed to find discriminator property for schema '{base_name}'");
     };
 
-    let children = utils::extract_discriminator_children(self.graph, schema, self.reachable_schemas.as_ref());
+    let children = extract_discriminator_children(self.graph, schema, self.reachable_schemas.as_ref());
     let enum_name = to_rust_type_name(base_name);
 
     let mut variants = Vec::new();
@@ -261,7 +263,7 @@ impl<'a> StructConverter<'a> {
     &self,
     parent_name: &str,
     schema: &ObjectSchema,
-    policy: utils::InlinePolicy,
+    policy: InlinePolicy,
     exclude_field: Option<&str>,
     schema_name: Option<&str>,
     mut cache: Option<&mut SharedSchemaCache>,
@@ -297,7 +299,7 @@ impl<'a> StructConverter<'a> {
       inline_types.append(&mut generated_types);
     }
 
-    utils::deduplicate_field_names(&mut fields);
+    deduplicate_field_names(&mut fields);
     Ok((fields, inline_types))
   }
 
@@ -331,10 +333,10 @@ impl<'a> StructConverter<'a> {
       is_required,
       discriminator_info.as_ref(),
     );
-    let final_type = utils::apply_optionality(base_type, should_be_optional);
+    let final_type = apply_optionality(base_type, should_be_optional);
 
     let metadata = FieldMetadata::from_schema(ctx.prop_name, is_required, &prop_schema, &final_type);
-    let serde_attrs = utils::serde_renamed_if_needed(ctx.prop_name);
+    let serde_attrs = serde_renamed_if_needed(ctx.prop_name);
 
     let (metadata, serde_attrs, extra_attrs, regex_validation) =
       Self::apply_discriminator_attributes(metadata, serde_attrs, &final_type, discriminator_info.as_ref());
@@ -342,7 +344,7 @@ impl<'a> StructConverter<'a> {
     let regex_validation =
       regex_validation.or_else(|| metadata::filter_regex_validation(&final_type, metadata.regex_validation.clone()));
 
-    let field = utils::build_field_def(
+    let field = build_field_def(
       ctx.prop_name,
       final_type,
       serde_attrs,
@@ -415,7 +417,7 @@ impl<'a> StructConverter<'a> {
     prop_name: &str,
     prop_schema: &ObjectSchema,
     prop_schema_ref: &ObjectOrReference<ObjectSchema>,
-    policy: utils::InlinePolicy,
+    policy: InlinePolicy,
     cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
     if Self::is_inline_struct(prop_schema_ref, prop_schema) {
@@ -423,7 +425,7 @@ impl<'a> StructConverter<'a> {
     }
 
     match policy {
-      utils::InlinePolicy::InlineUnions => self.type_resolver.resolve_property_type_with_inlines(
+      InlinePolicy::InlineUnions => self.type_resolver.resolve_property_type_with_inlines(
         parent_name,
         prop_name,
         prop_schema,
@@ -497,10 +499,10 @@ impl<'a> StructConverter<'a> {
 
   fn apply_discriminator_attributes(
     mut metadata: FieldMetadata,
-    mut serde_attrs: Vec<String>,
+    mut serde_attrs: Vec<SerdeAttribute>,
     final_type: &TypeRef,
     discriminator_info: Option<&DiscriminatorInfo>,
-  ) -> (FieldMetadata, Vec<String>, Vec<String>, Option<String>) {
+  ) -> (FieldMetadata, Vec<SerdeAttribute>, Vec<String>, Option<String>) {
     let Some(disc_info) = discriminator_info else {
       let regex = metadata.regex_validation.clone();
       return (metadata, serde_attrs, Vec::new(), regex);
@@ -511,14 +513,14 @@ impl<'a> StructConverter<'a> {
       metadata.validation_attrs.clear();
       let extra_attrs = vec![doc_attrs::HIDDEN.to_string()];
       metadata.default_value = Some(serde_json::Value::String(disc_value.clone()));
-      serde_attrs.push(serde_attrs::SKIP_DESERIALIZING.to_string());
-      serde_attrs.push(serde_attrs::DEFAULT.to_string());
+      serde_attrs.push(SerdeAttribute::SkipDeserializing);
+      serde_attrs.push(SerdeAttribute::Default);
       (metadata, serde_attrs, extra_attrs, None)
     } else if disc_info.is_base && !disc_info.has_enum {
       metadata.docs.clear();
       metadata.validation_attrs.clear();
       let extra_attrs = vec![doc_attrs::HIDDEN.to_string()];
-      serde_attrs.push(serde_attrs::SKIP.to_string());
+      serde_attrs.push(SerdeAttribute::Skip);
       if final_type.is_string_like() {
         metadata.default_value = Some(serde_json::Value::String(String::new()));
       }
@@ -529,14 +531,17 @@ impl<'a> StructConverter<'a> {
     }
   }
 
-  fn prepare_additional_properties(&self, schema: &ObjectSchema) -> ConversionResult<(Vec<String>, Option<FieldDef>)> {
+  fn prepare_additional_properties(
+    &self,
+    schema: &ObjectSchema,
+  ) -> ConversionResult<(Vec<SerdeAttribute>, Option<FieldDef>)> {
     let mut serde_attrs = Vec::new();
     let mut additional_field = None;
 
     if let Some(ref additional) = schema.additional_properties {
       match additional {
         Schema::Boolean(b) if !b.0 => {
-          serde_attrs.push(serde_attrs::DENY_UNKNOWN_FIELDS.to_string());
+          serde_attrs.push(SerdeAttribute::DenyUnknownFields);
         }
         Schema::Object(schema_ref) => {
           let additional_schema = schema_ref
@@ -551,7 +556,7 @@ impl<'a> StructConverter<'a> {
             name: "additional_properties".to_string(),
             docs: vec!["/// Additional properties not defined in the schema.".to_string()],
             rust_type: map_type,
-            serde_attrs: vec![serde_attrs::FLATTEN.to_string()],
+            serde_attrs: vec![SerdeAttribute::Flatten],
             ..Default::default()
           });
         }
@@ -673,11 +678,158 @@ impl<'a> StructConverter<'a> {
       let merged_parent = self
         .get_merged_schema(&parent_name, parent_schema, merged_schema_cache)
         .ok()?;
-      if utils::is_discriminated_base_type(&merged_parent) {
+      if is_discriminated_base_type(&merged_parent) {
         Some((parent_name, merged_parent))
       } else {
         None
       }
     })
+  }
+}
+
+#[derive(Copy, Clone)]
+pub(crate) enum InlinePolicy {
+  InlineUnions,
+}
+
+pub(crate) fn container_outer_attrs(_fields: &[FieldDef]) -> Vec<String> {
+  Vec::new()
+}
+
+pub(crate) fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {
+  schema
+    .discriminator
+    .as_ref()
+    .and_then(|d| d.mapping.as_ref().map(|m| !m.is_empty()))
+    .unwrap_or(false)
+    && !schema.properties.is_empty()
+}
+
+pub(crate) fn extract_discriminator_children(
+  graph: &SchemaGraph,
+  schema: &ObjectSchema,
+  reachable_filter: Option<&std::collections::BTreeSet<String>>,
+) -> Vec<(String, String)> {
+  let Some(mapping) = schema.discriminator.as_ref().and_then(|d| d.mapping.as_ref()) else {
+    return vec![];
+  };
+
+  let mut children: Vec<_> = mapping
+    .iter()
+    .filter_map(|(val, ref_path)| SchemaGraph::extract_ref_name(ref_path).map(|name| (val.clone(), name)))
+    .filter(|(_, name)| {
+      if let Some(filter) = reachable_filter {
+        filter.contains(name)
+      } else {
+        true
+      }
+    })
+    .collect();
+
+  let mut depth_memo = HashMap::new();
+  children.sort_by_key(|(_, name)| Reverse(compute_inheritance_depth(graph, name, &mut depth_memo)));
+  children
+}
+
+fn compute_inheritance_depth(graph: &SchemaGraph, schema_name: &str, memo: &mut HashMap<String, usize>) -> usize {
+  if let Some(&depth) = memo.get(schema_name) {
+    return depth;
+  }
+  let Some(schema) = graph.get_schema(schema_name) else {
+    return 0;
+  };
+
+  let depth = if schema.all_of.is_empty() {
+    0
+  } else {
+    schema
+      .all_of
+      .iter()
+      .filter_map(SchemaGraph::extract_ref_name_from_ref)
+      .map(|parent| compute_inheritance_depth(graph, &parent, memo))
+      .max()
+      .unwrap_or(0)
+      + 1
+  };
+
+  memo.insert(schema_name.to_string(), depth);
+  depth
+}
+
+pub(crate) fn serde_renamed_if_needed(prop_name: &str) -> Vec<SerdeAttribute> {
+  let rust_field_name = to_rust_field_name(prop_name);
+  if rust_field_name == prop_name {
+    vec![]
+  } else {
+    vec![SerdeAttribute::Rename(prop_name.to_string())]
+  }
+}
+
+pub(crate) fn apply_optionality(rust_type: TypeRef, is_optional: bool) -> TypeRef {
+  if is_optional && !rust_type.nullable {
+    rust_type.with_option()
+  } else {
+    rust_type
+  }
+}
+
+pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
+  let mut name_counts: BTreeMap<String, usize> = BTreeMap::new();
+  for field in &*fields {
+    *name_counts.entry(field.name.clone()).or_default() += 1;
+  }
+
+  let mut indices_to_remove = HashSet::<usize>::new();
+  for (name, _count) in name_counts.into_iter().filter(|(_, c)| *c > 1) {
+    let colliding_indices: Vec<_> = fields
+      .iter()
+      .enumerate()
+      .filter(|(_, f)| f.name == name)
+      .map(|(i, _)| i)
+      .collect();
+
+    let (deprecated, non_deprecated): (Vec<&usize>, Vec<&usize>) =
+      colliding_indices.iter().partition(|&&i| fields[i].deprecated);
+
+    if !deprecated.is_empty() && !non_deprecated.is_empty() {
+      indices_to_remove.extend(deprecated);
+    } else {
+      for (i, &idx) in colliding_indices.iter().enumerate().skip(1) {
+        fields[idx].name = format!("{name}_{}", i + 1);
+      }
+    }
+  }
+
+  if !indices_to_remove.is_empty() {
+    let mut i = 0;
+    fields.retain(|_| {
+      let keep = !indices_to_remove.contains(&i);
+      i += 1;
+      keep
+    });
+  }
+}
+
+pub(crate) fn build_field_def(
+  prop_name: &str,
+  rust_type: TypeRef,
+  serde_attrs: Vec<SerdeAttribute>,
+  metadata: FieldMetadata,
+  regex_validation: Option<String>,
+  extra_attrs: Vec<String>,
+) -> FieldDef {
+  FieldDef {
+    name: to_rust_field_name(prop_name),
+    docs: metadata.docs,
+    rust_type,
+    serde_attrs,
+    extra_attrs,
+    validation_attrs: metadata.validation_attrs,
+    regex_validation,
+    default_value: metadata.default_value,
+    example_value: None,
+    parameter_location: None,
+    deprecated: metadata.deprecated,
+    multiple_of: metadata.multiple_of,
   }
 }

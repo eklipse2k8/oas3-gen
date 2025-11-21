@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::{DeriveTrait, FieldDef, ParameterLocation};
+use crate::generator::ast::{DeriveTrait, FieldDef, ParameterLocation, SerdeAttribute};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -82,14 +82,14 @@ pub(crate) fn generate_outer_attrs(attrs: &[String]) -> TokenStream {
   quote! { #(#attr_tokens)* }
 }
 
-pub(crate) fn generate_serde_attrs(attrs: &[String]) -> TokenStream {
+pub(crate) fn generate_serde_attrs(attrs: &[SerdeAttribute]) -> TokenStream {
   if attrs.is_empty() {
     return quote! {};
   }
   let attr_tokens: Vec<TokenStream> = attrs
     .iter()
     .filter_map(|attr| {
-      let tokens: TokenStream = attr.as_str().parse().ok()?;
+      let tokens: TokenStream = attr.to_string().parse().ok()?;
       Some(quote! { #[serde(#tokens)] })
     })
     .collect();

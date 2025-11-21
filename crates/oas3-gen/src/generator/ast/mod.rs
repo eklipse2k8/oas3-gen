@@ -1,10 +1,12 @@
 mod derives;
+pub(super) mod serde_attrs;
 pub(super) mod types;
 
 use std::collections::BTreeSet;
 
 pub use derives::{DeriveTrait, default_enum_derives, default_struct_derives};
 use http::Method;
+pub use serde_attrs::SerdeAttribute;
 pub use types::{RustPrimitive, TypeRef};
 
 /// Discriminated enum variant mapping
@@ -131,7 +133,7 @@ pub struct StructDef {
   pub docs: Vec<String>,
   pub fields: Vec<FieldDef>,
   pub derives: BTreeSet<DeriveTrait>,
-  pub serde_attrs: Vec<String>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<String>,
   pub methods: Vec<StructMethod>,
   pub kind: StructKind,
@@ -180,7 +182,7 @@ pub struct FieldDef {
   pub name: String,
   pub docs: Vec<String>,
   pub rust_type: TypeRef,
-  pub serde_attrs: Vec<String>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub extra_attrs: Vec<String>,
   pub validation_attrs: Vec<String>,
   pub regex_validation: Option<String>,
@@ -199,7 +201,7 @@ pub struct EnumDef {
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
   pub derives: BTreeSet<DeriveTrait>,
-  pub serde_attrs: Vec<String>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<String>,
   pub case_insensitive: bool,
 }
@@ -210,7 +212,7 @@ pub struct VariantDef {
   pub name: String,
   pub docs: Vec<String>,
   pub content: VariantContent,
-  pub serde_attrs: Vec<String>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub deprecated: bool,
 }
 

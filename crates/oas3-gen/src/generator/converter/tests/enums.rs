@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::common::create_test_graph;
 use crate::generator::{
-  ast::{DeriveTrait, RustType},
+  ast::{DeriveTrait, RustType, SerdeAttribute},
   converter::{
     ConversionResult, FieldOptionalityPolicy, SchemaConverter,
     enums::{CollisionStrategy, EnumConverter, StringEnumOptimizer, VariantNameNormalizer},
@@ -105,12 +105,12 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> ConversionResult<()> {
   assert!(
     enum_def.variants[0]
       .serde_attrs
-      .contains(&r#"rename = "type_a""#.to_string())
+      .contains(&SerdeAttribute::Rename("type_a".to_string()))
   );
   assert!(
     enum_def.variants[1]
       .serde_attrs
-      .contains(&r#"rename = "type_b""#.to_string())
+      .contains(&SerdeAttribute::Rename("type_b".to_string()))
   );
   Ok(())
 }
@@ -173,7 +173,7 @@ fn test_anyof_without_discriminator_has_no_rename_attrs() -> ConversionResult<()
   assert_eq!(enum_def.variants.len(), 2);
   assert!(enum_def.variants[0].serde_attrs.is_empty());
   assert!(enum_def.variants[1].serde_attrs.is_empty());
-  assert!(enum_def.serde_attrs.contains(&"untagged".to_string()));
+  assert!(enum_def.serde_attrs.contains(&SerdeAttribute::Untagged));
   Ok(())
 }
 
@@ -242,7 +242,7 @@ fn test_anyof_with_discriminator_no_untagged() -> ConversionResult<()> {
 
   assert_eq!(enum_def.name, "TestUnion");
   assert_eq!(enum_def.discriminator, Some("type".to_string()));
-  assert!(!enum_def.serde_attrs.contains(&"untagged".to_string()));
+  assert!(!enum_def.serde_attrs.contains(&SerdeAttribute::Untagged));
   Ok(())
 }
 
@@ -268,25 +268,25 @@ fn test_integer_enum_values() -> ConversionResult<()> {
   assert!(
     enum_def.variants[0]
       .serde_attrs
-      .contains(&r#"rename = "0""#.to_string())
+      .contains(&SerdeAttribute::Rename("0".to_string()))
   );
   assert_eq!(enum_def.variants[1].name, "Value1");
   assert!(
     enum_def.variants[1]
       .serde_attrs
-      .contains(&r#"rename = "1""#.to_string())
+      .contains(&SerdeAttribute::Rename("1".to_string()))
   );
   assert_eq!(enum_def.variants[2].name, "Value42");
   assert!(
     enum_def.variants[2]
       .serde_attrs
-      .contains(&r#"rename = "42""#.to_string())
+      .contains(&SerdeAttribute::Rename("42".to_string()))
   );
   assert_eq!(enum_def.variants[3].name, "Value-5");
   assert!(
     enum_def.variants[3]
       .serde_attrs
-      .contains(&r#"rename = "-5""#.to_string())
+      .contains(&SerdeAttribute::Rename("-5".to_string()))
   );
   Ok(())
 }
@@ -313,13 +313,13 @@ fn test_float_enum_values() -> ConversionResult<()> {
   assert!(
     enum_def.variants[0]
       .serde_attrs
-      .contains(&r#"rename = "0""#.to_string())
+      .contains(&SerdeAttribute::Rename("0".to_string()))
   );
   assert_eq!(enum_def.variants[1].name, "Value1_5");
   assert!(
     enum_def.variants[1]
       .serde_attrs
-      .contains(&r#"rename = "1.5""#.to_string())
+      .contains(&SerdeAttribute::Rename("1.5".to_string()))
   );
   Ok(())
 }
@@ -346,13 +346,13 @@ fn test_boolean_enum_values() -> ConversionResult<()> {
   assert!(
     enum_def.variants[0]
       .serde_attrs
-      .contains(&r#"rename = "true""#.to_string())
+      .contains(&SerdeAttribute::Rename("true".to_string()))
   );
   assert_eq!(enum_def.variants[1].name, "False");
   assert!(
     enum_def.variants[1]
       .serde_attrs
-      .contains(&r#"rename = "false""#.to_string())
+      .contains(&SerdeAttribute::Rename("false".to_string()))
   );
   Ok(())
 }
@@ -424,23 +424,23 @@ fn test_case_insensitive_duplicates_with_deduplication() -> ConversionResult<()>
   assert!(
     enum_def.variants[0]
       .serde_attrs
-      .contains(&r#"rename = "ITEM""#.to_string())
+      .contains(&SerdeAttribute::Rename("ITEM".to_string()))
   );
   assert!(
     enum_def.variants[0]
       .serde_attrs
-      .contains(&r#"alias = "item""#.to_string())
+      .contains(&SerdeAttribute::Alias("item".to_string()))
   );
   assert_eq!(enum_def.variants[1].name, "Select");
   assert!(
     enum_def.variants[1]
       .serde_attrs
-      .contains(&r#"rename = "SELECT""#.to_string())
+      .contains(&SerdeAttribute::Rename("SELECT".to_string()))
   );
   assert!(
     enum_def.variants[1]
       .serde_attrs
-      .contains(&r#"alias = "select""#.to_string())
+      .contains(&SerdeAttribute::Alias("select".to_string()))
   );
   Ok(())
 }
@@ -467,25 +467,25 @@ fn test_case_insensitive_duplicates_with_preservation() -> ConversionResult<()> 
   assert!(
     enum_def.variants[0]
       .serde_attrs
-      .contains(&r#"rename = "ITEM""#.to_string())
+      .contains(&SerdeAttribute::Rename("ITEM".to_string()))
   );
   assert_eq!(enum_def.variants[1].name, "Item1");
   assert!(
     enum_def.variants[1]
       .serde_attrs
-      .contains(&r#"rename = "item""#.to_string())
+      .contains(&SerdeAttribute::Rename("item".to_string()))
   );
   assert_eq!(enum_def.variants[2].name, "Select");
   assert!(
     enum_def.variants[2]
       .serde_attrs
-      .contains(&r#"rename = "SELECT""#.to_string())
+      .contains(&SerdeAttribute::Rename("SELECT".to_string()))
   );
   assert_eq!(enum_def.variants[3].name, "Select3");
   assert!(
     enum_def.variants[3]
       .serde_attrs
-      .contains(&r#"rename = "select""#.to_string())
+      .contains(&SerdeAttribute::Rename("select".to_string()))
   );
   Ok(())
 }

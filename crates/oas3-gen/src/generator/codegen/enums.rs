@@ -8,7 +8,9 @@ use super::{
   },
   coercion,
 };
-use crate::generator::ast::{DeriveTrait, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, VariantContent, VariantDef};
+use crate::generator::ast::{
+  DeriveTrait, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeAttribute, VariantContent, VariantDef,
+};
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
   let name = format_ident!("{}", def.name);
@@ -139,7 +141,7 @@ fn generate_enum_serde_attrs(def: &EnumDef) -> TokenStream {
   }
 
   for attr in &def.serde_attrs {
-    if let Ok(tokens) = attr.parse::<TokenStream>() {
+    if let Ok(tokens) = attr.to_string().parse::<TokenStream>() {
       attrs.push(tokens);
     }
   }
@@ -205,10 +207,8 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
       let variant_name = format_ident!("{}", v.name);
       let mut rename = v.name.clone();
       for attr in &v.serde_attrs {
-        if let Some(val) = attr.strip_prefix("rename = \"")
-          && let Some(end) = val.strip_suffix("\"")
-        {
-          rename = end.to_string();
+        if let SerdeAttribute::Rename(val) = attr {
+          rename = val.clone();
         }
       }
       let lower_val = rename.to_ascii_lowercase();
@@ -224,10 +224,8 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
     .map(|v| {
       let mut rename = v.name.clone();
       for attr in &v.serde_attrs {
-        if let Some(val) = attr.strip_prefix("rename = \"")
-          && let Some(end) = val.strip_suffix("\"")
-        {
-          rename = end.to_string();
+        if let SerdeAttribute::Rename(val) = attr {
+          rename = val.clone();
         }
       }
       rename

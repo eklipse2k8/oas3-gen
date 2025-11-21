@@ -9,12 +9,12 @@ use serde_json::Value;
 
 use super::{
   BODY_FIELD_NAME, ConversionResult, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT, REQUEST_BODY_SUFFIX,
-  REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_SUFFIX, STATUS_ACCEPTED, STATUS_BAD_GATEWAY,
-  STATUS_BAD_REQUEST, STATUS_CLIENT_ERROR, STATUS_CONFLICT, STATUS_CREATED, STATUS_FORBIDDEN, STATUS_FOUND,
-  STATUS_GATEWAY_TIMEOUT, STATUS_GONE, STATUS_INFORMATIONAL, STATUS_INTERNAL_SERVER_ERROR, STATUS_METHOD_NOT_ALLOWED,
-  STATUS_MOVED_PERMANENTLY, STATUS_NO_CONTENT, STATUS_NOT_ACCEPTABLE, STATUS_NOT_FOUND, STATUS_NOT_IMPLEMENTED,
-  STATUS_NOT_MODIFIED, STATUS_OK, STATUS_PREFIX, STATUS_REDIRECTION, STATUS_REQUEST_TIMEOUT, STATUS_SERVER_ERROR,
-  STATUS_SERVICE_UNAVAILABLE, STATUS_SUCCESS, STATUS_TOO_MANY_REQUESTS, STATUS_UNAUTHORIZED,
+  REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX, STATUS_ACCEPTED,
+  STATUS_BAD_GATEWAY, STATUS_BAD_REQUEST, STATUS_CLIENT_ERROR, STATUS_CONFLICT, STATUS_CREATED, STATUS_FORBIDDEN,
+  STATUS_FOUND, STATUS_GATEWAY_TIMEOUT, STATUS_GONE, STATUS_INFORMATIONAL, STATUS_INTERNAL_SERVER_ERROR,
+  STATUS_METHOD_NOT_ALLOWED, STATUS_MOVED_PERMANENTLY, STATUS_NO_CONTENT, STATUS_NOT_ACCEPTABLE, STATUS_NOT_FOUND,
+  STATUS_NOT_IMPLEMENTED, STATUS_NOT_MODIFIED, STATUS_OK, STATUS_PREFIX, STATUS_REDIRECTION, STATUS_REQUEST_TIMEOUT,
+  STATUS_SERVER_ERROR, STATUS_SERVICE_UNAVAILABLE, STATUS_SUCCESS, STATUS_TOO_MANY_REQUESTS, STATUS_UNAUTHORIZED,
   STATUS_UNPROCESSABLE_ENTITY, SUCCESS_RESPONSE_PREFIX, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
   metadata,
 };
@@ -27,7 +27,7 @@ use crate::{
     },
     schema_graph::SchemaGraph,
   },
-  reserved::{to_rust_field_name, to_rust_type_name},
+  reserved::{sanitize, to_rust_field_name, to_rust_type_name},
 };
 
 type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);
@@ -350,7 +350,7 @@ impl<'a> OperationConverter<'a> {
         let final_type_name = if let Some(name) = cached_type_name {
           name
         } else {
-          let base_name = SharedSchemaCache::infer_name_from_context(inline_schema, path, "RequestBody");
+          let base_name = infer_name_from_context(inline_schema, path, "RequestBody");
           let unique_name = ctx.schema_cache.make_unique_name(&base_name);
 
           // Pass cache down for recursive deduplication
@@ -746,7 +746,7 @@ impl<'a> OperationConverter<'a> {
         let rust_type_name = if let Some(name) = cached_type_name {
           name
         } else {
-          let base_name = SharedSchemaCache::infer_name_from_context(inline_schema, path, status_code);
+          let base_name = infer_name_from_context(inline_schema, path, status_code);
           let unique_name = schema_cache.make_unique_name(&base_name);
 
           let (body_struct, nested_types) = self.schema_converter.convert_struct(
@@ -871,5 +871,101 @@ mod path_renderer {
     param
       .explode
       .unwrap_or(matches!(param.style, None | Some(ParameterStyle::Form)))
+  }
+}
+
+fn infer_name_from_context(schema: &oas3::spec::ObjectSchema, path: &str, context: &str) -> String {
+  let is_request = context == REQUEST_BODY_SUFFIX;
+
+  let with_suffix = |base: &str| {
+    let sanitized_base = sanitize(base);
+    if is_request {
+      format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
+    } else {
+      format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
+    }
+  };
+
+  if schema.properties.len() == 1
+    && let Some((prop_name, _)) = schema.properties.iter().next()
+  {
+    let singular = cruet::to_singular(prop_name);
+    let sanitized_singular = sanitize(&singular);
+    return if is_request {
+      sanitized_singular
+    } else {
+      format!("{sanitized_singular}{RESPONSE_SUFFIX}")
+    };
+  }
+
+  let segments: Vec<_> = path
+    .split('/')
+    .filter(|s| !s.is_empty() && !s.starts_with('{'))
+    .collect();
+
+  segments
+    .last()
+    .map(|&s| with_suffix(&cruet::to_singular(s)))
+    .or_else(|| segments.first().map(|&s| with_suffix(s)))
+    .unwrap_or_else(|| {
+      if is_request {
+        REQUEST_BODY_SUFFIX.to_string()
+      } else {
+        format!("{RESPONSE_PREFIX}{context}")
+      }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+  use oas3::spec::ObjectSchema;
+
+  use super::*;
+
+  #[test]
+  fn test_infer_name_from_context_sanitizes_hyphens() {
+    let schema = ObjectSchema::default();
+
+    let result = infer_name_from_context(&schema, "/api/check-access-by-email", "200");
+
+    assert_eq!(result, "check_access_by_email200Response");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+  }
+
+  #[test]
+  fn test_infer_name_from_context_sanitizes_multiple_separators() {
+    let schema = ObjectSchema::default();
+
+    let result = infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
+
+    assert_eq!(result, "foo_bar_baz_qux201Response");
+    assert!(
+      !result.contains('-') && !result.contains('.'),
+      "Result should not contain hyphens or dots: {result}"
+    );
+  }
+
+  #[test]
+  fn test_infer_name_from_context_with_request_body() {
+    let schema = ObjectSchema::default();
+
+    let result = infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
+
+    assert_eq!(result, "create_userRequestBody");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+  }
+
+  #[test]
+  fn test_infer_name_from_context_single_property_response() {
+    let mut schema = ObjectSchema::default();
+    schema.properties.insert(
+      "user".to_string(),
+      oas3::spec::ObjectOrReference::Object(ObjectSchema::default()),
+    );
+
+    let result = infer_name_from_context(&schema, "/api/check-access", "200");
+
+    assert_eq!(result, "userResponse");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
   }
 }
