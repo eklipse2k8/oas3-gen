@@ -6,7 +6,12 @@ use serde_json::json;
 use super::common::create_test_graph;
 use crate::generator::{
   ast::{DeriveTrait, RustType},
-  converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+  converter::{
+    ConversionResult, FieldOptionalityPolicy, SchemaConverter,
+    enums::{CollisionStrategy, EnumConverter, StringEnumOptimizer, VariantNameNormalizer},
+    type_resolver::TypeResolver,
+  },
+  schema_graph::SchemaGraph,
 };
 
 #[test]
@@ -483,4 +488,212 @@ fn test_case_insensitive_duplicates_with_preservation() -> ConversionResult<()> 
       .contains(&r#"rename = "select""#.to_string())
   );
   Ok(())
+}
+
+#[test]
+fn test_normalize_string() {
+  let val = json!("active");
+  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  assert_eq!(res.rename_value, "active");
+}
+
+#[test]
+fn test_normalize_int() {
+  let val = json!(404);
+  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  assert_eq!(res.name, "Value404");
+  assert_eq!(res.rename_value, "404");
+}
+
+#[test]
+#[allow(clippy::approx_constant)]
+fn test_normalize_float() {
+  let val = json!(3.14);
+  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  assert_eq!(res.name, "Value3_14");
+  assert_eq!(res.rename_value, "3.14");
+}
+
+#[test]
+fn test_normalize_bool() {
+  let val = json!(true);
+  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  assert_eq!(res.name, "True");
+  assert_eq!(res.rename_value, "true");
+
+  let val = json!(false);
+  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  assert_eq!(res.name, "False");
+  assert_eq!(res.rename_value, "false");
+}
+
+#[test]
+fn test_normalize_invalid() {
+  let val = json!({});
+  assert!(VariantNameNormalizer::normalize(&val).is_none());
+}
+
+#[test]
+fn test_collision_strategy_enum() {
+  let s1 = CollisionStrategy::Preserve;
+  let s2 = CollisionStrategy::Deduplicate;
+  assert_ne!(s1, s2);
+}
+
+#[test]
+fn test_preserve_strategy_with_multiple_collisions() {
+  let spec = oas3::Spec {
+    openapi: "3.1.0".to_string(),
+    info: oas3::spec::Info {
+      title: "Test".to_string(),
+      summary: None,
+      version: "1.0.0".to_string(),
+      description: None,
+      terms_of_service: None,
+      contact: None,
+      license: None,
+      extensions: BTreeMap::default(),
+    },
+    servers: vec![],
+    paths: None,
+    webhooks: BTreeMap::default(),
+    components: None,
+    security: vec![],
+    tags: vec![],
+    external_docs: None,
+    extensions: BTreeMap::default(),
+  };
+
+  let (graph, _) = SchemaGraph::new(spec);
+  let type_resolver = TypeResolver::new(&graph, false, false);
+  let converter = EnumConverter::new(&graph, type_resolver, true, false);
+
+  let schema = ObjectSchema {
+    enum_values: vec![json!("active"), json!("Active"), json!("ACTIVE")],
+    ..Default::default()
+  };
+
+  let result = converter.convert_simple_enum("Status", &schema);
+
+  if let RustType::Enum(enum_def) = result {
+    assert_eq!(enum_def.variants.len(), 3);
+    assert_eq!(enum_def.variants[0].name, "Active");
+    assert_eq!(enum_def.variants[1].name, "Active1");
+    assert_eq!(enum_def.variants[2].name, "Active2");
+  } else {
+    panic!("Expected enum result");
+  }
+}
+
+#[test]
+fn test_string_enum_optimizer_detects_freeform_pattern() {
+  let spec = oas3::Spec {
+    openapi: "3.1.0".to_string(),
+    info: oas3::spec::Info {
+      title: "Test".to_string(),
+      summary: None,
+      version: "1.0.0".to_string(),
+      description: None,
+      terms_of_service: None,
+      contact: None,
+      license: None,
+      extensions: BTreeMap::default(),
+    },
+    servers: vec![],
+    paths: None,
+    webhooks: BTreeMap::default(),
+    components: None,
+    security: vec![],
+    tags: vec![],
+    external_docs: None,
+    extensions: BTreeMap::default(),
+  };
+
+  let (graph, _) = SchemaGraph::new(spec);
+  let optimizer = StringEnumOptimizer::new(&graph, false);
+
+  let schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("known1")),
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("known2")),
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    ],
+    ..Default::default()
+  };
+
+  let result = optimizer.try_convert("TestEnum", &schema, None);
+  assert!(result.is_some());
+
+  let types = result.unwrap();
+  assert_eq!(types.len(), 2);
+
+  let has_known_enum = types.iter().any(|t| match t {
+    RustType::Enum(e) => e.name == "TestEnumKnown",
+    _ => false,
+  });
+  let has_outer_enum = types.iter().any(|t| match t {
+    RustType::Enum(e) => e.name == "TestEnum",
+    _ => false,
+  });
+
+  assert!(has_known_enum);
+  assert!(has_outer_enum);
+}
+
+#[test]
+fn test_string_enum_optimizer_rejects_no_freeform() {
+  let spec = oas3::Spec {
+    openapi: "3.1.0".to_string(),
+    info: oas3::spec::Info {
+      title: "Test".to_string(),
+      summary: None,
+      version: "1.0.0".to_string(),
+      description: None,
+      terms_of_service: None,
+      contact: None,
+      license: None,
+      extensions: BTreeMap::default(),
+    },
+    servers: vec![],
+    paths: None,
+    webhooks: BTreeMap::default(),
+    components: None,
+    security: vec![],
+    tags: vec![],
+    external_docs: None,
+    extensions: BTreeMap::default(),
+  };
+
+  let (graph, _) = SchemaGraph::new(spec);
+  let optimizer = StringEnumOptimizer::new(&graph, false);
+
+  let schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("known1")),
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("known2")),
+        ..Default::default()
+      }),
+    ],
+    ..Default::default()
+  };
+
+  let result = optimizer.try_convert("TestEnum", &schema, None);
+  assert!(result.is_none());
 }
