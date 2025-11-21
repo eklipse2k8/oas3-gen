@@ -697,3 +697,162 @@ fn test_string_enum_optimizer_rejects_no_freeform() {
   let result = optimizer.try_convert("TestEnum", &schema, None);
   assert!(result.is_none());
 }
+
+#[test]
+fn test_anyof_with_const_generates_unit_variant() -> ConversionResult<()> {
+  let text_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("text")),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let parent_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("auto")),
+        description: Some("`auto` is the default value".to_string()),
+        ..Default::default()
+      }),
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/TextFormat".to_string(),
+        description: None,
+        summary: None,
+      },
+    ],
+    description: Some("Response format option".to_string()),
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("ResponseFormat".to_string(), parent_schema.clone()),
+    ("TextFormat".to_string(), text_schema),
+  ]);
+  let graph = create_test_graph(schemas);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+
+  let result = converter.convert_schema("ResponseFormat", &parent_schema, None)?;
+
+  assert!(!result.is_empty());
+  let RustType::Enum(enum_def) = &result[result.len() - 1] else {
+    panic!("Expected enum as last type, got: {:?}", result);
+  };
+
+  assert_eq!(enum_def.name, "ResponseFormat");
+  assert_eq!(enum_def.variants.len(), 2);
+
+  let auto_variant = &enum_def.variants[0];
+  assert_eq!(auto_variant.name, "Auto");
+  assert!(matches!(
+    auto_variant.content,
+    crate::generator::ast::VariantContent::Unit
+  ));
+  assert_eq!(
+    auto_variant.serde_attrs,
+    vec![SerdeAttribute::Rename("auto".to_string())]
+  );
+
+  let text_variant = &enum_def.variants[1];
+  assert_eq!(text_variant.name, "TextFormat");
+  assert!(matches!(
+    text_variant.content,
+    crate::generator::ast::VariantContent::Tuple(_)
+  ));
+
+  Ok(())
+}
+
+#[test]
+fn test_const_unit_variant_in_enum() {
+  use serde::{Deserialize, Serialize};
+
+  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+  #[serde(default)]
+  struct DataVariant {
+    #[serde(rename = "type")]
+    r#type: String,
+    value: i32,
+  }
+
+  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+  #[serde(untagged)]
+  enum TestEnum {
+    #[serde(rename = "auto")]
+    Auto,
+    Data(DataVariant),
+  }
+
+  let auto = TestEnum::Auto;
+  let data = TestEnum::Data(DataVariant {
+    r#type: "data".to_string(),
+    value: 42,
+  });
+
+  let auto_json = serde_json::to_string(&auto).unwrap();
+  let data_json = serde_json::to_value(&data).unwrap();
+
+  assert_eq!(auto_json, "null");
+  assert_eq!(data_json["type"], "data");
+  assert_eq!(data_json["value"], 42);
+}
+
+#[test]
+fn test_openapi_response_format_serialization() {
+  use serde::{Deserialize, Serialize};
+
+  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+  #[serde(default)]
+  struct ResponseFormatText {
+    #[serde(rename = "type")]
+    #[serde(default = "default_text_type")]
+    r#type: String,
+  }
+
+  fn default_text_type() -> String {
+    "text".to_string()
+  }
+
+  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+  #[serde(default)]
+  struct ResponseFormatJsonSchema {
+    #[serde(rename = "type")]
+    #[serde(default = "default_json_schema_type")]
+    r#type: String,
+    json_schema: serde_json::Value,
+  }
+
+  fn default_json_schema_type() -> String {
+    "json_schema".to_string()
+  }
+
+  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+  #[serde(untagged)]
+  enum ResponseFormat {
+    #[serde(rename = "auto")]
+    Auto,
+    Text(ResponseFormatText),
+    JsonSchema(ResponseFormatJsonSchema),
+  }
+
+  let text = ResponseFormat::Text(ResponseFormatText {
+    r#type: "text".to_string(),
+  });
+  let json_schema = ResponseFormat::JsonSchema(ResponseFormatJsonSchema {
+    r#type: "json_schema".to_string(),
+    json_schema: serde_json::json!({"type": "object"}),
+  });
+
+  let text_json = serde_json::to_value(&text).unwrap();
+  let json_schema_json = serde_json::to_value(&json_schema).unwrap();
+
+  assert_eq!(text_json["type"], "text");
+  assert_eq!(json_schema_json["type"], "json_schema");
+  assert_eq!(json_schema_json["json_schema"]["type"], "object");
+}

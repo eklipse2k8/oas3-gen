@@ -312,6 +312,10 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     seen_names: &mut BTreeSet<String>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
+    if let Some(const_value) = &resolved_schema.const_value {
+      return self.create_const_variant(const_value, resolved_schema, seen_names);
+    }
+
     let base_name = resolved_schema
       .title
       .as_ref()
@@ -347,6 +351,28 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     };
 
     Ok((variant, generated_types))
+  }
+
+  fn create_const_variant(
+    &self,
+    const_value: &serde_json::Value,
+    resolved_schema: &ObjectSchema,
+    seen_names: &mut BTreeSet<String>,
+  ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
+    let normalized = VariantNameNormalizer::normalize(const_value)
+      .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
+
+    let variant_name = naming::ensure_unique(&normalized.name, seen_names);
+
+    let variant = VariantDef {
+      name: variant_name,
+      docs: metadata::extract_docs(resolved_schema.description.as_ref()),
+      content: VariantContent::Unit,
+      serde_attrs: vec![SerdeAttribute::Rename(normalized.rename_value)],
+      deprecated: resolved_schema.deprecated.unwrap_or(false),
+    };
+
+    Ok((variant, vec![]))
   }
 
   fn build_enum_def(&self, variants: Vec<VariantDef>) -> RustType {

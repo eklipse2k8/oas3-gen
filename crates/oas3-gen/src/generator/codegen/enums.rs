@@ -208,7 +208,7 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
       let mut rename = v.name.clone();
       for attr in &v.serde_attrs {
         if let SerdeAttribute::Rename(val) = attr {
-          rename = val.clone();
+          rename.clone_from(val);
         }
       }
       let lower_val = rename.to_ascii_lowercase();
@@ -225,7 +225,7 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
       let mut rename = v.name.clone();
       for attr in &v.serde_attrs {
         if let SerdeAttribute::Rename(val) = attr {
-          rename = val.clone();
+          rename.clone_from(val);
         }
       }
       rename
