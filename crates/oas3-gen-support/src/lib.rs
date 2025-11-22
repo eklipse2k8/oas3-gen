@@ -4,7 +4,6 @@ pub use better_default::Default;
 pub use http::Method;
 /// Re-exported from `percent_encoding` to support custom URL encoding sets.
 pub use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-pub use reqwest_eventsource as eventsource;
 /// Re-exported from `serde_with` to enable `#[skip_serializing_none]` on generated types.
 pub use serde_with::skip_serializing_none;
 
