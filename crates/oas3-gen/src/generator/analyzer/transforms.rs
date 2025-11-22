@@ -39,7 +39,7 @@ fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<String, TypeUsage>) {
   derives.remove(&DeriveTrait::Serialize);
   derives.remove(&DeriveTrait::Deserialize);
 
-  apply_usage_derives(&mut derives, usage);
+  apply_usage_derives(&mut derives, usage, false);
 
   def.derives = derives;
 }
@@ -55,17 +55,19 @@ fn calculate_struct_derives(kind: StructKind, usage: TypeUsage) -> BTreeSet<Deri
     derives.remove(&DeriveTrait::PartialEq);
     derives.insert(DeriveTrait::Validate);
   } else {
-    apply_usage_derives(&mut derives, usage);
+    apply_usage_derives(&mut derives, usage, true);
   }
 
   derives
 }
 
-fn apply_usage_derives(derives: &mut BTreeSet<DeriveTrait>, usage: TypeUsage) {
+fn apply_usage_derives(derives: &mut BTreeSet<DeriveTrait>, usage: TypeUsage, supports_validation: bool) {
   match usage {
     TypeUsage::RequestOnly => {
       derives.insert(DeriveTrait::Serialize);
-      derives.insert(DeriveTrait::Validate);
+      if supports_validation {
+        derives.insert(DeriveTrait::Validate);
+      }
     }
     TypeUsage::ResponseOnly => {
       derives.insert(DeriveTrait::Deserialize);
@@ -73,7 +75,9 @@ fn apply_usage_derives(derives: &mut BTreeSet<DeriveTrait>, usage: TypeUsage) {
     TypeUsage::Bidirectional => {
       derives.insert(DeriveTrait::Serialize);
       derives.insert(DeriveTrait::Deserialize);
-      derives.insert(DeriveTrait::Validate);
+      if supports_validation {
+        derives.insert(DeriveTrait::Validate);
+      }
     }
   }
 }

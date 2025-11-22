@@ -146,7 +146,7 @@ fn test_enum_processing_request_only() {
 
   assert!(def.derives.contains(&DeriveTrait::Debug)); // Preserved
   assert!(def.derives.contains(&DeriveTrait::Serialize)); // Added
-  assert!(def.derives.contains(&DeriveTrait::Validate)); // Added
+  assert!(!def.derives.contains(&DeriveTrait::Validate)); // Added
   assert!(!def.derives.contains(&DeriveTrait::Deserialize));
 }
 
