@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use http::Method;
 use oas3::{
   Spec,
@@ -8,26 +6,22 @@ use oas3::{
 use serde_json::Value;
 
 use super::{
-  BODY_FIELD_NAME, ConversionResult, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT, REQUEST_BODY_SUFFIX,
-  REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX, STATUS_ACCEPTED,
-  STATUS_BAD_GATEWAY, STATUS_BAD_REQUEST, STATUS_CLIENT_ERROR, STATUS_CONFLICT, STATUS_CREATED, STATUS_FORBIDDEN,
-  STATUS_FOUND, STATUS_GATEWAY_TIMEOUT, STATUS_GONE, STATUS_INFORMATIONAL, STATUS_INTERNAL_SERVER_ERROR,
-  STATUS_METHOD_NOT_ALLOWED, STATUS_MOVED_PERMANENTLY, STATUS_NO_CONTENT, STATUS_NOT_ACCEPTABLE, STATUS_NOT_FOUND,
-  STATUS_NOT_IMPLEMENTED, STATUS_NOT_MODIFIED, STATUS_OK, STATUS_PREFIX, STATUS_REDIRECTION, STATUS_REQUEST_TIMEOUT,
-  STATUS_SERVER_ERROR, STATUS_SERVICE_UNAVAILABLE, STATUS_SUCCESS, STATUS_TOO_MANY_REQUESTS, STATUS_UNAUTHORIZED,
-  STATUS_UNPROCESSABLE_ENTITY, SUCCESS_RESPONSE_PREFIX, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
-  metadata,
+  ConversionResult, SchemaConverter, TypeUsageRecorder,
+  cache::SharedSchemaCache,
+  constants::{
+    BODY_FIELD_NAME, REQUEST_BODY_SUFFIX, REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_SUFFIX,
+  },
+  metadata, naming, path_renderer, responses,
 };
 use crate::{
   generator::{
     ast::{
-      DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, PathSegment,
-      QueryParameter, ResponseEnumDef, ResponseVariant, RustPrimitive, RustType, StructDef, StructKind, StructMethod,
-      StructMethodKind, TypeAliasDef, TypeRef,
+      DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
+      RustType, StructDef, StructKind, TypeAliasDef, TypeRef,
     },
     schema_graph::SchemaGraph,
   },
-  reserved::{sanitize, to_rust_field_name, to_rust_type_name},
+  reserved::{to_rust_field_name, to_rust_type_name},
 };
 
 type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);
@@ -54,6 +48,10 @@ struct ProcessingContext<'a> {
   schema_cache: &'a mut SharedSchemaCache,
 }
 
+/// Converter for OpenAPI Operations into Rust request/response types.
+///
+/// Handles generation of request parameter structs, request body types,
+/// and response enums/structs for each operation.
 pub(crate) struct OperationConverter<'a> {
   schema_converter: &'a SchemaConverter<'a>,
   spec: &'a Spec,
@@ -86,6 +84,9 @@ impl<'a> OperationConverter<'a> {
     request_name
   }
 
+  /// Converts an OpenAPI operation into a set of Rust types and metadata.
+  ///
+  /// Generates request structs, response enums, and body types.
   #[allow(clippy::too_many_arguments)]
   pub(crate) fn convert(
     &self,
@@ -109,9 +110,16 @@ impl<'a> OperationConverter<'a> {
 
     let mut response_enum_info = if operation.responses.is_some() {
       let response_name = self.generate_unique_response_name(&base_name);
-      self
-        .build_response_enum(&response_name, None, operation, path, schema_cache)
-        .map(|def| (response_name, def))
+      responses::build_response_enum(
+        self.schema_converter,
+        self.spec,
+        &response_name,
+        None,
+        operation,
+        path,
+        schema_cache,
+      )
+      .map(|def| (response_name, def))
     } else {
       None
     };
@@ -154,9 +162,9 @@ impl<'a> OperationConverter<'a> {
       None
     };
 
-    let response_type_name = self.extract_response_type_name(operation);
-    let response_content_type = self.extract_response_content_type(operation);
-    let (success_response_types, error_response_types) = self.extract_all_response_types(operation);
+    let response_type_name = responses::extract_response_type_name(self.spec, operation);
+    let response_content_type = responses::extract_response_content_type(self.spec, operation);
+    let (success_response_types, error_response_types) = responses::extract_all_response_types(self.spec, operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
     }
@@ -232,7 +240,7 @@ impl<'a> OperationConverter<'a> {
     )];
 
     if let Some((response_enum_name, response_enum_def)) = response_enum_info {
-      methods.push(Self::build_parse_response_method(
+      methods.push(responses::build_parse_response_method(
         response_enum_name,
         &response_enum_def.variants,
       ));
@@ -350,10 +358,9 @@ impl<'a> OperationConverter<'a> {
         let final_type_name = if let Some(name) = cached_type_name {
           name
         } else {
-          let base_name = infer_name_from_context(inline_schema, path, "RequestBody");
+          let base_name = naming::infer_name_from_context(inline_schema, path, "RequestBody");
           let unique_name = ctx.schema_cache.make_unique_name(&base_name);
 
-          // Pass cache down for recursive deduplication
           let (body_struct, nested_types) = self.schema_converter.convert_struct(
             &unique_name,
             inline_schema,
@@ -501,9 +508,9 @@ impl<'a> OperationConverter<'a> {
     let schema = schema_ref.resolve(self.spec)?;
     let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
     let is_required = param.required.unwrap_or(false);
-    let validation = SchemaConverter::extract_validation_attrs(&param.name, is_required, &schema, &type_ref);
-    let regex = SchemaConverter::extract_validation_pattern(&param.name, &schema).cloned();
-    let default = SchemaConverter::extract_default_value(&schema);
+    let validation = metadata::extract_validation_attrs(is_required, &schema, &type_ref);
+    let regex = metadata::extract_validation_pattern(&param.name, &schema).cloned();
+    let default = metadata::extract_default_value(&schema);
 
     Ok((type_ref, validation, regex, default))
   }
@@ -524,448 +531,5 @@ impl<'a> OperationConverter<'a> {
       }),
       _ => {}
     }
-  }
-
-  fn extract_response_type_name(&self, operation: &Operation) -> Option<String> {
-    let responses = operation.responses.as_ref()?;
-    responses
-      .iter()
-      .find(|(code, _)| code.starts_with(SUCCESS_RESPONSE_PREFIX))
-      .or_else(|| responses.iter().next())
-      .and_then(|(_, resp_ref)| resp_ref.resolve(self.spec).ok())
-      .and_then(|resp| Self::extract_schema_name_from_response(&resp))
-      .map(|s| to_rust_type_name(&s))
-  }
-
-  fn extract_response_content_type(&self, operation: &Operation) -> Option<String> {
-    let responses = operation.responses.as_ref()?;
-    responses
-      .iter()
-      .find(|(code, _)| code.starts_with(SUCCESS_RESPONSE_PREFIX))
-      .or_else(|| responses.iter().next())
-      .and_then(|(_, resp_ref)| resp_ref.resolve(self.spec).ok())
-      .and_then(|resp| resp.content.keys().next().cloned())
-  }
-
-  fn extract_all_response_types(&self, operation: &Operation) -> (Vec<String>, Vec<String>) {
-    let mut success_set = HashSet::new();
-    let mut error_set = HashSet::new();
-
-    let Some(responses) = operation.responses.as_ref() else {
-      return (Vec::new(), Vec::new());
-    };
-
-    for (code, resp_ref) in responses {
-      if let Ok(resp) = resp_ref.resolve(self.spec)
-        && let Some(schema_name) = Self::extract_schema_name_from_response(&resp)
-      {
-        let rust_name = to_rust_type_name(&schema_name);
-        if Self::is_success_code(code) {
-          success_set.insert(rust_name);
-        } else if Self::is_error_code(code) {
-          error_set.insert(rust_name);
-        }
-      }
-    }
-
-    (success_set.into_iter().collect(), error_set.into_iter().collect())
-  }
-
-  fn is_success_code(code: &str) -> bool {
-    code.starts_with('2')
-  }
-
-  fn is_error_code(code: &str) -> bool {
-    code.starts_with('4') || code.starts_with('5')
-  }
-
-  fn extract_schema_name_from_response(response: &oas3::spec::Response) -> Option<String> {
-    response
-      .content
-      .values()
-      .next()?
-      .schema
-      .as_ref()
-      .and_then(|schema_ref| match schema_ref {
-        ObjectOrReference::Ref { ref_path, .. } => SchemaGraph::extract_ref_name(ref_path),
-        ObjectOrReference::Object(_) => None,
-      })
-  }
-
-  fn build_response_enum(
-    &self,
-    name: &str,
-    request_type: Option<&String>,
-    operation: &Operation,
-    path: &str,
-    schema_cache: &mut SharedSchemaCache,
-  ) -> Option<ResponseEnumDef> {
-    let responses = operation.responses.as_ref()?;
-
-    let mut variants = Vec::new();
-    let base_name = to_rust_type_name(name);
-
-    for (status_code, resp_ref) in responses {
-      let Ok(response) = resp_ref.resolve(self.spec) else {
-        continue;
-      };
-
-      let variant_name = Self::status_code_to_variant_name(status_code, &response);
-      let (schema_type, content_type) = self
-        .extract_response_schema_info(&response, path, status_code, schema_cache)
-        .ok()
-        .unwrap_or((None, None));
-
-      variants.push(ResponseVariant {
-        status_code: status_code.clone(),
-        variant_name,
-        description: response.description.clone(),
-        schema_type,
-        content_type,
-      });
-    }
-
-    if variants.is_empty() {
-      return None;
-    }
-
-    let has_default = variants.iter().any(|v| v.status_code == "default");
-    if !has_default {
-      variants.push(ResponseVariant {
-        status_code: "default".to_string(),
-        variant_name: DEFAULT_RESPONSE_VARIANT.to_string(),
-        description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
-        schema_type: None,
-        content_type: None,
-      });
-    }
-
-    Some(ResponseEnumDef {
-      name: base_name,
-      docs: vec![format!("/// Response types for {}", operation.operation_id.as_ref()?)],
-      variants,
-      request_type: request_type.map_or_else(String::new, std::clone::Clone::clone),
-    })
-  }
-
-  fn status_code_to_variant_name(status_code: &str, response: &oas3::spec::Response) -> String {
-    match status_code {
-      "200" => STATUS_OK.to_string(),
-      "201" => STATUS_CREATED.to_string(),
-      "202" => STATUS_ACCEPTED.to_string(),
-      "204" => STATUS_NO_CONTENT.to_string(),
-      "301" => STATUS_MOVED_PERMANENTLY.to_string(),
-      "302" => STATUS_FOUND.to_string(),
-      "304" => STATUS_NOT_MODIFIED.to_string(),
-      "400" => STATUS_BAD_REQUEST.to_string(),
-      "401" => STATUS_UNAUTHORIZED.to_string(),
-      "403" => STATUS_FORBIDDEN.to_string(),
-      "404" => STATUS_NOT_FOUND.to_string(),
-      "405" => STATUS_METHOD_NOT_ALLOWED.to_string(),
-      "406" => STATUS_NOT_ACCEPTABLE.to_string(),
-      "408" => STATUS_REQUEST_TIMEOUT.to_string(),
-      "409" => STATUS_CONFLICT.to_string(),
-      "410" => STATUS_GONE.to_string(),
-      "422" => STATUS_UNPROCESSABLE_ENTITY.to_string(),
-      "429" => STATUS_TOO_MANY_REQUESTS.to_string(),
-      "500" => STATUS_INTERNAL_SERVER_ERROR.to_string(),
-      "501" => STATUS_NOT_IMPLEMENTED.to_string(),
-      "502" => STATUS_BAD_GATEWAY.to_string(),
-      "503" => STATUS_SERVICE_UNAVAILABLE.to_string(),
-      "504" => STATUS_GATEWAY_TIMEOUT.to_string(),
-      "1XX" => STATUS_INFORMATIONAL.to_string(),
-      "2XX" => STATUS_SUCCESS.to_string(),
-      "3XX" => STATUS_REDIRECTION.to_string(),
-      "4XX" => STATUS_CLIENT_ERROR.to_string(),
-      "5XX" => STATUS_SERVER_ERROR.to_string(),
-      code if code.ends_with("XX") || code.ends_with("xx") => {
-        let prefix = &code[0..1];
-        match prefix {
-          "1" => STATUS_INFORMATIONAL.to_string(),
-          "2" => STATUS_SUCCESS.to_string(),
-          "3" => STATUS_REDIRECTION.to_string(),
-          "4" => STATUS_CLIENT_ERROR.to_string(),
-          "5" => STATUS_SERVER_ERROR.to_string(),
-          _ => format!("{STATUS_PREFIX}{}", code.replace(['X', 'x'], "")),
-        }
-      }
-      code => {
-        if let Some(desc) = &response.description {
-          let sanitized = desc
-            .chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-            .collect::<String>();
-          let words: Vec<&str> = sanitized.split_whitespace().take(3).collect();
-          if !words.is_empty() {
-            return to_rust_type_name(&words.join("_"));
-          }
-        }
-        format!("{STATUS_PREFIX}{code}")
-      }
-    }
-  }
-
-  fn extract_response_schema_info(
-    &self,
-    response: &oas3::spec::Response,
-    path: &str,
-    status_code: &str,
-    schema_cache: &mut SharedSchemaCache,
-  ) -> ConversionResult<(Option<TypeRef>, Option<String>)> {
-    let Some((content_type, media_type)) = response.content.iter().next() else {
-      return Ok((None, None));
-    };
-    let Some(schema_ref) = media_type.schema.as_ref() else {
-      return Ok((None, Some(content_type.clone())));
-    };
-
-    match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => {
-        let Some(schema_name) = SchemaGraph::extract_ref_name(ref_path) else {
-          return Ok((None, Some(content_type.clone())));
-        };
-        Ok((
-          Some(TypeRef::new(to_rust_type_name(&schema_name))),
-          Some(content_type.clone()),
-        ))
-      }
-      ObjectOrReference::Object(inline_schema) => {
-        if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() {
-          return Ok((None, Some(content_type.clone())));
-        }
-
-        if inline_schema.properties.is_empty()
-          && let Ok(type_ref) = self.schema_converter.schema_to_type_ref(inline_schema)
-          && !matches!(type_ref.base_type, RustPrimitive::Custom(_))
-        {
-          return Ok((Some(type_ref), Some(content_type.clone())));
-        }
-
-        let cached_type_name = schema_cache.get_type_name(inline_schema)?;
-
-        let rust_type_name = if let Some(name) = cached_type_name {
-          name
-        } else {
-          let base_name = infer_name_from_context(inline_schema, path, status_code);
-          let unique_name = schema_cache.make_unique_name(&base_name);
-
-          let (body_struct, nested_types) = self.schema_converter.convert_struct(
-            &unique_name,
-            inline_schema,
-            Some(StructKind::Schema),
-            Some(schema_cache),
-          )?;
-
-          schema_cache.register_type(inline_schema, &unique_name, nested_types, body_struct)?
-        };
-
-        Ok((Some(TypeRef::new(rust_type_name)), Some(content_type.clone())))
-      }
-    }
-  }
-
-  fn build_parse_response_method(response_enum_name: &str, variants: &[ResponseVariant]) -> StructMethod {
-    StructMethod {
-      name: "parse_response".to_string(),
-      docs: vec!["/// Parse the HTTP response into the response enum.".to_string()],
-      kind: StructMethodKind::ParseResponse {
-        response_enum: response_enum_name.to_string(),
-        variants: variants.to_vec(),
-      },
-      attrs: vec![],
-    }
-  }
-}
-
-mod path_renderer {
-  use std::collections::HashMap;
-
-  use oas3::spec::{Parameter, ParameterStyle};
-  use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-
-  use super::{PathSegment, QueryParameter};
-  use crate::generator::ast::{StructMethod, StructMethodKind};
-
-  const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
-
-  #[derive(Debug, Clone)]
-  pub(super) struct PathParamMapping {
-    pub rust_field: String,
-    pub original_name: String,
-  }
-
-  #[derive(Debug, Clone)]
-  pub(super) struct QueryParamMapping {
-    pub rust_field: String,
-    pub original_name: String,
-    pub explode: bool,
-    pub style: Option<ParameterStyle>,
-    pub optional: bool,
-    pub is_array: bool,
-  }
-
-  pub(super) fn build_render_path_method(
-    path: &str,
-    path_params: &[PathParamMapping],
-    query_params: &[QueryParamMapping],
-  ) -> StructMethod {
-    let query_parameters = query_params
-      .iter()
-      .map(|m| QueryParameter {
-        field: m.rust_field.clone(),
-        encoded_name: encode_query_name(&m.original_name),
-        explode: m.explode,
-        optional: m.optional,
-        is_array: m.is_array,
-        style: m.style,
-      })
-      .collect();
-
-    StructMethod {
-      name: "render_path".to_string(),
-      docs: vec!["/// Render the request path with parameters.".to_string()],
-      kind: StructMethodKind::RenderPath {
-        segments: parse_path_segments(path, path_params),
-        query_params: query_parameters,
-      },
-      attrs: vec![],
-    }
-  }
-
-  fn parse_path_segments(path: &str, path_params: &[PathParamMapping]) -> Vec<PathSegment> {
-    if path_params.is_empty() {
-      return vec![PathSegment::Literal(path.to_string())];
-    }
-    let param_map: HashMap<_, _> = path_params
-      .iter()
-      .map(|p| (&*p.original_name, &*p.rust_field))
-      .collect();
-    let mut segments = Vec::new();
-    let mut last_end = 0;
-    for (start, _part) in path.match_indices('{') {
-      if start > last_end {
-        segments.push(PathSegment::Literal(path[last_end..start].to_string()));
-      }
-      let end = path[start..].find('}').map_or(path.len(), |i| start + i);
-      let param_name = &path[start + 1..end];
-      if let Some(rust_field) = param_map.get(param_name) {
-        segments.push(PathSegment::Parameter {
-          field: (*rust_field).to_string(),
-        });
-      } else {
-        segments.push(PathSegment::Literal(path[start..=end].to_string()));
-      }
-      last_end = end + 1;
-    }
-    if last_end < path.len() {
-      segments.push(PathSegment::Literal(path[last_end..].to_string()));
-    }
-    segments
-  }
-
-  pub(super) fn encode_query_name(name: &str) -> String {
-    utf8_percent_encode(name, QUERY_ENCODE_SET).to_string()
-  }
-
-  pub(super) fn query_param_explode(param: &Parameter) -> bool {
-    param
-      .explode
-      .unwrap_or(matches!(param.style, None | Some(ParameterStyle::Form)))
-  }
-}
-
-fn infer_name_from_context(schema: &oas3::spec::ObjectSchema, path: &str, context: &str) -> String {
-  let is_request = context == REQUEST_BODY_SUFFIX;
-
-  let with_suffix = |base: &str| {
-    let sanitized_base = sanitize(base);
-    if is_request {
-      format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
-    } else {
-      format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
-    }
-  };
-
-  if schema.properties.len() == 1
-    && let Some((prop_name, _)) = schema.properties.iter().next()
-  {
-    let singular = cruet::to_singular(prop_name);
-    let sanitized_singular = sanitize(&singular);
-    return if is_request {
-      sanitized_singular
-    } else {
-      format!("{sanitized_singular}{RESPONSE_SUFFIX}")
-    };
-  }
-
-  let segments: Vec<_> = path
-    .split('/')
-    .filter(|s| !s.is_empty() && !s.starts_with('{'))
-    .collect();
-
-  segments
-    .last()
-    .map(|&s| with_suffix(&cruet::to_singular(s)))
-    .or_else(|| segments.first().map(|&s| with_suffix(s)))
-    .unwrap_or_else(|| {
-      if is_request {
-        REQUEST_BODY_SUFFIX.to_string()
-      } else {
-        format!("{RESPONSE_PREFIX}{context}")
-      }
-    })
-}
-
-#[cfg(test)]
-mod tests {
-  use oas3::spec::ObjectSchema;
-
-  use super::*;
-
-  #[test]
-  fn test_infer_name_from_context_sanitizes_hyphens() {
-    let schema = ObjectSchema::default();
-
-    let result = infer_name_from_context(&schema, "/api/check-access-by-email", "200");
-
-    assert_eq!(result, "check_access_by_email200Response");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_infer_name_from_context_sanitizes_multiple_separators() {
-    let schema = ObjectSchema::default();
-
-    let result = infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
-
-    assert_eq!(result, "foo_bar_baz_qux201Response");
-    assert!(
-      !result.contains('-') && !result.contains('.'),
-      "Result should not contain hyphens or dots: {result}"
-    );
-  }
-
-  #[test]
-  fn test_infer_name_from_context_with_request_body() {
-    let schema = ObjectSchema::default();
-
-    let result = infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
-
-    assert_eq!(result, "create_userRequestBody");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_infer_name_from_context_single_property_response() {
-    let mut schema = ObjectSchema::default();
-    schema.properties.insert(
-      "user".to_string(),
-      oas3::spec::ObjectOrReference::Object(ObjectSchema::default()),
-    );
-
-    let result = infer_name_from_context(&schema, "/api/check-access", "200");
-
-    assert_eq!(result, "userResponse");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
   }
 }

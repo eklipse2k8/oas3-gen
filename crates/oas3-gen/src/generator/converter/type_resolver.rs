@@ -17,11 +17,17 @@ use crate::{
   reserved::to_rust_type_name,
 };
 
+/// Extension methods for `ObjectSchema` to query its type properties conveniently.
 pub(crate) trait SchemaExt {
+  /// Returns true if the schema represents a primitive type (no properties, allOf, etc.).
   fn is_primitive(&self) -> bool;
+  /// Returns true if the schema is explicitly null.
   fn is_null(&self) -> bool;
+  /// Returns true if the schema is a nullable object (e.g. `type: [object, null]`).
   fn is_nullable_object(&self) -> bool;
+  /// Returns true if the schema is an array.
   fn is_array(&self) -> bool;
+  /// Returns the single `SchemaType` if only one is defined.
   fn single_type(&self) -> Option<SchemaType>;
 }
 
@@ -76,6 +82,7 @@ pub(crate) struct TypeResolver<'a> {
 }
 
 impl<'a> TypeResolver<'a> {
+  /// Creates a new `TypeResolver`.
   pub(crate) fn new(graph: &'a SchemaGraph, config: CodegenConfig) -> Self {
     Self {
       graph,
@@ -85,6 +92,7 @@ impl<'a> TypeResolver<'a> {
     }
   }
 
+  /// Resolves a schema to a `TypeRef`, potentially wrapping it in `Option` or `Vec`.
   pub(crate) fn schema_to_type_ref(&self, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
     if let Some(type_ref) = self.try_resolve_by_title(schema) {
       return Ok(type_ref);
@@ -111,6 +119,7 @@ impl<'a> TypeResolver<'a> {
     Ok(TypeRef::new("serde_json::Value"))
   }
 
+  /// Resolves a property type, handling inline enums/unions by generating them.
   pub(crate) fn resolve_property_type_with_inlines(
     &self,
     parent_name: &str,
@@ -135,6 +144,7 @@ impl<'a> TypeResolver<'a> {
     Ok((self.schema_to_type_ref(prop_schema)?, vec![]))
   }
 
+  /// Checks if a schema is a primitive type (no nesting).
   pub(crate) fn is_primitive_schema(schema: &ObjectSchema) -> bool {
     schema.is_primitive()
   }
@@ -178,7 +188,7 @@ impl<'a> TypeResolver<'a> {
       .enum_values
       .iter()
       .filter_map(|v| v.as_str().map(String::from))
-      .collect::<BTreeSet<_>>() // Deduplicate and sort
+      .collect::<BTreeSet<_>>()
       .into_iter()
       .collect();
 
@@ -202,7 +212,9 @@ impl<'a> TypeResolver<'a> {
       no_helpers: self.no_helpers,
     };
     let converter = EnumConverter::new(self.graph, self.clone(), config);
-    let inline_enum = converter.convert_simple_enum(&enum_name, prop_schema);
+    let inline_enum = converter
+      .convert_simple_enum(&enum_name, prop_schema, None)
+      .expect("convert_simple_enum should return Some when cache is None");
 
     if let Some(c) = cache {
       let type_name = c.register_type(prop_schema, &enum_name, vec![], inline_enum.clone())?;
@@ -252,10 +264,17 @@ impl<'a> TypeResolver<'a> {
       return Ok((type_ref, vec![]));
     }
 
-    if let Some(ref cache) = cache
-      && let Some(existing_name) = cache.get_type_name(prop_schema)?
-    {
-      return Ok((TypeRef::new(existing_name), vec![]));
+    if let Some(ref cache) = cache {
+      if let Some(existing_name) = cache.get_type_name(prop_schema)? {
+        return Ok((TypeRef::new(existing_name), vec![]));
+      }
+
+      if !super::naming::is_relaxed_enum_pattern(prop_schema)
+        && let Some(values) = super::naming::extract_enum_values(prop_schema)
+        && let Some(name) = cache.get_enum_name(&values)
+      {
+        return Ok((TypeRef::new(name), vec![]));
+      }
     }
 
     if let Some(name) = self.find_matching_union_schema(variants) {
@@ -353,6 +372,7 @@ impl<'a> TypeResolver<'a> {
     Ok(Some(self.schema_to_type_ref(&resolved)?.with_option()))
   }
 
+  /// Tries to convert a union schema into a single `TypeRef` (e.g. `Option<T>`, `Vec<T>`).
   pub(crate) fn try_convert_union_to_type_ref(
     &self,
     variants: &[ObjectOrReference<ObjectSchema>],

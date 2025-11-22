@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::type_usage::TypeUsage;
-use crate::generator::ast::{DeriveTrait, EnumDef, FieldDef, RustType, StructDef, StructKind, default_struct_derives};
+use crate::generator::ast::{
+  DeriveTrait, EnumDef, FieldDef, OperationInfo, RustType, StructDef, StructKind, StructMethodKind, TypeRef,
+  default_struct_derives,
+};
 
 const SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
 
@@ -97,4 +100,88 @@ fn matches_skip_serializing_none(attr: &str) -> bool {
 
 fn has_nullable_fields(fields: &[FieldDef]) -> bool {
   fields.iter().any(|field| field.rust_type.nullable)
+}
+
+type ResponseEnumSignature = Vec<(String, String, String, Option<String>)>;
+
+struct DuplicateCandidate {
+  index: usize,
+  name: String,
+}
+
+pub(crate) fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operations_info: &mut [OperationInfo]) {
+  let mut signature_map: BTreeMap<ResponseEnumSignature, Vec<DuplicateCandidate>> = BTreeMap::new();
+
+  for (i, rt) in rust_types.iter().enumerate() {
+    if let RustType::ResponseEnum(def) = rt {
+      let mut signature: Vec<_> = def
+        .variants
+        .iter()
+        .map(|v| {
+          (
+            v.status_code.clone(),
+            v.variant_name.clone(),
+            v.schema_type
+              .as_ref()
+              .map_or_else(|| "None".to_string(), TypeRef::to_rust_type),
+            v.content_type.clone(),
+          )
+        })
+        .collect();
+
+      signature.sort();
+
+      signature_map.entry(signature).or_default().push(DuplicateCandidate {
+        index: i,
+        name: def.name.clone(),
+      });
+    }
+  }
+
+  let mut replacements: BTreeMap<String, String> = BTreeMap::new();
+  let mut indices_to_remove = BTreeSet::new();
+
+  for group in signature_map.values() {
+    if group.len() > 1 {
+      let canonical = group
+        .iter()
+        .min_by(|a, b| a.name.len().cmp(&b.name.len()).then(a.name.cmp(&b.name)))
+        .unwrap();
+
+      for candidate in group {
+        if candidate.name != canonical.name {
+          replacements.insert(candidate.name.clone(), canonical.name.clone());
+          indices_to_remove.insert(candidate.index);
+        }
+      }
+    }
+  }
+
+  if replacements.is_empty() {
+    return;
+  }
+
+  for &idx in indices_to_remove.iter().rev() {
+    rust_types.remove(idx);
+  }
+
+  for op in operations_info.iter_mut() {
+    if let Some(ref current_name) = op.response_enum
+      && let Some(new_name) = replacements.get(current_name)
+    {
+      op.response_enum = Some(new_name.clone());
+    }
+  }
+
+  for rt in rust_types.iter_mut() {
+    if let RustType::Struct(def) = rt {
+      for method in &mut def.methods {
+        if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
+          && let Some(new_name) = replacements.get(response_enum)
+        {
+          *response_enum = new_name.clone();
+        }
+      }
+    }
+  }
 }

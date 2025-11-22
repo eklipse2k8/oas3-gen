@@ -8,7 +8,8 @@ use crate::generator::{
   ast::{DeriveTrait, EnumMethodKind, RustType, SerdeAttribute},
   converter::{
     ConversionResult, FieldOptionalityPolicy, SchemaConverter,
-    enums::{CollisionStrategy, EnumConverter, StringEnumOptimizer, VariantNameNormalizer},
+    enums::{CollisionStrategy, EnumConverter, VariantNameNormalizer},
+    string_enum_optimizer::StringEnumOptimizer,
     type_resolver::TypeResolver,
   },
   schema_graph::SchemaGraph,
@@ -573,9 +574,9 @@ fn test_preserve_strategy_with_multiple_collisions() {
     ..Default::default()
   };
 
-  let result = converter.convert_simple_enum("Status", &schema);
+  let result = converter.convert_simple_enum("Status", &schema, None);
 
-  if let RustType::Enum(enum_def) = result {
+  if let Some(RustType::Enum(enum_def)) = result {
     assert_eq!(enum_def.variants.len(), 3);
     assert_eq!(enum_def.variants[0].name, "Active");
     assert_eq!(enum_def.variants[1].name, "Active1");

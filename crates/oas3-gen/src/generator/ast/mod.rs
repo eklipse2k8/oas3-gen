@@ -1,4 +1,5 @@
 mod derives;
+pub mod lints;
 pub(super) mod serde_attrs;
 pub(super) mod types;
 
@@ -6,6 +7,7 @@ use std::collections::BTreeSet;
 
 pub use derives::{DeriveTrait, default_enum_derives, default_struct_derives};
 use http::Method;
+pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
 pub use types::{RustPrimitive, TypeRef};
 

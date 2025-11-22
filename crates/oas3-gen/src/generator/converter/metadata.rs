@@ -17,6 +17,7 @@ static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
     .expect("formatter failed to build.")
 });
 
+/// Metadata extracted from a schema for a struct field.
 #[derive(Clone, Default)]
 pub(crate) struct FieldMetadata {
   pub docs: Vec<String>,
@@ -28,6 +29,7 @@ pub(crate) struct FieldMetadata {
 }
 
 impl FieldMetadata {
+  /// Extracts metadata from a schema and type reference.
   pub(crate) fn from_schema(prop_name: &str, is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Self {
     Self {
       docs: extract_docs(schema.description.as_ref()),
@@ -40,10 +42,12 @@ impl FieldMetadata {
   }
 }
 
+/// Extracts documentation comments from a schema description.
 pub(crate) fn extract_docs(desc: Option<&String>) -> Vec<String> {
   desc.map_or_else(Vec::new, |d| doc_comment_lines(d))
 }
 
+/// Extracts the default value from a schema, checking `default` and `const` fields.
 pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
   schema
     .default
@@ -58,6 +62,7 @@ pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json:
     })
 }
 
+/// Extracts a validation regex pattern, filtering out known non-string formats.
 pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
   match (schema.schema_type.as_ref(), schema.pattern.as_ref()) {
     (Some(SchemaTypeSet::Single(SchemaType::String)), Some(pattern)) => {
@@ -87,6 +92,7 @@ pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s Object
   }
 }
 
+/// Filters regex validation based on the Rust type (e.g. skip for Dates).
 pub(crate) fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>) -> Option<String> {
   match &rust_type.base_type {
     RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid => None,
@@ -94,6 +100,7 @@ pub(crate) fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>
   }
 }
 
+/// Extracts validation attributes (e.g. `length`, `range`, `email`) for validator crate.
 pub(crate) fn extract_validation_attrs(is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Vec<String> {
   let mut attrs = Vec::new();
 

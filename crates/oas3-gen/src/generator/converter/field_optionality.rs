@@ -1,5 +1,6 @@
 use oas3::spec::ObjectSchema;
 
+/// Context passed to optionality rules to determine if a field should be optional.
 pub(crate) struct FieldOptionalityContext<'a> {
   pub prop_name: &'a str,
   pub parent_schema: &'a ObjectSchema,
@@ -9,8 +10,11 @@ pub(crate) struct FieldOptionalityContext<'a> {
   pub discriminator_has_enum: bool,
 }
 
+/// A rule that determines if a field should be optional based on context.
 pub(crate) trait FieldOptionalityRule: Send + Sync {
+  /// Returns true if this rule applies to the current context.
   fn applies(&self, ctx: &FieldOptionalityContext) -> bool;
+  /// Returns true if the field should be optional.
   fn should_be_optional(&self, ctx: &FieldOptionalityContext) -> bool;
 }
 
@@ -70,24 +74,30 @@ pub(crate) enum PolicyKind {
   WithODataSupport,
 }
 
+/// Policy for determining if a field in a struct should be `Option<T>`.
+///
+/// Supports different strategies, e.g., standard OpenAPI rules vs OData-specific hacks.
 #[derive(Debug, Clone)]
 pub(crate) struct FieldOptionalityPolicy {
   kind: PolicyKind,
 }
 
 impl FieldOptionalityPolicy {
+  /// Creates a standard policy based on strict OpenAPI required/default rules.
   pub fn standard() -> Self {
     Self {
       kind: PolicyKind::Standard,
     }
   }
 
+  /// Creates a policy that handles OData-specific fields (e.g. `@odata.type`).
   pub fn with_odata_support() -> Self {
     Self {
       kind: PolicyKind::WithODataSupport,
     }
   }
 
+  /// Determines if a field should be optional based on the configured policy.
   pub fn compute_optionality(&self, ctx: &FieldOptionalityContext) -> bool {
     let rules: Vec<Box<dyn FieldOptionalityRule>> = match self.kind {
       PolicyKind::Standard => vec![

@@ -1,14 +1,21 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
-use super::{cache::SharedSchemaCache, type_resolver::TypeResolver};
+use super::{
+  constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
+  hashing,
+  type_resolver::TypeResolver,
+};
 use crate::{
   generator::schema_graph::SchemaGraph,
-  reserved::{FORBIDDEN_IDENTIFIERS, to_rust_type_name},
+  reserved::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
 };
 
+/// Scans the schema graph to discover and name inline types (enums, objects) ahead of time.
+///
+/// This helps avoiding name collisions and ensures consistent naming for reused inline schemas.
 pub(crate) struct InlineTypeScanner<'a> {
   graph: &'a SchemaGraph,
   #[allow(dead_code)]
@@ -21,57 +28,202 @@ pub(crate) struct ScanResult {
   pub(crate) enum_names: BTreeMap<Vec<String>, String>,
 }
 
+/// Checks if a schema matches the "relaxed enum" pattern.
+///
+/// A relaxed enum is defined as having a freeform string variant (no enum values, no const)
+/// alongside other variants that are constrained (enum values or const).
+pub(crate) fn is_relaxed_enum_pattern(schema: &ObjectSchema) -> bool {
+  let variants: Vec<_> = schema.any_of.iter().chain(&schema.one_of).collect();
+
+  if variants.is_empty() {
+    return false;
+  }
+
+  let has_freeform_string = variants.iter().any(|variant| match variant {
+    ObjectOrReference::Object(s) => {
+      s.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
+        && s.enum_values.is_empty()
+        && s.const_value.is_none()
+    }
+    ObjectOrReference::Ref { .. } => false,
+  });
+
+  let has_constrained_variant = variants.iter().any(|variant| match variant {
+    ObjectOrReference::Object(s) => !s.enum_values.is_empty() || s.const_value.is_some(),
+    ObjectOrReference::Ref { .. } => false,
+  });
+
+  has_freeform_string && has_constrained_variant
+}
+
+/// Extracts enum values from a schema, handling standard enums, oneOf/anyOf patterns,
+/// and relaxed enum patterns (mixed freeform string and constants).
+///
+/// Returns `None` if no valid enum values could be extracted.
+pub(crate) fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> {
+  if !schema.enum_values.is_empty() {
+    let string_values: Vec<_> = schema
+      .enum_values
+      .iter()
+      .filter_map(|v| v.as_str().map(String::from))
+      .collect();
+
+    if !string_values.is_empty() {
+      let mut sorted = string_values;
+      sorted.sort();
+      return Some(sorted);
+    }
+  }
+
+  let variants: Vec<_> = schema.any_of.iter().chain(&schema.one_of).collect();
+
+  if variants.is_empty() {
+    return None;
+  }
+
+  let has_freeform_string = variants.iter().any(|variant| match variant {
+    ObjectOrReference::Object(s) => {
+      s.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
+        && s.enum_values.is_empty()
+        && s.const_value.is_none()
+    }
+    ObjectOrReference::Ref { .. } => false,
+  });
+
+  if has_freeform_string {
+    let values: BTreeSet<_> = variants
+      .iter()
+      .filter_map(|variant| match variant {
+        ObjectOrReference::Object(s) => {
+          let enum_values = s.enum_values.iter().filter_map(|v| v.as_str().map(String::from));
+          let const_value = s.const_value.as_ref().and_then(|v| v.as_str().map(String::from));
+          Some(enum_values.chain(const_value))
+        }
+        ObjectOrReference::Ref { .. } => None,
+      })
+      .flatten()
+      .collect();
+
+    return if values.is_empty() {
+      None
+    } else {
+      Some(values.into_iter().collect())
+    };
+  }
+
+  if !schema.one_of.is_empty() {
+    let mut const_values = BTreeSet::new();
+
+    for variant in &schema.one_of {
+      match variant {
+        ObjectOrReference::Object(s) => {
+          if let Some(const_str) = s.const_value.as_ref().and_then(|v| v.as_str()) {
+            const_values.insert(const_str.to_string());
+          } else {
+            return None;
+          }
+        }
+        ObjectOrReference::Ref { .. } => return None,
+      }
+    }
+
+    return if const_values.is_empty() {
+      None
+    } else {
+      Some(const_values.into_iter().collect())
+    };
+  }
+
+  None
+}
+
 impl<'a> InlineTypeScanner<'a> {
   pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>) -> Self {
     Self { graph, type_resolver }
   }
 
+  /// Scans the graph and computes unique names for all inline schemas.
+  ///
+  /// Returns a map of schema hash -> name, and enum values -> name.
   pub(crate) fn scan_and_compute_names(&self) -> anyhow::Result<ScanResult> {
-    // Map<Hash, Set<CandidateName>>
-    let mut candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    // Map<EnumValues, Set<CandidateName>>
-    let mut enum_candidates: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+    type NameCandidates = BTreeSet<(String, bool)>;
 
-    // Iterate over all schemas in the graph
-    for schema_name in self.graph.schema_names() {
-      if let Some(schema) = self.graph.get_schema(schema_name) {
-        // Also collect candidates from the root schema itself (e.g. if it's a named enum)
-        if Self::is_inline_target(schema)
-          && let Some(values) = Self::extract_enum_values(schema)
-        {
-          let rust_name = to_rust_type_name(schema_name);
-          enum_candidates.entry(values).or_default().insert(rust_name);
-        }
+    let mut inline_schema_candidates: BTreeMap<String, NameCandidates> = BTreeMap::new();
+    let mut enum_value_candidates: BTreeMap<Vec<String>, NameCandidates> = BTreeMap::new();
 
-        Self::collect_inline_candidates(schema_name, schema, &mut candidates, &mut enum_candidates)?;
-      }
-    }
+    self.collect_all_naming_candidates(&mut inline_schema_candidates, &mut enum_value_candidates)?;
 
-    let mut final_names = BTreeMap::new();
-    let mut final_enum_names = BTreeMap::new();
     let mut used_names = self.get_existing_names();
 
-    // Process enums first to claim best names
-    for (values, name_candidates) in enum_candidates {
-      let best_name = Self::compute_best_name(&name_candidates, &used_names);
-      used_names.insert(best_name.clone());
-      final_enum_names.insert(values, best_name);
-    }
-
-    // Process schema-based names
-    for (hash, name_candidates) in candidates {
-      // If this schema hash corresponds to an enum we already named, we could try to align them.
-      // But for now, just compute independent best name (collision handling in ensure_unique will respect used_names)
-      // If the simple enum is processed via handle_inline_enum, it will check get_enum_name first.
-      let best_name = Self::compute_best_name(&name_candidates, &used_names);
-      used_names.insert(best_name.clone());
-      final_names.insert(hash, best_name);
-    }
+    let final_enum_names = Self::resolve_enum_names(enum_value_candidates, &mut used_names);
+    let final_schema_names = Self::resolve_schema_names(inline_schema_candidates, &mut used_names);
 
     Ok(ScanResult {
-      names: final_names,
+      names: final_schema_names,
       enum_names: final_enum_names,
     })
+  }
+
+  fn collect_all_naming_candidates(
+    &self,
+    inline_schema_candidates: &mut BTreeMap<String, BTreeSet<(String, bool)>>,
+    enum_value_candidates: &mut BTreeMap<Vec<String>, BTreeSet<(String, bool)>>,
+  ) -> anyhow::Result<()> {
+    for schema_name in self.graph.schema_names() {
+      let Some(schema) = self.graph.get_schema(schema_name) else {
+        continue;
+      };
+
+      if Self::is_inline_target(schema)
+        && let Some(enum_values) = extract_enum_values(schema)
+      {
+        let mut rust_name = to_rust_type_name(schema_name);
+
+        if Self::is_string_enum_optimizer_pattern(schema) {
+          rust_name.push_str("Known");
+        }
+
+        let is_from_schema = true;
+        enum_value_candidates
+          .entry(enum_values)
+          .or_default()
+          .insert((rust_name, is_from_schema));
+      }
+
+      Self::collect_inline_candidates(schema_name, schema, inline_schema_candidates, enum_value_candidates)?;
+    }
+
+    Ok(())
+  }
+
+  fn resolve_enum_names(
+    enum_value_candidates: BTreeMap<Vec<String>, BTreeSet<(String, bool)>>,
+    used_names: &mut BTreeSet<String>,
+  ) -> BTreeMap<Vec<String>, String> {
+    let mut final_enum_names = BTreeMap::new();
+
+    for (enum_values, name_candidates) in enum_value_candidates {
+      let best_name = Self::compute_best_name(&name_candidates, used_names);
+      used_names.insert(best_name.clone());
+      final_enum_names.insert(enum_values, best_name);
+    }
+
+    final_enum_names
+  }
+
+  fn resolve_schema_names(
+    inline_schema_candidates: BTreeMap<String, BTreeSet<(String, bool)>>,
+    used_names: &mut BTreeSet<String>,
+  ) -> BTreeMap<String, String> {
+    let mut final_schema_names = BTreeMap::new();
+
+    for (schema_hash, name_candidates) in inline_schema_candidates {
+      let best_name = Self::compute_best_name(&name_candidates, used_names);
+      used_names.insert(best_name.clone());
+      final_schema_names.insert(schema_hash, best_name);
+    }
+
+    final_schema_names
   }
 
   fn get_existing_names(&self) -> BTreeSet<String> {
@@ -86,10 +238,9 @@ impl<'a> InlineTypeScanner<'a> {
   fn collect_inline_candidates(
     parent_name: &str,
     schema: &ObjectSchema,
-    candidates: &mut BTreeMap<String, BTreeSet<String>>,
-    enum_candidates: &mut BTreeMap<Vec<String>, BTreeSet<String>>,
+    candidates: &mut BTreeMap<String, BTreeSet<(String, bool)>>,
+    enum_candidates: &mut BTreeMap<Vec<String>, BTreeSet<(String, bool)>>,
   ) -> anyhow::Result<()> {
-    // Check properties
     for (prop_name, prop_schema_ref) in &schema.properties {
       let prop_schema = match prop_schema_ref {
         ObjectOrReference::Ref { .. } => continue,
@@ -97,186 +248,132 @@ impl<'a> InlineTypeScanner<'a> {
       };
 
       if Self::is_inline_target(prop_schema) {
-        let hash = SharedSchemaCache::hash_schema(prop_schema)?;
-        let candidate_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
+        let hash = hashing::hash_schema(prop_schema)?;
+        let candidate_name = format!("{parent_name}{}", prop_name.to_pascal_case());
         let rust_name = to_rust_type_name(&candidate_name);
 
-        candidates.entry(hash).or_default().insert(rust_name.clone());
+        candidates.entry(hash).or_default().insert((rust_name.clone(), false));
 
-        if let Some(values) = Self::extract_enum_values(prop_schema) {
-          enum_candidates.entry(values).or_default().insert(rust_name);
+        if let Some(values) = extract_enum_values(prop_schema) {
+          enum_candidates.entry(values).or_default().insert((rust_name, false));
         }
       }
 
-      // Recurse if it's an object
       if !prop_schema.properties.is_empty() {
-        let next_parent = format!("{}{}", parent_name, prop_name.to_pascal_case());
+        let next_parent = format!("{parent_name}{}", prop_name.to_pascal_case());
         Self::collect_inline_candidates(&next_parent, prop_schema, candidates, enum_candidates)?;
       }
     }
 
-    // Check all_of
-    for sub_ref in &schema.all_of {
-      if let ObjectOrReference::Object(sub) = sub_ref {
-        Self::collect_inline_candidates(parent_name, sub, candidates, enum_candidates)?;
-      }
-    }
-
-    // Check one_of/any_of
-    for sub_ref in schema.one_of.iter().chain(schema.any_of.iter()) {
-      if let ObjectOrReference::Object(_sub) = sub_ref {
-        // Skip recursion
-      }
+    for sub in schema.all_of.iter().filter_map(|r| match r {
+      ObjectOrReference::Object(s) => Some(s),
+      ObjectOrReference::Ref { .. } => None,
+    }) {
+      Self::collect_inline_candidates(parent_name, sub, candidates, enum_candidates)?;
     }
 
     Ok(())
   }
 
-  fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> {
-    if !schema.enum_values.is_empty() {
-      let mut values: Vec<String> = schema
-        .enum_values
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-      values.sort();
-      if !values.is_empty() {
-        return Some(values);
-      }
+  fn is_string_enum_optimizer_pattern(schema: &ObjectSchema) -> bool {
+    if schema.any_of.is_empty() {
+      return false;
     }
 
-    // Check for relaxed string enum pattern in anyOf/oneOf
-    // (String + Enum)
-    let has_string = schema.any_of.iter().chain(schema.one_of.iter()).any(|v| {
-           matches!(v, ObjectOrReference::Object(s) if s.schema_type == Some(SchemaTypeSet::Single(SchemaType::String)) && s.enum_values.is_empty())
-      });
-
-    if has_string {
-      let mut values = HashSet::new();
-      for variant in schema.any_of.iter().chain(schema.one_of.iter()) {
-        if let ObjectOrReference::Object(s) = variant {
-          for val in &s.enum_values {
-            if let Some(str_val) = val.as_str() {
-              values.insert(str_val.to_string());
-            }
-          }
-          if let Some(const_val) = s.const_value.as_ref().and_then(|v| v.as_str()) {
-            values.insert(const_val.to_string());
-          }
-        }
+    let has_freeform_string = schema.any_of.iter().any(|variant| match variant {
+      ObjectOrReference::Object(s) => {
+        s.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
+          && s.enum_values.is_empty()
+          && s.const_value.is_none()
       }
-      if !values.is_empty() {
-        let mut sorted: Vec<_> = values.into_iter().collect();
-        sorted.sort();
-        return Some(sorted);
-      }
-    }
+      ObjectOrReference::Ref { .. } => false,
+    });
 
-    None
+    let has_constrained_variant = schema.any_of.iter().any(|variant| match variant {
+      ObjectOrReference::Object(s) => !s.enum_values.is_empty() || s.const_value.is_some(),
+      ObjectOrReference::Ref { .. } => false,
+    });
+
+    has_freeform_string && has_constrained_variant
   }
+
   fn is_inline_target(schema: &ObjectSchema) -> bool {
-    // Check for inline enum
-    if !schema.enum_values.is_empty() {
-      return true;
-    }
-
-    // Check for inline union
-    if !schema.one_of.is_empty() || !schema.any_of.is_empty() {
-      // Basic heuristic: if it's complex enough to need a name
-      return true;
-    }
-
-    // Check for inline struct (nested object)
-    // Matches logic in StructConverter::is_inline_struct
-    // If it has properties and isn't just a map
-    if !schema.properties.is_empty() && schema.additional_properties.is_none() {
-      return true;
-    }
-
-    false
+    !schema.enum_values.is_empty()
+      || !schema.one_of.is_empty()
+      || !schema.any_of.is_empty()
+      || (!schema.properties.is_empty() && schema.additional_properties.is_none())
   }
-  fn compute_best_name(candidates: &BTreeSet<String>, used_names: &BTreeSet<String>) -> String {
-    // 1. Convert to vector for indexing
-    let candidate_vec: Vec<&String> = candidates.iter().collect();
+
+  /// Computes the best name for a set of candidates, avoiding collisions with used names.
+  ///
+  /// Strategy:
+  /// 1. If any candidate is an explicit schema name (is_from_schema=true), prefer it.
+  /// 2. If there's only one candidate, use it (uniquified).
+  /// 3. If there are multiple, try to find a Longest Common Suffix (LCS).
+  /// 4. If LCS is valid, use it.
+  /// 5. Fallback to the first candidate.
+  pub(crate) fn compute_best_name(candidates: &BTreeSet<(String, bool)>, used_names: &BTreeSet<String>) -> String {
+    if let Some((name, _)) = candidates.iter().find(|(_, is_from_schema)| *is_from_schema) {
+      return name.clone();
+    }
+
+    let candidate_vec: Vec<&String> = candidates.iter().map(|(n, _)| n).collect();
     if candidate_vec.is_empty() {
-      return "UnknownType".to_string(); // Should not happen
+      return "UnknownType".to_string();
     }
 
-    // 2. If only one candidate, use it (handling collisions)
     if candidate_vec.len() == 1 {
-      let name = candidate_vec[0];
-      if !used_names.contains(name) || candidates.contains(name) {
-        return name.clone();
-      }
-      return ensure_unique(name, used_names);
+      return ensure_unique(candidate_vec[0], used_names);
     }
-
-    // Prioritize candidates that match existing schema names (e.g. "Status" vs "InlineStatus")
-    // If we have a candidate that is already "used" (and it is in our candidate set), it means
-    // this group includes that named schema, so we should use that name.
-    for candidate in &candidate_vec {
-      if used_names.contains(*candidate) {
-        return (*candidate).clone();
-      }
-    }
-
-    // 3. Try to find Longest Common Suffix      // "CreateUserRole", "UpdateUserRole" -> "UserRole"
-    // "ABStatus", "CDStatus" -> "Status"
 
     let lcs = Self::longest_common_suffix(&candidate_vec);
 
-    // Heuristic: Common suffix must be at least X chars and not just "Enum" or generic
-    // And it should probably start with an uppercase letter (it will if inputs are PascalCase)
-
     if Self::is_valid_common_name(&lcs) {
-      // Check if the LCS itself is a valid name (not reserved, not empty)
-      // And check uniqueness
-      if !used_names.contains(&lcs) || candidates.contains(&lcs) {
-        return lcs;
-      }
       let unique_lcs = ensure_unique(&lcs, used_names);
       return unique_lcs;
     }
 
-    // 4. Fallback: Pick the "first" candidate (alphabetically)
-    // They are already sorted in BTreeSet
-    let first = candidate_vec[0];
-    if !used_names.contains(first) || candidates.contains(first) {
-      return first.clone();
-    }
-    ensure_unique(first, used_names)
+    ensure_unique(candidate_vec[0], used_names)
   }
-  fn longest_common_suffix(strings: &[&String]) -> String {
-    if strings.is_empty() {
+
+  /// Finds the longest common suffix among a set of strings.
+  ///
+  /// Example: `["CreateUserRequest", "UpdateUserRequest"]` -> `"UserRequest"`
+  pub(crate) fn longest_common_suffix(strings: &[&String]) -> String {
+    let [first, rest @ ..] = strings else {
       return String::new();
-    }
-    let first = strings[0];
-    let mut longest_suffix = String::new();
+    };
 
-    for i in 1..=first.len() {
-      let suffix = &first[first.len() - i..];
-      if strings.iter().all(|s| s.ends_with(suffix)) {
-        longest_suffix = suffix.to_string();
-      } else {
-        break;
-      }
-    }
-    longest_suffix
+    let first_reversed: Vec<char> = first.chars().rev().collect();
+
+    let common_length = first_reversed
+      .iter()
+      .enumerate()
+      .take_while(|(index, char_from_first)| {
+        rest.iter().all(|other_string| {
+          other_string
+            .chars()
+            .rev()
+            .nth(*index)
+            .is_some_and(|c| c == **char_from_first)
+        })
+      })
+      .count();
+
+    first_reversed.into_iter().take(common_length).rev().collect()
   }
 
-  fn is_valid_common_name(name: &str) -> bool {
+  /// Checks if a name is a valid common name (not reserved, follows conventions).
+  pub(crate) fn is_valid_common_name(name: &str) -> bool {
     if name.len() < 4 {
       return false;
-    } // Too short
-
-    if name == "Enum" || name == "Struct" || name == "Type" {
+    }
+    if matches!(name, "Enum" | "Struct" | "Type" | "Object") {
       return false;
-    } // Too generic
-
-    if !name.chars().next().unwrap().is_uppercase() {
+    }
+    if !name.chars().next().is_some_and(char::is_uppercase) {
       return false;
-    } // Must be PascalCase
-
+    }
     if FORBIDDEN_IDENTIFIERS.contains(name) {
       return false;
     }
@@ -285,14 +382,11 @@ impl<'a> InlineTypeScanner<'a> {
   }
 }
 
+/// Ensures a name is unique within a set of used names, appending a numeric suffix if needed.
 pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
   if !used_names.contains(base_name) {
     return base_name.to_string();
   }
-
-  // Collision resolution: append suffix
-  // This is slightly imperfect because "Name2" might collide with an existing "Name2"
-  // but we iterate
   let mut i = 2;
   loop {
     let new_name = format!("{base_name}{i}");
@@ -303,33 +397,64 @@ pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> S
   }
 }
 
-/// Derives a method name for an enum variant helper by stripping common prefix/suffix
-/// between the enum name and variant name.
-pub(crate) fn derive_method_name(enum_name: &str, variant_name: &str) -> String {
-  let variant_words = split_pascal_case(variant_name);
-  let enum_words = split_pascal_case(enum_name);
-
-  let mut start = 0;
-  while start < variant_words.len() && start < enum_words.len() && variant_words[start] == enum_words[start] {
-    start += 1;
+/// Derives method names for multiple enum variants, ensuring they remain unique
+/// after filtering out common words with the enum name.
+///
+/// Algorithm:
+/// 1. Split enum name into words (e.g., `"MyEnum"` -> `["My", "Enum"]`).
+/// 2. For each variant, split into words.
+/// 3. Remove words present in the enum name from the variant name.
+/// 4. If the result is unique and non-empty, use it.
+/// 5. Otherwise, fall back to the full variant name (snake_cased).
+pub(crate) fn derive_method_names(enum_name: &str, variant_names: &[String]) -> Vec<String> {
+  if variant_names.is_empty() {
+    return vec![];
   }
 
-  let mut end = variant_words.len();
-  let mut enum_end = enum_words.len();
-  while end > start && enum_end > 0 && variant_words[end - 1] == enum_words[enum_end - 1] {
-    end -= 1;
-    enum_end -= 1;
+  let enum_words: BTreeSet<_> = split_pascal_case(enum_name).into_iter().collect();
+
+  // Pre-calculate candidates: (original_snake, simplified_snake)
+  let candidates: Vec<(String, String)> = variant_names
+    .iter()
+    .map(|variant_name| {
+      let variant_words = split_pascal_case(variant_name);
+      let unique_words: Vec<_> = variant_words
+        .iter()
+        .filter(|word| !enum_words.contains(*word))
+        .cloned()
+        .collect();
+
+      let original = variant_name.to_snake_case();
+      let simplified = if unique_words.is_empty() {
+        original.clone()
+      } else {
+        unique_words.join("").to_snake_case()
+      };
+      (original, simplified)
+    })
+    .collect();
+
+  // Count occurrences of simplified names to detect collisions
+  let mut simplified_counts = BTreeMap::new();
+  for (_, simplified) in &candidates {
+    *simplified_counts.entry(simplified.clone()).or_insert(0) += 1;
   }
 
-  if start >= end {
-    return to_snake_case(variant_name);
-  }
-
-  let stripped = &variant_words[start..end];
-  to_snake_case(&stripped.join(""))
+  candidates
+    .into_iter()
+    .map(|(original, simplified)| {
+      if simplified_counts[&simplified] > 1 {
+        original
+      } else {
+        simplified
+      }
+    })
+    .collect()
 }
 
-fn split_pascal_case(name: &str) -> Vec<String> {
+/// Splits a PascalCase string into words.
+/// Handles adjacent uppercase letters correctly (e.g., `"XMLParser"` -> `["XML", "Parser"]`).
+pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
   if name.is_empty() {
     return Vec::new();
   }
@@ -338,15 +463,16 @@ fn split_pascal_case(name: &str) -> Vec<String> {
   let mut current_word = String::new();
   let chars: Vec<char> = name.chars().collect();
 
-  for i in 0..chars.len() {
-    let ch = chars[i];
-    let prev_is_lower = i > 0 && chars[i - 1].is_lowercase();
-    let next_is_lower = i + 1 < chars.len() && chars[i + 1].is_lowercase();
+  for (i, &ch) in chars.iter().enumerate() {
+    if ch.is_uppercase() && !current_word.is_empty() {
+      // Check boundary conditions for splitting
+      let prev_is_lower = i > 0 && chars[i - 1].is_lowercase();
+      let next_is_lower = i + 1 < chars.len() && chars[i + 1].is_lowercase();
 
-    if ch.is_uppercase() && !current_word.is_empty() && (prev_is_lower || next_is_lower) {
-      words.push(std::mem::take(&mut current_word));
+      if prev_is_lower || next_is_lower {
+        words.push(std::mem::take(&mut current_word));
+      }
     }
-
     current_word.push(ch);
   }
 
@@ -357,124 +483,117 @@ fn split_pascal_case(name: &str) -> Vec<String> {
   words
 }
 
-fn to_snake_case(name: &str) -> String {
-  name.to_snake_case()
+/// Infers a name for an inline schema based on its context (path, operation).
+///
+/// Used when a schema doesn't have a title or ref name.
+pub(crate) fn infer_name_from_context(schema: &oas3::spec::ObjectSchema, path: &str, context: &str) -> String {
+  let is_request = context == REQUEST_BODY_SUFFIX;
+
+  let with_suffix = |base: &str| {
+    let sanitized_base = sanitize(base);
+    if is_request {
+      format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
+    } else {
+      format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
+    }
+  };
+
+  // If schema has exactly one property, try to name it after that property
+  if schema.properties.len() == 1
+    && let Some((prop_name, _)) = schema.properties.iter().next()
+  {
+    let singular = cruet::to_singular(prop_name);
+    let sanitized_singular = sanitize(&singular);
+    return if is_request {
+      sanitized_singular
+    } else {
+      format!("{sanitized_singular}{RESPONSE_SUFFIX}")
+    };
+  }
+
+  // Otherwise, derive from path segments
+  let segments: Vec<_> = path
+    .split('/')
+    .filter(|s| !s.is_empty() && !s.starts_with('{'))
+    .collect();
+
+  segments
+    .last()
+    .map(|&s| with_suffix(&cruet::to_singular(s)))
+    .or_else(|| segments.first().map(|&s| with_suffix(s)))
+    .unwrap_or_else(|| {
+      if is_request {
+        REQUEST_BODY_SUFFIX.to_string()
+      } else {
+        format!("{RESPONSE_PREFIX}{context}")
+      }
+    })
 }
 
 #[cfg(test)]
 mod tests {
-  use std::collections::BTreeSet;
+  use oas3::spec::ObjectSchema;
 
   use super::*;
 
   #[test]
-  fn test_ensure_unique_handles_collisions() {
-    let mut used = BTreeSet::new();
-    used.insert("UserResponse".to_string());
+  fn test_infer_name_from_context_sanitizes_hyphens() {
+    let schema = ObjectSchema::default();
 
-    let result = ensure_unique("UserResponse", &used);
+    let result = infer_name_from_context(&schema, "/api/check-access-by-email", "200");
 
-    assert_eq!(result, "UserResponse2");
+    assert_eq!(result, "check_access_by_email200Response");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
   }
 
   #[test]
-  fn test_ensure_unique_handles_multiple_collisions() {
-    let mut used = BTreeSet::new();
-    used.insert("UserResponse".to_string());
-    used.insert("UserResponse2".to_string());
-    used.insert("UserResponse3".to_string());
+  fn test_infer_name_from_context_sanitizes_multiple_separators() {
+    let schema = ObjectSchema::default();
 
-    let result = ensure_unique("UserResponse", &used);
+    let result = infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
 
-    assert_eq!(result, "UserResponse4");
+    assert_eq!(result, "foo_bar_baz_qux201Response");
+    assert!(
+      !result.contains('-') && !result.contains('.'),
+      "Result should not contain hyphens or dots: {result}"
+    );
   }
 
   #[test]
-  fn test_ensure_unique_with_empty_string() {
-    let used = BTreeSet::new();
-    let result = ensure_unique("", &used);
-    assert_eq!(result, "");
+  fn test_infer_name_from_context_with_request_body() {
+    let schema = ObjectSchema::default();
+
+    let result = infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
+
+    assert_eq!(result, "create_userRequestBody");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
   }
 
   #[test]
-  fn test_ensure_unique_with_suffixed_collision() {
-    let mut used = BTreeSet::new();
-    used.insert("Name2".to_string());
-    let result = ensure_unique("Name", &used);
-    assert_eq!(result, "Name");
+  fn test_infer_name_from_context_single_property_response() {
+    let mut schema = ObjectSchema::default();
+    schema.properties.insert(
+      "user".to_string(),
+      oas3::spec::ObjectOrReference::Object(ObjectSchema::default()),
+    );
+
+    let result = infer_name_from_context(&schema, "/api/check-access", "200");
+
+    assert_eq!(result, "userResponse");
+    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
   }
 
   #[test]
-  fn test_ensure_unique_no_collision() {
-    let used = BTreeSet::new();
-    let result = ensure_unique("UniqueName", &used);
-    assert_eq!(result, "UniqueName");
-  }
+  fn test_longest_common_suffix() {
+    let s1 = "CreateUserRequest".to_string();
+    let s2 = "UpdateUserRequest".to_string();
+    let s3 = "DeleteUserRequest".to_string();
+    let strings = vec![&s1, &s2, &s3];
+    // "Create", "Update", "Delete" all end in "te", so the suffix includes "te"
+    assert_eq!(InlineTypeScanner::longest_common_suffix(&strings), "teUserRequest");
 
-  #[test]
-  fn test_ensure_unique_skips_to_available_suffix() {
-    let mut used = BTreeSet::new();
-    used.insert("Value".to_string());
-    used.insert("Value3".to_string());
-    let result = ensure_unique("Value", &used);
-    assert_eq!(result, "Value2");
-  }
-
-  #[test]
-  fn test_split_pascal_case_simple() {
-    assert_eq!(split_pascal_case("UserName"), vec!["User", "Name"]);
-    assert_eq!(split_pascal_case("SimpleTest"), vec!["Simple", "Test"]);
-  }
-
-  #[test]
-  fn test_split_pascal_case_with_acronyms() {
-    assert_eq!(split_pascal_case("HTTPSConnection"), vec!["HTTPS", "Connection"]);
-    assert_eq!(split_pascal_case("XMLParser"), vec!["XML", "Parser"]);
-    assert_eq!(split_pascal_case("JSONResponse"), vec!["JSON", "Response"]);
-    assert_eq!(split_pascal_case("HTTPStatus"), vec!["HTTP", "Status"]);
-  }
-
-  #[test]
-  fn test_split_pascal_case_all_caps() {
-    assert_eq!(split_pascal_case("HTTPS"), vec!["HTTPS"]);
-    assert_eq!(split_pascal_case("XML"), vec!["XML"]);
-  }
-
-  #[test]
-  fn test_split_pascal_case_single_word() {
-    assert_eq!(split_pascal_case("User"), vec!["User"]);
-    assert_eq!(split_pascal_case("Status"), vec!["Status"]);
-  }
-
-  #[test]
-  fn test_derive_method_name_strips_common_prefix() {
-    assert_eq!(derive_method_name("ResponseFormat", "ResponseFormatText"), "text");
-    assert_eq!(derive_method_name("Status", "StatusActive"), "active");
-  }
-
-  #[test]
-  fn test_derive_method_name_strips_common_suffix() {
-    assert_eq!(derive_method_name("TextFormat", "PlainTextFormat"), "plain");
-  }
-
-  #[test]
-  fn test_derive_method_name_identical_names() {
-    assert_eq!(derive_method_name("Status", "Status"), "status");
-  }
-
-  #[test]
-  fn test_derive_method_name_with_acronyms() {
-    assert_eq!(derive_method_name("ResponseFormat", "ResponseFormatHTTPS"), "https");
-    assert_eq!(derive_method_name("APIResponse", "APIResponseJSON"), "json");
-  }
-
-  #[test]
-  fn test_split_pascal_case_empty_string() {
-    assert_eq!(split_pascal_case(""), Vec::<String>::new());
-  }
-
-  #[test]
-  fn test_derive_method_name_empty_variant() {
-    assert_eq!(derive_method_name("Status", ""), "");
+    let s4 = "SomethingElse".to_string();
+    let strings2 = vec![&s1, &s4];
+    assert_eq!(InlineTypeScanner::longest_common_suffix(&strings2), "");
   }
 }

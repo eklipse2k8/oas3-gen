@@ -7,9 +7,9 @@ use inflections::Inflect;
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
 
 use super::{
-  ConversionResult, DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX,
+  ConversionResult,
   cache::SharedSchemaCache,
-  constants::doc_attrs,
+  constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX, doc_attrs},
   field_optionality::{FieldOptionalityContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
@@ -38,6 +38,7 @@ struct DiscriminatorInfo {
   has_enum: bool,
 }
 
+/// Converter for OpenAPI object schemas into Rust Structs.
 #[derive(Clone)]
 pub(crate) struct StructConverter<'a> {
   graph: &'a SchemaGraph,
@@ -61,6 +62,7 @@ impl<'a> StructConverter<'a> {
     }
   }
 
+  /// Converts a schema composed with `allOf` by merging properties.
   pub(crate) fn convert_all_of_schema(
     &self,
     name: &str,
@@ -79,6 +81,9 @@ impl<'a> StructConverter<'a> {
     self.finalize_struct_types(name, &merged_schema, main_type, inline_types)
   }
 
+  /// Converts a standard object schema into a Rust Struct.
+  ///
+  /// Handles fields, optionality, and inline type generation.
   pub(crate) fn convert_struct(
     &self,
     name: &str,
@@ -183,6 +188,7 @@ impl<'a> StructConverter<'a> {
     Ok(all_types)
   }
 
+  /// Finalizes struct conversion, optionally wrapping it in a discriminated enum if needed.
   pub(crate) fn finalize_struct_types(
     &self,
     name: &str,
@@ -490,7 +496,6 @@ impl<'a> StructConverter<'a> {
       return Ok((TypeRef::new(type_name), vec![]));
     }
 
-    // Fallback: no cache. Return everything.
     let mut all_types = vec![struct_type];
     all_types.append(&mut inline_types);
 

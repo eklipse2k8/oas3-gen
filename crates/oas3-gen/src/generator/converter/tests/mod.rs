@@ -1,7 +1,9 @@
+mod cache;
 mod common;
 mod enums;
 mod implicit_dependencies;
 mod inline_objects;
+mod naming;
 mod operations;
 mod structs;
 mod type_aliases;

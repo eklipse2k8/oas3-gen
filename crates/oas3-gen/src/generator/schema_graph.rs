@@ -14,12 +14,12 @@ use crate::generator::operation_registry::OperationRegistry;
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
 #[derive(Debug)]
-struct SchemaRepository {
-  schemas: BTreeMap<String, ObjectSchema>,
+pub(crate) struct SchemaRepository {
+  pub(crate) schemas: BTreeMap<String, ObjectSchema>,
 }
 
 impl SchemaRepository {
-  fn from_spec(spec: &Spec) -> (Self, Vec<GenerationWarning>) {
+  pub(crate) fn from_spec(spec: &Spec) -> (Self, Vec<GenerationWarning>) {
     let mut schemas = BTreeMap::new();
     let mut warnings = Vec::new();
 
@@ -42,20 +42,20 @@ impl SchemaRepository {
     (Self { schemas }, warnings)
   }
 
-  fn get(&self, name: &str) -> Option<&ObjectSchema> {
+  pub(crate) fn get(&self, name: &str) -> Option<&ObjectSchema> {
     self.schemas.get(name)
   }
 
-  fn names(&self) -> impl Iterator<Item = &String> {
+  pub(crate) fn names(&self) -> impl Iterator<Item = &String> {
     self.schemas.keys()
   }
 }
 
 #[derive(Debug)]
-struct ReferenceExtractor;
+pub(crate) struct ReferenceExtractor;
 
 impl ReferenceExtractor {
-  fn extract_from_schema(
+  pub(crate) fn extract_from_schema(
     schema: &ObjectSchema,
     fingerprints: Option<&HashMap<BTreeSet<String>, String>>,
   ) -> BTreeSet<String> {
@@ -139,20 +139,20 @@ impl ReferenceExtractor {
 }
 
 #[derive(Debug)]
-struct DependencyGraph {
-  dependencies: BTreeMap<String, BTreeSet<String>>,
+pub(crate) struct DependencyGraph {
+  pub(crate) dependencies: BTreeMap<String, BTreeSet<String>>,
   cyclic_schemas: BTreeSet<String>,
 }
 
 impl DependencyGraph {
-  fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       dependencies: BTreeMap::new(),
       cyclic_schemas: BTreeSet::new(),
     }
   }
 
-  fn build(&mut self, repository: &SchemaRepository, fingerprints: &HashMap<BTreeSet<String>, String>) {
+  pub(crate) fn build(&mut self, repository: &SchemaRepository, fingerprints: &HashMap<BTreeSet<String>, String>) {
     for schema_name in repository.names() {
       let deps = repository
         .get(schema_name)
@@ -163,7 +163,7 @@ impl DependencyGraph {
     }
   }
 
-  fn detect_cycles(&mut self) -> Vec<Vec<String>> {
+  pub(crate) fn detect_cycles(&mut self) -> Vec<Vec<String>> {
     let mut detector = CycleDetector::new(&self.dependencies);
     let cycles = detector.find_all_cycles();
 
@@ -176,13 +176,13 @@ impl DependencyGraph {
     cycles
   }
 
-  fn is_cyclic(&self, schema_name: &str) -> bool {
+  pub(crate) fn is_cyclic(&self, schema_name: &str) -> bool {
     self.cyclic_schemas.contains(schema_name)
   }
 }
 
 #[derive(Debug)]
-struct CycleDetector<'a> {
+pub(crate) struct CycleDetector<'a> {
   dependencies: &'a BTreeMap<String, BTreeSet<String>>,
   visited: BTreeSet<String>,
   recursion_stack: BTreeSet<String>,
@@ -191,7 +191,7 @@ struct CycleDetector<'a> {
 }
 
 impl<'a> CycleDetector<'a> {
-  fn new(dependencies: &'a BTreeMap<String, BTreeSet<String>>) -> Self {
+  pub(crate) fn new(dependencies: &'a BTreeMap<String, BTreeSet<String>>) -> Self {
     Self {
       dependencies,
       visited: BTreeSet::new(),
@@ -201,7 +201,7 @@ impl<'a> CycleDetector<'a> {
     }
   }
 
-  fn find_all_cycles(&mut self) -> Vec<Vec<String>> {
+  pub(crate) fn find_all_cycles(&mut self) -> Vec<Vec<String>> {
     let nodes: Vec<String> = self.dependencies.keys().cloned().collect();
 
     for node in nodes {
