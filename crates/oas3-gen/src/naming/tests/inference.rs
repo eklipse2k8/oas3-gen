@@ -3,10 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use super::common::{create_test_graph, default_config};
-use crate::generator::converter::{
-  naming::{InlineTypeScanner, derive_method_names, ensure_unique, split_pascal_case},
-  type_resolver::TypeResolver,
+use crate::{
+  generator::converter::{constants::REQUEST_BODY_SUFFIX, type_resolver::TypeResolver},
+  naming::inference::{
+    InlineTypeScanner, derive_method_names, ensure_unique, infer_name_from_context, split_pascal_case,
+  },
+  tests::common::{create_test_graph, default_config},
 };
 
 #[test]
@@ -332,4 +334,50 @@ fn test_inline_type_scanner_anyof_with_const_values() {
     Some(&"FormatTypeKnown".to_string()),
     "anyOf with const values should be named with 'Known' suffix"
   );
+}
+
+#[test]
+fn test_infer_name_from_context_sanitizes_hyphens() {
+  let schema = ObjectSchema::default();
+
+  let result = infer_name_from_context(&schema, "/api/check-access-by-email", "200");
+
+  assert_eq!(result, "check_access_by_email200Response");
+  assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+}
+
+#[test]
+fn test_infer_name_from_context_sanitizes_multiple_separators() {
+  let schema = ObjectSchema::default();
+
+  let result = infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
+
+  assert_eq!(result, "foo_bar_baz_qux201Response");
+  assert!(
+    !result.contains('-') && !result.contains('.'),
+    "Result should not contain hyphens or dots: {result}"
+  );
+}
+
+#[test]
+fn test_infer_name_from_context_with_request_body() {
+  let schema = ObjectSchema::default();
+
+  let result = infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
+
+  assert_eq!(result, "create_userRequestBody");
+  assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+}
+
+#[test]
+fn test_infer_name_from_context_single_property_response() {
+  let mut schema = ObjectSchema::default();
+  schema
+    .properties
+    .insert("user".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+
+  let result = infer_name_from_context(&schema, "/api/check-access", "200");
+
+  assert_eq!(result, "userResponse");
+  assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
 }

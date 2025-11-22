@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
-use super::common::{create_test_graph, default_config};
-use crate::generator::{
-  ast::RustType,
-  converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+use crate::{
+  generator::{
+    ast::RustType,
+    converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+  },
+  tests::common::{create_test_graph, default_config},
 };
 
 #[test]

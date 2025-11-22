@@ -3,10 +3,12 @@ use std::collections::BTreeMap;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use super::common::{create_test_graph, default_config};
-use crate::generator::{
-  converter::type_resolver::{SchemaExt, TypeResolver},
-  schema_graph::SchemaGraph,
+use crate::{
+  generator::{
+    converter::type_resolver::{SchemaExt, TypeResolver},
+    schema_graph::SchemaGraph,
+  },
+  tests::common::{create_test_graph, default_config},
 };
 
 #[test]

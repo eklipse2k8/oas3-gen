@@ -4,9 +4,9 @@ use num_format::{CustomFormat, Grouping, ToFormattedString};
 use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 use regex::Regex;
 
-use crate::generator::{
-  ast::{RustPrimitive, TypeRef},
-  utils::doc_comment_lines,
+use crate::{
+  generator::ast::{RustPrimitive, TypeRef},
+  utils::text::doc_comment_lines,
 };
 
 static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {

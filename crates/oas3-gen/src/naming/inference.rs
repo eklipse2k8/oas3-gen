@@ -3,19 +3,21 @@ use std::collections::{BTreeMap, BTreeSet};
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
-use super::{
-  constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
-  hashing,
-  type_resolver::TypeResolver,
-};
 use crate::{
-  generator::schema_graph::SchemaGraph,
-  reserved::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
+  generator::{
+    converter::{
+      constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
+      hashing,
+      type_resolver::TypeResolver,
+    },
+    schema_graph::SchemaGraph,
+  },
+  naming::identifiers::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
 };
 
 /// Scans the schema graph to discover and name inline types (enums, objects) ahead of time.
 ///
-/// This helps avoiding name collisions and ensures consistent naming for reused inline schemas.
+/// This helps to avoid name collisions and ensures consistent naming for reused inline schemas.
 pub(crate) struct InlineTypeScanner<'a> {
   graph: &'a SchemaGraph,
   #[allow(dead_code)]
@@ -486,7 +488,7 @@ pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
 /// Infers a name for an inline schema based on its context (path, operation).
 ///
 /// Used when a schema doesn't have a title or ref name.
-pub(crate) fn infer_name_from_context(schema: &oas3::spec::ObjectSchema, path: &str, context: &str) -> String {
+pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
   let is_request = context == REQUEST_BODY_SUFFIX;
 
   let with_suffix = |base: &str| {
@@ -528,72 +530,4 @@ pub(crate) fn infer_name_from_context(schema: &oas3::spec::ObjectSchema, path: &
         format!("{RESPONSE_PREFIX}{context}")
       }
     })
-}
-
-#[cfg(test)]
-mod tests {
-  use oas3::spec::ObjectSchema;
-
-  use super::*;
-
-  #[test]
-  fn test_infer_name_from_context_sanitizes_hyphens() {
-    let schema = ObjectSchema::default();
-
-    let result = infer_name_from_context(&schema, "/api/check-access-by-email", "200");
-
-    assert_eq!(result, "check_access_by_email200Response");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_infer_name_from_context_sanitizes_multiple_separators() {
-    let schema = ObjectSchema::default();
-
-    let result = infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
-
-    assert_eq!(result, "foo_bar_baz_qux201Response");
-    assert!(
-      !result.contains('-') && !result.contains('.'),
-      "Result should not contain hyphens or dots: {result}"
-    );
-  }
-
-  #[test]
-  fn test_infer_name_from_context_with_request_body() {
-    let schema = ObjectSchema::default();
-
-    let result = infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
-
-    assert_eq!(result, "create_userRequestBody");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_infer_name_from_context_single_property_response() {
-    let mut schema = ObjectSchema::default();
-    schema.properties.insert(
-      "user".to_string(),
-      oas3::spec::ObjectOrReference::Object(ObjectSchema::default()),
-    );
-
-    let result = infer_name_from_context(&schema, "/api/check-access", "200");
-
-    assert_eq!(result, "userResponse");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_longest_common_suffix() {
-    let s1 = "CreateUserRequest".to_string();
-    let s2 = "UpdateUserRequest".to_string();
-    let s3 = "DeleteUserRequest".to_string();
-    let strings = vec![&s1, &s2, &s3];
-    // "Create", "Update", "Delete" all end in "te", so the suffix includes "te"
-    assert_eq!(InlineTypeScanner::longest_common_suffix(&strings), "teUserRequest");
-
-    let s4 = "SomethingElse".to_string();
-    let strings2 = vec![&s1, &s4];
-    assert_eq!(InlineTypeScanner::longest_common_suffix(&strings2), "");
-  }
 }

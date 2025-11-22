@@ -3,13 +3,15 @@ use std::collections::BTreeMap;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use super::common::{create_test_graph, default_config};
-use crate::generator::{
-  ast::RustType,
-  converter::{
-    FieldOptionalityPolicy, SchemaConverter, cache::SharedSchemaCache, enums::EnumConverter, hashing,
-    string_enum_optimizer::StringEnumOptimizer, type_resolver::TypeResolver,
+use crate::{
+  generator::{
+    ast::RustType,
+    converter::{
+      FieldOptionalityPolicy, SchemaConverter, cache::SharedSchemaCache, enums::EnumConverter, hashing,
+      string_enum_optimizer::StringEnumOptimizer, type_resolver::TypeResolver,
+    },
   },
+  tests::common::{create_test_graph, default_config},
 };
 
 #[test]

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use super::{
   CodegenConfig, ConversionResult,
@@ -14,7 +14,10 @@ use crate::{
     ast::{RustPrimitive, RustType, TypeRef},
     schema_graph::SchemaGraph,
   },
-  reserved::to_rust_type_name,
+  naming::{
+    identifiers::to_rust_type_name,
+    inference::{extract_enum_values, is_relaxed_enum_pattern},
+  },
 };
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
@@ -203,7 +206,7 @@ impl<'a> TypeResolver<'a> {
       }
     }
 
-    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
+    let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
     let enum_name = Self::determine_enum_name(prop_schema, &base_name, &enum_values, &cache)?;
 
     let config = CodegenConfig {
@@ -269,8 +272,8 @@ impl<'a> TypeResolver<'a> {
         return Ok((TypeRef::new(existing_name), vec![]));
       }
 
-      if !super::naming::is_relaxed_enum_pattern(prop_schema)
-        && let Some(values) = super::naming::extract_enum_values(prop_schema)
+      if !is_relaxed_enum_pattern(prop_schema)
+        && let Some(values) = extract_enum_values(prop_schema)
         && let Some(name) = cache.get_enum_name(&values)
       {
         return Ok((TypeRef::new(name), vec![]));
@@ -285,7 +288,7 @@ impl<'a> TypeResolver<'a> {
       return Ok((type_ref, vec![]));
     }
 
-    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
+    let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
     let enum_name = if let Some(ref mut c) = cache {
       c.get_preferred_name(prop_schema, &base_name)?
     } else {
@@ -499,8 +502,8 @@ impl<'a> TypeResolver<'a> {
 
   fn convert_array_items(&self, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
     let Some(items_ref) = schema.items.as_ref().and_then(|b| match b.as_ref() {
-      oas3::spec::Schema::Object(o) => Some(o),
-      oas3::spec::Schema::Boolean(_) => None,
+      Schema::Object(o) => Some(o),
+      Schema::Boolean(_) => None,
     }) else {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };

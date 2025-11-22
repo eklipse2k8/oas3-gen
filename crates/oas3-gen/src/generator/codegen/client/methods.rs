@@ -7,7 +7,7 @@ use crate::{
   generator::ast::{
     FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef, TypeRef,
   },
-  reserved::header_const_name,
+  naming::identifiers::header_const_name,
 };
 
 struct TypeInfo {

@@ -5,7 +5,7 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
   CodegenConfig, ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
-  naming, string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
+  string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::{
   generator::{
@@ -15,7 +15,7 @@ use crate::{
     },
     schema_graph::SchemaGraph,
   },
-  reserved::to_rust_type_name,
+  naming::{identifiers::to_rust_type_name, inference as naming},
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

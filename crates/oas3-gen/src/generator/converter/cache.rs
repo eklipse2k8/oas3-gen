@@ -2,8 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::ObjectSchema;
 
-use super::{ConversionResult, hashing, naming};
-use crate::{generator::ast::RustType, reserved::to_rust_type_name};
+use super::{ConversionResult, hashing};
+use crate::{
+  generator::ast::RustType,
+  naming::{identifiers::to_rust_type_name, inference as naming},
+};
 
 /// Cache for sharing generated Rust types across the schema graph.
 ///

@@ -1,14 +1,37 @@
 use oas3::spec::Response;
 
-use super::constants::{
-  STATUS_ACCEPTED, STATUS_BAD_GATEWAY, STATUS_BAD_REQUEST, STATUS_CLIENT_ERROR, STATUS_CONFLICT, STATUS_CREATED,
-  STATUS_FORBIDDEN, STATUS_FOUND, STATUS_GATEWAY_TIMEOUT, STATUS_GONE, STATUS_INFORMATIONAL,
-  STATUS_INTERNAL_SERVER_ERROR, STATUS_METHOD_NOT_ALLOWED, STATUS_MOVED_PERMANENTLY, STATUS_NO_CONTENT,
-  STATUS_NOT_ACCEPTABLE, STATUS_NOT_FOUND, STATUS_NOT_IMPLEMENTED, STATUS_NOT_MODIFIED, STATUS_OK, STATUS_PREFIX,
-  STATUS_REDIRECTION, STATUS_REQUEST_TIMEOUT, STATUS_SERVER_ERROR, STATUS_SERVICE_UNAVAILABLE, STATUS_SUCCESS,
-  STATUS_TOO_MANY_REQUESTS, STATUS_UNAUTHORIZED, STATUS_UNPROCESSABLE_ENTITY,
-};
-use crate::reserved::to_rust_type_name;
+use crate::naming::identifiers::to_rust_type_name;
+
+pub(crate) const STATUS_OK: &str = "Ok";
+pub(crate) const STATUS_CREATED: &str = "Created";
+pub(crate) const STATUS_ACCEPTED: &str = "Accepted";
+pub(crate) const STATUS_NO_CONTENT: &str = "NoContent";
+pub(crate) const STATUS_MOVED_PERMANENTLY: &str = "MovedPermanently";
+pub(crate) const STATUS_FOUND: &str = "Found";
+pub(crate) const STATUS_NOT_MODIFIED: &str = "NotModified";
+pub(crate) const STATUS_BAD_REQUEST: &str = "BadRequest";
+pub(crate) const STATUS_UNAUTHORIZED: &str = "Unauthorized";
+pub(crate) const STATUS_FORBIDDEN: &str = "Forbidden";
+pub(crate) const STATUS_NOT_FOUND: &str = "NotFound";
+pub(crate) const STATUS_METHOD_NOT_ALLOWED: &str = "MethodNotAllowed";
+pub(crate) const STATUS_NOT_ACCEPTABLE: &str = "NotAcceptable";
+pub(crate) const STATUS_REQUEST_TIMEOUT: &str = "RequestTimeout";
+pub(crate) const STATUS_CONFLICT: &str = "Conflict";
+pub(crate) const STATUS_GONE: &str = "Gone";
+pub(crate) const STATUS_UNPROCESSABLE_ENTITY: &str = "UnprocessableEntity";
+pub(crate) const STATUS_TOO_MANY_REQUESTS: &str = "TooManyRequests";
+pub(crate) const STATUS_INTERNAL_SERVER_ERROR: &str = "InternalServerError";
+pub(crate) const STATUS_NOT_IMPLEMENTED: &str = "NotImplemented";
+pub(crate) const STATUS_BAD_GATEWAY: &str = "BadGateway";
+pub(crate) const STATUS_SERVICE_UNAVAILABLE: &str = "ServiceUnavailable";
+pub(crate) const STATUS_GATEWAY_TIMEOUT: &str = "GatewayTimeout";
+
+pub(crate) const STATUS_INFORMATIONAL: &str = "Informational";
+pub(crate) const STATUS_SUCCESS: &str = "Success";
+pub(crate) const STATUS_REDIRECTION: &str = "Redirection";
+pub(crate) const STATUS_CLIENT_ERROR: &str = "ClientError";
+pub(crate) const STATUS_SERVER_ERROR: &str = "ServerError";
+pub(crate) const STATUS_PREFIX: &str = "Status";
 
 pub(crate) const STATUS_CODE_MAP: &[(&str, &str)] = &[
   ("200", STATUS_OK),

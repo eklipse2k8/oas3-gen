@@ -22,7 +22,7 @@ use crate::{
     },
     schema_graph::SchemaGraph,
   },
-  reserved::{to_rust_field_name, to_rust_type_name},
+  naming::identifiers::{to_rust_field_name, to_rust_type_name},
 };
 
 struct FieldProcessingContext<'a> {

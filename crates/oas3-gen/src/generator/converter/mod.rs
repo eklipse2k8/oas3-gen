@@ -4,7 +4,6 @@ mod enums;
 mod field_optionality;
 pub(crate) mod hashing;
 pub(crate) mod metadata;
-pub(crate) mod naming;
 pub(crate) mod operations;
 pub(crate) mod path_renderer;
 pub(crate) mod responses;
@@ -25,7 +24,7 @@ use super::{
   ast::{RustType, StructKind, TypeAliasDef, TypeRef},
   schema_graph::SchemaGraph,
 };
-use crate::reserved::to_rust_type_name;
+use crate::naming::identifiers::to_rust_type_name;
 
 pub(crate) type ConversionResult<T> = anyhow::Result<T>;
 

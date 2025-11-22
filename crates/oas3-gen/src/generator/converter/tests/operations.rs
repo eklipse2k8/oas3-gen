@@ -6,13 +6,15 @@ use oas3::spec::{
   SchemaTypeSet,
 };
 
-use super::common::{create_test_graph, default_config};
-use crate::generator::{
-  ast::{PathSegment, RustType, StructMethodKind},
-  converter::{
-    ConversionResult, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
-    operations::OperationConverter,
+use crate::{
+  generator::{
+    ast::{PathSegment, RustType, StructMethodKind},
+    converter::{
+      ConversionResult, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
+      operations::OperationConverter,
+    },
   },
+  tests::common::{create_test_graph, default_config},
 };
 
 #[test]

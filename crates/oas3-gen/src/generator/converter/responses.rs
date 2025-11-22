@@ -9,7 +9,6 @@ use super::{
   ConversionResult, SchemaConverter,
   cache::SharedSchemaCache,
   constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT, SUCCESS_RESPONSE_PREFIX},
-  naming,
   status_codes::status_code_to_variant_name,
 };
 use crate::{
@@ -17,7 +16,7 @@ use crate::{
     ast::{ResponseEnumDef, ResponseVariant, RustPrimitive, StructKind, StructMethod, StructMethodKind, TypeRef},
     schema_graph::SchemaGraph,
   },
-  reserved::to_rust_type_name,
+  naming::{identifiers::to_rust_type_name, inference as naming},
 };
 
 pub(crate) fn extract_response_type_name(spec: &Spec, operation: &Operation) -> Option<String> {
@@ -139,7 +138,7 @@ pub(crate) fn build_response_enum(
     name: base_name,
     docs: vec![format!("/// Response types for {}", operation.operation_id.as_ref()?)],
     variants,
-    request_type: request_type.map_or_else(String::new, std::clone::Clone::clone),
+    request_type: request_type.map_or_else(String::new, Clone::clone),
   })
 }
 

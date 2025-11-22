@@ -1,7 +1,7 @@
-mod dependency_graph;
 mod errors;
 mod stats;
 mod transforms;
+mod type_graph;
 mod type_usage;
 
 pub(crate) use errors::ErrorAnalyzer;

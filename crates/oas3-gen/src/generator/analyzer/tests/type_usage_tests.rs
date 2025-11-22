@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::generator::{
-  analyzer::{TypeUsage, build_type_usage_map, dependency_graph::DependencyGraph},
+  analyzer::{TypeUsage, build_type_usage_map, type_graph::TypeDependencyGraph},
   ast::{
     DeriveTrait, EnumDef, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive, RustType, StructDef, StructKind,
     TypeAliasDef, TypeRef, VariantContent, VariantDef,
@@ -708,7 +708,7 @@ fn test_response_enum_dependency_extraction() {
   });
 
   let types = vec![request_struct, response_a, response_b, response_enum];
-  let dep_graph = DependencyGraph::build(&types);
+  let dep_graph = TypeDependencyGraph::build(&types);
 
   let response_enum_deps = dep_graph.get_dependencies("MyResponseEnum");
   assert!(response_enum_deps.is_some(), "ResponseEnum should have dependencies");

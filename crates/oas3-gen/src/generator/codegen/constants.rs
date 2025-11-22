@@ -5,7 +5,7 @@ use quote::{format_ident, quote};
 
 use crate::{
   generator::ast::RustType,
-  reserved::{header_const_name, regex_const_name},
+  naming::identifiers::{header_const_name, regex_const_name},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

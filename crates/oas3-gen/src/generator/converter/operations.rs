@@ -11,7 +11,7 @@ use super::{
   constants::{
     BODY_FIELD_NAME, REQUEST_BODY_SUFFIX, REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_SUFFIX,
   },
-  metadata, naming, path_renderer, responses,
+  metadata, path_renderer, responses,
 };
 use crate::{
   generator::{
@@ -21,7 +21,10 @@ use crate::{
     },
     schema_graph::SchemaGraph,
   },
-  reserved::{to_rust_field_name, to_rust_type_name},
+  naming::{
+    identifiers::{to_rust_field_name, to_rust_type_name},
+    inference as naming,
+  },
 };
 
 type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);

@@ -4,11 +4,11 @@ use crate::generator::ast::{
   DiscriminatedEnumDef, EnumDef, ResponseEnumDef, RustPrimitive, RustType, TypeAliasDef, TypeRef, VariantContent,
 };
 
-pub(crate) struct DependencyGraph {
+pub(crate) struct TypeDependencyGraph {
   dependencies: BTreeMap<String, BTreeSet<String>>,
 }
 
-impl DependencyGraph {
+impl TypeDependencyGraph {
   pub(crate) fn build(types: &[RustType]) -> Self {
     let mut dependencies = BTreeMap::new();
 

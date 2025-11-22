@@ -2,13 +2,13 @@ use std::collections::{BTreeSet, HashSet};
 
 use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 
-use super::{cache::SharedSchemaCache, metadata, naming};
+use super::{cache::SharedSchemaCache, metadata};
 use crate::{
   generator::{
     ast::{EnumDef, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
     schema_graph::SchemaGraph,
   },
-  reserved::to_rust_type_name,
+  naming::{identifiers::to_rust_type_name, inference as naming},
 };
 
 /// Optimizes anyOf unions containing string enums and a freeform string.

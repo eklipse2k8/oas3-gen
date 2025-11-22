@@ -4,7 +4,7 @@ use http::Method;
 use indexmap::IndexMap;
 use oas3::Spec;
 
-use crate::reserved::to_rust_field_name;
+use crate::naming::identifiers::to_rust_field_name;
 
 #[derive(Debug, Clone)]
 pub struct OperationLocation {

@@ -3,16 +3,18 @@ use std::{collections::BTreeMap, f64::consts::PI};
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use super::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config};
-use crate::generator::{
-  ast::{DeriveTrait, EnumMethodKind, RustType, SerdeAttribute},
-  converter::{
-    ConversionResult, FieldOptionalityPolicy, SchemaConverter,
-    enums::{CollisionStrategy, EnumConverter, VariantNameNormalizer},
-    string_enum_optimizer::StringEnumOptimizer,
-    type_resolver::TypeResolver,
+use crate::{
+  generator::{
+    ast::{DeriveTrait, EnumMethodKind, RustType, SerdeAttribute},
+    converter::{
+      ConversionResult, FieldOptionalityPolicy, SchemaConverter,
+      enums::{CollisionStrategy, EnumConverter, VariantNameNormalizer},
+      string_enum_optimizer::StringEnumOptimizer,
+      type_resolver::TypeResolver,
+    },
+    schema_graph::SchemaGraph,
   },
-  schema_graph::SchemaGraph,
+  tests::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config},
 };
 
 #[test]
