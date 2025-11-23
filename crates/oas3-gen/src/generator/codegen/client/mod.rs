@@ -3,11 +3,9 @@ use std::collections::BTreeSet;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::{
-  generator::{
-    ast::{OperationInfo, ParameterLocation, RustType},
-    codegen::constants,
-  },
+use crate::generator::{
+  ast::{OperationInfo, ParameterLocation, RustType},
+  codegen::constants,
   naming::identifiers::to_rust_type_name,
 };
 

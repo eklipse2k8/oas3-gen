@@ -8,5 +8,6 @@ pub mod operation_registry;
 pub mod orchestrator;
 pub(crate) mod schema_graph;
 
+mod naming;
 #[cfg(test)]
 mod tests;

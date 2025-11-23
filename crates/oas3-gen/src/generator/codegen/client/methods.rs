@@ -3,10 +3,8 @@ use http::Method;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::{
-  generator::ast::{
-    FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef, TypeRef,
-  },
+use crate::generator::{
+  ast::{FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef, TypeRef},
   naming::identifiers::header_const_name,
 };
 

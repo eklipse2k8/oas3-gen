@@ -13,18 +13,16 @@ use super::{
   },
   metadata, path_renderer, responses,
 };
-use crate::{
-  generator::{
-    ast::{
-      DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
-      RustType, StructDef, StructKind, TypeAliasDef, TypeRef,
-    },
-    schema_graph::SchemaGraph,
+use crate::generator::{
+  ast::{
+    DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
+    RustType, StructDef, StructKind, TypeAliasDef, TypeRef,
   },
   naming::{
     identifiers::{to_rust_field_name, to_rust_type_name},
     inference as naming,
   },
+  schema_graph::SchemaGraph,
 };
 
 type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);

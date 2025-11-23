@@ -7,15 +7,13 @@ use super::{
   CodegenConfig, ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
   string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
 };
-use crate::{
-  generator::{
-    ast::{
-      EnumDef, EnumMethod, EnumMethodKind, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
-      default_enum_derives,
-    },
-    schema_graph::SchemaGraph,
+use crate::generator::{
+  ast::{
+    EnumDef, EnumMethod, EnumMethodKind, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+    default_enum_derives,
   },
   naming::{identifiers::to_rust_type_name, inference as naming},
+  schema_graph::SchemaGraph,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

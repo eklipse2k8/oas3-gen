@@ -9,15 +9,13 @@ use super::{
   cache::SharedSchemaCache,
   enums::{EnumConverter, UnionKind},
 };
-use crate::{
-  generator::{
-    ast::{RustPrimitive, RustType, TypeRef},
-    schema_graph::SchemaGraph,
-  },
+use crate::generator::{
+  ast::{RustPrimitive, RustType, TypeRef},
   naming::{
     identifiers::to_rust_type_name,
     inference::{extract_enum_values, is_relaxed_enum_pattern},
   },
+  schema_graph::SchemaGraph,
 };
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.

@@ -14,15 +14,13 @@ use super::{
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
 };
-use crate::{
-  generator::{
-    ast::{
-      DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, RustType, SerdeAttribute, StructDef, StructKind, TypeRef,
-      default_struct_derives,
-    },
-    schema_graph::SchemaGraph,
+use crate::generator::{
+  ast::{
+    DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, RustType, SerdeAttribute, StructDef, StructKind, TypeRef,
+    default_struct_derives,
   },
   naming::identifiers::{to_rust_field_name, to_rust_type_name},
+  schema_graph::SchemaGraph,
 };
 
 struct FieldProcessingContext<'a> {

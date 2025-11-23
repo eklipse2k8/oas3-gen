@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::{
-  generator::ast::RustType,
+use crate::generator::{
+  ast::RustType,
   naming::identifiers::{header_const_name, regex_const_name},
 };
 

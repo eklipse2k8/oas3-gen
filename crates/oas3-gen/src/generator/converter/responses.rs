@@ -11,12 +11,10 @@ use super::{
   constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT, SUCCESS_RESPONSE_PREFIX},
   status_codes::status_code_to_variant_name,
 };
-use crate::{
-  generator::{
-    ast::{ResponseEnumDef, ResponseVariant, RustPrimitive, StructKind, StructMethod, StructMethodKind, TypeRef},
-    schema_graph::SchemaGraph,
-  },
+use crate::generator::{
+  ast::{ResponseEnumDef, ResponseVariant, RustPrimitive, StructKind, StructMethod, StructMethodKind, TypeRef},
   naming::{identifiers::to_rust_type_name, inference as naming},
+  schema_graph::SchemaGraph,
 };
 
 pub(crate) fn extract_response_type_name(spec: &Spec, operation: &Operation) -> Option<String> {

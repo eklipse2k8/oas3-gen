@@ -1,4 +1,6 @@
-use crate::naming::identifiers::{header_const_name, regex_const_name, to_rust_field_name, to_rust_type_name};
+use crate::generator::naming::identifiers::{
+  header_const_name, regex_const_name, to_rust_field_name, to_rust_type_name,
+};
 
 #[test]
 fn test_field_names() {

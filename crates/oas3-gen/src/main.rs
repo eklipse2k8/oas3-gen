@@ -6,7 +6,6 @@ use clap::Parser;
 use crate::ui::{Cli, Colors, Commands, ListCommands, colors};
 
 mod generator;
-mod naming;
 mod ui;
 mod utils;
 

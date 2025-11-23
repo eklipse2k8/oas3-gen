@@ -24,7 +24,7 @@ use super::{
   ast::{RustType, StructKind, TypeAliasDef, TypeRef},
   schema_graph::SchemaGraph,
 };
-use crate::naming::identifiers::to_rust_type_name;
+use crate::generator::naming::identifiers::to_rust_type_name;
 
 pub(crate) type ConversionResult<T> = anyhow::Result<T>;
 

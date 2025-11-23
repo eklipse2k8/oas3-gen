@@ -1,6 +1,6 @@
 use oas3::spec::Response;
 
-use crate::naming::identifiers::to_rust_type_name;
+use crate::generator::naming::identifiers::to_rust_type_name;
 
 pub(crate) const STATUS_OK: &str = "Ok";
 pub(crate) const STATUS_CREATED: &str = "Created";

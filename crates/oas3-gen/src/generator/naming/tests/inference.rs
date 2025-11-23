@@ -4,9 +4,11 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::{
-  generator::converter::{constants::REQUEST_BODY_SUFFIX, type_resolver::TypeResolver},
-  naming::inference::{
-    InlineTypeScanner, derive_method_names, ensure_unique, infer_name_from_context, split_pascal_case,
+  generator::{
+    converter::{constants::REQUEST_BODY_SUFFIX, type_resolver::TypeResolver},
+    naming::inference::{
+      InlineTypeScanner, derive_method_names, ensure_unique, infer_name_from_context, split_pascal_case,
+    },
   },
   tests::common::{create_test_graph, default_config},
 };

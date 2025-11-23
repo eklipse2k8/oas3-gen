@@ -3,16 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
-use crate::{
-  generator::{
-    converter::{
-      constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
-      hashing,
-      type_resolver::TypeResolver,
-    },
-    schema_graph::SchemaGraph,
+use crate::generator::{
+  converter::{
+    constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
+    hashing,
+    type_resolver::TypeResolver,
   },
   naming::identifiers::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
+  schema_graph::SchemaGraph,
 };
 
 /// Scans the schema graph to discover and name inline types (enums, objects) ahead of time.

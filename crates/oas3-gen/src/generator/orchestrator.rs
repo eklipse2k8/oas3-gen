@@ -3,19 +3,17 @@ use std::collections::HashSet;
 use strum::Display;
 
 use super::converter::cache::SharedSchemaCache;
-use crate::{
-  generator::{
-    analyzer::{self, ErrorAnalyzer},
-    ast::{LintConfig, OperationInfo, RustType},
-    codegen::{self, Visibility, metadata::CodeMetadata},
-    converter::{
-      CodegenConfig, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
-      type_resolver::TypeResolver,
-    },
-    operation_registry::OperationRegistry,
-    schema_graph::SchemaGraph,
+use crate::generator::{
+  analyzer::{self, ErrorAnalyzer},
+  ast::{LintConfig, OperationInfo, RustType},
+  codegen::{self, Visibility, metadata::CodeMetadata},
+  converter::{
+    CodegenConfig, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
+    type_resolver::TypeResolver,
   },
   naming::inference::InlineTypeScanner,
+  operation_registry::OperationRegistry,
+  schema_graph::SchemaGraph,
 };
 
 const OAS3_GEN_VERSION: &str = env!("CARGO_PKG_VERSION");
