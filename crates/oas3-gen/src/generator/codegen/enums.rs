@@ -8,7 +8,10 @@ use super::{
   },
   coercion,
 };
-use crate::generator::ast::{DiscriminatedEnumDef, EnumDef, ResponseEnumDef, VariantContent, VariantDef};
+use crate::generator::ast::{
+  DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute, VariantContent,
+  VariantDef,
+};
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
   let name = format_ident!("{}", def.name);
@@ -17,13 +20,14 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
 
   let mut derives_list = def.derives.clone();
   if def.case_insensitive {
-    derives_list.retain(|d| d != "Deserialize");
+    derives_list.remove(&DeriveTrait::Deserialize);
   }
   let derives = generate_derives_from_slice(&derives_list);
 
   let outer_attrs = generate_outer_attrs(&def.outer_attrs);
   let serde_attrs = generate_enum_serde_attrs(def);
   let variants = generate_variants(&def.variants);
+  let methods = generate_enum_methods(def, visibility);
 
   let enum_def = quote! {
     #docs
@@ -33,6 +37,7 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
     #vis enum #name {
       #(#variants),*
     }
+    #methods
   };
 
   if def.case_insensitive {
@@ -43,6 +48,62 @@ pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStrea
     }
   } else {
     enum_def
+  }
+}
+
+fn generate_enum_methods(def: &EnumDef, visibility: Visibility) -> TokenStream {
+  if def.methods.is_empty() {
+    return quote! {};
+  }
+
+  let name = format_ident!("{}", def.name);
+  let vis = visibility.to_tokens();
+
+  let methods = def.methods.iter().map(|m| {
+    let method_name = format_ident!("{}", m.name);
+    let docs = generate_docs(&m.docs);
+
+    match &m.kind {
+      EnumMethodKind::SimpleConstructor {
+        variant_name,
+        wrapped_type,
+      } => {
+        let variant = format_ident!("{}", variant_name);
+        let type_name = coercion::parse_type_string(wrapped_type);
+        quote! {
+          #docs
+          #vis fn #method_name() -> Self {
+            Self::#variant(#type_name::default())
+          }
+        }
+      }
+      EnumMethodKind::ParameterizedConstructor {
+        variant_name,
+        wrapped_type,
+        param_name,
+        param_type,
+      } => {
+        let variant = format_ident!("{}", variant_name);
+        let type_name = coercion::parse_type_string(wrapped_type);
+        let param_ident = format_ident!("{}", param_name);
+        let param_ty = coercion::parse_type_string(param_type);
+        quote! {
+          #docs
+          #vis fn #method_name(#param_ident: #param_ty) -> Self {
+            Self::#variant(#type_name {
+              #param_ident,
+              ..Default::default()
+            })
+          }
+        }
+      }
+    }
+  });
+
+  quote! {
+    impl #name {
+      #(#methods)*
+    }
   }
 }
 
@@ -139,7 +200,7 @@ fn generate_enum_serde_attrs(def: &EnumDef) -> TokenStream {
   }
 
   for attr in &def.serde_attrs {
-    if let Ok(tokens) = attr.parse::<TokenStream>() {
+    if let Ok(tokens) = attr.to_string().parse::<TokenStream>() {
       attrs.push(tokens);
     }
   }
@@ -205,10 +266,8 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
       let variant_name = format_ident!("{}", v.name);
       let mut rename = v.name.clone();
       for attr in &v.serde_attrs {
-        if let Some(val) = attr.strip_prefix("rename = \"")
-          && let Some(end) = val.strip_suffix("\"")
-        {
-          rename = end.to_string();
+        if let SerdeAttribute::Rename(val) = attr {
+          rename.clone_from(val);
         }
       }
       let lower_val = rename.to_ascii_lowercase();
@@ -224,10 +283,8 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
     .map(|v| {
       let mut rename = v.name.clone();
       for attr in &v.serde_attrs {
-        if let Some(val) = attr.strip_prefix("rename = \"")
-          && let Some(end) = val.strip_suffix("\"")
-        {
-          rename = end.to_string();
+        if let SerdeAttribute::Rename(val) = attr {
+          rename.clone_from(val);
         }
       }
       rename

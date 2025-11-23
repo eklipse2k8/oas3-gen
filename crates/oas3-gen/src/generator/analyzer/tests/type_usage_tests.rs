@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::generator::{
-  analyzer::{TypeUsage, build_type_usage_map},
+  analyzer::{TypeUsage, build_type_usage_map, type_graph::TypeDependencyGraph},
   ast::{
-    EnumDef, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive, RustType, StructDef, StructKind,
+    DeriveTrait, EnumDef, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive, RustType, StructDef, StructKind,
     TypeAliasDef, TypeRef, VariantContent, VariantDef,
   },
 };
@@ -25,7 +25,7 @@ fn test_dependency_graph_simple_struct() {
       rust_type: TypeRef::new(RustPrimitive::Custom("Address".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -40,7 +40,7 @@ fn test_dependency_graph_simple_struct() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -66,7 +66,7 @@ fn test_propagation_request_to_nested() {
       rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -81,7 +81,7 @@ fn test_propagation_request_to_nested() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -105,7 +105,7 @@ fn test_propagation_response_to_nested() {
       rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -120,7 +120,7 @@ fn test_propagation_response_to_nested() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -144,7 +144,7 @@ fn test_propagation_bidirectional() {
       rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -159,7 +159,7 @@ fn test_propagation_bidirectional() {
       rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -174,7 +174,7 @@ fn test_propagation_bidirectional() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string(), "Clone".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -202,7 +202,7 @@ fn test_transitive_dependency_chain() {
       rust_type: TypeRef::new(RustPrimitive::Custom("B".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -217,7 +217,7 @@ fn test_transitive_dependency_chain() {
       rust_type: TypeRef::new(RustPrimitive::Custom("C".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -232,7 +232,7 @@ fn test_transitive_dependency_chain() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -260,10 +260,11 @@ fn test_enum_with_tuple_variant() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
+    methods: vec![],
   });
 
   let user_struct = RustType::Struct(StructDef {
@@ -274,7 +275,7 @@ fn test_enum_with_tuple_variant() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -304,7 +305,7 @@ fn test_type_alias_dependency() {
       rust_type: TypeRef::new(RustPrimitive::I64),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -328,7 +329,7 @@ fn test_no_propagation_without_operations() {
       rust_type: TypeRef::new(RustPrimitive::Custom("Address".to_string())),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -339,7 +340,7 @@ fn test_no_propagation_without_operations() {
     name: "Address".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -364,7 +365,7 @@ fn test_cyclic_dependency_handling() {
       rust_type: TypeRef::new(RustPrimitive::Custom("B".to_string())).with_boxed(),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -379,7 +380,7 @@ fn test_cyclic_dependency_handling() {
       rust_type: TypeRef::new(RustPrimitive::Custom("A".to_string())).with_boxed(),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -403,7 +404,7 @@ fn test_response_enum_does_not_propagate_to_request_type() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -418,7 +419,7 @@ fn test_response_enum_does_not_propagate_to_request_type() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec!["Debug".to_string()],
+    derives: BTreeSet::from([DeriveTrait::Debug]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -456,7 +457,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
     name: "ResponseA".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -467,7 +468,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
     name: "ResponseB".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -478,7 +479,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
     name: "RequestParams".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -508,10 +509,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
   });
 
   let types = vec![response_a, response_b, request_struct, response_enum];
-  let seed = seeds(&[
-    ("RequestParams", (true, false)),
-    ("MyResponseEnum", (false, true)),
-  ]);
+  let seed = seeds(&[("RequestParams", (true, false)), ("MyResponseEnum", (false, true))]);
   let usage_map = build_type_usage_map(seed, &types);
 
   assert_eq!(usage_map.get("RequestParams"), Some(&TypeUsage::RequestOnly));
@@ -530,7 +528,7 @@ fn test_request_body_chain_with_response_enum() {
       rust_type: TypeRef::new(RustPrimitive::Custom("ModelIds".to_string())),
       ..Default::default()
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -548,10 +546,11 @@ fn test_request_body_chain_with_response_enum() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
+    methods: vec![],
   });
 
   let request_body_alias = RustType::TypeAlias(TypeAliasDef {
@@ -568,7 +567,7 @@ fn test_request_body_chain_with_response_enum() {
       rust_type: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequestBody".to_string())),
       ..Default::default()
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -579,7 +578,7 @@ fn test_request_body_chain_with_response_enum() {
     name: "CreateChatCompletionResponse".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -594,7 +593,9 @@ fn test_request_body_chain_with_response_enum() {
       status_code: "200".to_string(),
       variant_name: "Ok".to_string(),
       description: None,
-      schema_type: Some(TypeRef::new(RustPrimitive::Custom("CreateChatCompletionResponse".to_string()))),
+      schema_type: Some(TypeRef::new(RustPrimitive::Custom(
+        "CreateChatCompletionResponse".to_string(),
+      ))),
       content_type: None,
     }],
   });
@@ -651,13 +652,11 @@ fn test_request_body_chain_with_response_enum() {
 
 #[test]
 fn test_response_enum_dependency_extraction() {
-  use crate::generator::analyzer::dependency_graph::DependencyGraph;
-
   let request_struct = RustType::Struct(StructDef {
     name: "RequestParams".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -668,7 +667,7 @@ fn test_response_enum_dependency_extraction() {
     name: "ResponseA".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -679,7 +678,7 @@ fn test_response_enum_dependency_extraction() {
     name: "ResponseB".to_string(),
     docs: vec![],
     fields: vec![],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -709,7 +708,7 @@ fn test_response_enum_dependency_extraction() {
   });
 
   let types = vec![request_struct, response_a, response_b, response_enum];
-  let dep_graph = DependencyGraph::build(&types);
+  let dep_graph = TypeDependencyGraph::build(&types);
 
   let response_enum_deps = dep_graph.get_dependencies("MyResponseEnum");
   assert!(response_enum_deps.is_some(), "ResponseEnum should have dependencies");
@@ -717,5 +716,8 @@ fn test_response_enum_dependency_extraction() {
   let deps = response_enum_deps.unwrap();
   assert!(deps.contains("ResponseA"), "Should depend on ResponseA variant");
   assert!(deps.contains("ResponseB"), "Should depend on ResponseB variant");
-  assert!(!deps.contains("RequestParams"), "Should NOT depend on request_type field - this was the bug!");
+  assert!(
+    !deps.contains("RequestParams"),
+    "Should NOT depend on request_type field - this was the bug!"
+  );
 }

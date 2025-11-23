@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
-use super::common::create_test_graph;
-use crate::generator::{
-  ast::RustType,
-  converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+use crate::{
+  generator::{
+    ast::RustType,
+    converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+  },
+  tests::common::{create_test_graph, default_config},
 };
 
 #[test]
@@ -40,7 +42,7 @@ fn test_inline_object_generation() -> ConversionResult<()> {
     .insert("config".to_string(), ObjectOrReference::Object(config_schema));
 
   let graph = create_test_graph(BTreeMap::from([("Parent".to_string(), parent_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("Parent", graph.get_schema("Parent").unwrap(), None)?;
 
   // Check for Parent struct
@@ -106,7 +108,7 @@ fn test_inline_object_without_type_field() -> ConversionResult<()> {
     .insert("metadata".to_string(), ObjectOrReference::Object(meta_schema));
 
   let graph = create_test_graph(BTreeMap::from([("Resource".to_string(), parent_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("Resource", graph.get_schema("Resource").unwrap(), None)?;
 
   // Check for Resource struct

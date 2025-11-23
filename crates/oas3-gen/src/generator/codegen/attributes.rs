@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::{FieldDef, ParameterLocation};
+use crate::generator::ast::{DeriveTrait, FieldDef, ParameterLocation, SerdeAttribute};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -50,11 +52,11 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
   generate_docs(&docs)
 }
 
-pub(crate) fn generate_derives_from_slice(derives: &[String]) -> TokenStream {
+pub(crate) fn generate_derives_from_slice(derives: &BTreeSet<DeriveTrait>) -> TokenStream {
   if derives.is_empty() {
     return quote! {};
   }
-  let derive_idents = derives.iter().filter_map(|d| d.parse::<TokenStream>().ok());
+  let derive_idents = derives.iter().filter_map(|d| d.to_string().parse::<TokenStream>().ok());
   quote! { #[derive(#(#derive_idents),*)] }
 }
 
@@ -80,14 +82,14 @@ pub(crate) fn generate_outer_attrs(attrs: &[String]) -> TokenStream {
   quote! { #(#attr_tokens)* }
 }
 
-pub(crate) fn generate_serde_attrs(attrs: &[String]) -> TokenStream {
+pub(crate) fn generate_serde_attrs(attrs: &[SerdeAttribute]) -> TokenStream {
   if attrs.is_empty() {
     return quote! {};
   }
   let attr_tokens: Vec<TokenStream> = attrs
     .iter()
     .filter_map(|attr| {
-      let tokens: TokenStream = attr.as_str().parse().ok()?;
+      let tokens: TokenStream = attr.to_string().parse().ok()?;
       Some(quote! { #[serde(#tokens)] })
     })
     .collect();

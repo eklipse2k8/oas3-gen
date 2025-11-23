@@ -40,6 +40,7 @@ regex.workspace = true
 serde_json.workspace = true
 serde_plain.workspace = true
 serde.workspace = true
+strum.workspace = true
 syn.workspace = true
 tokio.workspace = true
 

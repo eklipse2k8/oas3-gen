@@ -7,7 +7,7 @@ use crate::{
   generator::ast::{
     FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef, TypeRef,
   },
-  reserved::header_const_name,
+  naming::identifiers::header_const_name,
 };
 
 struct TypeInfo {
@@ -514,6 +514,8 @@ fn parse_type(type_name: &str) -> anyhow::Result<syn::Type> {
 
 #[cfg(test)]
 mod tests {
+  use std::collections::BTreeSet;
+
   use super::*;
   use crate::generator::ast::{FieldDef, RustPrimitive, RustType, StructDef, StructKind, TypeRef};
 
@@ -796,7 +798,7 @@ mod tests {
       name: "MultipartBody".to_string(),
       fields: vec![binary_field, text_field],
       docs: vec![],
-      derives: vec![],
+      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],
@@ -817,7 +819,7 @@ mod tests {
         ..Default::default()
       }],
       docs: vec![],
-      derives: vec![],
+      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],

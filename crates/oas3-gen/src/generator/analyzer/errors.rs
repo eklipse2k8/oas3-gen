@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::dependency_graph::DependencyGraph;
+use super::type_graph::TypeDependencyGraph;
 use crate::generator::ast::{OperationInfo, RustType};
 
 pub(crate) struct ErrorAnalyzer;
@@ -32,7 +32,7 @@ impl ErrorAnalyzer {
     rust_types: &[RustType],
     success_schemas: &HashSet<String>,
   ) -> HashSet<String> {
-    let dep_graph = DependencyGraph::build(rust_types);
+    let dep_graph = TypeDependencyGraph::build(rust_types);
 
     let mut result = roots.clone();
     let mut queue: Vec<String> = roots.iter().cloned().collect();

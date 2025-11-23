@@ -3,8 +3,13 @@ use std::collections::BTreeMap;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use super::common::create_test_graph;
-use crate::generator::converter::type_resolver::TypeResolver;
+use crate::{
+  generator::{
+    converter::type_resolver::{SchemaExt, TypeResolver},
+    schema_graph::SchemaGraph,
+  },
+  tests::common::{create_test_graph, default_config},
+};
 
 #[test]
 fn test_title_ignored_when_schema_type_present() {
@@ -21,7 +26,7 @@ fn test_title_ignored_when_schema_type_present() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     title: Some("Message".to_string()),
@@ -48,7 +53,7 @@ fn test_title_used_when_no_schema_type() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     title: Some("CustomType".to_string()),
@@ -146,7 +151,7 @@ fn test_anyof_with_nested_oneof_resolves_to_ref() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CacheControlEphemeral".to_string(), cache_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let inner_schema = ObjectSchema {
     one_of: vec![ObjectOrReference::Ref {
@@ -176,7 +181,7 @@ fn test_anyof_with_nested_oneof_resolves_to_ref() {
 #[test]
 fn test_anyof_with_no_resolvable_variants() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let null_schema1 = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
@@ -200,7 +205,7 @@ fn test_anyof_with_no_resolvable_variants() {
 #[test]
 fn test_array_with_items() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -220,7 +225,7 @@ fn test_array_with_items() {
 #[test]
 fn test_array_without_items_fallback() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -235,7 +240,7 @@ fn test_array_without_items_fallback() {
 #[test]
 fn test_array_with_boolean_schema_items() {
   let graph = create_test_graph(BTreeMap::new());
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -262,7 +267,7 @@ fn test_array_with_ref_items() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolver::new(&graph, false, false);
+  let resolver = TypeResolver::new(&graph, default_config());
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -276,4 +281,110 @@ fn test_array_with_ref_items() {
 
   let result = resolver.schema_to_type_ref(&schema).unwrap();
   assert_eq!(result.to_rust_type(), "Vec<CustomType>");
+}
+
+fn create_empty_test_graph() -> SchemaGraph {
+  let spec = oas3::Spec {
+    openapi: "3.0.0".to_string(),
+    info: oas3::spec::Info {
+      title: "Test".to_string(),
+      summary: None,
+      version: "1.0.0".to_string(),
+      description: None,
+      terms_of_service: None,
+      contact: None,
+      license: None,
+      extensions: BTreeMap::new(),
+    },
+    servers: Vec::new(),
+    paths: None,
+    webhooks: BTreeMap::new(),
+    components: None,
+    security: Vec::new(),
+    tags: Vec::new(),
+    external_docs: None,
+    extensions: BTreeMap::new(),
+  };
+  let (graph, _) = SchemaGraph::new(spec);
+  graph
+}
+
+#[test]
+fn test_schema_ext_is_primitive() {
+  let mut s = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    ..ObjectSchema::default()
+  };
+  assert!(s.is_primitive());
+
+  s.properties
+    .insert("foo".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+  assert!(!s.is_primitive());
+}
+
+#[test]
+fn test_resolve_simple_primitive() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+    format: Some("int32".to_string()),
+    ..ObjectSchema::default()
+  };
+
+  let result = resolver.schema_to_type_ref(&schema).unwrap();
+  assert_eq!(result.to_rust_type().clone(), "i32");
+}
+
+#[test]
+fn test_resolve_nullable_primitive() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Null])),
+    ..ObjectSchema::default()
+  };
+
+  let result = resolver.schema_to_type_ref(&schema).unwrap();
+  assert_eq!(result.to_rust_type().clone(), "Option<String>");
+}
+
+#[test]
+fn test_resolve_array() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let item_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    ..ObjectSchema::default()
+  };
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+      oas3::spec::ObjectOrReference::Object(item_schema),
+    )))),
+    ..ObjectSchema::default()
+  };
+
+  let result = resolver.schema_to_type_ref(&schema).unwrap();
+  assert_eq!(result.to_rust_type().clone(), "Vec<String>");
+}
+
+#[test]
+fn test_is_nullable_object() {
+  let mut s = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+    ..ObjectSchema::default()
+  };
+  assert!(s.is_nullable_object());
+
+  s.schema_type = Some(SchemaTypeSet::Multiple(vec![SchemaType::Object, SchemaType::Null]));
+  assert!(s.is_nullable_object());
+
+  s.properties
+    .insert("x".into(), ObjectOrReference::Object(ObjectSchema::default()));
+  assert!(!s.is_nullable_object());
 }

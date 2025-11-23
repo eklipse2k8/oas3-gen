@@ -1,6 +1,14 @@
+mod derives;
+pub mod lints;
+pub(super) mod serde_attrs;
 pub(super) mod types;
 
+use std::collections::BTreeSet;
+
+pub use derives::{DeriveTrait, default_enum_derives, default_struct_derives};
 use http::Method;
+pub use lints::LintConfig;
+pub use serde_attrs::SerdeAttribute;
 pub use types::{RustPrimitive, TypeRef};
 
 /// Discriminated enum variant mapping
@@ -126,8 +134,8 @@ pub struct StructDef {
   pub name: String,
   pub docs: Vec<String>,
   pub fields: Vec<FieldDef>,
-  pub derives: Vec<String>,
-  pub serde_attrs: Vec<String>,
+  pub derives: BTreeSet<DeriveTrait>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<String>,
   pub methods: Vec<StructMethod>,
   pub kind: StructKind,
@@ -170,21 +178,41 @@ pub enum PathSegment {
   Parameter { field: String },
 }
 
+/// Associated method definition for an enum
+#[derive(Debug, Clone)]
+pub struct EnumMethod {
+  pub name: String,
+  pub docs: Vec<String>,
+  pub kind: EnumMethodKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum EnumMethodKind {
+  SimpleConstructor {
+    variant_name: String,
+    wrapped_type: String,
+  },
+  ParameterizedConstructor {
+    variant_name: String,
+    wrapped_type: String,
+    param_name: String,
+    param_type: String,
+  },
+}
+
 /// Rust struct field definition
 #[derive(Debug, Clone, Default)]
 pub struct FieldDef {
   pub name: String,
   pub docs: Vec<String>,
   pub rust_type: TypeRef,
-  pub serde_attrs: Vec<String>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub extra_attrs: Vec<String>,
   pub validation_attrs: Vec<String>,
   pub regex_validation: Option<String>,
   pub default_value: Option<serde_json::Value>,
   pub example_value: Option<serde_json::Value>,
   pub parameter_location: Option<ParameterLocation>,
-  pub read_only: bool,
-  pub write_only: bool,
   pub deprecated: bool,
   pub multiple_of: Option<serde_json::Number>,
 }
@@ -196,10 +224,11 @@ pub struct EnumDef {
   pub docs: Vec<String>,
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
-  pub derives: Vec<String>,
-  pub serde_attrs: Vec<String>,
+  pub derives: BTreeSet<DeriveTrait>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<String>,
   pub case_insensitive: bool,
+  pub methods: Vec<EnumMethod>,
 }
 
 /// Rust enum variant definition
@@ -208,7 +237,7 @@ pub struct VariantDef {
   pub name: String,
   pub docs: Vec<String>,
   pub content: VariantContent,
-  pub serde_attrs: Vec<String>,
+  pub serde_attrs: Vec<SerdeAttribute>,
   pub deprecated: bool,
 }
 

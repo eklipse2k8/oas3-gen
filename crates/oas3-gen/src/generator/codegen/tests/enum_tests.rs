@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
+
 use crate::generator::{
-  ast::{EnumDef, VariantContent, VariantDef},
+  ast::{DeriveTrait, EnumDef, SerdeAttribute, VariantContent, VariantDef},
   codegen::{Visibility, enums::generate_enum},
 };
 
@@ -13,27 +15,28 @@ fn test_case_insensitive_enum_generation() {
         name: "Active".to_string(),
         docs: vec![],
         content: VariantContent::Unit,
-        serde_attrs: vec![r#"rename = "active""#.to_string()],
+        serde_attrs: vec![SerdeAttribute::Rename("active".to_string())],
         deprecated: false,
       },
       VariantDef {
         name: "InProgress".to_string(),
         docs: vec![],
         content: VariantContent::Unit,
-        serde_attrs: vec![r#"rename = "in-progress""#.to_string()],
+        serde_attrs: vec![SerdeAttribute::Rename("in-progress".to_string())],
         deprecated: false,
       },
     ],
     discriminator: None,
-    derives: vec![
-      "Debug".to_string(),
-      "Clone".to_string(),
-      "Serialize".to_string(),
-      "Deserialize".to_string(),
-    ],
+    derives: BTreeSet::from([
+      DeriveTrait::Debug,
+      DeriveTrait::Clone,
+      DeriveTrait::Serialize,
+      DeriveTrait::Deserialize,
+    ]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
+    methods: vec![],
   };
 
   let tokens = generate_enum(&def, Visibility::Public);

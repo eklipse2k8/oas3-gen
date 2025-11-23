@@ -101,6 +101,10 @@ pub enum Commands {
     )]
     enum_mode: EnumCaseMode,
 
+    /// Disable generation of ergonomic helper methods for enum variants
+    #[arg(long, default_value_t = false, display_order = 13, help_heading = "Code Generation")]
+    no_helpers: bool,
+
     /// Generate all schemas, even those unreferenced by selected operations
     #[arg(
       group = "filter",

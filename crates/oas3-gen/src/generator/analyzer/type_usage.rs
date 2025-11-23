@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use super::dependency_graph::DependencyGraph;
+use super::type_graph::TypeDependencyGraph;
 use crate::generator::ast::RustType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,7 +14,7 @@ pub(crate) fn build_type_usage_map(
   mut usage_map: BTreeMap<String, (bool, bool)>,
   types: &[RustType],
 ) -> BTreeMap<String, TypeUsage> {
-  let dep_graph = DependencyGraph::build(types);
+  let dep_graph = TypeDependencyGraph::build(types);
   propagate_usage_to_all_dependencies(&mut usage_map, &dep_graph, types);
 
   usage_map
@@ -32,7 +32,7 @@ pub(crate) fn build_type_usage_map(
 
 fn propagate_usage_to_all_dependencies(
   usage_map: &mut BTreeMap<String, (bool, bool)>,
-  dep_graph: &DependencyGraph,
+  dep_graph: &TypeDependencyGraph,
   types: &[RustType],
 ) {
   let mut worklist = VecDeque::new();

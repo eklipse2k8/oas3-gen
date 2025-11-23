@@ -4,9 +4,9 @@ use num_format::{CustomFormat, Grouping, ToFormattedString};
 use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 use regex::Regex;
 
-use crate::generator::{
-  ast::{RustPrimitive, TypeRef},
-  utils::doc_comment_lines,
+use crate::{
+  generator::ast::{RustPrimitive, TypeRef},
+  utils::text::doc_comment_lines,
 };
 
 static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
@@ -17,37 +17,37 @@ static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
     .expect("formatter failed to build.")
 });
 
+/// Metadata extracted from a schema for a struct field.
 #[derive(Clone, Default)]
 pub(crate) struct FieldMetadata {
   pub docs: Vec<String>,
   pub validation_attrs: Vec<String>,
   pub regex_validation: Option<String>,
   pub default_value: Option<serde_json::Value>,
-  pub read_only: bool,
-  pub write_only: bool,
   pub deprecated: bool,
   pub multiple_of: Option<serde_json::Number>,
 }
 
 impl FieldMetadata {
+  /// Extracts metadata from a schema and type reference.
   pub(crate) fn from_schema(prop_name: &str, is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Self {
     Self {
       docs: extract_docs(schema.description.as_ref()),
       validation_attrs: extract_validation_attrs(is_required, schema, type_ref),
       regex_validation: extract_validation_pattern(prop_name, schema).cloned(),
       default_value: extract_default_value(schema),
-      read_only: schema.read_only.unwrap_or(false),
-      write_only: schema.write_only.unwrap_or(false),
       deprecated: schema.deprecated.unwrap_or(false),
       multiple_of: schema.multiple_of.clone(),
     }
   }
 }
 
+/// Extracts documentation comments from a schema description.
 pub(crate) fn extract_docs(desc: Option<&String>) -> Vec<String> {
   desc.map_or_else(Vec::new, |d| doc_comment_lines(d))
 }
 
+/// Extracts the default value from a schema, checking `default` and `const` fields.
 pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
   schema
     .default
@@ -62,6 +62,7 @@ pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json:
     })
 }
 
+/// Extracts a validation regex pattern, filtering out known non-string formats.
 pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
   match (schema.schema_type.as_ref(), schema.pattern.as_ref()) {
     (Some(SchemaTypeSet::Single(SchemaType::String)), Some(pattern)) => {
@@ -91,6 +92,7 @@ pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s Object
   }
 }
 
+/// Filters regex validation based on the Rust type (e.g. skip for Dates).
 pub(crate) fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>) -> Option<String> {
   match &rust_type.base_type {
     RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid => None,
@@ -98,6 +100,7 @@ pub(crate) fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>
   }
 }
 
+/// Extracts validation attributes (e.g. `length`, `range`, `email`) for validator crate.
 pub(crate) fn extract_validation_attrs(is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Vec<String> {
   let mut attrs = Vec::new();
 

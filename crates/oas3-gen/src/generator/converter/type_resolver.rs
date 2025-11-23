@@ -1,37 +1,101 @@
 use std::collections::BTreeSet;
 
+use anyhow::{Context, Result};
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use super::{
-  ConversionResult,
+  CodegenConfig, ConversionResult,
   cache::SharedSchemaCache,
-  enums::{self, EnumConverter},
+  enums::{EnumConverter, UnionKind},
 };
 use crate::{
   generator::{
     ast::{RustPrimitive, RustType, TypeRef},
     schema_graph::SchemaGraph,
   },
-  reserved::to_rust_type_name,
+  naming::{
+    identifiers::to_rust_type_name,
+    inference::{extract_enum_values, is_relaxed_enum_pattern},
+  },
 };
 
+/// Extension methods for `ObjectSchema` to query its type properties conveniently.
+pub(crate) trait SchemaExt {
+  /// Returns true if the schema represents a primitive type (no properties, allOf, etc.).
+  fn is_primitive(&self) -> bool;
+  /// Returns true if the schema is explicitly null.
+  fn is_null(&self) -> bool;
+  /// Returns true if the schema is a nullable object (e.g. `type: [object, null]`).
+  fn is_nullable_object(&self) -> bool;
+  /// Returns true if the schema is an array.
+  fn is_array(&self) -> bool;
+  /// Returns the single `SchemaType` if only one is defined.
+  fn single_type(&self) -> Option<SchemaType>;
+}
+
+impl SchemaExt for ObjectSchema {
+  fn is_primitive(&self) -> bool {
+    self.properties.is_empty()
+      && self.one_of.is_empty()
+      && self.any_of.is_empty()
+      && self.all_of.is_empty()
+      && (self.schema_type.is_some() || self.enum_values.len() <= 1)
+  }
+
+  fn is_null(&self) -> bool {
+    self.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null))
+  }
+
+  fn is_nullable_object(&self) -> bool {
+    if self.is_null() {
+      return true;
+    }
+    if let Some(SchemaTypeSet::Multiple(types)) = &self.schema_type {
+      types.contains(&SchemaType::Null)
+        && types.contains(&SchemaType::Object)
+        && self.properties.is_empty()
+        && self.additional_properties.is_none()
+    } else {
+      false
+    }
+  }
+
+  fn is_array(&self) -> bool {
+    self.schema_type == Some(SchemaTypeSet::Single(SchemaType::Array))
+  }
+
+  fn single_type(&self) -> Option<SchemaType> {
+    match &self.schema_type {
+      Some(SchemaTypeSet::Single(t)) => Some(*t),
+      _ => None,
+    }
+  }
+}
+
+/// Resolves OpenAPI schemas into Rust Type References (`TypeRef`).
+///
+/// Handles primitives, references, inlining enums, and union types.
 #[derive(Clone)]
 pub(crate) struct TypeResolver<'a> {
   graph: &'a SchemaGraph,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
+  pub(crate) no_helpers: bool,
 }
 
 impl<'a> TypeResolver<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, preserve_case_variants: bool, case_insensitive_enums: bool) -> Self {
+  /// Creates a new `TypeResolver`.
+  pub(crate) fn new(graph: &'a SchemaGraph, config: CodegenConfig) -> Self {
     Self {
       graph,
-      preserve_case_variants,
-      case_insensitive_enums,
+      preserve_case_variants: config.preserve_case_variants,
+      case_insensitive_enums: config.case_insensitive_enums,
+      no_helpers: config.no_helpers,
     }
   }
 
+  /// Resolves a schema to a `TypeRef`, potentially wrapping it in `Option` or `Vec`.
   pub(crate) fn schema_to_type_ref(&self, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
     if let Some(type_ref) = self.try_resolve_by_title(schema) {
       return Ok(type_ref);
@@ -58,6 +122,7 @@ impl<'a> TypeResolver<'a> {
     Ok(TypeRef::new("serde_json::Value"))
   }
 
+  /// Resolves a property type, handling inline enums/unions by generating them.
   pub(crate) fn resolve_property_type_with_inlines(
     &self,
     parent_name: &str,
@@ -66,17 +131,8 @@ impl<'a> TypeResolver<'a> {
     prop_schema_ref: &ObjectOrReference<ObjectSchema>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
-    if let ObjectOrReference::Ref { ref_path, .. } = prop_schema_ref
-      && let Some(ref_name) = SchemaGraph::extract_ref_name(ref_path)
-    {
-      if Self::is_primitive_schema(prop_schema) {
-        return Ok((self.schema_to_type_ref(prop_schema)?, vec![]));
-      }
-      let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
-      if self.graph.is_cyclic(&ref_name) {
-        type_ref = type_ref.with_boxed();
-      }
-      return Ok((type_ref, vec![]));
+    if let ObjectOrReference::Ref { ref_path, .. } = prop_schema_ref {
+      return self.resolve_reference(ref_path, prop_schema);
     }
 
     if !prop_schema.enum_values.is_empty() {
@@ -91,12 +147,33 @@ impl<'a> TypeResolver<'a> {
     Ok((self.schema_to_type_ref(prop_schema)?, vec![]))
   }
 
+  /// Checks if a schema is a primitive type (no nesting).
   pub(crate) fn is_primitive_schema(schema: &ObjectSchema) -> bool {
-    schema.properties.is_empty()
-      && schema.one_of.is_empty()
-      && schema.any_of.is_empty()
-      && schema.all_of.is_empty()
-      && (schema.schema_type.is_some() || schema.enum_values.len() <= 1)
+    schema.is_primitive()
+  }
+
+  /// Resolves a schema reference to its corresponding Rust type.
+  ///
+  /// If the reference points to a primitive type, returns the primitive directly.
+  /// Otherwise, returns the named type (with Box wrapper if cyclic).
+  fn resolve_reference(
+    &self,
+    ref_path: &str,
+    resolved_schema: &ObjectSchema,
+  ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
+    let ref_name =
+      SchemaGraph::extract_ref_name(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
+
+    if resolved_schema.is_primitive() {
+      return Ok((self.schema_to_type_ref(resolved_schema)?, vec![]));
+    }
+
+    let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
+    if self.graph.is_cyclic(&ref_name) {
+      type_ref = type_ref.with_boxed();
+    }
+
+    Ok((type_ref, vec![]))
   }
 
   fn handle_inline_enum(
@@ -104,81 +181,72 @@ impl<'a> TypeResolver<'a> {
     parent_name: &str,
     prop_name: &str,
     prop_schema: &ObjectSchema,
-    mut cache: Option<&mut SharedSchemaCache>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionResult<(TypeRef, Vec<RustType>)> {
     if prop_schema.enum_values.len() == 1 {
       return Ok((self.schema_to_type_ref(prop_schema)?, vec![]));
     }
 
-    if let Some(ref cache) = cache
-      && let Some(existing_name) = cache.get_type_name(prop_schema)?
-    {
-      return Ok((TypeRef::new(existing_name), vec![]));
-    }
+    let enum_values: Vec<String> = prop_schema
+      .enum_values
+      .iter()
+      .filter_map(|v| v.as_str().map(String::from))
+      .collect::<BTreeSet<_>>()
+      .into_iter()
+      .collect();
 
-    // Check for value-based deduplication
     if let Some(ref cache) = cache {
-      let mut values: Vec<String> = prop_schema
-        .enum_values
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-      values.sort();
-
-      if let Some(name) = cache.get_enum_name(&values)
-        && cache.is_enum_generated(&values)
+      if let Some(existing_name) = cache.get_type_name(prop_schema)? {
+        return Ok((TypeRef::new(existing_name), vec![]));
+      }
+      if let Some(name) = cache.get_enum_name(&enum_values)
+        && cache.is_enum_generated(&enum_values)
       {
         return Ok((TypeRef::new(name), vec![]));
       }
-      // If not generated yet, we will generate it using this name.
     }
 
-    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
-    // Use value-based preferred name if available, otherwise schema-based
-    let enum_name = if let Some(ref mut c) = cache {
-      let mut values: Vec<String> = prop_schema
-        .enum_values
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-      values.sort();
-      c.get_enum_name(&values).unwrap_or_else(|| {
-        // Fallback to schema-based preferred name (or uniqueify base_name)
-        // Note: get_preferred_name uses schema hash.
-        // If we are here, we didn't find a precomputed enum name?
-        // But InlineTypeScanner should have found it.
-        // Unless it's a new schema not in the graph?
-        // Just use get_preferred_name as fallback.
-        c.get_preferred_name(prop_schema, &base_name)
-          .unwrap_or_else(|_| c.make_unique_name(&base_name))
-      })
-    } else {
-      base_name
-    };
+    let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
+    let enum_name = Self::determine_enum_name(prop_schema, &base_name, &enum_values, &cache)?;
 
-    let enum_converter = EnumConverter::new(
-      self.graph,
-      self.clone(),
-      self.preserve_case_variants,
-      self.case_insensitive_enums,
-    );
-    let inline_enum = enum_converter.convert_simple_enum(&enum_name, prop_schema);
+    let config = CodegenConfig {
+      preserve_case_variants: self.preserve_case_variants,
+      case_insensitive_enums: self.case_insensitive_enums,
+      no_helpers: self.no_helpers,
+    };
+    let converter = EnumConverter::new(self.graph, self.clone(), config);
+    let inline_enum = converter
+      .convert_simple_enum(&enum_name, prop_schema, None)
+      .expect("convert_simple_enum should return Some when cache is None");
 
     if let Some(c) = cache {
       let type_name = c.register_type(prop_schema, &enum_name, vec![], inline_enum.clone())?;
-      // Also register by values
-      let mut values: Vec<String> = prop_schema
-        .enum_values
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-      values.sort();
-      c.register_enum(values, type_name.clone());
-
-      return Ok((TypeRef::new(type_name), vec![]));
+      c.register_enum(enum_values, type_name.clone());
+      Ok((TypeRef::new(type_name), vec![]))
+    } else {
+      Ok((TypeRef::new(RustPrimitive::Custom(enum_name)), vec![inline_enum]))
     }
+  }
 
-    Ok((TypeRef::new(RustPrimitive::Custom(enum_name)), vec![inline_enum]))
+  /// Determines the final name for a generated enum.
+  ///
+  /// Checks the cache for existing enum names matching the values,
+  /// falls back to schema-based preferred names, or generates a unique name.
+  fn determine_enum_name(
+    schema: &ObjectSchema,
+    base_name: &str,
+    values: &[String],
+    cache: &Option<&mut SharedSchemaCache>,
+  ) -> Result<String> {
+    if let Some(c) = cache {
+      if let Some(name) = c.get_enum_name(values) {
+        return Ok(name);
+      }
+      c.get_preferred_name(schema, base_name)
+        .or_else(|_| Ok(c.make_unique_name(base_name)))
+    } else {
+      Ok(base_name.to_string())
+    }
   }
 
   fn convert_inline_union_type(
@@ -199,10 +267,17 @@ impl<'a> TypeResolver<'a> {
       return Ok((type_ref, vec![]));
     }
 
-    if let Some(ref cache) = cache
-      && let Some(existing_name) = cache.get_type_name(prop_schema)?
-    {
-      return Ok((TypeRef::new(existing_name), vec![]));
+    if let Some(ref cache) = cache {
+      if let Some(existing_name) = cache.get_type_name(prop_schema)? {
+        return Ok((TypeRef::new(existing_name), vec![]));
+      }
+
+      if !is_relaxed_enum_pattern(prop_schema)
+        && let Some(values) = extract_enum_values(prop_schema)
+        && let Some(name) = cache.get_enum_name(&values)
+      {
+        return Ok((TypeRef::new(name), vec![]));
+      }
     }
 
     if let Some(name) = self.find_matching_union_schema(variants) {
@@ -213,27 +288,28 @@ impl<'a> TypeResolver<'a> {
       return Ok((type_ref, vec![]));
     }
 
-    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
+    let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
     let enum_name = if let Some(ref mut c) = cache {
       c.get_preferred_name(prop_schema, &base_name)?
     } else {
       base_name
     };
 
-    let enum_converter = EnumConverter::new(
-      self.graph,
-      self.clone(),
-      self.preserve_case_variants,
-      self.case_insensitive_enums,
-    );
-    let kind = if uses_one_of {
-      enums::UnionKind::OneOf
-    } else {
-      enums::UnionKind::AnyOf
+    let config = CodegenConfig {
+      preserve_case_variants: self.preserve_case_variants,
+      case_insensitive_enums: self.case_insensitive_enums,
+      no_helpers: self.no_helpers,
     };
-    let mut enum_types = enum_converter.convert_union_enum(&enum_name, prop_schema, kind, cache.as_deref_mut())?;
+    let converter = EnumConverter::new(self.graph, self.clone(), config);
+    let kind = if uses_one_of {
+      UnionKind::OneOf
+    } else {
+      UnionKind::AnyOf
+    };
 
-    let type_name = enum_types
+    let generated_types = converter.convert_union_enum(&enum_name, prop_schema, kind, cache.as_deref_mut())?;
+
+    let main_type_name = generated_types
       .iter()
       .find_map(|t| match t {
         RustType::Enum(e) if e.name == to_rust_type_name(&enum_name) => Some(e.name.clone()),
@@ -242,21 +318,30 @@ impl<'a> TypeResolver<'a> {
       .unwrap_or_else(|| to_rust_type_name(&enum_name));
 
     if let Some(c) = cache {
-      let (main_type, nested_types) = if let Some(pos) = enum_types.iter().position(|t| match t {
-        RustType::Enum(e) => e.name == type_name,
-        _ => false,
-      }) {
-        let main = enum_types.remove(pos);
-        (main, enum_types)
-      } else {
-        let main = enum_types.pop().expect("generated empty types");
-        (main, enum_types)
-      };
-      let registered_name = c.register_type(prop_schema, &enum_name, nested_types, main_type)?;
-      return Ok((TypeRef::new(registered_name), vec![]));
+      let (main_type, nested) = Self::extract_main_type(generated_types, &main_type_name)?;
+      let registered_name = c.register_type(prop_schema, &enum_name, nested, main_type)?;
+      Ok((TypeRef::new(registered_name), vec![]))
+    } else {
+      Ok((TypeRef::new(main_type_name), generated_types))
     }
+  }
 
-    Ok((TypeRef::new(type_name), enum_types))
+  /// Extracts the main type from a list of generated types.
+  ///
+  /// Searches for a type matching the target name. If not found,
+  /// falls back to the last type in the list (which is typically the main enum).
+  fn extract_main_type(mut types: Vec<RustType>, target_name: &str) -> Result<(RustType, Vec<RustType>)> {
+    let pos = types
+      .iter()
+      .position(|t| match t {
+        RustType::Enum(e) => e.name == target_name,
+        _ => false,
+      })
+      .or_else(|| (!types.is_empty()).then_some(types.len() - 1))
+      .ok_or_else(|| anyhow::anyhow!("Failed to locate generated union type"))?;
+
+    let main = types.remove(pos);
+    Ok((main, types))
   }
 
   fn try_build_nullable_union(
@@ -267,24 +352,13 @@ impl<'a> TypeResolver<'a> {
       return Ok(None);
     }
 
-    let mut non_null_variant = None;
-    let mut has_null = false;
+    let (non_null, has_null) = self.partition_nullable_variants(variants)?;
 
-    for variant_ref in variants {
-      let resolved = variant_ref
-        .resolve(self.graph.spec())
-        .map_err(|e| anyhow::anyhow!("Schema resolution failed for nullable union variant: {e}"))?;
-      if is_null_or_nullable_object(&resolved) {
-        has_null = true;
-      } else {
-        non_null_variant = Some(variant_ref);
-      }
-    }
-
-    if !has_null || non_null_variant.is_none() {
+    if !has_null || non_null.is_none() {
       return Ok(None);
     }
-    let non_null_variant = non_null_variant.unwrap();
+
+    let non_null_variant = non_null.unwrap();
 
     if let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(non_null_variant) {
       let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
@@ -296,10 +370,12 @@ impl<'a> TypeResolver<'a> {
 
     let resolved = non_null_variant
       .resolve(self.graph.spec())
-      .map_err(|e| anyhow::anyhow!("Schema resolution failed for non-null union variant: {e}"))?;
+      .context("Resolving non-null union variant")?;
+
     Ok(Some(self.schema_to_type_ref(&resolved)?.with_option()))
   }
 
+  /// Tries to convert a union schema into a single `TypeRef` (e.g. `Option<T>`, `Vec<T>`).
   pub(crate) fn try_convert_union_to_type_ref(
     &self,
     variants: &[ObjectOrReference<ObjectSchema>],
@@ -318,10 +394,17 @@ impl<'a> TypeResolver<'a> {
       }
       let resolved = non_null_variant
         .resolve(self.graph.spec())
-        .map_err(|e| anyhow::anyhow!("Schema resolution failed for non-null variant: {e}"))?;
+        .context("Resolving non-null variant")?;
       return Ok(Some(self.schema_to_type_ref(&resolved)?.with_option()));
     }
 
+    self.find_best_union_fallback(variants)
+  }
+
+  fn find_best_union_fallback(
+    &self,
+    variants: &[ObjectOrReference<ObjectSchema>],
+  ) -> ConversionResult<Option<TypeRef>> {
     let mut fallback_type: Option<TypeRef> = None;
 
     for variant_ref in variants {
@@ -333,11 +416,11 @@ impl<'a> TypeResolver<'a> {
         continue;
       };
 
-      if is_null_schema(&resolved) {
+      if resolved.is_null() {
         continue;
       }
 
-      if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Array)) {
+      if resolved.is_array() {
         let item_type = self.convert_array_items(&resolved)?;
         let unique_items = resolved.unique_items.unwrap_or(false);
         return Ok(Some(
@@ -347,13 +430,12 @@ impl<'a> TypeResolver<'a> {
         ));
       }
 
-      if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::String)) && fallback_type.is_none() {
+      if resolved.single_type() == Some(SchemaType::String) && fallback_type.is_none() {
         fallback_type = Some(TypeRef::new(RustPrimitive::String));
         continue;
       }
 
-      if !resolved.one_of.is_empty()
-        && resolved.one_of.len() == 1
+      if resolved.one_of.len() == 1
         && let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(&resolved.one_of[0])
       {
         return Ok(Some(TypeRef::new(to_rust_type_name(&ref_name))));
@@ -370,39 +452,41 @@ impl<'a> TypeResolver<'a> {
   }
 
   fn map_single_primitive_type(&self, schema_type: SchemaType, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
-    Ok(match schema_type {
-      SchemaType::String => TypeRef::new(
-        schema
-          .format
-          .as_ref()
-          .and_then(|f| RustPrimitive::from_format(f))
-          .unwrap_or(RustPrimitive::String),
-      ),
-      SchemaType::Number => TypeRef::new(
-        schema
-          .format
-          .as_ref()
-          .and_then(|f| RustPrimitive::from_format(f))
-          .unwrap_or(RustPrimitive::F64),
-      ),
-      SchemaType::Integer => TypeRef::new(
-        schema
-          .format
-          .as_ref()
-          .and_then(|f| RustPrimitive::from_format(f))
-          .unwrap_or(RustPrimitive::I64),
-      ),
-      SchemaType::Boolean => TypeRef::new(RustPrimitive::Bool),
+    let primitive = match schema_type {
+      SchemaType::String => schema
+        .format
+        .as_ref()
+        .and_then(|f| RustPrimitive::from_format(f))
+        .unwrap_or(RustPrimitive::String),
+      SchemaType::Number => schema
+        .format
+        .as_ref()
+        .and_then(|f| RustPrimitive::from_format(f))
+        .unwrap_or(RustPrimitive::F64),
+      SchemaType::Integer => schema
+        .format
+        .as_ref()
+        .and_then(|f| RustPrimitive::from_format(f))
+        .unwrap_or(RustPrimitive::I64),
+      SchemaType::Boolean => RustPrimitive::Bool,
+      SchemaType::Object => RustPrimitive::Value,
+      SchemaType::Null => RustPrimitive::Unit,
       SchemaType::Array => {
         let item_type = self.convert_array_items(schema)?;
         let unique_items = schema.unique_items.unwrap_or(false);
-        TypeRef::new(item_type.to_rust_type())
-          .with_vec()
-          .with_unique_items(unique_items)
+        return Ok(
+          TypeRef::new(item_type.to_rust_type())
+            .with_vec()
+            .with_unique_items(unique_items),
+        );
       }
-      SchemaType::Object => TypeRef::new(RustPrimitive::Value),
-      SchemaType::Null => TypeRef::new(RustPrimitive::Unit).with_option(),
-    })
+    };
+
+    let mut type_ref = TypeRef::new(primitive);
+    if schema_type == SchemaType::Null {
+      type_ref = type_ref.with_option();
+    }
+    Ok(type_ref)
   }
 
   fn convert_nullable_primitive(&self, types: &[SchemaType], schema: &ObjectSchema) -> ConversionResult<TypeRef> {
@@ -418,8 +502,8 @@ impl<'a> TypeResolver<'a> {
 
   fn convert_array_items(&self, schema: &ObjectSchema) -> ConversionResult<TypeRef> {
     let Some(items_ref) = schema.items.as_ref().and_then(|b| match b.as_ref() {
-      oas3::spec::Schema::Object(o) => Some(o),
-      oas3::spec::Schema::Boolean(_) => None,
+      Schema::Object(o) => Some(o),
+      Schema::Boolean(_) => None,
     }) else {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };
@@ -428,9 +512,8 @@ impl<'a> TypeResolver<'a> {
       return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
     }
 
-    let items_schema = items_ref
-      .resolve(self.graph.spec())
-      .map_err(|e| anyhow::anyhow!("Schema resolution failed for array items: {e}"))?;
+    let items_schema = items_ref.resolve(self.graph.spec()).context("Resolving array items")?;
+
     self.schema_to_type_ref(&items_schema)
   }
 
@@ -458,11 +541,36 @@ impl<'a> TypeResolver<'a> {
       .iter()
       .find(|&&name| {
         self.graph.get_schema(name).is_some_and(|s| {
-          (!s.one_of.is_empty() && extract_all_variant_refs(&s.one_of) == variant_refs)
-            || (!s.any_of.is_empty() && extract_all_variant_refs(&s.any_of) == variant_refs)
+          let one_of_match = !s.one_of.is_empty() && extract_all_variant_refs(&s.one_of) == variant_refs;
+          let any_of_match = !s.any_of.is_empty() && extract_all_variant_refs(&s.any_of) == variant_refs;
+          one_of_match || any_of_match
         })
       })
-      .map(|s| (*s).clone())
+      .map(|&s| s.clone())
+  }
+
+  /// Partitions union variants into nullable and non-nullable types.
+  ///
+  /// Returns the first non-null variant found and whether any null variant exists.
+  fn partition_nullable_variants<'b>(
+    &self,
+    variants: &'b [ObjectOrReference<ObjectSchema>],
+  ) -> Result<(Option<&'b ObjectOrReference<ObjectSchema>>, bool)> {
+    let mut non_null = None;
+    let mut has_null = false;
+
+    for variant in variants {
+      let resolved = variant
+        .resolve(self.graph.spec())
+        .context("Resolving variant for null check")?;
+
+      if resolved.is_nullable_object() {
+        has_null = true;
+      } else {
+        non_null = Some(variant);
+      }
+    }
+    Ok((non_null, has_null))
   }
 
   fn find_non_null_variant<'b>(
@@ -474,31 +582,15 @@ impl<'a> TypeResolver<'a> {
     }
     let has_null = variants
       .iter()
-      .any(|v| v.resolve(self.graph.spec()).ok().is_some_and(|s| is_null_schema(&s)));
+      .any(|v| v.resolve(self.graph.spec()).ok().is_some_and(|s| s.is_null()));
+
     if !has_null {
       return None;
     }
+
     variants
       .iter()
-      .find(|v| v.resolve(self.graph.spec()).ok().is_some_and(|s| !is_null_schema(&s)))
-  }
-}
-
-fn is_null_schema(schema: &ObjectSchema) -> bool {
-  schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null))
-}
-
-fn is_null_or_nullable_object(schema: &ObjectSchema) -> bool {
-  if is_null_schema(schema) {
-    return true;
-  }
-  if let Some(SchemaTypeSet::Multiple(types)) = &schema.schema_type {
-    types.contains(&SchemaType::Null)
-      && types.contains(&SchemaType::Object)
-      && schema.properties.is_empty()
-      && schema.additional_properties.is_none()
-  } else {
-    false
+      .find(|v| v.resolve(self.graph.spec()).ok().is_some_and(|s| !s.is_null()))
   }
 }
 

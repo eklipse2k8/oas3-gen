@@ -8,7 +8,7 @@ use crate::{
     ast::{OperationInfo, ParameterLocation, RustType},
     codegen::constants,
   },
-  reserved::to_rust_type_name,
+  naming::identifiers::to_rust_type_name,
 };
 
 mod methods;

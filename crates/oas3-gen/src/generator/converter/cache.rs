@@ -1,52 +1,55 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Context;
-use blake3::Hasher;
-use json_canon::to_string as to_canonical_json;
 use oas3::spec::ObjectSchema;
-use serde_json::Value;
 
-use super::{ConversionResult, REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX};
+use super::{ConversionResult, hashing};
 use crate::{
   generator::ast::RustType,
-  reserved::{sanitize, to_rust_type_name},
+  naming::{identifiers::to_rust_type_name, inference as naming},
 };
 
+/// Cache for sharing generated Rust types across the schema graph.
+///
+/// Prevents duplication of structs and enums by hashing schemas and storing mapping.
 pub(crate) struct SharedSchemaCache {
   schema_to_type: BTreeMap<String, String>,
-  enum_to_type: HashMap<Vec<String>, String>,
+  enum_to_type: BTreeMap<Vec<String>, String>,
   generated_types: Vec<RustType>,
   used_names: BTreeSet<String>,
   precomputed_names: BTreeMap<String, String>,
-  precomputed_enum_names: HashMap<Vec<String>, String>,
+  precomputed_enum_names: BTreeMap<Vec<String>, String>,
 }
 
 impl SharedSchemaCache {
+  /// Creates a new empty cache.
   pub(crate) fn new() -> Self {
     Self {
       schema_to_type: BTreeMap::new(),
-      enum_to_type: HashMap::new(),
+      enum_to_type: BTreeMap::new(),
       generated_types: Vec::new(),
       used_names: BTreeSet::new(),
       precomputed_names: BTreeMap::new(),
-      precomputed_enum_names: HashMap::new(),
+      precomputed_enum_names: BTreeMap::new(),
     }
   }
 
+  /// Sets precomputed names for schemas, useful for deterministic naming or overrides.
   pub(crate) fn set_precomputed_names(
     &mut self,
     names: BTreeMap<String, String>,
-    enum_names: HashMap<Vec<String>, String>,
+    enum_names: BTreeMap<Vec<String>, String>,
   ) {
     self.precomputed_names = names;
     self.precomputed_enum_names = enum_names;
   }
 
+  /// Retrieves a cached type name for a schema, if it exists.
   pub(crate) fn get_type_name(&self, schema: &ObjectSchema) -> ConversionResult<Option<String>> {
-    let schema_hash = Self::hash_schema(schema)?;
+    let schema_hash = hashing::hash_schema(schema)?;
     Ok(self.schema_to_type.get(&schema_hash).cloned())
   }
 
+  /// Retrieves a cached name for an enum based on its values.
   pub(crate) fn get_enum_name(&self, values: &[String]) -> Option<String> {
     if let Some(name) = self.enum_to_type.get(values) {
       Some(name.clone())
@@ -55,26 +58,33 @@ impl SharedSchemaCache {
     }
   }
 
+  /// Checks if an enum with the given values has already been generated.
   pub(crate) fn is_enum_generated(&self, values: &[String]) -> bool {
     self.enum_to_type.contains_key(values)
   }
 
+  /// Registers an enum name for a set of values.
   pub(crate) fn register_enum(&mut self, values: Vec<String>, name: String) {
     self.enum_to_type.insert(values, name);
   }
 
+  /// Marks a type name as used to prevent collisions.
   pub(crate) fn mark_name_used(&mut self, name: String) {
     self.used_names.insert(name);
   }
 
+  /// Gets a preferred name for a schema, using precomputed names or generating a unique one.
   pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> ConversionResult<String> {
-    let schema_hash = Self::hash_schema(schema)?;
+    let schema_hash = hashing::hash_schema(schema)?;
     if let Some(name) = self.precomputed_names.get(&schema_hash) {
       return Ok(name.clone());
     }
     Ok(self.make_unique_name(base_name))
   }
 
+  /// Registers a new type definition in the cache.
+  ///
+  /// Handles name collisions, enum reuse, and stores the generated Rust type.
   pub(crate) fn register_type(
     &mut self,
     schema: &ObjectSchema,
@@ -82,31 +92,19 @@ impl SharedSchemaCache {
     mut nested_types: Vec<RustType>,
     type_def: RustType,
   ) -> ConversionResult<String> {
-    let schema_hash = Self::hash_schema(schema)?;
+    let schema_hash = hashing::hash_schema(schema)?;
+
+    if !naming::is_relaxed_enum_pattern(schema)
+      && let Some(values) = naming::extract_enum_values(schema)
+      && let Some(existing_name) = self.enum_to_type.get(&values)
+    {
+      self.schema_to_type.insert(schema_hash, existing_name.clone());
+      return Ok(existing_name.clone());
+    }
+
     let mut name = base_name.to_string();
 
     if self.used_names.contains(&name) {
-      // Check if it's an enum reuse case
-      let mut reused = false;
-      if !schema.enum_values.is_empty() {
-        let mut values: Vec<String> = schema
-          .enum_values
-          .iter()
-          .filter_map(|v| v.as_str().map(String::from))
-          .collect();
-        values.sort();
-        if let Some(existing_name) = self.enum_to_type.get(&values)
-          && existing_name == &name
-        {
-          reused = true;
-        }
-      }
-
-      if reused {
-        self.schema_to_type.insert(schema_hash, name.clone());
-        return Ok(name);
-      }
-
       if let Some(existing_name) = self.schema_to_type.get(&schema_hash) {
         return Ok(existing_name.clone());
       }
@@ -117,13 +115,7 @@ impl SharedSchemaCache {
     self.schema_to_type.insert(schema_hash, name.clone());
 
     // If this is an enum, register its values too (if not already)
-    if !schema.enum_values.is_empty() {
-      let mut values: Vec<String> = schema
-        .enum_values
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-      values.sort();
+    if let Some(values) = naming::extract_enum_values(schema) {
       self.enum_to_type.insert(values, name.clone());
     }
 
@@ -141,294 +133,14 @@ impl SharedSchemaCache {
     Ok(name)
   }
 
-  pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
-    let is_request = context == REQUEST_BODY_SUFFIX;
-
-    let with_suffix = |base: &str| {
-      let sanitized_base = sanitize(base);
-      if is_request {
-        format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
-      } else {
-        format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
-      }
-    };
-
-    if schema.properties.len() == 1
-      && let Some((prop_name, _)) = schema.properties.iter().next()
-    {
-      let singular = cruet::to_singular(prop_name);
-      let sanitized_singular = sanitize(&singular);
-      return if is_request {
-        sanitized_singular
-      } else {
-        format!("{sanitized_singular}{RESPONSE_SUFFIX}")
-      };
-    }
-
-    let segments: Vec<_> = path
-      .split('/')
-      .filter(|s| !s.is_empty() && !s.starts_with('{'))
-      .collect();
-
-    segments
-      .last()
-      .map(|&s| with_suffix(&cruet::to_singular(s)))
-      .or_else(|| segments.first().map(|&s| with_suffix(s)))
-      .unwrap_or_else(|| {
-        if is_request {
-          REQUEST_BODY_SUFFIX.to_string()
-        } else {
-          format!("{RESPONSE_PREFIX}{context}")
-        }
-      })
-  }
-
+  /// Generates a unique name based on a base name, ensuring no collisions with used names.
   pub(crate) fn make_unique_name(&self, base: &str) -> String {
     let rust_name = to_rust_type_name(base);
-    if !self.used_names.contains(&rust_name) {
-      return rust_name;
-    }
-
-    let mut suffix = 2;
-    loop {
-      let candidate_base = format!("{base}{suffix}");
-      let candidate_rust = to_rust_type_name(&candidate_base);
-      if !self.used_names.contains(&candidate_rust) {
-        return candidate_rust;
-      }
-      suffix += 1;
-    }
+    naming::ensure_unique(&rust_name, &self.used_names)
   }
 
-  pub(crate) fn hash_schema(schema: &ObjectSchema) -> ConversionResult<String> {
-    let mut value = serde_json::to_value(schema).context("Failed to serialize schema for hashing")?;
-
-    Self::normalize_schema_semantics(&mut value);
-
-    let canonical_json = to_canonical_json(&value).context("Failed to create canonical JSON string")?;
-
-    let mut hasher = Hasher::new();
-    hasher.update(canonical_json.as_bytes());
-    let hash = hasher.finalize();
-
-    Ok(hash.to_hex().to_string())
-  }
-
-  /// Normalizes a JSON schema `Value` in-place to ensure that
-  /// semantically identical schemas produce the same hash.
-  ///
-  /// This function specifically handles fields where order does not
-  /// matter, like the `required` and `type` arrays.
-  fn normalize_schema_semantics(value: &mut Value) {
-    match value {
-      Value::Object(map) => {
-        if let Some(Value::Array(arr)) = map.get_mut("required") {
-          Self::sort_string_array_in_place(arr);
-        }
-
-        if let Some(Value::Array(arr)) = map.get_mut("type") {
-          Self::sort_string_array_in_place(arr);
-        }
-
-        if let Some(Value::Array(arr)) = map.get_mut("enum") {
-          Self::sort_string_array_in_place(arr);
-        }
-
-        for value in map.values_mut() {
-          Self::normalize_schema_semantics(value);
-        }
-      }
-      Value::Array(arr) => {
-        for item in arr {
-          Self::normalize_schema_semantics(item);
-        }
-      }
-      _ => {}
-    }
-  }
-
-  /// Helper to sort a `Vec<Value>` in-place, if and only if
-  /// it contains entirely string elements.
-  fn sort_string_array_in_place(arr: &mut Vec<Value>) {
-    let mut strings: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
-
-    if strings.len() == arr.len() {
-      strings.sort_unstable();
-      *arr = strings.into_iter().map(Value::String).collect();
-    }
-  }
-
+  /// Consumes the cache and returns all generated Rust types.
   pub(crate) fn into_types(self) -> Vec<RustType> {
     self.generated_types
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use oas3::spec::ObjectSchema;
-
-  use super::*;
-
-  #[test]
-  fn test_hash_schema_deterministic() {
-    let schema = ObjectSchema {
-      required: vec!["name".to_string(), "id".to_string()],
-      ..Default::default()
-    };
-
-    let hash1 = SharedSchemaCache::hash_schema(&schema).expect("hash should succeed");
-    let hash2 = SharedSchemaCache::hash_schema(&schema).expect("hash should succeed");
-    let hash3 = SharedSchemaCache::hash_schema(&schema).expect("hash should succeed");
-
-    assert_eq!(hash1, hash2, "Hash should be deterministic across calls");
-    assert_eq!(hash2, hash3, "Hash should be deterministic across calls");
-    assert!(!hash1.is_empty(), "Hash should not be empty");
-  }
-
-  #[test]
-  fn test_hash_schema_different_for_different_schemas() {
-    let schema1 = ObjectSchema {
-      required: vec!["id".to_string()],
-      ..Default::default()
-    };
-
-    let schema2 = ObjectSchema {
-      required: vec!["name".to_string()],
-      ..Default::default()
-    };
-
-    let hash1 = SharedSchemaCache::hash_schema(&schema1).expect("hash should succeed");
-    let hash2 = SharedSchemaCache::hash_schema(&schema2).expect("hash should succeed");
-
-    assert_ne!(hash1, hash2, "Different schemas should produce different hashes");
-  }
-
-  #[test]
-  fn test_hash_schema_order_independent() {
-    let schema1 = ObjectSchema {
-      required: vec!["id".to_string(), "name".to_string()],
-      ..Default::default()
-    };
-
-    let schema2 = ObjectSchema {
-      required: vec!["name".to_string(), "id".to_string()],
-      ..Default::default()
-    };
-
-    let hash1 = SharedSchemaCache::hash_schema(&schema1).expect("hash should succeed");
-    let hash2 = SharedSchemaCache::hash_schema(&schema2).expect("hash should succeed");
-
-    assert_eq!(
-      hash1, hash2,
-      "Required array order should not affect hash due to RFC 8785 canonicalization"
-    );
-  }
-
-  #[test]
-  fn test_infer_name_from_context_sanitizes_hyphens() {
-    let schema = ObjectSchema::default();
-
-    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/check-access-by-email", "200");
-
-    assert_eq!(result, "check_access_by_email200Response");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_infer_name_from_context_sanitizes_multiple_separators() {
-    let schema = ObjectSchema::default();
-
-    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
-
-    assert_eq!(result, "foo_bar_baz_qux201Response");
-    assert!(
-      !result.contains('-') && !result.contains('.'),
-      "Result should not contain hyphens or dots: {result}"
-    );
-  }
-
-  #[test]
-  fn test_infer_name_from_context_with_request_body() {
-    let schema = ObjectSchema::default();
-
-    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
-
-    assert_eq!(result, "create_userRequestBody");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_infer_name_from_context_single_property_response() {
-    let mut schema = ObjectSchema::default();
-    schema.properties.insert(
-      "user".to_string(),
-      oas3::spec::ObjectOrReference::Object(ObjectSchema::default()),
-    );
-
-    let result = SharedSchemaCache::infer_name_from_context(&schema, "/api/check-access", "200");
-
-    assert_eq!(result, "userResponse");
-    assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-  }
-
-  #[test]
-  fn test_make_unique_name_returns_pascal_case() {
-    let cache = SharedSchemaCache::new();
-
-    let result = cache.make_unique_name("check_access_by_email200Response");
-
-    assert_eq!(result, "CheckAccessByEmail200Response");
-    assert!(
-      result.chars().next().unwrap().is_uppercase(),
-      "Result should start with uppercase: {result}"
-    );
-  }
-
-  #[test]
-  fn test_make_unique_name_handles_collisions() {
-    let mut cache = SharedSchemaCache::new();
-    cache.used_names.insert("UserResponse".to_string());
-
-    let result = cache.make_unique_name("user_response");
-
-    assert_eq!(result, "UserResponse2");
-    assert!(
-      result.chars().next().unwrap().is_uppercase(),
-      "Result should start with uppercase: {result}"
-    );
-  }
-
-  #[test]
-  fn test_make_unique_name_handles_multiple_collisions() {
-    let mut cache = SharedSchemaCache::new();
-    cache.used_names.insert("UserResponse".to_string());
-    cache.used_names.insert("UserResponse2".to_string());
-    cache.used_names.insert("UserResponse3".to_string());
-
-    let result = cache.make_unique_name("user_response");
-
-    assert_eq!(result, "UserResponse4");
-  }
-
-  #[test]
-  fn test_make_unique_name_with_leading_digit() {
-    let cache = SharedSchemaCache::new();
-
-    let result = cache.make_unique_name("200_response");
-
-    assert_eq!(result, "T200Response");
-    assert!(
-      result.starts_with('T'),
-      "Result should be prefixed with T when starting with digit: {result}"
-    );
-  }
-
-  #[test]
-  fn test_make_unique_name_preserves_mixed_case() {
-    let cache = SharedSchemaCache::new();
-
-    let result = cache.make_unique_name("XMLHttpRequest");
-
-    assert_eq!(result, "XMLHttpRequest");
   }
 }

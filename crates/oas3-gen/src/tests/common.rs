@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use oas3::spec::{ObjectSchema, Spec};
 use serde_json::json;
 
-use crate::generator::schema_graph::SchemaGraph;
+use crate::generator::{converter::CodegenConfig, schema_graph::SchemaGraph};
 
 pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec {
   let mut spec_json = json!({
@@ -27,4 +27,28 @@ pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Sche
   graph.build_dependencies();
   graph.detect_cycles();
   graph
+}
+
+pub(crate) fn default_config() -> CodegenConfig {
+  CodegenConfig {
+    preserve_case_variants: false,
+    case_insensitive_enums: false,
+    no_helpers: false,
+  }
+}
+
+pub(crate) fn config_with_preserve_case() -> CodegenConfig {
+  CodegenConfig {
+    preserve_case_variants: true,
+    case_insensitive_enums: false,
+    no_helpers: false,
+  }
+}
+
+pub(crate) fn config_with_no_helpers() -> CodegenConfig {
+  CodegenConfig {
+    preserve_case_variants: false,
+    case_insensitive_enums: false,
+    no_helpers: true,
+  }
 }

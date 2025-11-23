@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use crate::generator::{
   ast::{EnumDef, FieldDef, RustPrimitive, RustType, StructDef, StructKind, TypeRef, VariantContent, VariantDef},
@@ -15,7 +15,7 @@ fn test_generate_error_struct_impl_with_error_field() {
       rust_type: TypeRef::new(RustPrimitive::Custom("InnerError".to_string())),
       ..Default::default()
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -41,7 +41,7 @@ fn test_generate_error_struct_impl_with_message_field() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -67,7 +67,7 @@ fn test_generate_error_struct_impl_without_error_fields() {
       rust_type: TypeRef::new(RustPrimitive::I32),
       ..Default::default()
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -90,11 +90,12 @@ fn test_generate_error_enum_impl_with_tuple_variants() {
       serde_attrs: vec![],
       deprecated: false,
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     discriminator: None,
     case_insensitive: false,
+    methods: vec![],
   };
 
   let result = error_impls::generate_error_impl(&RustType::Enum(enum_def));
@@ -118,11 +119,12 @@ fn test_generate_error_enum_impl_with_unit_variants() {
       serde_attrs: vec![],
       deprecated: false,
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     discriminator: None,
     case_insensitive: false,
+    methods: vec![],
   };
 
   let result = error_impls::generate_error_impl(&RustType::Enum(enum_def));
@@ -139,7 +141,7 @@ fn test_try_generate_error_impl_for_error_struct() {
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -166,11 +168,12 @@ fn test_try_generate_error_impl_for_error_enum() {
       serde_attrs: vec![],
       deprecated: false,
     }],
-    derives: vec![],
+    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     discriminator: None,
     case_insensitive: false,
+    methods: vec![],
   };
 
   let rust_type = RustType::Enum(enum_def);

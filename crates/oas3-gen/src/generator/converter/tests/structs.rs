@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 
 use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
-use super::common::create_test_graph;
-use crate::generator::{
-  ast::RustType,
-  converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+use crate::{
+  generator::{
+    ast::{RustType, SerdeAttribute},
+    converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+  },
+  tests::common::{create_test_graph, default_config},
 };
 
 #[test]
@@ -38,7 +40,7 @@ fn test_discriminated_base_struct_renamed() -> ConversionResult<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
 
   let struct_def = result
@@ -50,7 +52,7 @@ fn test_discriminated_base_struct_renamed() -> ConversionResult<()> {
     .expect("Backing struct should be present");
 
   assert_eq!(struct_def.name, "EntityBase");
-  assert!(struct_def.serde_attrs.iter().any(|a| a == "deny_unknown_fields"));
+  assert!(struct_def.serde_attrs.contains(&SerdeAttribute::DenyUnknownFields));
   Ok(())
 }
 
@@ -86,7 +88,7 @@ fn test_discriminator_with_enum_remains_visible() -> ConversionResult<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("Message", graph.get_schema("Message").unwrap(), None)?;
 
   let struct_def = result
@@ -108,7 +110,10 @@ fn test_discriminator_with_enum_remains_visible() -> ConversionResult<()> {
     "role field should not be hidden"
   );
   assert!(
-    !role_field.serde_attrs.iter().any(|a| a.contains("skip")),
+    !role_field
+      .serde_attrs
+      .iter()
+      .any(|a| matches!(a, SerdeAttribute::Skip | SerdeAttribute::SkipDeserializing)),
     "role field should not be skipped"
   );
   assert!(
@@ -149,7 +154,7 @@ fn test_discriminator_without_enum_is_hidden() -> ConversionResult<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), false, false);
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
 
   let struct_def = result
@@ -171,7 +176,7 @@ fn test_discriminator_without_enum_is_hidden() -> ConversionResult<()> {
     "odata_type field should be hidden"
   );
   assert!(
-    odata_field.serde_attrs.iter().any(|a| a == "skip"),
+    odata_field.serde_attrs.contains(&SerdeAttribute::Skip),
     "odata_type field should be skipped"
   );
 

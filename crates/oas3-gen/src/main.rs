@@ -6,8 +6,12 @@ use clap::Parser;
 use crate::ui::{Cli, Colors, Commands, ListCommands, colors};
 
 mod generator;
-mod reserved;
+mod naming;
 mod ui;
+mod utils;
+
+#[cfg(test)]
+mod tests;
 
 #[macro_use(cfg_if)]
 extern crate cfg_if;
@@ -28,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
       visibility,
       odata_support,
       enum_mode,
+      no_helpers,
       verbose,
       quiet,
       all_schemas,
@@ -44,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         all_schemas,
         odata_support,
         &enum_mode,
+        no_helpers,
         only,
         exclude,
       );

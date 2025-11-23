@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::generator::ast::{
-  DiscriminatedEnumDef, EnumDef, ResponseEnumDef, RustPrimitive, RustType, TypeAliasDef, VariantContent,
+  DiscriminatedEnumDef, EnumDef, ResponseEnumDef, RustPrimitive, RustType, TypeAliasDef, TypeRef, VariantContent,
 };
 
-pub(crate) struct DependencyGraph {
+pub(crate) struct TypeDependencyGraph {
   dependencies: BTreeMap<String, BTreeSet<String>>,
 }
 
-impl DependencyGraph {
+impl TypeDependencyGraph {
   pub(crate) fn build(types: &[RustType]) -> Self {
     let mut dependencies = BTreeMap::new();
 
@@ -77,7 +77,7 @@ impl DependencyGraph {
     }
   }
 
-  fn extract_from_type_ref(type_ref: &crate::generator::ast::TypeRef, deps: &mut BTreeSet<String>) {
+  fn extract_from_type_ref(type_ref: &TypeRef, deps: &mut BTreeSet<String>) {
     if let RustPrimitive::Custom(name) = &type_ref.base_type {
       deps.insert(name.clone());
     }
