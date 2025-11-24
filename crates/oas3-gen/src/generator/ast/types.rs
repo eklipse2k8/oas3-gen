@@ -12,6 +12,10 @@ static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
     .expect("formatter failed to build.")
 });
 
+fn format_number_with_underscores<T: ToFormattedString>(value: &T) -> String {
+  value.to_formatted_string(&*UNDERSCORE_FORMAT)
+}
+
 /// Type reference with wrapper support (Box, Option, Vec)
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -415,14 +419,14 @@ fn render_integer(primitive: &RustPrimitive, value: i64) -> String {
   match primitive {
     RustPrimitive::I8 if value <= i64::from(i8::MIN) => "i8::MIN".to_string(),
     RustPrimitive::I8 if value >= i64::from(i8::MAX) => "i8::MAX".to_string(),
-    RustPrimitive::I8 => format!("{}i8", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
+    RustPrimitive::I8 => format!("{}i8", format_number_with_underscores(&value)),
     RustPrimitive::I16 if value <= i64::from(i16::MIN) => "i16::MIN".to_string(),
     RustPrimitive::I16 if value >= i64::from(i16::MAX) => "i16::MAX".to_string(),
-    RustPrimitive::I16 => format!("{}i16", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
+    RustPrimitive::I16 => format!("{}i16", format_number_with_underscores(&value)),
     RustPrimitive::I32 if value <= i64::from(i32::MIN) => "i32::MIN".to_string(),
     RustPrimitive::I32 if value >= i64::from(i32::MAX) => "i32::MAX".to_string(),
-    RustPrimitive::I32 => format!("{}i32", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::I64 => format!("{}i64", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
+    RustPrimitive::I32 => format!("{}i32", format_number_with_underscores(&value)),
+    RustPrimitive::I64 => format!("{}i64", format_number_with_underscores(&value)),
     _ => value.to_string(),
   }
 }
@@ -430,12 +434,12 @@ fn render_integer(primitive: &RustPrimitive, value: i64) -> String {
 fn render_unsigned_integer(primitive: &RustPrimitive, value: u64) -> String {
   match primitive {
     RustPrimitive::U8 if value >= u64::from(u8::MAX) => "u8::MAX".to_string(),
-    RustPrimitive::U8 => format!("{}u8", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
+    RustPrimitive::U8 => format!("{}u8", format_number_with_underscores(&value)),
     RustPrimitive::U16 if value >= u64::from(u16::MAX) => "u16::MAX".to_string(),
-    RustPrimitive::U16 => format!("{}u16", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
+    RustPrimitive::U16 => format!("{}u16", format_number_with_underscores(&value)),
     RustPrimitive::U32 if value >= u64::from(u32::MAX) => "u32::MAX".to_string(),
-    RustPrimitive::U32 => format!("{}u32", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
-    RustPrimitive::U64 => format!("{}u64", value.to_formatted_string(&*UNDERSCORE_FORMAT)),
+    RustPrimitive::U32 => format!("{}u32", format_number_with_underscores(&value)),
+    RustPrimitive::U64 => format!("{}u64", format_number_with_underscores(&value)),
     _ => value.to_string(),
   }
 }

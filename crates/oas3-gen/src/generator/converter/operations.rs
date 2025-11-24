@@ -16,7 +16,7 @@ use super::{
 use crate::generator::{
   ast::{
     DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
-    RustType, StructDef, StructKind, TypeAliasDef, TypeRef,
+    RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
   },
   naming::{
     identifiers::{to_rust_field_name, to_rust_type_name},
@@ -25,7 +25,7 @@ use crate::generator::{
   schema_graph::SchemaGraph,
 };
 
-type ParameterValidation = (TypeRef, Vec<String>, Option<String>, Option<Value>);
+type ParameterValidation = (TypeRef, Vec<ValidationAttribute>, Option<Value>);
 
 struct RequestBodyInfo {
   body_type: Option<TypeRef>,
@@ -448,8 +448,7 @@ impl<'a> OperationConverter<'a> {
     param: &Parameter,
     warnings: &mut Vec<String>,
   ) -> ConversionResult<(FieldDef, OperationParameter)> {
-    let (rust_type, validation_attrs, regex_validation, default_value) =
-      self.extract_parameter_type_and_validation(param, warnings)?;
+    let (rust_type, validation_attrs, default_value) = self.extract_parameter_type_and_validation(param, warnings)?;
 
     let is_required = param.required.unwrap_or(false);
     let docs = metadata::extract_docs(param.description.as_ref());
@@ -474,7 +473,6 @@ impl<'a> OperationConverter<'a> {
       docs,
       rust_type: final_rust_type.clone(),
       validation_attrs,
-      regex_validation,
       default_value,
       example_value: param.example.clone(),
       parameter_location: Some(location),
@@ -502,17 +500,19 @@ impl<'a> OperationConverter<'a> {
         "Parameter '{}' has no schema, defaulting to String.",
         param.name
       ));
-      return Ok((TypeRef::new("String"), vec![], None, None));
+      return Ok((TypeRef::new("String"), vec![], None));
     };
 
     let schema = schema_ref.resolve(self.spec)?;
     let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
     let is_required = param.required.unwrap_or(false);
-    let validation = metadata::extract_validation_attrs(is_required, &schema, &type_ref);
-    let regex = metadata::extract_validation_pattern(&param.name, &schema).cloned();
+    let mut validation = metadata::extract_validation_attrs(is_required, &schema, &type_ref);
+    if let Some(regex_attr) = ValidationAttribute::extract_regex_if_applicable(&param.name, &schema, &type_ref) {
+      validation.push(regex_attr);
+    }
     let default = metadata::extract_default_value(&schema);
 
-    Ok((type_ref, validation, regex, default))
+    Ok((type_ref, validation, default))
   }
 
   fn map_parameter(param: &Parameter, field: &FieldDef, mappings: &mut ParameterMappings) {

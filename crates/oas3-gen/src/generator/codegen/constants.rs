@@ -4,44 +4,9 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use crate::generator::{
-  ast::RustType,
+  ast::{RegexKey, RustType, ValidationAttribute},
   naming::identifiers::{header_const_name, regex_const_name},
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RegexKey {
-  owner_type: String,
-  owner_variant: Option<String>,
-  field: String,
-}
-
-impl RegexKey {
-  pub fn for_struct(type_name: &str, field_name: &str) -> Self {
-    Self {
-      owner_type: type_name.to_string(),
-      owner_variant: None,
-      field: field_name.to_string(),
-    }
-  }
-
-  #[allow(dead_code)]
-  pub fn for_variant(type_name: &str, variant_name: &str, field_name: &str) -> Self {
-    Self {
-      owner_type: type_name.to_string(),
-      owner_variant: Some(variant_name.to_string()),
-      field: field_name.to_string(),
-    }
-  }
-
-  pub fn parts(&self) -> Vec<&str> {
-    let mut parts = vec![self.owner_type.as_str()];
-    if let Some(variant) = &self.owner_variant {
-      parts.push(variant.as_str());
-    }
-    parts.push(self.field.as_str());
-    parts
-  }
-}
 
 pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTreeMap<RegexKey, String>) {
   let mut const_defs: BTreeMap<String, String> = BTreeMap::new();
@@ -52,7 +17,15 @@ pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTr
     match rust_type {
       RustType::Struct(def) => {
         for field in &def.fields {
-          let Some(pattern) = &field.regex_validation else {
+          let pattern = field.validation_attrs.iter().find_map(|attr| {
+            if let ValidationAttribute::Regex(p) = attr {
+              Some(p)
+            } else {
+              None
+            }
+          });
+
+          let Some(pattern) = pattern else {
             continue;
           };
           let key = RegexKey::for_struct(&def.name, &field.name);

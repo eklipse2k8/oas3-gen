@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
-  ast::{DeriveTrait, EnumDef, FieldDef, RustType, StructDef, StructKind, TypeRef, VariantContent, VariantDef},
+  ast::{
+    DeriveTrait, EnumDef, FieldDef, RustType, StructDef, StructKind, TypeRef, ValidationAttribute, VariantContent,
+    VariantDef,
+  },
 };
-
-// --- Helpers ---
 
 fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
   StructDef {
@@ -18,8 +19,13 @@ fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
       } else {
         TypeRef::new("String")
       },
-      validation_attrs: vec!["length(min = 1)".to_string()],
-      regex_validation: Some("regex".to_string()),
+      validation_attrs: vec![
+        ValidationAttribute::Length {
+          min: Some(1),
+          max: None,
+        },
+        ValidationAttribute::Regex("regex".to_string()),
+      ],
       ..Default::default()
     }],
     derives: BTreeSet::new(),
@@ -108,7 +114,6 @@ fn test_schema_response_only() {
 
   // Check Validation (Should be stripped)
   assert!(def.fields[0].validation_attrs.is_empty());
-  assert!(def.fields[0].regex_validation.is_none());
 }
 
 #[test]

@@ -35,6 +35,7 @@ pub struct GenerationStats {
   pub types_generated: usize,
   pub structs_generated: usize,
   pub enums_generated: usize,
+  pub enums_with_helpers_generated: usize,
   pub type_aliases_generated: usize,
   pub operations_converted: usize,
   pub cycles_detected: usize,
@@ -207,12 +208,19 @@ impl Orchestrator {
 
     let mut structs_generated = 0;
     let mut enums_generated = 0;
+    let mut enums_with_helpers_generated = 0;
     let mut type_aliases_generated = 0;
 
     for rust_type in &rust_types {
       match rust_type {
         RustType::Struct(_) => structs_generated += 1,
-        RustType::Enum(_) | RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => enums_generated += 1,
+        RustType::Enum(def) => {
+          enums_generated += 1;
+          if !def.methods.is_empty() {
+            enums_with_helpers_generated += 1;
+          }
+        }
+        RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => enums_generated += 1,
         RustType::TypeAlias(_) => type_aliases_generated += 1,
       }
     }
@@ -223,6 +231,7 @@ impl Orchestrator {
       types_generated,
       structs_generated,
       enums_generated,
+      enums_with_helpers_generated,
       type_aliases_generated,
       operations_converted: operations_info.len(),
       cycles_detected: cycle_details.len(),

@@ -151,6 +151,52 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - Types/schemas/dependencies → BTreeMap (alphabetical is better)
 - Internal bookkeeping → HashMap only if order truly doesn't matter
 
+### Preferred Code Patterns
+
+**Reference Counting and Cloning:**
+
+- Use `Arc<T>` for shared ownership of expensive-to-clone types (e.g., `Arc<ObjectSchema>`)
+- `Arc::clone()` is O(1) and only increments a reference count
+- Prefer `Arc` over deep cloning when passing schemas or large data structures through the conversion pipeline
+- This reduces memory usage and improves performance
+
+**Vec Initialization:**
+
+- Prefer `vec![]` over `Vec::new()` for consistency
+- Both are idiomatic, but `vec![]` is more concise
+
+**Builder Pattern:**
+
+- Use builder pattern (via `derive_builder`) for structs with multiple optional fields or complex construction
+- Direct struct initialization is acceptable for simple parameter objects with few required fields
+- Builders improve readability when constructing objects with many fields
+- Example: `FieldDefBuilder::default().name("foo").rust_type(ty).build()?`
+
+**Avoid Tuples:**
+
+- NEVER use tuples as function return types when returning multiple values
+- Use named structs instead for clarity and maintainability
+- Good: `fn convert() -> Generated<RustType>` with `struct Generated<T> { item: T, inline_types: Vec<RustType> }`
+- Bad: `fn convert() -> (RustType, Vec<RustType>)`
+- Tuples lack semantic meaning and make code harder to understand
+- Exception: Standard library patterns like `Iterator::enumerate()` where tuple meaning is well-established
+
+**String Enums:**
+
+- Use `strum` (with `#[derive(EnumString, Display)]`) for simple known string enums
+- Provides automatic string parsing and serialization without boilerplate
+- Good for enums with fixed string representations like HTTP methods, status categories, etc.
+- Example: `#[derive(EnumString, Display)] enum HttpMethod { Get, Post, Put, Delete }`
+
+**String Interning:**
+
+- Use `string_cache::DefaultAtom` when strings act as symbols (identifiers, type names, field names)
+- `DefaultAtom` provides O(1) equality comparison and reduced memory usage through interning
+- Wrap strings in `DefaultAtom` using `.into()`: `let name: DefaultAtom = "MyStruct".into()`
+- Particularly effective for repeated identifiers in code generation where the same names appear frequently
+- Example: Type names, field names, operation IDs, schema references
+- Don't use for arbitrary user content or large strings that won't be reused
+
 ### Design Principles and Code Quality
 
 **SOLID Principles:**
@@ -170,9 +216,13 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 **Code Placement Strategy:**
 
 1. Review pipeline architecture: Parse/Analyze → Convert (AST) → Generate (Rust source)
-2. Identify stage: analyzer/, converter/, or codegen/
-3. Locate module: enums, structs, operations, type_resolver, attributes, etc.
-4. Check utilities for cross-cutting concerns: reserved.rs, utils.rs
+2. Identify stage:
+   - analyzer/ for schema analysis, validation, and type usage tracking
+   - naming/ for identifier generation and type name inference
+   - converter/ for OpenAPI to AST transformation
+   - codegen/ for AST to Rust source code generation
+3. Locate module: enums, structs, operations, type_resolver, attributes, cache, etc.
+4. Check utilities for cross-cutting concerns: utils/text.rs, naming/identifiers.rs
 
 **Test Coverage:**
 
@@ -332,29 +382,57 @@ crates/
 ├── oas3-gen/                      # CLI tool (binary)
 │   └── src/
 │       ├── main.rs                # Entry point
-│       ├── reserved.rs            # Rust keyword handling and identifier sanitization
 │       ├── ui/                    # CLI interface
 │       │   ├── cli.rs             # Argument definitions
 │       │   ├── colors.rs          # Terminal theming
 │       │   └── commands/          # Command handlers (generate, list)
+│       ├── utils/                 # Cross-cutting utilities
+│       │   └── text.rs            # Text processing utilities
 │       └── generator/             # Core generation pipeline
 │           ├── orchestrator.rs    # Main pipeline coordinator
+│           ├── operation_registry.rs # Operation collection management
 │           ├── schema_graph.rs    # Dependency tracking and cycle detection
-│           ├── utils.rs           # Doc comment utilities
-│           ├── analyzer/          # Schema validation
-│           ├── ast/               # AST type definitions (RustType, StructDef, EnumDef, etc.)
-│           ├── converter/         # OpenAPI → AST
+│           ├── analyzer/          # Schema analysis and validation
+│           │   ├── errors.rs      # Error type definitions
+│           │   ├── stats.rs       # Schema statistics
+│           │   ├── transforms.rs  # Schema transformations
+│           │   ├── type_graph.rs  # Type dependency graph
+│           │   └── type_usage.rs  # Type usage tracking
+│           ├── naming/            # Identifier naming and conversion
+│           │   ├── identifiers.rs # Rust identifier generation
+│           │   └── inference.rs   # Type name inference
+│           ├── ast/               # AST type definitions
+│           │   ├── types.rs       # Core AST types (RustType, StructDef, EnumDef, etc.)
+│           │   ├── derives.rs     # Derive macro selection
+│           │   ├── lints.rs       # Clippy lint attributes
+│           │   ├── serde_attrs.rs # Serde attribute builders
+│           │   └── validation_attrs.rs # Validation attribute builders
+│           ├── converter/         # OpenAPI → AST conversion
+│           │   ├── cache.rs       # Schema conversion caching
+│           │   ├── constants.rs   # Conversion constants
 │           │   ├── enums.rs       # oneOf/anyOf/allOf conversion
-│           │   ├── structs.rs     # Object schema conversion
+│           │   ├── field_optionality.rs # Field requirement logic
+│           │   ├── hashing.rs     # Schema fingerprinting
+│           │   ├── metadata.rs    # Schema metadata extraction
 │           │   ├── operations.rs  # Request/response type generation
-│           │   └── type_resolver.rs # Type mapping and nullable patterns
-│           └── codegen/           # AST → Rust source
-│               ├── attributes.rs  # Serde and validation attributes
-│               ├── constants.rs   # Regex and header constants
-│               ├── derives.rs     # Derive attribute selection
+│           │   ├── path_renderer.rs # URL path template rendering
+│           │   ├── responses.rs   # Response type generation
+│           │   ├── status_codes.rs # HTTP status code handling
+│           │   ├── string_enum_optimizer.rs # String enum optimization
+│           │   ├── structs.rs     # Object schema conversion
+│           │   ├── type_resolver.rs # Type mapping and nullable patterns
+│           │   └── type_usage_recorder.rs # Type usage recording
+│           └── codegen/           # AST → Rust source generation
+│               ├── attributes.rs  # Attribute generation
+│               ├── coercion.rs    # Type coercion logic
+│               ├── constants.rs   # Constant generation
 │               ├── enums.rs       # Enum code generation
+│               ├── error_impls.rs # Error trait implementations
+│               ├── metadata.rs    # Metadata comment generation
 │               ├── structs.rs     # Struct code generation
-│               └── error_impls.rs # Error trait implementations
+│               ├── type_aliases.rs # Type alias generation
+│               └── client/        # HTTP client generation
+│                   └── methods.rs # Client method generation
 └── oas3-gen-support/              # Runtime library (rlib + cdylib)
     └── src/
         └── lib.rs                 # discriminated_enum! macro and utilities
@@ -372,7 +450,9 @@ crates/
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator
 - [schema_graph.rs](crates/oas3-gen/src/generator/schema_graph.rs): Dependency and cycle management
 - [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
-- [reserved.rs](crates/oas3-gen/src/reserved.rs): Identifier sanitization and keyword handling
+- [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
+- [cache.rs](crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching for performance
+- [type_usage.rs](crates/oas3-gen/src/generator/analyzer/type_usage.rs): Type usage tracking and analysis
 
 ### Key Dependencies
 
@@ -383,44 +463,55 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **oas3** (0.20): OpenAPI 3.1 spec parser
 - **quote** (1.0): Token stream generation
 - **proc-macro2** (1.0): Token manipulation
-- **syn** (2.0): Rust syntax parser
+- **syn** (2.0): Rust syntax parser with full parsing support
 - **prettyplease** (0.2): Code formatter
 
 **CLI & Terminal:**
 
-- **clap** (4.5): Argument parsing with derives
-- **tokio** (1.48): Async runtime for file I/O
-- **anyhow** (1.0): Error handling
+- **clap** (4.5): Argument parsing with derives and color support
+- **tokio** (1.48): Async runtime for multi-threaded I/O
+- **anyhow** (1.0): Error handling with context
+- **thiserror** (2.0): Custom error type derivation
 - **crossterm** (0.29): Terminal interaction
-- **comfy-table** (7.2): Table formatting
-- **num-format** (0.4): Number formatting
+- **comfy-table** (7.2): Table formatting for CLI output
+- **num-format** (0.4): Number formatting for statistics
 - **cfg-if** (1.0): Conditional compilation
 
 **Serialization & Data:**
 
 - **serde** (1.0): Serialization framework
 - **serde_json** (1.0): JSON with order preservation
-- **serde_with** (3.15): Enhanced serde utilities
+- **serde_with** (3.15): Enhanced serde utilities and chrono support
 - **serde_plain** (1.0): Plain text serialization
+- **serde_path_to_error** (0.1): Detailed deserialization error paths
+- **json-canon** (0.1): Canonical JSON representation
 
 **Validation & Patterns:**
 
-- **validator** (0.20): Validation attributes
-- **regex** (1.12): Pattern matching
+- **validator** (0.20): Validation attributes and derive macros
+- **regex** (1.12): Pattern matching and validation
 
 **Type System Support:**
 
-- **better_default** (1.0): `#[default(value)]` attribute
-- **chrono** (0.4.42+): Date/time types
-- **uuid** (1.18): UUID type support
-- **indexmap** (2.12): Ordered maps
-- **http** (1.3): HTTP primitives
+- **better_default** (1.0): Enhanced `#[default(value)]` attribute
+- **chrono** (>=0.4.42): Date/time types with serde support
+- **uuid** (1.18): UUID type support with serde
+- **indexmap** (2.12): Insertion-ordered maps with serde
+- **http** (1.3): HTTP primitives and status codes
 
 **String & Identifier Processing:**
 
-- **inflections** (1.1): Case conversions
-- **any_ascii** (0.3): ASCII transliteration
-- **percent-encoding** (2.3): URL encoding
+- **inflections** (1.1): Case conversions (snake_case, camelCase, etc.)
+- **cruet** (0.15): Advanced string inflection and pluralization
+- **any_ascii** (0.3): ASCII transliteration for identifiers
+- **percent-encoding** (2.3): URL encoding for path templates
+- **string_cache** (0.9): Interned strings for performance
+- **strum** (0.27): String enum derivations
+
+**Performance & Caching:**
+
+- **blake3** (1.8): Fast cryptographic hashing with NEON support
+- **fmmap** (0.4): Memory-mapped file I/O with tokio support
 
 **HTTP Client:**
 
@@ -428,8 +519,8 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 **Runtime Support:**
 
-- **oas3-gen-support** (0.16.0): Workspace runtime library with macros and utilities
+- **oas3-gen-support** (0.20.0): Workspace runtime library with macros and utilities
 
 **Development & Testing:**
 
-- **tempfile** (3.23): Temporary test files
+- **tempfile** (3.23): Temporary test files and directories

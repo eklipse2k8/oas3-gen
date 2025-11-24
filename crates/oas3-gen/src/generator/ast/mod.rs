@@ -2,14 +2,17 @@ mod derives;
 pub mod lints;
 pub(super) mod serde_attrs;
 pub(super) mod types;
+pub(super) mod validation_attrs;
 
 use std::collections::BTreeSet;
 
+use derive_builder::Builder;
 pub use derives::{DeriveTrait, default_enum_derives, default_struct_derives};
 use http::Method;
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
 pub use types::{RustPrimitive, TypeRef};
+pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 /// Discriminated enum variant mapping
 #[derive(Debug, Clone)]
@@ -90,15 +93,16 @@ pub struct OperationInfo {
   pub body: Option<OperationBody>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParameterLocation {
+  #[default]
   Path,
   Query,
   Header,
   Cookie,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OperationParameter {
   pub original_name: String,
   pub rust_field: String,
@@ -107,7 +111,7 @@ pub struct OperationParameter {
   pub rust_type: TypeRef,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OperationBody {
   pub field_name: String,
   pub optional: bool,
@@ -127,7 +131,7 @@ pub enum StructKind {
 }
 
 /// Rust struct definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StructDef {
   pub name: String,
   pub docs: Vec<String>,
@@ -148,7 +152,7 @@ pub struct StructMethod {
   pub attrs: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct QueryParameter {
   pub field: String,
   pub encoded_name: String,
@@ -199,15 +203,15 @@ pub enum EnumMethodKind {
 }
 
 /// Rust struct field definition
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Builder)]
+#[builder(default, setter(into))]
 pub struct FieldDef {
   pub name: String,
   pub docs: Vec<String>,
   pub rust_type: TypeRef,
   pub serde_attrs: Vec<SerdeAttribute>,
   pub extra_attrs: Vec<String>,
-  pub validation_attrs: Vec<String>,
-  pub regex_validation: Option<String>,
+  pub validation_attrs: Vec<ValidationAttribute>,
   pub default_value: Option<serde_json::Value>,
   pub example_value: Option<serde_json::Value>,
   pub parameter_location: Option<ParameterLocation>,
@@ -216,7 +220,7 @@ pub struct FieldDef {
 }
 
 /// Rust enum definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EnumDef {
   pub name: String,
   pub docs: Vec<String>,
@@ -230,7 +234,7 @@ pub struct EnumDef {
 }
 
 /// Rust enum variant definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VariantDef {
   pub name: String,
   pub docs: Vec<String>,
@@ -240,14 +244,15 @@ pub struct VariantDef {
 }
 
 /// Enum variant content (Unit, Tuple, or Struct)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum VariantContent {
+  #[default]
   Unit,
   Tuple(Vec<TypeRef>),
 }
 
 /// Type alias definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TypeAliasDef {
   pub name: String,
   pub docs: Vec<String>,
