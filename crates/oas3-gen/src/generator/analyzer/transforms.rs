@@ -85,7 +85,6 @@ fn apply_usage_derives(derives: &mut BTreeSet<DeriveTrait>, usage: TypeUsage, su
 fn strip_validation_attrs(fields: &mut [FieldDef]) {
   for field in fields {
     field.validation_attrs.clear();
-    field.regex_validation = None;
   }
 }
 

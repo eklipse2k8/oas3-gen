@@ -7,7 +7,6 @@ use crate::generator::{
   converter::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
     hashing,
-    type_resolver::TypeResolver,
   },
   naming::identifiers::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
   schema_graph::SchemaGraph,
@@ -18,8 +17,6 @@ use crate::generator::{
 /// This helps to avoid name collisions and ensures consistent naming for reused inline schemas.
 pub(crate) struct InlineTypeScanner<'a> {
   graph: &'a SchemaGraph,
-  #[allow(dead_code)]
-  type_resolver: TypeResolver<'a>,
 }
 
 #[derive(Default)]
@@ -138,8 +135,8 @@ pub(crate) fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> 
 }
 
 impl<'a> InlineTypeScanner<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>) -> Self {
-    Self { graph, type_resolver }
+  pub(crate) fn new(graph: &'a SchemaGraph) -> Self {
+    Self { graph }
   }
 
   /// Scans the graph and computes unique names for all inline schemas.

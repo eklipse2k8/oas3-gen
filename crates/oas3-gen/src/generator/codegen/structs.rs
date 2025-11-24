@@ -11,11 +11,10 @@ use super::{
     generate_validation_attrs,
   },
   coercion,
-  constants::RegexKey,
 };
 use crate::generator::ast::{
-  FieldDef, PathSegment, QueryParameter, ResponseVariant, RustPrimitive, StructDef, StructMethod, StructMethodKind,
-  TypeRef,
+  FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive, StructDef, StructMethod,
+  StructMethodKind, TypeRef, ValidationAttribute,
 };
 
 pub(crate) fn generate_struct(
@@ -82,14 +81,22 @@ fn generate_fields(
         .filter_map(|attr| attr.parse::<TokenStream>().ok())
         .collect();
 
-      let regex_const = if field.regex_validation.is_some() {
-        let key = RegexKey::for_struct(type_name, &field.name);
-        regex_lookup.get(&key).map(std::string::String::as_str)
-      } else {
-        None
-      };
+      let validation_attrs: Vec<ValidationAttribute> = field
+        .validation_attrs
+        .iter()
+        .map(|attr| match attr {
+          ValidationAttribute::Regex(_) => {
+            let key = RegexKey::for_struct(type_name, &field.name);
+            regex_lookup.get(&key).map_or_else(
+              || attr.clone(),
+              |const_name| ValidationAttribute::Regex(const_name.clone()),
+            )
+          }
+          _ => attr.clone(),
+        })
+        .collect();
 
-      let validation_attrs = generate_validation_attrs(regex_const, &field.validation_attrs);
+      let validation_attrs = generate_validation_attrs(&validation_attrs);
 
       let deprecated_attr = generate_deprecated_attr(field.deprecated);
 
@@ -304,7 +311,7 @@ fn status_code_condition(status_code: &str) -> TokenStream {
 }
 
 fn generate_parse_response_method(
-  _name: &proc_macro2::Ident,
+  _: &proc_macro2::Ident,
   response_enum: &str,
   variants: &[ResponseVariant],
   docs: &TokenStream,

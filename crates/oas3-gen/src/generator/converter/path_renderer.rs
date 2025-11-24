@@ -61,7 +61,7 @@ fn parse_path_segments(path: &str, path_params: &[PathParamMapping]) -> Vec<Path
     .collect();
   let mut segments = vec![];
   let mut last_end = 0;
-  for (start, _part) in path.match_indices('{') {
+  for (start, _) in path.match_indices('{') {
     if start > last_end {
       segments.push(PathSegment::Literal(path[last_end..start].to_string()));
     }

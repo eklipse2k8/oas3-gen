@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::generator::{
   ast::{
     DeriveTrait, FieldDef, PathSegment, QueryParameter, ResponseVariant, RustType, StructDef, StructKind, StructMethod,
-    StructMethodKind, TypeRef,
+    StructMethodKind, TypeRef, ValidationAttribute,
   },
   codegen::{self, Visibility, structs},
 };
@@ -17,8 +17,10 @@ fn base_struct(kind: StructKind) -> StructDef {
       rust_type: TypeRef::new("String"),
       serde_attrs: vec![],
       extra_attrs: vec![],
-      validation_attrs: vec!["length(min = 1)".to_string()],
-      regex_validation: None,
+      validation_attrs: vec![ValidationAttribute::Length {
+        min: Some(1),
+        max: None,
+      }],
       default_value: None,
       ..Default::default()
     }],
@@ -268,7 +270,6 @@ fn renders_path_with_integer_parameter() {
     serde_attrs: vec![],
     extra_attrs: vec![],
     validation_attrs: vec![],
-    regex_validation: None,
     default_value: None,
     ..Default::default()
   }];
@@ -302,7 +303,6 @@ fn renders_path_with_boolean_parameter() {
     serde_attrs: vec![],
     extra_attrs: vec![],
     validation_attrs: vec![],
-    regex_validation: None,
     default_value: None,
     ..Default::default()
   }];
@@ -335,7 +335,6 @@ fn renders_path_with_float_parameter() {
     serde_attrs: vec![],
     extra_attrs: vec![],
     validation_attrs: vec![],
-    regex_validation: None,
     default_value: None,
     ..Default::default()
   }];
@@ -368,7 +367,6 @@ fn renders_path_with_uuid_parameter() {
     serde_attrs: vec![],
     extra_attrs: vec![],
     validation_attrs: vec![],
-    regex_validation: None,
     default_value: None,
     ..Default::default()
   }];
@@ -402,7 +400,6 @@ fn renders_path_with_mixed_parameters() {
       serde_attrs: vec![],
       extra_attrs: vec![],
       validation_attrs: vec![],
-      regex_validation: None,
       default_value: None,
       ..Default::default()
     },
@@ -412,7 +409,6 @@ fn renders_path_with_mixed_parameters() {
       serde_attrs: vec![],
       extra_attrs: vec![],
       validation_attrs: vec![],
-      regex_validation: None,
       default_value: None,
       ..Default::default()
     },

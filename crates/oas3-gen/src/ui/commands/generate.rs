@@ -122,30 +122,36 @@ impl<'a> GenerateLogger<'a> {
     Self { config, colors }
   }
 
-  fn log_loading(&self) {
+  fn info(&self, message: &str) {
     if !self.config.quiet {
-      let timestamp = format_timestamp();
+      println!("{} {message}", format_timestamp().with(self.colors.timestamp()));
+    }
+  }
+
+  fn stat(&self, label: &str, value: String) {
+    if !self.config.quiet {
       println!(
-        "{} {}",
-        timestamp.with(self.colors.timestamp()),
-        format!("Loading OpenAPI spec from: {}", self.config.input.display()).with(self.colors.primary())
+        "            {:<25} {}",
+        label.with(self.colors.label()),
+        value.with(self.colors.value())
       );
     }
   }
 
+  fn log_loading(&self) {
+    self.info(
+      &format!("Loading OpenAPI spec from: {}", self.config.input.display())
+        .with(self.colors.primary())
+        .to_string(),
+    );
+  }
+
   fn log_generating(&self) {
-    if !self.config.quiet {
-      let timestamp = format_timestamp();
-      let message = match self.config.mode {
-        GenerateMode::Types => "Generating Rust types...".to_string(),
-        GenerateMode::Client => "Generating Rust client...".to_string(),
-      };
-      println!(
-        "{} {}",
-        timestamp.with(self.colors.timestamp()),
-        message.with(self.colors.primary())
-      );
-    }
+    let message = match self.config.mode {
+      GenerateMode::Types => "Generating Rust types...",
+      GenerateMode::Client => "Generating Rust client...",
+    };
+    self.info(&message.with(self.colors.primary()).to_string());
   }
 
   fn print_statistics(&self, stats: &GenerationStats) {
@@ -153,57 +159,47 @@ impl<'a> GenerateLogger<'a> {
       return;
     }
 
-    self.print_basic_stats(stats);
-    self.print_cycles(stats);
-    self.print_orphaned_schemas(stats);
-  }
-
-  fn print_basic_stats(&self, stats: &GenerationStats) {
-    if let (Some(methods), Some(headers)) = (stats.client_methods_generated, stats.client_headers_generated) {
-      println!(
-        "            {:<25} {}",
-        "Methods generated:".with(self.colors.label()),
-        methods.to_string().with(self.colors.value())
-      );
-      println!(
-        "            {:<25} {}",
-        "Headers generated:".with(self.colors.label()),
-        headers.to_string().with(self.colors.value())
-      );
-    } else {
-      println!(
-        "            {:<25} {}",
-        "Types generated:".with(self.colors.label()),
-        stats.types_generated.to_string().with(self.colors.value())
-      );
-      println!(
-        "            {:<25}   {} structs",
-        "".with(self.colors.label()),
-        stats.structs_generated.to_string().with(self.colors.value())
-      );
-      println!(
-        "            {:<25}   {} enums",
-        "".with(self.colors.label()),
-        stats.enums_generated.to_string().with(self.colors.value())
-      );
-      println!(
-        "            {:<25}   {} type aliases",
-        "".with(self.colors.label()),
-        stats.type_aliases_generated.to_string().with(self.colors.value())
-      );
-      println!(
-        "            {:<25} {}",
-        "Operations converted:".with(self.colors.label()),
-        stats.operations_converted.to_string().with(self.colors.value())
-      );
+    match self.config.mode {
+      GenerateMode::Types => self.print_type_stats(stats),
+      GenerateMode::Client => self.print_client_stats(stats),
     }
 
-    if !stats.warnings.is_empty() {
-      println!(
-        "            {:<25} {}",
-        "Warnings:".with(self.colors.label()),
-        stats.warnings.len().to_string().with(self.colors.value())
+    self.print_common_stats(stats);
+    self.print_cycles(stats);
+    self.print_orphaned_schemas(stats);
+    self.print_warnings(stats);
+  }
+
+  fn print_type_stats(&self, stats: &GenerationStats) {
+    self.stat("Types generated:", stats.types_generated.to_string());
+    self.stat("", format!("{} structs", stats.structs_generated));
+    if stats.enums_with_helpers_generated > 0 {
+      self.stat(
+        "",
+        format!(
+          "{} enums, {} have helpers",
+          stats.enums_generated, stats.enums_with_helpers_generated
+        ),
       );
+    } else {
+      self.stat("", format!("{} enums", stats.enums_generated));
+    }
+    self.stat("", format!("{} type aliases", stats.type_aliases_generated));
+    self.stat("Operations converted:", stats.operations_converted.to_string());
+  }
+
+  fn print_client_stats(&self, stats: &GenerationStats) {
+    if let Some(methods) = stats.client_methods_generated {
+      self.stat("Methods generated:", methods.to_string());
+    }
+    if let Some(headers) = stats.client_headers_generated {
+      self.stat("Headers generated:", headers.to_string());
+    }
+  }
+
+  fn print_common_stats(&self, stats: &GenerationStats) {
+    if !stats.warnings.is_empty() {
+      self.stat("Warnings:", stats.warnings.len().to_string());
     }
   }
 
@@ -212,11 +208,7 @@ impl<'a> GenerateLogger<'a> {
       return;
     }
 
-    println!(
-      "            {:<25} {}",
-      "Cycles:".with(self.colors.label()),
-      stats.cycles_detected.to_string().with(self.colors.value())
-    );
+    self.stat("Cycles:", stats.cycles_detected.to_string());
 
     if self.config.verbose {
       for (i, cycle) in stats.cycle_details.iter().enumerate() {
@@ -231,11 +223,7 @@ impl<'a> GenerateLogger<'a> {
 
   fn print_orphaned_schemas(&self, stats: &GenerationStats) {
     if stats.orphaned_schemas_count > 0 && self.config.verbose {
-      println!(
-        "            {:<25} {}",
-        "Orphaned schemas:".with(self.colors.label()),
-        stats.orphaned_schemas_count.to_string().with(self.colors.value())
-      );
+      self.stat("Orphaned schemas:", stats.orphaned_schemas_count.to_string());
     }
   }
 
@@ -255,14 +243,11 @@ impl<'a> GenerateLogger<'a> {
   }
 
   fn log_writing(&self) {
-    if !self.config.quiet {
-      let timestamp = format_timestamp();
-      println!(
-        "{} {}",
-        timestamp.with(self.colors.timestamp()),
-        format!("Writing to: {}", self.config.output.display()).with(self.colors.primary())
-      );
-    }
+    self.info(
+      &format!("Writing to: {}", self.config.output.display())
+        .with(self.colors.primary())
+        .to_string(),
+    );
   }
 
   fn log_success(&self) {
@@ -296,7 +281,6 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
   };
 
   logger.print_statistics(&stats);
-  logger.print_warnings(&stats);
 
   logger.log_writing();
   config.write_output(code).await?;

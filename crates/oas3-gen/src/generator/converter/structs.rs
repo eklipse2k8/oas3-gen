@@ -114,15 +114,13 @@ impl<'a> StructConverter<'a> {
       serde_attrs.push(SerdeAttribute::Default);
     }
 
-    let outer_attrs = container_outer_attrs(&fields);
-
     let struct_type = RustType::Struct(StructDef {
       name: struct_name,
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
       derives: default_struct_derives(),
       serde_attrs,
-      outer_attrs,
+      outer_attrs: vec![],
       methods: vec![],
       kind: kind.unwrap_or(StructKind::Schema),
     });
@@ -168,8 +166,6 @@ impl<'a> StructConverter<'a> {
       fields.push(field);
     }
 
-    let outer_attrs = container_outer_attrs(&fields);
-
     let mut all_types = Vec::with_capacity(1 + inline_types.len());
     all_types.push(RustType::Struct(StructDef {
       name: struct_name,
@@ -177,7 +173,7 @@ impl<'a> StructConverter<'a> {
       fields,
       derives: default_struct_derives(),
       serde_attrs,
-      outer_attrs,
+      outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
     }));
@@ -342,20 +338,10 @@ impl<'a> StructConverter<'a> {
     let metadata = FieldMetadata::from_schema(ctx.prop_name, is_required, &prop_schema, &final_type);
     let serde_attrs = serde_renamed_if_needed(ctx.prop_name);
 
-    let (metadata, serde_attrs, extra_attrs, regex_validation) =
+    let (metadata, serde_attrs, extra_attrs) =
       Self::apply_discriminator_attributes(metadata, serde_attrs, &final_type, discriminator_info.as_ref());
 
-    let regex_validation =
-      regex_validation.or_else(|| metadata::filter_regex_validation(&final_type, metadata.regex_validation.clone()));
-
-    let field = build_field_def(
-      ctx.prop_name,
-      final_type,
-      serde_attrs,
-      metadata,
-      regex_validation,
-      extra_attrs,
-    );
+    let field = build_field_def(ctx.prop_name, final_type, serde_attrs, metadata, extra_attrs);
 
     Ok((field, generated_types))
   }
@@ -505,10 +491,9 @@ impl<'a> StructConverter<'a> {
     mut serde_attrs: Vec<SerdeAttribute>,
     final_type: &TypeRef,
     discriminator_info: Option<&DiscriminatorInfo>,
-  ) -> (FieldMetadata, Vec<SerdeAttribute>, Vec<String>, Option<String>) {
+  ) -> (FieldMetadata, Vec<SerdeAttribute>, Vec<String>) {
     let Some(disc_info) = discriminator_info else {
-      let regex = metadata.regex_validation.clone();
-      return (metadata, serde_attrs, vec![], regex);
+      return (metadata, serde_attrs, vec![]);
     };
 
     if let Some(ref disc_value) = disc_info.value {
@@ -518,7 +503,7 @@ impl<'a> StructConverter<'a> {
       metadata.default_value = Some(serde_json::Value::String(disc_value.clone()));
       serde_attrs.push(SerdeAttribute::SkipDeserializing);
       serde_attrs.push(SerdeAttribute::Default);
-      (metadata, serde_attrs, extra_attrs, None)
+      (metadata, serde_attrs, extra_attrs)
     } else if disc_info.is_base && !disc_info.has_enum {
       metadata.docs.clear();
       metadata.validation_attrs.clear();
@@ -527,10 +512,9 @@ impl<'a> StructConverter<'a> {
       if final_type.is_string_like() {
         metadata.default_value = Some(serde_json::Value::String(String::new()));
       }
-      (metadata, serde_attrs, extra_attrs, None)
+      (metadata, serde_attrs, extra_attrs)
     } else {
-      let regex = metadata.regex_validation.clone();
-      (metadata, serde_attrs, vec![], regex)
+      (metadata, serde_attrs, vec![])
     }
   }
 
@@ -695,10 +679,6 @@ pub(crate) enum InlinePolicy {
   InlineUnions,
 }
 
-pub(crate) fn container_outer_attrs(_fields: &[FieldDef]) -> Vec<String> {
-  vec![]
-}
-
 pub(crate) fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {
   schema
     .discriminator
@@ -783,7 +763,7 @@ pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
   }
 
   let mut indices_to_remove = HashSet::<usize>::new();
-  for (name, _count) in name_counts.into_iter().filter(|(_, c)| *c > 1) {
+  for (name, _) in name_counts.into_iter().filter(|(_, c)| *c > 1) {
     let colliding_indices: Vec<_> = fields
       .iter()
       .enumerate()
@@ -818,7 +798,6 @@ pub(crate) fn build_field_def(
   rust_type: TypeRef,
   serde_attrs: Vec<SerdeAttribute>,
   metadata: FieldMetadata,
-  regex_validation: Option<String>,
   extra_attrs: Vec<String>,
 ) -> FieldDef {
   FieldDef {
@@ -828,7 +807,6 @@ pub(crate) fn build_field_def(
     serde_attrs,
     extra_attrs,
     validation_attrs: metadata.validation_attrs,
-    regex_validation,
     default_value: metadata.default_value,
     example_value: None,
     parameter_location: None,

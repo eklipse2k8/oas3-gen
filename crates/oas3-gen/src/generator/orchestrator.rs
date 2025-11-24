@@ -9,7 +9,6 @@ use crate::generator::{
   codegen::{self, Visibility, metadata::CodeMetadata},
   converter::{
     CodegenConfig, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
-    type_resolver::TypeResolver,
   },
   naming::inference::InlineTypeScanner,
   operation_registry::OperationRegistry,
@@ -35,6 +34,7 @@ pub struct GenerationStats {
   pub types_generated: usize,
   pub structs_generated: usize,
   pub enums_generated: usize,
+  pub enums_with_helpers_generated: usize,
   pub type_aliases_generated: usize,
   pub operations_converted: usize,
   pub cycles_detected: usize,
@@ -185,8 +185,7 @@ impl Orchestrator {
       SchemaConverter::new(&graph, self.optionality_policy.clone(), config)
     };
 
-    let type_resolver = TypeResolver::new(&graph, config);
-    let scanner = InlineTypeScanner::new(&graph, type_resolver);
+    let scanner = InlineTypeScanner::new(&graph);
     let scan_result = scanner.scan_and_compute_names().unwrap_or_default();
 
     let mut cache = SharedSchemaCache::new();
@@ -207,12 +206,19 @@ impl Orchestrator {
 
     let mut structs_generated = 0;
     let mut enums_generated = 0;
+    let mut enums_with_helpers_generated = 0;
     let mut type_aliases_generated = 0;
 
     for rust_type in &rust_types {
       match rust_type {
         RustType::Struct(_) => structs_generated += 1,
-        RustType::Enum(_) | RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => enums_generated += 1,
+        RustType::Enum(def) => {
+          enums_generated += 1;
+          if !def.methods.is_empty() {
+            enums_with_helpers_generated += 1;
+          }
+        }
+        RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => enums_generated += 1,
         RustType::TypeAlias(_) => type_aliases_generated += 1,
       }
     }
@@ -223,6 +229,7 @@ impl Orchestrator {
       types_generated,
       structs_generated,
       enums_generated,
+      enums_with_helpers_generated,
       type_aliases_generated,
       operations_converted: operations_info.len(),
       cycles_detected: cycle_details.len(),

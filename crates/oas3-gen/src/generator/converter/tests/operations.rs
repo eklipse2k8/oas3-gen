@@ -143,7 +143,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
 
   let mut usage = TypeUsageRecorder::new();
   let mut cache = SharedSchemaCache::new();
-  let (types, _info) = converter.convert(
+  let (types, _) = converter.convert(
     "create_user",
     "createUser",
     &Method::POST,
@@ -588,7 +588,7 @@ fn test_operation_with_multiple_path_parameters() -> ConversionResult<()> {
 
   let mut usage = TypeUsageRecorder::new();
   let mut cache = SharedSchemaCache::new();
-  let (types, _info) = converter.convert(
+  let (types, _) = converter.convert(
     "get_user_post",
     "getUserPost",
     &Method::GET,

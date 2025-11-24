@@ -4,7 +4,7 @@ use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::ast::{DeriveTrait, RustType};
+use super::ast::{self, DeriveTrait, RustType};
 
 pub mod attributes;
 pub mod client;
@@ -142,7 +142,7 @@ fn type_priority(rust_type: &RustType) -> u8 {
 
 fn generate_type(
   rust_type: &RustType,
-  regex_lookup: &BTreeMap<constants::RegexKey, String>,
+  regex_lookup: &BTreeMap<ast::RegexKey, String>,
   error_schemas: &HashSet<String>,
   visibility: Visibility,
 ) -> TokenStream {

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::{DeriveTrait, FieldDef, ParameterLocation, SerdeAttribute};
+use crate::generator::ast::{DeriveTrait, FieldDef, ParameterLocation, SerdeAttribute, ValidationAttribute};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -96,18 +96,12 @@ pub(crate) fn generate_serde_attrs(attrs: &[SerdeAttribute]) -> TokenStream {
   quote! { #(#attr_tokens)* }
 }
 
-pub(crate) fn generate_validation_attrs(regex_const: Option<&str>, attrs: &[String]) -> TokenStream {
-  if attrs.is_empty() && regex_const.is_none() {
+pub(crate) fn generate_validation_attrs(attrs: &[ValidationAttribute]) -> TokenStream {
+  if attrs.is_empty() {
     return quote! {};
   }
 
-  let mut combined = attrs.to_owned();
-
-  if let Some(const_name) = regex_const {
-    combined.push(format!("regex(path = \"{const_name}\")"));
-  }
-
-  let attr_tokens: Vec<TokenStream> = combined.iter().filter_map(|attr| attr.parse().ok()).collect();
+  let attr_tokens: Vec<TokenStream> = attrs.iter().filter_map(|attr| attr.to_string().parse().ok()).collect();
 
   quote! { #[validate(#(#attr_tokens),*)] }
 }
