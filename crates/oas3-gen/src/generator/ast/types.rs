@@ -12,7 +12,7 @@ static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
     .expect("formatter failed to build.")
 });
 
-fn format_number_with_underscores<T: ToFormattedString>(value: &T) -> String {
+pub(crate) fn format_number_with_underscores<T: ToFormattedString>(value: &T) -> String {
   value.to_formatted_string(&*UNDERSCORE_FORMAT)
 }
 
@@ -431,7 +431,7 @@ fn render_integer(primitive: &RustPrimitive, value: i64) -> String {
   }
 }
 
-fn render_unsigned_integer(primitive: &RustPrimitive, value: u64) -> String {
+pub(crate) fn render_unsigned_integer(primitive: &RustPrimitive, value: u64) -> String {
   match primitive {
     RustPrimitive::U8 if value >= u64::from(u8::MAX) => "u8::MAX".to_string(),
     RustPrimitive::U8 => format!("{}u8", format_number_with_underscores(&value)),
