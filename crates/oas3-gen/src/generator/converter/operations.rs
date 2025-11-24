@@ -102,8 +102,8 @@ impl<'a> OperationConverter<'a> {
     let base_name = to_rust_type_name(operation_id);
     let stable_id = stable_id.to_string();
 
-    let mut warnings = Vec::new();
-    let mut types = Vec::new();
+    let mut warnings = vec![];
+    let mut types = vec![];
 
     let body_info = self.prepare_request_body(&base_name, operation, path, usage, schema_cache)?;
     types.extend(body_info.generated_types);
@@ -191,7 +191,6 @@ impl<'a> OperationConverter<'a> {
       response_type: response_type_name,
       response_enum: response_enum_name,
       response_content_type,
-      request_body_types: body_info.type_usage,
       success_response_types,
       error_response_types,
       warnings,
@@ -210,10 +209,10 @@ impl<'a> OperationConverter<'a> {
     body_type: Option<TypeRef>,
     response_enum_info: Option<&(String, ResponseEnumDef)>,
   ) -> ConversionResult<(StructDef, Vec<String>, Vec<OperationParameter>)> {
-    let mut warnings = Vec::new();
-    let mut fields = Vec::new();
+    let mut warnings = vec![];
+    let mut fields = vec![];
     let mut param_mappings = ParameterMappings::default();
-    let mut parameter_info = Vec::new();
+    let mut parameter_info = vec![];
 
     for param in self.collect_parameters(path, operation) {
       let (field, meta) = self.convert_parameter(&param, &mut warnings)?;
@@ -271,8 +270,8 @@ impl<'a> OperationConverter<'a> {
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
   ) -> ConversionResult<RequestBodyInfo> {
-    let mut generated_types = Vec::new();
-    let mut type_usage = Vec::new();
+    let mut generated_types = vec![];
+    let mut type_usage = vec![];
 
     let Some(body_ref) = operation.request_body.as_ref() else {
       return Ok(RequestBodyInfo {
@@ -423,7 +422,7 @@ impl<'a> OperationConverter<'a> {
   }
 
   fn collect_parameters(&self, path: &str, operation: &Operation) -> Vec<Parameter> {
-    let mut params = Vec::new();
+    let mut params = vec![];
 
     if let Some(path_item) = self.spec.paths.as_ref().and_then(|p| p.get(path)) {
       for param_ref in &path_item.parameters {

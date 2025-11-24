@@ -128,7 +128,7 @@ impl<'a> EnumConverter<'a> {
   }
 
   fn build_simple_enum(&self, name: &str, schema: &ObjectSchema, strategy: CollisionStrategy) -> RustType {
-    let mut variants: Vec<VariantDef> = Vec::new();
+    let mut variants: Vec<VariantDef> = vec![];
     let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
 
     for (i, value) in schema.enum_values.iter().enumerate() {
@@ -263,8 +263,8 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       UnionKind::AnyOf => &self.schema.any_of,
     };
 
-    let mut inline_types = Vec::new();
-    let mut variants = Vec::new();
+    let mut inline_types = vec![];
+    let mut variants = vec![];
     let mut seen_names = BTreeSet::new();
 
     for (i, variant_ref) in variants_src.iter().enumerate() {
@@ -286,7 +286,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     strip_common_affixes(&mut variants);
 
     let methods = if self.converter.no_helpers {
-      Vec::new()
+      vec![]
     } else {
       self.generate_methods(&variants, &inline_types)
     };
@@ -499,7 +499,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
 
     let variant_name = naming::ensure_unique(&rust_type_name, seen_names);
 
-    let mut serde_attrs = Vec::new();
+    let mut serde_attrs = vec![];
     if let Some(disc_value) = self.discriminator_map.get(schema_name) {
       serde_attrs.push(SerdeAttribute::Rename(disc_value.clone()));
     }
@@ -645,7 +645,7 @@ pub(crate) fn strip_common_affixes(variants: &mut [VariantDef]) {
   let common_prefix_len = find_common_prefix_len(&split_names);
   let common_suffix_len = find_common_suffix_len(&split_names);
 
-  let mut stripped_names = Vec::new();
+  let mut stripped_names = vec![];
   for words in &split_names {
     let start = common_prefix_len;
     let end = words.len().saturating_sub(common_suffix_len);
@@ -700,7 +700,7 @@ fn find_common_suffix_len(split_names: &[Vec<String>]) -> usize {
 }
 
 fn split_pascal_case(name: &str) -> Vec<String> {
-  let mut words = Vec::new();
+  let mut words = vec![];
   let mut current_word = String::new();
   for (i, ch) in name.chars().enumerate() {
     if ch.is_uppercase() && i > 0 && !current_word.is_empty() {

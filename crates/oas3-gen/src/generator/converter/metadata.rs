@@ -102,7 +102,7 @@ pub(crate) fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>
 
 /// Extracts validation attributes (e.g. `length`, `range`, `email`) for validator crate.
 pub(crate) fn extract_validation_attrs(is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Vec<String> {
-  let mut attrs = Vec::new();
+  let mut attrs = vec![];
 
   if let Some(ref format) = schema.format {
     match format.as_str() {

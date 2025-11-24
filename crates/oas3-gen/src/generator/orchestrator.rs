@@ -247,8 +247,8 @@ impl Orchestrator {
     operation_reachable: Option<&std::collections::BTreeSet<String>>,
     cache: &mut SharedSchemaCache,
   ) -> (Vec<RustType>, Vec<GenerationWarning>) {
-    let mut rust_types = Vec::new();
-    let mut warnings = Vec::new();
+    let mut rust_types = vec![];
+    let mut warnings = vec![];
 
     for schema_name in graph.schema_names() {
       if let Some(filter) = operation_reachable
@@ -303,9 +303,9 @@ impl Orchestrator {
     Vec<GenerationWarning>,
     TypeUsageRecorder,
   ) {
-    let mut rust_types = Vec::new();
-    let mut operations_info = Vec::new();
-    let mut warnings = Vec::new();
+    let mut rust_types = vec![];
+    let mut operations_info = vec![];
+    let mut warnings = vec![];
     let mut usage_recorder = TypeUsageRecorder::new();
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());

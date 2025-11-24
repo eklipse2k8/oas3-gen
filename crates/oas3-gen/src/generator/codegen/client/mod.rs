@@ -34,7 +34,7 @@ pub fn generate_client(
   let header_refs: Vec<&String> = header_names.iter().collect();
   let header_consts = constants::generate_header_constants(&header_refs);
 
-  let mut method_tokens = Vec::new();
+  let mut method_tokens = vec![];
   for operation in operations {
     method_tokens.push(methods::build_method_tokens(operation, rust_types)?);
   }

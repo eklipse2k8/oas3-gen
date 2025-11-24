@@ -21,7 +21,7 @@ pub(crate) struct SchemaRepository {
 impl SchemaRepository {
   pub(crate) fn from_spec(spec: &Spec) -> (Self, Vec<GenerationWarning>) {
     let mut schemas = BTreeMap::new();
-    let mut warnings = Vec::new();
+    let mut warnings = vec![];
 
     if let Some(components) = &spec.components {
       for (name, schema_ref) in &components.schemas {
@@ -196,8 +196,8 @@ impl<'a> CycleDetector<'a> {
       dependencies,
       visited: BTreeSet::new(),
       recursion_stack: BTreeSet::new(),
-      path: Vec::new(),
-      cycles: Vec::new(),
+      path: vec![],
+      cycles: vec![],
     }
   }
 
@@ -447,15 +447,15 @@ mod tests {
         license: None,
         extensions: BTreeMap::default(),
       },
-      servers: Vec::new(),
+      servers: vec![],
       paths: Option::default(),
       webhooks: BTreeMap::default(),
       components: Some(Components {
         schemas,
         ..Default::default()
       }),
-      security: Vec::new(),
-      tags: Vec::new(),
+      security: vec![],
+      tags: vec![],
       external_docs: None,
       extensions: BTreeMap::default(),
     }

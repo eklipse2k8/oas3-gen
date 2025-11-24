@@ -92,7 +92,7 @@ fn build_http_method_init(method: &Method) -> TokenStream {
 }
 
 fn build_doc_attributes(operation: &OperationInfo) -> Vec<TokenStream> {
-  let mut doc_attrs = Vec::new();
+  let mut doc_attrs = vec![];
 
   if let Some(summary) = &operation.summary {
     for line in summary.lines() {
@@ -529,7 +529,6 @@ mod tests {
       response_type: Some("TestResponse".to_string()),
       response_enum: None,
       response_content_type: None,
-      request_body_types: vec![],
       success_response_types: vec![],
       error_response_types: vec![],
       warnings: vec![],
@@ -837,7 +836,6 @@ mod tests {
       response_type: None,
       response_enum: None,
       response_content_type: None,
-      request_body_types: vec![],
       success_response_types: vec![],
       error_response_types: vec![],
       warnings: vec![],
@@ -874,7 +872,6 @@ mod tests {
       response_type: None,
       response_enum: None,
       response_content_type: None,
-      request_body_types: vec![],
       success_response_types: vec![],
       error_response_types: vec![],
       warnings: vec![],
