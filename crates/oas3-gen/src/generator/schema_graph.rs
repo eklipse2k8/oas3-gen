@@ -349,7 +349,7 @@ impl SchemaGraph {
   pub(crate) fn get_operation_reachable_schemas(&self, operation_registry: &OperationRegistry) -> BTreeSet<String> {
     let mut reachable = BTreeSet::new();
 
-    for (_stable_id, _method, _path, operation) in operation_registry.operations_with_details() {
+    for (_, _, _, operation) in operation_registry.operations_with_details() {
       Self::collect_refs_from_operation(operation, &self.spec, &mut reachable, &self.union_fingerprints);
     }
 
@@ -493,7 +493,7 @@ mod tests {
     schemas.insert("Post".to_string(), ObjectOrReference::Object(create_simple_schema()));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (repo, _warnings) = SchemaRepository::from_spec(&spec);
+    let (repo, _) = SchemaRepository::from_spec(&spec);
 
     assert!(repo.get("User").is_some());
     assert!(repo.get("Post").is_some());
@@ -623,7 +623,7 @@ mod tests {
     );
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (repo, _warnings) = SchemaRepository::from_spec(&spec);
+    let (repo, _) = SchemaRepository::from_spec(&spec);
 
     let mut graph = DependencyGraph::new();
     graph.build(&repo, &HashMap::new());
@@ -659,7 +659,7 @@ mod tests {
     schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (repo, _warnings) = SchemaRepository::from_spec(&spec);
+    let (repo, _) = SchemaRepository::from_spec(&spec);
 
     let mut graph = DependencyGraph::new();
     graph.build(&repo, &HashMap::new());
@@ -680,7 +680,7 @@ mod tests {
     );
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (mut graph, _warnings) = SchemaGraph::new(spec);
+    let (mut graph, _) = SchemaGraph::new(spec);
 
     assert!(graph.get_schema("User").is_some());
     assert!(graph.get_schema("Post").is_some());

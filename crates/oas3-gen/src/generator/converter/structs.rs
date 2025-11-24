@@ -114,15 +114,13 @@ impl<'a> StructConverter<'a> {
       serde_attrs.push(SerdeAttribute::Default);
     }
 
-    let outer_attrs = container_outer_attrs(&fields);
-
     let struct_type = RustType::Struct(StructDef {
       name: struct_name,
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
       derives: default_struct_derives(),
       serde_attrs,
-      outer_attrs,
+      outer_attrs: vec![],
       methods: vec![],
       kind: kind.unwrap_or(StructKind::Schema),
     });
@@ -168,8 +166,6 @@ impl<'a> StructConverter<'a> {
       fields.push(field);
     }
 
-    let outer_attrs = container_outer_attrs(&fields);
-
     let mut all_types = Vec::with_capacity(1 + inline_types.len());
     all_types.push(RustType::Struct(StructDef {
       name: struct_name,
@@ -177,7 +173,7 @@ impl<'a> StructConverter<'a> {
       fields,
       derives: default_struct_derives(),
       serde_attrs,
-      outer_attrs,
+      outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
     }));
@@ -683,10 +679,6 @@ pub(crate) enum InlinePolicy {
   InlineUnions,
 }
 
-pub(crate) fn container_outer_attrs(_fields: &[FieldDef]) -> Vec<String> {
-  vec![]
-}
-
 pub(crate) fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {
   schema
     .discriminator
@@ -771,7 +763,7 @@ pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
   }
 
   let mut indices_to_remove = HashSet::<usize>::new();
-  for (name, _count) in name_counts.into_iter().filter(|(_, c)| *c > 1) {
+  for (name, _) in name_counts.into_iter().filter(|(_, c)| *c > 1) {
     let colliding_indices: Vec<_> = fields
       .iter()
       .enumerate()

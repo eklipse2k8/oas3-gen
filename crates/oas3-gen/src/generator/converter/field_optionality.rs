@@ -15,7 +15,9 @@ pub(crate) trait FieldOptionalityRule: Send + Sync {
   /// Returns true if this rule applies to the current context.
   fn applies(&self, ctx: &FieldOptionalityContext) -> bool;
   /// Returns true if the field should be optional.
-  fn should_be_optional(&self, ctx: &FieldOptionalityContext) -> bool;
+  fn should_be_optional(&self, _ctx: &FieldOptionalityContext) -> bool {
+    true
+  }
 }
 
 struct NotRequiredRule;
@@ -23,10 +25,6 @@ struct NotRequiredRule;
 impl FieldOptionalityRule for NotRequiredRule {
   fn applies(&self, ctx: &FieldOptionalityContext) -> bool {
     !ctx.is_required
-  }
-
-  fn should_be_optional(&self, _ctx: &FieldOptionalityContext) -> bool {
-    true
   }
 }
 
@@ -36,10 +34,6 @@ impl FieldOptionalityRule for HasDefaultRule {
   fn applies(&self, ctx: &FieldOptionalityContext) -> bool {
     ctx.has_default
   }
-
-  fn should_be_optional(&self, _ctx: &FieldOptionalityContext) -> bool {
-    true
-  }
 }
 
 struct DiscriminatorWithoutEnumRule;
@@ -47,10 +41,6 @@ struct DiscriminatorWithoutEnumRule;
 impl FieldOptionalityRule for DiscriminatorWithoutEnumRule {
   fn applies(&self, ctx: &FieldOptionalityContext) -> bool {
     ctx.is_discriminator_field && !ctx.discriminator_has_enum
-  }
-
-  fn should_be_optional(&self, _ctx: &FieldOptionalityContext) -> bool {
-    true
   }
 }
 
@@ -61,10 +51,6 @@ impl FieldOptionalityRule for ODataMetadataOnConcreteTypeRule {
     ctx.prop_name.starts_with("@odata.")
       && ctx.parent_schema.discriminator.is_none()
       && ctx.parent_schema.all_of.is_empty()
-  }
-
-  fn should_be_optional(&self, _ctx: &FieldOptionalityContext) -> bool {
-    true
   }
 }
 

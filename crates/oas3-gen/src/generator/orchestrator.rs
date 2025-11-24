@@ -9,7 +9,6 @@ use crate::generator::{
   codegen::{self, Visibility, metadata::CodeMetadata},
   converter::{
     CodegenConfig, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
-    type_resolver::TypeResolver,
   },
   naming::inference::InlineTypeScanner,
   operation_registry::OperationRegistry,
@@ -186,8 +185,7 @@ impl Orchestrator {
       SchemaConverter::new(&graph, self.optionality_policy.clone(), config)
     };
 
-    let type_resolver = TypeResolver::new(&graph, config);
-    let scanner = InlineTypeScanner::new(&graph, type_resolver);
+    let scanner = InlineTypeScanner::new(&graph);
     let scan_result = scanner.scan_and_compute_names().unwrap_or_default();
 
     let mut cache = SharedSchemaCache::new();

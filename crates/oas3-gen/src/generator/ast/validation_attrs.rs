@@ -24,15 +24,6 @@ impl RegexKey {
     }
   }
 
-  #[allow(dead_code)]
-  pub fn for_variant(type_name: &str, variant_name: &str, field_name: &str) -> Self {
-    Self {
-      owner_type: type_name.to_string(),
-      owner_variant: Some(variant_name.to_string()),
-      field: field_name.to_string(),
-    }
-  }
-
   pub fn parts(&self) -> Vec<&str> {
     let mut parts = vec![self.owner_type.as_str()];
     if let Some(variant) = &self.owner_variant {

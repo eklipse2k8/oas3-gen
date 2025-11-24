@@ -5,12 +5,12 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    converter::{constants::REQUEST_BODY_SUFFIX, type_resolver::TypeResolver},
+    converter::constants::REQUEST_BODY_SUFFIX,
     naming::inference::{
       InlineTypeScanner, derive_method_names, ensure_unique, infer_name_from_context, split_pascal_case,
     },
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::create_test_graph,
 };
 
 #[test]
@@ -215,8 +215,7 @@ fn test_inline_type_scanner_names_string_enum_optimizer_pattern() {
 
   let graph = create_test_graph(BTreeMap::from([("VoiceIdsShared".to_string(), voice_ids_shared)]));
 
-  let type_resolver = TypeResolver::new(&graph, default_config());
-  let scanner = InlineTypeScanner::new(&graph, type_resolver);
+  let scanner = InlineTypeScanner::new(&graph);
   let result = scanner.scan_and_compute_names().expect("Should scan successfully");
 
   let enum_values = vec!["alloy".to_string(), "ash".to_string(), "ballad".to_string()];
@@ -239,8 +238,7 @@ fn test_inline_type_scanner_names_regular_enum_without_known_suffix() {
 
   let graph = create_test_graph(BTreeMap::from([("Status".to_string(), status)]));
 
-  let type_resolver = TypeResolver::new(&graph, default_config());
-  let scanner = InlineTypeScanner::new(&graph, type_resolver);
+  let scanner = InlineTypeScanner::new(&graph);
   let result = scanner.scan_and_compute_names().expect("Should scan successfully");
 
   let enum_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
@@ -281,8 +279,7 @@ fn test_inline_type_scanner_handles_anyof_with_ref() {
     ("ModelIdsShared".to_string(), model_ids_shared),
   ]));
 
-  let type_resolver = TypeResolver::new(&graph, default_config());
-  let scanner = InlineTypeScanner::new(&graph, type_resolver);
+  let scanner = InlineTypeScanner::new(&graph);
   let result = scanner.scan_and_compute_names().expect("Should scan successfully");
 
   let chat_model_values = vec!["gpt-3.5-turbo".to_string(), "gpt-4".to_string()];
@@ -324,8 +321,7 @@ fn test_inline_type_scanner_anyof_with_const_values() {
 
   let graph = create_test_graph(BTreeMap::from([("FormatType".to_string(), format_type)]));
 
-  let type_resolver = TypeResolver::new(&graph, default_config());
-  let scanner = InlineTypeScanner::new(&graph, type_resolver);
+  let scanner = InlineTypeScanner::new(&graph);
   let result = scanner.scan_and_compute_names().expect("Should scan successfully");
 
   let enum_values = vec!["json".to_string(), "text".to_string(), "xml".to_string()];

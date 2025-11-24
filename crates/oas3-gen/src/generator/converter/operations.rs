@@ -287,7 +287,7 @@ impl<'a> OperationConverter<'a> {
     let body = body_ref.resolve(self.spec)?;
     let is_required = body.required.unwrap_or(false);
 
-    let Some((_content_type, media_type)) = body.content.iter().next() else {
+    let Some((_, media_type)) = body.content.iter().next() else {
       return Ok(RequestBodyInfo {
         body_type: None,
         generated_types,

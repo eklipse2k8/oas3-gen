@@ -311,7 +311,7 @@ fn status_code_condition(status_code: &str) -> TokenStream {
 }
 
 fn generate_parse_response_method(
-  _name: &proc_macro2::Ident,
+  _: &proc_macro2::Ident,
   response_enum: &str,
   variants: &[ResponseVariant],
   docs: &TokenStream,

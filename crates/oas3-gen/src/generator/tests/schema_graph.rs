@@ -67,7 +67,7 @@ fn test_schema_repository_from_spec() {
   schemas.insert("Post".to_string(), ObjectOrReference::Object(create_simple_schema()));
 
   let spec = create_test_spec_with_schemas(schemas);
-  let (repo, _warnings) = SchemaRepository::from_spec(&spec);
+  let (repo, _) = SchemaRepository::from_spec(&spec);
 
   assert!(repo.get("User").is_some());
   assert!(repo.get("Post").is_some());
@@ -179,7 +179,7 @@ fn test_dependency_graph() {
     ObjectOrReference::Object(create_schema_with_ref("User")),
   );
   let spec = create_test_spec_with_schemas(schemas);
-  let (repo, _warnings) = SchemaRepository::from_spec(&spec);
+  let (repo, _) = SchemaRepository::from_spec(&spec);
   let mut graph = DependencyGraph::new();
   graph.build(&repo, &HashMap::new());
   assert_eq!(graph.dependencies.len(), 2);
@@ -209,7 +209,7 @@ fn test_dependency_graph() {
   schemas.insert("User".to_string(), ObjectOrReference::Object(user_schema));
   schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
   let spec = create_test_spec_with_schemas(schemas);
-  let (repo, _warnings) = SchemaRepository::from_spec(&spec);
+  let (repo, _) = SchemaRepository::from_spec(&spec);
   let mut graph = DependencyGraph::new();
   graph.build(&repo, &HashMap::new());
   let cycles = graph.detect_cycles();
@@ -228,7 +228,7 @@ fn test_schema_graph_integration() {
   );
 
   let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _warnings) = SchemaGraph::new(spec);
+  let (mut graph, _) = SchemaGraph::new(spec);
 
   assert!(graph.get_schema("User").is_some());
   assert!(graph.get_schema("Post").is_some());
