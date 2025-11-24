@@ -456,10 +456,10 @@ pub(crate) fn derive_method_names(enum_name: &str, variant_names: &[String]) -> 
 /// Handles adjacent uppercase letters correctly (e.g., `"XMLParser"` -> `["XML", "Parser"]`).
 pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
   if name.is_empty() {
-    return Vec::new();
+    return vec![];
   }
 
-  let mut words = Vec::new();
+  let mut words = vec![];
   let mut current_word = String::new();
   let chars: Vec<char> = name.chars().collect();
 

@@ -143,7 +143,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
 
   let mut usage = TypeUsageRecorder::new();
   let mut cache = SharedSchemaCache::new();
-  let (types, info) = converter.convert(
+  let (types, _info) = converter.convert(
     "create_user",
     "createUser",
     &Method::POST,
@@ -164,7 +164,6 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
       .iter()
       .any(|t| matches!(t, RustType::Struct(s) if s.name == "CreateUserRequest"))
   );
-  assert_eq!(info.request_body_types, vec!["User", "CreateUserRequestBody"]);
   Ok(())
 }
 

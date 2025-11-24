@@ -59,7 +59,7 @@ fn parse_path_segments(path: &str, path_params: &[PathParamMapping]) -> Vec<Path
     .iter()
     .map(|p| (&*p.original_name, &*p.rust_field))
     .collect();
-  let mut segments = Vec::new();
+  let mut segments = vec![];
   let mut last_end = 0;
   for (start, _part) in path.match_indices('{') {
     if start > last_end {

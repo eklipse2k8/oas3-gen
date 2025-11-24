@@ -26,7 +26,7 @@ impl SharedSchemaCache {
     Self {
       schema_to_type: BTreeMap::new(),
       enum_to_type: BTreeMap::new(),
-      generated_types: Vec::new(),
+      generated_types: vec![],
       used_names: BTreeSet::new(),
       precomputed_names: BTreeMap::new(),
       precomputed_enum_names: BTreeMap::new(),

@@ -413,7 +413,7 @@ struct Item { id: u32, name: String }
 
 // BEFORE: O(n^2) algorithm
 fn find_common_items(items1: &[Item], items2: &[Item]) -> Vec<Item> {
-    let mut common = Vec::new();
+    let mut common = vec![];
     for item1 in items1 {
         for item2 in items2 {
             if item1.id == item2.id {
@@ -428,7 +428,7 @@ fn find_common_items(items1: &[Item], items2: &[Item]) -> Vec<Item> {
 // AFTER: O(n) algorithm using a HashMap
 fn find_common_items_v2<'a>(items1: &'a [Item], items2: &'a [Item]) -> Vec<&'a Item> {
     let items1_map: HashMap<u32, &'a Item> = items1.iter().map(|item| (item.id, item)).collect();
-    let mut common = Vec::new();
+    let mut common = vec![];
     for item2 in items2 {
         if let Some(item1) = items1_map.get(&item2.id) {
             common.push(*item1);

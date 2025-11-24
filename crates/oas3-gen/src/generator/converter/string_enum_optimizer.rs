@@ -57,7 +57,7 @@ impl<'a> StringEnumOptimizer<'a> {
 
   fn collect_known_values(&self, schema: &ObjectSchema) -> Vec<(String, Option<String>, bool)> {
     let mut seen_values = HashSet::new();
-    let mut known_values = Vec::new();
+    let mut known_values = vec![];
 
     for variant in &schema.any_of {
       let Ok(resolved) = variant.resolve(self.graph.spec()) else {
@@ -109,7 +109,7 @@ impl<'a> StringEnumOptimizer<'a> {
 
     let outer_enum = Self::build_outer_enum(&base_name, &known_enum_name, schema);
 
-    let mut types = Vec::new();
+    let mut types = vec![];
     if let Some(ie) = inner_enum_type {
       types.push(ie);
     }
@@ -150,7 +150,7 @@ impl<'a> StringEnumOptimizer<'a> {
 
   fn build_known_enum(&self, name: &str, values: &[(String, Option<String>, bool)]) -> RustType {
     let mut seen_names = BTreeSet::new();
-    let mut variants = Vec::new();
+    let mut variants = vec![];
 
     for (value, description, deprecated) in values {
       let base_name = to_rust_type_name(value);

@@ -165,7 +165,7 @@ fn build_render_path_body(segments: &[PathSegment], query_params: &[QueryParamet
 fn build_path_expression(segments: &[PathSegment]) -> TokenStream {
   let mut format_string = String::new();
   let mut fallback_string = String::new();
-  let mut args = Vec::new();
+  let mut args = vec![];
 
   for (i, segment) in segments.iter().enumerate() {
     match segment {

@@ -225,7 +225,7 @@ impl<'a> StructConverter<'a> {
     let children = extract_discriminator_children(self.graph, schema, self.reachable_schemas.as_ref());
     let enum_name = to_rust_type_name(base_name);
 
-    let mut variants = Vec::new();
+    let mut variants = vec![];
     for (disc_value, child_schema_name) in children {
       let child_type_name = to_rust_type_name(&child_schema_name);
       let variant_name = child_type_name
@@ -278,7 +278,7 @@ impl<'a> StructConverter<'a> {
     let discriminator_mapping = schema_name.and_then(|name| self.graph.get_discriminator_mapping(name));
 
     let mut fields = Vec::with_capacity(num_properties);
-    let mut inline_types = Vec::new();
+    let mut inline_types = vec![];
 
     for (prop_name, prop_schema_ref) in &schema.properties {
       if exclude_field == Some(prop_name.as_str()) {
@@ -508,7 +508,7 @@ impl<'a> StructConverter<'a> {
   ) -> (FieldMetadata, Vec<SerdeAttribute>, Vec<String>, Option<String>) {
     let Some(disc_info) = discriminator_info else {
       let regex = metadata.regex_validation.clone();
-      return (metadata, serde_attrs, Vec::new(), regex);
+      return (metadata, serde_attrs, vec![], regex);
     };
 
     if let Some(ref disc_value) = disc_info.value {
@@ -530,7 +530,7 @@ impl<'a> StructConverter<'a> {
       (metadata, serde_attrs, extra_attrs, None)
     } else {
       let regex = metadata.regex_validation.clone();
-      (metadata, serde_attrs, Vec::new(), regex)
+      (metadata, serde_attrs, vec![], regex)
     }
   }
 
@@ -538,7 +538,7 @@ impl<'a> StructConverter<'a> {
     &self,
     schema: &ObjectSchema,
   ) -> ConversionResult<(Vec<SerdeAttribute>, Option<FieldDef>)> {
-    let mut serde_attrs = Vec::new();
+    let mut serde_attrs = vec![];
     let mut additional_field = None;
 
     if let Some(ref additional) = schema.additional_properties {
@@ -696,7 +696,7 @@ pub(crate) enum InlinePolicy {
 }
 
 pub(crate) fn container_outer_attrs(_fields: &[FieldDef]) -> Vec<String> {
-  Vec::new()
+  vec![]
 }
 
 pub(crate) fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {

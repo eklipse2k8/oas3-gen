@@ -193,7 +193,7 @@ fn generate_variants(variants: &[VariantDef]) -> Vec<TokenStream> {
 }
 
 fn generate_enum_serde_attrs(def: &EnumDef) -> TokenStream {
-  let mut attrs = Vec::new();
+  let mut attrs = vec![];
 
   if let Some(ref discriminator) = def.discriminator {
     attrs.push(quote! { tag = #discriminator });

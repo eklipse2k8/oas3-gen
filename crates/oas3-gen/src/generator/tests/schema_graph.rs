@@ -21,15 +21,15 @@ fn create_test_spec_with_schemas(schemas: BTreeMap<String, ObjectOrReference<Obj
       license: None,
       extensions: BTreeMap::default(),
     },
-    servers: Vec::new(),
+    servers: vec![],
     paths: Option::default(),
     webhooks: BTreeMap::default(),
     components: Some(Components {
       schemas,
       ..Default::default()
     }),
-    security: Vec::new(),
-    tags: Vec::new(),
+    security: vec![],
+    tags: vec![],
     external_docs: None,
     extensions: BTreeMap::default(),
   }

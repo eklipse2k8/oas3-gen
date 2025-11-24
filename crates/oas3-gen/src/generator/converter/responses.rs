@@ -43,7 +43,7 @@ pub(crate) fn extract_all_response_types(spec: &Spec, operation: &Operation) -> 
   let mut error_set = HashSet::new();
 
   let Some(responses) = operation.responses.as_ref() else {
-    return (Vec::new(), Vec::new());
+    return (vec![], vec![]);
   };
 
   for (code, resp_ref) in responses {
@@ -94,7 +94,7 @@ pub(crate) fn build_response_enum(
 ) -> Option<ResponseEnumDef> {
   let responses = operation.responses.as_ref()?;
 
-  let mut variants = Vec::new();
+  let mut variants = vec![];
   let base_name = to_rust_type_name(name);
 
   for (status_code, resp_ref) in responses {
