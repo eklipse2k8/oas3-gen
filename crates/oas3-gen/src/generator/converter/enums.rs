@@ -1,10 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  sync::Arc,
+};
 
 use anyhow::Context;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  CodegenConfig, ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
+  CodegenConfig, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
   string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::generator::{
@@ -39,21 +42,21 @@ pub(crate) struct NormalizedVariant {
 }
 
 #[derive(Clone)]
-pub(crate) struct EnumConverter<'a> {
-  graph: &'a SchemaGraph,
-  type_resolver: TypeResolver<'a>,
-  struct_converter: StructConverter<'a>,
+pub(crate) struct EnumConverter {
+  graph: Arc<SchemaGraph>,
+  type_resolver: TypeResolver,
+  struct_converter: StructConverter,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   pub(crate) no_helpers: bool,
 }
 
-impl<'a> EnumConverter<'a> {
+impl EnumConverter {
   /// Creates a new EnumConverter instance.
-  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>, config: CodegenConfig) -> Self {
-    let struct_converter = StructConverter::new(graph, type_resolver.clone(), None, FieldOptionalityPolicy::standard());
+  pub(crate) fn new(graph: &Arc<SchemaGraph>, type_resolver: TypeResolver, config: CodegenConfig) -> Self {
+    let struct_converter = StructConverter::new(graph.clone(), config, None, FieldOptionalityPolicy::standard());
     Self {
-      graph,
+      graph: graph.clone(),
       type_resolver,
       struct_converter,
       preserve_case_variants: config.preserve_case_variants,
@@ -107,9 +110,9 @@ impl<'a> EnumConverter<'a> {
     schema: &ObjectSchema,
     kind: UnionKind,
     mut cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<Vec<RustType>> {
+  ) -> anyhow::Result<Vec<RustType>> {
     if kind == UnionKind::AnyOf {
-      let optimizer = StringEnumOptimizer::new(self.graph, self.case_insensitive_enums);
+      let optimizer = StringEnumOptimizer::new(&self.graph, self.case_insensitive_enums);
       if let Some(result) = optimizer.try_convert(name, schema, cache.as_deref_mut()) {
         return Ok(result);
       }
@@ -218,16 +221,16 @@ impl VariantNameNormalizer {
 ///
 /// Handles reference variants, inline schemas, discriminator mapping,
 /// and generates nested types for complex variants with properties.
-struct UnionProcessor<'a, 'b> {
-  converter: &'b EnumConverter<'a>,
+struct UnionProcessor<'b> {
+  converter: &'b EnumConverter,
   name: &'b str,
   schema: &'b ObjectSchema,
   kind: UnionKind,
   discriminator_map: BTreeMap<String, String>,
 }
 
-impl<'a, 'b> UnionProcessor<'a, 'b> {
-  fn new(converter: &'b EnumConverter<'a>, name: &'b str, schema: &'b ObjectSchema, kind: UnionKind) -> Self {
+impl<'b> UnionProcessor<'b> {
+  fn new(converter: &'b EnumConverter, name: &'b str, schema: &'b ObjectSchema, kind: UnionKind) -> Self {
     let discriminator_map = if kind == UnionKind::OneOf {
       Self::build_discriminator_map(schema)
     } else {
@@ -257,7 +260,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       .unwrap_or_default()
   }
 
-  fn process(&self, mut cache: Option<&mut SharedSchemaCache>) -> ConversionResult<Vec<RustType>> {
+  fn process(&self, mut cache: Option<&mut SharedSchemaCache>) -> anyhow::Result<Vec<RustType>> {
     let variants_src = match self.kind {
       UnionKind::OneOf => &self.schema.one_of,
       UnionKind::AnyOf => &self.schema.any_of,
@@ -443,7 +446,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       .convert_struct(schema_name, schema, None, None)
       .ok()?;
 
-    match &struct_result.0 {
+    match &struct_result.result {
       RustType::Struct(s) => Some((
         s.derives.contains(&crate::generator::ast::DeriveTrait::Default),
         s.fields.clone(),
@@ -477,7 +480,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     resolved_schema: &ObjectSchema,
     seen_names: &mut BTreeSet<String>,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
+  ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
     if let Some(schema_name) = SchemaGraph::extract_ref_name_from_ref(variant_ref) {
       return Ok(self.create_ref_variant(&schema_name, resolved_schema, seen_names));
     }
@@ -521,7 +524,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     resolved_schema: &ObjectSchema,
     seen_names: &mut BTreeSet<String>,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
+  ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
     if let Some(const_value) = &resolved_schema.const_value {
       return Self::create_const_variant(const_value, resolved_schema, seen_names);
     }
@@ -537,11 +540,11 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       (VariantContent::Tuple(vec![type_ref]), vec![])
     } else {
       let struct_name_prefix = format!("{}{}", self.name, variant_name);
-      let (struct_def, mut inline_types) =
-        self
-          .converter
-          .struct_converter
-          .convert_struct(&struct_name_prefix, resolved_schema, None, cache)?;
+      let result = self
+        .converter
+        .struct_converter
+        .convert_struct(&struct_name_prefix, resolved_schema, None, cache)?;
+      let (struct_def, mut inline_types) = (result.result, result.inline_types);
 
       let struct_name = match &struct_def {
         RustType::Struct(s) => s.name.clone(),
@@ -567,7 +570,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     const_value: &serde_json::Value,
     resolved_schema: &ObjectSchema,
     seen_names: &mut BTreeSet<String>,
-  ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
+  ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
     let normalized = VariantNameNormalizer::normalize(const_value)
       .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
 

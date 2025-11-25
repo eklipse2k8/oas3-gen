@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use strum::Display;
 
@@ -179,10 +179,12 @@ impl Orchestrator {
       no_helpers: self.no_helpers,
     };
 
+    let graph = Arc::new(graph);
+
     let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy.clone(), config)
+      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy, config)
     } else {
-      SchemaConverter::new(&graph, self.optionality_policy.clone(), config)
+      SchemaConverter::new(&graph, self.optionality_policy, config)
     };
 
     let scanner = InlineTypeScanner::new(&graph);

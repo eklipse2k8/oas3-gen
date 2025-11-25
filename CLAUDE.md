@@ -197,6 +197,15 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - Example: Type names, field names, operation IDs, schema references
 - Don't use for arbitrary user content or large strings that won't be reused
 
+**Error Context with anyhow:**
+
+- Use `with_context()` instead of `map_err()` when adding context to errors
+- `with_context()` preserves the error chain and is more idiomatic with anyhow
+- Bad: `.map_err(|e| anyhow::anyhow!("Failed for '{}': {e}", name))?`
+- Good: `.with_context(|| format!("Failed for '{}'", name))?`
+- The underlying error is automatically chained; don't manually interpolate it into the message
+- Import `use anyhow::Context;` to access the `with_context()` method on `Result` types
+
 ### Design Principles and Code Quality
 
 **SOLID Principles:**

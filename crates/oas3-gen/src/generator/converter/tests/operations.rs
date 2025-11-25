@@ -10,7 +10,7 @@ use crate::{
   generator::{
     ast::{PathSegment, RustType, StructMethodKind},
     converter::{
-      ConversionResult, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
+      FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
       operations::OperationConverter,
     },
   },
@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[test]
-fn test_basic_get_operation() -> ConversionResult<()> {
+fn test_basic_get_operation() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -45,7 +45,7 @@ fn test_basic_get_operation() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_path_parameter() -> ConversionResult<()> {
+fn test_operation_with_path_parameter() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -113,7 +113,7 @@ fn test_operation_with_path_parameter() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_request_body_ref() -> ConversionResult<()> {
+fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
   let user_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
@@ -168,7 +168,7 @@ fn test_operation_with_request_body_ref() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_response_type() -> ConversionResult<()> {
+fn test_operation_with_response_type() -> anyhow::Result<()> {
   let user_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
@@ -216,7 +216,7 @@ fn test_operation_with_response_type() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_integer_path_parameter() -> ConversionResult<()> {
+fn test_operation_with_integer_path_parameter() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -273,7 +273,7 @@ fn test_operation_with_integer_path_parameter() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_int32_path_parameter() -> ConversionResult<()> {
+fn test_operation_with_int32_path_parameter() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -326,7 +326,7 @@ fn test_operation_with_int32_path_parameter() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_number_path_parameter() -> ConversionResult<()> {
+fn test_operation_with_number_path_parameter() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -379,7 +379,7 @@ fn test_operation_with_number_path_parameter() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_boolean_path_parameter() -> ConversionResult<()> {
+fn test_operation_with_boolean_path_parameter() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -431,7 +431,7 @@ fn test_operation_with_boolean_path_parameter() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_uuid_path_parameter() -> ConversionResult<()> {
+fn test_operation_with_uuid_path_parameter() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -484,7 +484,7 @@ fn test_operation_with_uuid_path_parameter() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_date_time_path_parameter() -> ConversionResult<()> {
+fn test_operation_with_date_time_path_parameter() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
@@ -540,7 +540,7 @@ fn test_operation_with_date_time_path_parameter() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_operation_with_multiple_path_parameters() -> ConversionResult<()> {
+fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::new());
   let spec = graph.spec().clone();
   let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());

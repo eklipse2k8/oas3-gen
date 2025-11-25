@@ -6,7 +6,7 @@ use oas3::{
 };
 
 use super::{
-  ConversionResult, SchemaConverter,
+  SchemaConverter,
   cache::SharedSchemaCache,
   constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT, SUCCESS_RESPONSE_PREFIX},
   status_codes::status_code_to_variant_name,
@@ -146,7 +146,7 @@ fn extract_response_schema_info(
   path: &str,
   status_code: &str,
   schema_cache: &mut SharedSchemaCache,
-) -> ConversionResult<(Option<TypeRef>, Option<String>)> {
+) -> anyhow::Result<(Option<TypeRef>, Option<String>)> {
   let Some((content_type, media_type)) = response.content.iter().next() else {
     return Ok((None, None));
   };
@@ -184,14 +184,14 @@ fn extract_response_schema_info(
         let base_name = naming::infer_name_from_context(inline_schema, path, status_code);
         let unique_name = schema_cache.make_unique_name(&base_name);
 
-        let (body_struct, nested_types) = schema_converter.convert_struct(
+        let result = schema_converter.convert_struct(
           &unique_name,
           inline_schema,
           Some(StructKind::Schema),
           Some(schema_cache),
         )?;
 
-        schema_cache.register_type(inline_schema, &unique_name, nested_types, body_struct)?
+        schema_cache.register_type(inline_schema, &unique_name, result.inline_types, result.result)?
       };
 
       Ok((Some(TypeRef::new(rust_type_name)), Some(content_type.clone())))

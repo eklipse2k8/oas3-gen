@@ -6,7 +6,7 @@ use oas3::{
 use serde_json::Value;
 
 use super::{
-  ConversionResult, SchemaConverter, TypeUsageRecorder,
+  SchemaConverter, TypeUsageRecorder,
   cache::SharedSchemaCache,
   constants::{
     BODY_FIELD_NAME, REQUEST_BODY_SUFFIX, REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_SUFFIX,
@@ -54,12 +54,12 @@ struct ProcessingContext<'a> {
 /// Handles generation of request parameter structs, request body types,
 /// and response enums/structs for each operation.
 pub(crate) struct OperationConverter<'a> {
-  schema_converter: &'a SchemaConverter<'a>,
+  schema_converter: &'a SchemaConverter,
   spec: &'a Spec,
 }
 
 impl<'a> OperationConverter<'a> {
-  pub(crate) fn new(schema_converter: &'a SchemaConverter<'a>, spec: &'a Spec) -> Self {
+  pub(crate) fn new(schema_converter: &'a SchemaConverter, spec: &'a Spec) -> Self {
     Self { schema_converter, spec }
   }
 
@@ -98,7 +98,7 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
-  ) -> ConversionResult<(Vec<RustType>, OperationInfo)> {
+  ) -> anyhow::Result<(Vec<RustType>, OperationInfo)> {
     let base_name = to_rust_type_name(operation_id);
     let stable_id = stable_id.to_string();
 
@@ -208,7 +208,7 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
     body_type: Option<TypeRef>,
     response_enum_info: Option<&(String, ResponseEnumDef)>,
-  ) -> ConversionResult<(StructDef, Vec<String>, Vec<OperationParameter>)> {
+  ) -> anyhow::Result<(StructDef, Vec<String>, Vec<OperationParameter>)> {
     let mut warnings = vec![];
     let mut fields = vec![];
     let mut param_mappings = ParameterMappings::default();
@@ -269,7 +269,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
-  ) -> ConversionResult<RequestBodyInfo> {
+  ) -> anyhow::Result<RequestBodyInfo> {
     let mut generated_types = vec![];
     let mut type_usage = vec![];
 
@@ -344,7 +344,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     description: Option<&String>,
     ctx: &mut ProcessingContext,
-  ) -> ConversionResult<Option<TypeRef>> {
+  ) -> anyhow::Result<Option<TypeRef>> {
     let rust_type_name = to_rust_type_name(type_name);
 
     match schema_ref {
@@ -361,7 +361,7 @@ impl<'a> OperationConverter<'a> {
           let base_name = naming::infer_name_from_context(inline_schema, path, "RequestBody");
           let unique_name = ctx.schema_cache.make_unique_name(&base_name);
 
-          let (body_struct, nested_types) = self.schema_converter.convert_struct(
+          let result = self.schema_converter.convert_struct(
             &unique_name,
             inline_schema,
             Some(StructKind::RequestBody),
@@ -370,7 +370,7 @@ impl<'a> OperationConverter<'a> {
 
           ctx
             .schema_cache
-            .register_type(inline_schema, &unique_name, nested_types, body_struct)?
+            .register_type(inline_schema, &unique_name, result.inline_types, result.result)?
         };
 
         ctx.type_usage.push(final_type_name.clone());
@@ -447,7 +447,7 @@ impl<'a> OperationConverter<'a> {
     &self,
     param: &Parameter,
     warnings: &mut Vec<String>,
-  ) -> ConversionResult<(FieldDef, OperationParameter)> {
+  ) -> anyhow::Result<(FieldDef, OperationParameter)> {
     let (rust_type, validation_attrs, default_value) = self.extract_parameter_type_and_validation(param, warnings)?;
 
     let is_required = param.required.unwrap_or(false);
@@ -494,7 +494,7 @@ impl<'a> OperationConverter<'a> {
     &self,
     param: &Parameter,
     warnings: &mut Vec<String>,
-  ) -> ConversionResult<ParameterValidation> {
+  ) -> anyhow::Result<ParameterValidation> {
     let Some(schema_ref) = param.schema.as_ref() else {
       warnings.push(format!(
         "Parameter '{}' has no schema, defaulting to String.",

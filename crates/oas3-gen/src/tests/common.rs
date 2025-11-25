@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use oas3::spec::{ObjectSchema, Spec};
 use serde_json::json;
@@ -21,12 +21,12 @@ pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec 
   serde_json::from_value(spec_json).unwrap()
 }
 
-pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> SchemaGraph {
+pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<SchemaGraph> {
   let spec = create_test_spec(schemas);
   let (mut graph, _) = SchemaGraph::new(spec);
   graph.build_dependencies();
   graph.detect_cycles();
-  graph
+  Arc::new(graph)
 }
 
 pub(crate) fn default_config() -> CodegenConfig {

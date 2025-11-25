@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, f64::consts::PI};
+use std::{collections::BTreeMap, f64::consts::PI, sync::Arc};
 
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
@@ -7,7 +7,7 @@ use crate::{
   generator::{
     ast::{DeriveTrait, EnumMethodKind, RustType, SerdeAttribute},
     converter::{
-      ConversionResult, FieldOptionalityPolicy, SchemaConverter,
+      FieldOptionalityPolicy, SchemaConverter,
       enums::{CollisionStrategy, EnumConverter, VariantNameNormalizer},
       string_enum_optimizer::StringEnumOptimizer,
       type_resolver::TypeResolver,
@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[test]
-fn test_simple_string_enum() -> ConversionResult<()> {
+fn test_simple_string_enum() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
     enum_values: vec![json!("value1"), json!("value2")],
@@ -41,7 +41,7 @@ fn test_simple_string_enum() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_oneof_with_discriminator_has_rename_attrs() -> ConversionResult<()> {
+fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
   let variant1 = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
@@ -119,7 +119,7 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_anyof_without_discriminator_has_no_rename_attrs() -> ConversionResult<()> {
+fn test_anyof_without_discriminator_has_no_rename_attrs() -> anyhow::Result<()> {
   let variant1 = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
@@ -181,7 +181,7 @@ fn test_anyof_without_discriminator_has_no_rename_attrs() -> ConversionResult<()
 }
 
 #[test]
-fn test_anyof_with_discriminator_no_untagged() -> ConversionResult<()> {
+fn test_anyof_with_discriminator_no_untagged() -> anyhow::Result<()> {
   let variant1 = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
@@ -250,7 +250,7 @@ fn test_anyof_with_discriminator_no_untagged() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_integer_enum_values() -> ConversionResult<()> {
+fn test_integer_enum_values() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
     enum_values: vec![json!(0), json!(1), json!(42), json!(-5)],
@@ -295,7 +295,7 @@ fn test_integer_enum_values() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_float_enum_values() -> ConversionResult<()> {
+fn test_float_enum_values() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
     enum_values: vec![json!(0.0), json!(1.5), json!(PI), json!(-2.5)],
@@ -328,7 +328,7 @@ fn test_float_enum_values() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_boolean_enum_values() -> ConversionResult<()> {
+fn test_boolean_enum_values() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
     enum_values: vec![json!(true), json!(false)],
@@ -361,7 +361,7 @@ fn test_boolean_enum_values() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_mixed_type_enum_values() -> ConversionResult<()> {
+fn test_mixed_type_enum_values() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     enum_values: vec![json!("string"), json!(42), json!(1.5), json!(true)],
     ..Default::default()
@@ -385,7 +385,7 @@ fn test_mixed_type_enum_values() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_empty_enum_converts_to_string() -> ConversionResult<()> {
+fn test_empty_enum_converts_to_string() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
     enum_values: vec![],
@@ -406,7 +406,7 @@ fn test_empty_enum_converts_to_string() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_case_insensitive_duplicates_with_deduplication() -> ConversionResult<()> {
+fn test_case_insensitive_duplicates_with_deduplication() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
     enum_values: vec![json!("ITEM"), json!("item"), json!("SELECT"), json!("select")],
@@ -449,7 +449,7 @@ fn test_case_insensitive_duplicates_with_deduplication() -> ConversionResult<()>
 }
 
 #[test]
-fn test_case_insensitive_duplicates_with_preservation() -> ConversionResult<()> {
+fn test_case_insensitive_duplicates_with_preservation() -> anyhow::Result<()> {
   let enum_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
     enum_values: vec![json!("ITEM"), json!("item"), json!("SELECT"), json!("select")],
@@ -568,6 +568,7 @@ fn test_preserve_strategy_with_multiple_collisions() {
   };
 
   let (graph, _) = SchemaGraph::new(spec);
+  let graph = Arc::new(graph);
   let type_resolver = TypeResolver::new(&graph, default_config());
   let converter = EnumConverter::new(&graph, type_resolver, config_with_preserve_case());
 
@@ -613,6 +614,7 @@ fn test_string_enum_optimizer_detects_freeform_pattern() {
   };
 
   let (graph, _) = SchemaGraph::new(spec);
+  let graph = Arc::new(graph);
   let optimizer = StringEnumOptimizer::new(&graph, false);
 
   let schema = ObjectSchema {
@@ -679,6 +681,7 @@ fn test_string_enum_optimizer_rejects_no_freeform() {
   };
 
   let (graph, _) = SchemaGraph::new(spec);
+  let graph = Arc::new(graph);
   let optimizer = StringEnumOptimizer::new(&graph, false);
 
   let schema = ObjectSchema {
@@ -702,7 +705,7 @@ fn test_string_enum_optimizer_rejects_no_freeform() {
 }
 
 #[test]
-fn test_anyof_with_const_generates_unit_variant() -> ConversionResult<()> {
+fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
   let text_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
@@ -861,7 +864,7 @@ fn test_openapi_response_format_serialization() {
 }
 
 #[test]
-fn test_enum_helper_methods_generation() -> ConversionResult<()> {
+fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
   let simple_struct_schema = ObjectSchema {
     title: Some("Simple".to_string()),
     properties: BTreeMap::from([(
@@ -971,7 +974,7 @@ fn test_enum_helper_methods_generation() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_enum_helper_methods_disabled_flag() -> ConversionResult<()> {
+fn test_enum_helper_methods_disabled_flag() -> anyhow::Result<()> {
   let simple_struct_schema = ObjectSchema {
     title: Some("Simple".to_string()),
     properties: BTreeMap::from([(
@@ -1004,7 +1007,7 @@ fn test_enum_helper_methods_disabled_flag() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_enum_helper_naming_stripping() -> ConversionResult<()> {
+fn test_enum_helper_naming_stripping() -> anyhow::Result<()> {
   let simple_schema = ObjectSchema {
     title: Some("ResponseFormatText".to_string()),
     properties: BTreeMap::from([(
@@ -1038,7 +1041,7 @@ fn test_enum_helper_naming_stripping() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_enum_helper_method_name_collision() -> ConversionResult<()> {
+fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
   let schema1 = ObjectSchema {
     title: Some("StatusActive".to_string()),
     properties: BTreeMap::from([(

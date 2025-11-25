@@ -5,13 +5,13 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use crate::{
   generator::{
     ast::RustType,
-    converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+    converter::{FieldOptionalityPolicy, SchemaConverter},
   },
   tests::common::{create_test_graph, default_config},
 };
 
 #[test]
-fn test_array_type_alias_with_ref_items() -> ConversionResult<()> {
+fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
   let pet_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([
@@ -62,7 +62,7 @@ fn test_array_type_alias_with_ref_items() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_array_type_alias_with_primitive_items() -> ConversionResult<()> {
+fn test_array_type_alias_with_primitive_items() -> anyhow::Result<()> {
   let strings_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
@@ -89,7 +89,7 @@ fn test_array_type_alias_with_primitive_items() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_primitive_type_alias() -> ConversionResult<()> {
+fn test_primitive_type_alias() -> anyhow::Result<()> {
   let identifier_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
     ..Default::default()
@@ -110,7 +110,7 @@ fn test_primitive_type_alias() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_integer_type_alias_with_format() -> ConversionResult<()> {
+fn test_integer_type_alias_with_format() -> anyhow::Result<()> {
   let timestamp_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
     format: Some("int64".to_string()),
@@ -132,7 +132,7 @@ fn test_integer_type_alias_with_format() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_array_with_no_items_falls_back() -> ConversionResult<()> {
+fn test_array_with_no_items_falls_back() -> anyhow::Result<()> {
   let untyped_array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: None,
@@ -154,7 +154,7 @@ fn test_array_with_no_items_falls_back() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_nested_array_type_alias() -> ConversionResult<()> {
+fn test_nested_array_type_alias() -> anyhow::Result<()> {
   let matrix_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(oas3::spec::Schema::Object(Box::new(

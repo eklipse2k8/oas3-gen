@@ -1,4 +1,5 @@
 pub(crate) mod cache;
+mod common;
 pub(crate) mod constants;
 mod enums;
 mod field_optionality;
@@ -13,8 +14,12 @@ mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
 
-use std::collections::{BTreeSet, HashSet};
+use std::{
+  collections::{BTreeSet, HashSet},
+  sync::Arc,
+};
 
+pub(crate) use common::{ConversionOutput, SchemaExt};
 pub(crate) use field_optionality::FieldOptionalityPolicy;
 use oas3::spec::ObjectSchema;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
@@ -25,8 +30,6 @@ use super::{
   schema_graph::SchemaGraph,
 };
 use crate::generator::naming::identifiers::to_rust_type_name;
-
-pub(crate) type ConversionResult<T> = anyhow::Result<T>;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CodegenConfig {
@@ -39,21 +42,25 @@ pub(crate) struct CodegenConfig {
 ///
 /// Coordinates `StructConverter`, `EnumConverter`, and `TypeResolver` to transform
 /// `ObjectSchema` definitions into `RustType` definitions (structs, enums, aliases).
-pub(crate) struct SchemaConverter<'a> {
-  type_resolver: TypeResolver<'a>,
-  struct_converter: StructConverter<'a>,
-  enum_converter: EnumConverter<'a>,
+pub(crate) struct SchemaConverter {
+  type_resolver: TypeResolver,
+  struct_converter: StructConverter,
+  enum_converter: EnumConverter,
   cached_schema_names: HashSet<String>,
 }
 
-impl<'a> SchemaConverter<'a> {
+impl SchemaConverter {
   /// Creates a new `SchemaConverter` with standard configuration.
-  pub(crate) fn new(graph: &'a SchemaGraph, optionality_policy: FieldOptionalityPolicy, config: CodegenConfig) -> Self {
+  pub(crate) fn new(
+    graph: &Arc<SchemaGraph>,
+    optionality_policy: FieldOptionalityPolicy,
+    config: CodegenConfig,
+  ) -> Self {
     let type_resolver = TypeResolver::new(graph, config);
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(graph, type_resolver.clone(), None, optionality_policy),
+      struct_converter: StructConverter::new(graph.clone(), config, None, optionality_policy),
       enum_converter: EnumConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
@@ -63,7 +70,7 @@ impl<'a> SchemaConverter<'a> {
   ///
   /// Useful for generating only a subset of the API surface (e.g., specific tags).
   pub(crate) fn new_with_filter(
-    graph: &'a SchemaGraph,
+    graph: &Arc<SchemaGraph>,
     reachable_schemas: BTreeSet<String>,
     optionality_policy: FieldOptionalityPolicy,
     config: CodegenConfig,
@@ -73,9 +80,9 @@ impl<'a> SchemaConverter<'a> {
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(
-        graph,
-        type_resolver.clone(),
-        Some(reachable_schemas),
+        graph.clone(),
+        config,
+        Some(Arc::new(reachable_schemas)),
         optionality_policy,
       ),
       enum_converter: EnumConverter::new(graph, type_resolver, config),
@@ -91,7 +98,7 @@ impl<'a> SchemaConverter<'a> {
     name: &str,
     schema: &ObjectSchema,
     mut cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<Vec<RustType>> {
+  ) -> anyhow::Result<Vec<RustType>> {
     if !schema.all_of.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
       return self
@@ -126,12 +133,12 @@ impl<'a> SchemaConverter<'a> {
 
     if !schema.properties.is_empty() || schema.additional_properties.is_some() {
       let cache_reborrow = cache;
-      let (main_type, inline_types) = self
+      let result = self
         .struct_converter
         .convert_struct(name, schema, None, cache_reborrow)?;
       return self
         .struct_converter
-        .finalize_struct_types(name, schema, main_type, inline_types);
+        .finalize_struct_types(name, schema, result.result, result.inline_types);
     }
 
     let type_ref = self.type_resolver.schema_to_type_ref(schema)?;
@@ -151,7 +158,7 @@ impl<'a> SchemaConverter<'a> {
     schema: &ObjectSchema,
     kind: Option<StructKind>,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<(RustType, Vec<RustType>)> {
+  ) -> anyhow::Result<ConversionOutput<RustType>> {
     self.struct_converter.convert_struct(name, schema, kind, cache)
   }
 
