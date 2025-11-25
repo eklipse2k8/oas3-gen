@@ -5,24 +5,20 @@ use oas3::{
 };
 use serde_json::Value;
 
-use super::{
-  ConversionResult, SchemaConverter, TypeUsageRecorder,
-  cache::SharedSchemaCache,
-  constants::{
-    BODY_FIELD_NAME, REQUEST_BODY_SUFFIX, REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_SUFFIX,
-  },
-  metadata, path_renderer, responses,
-};
+use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
     DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
     RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
   },
   naming::{
+    constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
     identifiers::{to_rust_field_name, to_rust_type_name},
     inference as naming,
+    operations::{generate_unique_request_name, generate_unique_response_name},
+    responses as naming_responses,
   },
-  schema_graph::SchemaGraph,
+  schema_registry::SchemaRegistry,
 };
 
 type ParameterValidation = (TypeRef, Vec<ValidationAttribute>, Option<Value>);
@@ -34,6 +30,19 @@ struct RequestBodyInfo {
   field_name: Option<String>,
   optional: bool,
   content_type: Option<String>,
+}
+
+impl RequestBodyInfo {
+  fn empty(optional: bool) -> Self {
+    Self {
+      body_type: None,
+      generated_types: vec![],
+      type_usage: vec![],
+      field_name: None,
+      optional,
+      content_type: None,
+    }
+  }
 }
 
 #[derive(Default)]
@@ -54,35 +63,13 @@ struct ProcessingContext<'a> {
 /// Handles generation of request parameter structs, request body types,
 /// and response enums/structs for each operation.
 pub(crate) struct OperationConverter<'a> {
-  schema_converter: &'a SchemaConverter<'a>,
+  schema_converter: &'a SchemaConverter,
   spec: &'a Spec,
 }
 
 impl<'a> OperationConverter<'a> {
-  pub(crate) fn new(schema_converter: &'a SchemaConverter<'a>, spec: &'a Spec) -> Self {
+  pub(crate) fn new(schema_converter: &'a SchemaConverter, spec: &'a Spec) -> Self {
     Self { schema_converter, spec }
-  }
-
-  fn generate_unique_response_name(&self, base_name: &str) -> String {
-    let mut response_name = format!("{base_name}{RESPONSE_SUFFIX}");
-    let rust_response_name = to_rust_type_name(&response_name);
-
-    if self.schema_converter.is_schema_name(&rust_response_name) {
-      response_name = format!("{base_name}{RESPONSE_SUFFIX}{RESPONSE_ENUM_SUFFIX}");
-    }
-
-    response_name
-  }
-
-  fn generate_unique_request_name(&self, base_name: &str) -> String {
-    let mut request_name = format!("{base_name}{REQUEST_SUFFIX}");
-    let rust_request_name = to_rust_type_name(&request_name);
-
-    if self.schema_converter.is_schema_name(&rust_request_name) {
-      request_name = format!("{base_name}{REQUEST_SUFFIX}{REQUEST_PARAMS_SUFFIX}");
-    }
-
-    request_name
   }
 
   /// Converts an OpenAPI operation into a set of Rust types and metadata.
@@ -98,7 +85,7 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
-  ) -> ConversionResult<(Vec<RustType>, OperationInfo)> {
+  ) -> anyhow::Result<(Vec<RustType>, OperationInfo)> {
     let base_name = to_rust_type_name(operation_id);
     let stable_id = stable_id.to_string();
 
@@ -110,7 +97,7 @@ impl<'a> OperationConverter<'a> {
     usage.mark_request_iter(&body_info.type_usage);
 
     let mut response_enum_info = if operation.responses.is_some() {
-      let response_name = self.generate_unique_response_name(&base_name);
+      let response_name = generate_unique_response_name(&base_name, |name| self.schema_converter.is_schema_name(name));
       responses::build_response_enum(
         self.schema_converter,
         self.spec,
@@ -125,7 +112,7 @@ impl<'a> OperationConverter<'a> {
       None
     };
 
-    let request_name = self.generate_unique_request_name(&base_name);
+    let request_name = generate_unique_request_name(&base_name, |name| self.schema_converter.is_schema_name(name));
     let (request_struct, request_warnings, parameter_metadata) = self.build_request_struct(
       &request_name,
       path,
@@ -163,14 +150,14 @@ impl<'a> OperationConverter<'a> {
       None
     };
 
-    let response_type_name = responses::extract_response_type_name(self.spec, operation);
-    let response_content_type = responses::extract_response_content_type(self.spec, operation);
-    let (success_response_types, error_response_types) = responses::extract_all_response_types(self.spec, operation);
+    let response_type_name = naming_responses::extract_response_type_name(self.spec, operation);
+    let response_content_type = naming_responses::extract_response_content_type(self.spec, operation);
+    let response_types = naming_responses::extract_all_response_types(self.spec, operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
     }
-    usage.mark_response_iter(&success_response_types);
-    usage.mark_response_iter(&error_response_types);
+    usage.mark_response_iter(&response_types.success);
+    usage.mark_response_iter(&response_types.error);
 
     let body_metadata = body_info.field_name.as_ref().map(|field_name| OperationBody {
       field_name: field_name.clone(),
@@ -191,8 +178,8 @@ impl<'a> OperationConverter<'a> {
       response_type: response_type_name,
       response_enum: response_enum_name,
       response_content_type,
-      success_response_types,
-      error_response_types,
+      success_response_types: response_types.success,
+      error_response_types: response_types.error,
       warnings,
       parameters: parameter_metadata,
       body: body_metadata,
@@ -208,7 +195,7 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
     body_type: Option<TypeRef>,
     response_enum_info: Option<&(String, ResponseEnumDef)>,
-  ) -> ConversionResult<(StructDef, Vec<String>, Vec<OperationParameter>)> {
+  ) -> anyhow::Result<(StructDef, Vec<String>, Vec<OperationParameter>)> {
     let mut warnings = vec![];
     let mut fields = vec![];
     let mut param_mappings = ParameterMappings::default();
@@ -269,44 +256,23 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
-  ) -> ConversionResult<RequestBodyInfo> {
+  ) -> anyhow::Result<RequestBodyInfo> {
     let mut generated_types = vec![];
     let mut type_usage = vec![];
 
     let Some(body_ref) = operation.request_body.as_ref() else {
-      return Ok(RequestBodyInfo {
-        body_type: None,
-        generated_types,
-        type_usage,
-        field_name: None,
-        optional: true,
-        content_type: None,
-      });
+      return Ok(RequestBodyInfo::empty(true));
     };
 
     let body = body_ref.resolve(self.spec)?;
     let is_required = body.required.unwrap_or(false);
 
     let Some((_, media_type)) = body.content.iter().next() else {
-      return Ok(RequestBodyInfo {
-        body_type: None,
-        generated_types,
-        type_usage,
-        field_name: None,
-        optional: !is_required,
-        content_type: None,
-      });
+      return Ok(RequestBodyInfo::empty(!is_required));
     };
 
     let Some(schema_ref) = media_type.schema.as_ref() else {
-      return Ok(RequestBodyInfo {
-        body_type: None,
-        generated_types,
-        type_usage,
-        field_name: None,
-        optional: !is_required,
-        content_type: None,
-      });
+      return Ok(RequestBodyInfo::empty(!is_required));
     };
 
     let raw_body_type_name = format!("{base_name}{REQUEST_BODY_SUFFIX}");
@@ -344,7 +310,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     description: Option<&String>,
     ctx: &mut ProcessingContext,
-  ) -> ConversionResult<Option<TypeRef>> {
+  ) -> anyhow::Result<Option<TypeRef>> {
     let rust_type_name = to_rust_type_name(type_name);
 
     match schema_ref {
@@ -361,7 +327,7 @@ impl<'a> OperationConverter<'a> {
           let base_name = naming::infer_name_from_context(inline_schema, path, "RequestBody");
           let unique_name = ctx.schema_cache.make_unique_name(&base_name);
 
-          let (body_struct, nested_types) = self.schema_converter.convert_struct(
+          let result = self.schema_converter.convert_struct(
             &unique_name,
             inline_schema,
             Some(StructKind::RequestBody),
@@ -370,7 +336,7 @@ impl<'a> OperationConverter<'a> {
 
           ctx
             .schema_cache
-            .register_type(inline_schema, &unique_name, nested_types, body_struct)?
+            .register_type(inline_schema, &unique_name, result.inline_types, result.result)?
         };
 
         ctx.type_usage.push(final_type_name.clone());
@@ -378,7 +344,7 @@ impl<'a> OperationConverter<'a> {
         Ok(Some(TypeRef::new(final_type_name)))
       }
       ObjectOrReference::Ref { ref_path, .. } => {
-        let Some(target_name) = SchemaGraph::extract_ref_name(ref_path) else {
+        let Some(target_name) = SchemaRegistry::extract_ref_name(ref_path) else {
           return Ok(None);
         };
         let target_rust_name = to_rust_type_name(&target_name);
@@ -398,10 +364,8 @@ impl<'a> OperationConverter<'a> {
   }
 
   fn create_body_field(&self, operation: &Operation, body_type: TypeRef) -> Option<FieldDef> {
-    #[allow(clippy::question_mark)]
-    let Some(body) = operation.request_body.as_ref().and_then(|r| r.resolve(self.spec).ok()) else {
-      return None;
-    };
+    let body_ref = operation.request_body.as_ref()?;
+    let body = body_ref.resolve(self.spec).ok()?;
     let is_required = body.required.unwrap_or(false);
 
     let docs = body
@@ -434,8 +398,8 @@ impl<'a> OperationConverter<'a> {
 
     for param_ref in &operation.parameters {
       if let Ok(param) = param_ref.resolve(self.spec) {
-        let key = (param.location, param.name.clone());
-        params.retain(|p| (p.location, p.name.clone()) != key);
+        let param_key = (param.location, param.name.clone());
+        params.retain(|p| (p.location, p.name.clone()) != param_key);
         params.push(param);
       }
     }
@@ -447,7 +411,7 @@ impl<'a> OperationConverter<'a> {
     &self,
     param: &Parameter,
     warnings: &mut Vec<String>,
-  ) -> ConversionResult<(FieldDef, OperationParameter)> {
+  ) -> anyhow::Result<(FieldDef, OperationParameter)> {
     let (rust_type, validation_attrs, default_value) = self.extract_parameter_type_and_validation(param, warnings)?;
 
     let is_required = param.required.unwrap_or(false);
@@ -494,7 +458,7 @@ impl<'a> OperationConverter<'a> {
     &self,
     param: &Parameter,
     warnings: &mut Vec<String>,
-  ) -> ConversionResult<ParameterValidation> {
+  ) -> anyhow::Result<ParameterValidation> {
     let Some(schema_ref) = param.schema.as_ref() else {
       warnings.push(format!(
         "Parameter '{}' has no schema, defaulting to String.",

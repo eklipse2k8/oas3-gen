@@ -1,19 +1,26 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  sync::Arc,
+};
 
 use anyhow::Context;
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  CodegenConfig, ConversionResult, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
+  CodegenConfig, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
   string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
-    EnumDef, EnumMethod, EnumMethodKind, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
-    default_enum_derives,
+    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, FieldDef, RustType, SerdeAttribute, TypeRef, VariantContent,
+    VariantDef, default_enum_derives,
   },
-  naming::{identifiers::to_rust_type_name, inference as naming},
-  schema_graph::SchemaGraph,
+  naming::{
+    identifiers::to_rust_type_name,
+    inference as naming,
+    variants::{VariantNameNormalizer, infer_variant_name, strip_common_affixes},
+  },
+  schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -30,30 +37,22 @@ pub(crate) enum CollisionStrategy {
   Deduplicate,
 }
 
-/// Holds the result of normalizing a schema value into a Rust identifier.
-pub(crate) struct NormalizedVariant {
-  /// The valid Rust identifier (e.g., "Value10_5").
-  pub(crate) name: String,
-  /// The original value string for serialization (e.g., "10.5").
-  pub(crate) rename_value: String,
-}
-
 #[derive(Clone)]
-pub(crate) struct EnumConverter<'a> {
-  graph: &'a SchemaGraph,
-  type_resolver: TypeResolver<'a>,
-  struct_converter: StructConverter<'a>,
+pub(crate) struct EnumConverter {
+  graph: Arc<SchemaRegistry>,
+  type_resolver: TypeResolver,
+  struct_converter: StructConverter,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   pub(crate) no_helpers: bool,
 }
 
-impl<'a> EnumConverter<'a> {
+impl EnumConverter {
   /// Creates a new EnumConverter instance.
-  pub(crate) fn new(graph: &'a SchemaGraph, type_resolver: TypeResolver<'a>, config: CodegenConfig) -> Self {
-    let struct_converter = StructConverter::new(graph, type_resolver.clone(), None, FieldOptionalityPolicy::standard());
+  pub(crate) fn new(graph: &Arc<SchemaRegistry>, type_resolver: TypeResolver, config: CodegenConfig) -> Self {
+    let struct_converter = StructConverter::new(graph.clone(), config, None, FieldOptionalityPolicy::standard());
     Self {
-      graph,
+      graph: graph.clone(),
       type_resolver,
       struct_converter,
       preserve_case_variants: config.preserve_case_variants,
@@ -76,9 +75,7 @@ impl<'a> EnumConverter<'a> {
       .collect();
     enum_values.sort();
 
-    if let Some(ref c) = cache
-      && c.is_enum_generated(&enum_values)
-    {
+    if cache.as_ref().is_some_and(|c| c.is_enum_generated(&enum_values)) {
       return None;
     }
 
@@ -90,9 +87,7 @@ impl<'a> EnumConverter<'a> {
 
     let enum_def = self.build_simple_enum(name, schema, strategy);
 
-    if let Some(c) = cache
-      && let RustType::Enum(ref e) = enum_def
-    {
+    if let (Some(c), RustType::Enum(e)) = (cache, &enum_def) {
       c.register_enum(enum_values, e.name.clone());
       c.mark_name_used(e.name.clone());
     }
@@ -107,15 +102,31 @@ impl<'a> EnumConverter<'a> {
     schema: &ObjectSchema,
     kind: UnionKind,
     mut cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<Vec<RustType>> {
+  ) -> anyhow::Result<Vec<RustType>> {
     if kind == UnionKind::AnyOf {
-      let optimizer = StringEnumOptimizer::new(self.graph, self.case_insensitive_enums);
+      let optimizer = StringEnumOptimizer::new(&self.graph, self.case_insensitive_enums);
       if let Some(result) = optimizer.try_convert(name, schema, cache.as_deref_mut()) {
         return Ok(result);
       }
     }
-    let processor = UnionProcessor::new(self, name, schema, kind);
-    let result = processor.process(cache.as_deref_mut())?;
+
+    let discriminator_map = if kind == UnionKind::OneOf {
+      schema
+        .discriminator
+        .as_ref()
+        .and_then(|d| d.mapping.as_ref())
+        .map(|mapping| {
+          mapping
+            .iter()
+            .filter_map(|(val, ref_path)| SchemaRegistry::extract_ref_name(ref_path).map(|name| (name, val.clone())))
+            .collect()
+        })
+        .unwrap_or_default()
+    } else {
+      BTreeMap::new()
+    };
+
+    let result = self.process_union(name, schema, kind, &discriminator_map, cache.as_deref_mut())?;
 
     if let Some(c) = cache
       && let Some(values) = naming::extract_enum_values(schema)
@@ -178,89 +189,18 @@ impl<'a> EnumConverter<'a> {
       deprecated: false,
     });
   }
-}
 
-/// Normalizes JSON values into valid Rust variant names.
-///
-/// Converts strings, numbers, and booleans into PascalCase identifiers
-/// suitable for enum variants, preserving original values for serde rename.
-pub(crate) struct VariantNameNormalizer;
-
-impl VariantNameNormalizer {
-  pub(crate) fn normalize(value: &serde_json::Value) -> Option<NormalizedVariant> {
-    if let Some(str_val) = value.as_str() {
-      Some(NormalizedVariant {
-        name: to_rust_type_name(str_val),
-        rename_value: str_val.to_string(),
-      })
-    } else if let Some(num_val) = value.as_i64() {
-      Some(NormalizedVariant {
-        name: format!("Value{num_val}"),
-        rename_value: num_val.to_string(),
-      })
-    } else if let Some(num_val) = value.as_f64() {
-      let raw_str = num_val.to_string();
-      let safe_name = raw_str.replace(['.', '-'], "_");
-      Some(NormalizedVariant {
-        name: format!("Value{safe_name}"),
-        rename_value: raw_str,
-      })
-    } else {
-      value.as_bool().map(|bool_val| NormalizedVariant {
-        name: if bool_val { "True".into() } else { "False".into() },
-        rename_value: bool_val.to_string(),
-      })
-    }
-  }
-}
-
-/// Processes union types (oneOf/anyOf) into Rust enum definitions.
-///
-/// Handles reference variants, inline schemas, discriminator mapping,
-/// and generates nested types for complex variants with properties.
-struct UnionProcessor<'a, 'b> {
-  converter: &'b EnumConverter<'a>,
-  name: &'b str,
-  schema: &'b ObjectSchema,
-  kind: UnionKind,
-  discriminator_map: BTreeMap<String, String>,
-}
-
-impl<'a, 'b> UnionProcessor<'a, 'b> {
-  fn new(converter: &'b EnumConverter<'a>, name: &'b str, schema: &'b ObjectSchema, kind: UnionKind) -> Self {
-    let discriminator_map = if kind == UnionKind::OneOf {
-      Self::build_discriminator_map(schema)
-    } else {
-      BTreeMap::new()
-    };
-
-    Self {
-      converter,
-      name,
-      schema,
-      kind,
-      discriminator_map,
-    }
-  }
-
-  fn build_discriminator_map(schema: &ObjectSchema) -> BTreeMap<String, String> {
-    schema
-      .discriminator
-      .as_ref()
-      .and_then(|d| d.mapping.as_ref())
-      .map(|mapping| {
-        mapping
-          .iter()
-          .filter_map(|(val, ref_path)| SchemaGraph::extract_ref_name(ref_path).map(|name| (name, val.clone())))
-          .collect()
-      })
-      .unwrap_or_default()
-  }
-
-  fn process(&self, mut cache: Option<&mut SharedSchemaCache>) -> ConversionResult<Vec<RustType>> {
-    let variants_src = match self.kind {
-      UnionKind::OneOf => &self.schema.one_of,
-      UnionKind::AnyOf => &self.schema.any_of,
+  fn process_union(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    kind: UnionKind,
+    discriminator_map: &BTreeMap<String, String>,
+    mut cache: Option<&mut SharedSchemaCache>,
+  ) -> anyhow::Result<Vec<RustType>> {
+    let variants_src = match kind {
+      UnionKind::OneOf => &schema.one_of,
+      UnionKind::AnyOf => &schema.any_of,
     };
 
     let mut inline_types = vec![];
@@ -269,7 +209,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
 
     for (i, variant_ref) in variants_src.iter().enumerate() {
       let resolved = variant_ref
-        .resolve(self.converter.graph.spec())
+        .resolve(self.graph.spec())
         .with_context(|| format!("Schema resolution failed for union variant {i}"))?;
 
       if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
@@ -277,7 +217,11 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       }
 
       let (variant, mut generated) =
-        self.process_single_variant(i, variant_ref, &resolved, &mut seen_names, cache.as_deref_mut())?;
+        if let Some(schema_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(variant_ref) {
+          self.create_ref_variant(&schema_name, &resolved, discriminator_map, &mut seen_names)
+        } else {
+          self.create_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
+        };
 
       variants.push(variant);
       inline_types.append(&mut generated);
@@ -285,19 +229,25 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
 
     strip_common_affixes(&mut variants);
 
-    let methods = if self.converter.no_helpers {
+    let methods = if self.no_helpers {
       vec![]
     } else {
-      self.generate_methods(&variants, &inline_types)
+      self.generate_methods(&variants, &inline_types, name)
     };
 
-    let main_enum = self.build_enum_def(variants, methods);
+    let main_enum = Self::build_union_enum_def(name, schema, kind, variants, methods);
     inline_types.push(main_enum);
 
     Ok(inline_types)
   }
 
-  fn generate_methods(&self, variants: &[VariantDef], inline_types: &[RustType]) -> Vec<EnumMethod> {
+  /// Generates helper methods for creating enum variants with default or single-parameter constructors.
+  ///
+  /// For each variant wrapping a struct with Default derive:
+  /// - If all fields are optional: generates simple constructor (e.g., `enum.variant_name()`)
+  /// - If exactly one field is required: generates parameterized constructor (e.g., `enum.variant_name(value)`)
+  /// - If multiple fields are required: skips method generation (too complex for helpers)
+  fn generate_methods(&self, variants: &[VariantDef], inline_types: &[RustType], enum_name: &str) -> Vec<EnumMethod> {
     struct EligibleVariant {
       variant_name: String,
       type_name: String,
@@ -306,7 +256,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       has_required_fields: bool,
     }
 
-    let enum_name = to_rust_type_name(self.name);
+    let enum_name = to_rust_type_name(enum_name);
 
     let struct_map: BTreeMap<_, _> = inline_types
       .iter()
@@ -332,9 +282,7 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
 
         let struct_info = if let Some(&struct_def) = struct_map.get(&type_name) {
           Some((
-            struct_def
-              .derives
-              .contains(&crate::generator::ast::DeriveTrait::Default),
+            struct_def.derives.contains(&DeriveTrait::Default),
             struct_def.fields.clone(),
             struct_def.docs.clone(),
           ))
@@ -424,12 +372,13 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       .collect()
   }
 
-  fn try_analyze_referenced_struct(
-    &self,
-    type_name: &str,
-  ) -> Option<(bool, Vec<crate::generator::ast::FieldDef>, Vec<String>)> {
+  /// Analyzes a referenced struct type to extract its Default derive status, fields, and documentation.
+  ///
+  /// This is used for generating helper methods when a variant wraps a referenced type (not inline).
+  /// Returns None if the type is not a struct or cannot be converted.
+  fn try_analyze_referenced_struct(&self, type_name: &str) -> Option<(bool, Vec<FieldDef>, Vec<String>)> {
     let schema_name = type_name.trim_start_matches("Box<").trim_end_matches('>');
-    let schema = self.converter.graph.get_schema(schema_name)?;
+    let schema = self.graph.get_schema(schema_name)?;
 
     if schema.schema_type != Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object))
       && schema.properties.is_empty()
@@ -438,14 +387,13 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     }
 
     let struct_result = self
-      .converter
       .struct_converter
       .convert_struct(schema_name, schema, None, None)
       .ok()?;
 
-    match &struct_result.0 {
+    match &struct_result.result {
       RustType::Struct(s) => Some((
-        s.derives.contains(&crate::generator::ast::DeriveTrait::Default),
+        s.derives.contains(&DeriveTrait::Default),
         s.fields.clone(),
         s.docs.clone(),
       )),
@@ -470,37 +418,24 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     }
   }
 
-  fn process_single_variant(
-    &self,
-    index: usize,
-    variant_ref: &ObjectOrReference<ObjectSchema>,
-    resolved_schema: &ObjectSchema,
-    seen_names: &mut BTreeSet<String>,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
-    if let Some(schema_name) = SchemaGraph::extract_ref_name_from_ref(variant_ref) {
-      return Ok(self.create_ref_variant(&schema_name, resolved_schema, seen_names));
-    }
-    self.create_inline_variant(index, resolved_schema, seen_names, cache)
-  }
-
   fn create_ref_variant(
     &self,
     schema_name: &str,
     resolved_schema: &ObjectSchema,
+    discriminator_map: &BTreeMap<String, String>,
     seen_names: &mut BTreeSet<String>,
   ) -> (VariantDef, Vec<RustType>) {
     let rust_type_name = to_rust_type_name(schema_name);
     let mut type_ref = TypeRef::new(&rust_type_name);
 
-    if self.converter.graph.is_cyclic(schema_name) {
+    if self.graph.is_cyclic(schema_name) {
       type_ref = type_ref.with_boxed();
     }
 
     let variant_name = naming::ensure_unique(&rust_type_name, seen_names);
 
     let mut serde_attrs = vec![];
-    if let Some(disc_value) = self.discriminator_map.get(schema_name) {
+    if let Some(disc_value) = discriminator_map.get(schema_name) {
       serde_attrs.push(SerdeAttribute::Rename(disc_value.clone()));
     }
 
@@ -519,11 +454,25 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     &self,
     index: usize,
     resolved_schema: &ObjectSchema,
+    enum_name: &str,
     seen_names: &mut BTreeSet<String>,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
+  ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
     if let Some(const_value) = &resolved_schema.const_value {
-      return Self::create_const_variant(const_value, resolved_schema, seen_names);
+      let normalized = VariantNameNormalizer::normalize(const_value)
+        .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
+
+      let variant_name = naming::ensure_unique(&normalized.name, seen_names);
+
+      let variant = VariantDef {
+        name: variant_name,
+        docs: metadata::extract_docs(resolved_schema.description.as_ref()),
+        content: VariantContent::Unit,
+        serde_attrs: vec![SerdeAttribute::Rename(normalized.rename_value)],
+        deprecated: resolved_schema.deprecated.unwrap_or(false),
+      };
+
+      return Ok((variant, vec![]));
     }
 
     let base_name = resolved_schema
@@ -533,15 +482,14 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     let variant_name = naming::ensure_unique(&base_name, seen_names);
 
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
-      let type_ref = self.converter.type_resolver.schema_to_type_ref(resolved_schema)?;
+      let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;
       (VariantContent::Tuple(vec![type_ref]), vec![])
     } else {
-      let struct_name_prefix = format!("{}{}", self.name, variant_name);
-      let (struct_def, mut inline_types) =
-        self
-          .converter
-          .struct_converter
-          .convert_struct(&struct_name_prefix, resolved_schema, None, cache)?;
+      let struct_name_prefix = format!("{enum_name}{variant_name}");
+      let result = self
+        .struct_converter
+        .convert_struct(&struct_name_prefix, resolved_schema, None, cache)?;
+      let (struct_def, mut inline_types) = (result.result, result.inline_types);
 
       let struct_name = match &struct_def {
         RustType::Struct(s) => s.name.clone(),
@@ -563,41 +511,26 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
     Ok((variant, generated_types))
   }
 
-  fn create_const_variant(
-    const_value: &serde_json::Value,
-    resolved_schema: &ObjectSchema,
-    seen_names: &mut BTreeSet<String>,
-  ) -> ConversionResult<(VariantDef, Vec<RustType>)> {
-    let normalized = VariantNameNormalizer::normalize(const_value)
-      .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
+  fn build_union_enum_def(
+    name: &str,
+    schema: &ObjectSchema,
+    kind: UnionKind,
+    variants: Vec<VariantDef>,
+    methods: Vec<EnumMethod>,
+  ) -> RustType {
+    let has_discriminator = schema.discriminator.is_some();
 
-    let variant_name = naming::ensure_unique(&normalized.name, seen_names);
-
-    let variant = VariantDef {
-      name: variant_name,
-      docs: metadata::extract_docs(resolved_schema.description.as_ref()),
-      content: VariantContent::Unit,
-      serde_attrs: vec![SerdeAttribute::Rename(normalized.rename_value)],
-      deprecated: resolved_schema.deprecated.unwrap_or(false),
-    };
-
-    Ok((variant, vec![]))
-  }
-
-  fn build_enum_def(&self, variants: Vec<VariantDef>, methods: Vec<EnumMethod>) -> RustType {
-    let has_discriminator = self.schema.discriminator.is_some();
-
-    let (serde_attrs, derives) = if self.kind == UnionKind::AnyOf && !has_discriminator {
+    let (serde_attrs, derives) = if kind == UnionKind::AnyOf && !has_discriminator {
       (vec![SerdeAttribute::Untagged], default_enum_derives(false))
     } else {
       (vec![], default_enum_derives(false))
     };
 
     RustType::Enum(EnumDef {
-      name: to_rust_type_name(self.name),
-      docs: metadata::extract_docs(self.schema.description.as_ref()),
+      name: to_rust_type_name(name),
+      docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
-      discriminator: self.schema.discriminator.as_ref().map(|d| d.property_name.clone()),
+      discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),
       derives,
       serde_attrs,
       outer_attrs: vec![],
@@ -605,111 +538,4 @@ impl<'a, 'b> UnionProcessor<'a, 'b> {
       methods,
     })
   }
-}
-
-/// Infers a variant name for an inline schema in a union.
-pub(crate) fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
-  if !schema.enum_values.is_empty() {
-    return "Enum".to_string();
-  }
-  if let Some(ref schema_type) = schema.schema_type {
-    match schema_type {
-      SchemaTypeSet::Single(typ) => match typ {
-        SchemaType::String => "String".to_string(),
-        SchemaType::Number => "Number".to_string(),
-        SchemaType::Integer => "Integer".to_string(),
-        SchemaType::Boolean => "Boolean".to_string(),
-        SchemaType::Array => "Array".to_string(),
-        SchemaType::Object => "Object".to_string(),
-        SchemaType::Null => "Null".to_string(),
-      },
-      SchemaTypeSet::Multiple(_) => "Mixed".to_string(),
-    }
-  } else {
-    format!("Variant{index}")
-  }
-}
-
-/// Strips common prefixes and suffixes from variant names to make them concise.
-///
-/// Useful for generated union variants that might share long names like
-/// `CreateUserResponse`, `UpdateUserResponse` -> `Create`, `Update`.
-pub(crate) fn strip_common_affixes(variants: &mut [VariantDef]) {
-  let variant_names: Vec<_> = variants.iter().map(|v| v.name.clone()).collect();
-  if variant_names.len() < 2 {
-    return;
-  }
-
-  let split_names: Vec<Vec<String>> = variant_names.iter().map(|n| split_pascal_case(n)).collect();
-
-  let common_prefix_len = find_common_prefix_len(&split_names);
-  let common_suffix_len = find_common_suffix_len(&split_names);
-
-  let mut stripped_names = vec![];
-  for words in &split_names {
-    let start = common_prefix_len;
-    let end = words.len().saturating_sub(common_suffix_len);
-    if start >= end {
-      stripped_names.push(words.join(""));
-    } else {
-      stripped_names.push(words[start..end].join(""));
-    }
-  }
-
-  let mut seen = BTreeSet::new();
-  if stripped_names.iter().any(|n| n.is_empty() || !seen.insert(n)) {
-    return;
-  }
-
-  for (variant, new_name) in variants.iter_mut().zip(stripped_names) {
-    variant.name = new_name;
-  }
-}
-
-fn find_common_prefix_len(split_names: &[Vec<String>]) -> usize {
-  let Some(first) = split_names.first() else {
-    return 0;
-  };
-  let mut len = 0;
-  'outer: for (i, word) in first.iter().enumerate() {
-    for other in &split_names[1..] {
-      if other.get(i) != Some(word) {
-        break 'outer;
-      }
-    }
-    len = i + 1;
-  }
-  len
-}
-
-fn find_common_suffix_len(split_names: &[Vec<String>]) -> usize {
-  let Some(first) = split_names.first() else {
-    return 0;
-  };
-  let mut len = 0;
-  'outer: for i in 1..=first.len() {
-    let word = &first[first.len() - i];
-    for other in &split_names[1..] {
-      if other.len() < i || &other[other.len() - i] != word {
-        break 'outer;
-      }
-    }
-    len = i;
-  }
-  len
-}
-
-fn split_pascal_case(name: &str) -> Vec<String> {
-  let mut words = vec![];
-  let mut current_word = String::new();
-  for (i, ch) in name.chars().enumerate() {
-    if ch.is_uppercase() && i > 0 && !current_word.is_empty() {
-      words.push(std::mem::take(&mut current_word));
-    }
-    current_word.push(ch);
-  }
-  if !current_word.is_empty() {
-    words.push(current_word);
-  }
-  words
 }

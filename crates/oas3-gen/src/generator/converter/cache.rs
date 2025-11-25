@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::ObjectSchema;
 
-use super::{ConversionResult, hashing};
+use super::hashing;
 use crate::generator::{
   ast::RustType,
   naming::{identifiers::to_rust_type_name, inference as naming},
@@ -44,18 +44,18 @@ impl SharedSchemaCache {
   }
 
   /// Retrieves a cached type name for a schema, if it exists.
-  pub(crate) fn get_type_name(&self, schema: &ObjectSchema) -> ConversionResult<Option<String>> {
+  pub(crate) fn get_type_name(&self, schema: &ObjectSchema) -> anyhow::Result<Option<String>> {
     let schema_hash = hashing::hash_schema(schema)?;
     Ok(self.schema_to_type.get(&schema_hash).cloned())
   }
 
   /// Retrieves a cached name for an enum based on its values.
   pub(crate) fn get_enum_name(&self, values: &[String]) -> Option<String> {
-    if let Some(name) = self.enum_to_type.get(values) {
-      Some(name.clone())
-    } else {
-      self.precomputed_enum_names.get(values).cloned()
-    }
+    self
+      .enum_to_type
+      .get(values)
+      .or_else(|| self.precomputed_enum_names.get(values))
+      .cloned()
   }
 
   /// Checks if an enum with the given values has already been generated.
@@ -74,7 +74,7 @@ impl SharedSchemaCache {
   }
 
   /// Gets a preferred name for a schema, using precomputed names or generating a unique one.
-  pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> ConversionResult<String> {
+  pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> anyhow::Result<String> {
     let schema_hash = hashing::hash_schema(schema)?;
     if let Some(name) = self.precomputed_names.get(&schema_hash) {
       return Ok(name.clone());
@@ -91,7 +91,7 @@ impl SharedSchemaCache {
     base_name: &str,
     mut nested_types: Vec<RustType>,
     type_def: RustType,
-  ) -> ConversionResult<String> {
+  ) -> anyhow::Result<String> {
     let schema_hash = hashing::hash_schema(schema)?;
 
     if !naming::is_relaxed_enum_pattern(schema)

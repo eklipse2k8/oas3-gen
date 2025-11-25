@@ -197,6 +197,15 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - Example: Type names, field names, operation IDs, schema references
 - Don't use for arbitrary user content or large strings that won't be reused
 
+**Error Context with anyhow:**
+
+- Use `with_context()` instead of `map_err()` when adding context to errors
+- `with_context()` preserves the error chain and is more idiomatic with anyhow
+- Bad: `.map_err(|e| anyhow::anyhow!("Failed for '{}': {e}", name))?`
+- Good: `.with_context(|| format!("Failed for '{}'", name))?`
+- The underlying error is automatically chained; don't manually interpolate it into the message
+- Import `use anyhow::Context;` to access the `with_context()` method on `Result` types
+
 ### Design Principles and Code Quality
 
 **SOLID Principles:**
@@ -293,6 +302,15 @@ cargo test
 ```
 
 Note: Use `cargo test` without `--lib` to test the entire workspace. Using `cargo test --lib` only tests the oas3-gen-support library crate.
+
+### Code Coverage
+
+```bash
+# Generate code coverage report in Markdown format
+cargo tarpaulin --bins --skip-clean -o Markdown
+```
+
+This command generates a `tarpaulin-report.md` file with detailed coverage statistics. View the report to identify untested code paths, then delete the file when finished.
 
 ### Linting (non-destructive)
 
@@ -448,7 +466,7 @@ crates/
 **Key Files:**
 
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator
-- [schema_graph.rs](crates/oas3-gen/src/generator/schema_graph.rs): Dependency and cycle management
+- [schema_graph.rs](crates/oas3-gen/src/generator/schema_registry.rs): Dependency and cycle management
 - [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
 - [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
 - [cache.rs](crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching for performance

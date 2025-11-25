@@ -4,13 +4,11 @@ use json_canon::to_string as to_canonical_json;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
-use super::ConversionResult;
-
 /// Computes a deterministic hash of an `ObjectSchema`.
 ///
 /// Used for caching generated types to avoid duplication.
 /// Normalizes fields like `required`, `type`, `enum` to ensure consistent hashing.
-pub(crate) fn hash_schema(schema: &ObjectSchema) -> ConversionResult<String> {
+pub(crate) fn hash_schema(schema: &ObjectSchema) -> anyhow::Result<String> {
   let mut value = serde_json::to_value(schema).context("Failed to serialize schema for hashing")?;
 
   normalize_schema_semantics(&mut value);

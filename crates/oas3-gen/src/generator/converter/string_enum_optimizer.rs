@@ -6,7 +6,7 @@ use super::{cache::SharedSchemaCache, metadata};
 use crate::generator::{
   ast::{EnumDef, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
   naming::{identifiers::to_rust_type_name, inference as naming},
-  schema_graph::SchemaGraph,
+  schema_registry::SchemaRegistry,
 };
 
 /// Optimizes anyOf unions containing string enums and a freeform string.
@@ -15,12 +15,12 @@ use crate::generator::{
 /// and generates a two-variant enum: Known(KnownEnum) | Other(String).
 /// This provides type safety for known values while accepting unknown ones.
 pub(crate) struct StringEnumOptimizer<'a> {
-  graph: &'a SchemaGraph,
+  graph: &'a SchemaRegistry,
   case_insensitive: bool,
 }
 
 impl<'a> StringEnumOptimizer<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph, case_insensitive: bool) -> Self {
+  pub(crate) fn new(graph: &'a SchemaRegistry, case_insensitive: bool) -> Self {
     Self {
       graph,
       case_insensitive,

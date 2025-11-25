@@ -1,0 +1,11 @@
+pub const REQUEST_SUFFIX: &str = "Request";
+pub const REQUEST_BODY_SUFFIX: &str = "RequestBody";
+pub const RESPONSE_SUFFIX: &str = "Response";
+pub const REQUEST_PARAMS_SUFFIX: &str = "Params";
+pub const RESPONSE_ENUM_SUFFIX: &str = "Enum";
+pub const DISCRIMINATED_BASE_SUFFIX: &str = "Base";
+pub const MERGED_SCHEMA_CACHE_SUFFIX: &str = "_merged";
+pub const RESPONSE_PREFIX: &str = "Response";
+pub const BODY_FIELD_NAME: &str = "body";
+pub const DEFAULT_RESPONSE_VARIANT: &str = "Unknown";
+pub const DEFAULT_RESPONSE_DESCRIPTION: &str = "Unknown response";

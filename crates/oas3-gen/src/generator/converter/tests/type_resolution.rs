@@ -1,12 +1,12 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::{
   generator::{
-    converter::type_resolver::{SchemaExt, TypeResolver},
-    schema_graph::SchemaGraph,
+    converter::{SchemaExt, type_resolver::TypeResolver},
+    schema_registry::SchemaRegistry,
   },
   tests::common::{create_test_graph, default_config},
 };
@@ -283,7 +283,7 @@ fn test_array_with_ref_items() {
   assert_eq!(result.to_rust_type(), "Vec<CustomType>");
 }
 
-fn create_empty_test_graph() -> SchemaGraph {
+fn create_empty_test_graph() -> Arc<SchemaRegistry> {
   let spec = oas3::Spec {
     openapi: "3.0.0".to_string(),
     info: oas3::spec::Info {
@@ -298,15 +298,16 @@ fn create_empty_test_graph() -> SchemaGraph {
     },
     servers: vec![],
     paths: None,
-    webhooks: BTreeMap::new(),
+    webhooks: BTreeMap::default(),
     components: None,
     security: vec![],
     tags: vec![],
     external_docs: None,
-    extensions: BTreeMap::new(),
+    extensions: BTreeMap::default(),
   };
-  let (graph, _) = SchemaGraph::new(spec);
-  graph
+
+  let (graph, _) = SchemaRegistry::new(spec);
+  Arc::new(graph)
 }
 
 #[test]

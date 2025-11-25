@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use strum::Display;
 
@@ -12,7 +12,7 @@ use crate::generator::{
   },
   naming::inference::InlineTypeScanner,
   operation_registry::OperationRegistry,
-  schema_graph::SchemaGraph,
+  schema_registry::SchemaRegistry,
 };
 
 const OAS3_GEN_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -156,7 +156,7 @@ impl Orchestrator {
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
-    let (mut graph, mut warnings) = SchemaGraph::new(self.spec.clone());
+    let (mut graph, mut warnings) = SchemaRegistry::new(self.spec.clone());
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
@@ -179,10 +179,12 @@ impl Orchestrator {
       no_helpers: self.no_helpers,
     };
 
+    let graph = Arc::new(graph);
+
     let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy.clone(), config)
+      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy, config)
     } else {
-      SchemaConverter::new(&graph, self.optionality_policy.clone(), config)
+      SchemaConverter::new(&graph, self.optionality_policy, config)
     };
 
     let scanner = InlineTypeScanner::new(&graph);
@@ -248,8 +250,25 @@ impl Orchestrator {
     }
   }
 
+  /// Converts all schemas from the OpenAPI spec to Rust types.
+  ///
+  /// Processing order: Enums are converted before other schema types to ensure deterministic
+  /// code generation. This ordering prevents issues where enum types might be referenced
+  /// before they are defined, and ensures generated code is stable across multiple runs.
+  ///
+  /// Algorithm:
+  /// 1. Collect all schema names from the graph
+  /// 2. Sort schemas by `is_none_or(|s| s.enum_values.is_empty())` to place enums first:
+  ///    - Schemas with non-empty `enum_values` sort as `false` (enums first)
+  ///    - Schemas with empty `enum_values` sort as `true` (non-enums after)
+  ///    - Missing schemas sort as `true` (last)
+  /// 3. Process each schema in order, applying operation reachability filtering if enabled
+  /// 4. Collect conversion errors as warnings rather than failing fast
+  ///
+  /// The `operation_reachable` filter, when provided, limits conversion to schemas that are
+  /// referenced by at least one operation, reducing generated code size.
   fn convert_all_schemas(
-    graph: &SchemaGraph,
+    graph: &SchemaRegistry,
     schema_converter: &SchemaConverter,
     operation_reachable: Option<&std::collections::BTreeSet<String>>,
     cache: &mut SharedSchemaCache,
@@ -257,43 +276,28 @@ impl Orchestrator {
     let mut rust_types = vec![];
     let mut warnings = vec![];
 
-    for schema_name in graph.schema_names() {
-      if let Some(filter) = operation_reachable
-        && !filter.contains(schema_name.as_str())
-      {
+    let mut schema_names = graph.schema_names();
+    schema_names.sort_by_key(|name| {
+      graph
+        .get_schema(name)
+        .is_none_or(|schema| schema.enum_values.is_empty())
+    });
+
+    for schema_name in schema_names {
+      if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
         continue;
       }
 
-      if let Some(schema) = graph.get_schema(schema_name)
-        && !schema.enum_values.is_empty()
-      {
-        match schema_converter.convert_schema(schema_name, schema, Some(cache)) {
-          Ok(types) => rust_types.extend(types),
-          Err(e) => warnings.push(GenerationWarning::SchemaConversionFailed {
-            schema_name: schema_name.clone(),
-            error: e.to_string(),
-          }),
-        }
-      }
-    }
-
-    for schema_name in graph.schema_names() {
-      if let Some(filter) = operation_reachable
-        && !filter.contains(schema_name.as_str())
-      {
+      let Some(schema) = graph.get_schema(schema_name) else {
         continue;
-      }
+      };
 
-      if let Some(schema) = graph.get_schema(schema_name)
-        && schema.enum_values.is_empty()
-      {
-        match schema_converter.convert_schema(schema_name, schema, Some(cache)) {
-          Ok(types) => rust_types.extend(types),
-          Err(e) => warnings.push(GenerationWarning::SchemaConversionFailed {
-            schema_name: schema_name.clone(),
-            error: e.to_string(),
-          }),
-        }
+      match schema_converter.convert_schema(schema_name, schema, Some(cache)) {
+        Ok(types) => rust_types.extend(types),
+        Err(e) => warnings.push(GenerationWarning::SchemaConversionFailed {
+          schema_name: schema_name.clone(),
+          error: e.to_string(),
+        }),
       }
     }
     (rust_types, warnings)
@@ -301,7 +305,7 @@ impl Orchestrator {
 
   fn convert_all_operations(
     &self,
-    graph: &SchemaGraph,
+    graph: &SchemaRegistry,
     schema_converter: &SchemaConverter,
     cache: &mut SharedSchemaCache,
   ) -> (

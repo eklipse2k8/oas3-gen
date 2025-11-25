@@ -5,13 +5,13 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use crate::{
   generator::{
     ast::RustType,
-    converter::{ConversionResult, FieldOptionalityPolicy, SchemaConverter},
+    converter::{FieldOptionalityPolicy, SchemaConverter},
   },
   tests::common::{create_test_graph, default_config},
 };
 
 #[test]
-fn test_inline_object_generation() -> ConversionResult<()> {
+fn test_inline_object_generation() -> anyhow::Result<()> {
   let mut parent_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
@@ -83,7 +83,7 @@ fn test_inline_object_generation() -> ConversionResult<()> {
 }
 
 #[test]
-fn test_inline_object_without_type_field() -> ConversionResult<()> {
+fn test_inline_object_without_type_field() -> anyhow::Result<()> {
   // Some specs omit "type": "object" but implied by properties
   let mut parent_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
