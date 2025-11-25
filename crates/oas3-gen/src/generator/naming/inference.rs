@@ -9,14 +9,14 @@ use crate::generator::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
     identifiers::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
   },
-  schema_graph::SchemaGraph,
+  schema_registry::SchemaRegistry,
 };
 
 /// Scans the schema graph to discover and name inline types (enums, objects) ahead of time.
 ///
 /// This helps to avoid name collisions and ensures consistent naming for reused inline schemas.
 pub(crate) struct InlineTypeScanner<'a> {
-  graph: &'a SchemaGraph,
+  graph: &'a SchemaRegistry,
 }
 
 #[derive(Default)]
@@ -135,7 +135,7 @@ pub(crate) fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> 
 }
 
 impl<'a> InlineTypeScanner<'a> {
-  pub(crate) fn new(graph: &'a SchemaGraph) -> Self {
+  pub(crate) fn new(graph: &'a SchemaRegistry) -> Self {
     Self { graph }
   }
 

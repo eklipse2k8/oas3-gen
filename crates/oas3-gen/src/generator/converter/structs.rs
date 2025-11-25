@@ -12,7 +12,6 @@ use string_cache::DefaultAtom;
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
-  constants::doc_attrs,
   field_optionality::{FieldContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
@@ -26,8 +25,10 @@ use crate::generator::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
     identifiers::{to_rust_field_name, to_rust_type_name},
   },
-  schema_graph::SchemaGraph,
+  schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
+
+const HIDDEN: &str = "#[doc(hidden)]";
 
 pub(crate) struct DiscriminatorAttributesResult {
   pub metadata: FieldMetadata,
@@ -54,7 +55,7 @@ pub(crate) struct DiscriminatorInfo {
 /// Converter for OpenAPI object schemas into Rust Structs.
 #[derive(Clone)]
 pub(crate) struct StructConverter {
-  graph: Arc<SchemaGraph>,
+  graph: Arc<SchemaRegistry>,
   type_resolver: TypeResolver,
   merger: SchemaMerger,
   field_processor: FieldProcessor,
@@ -63,7 +64,7 @@ pub(crate) struct StructConverter {
 
 impl StructConverter {
   pub(crate) fn new(
-    graph: Arc<SchemaGraph>,
+    graph: Arc<SchemaRegistry>,
     config: CodegenConfig,
     reachable_schemas: Option<Arc<BTreeSet<String>>>,
     optionality_policy: FieldOptionalityPolicy,
@@ -349,11 +350,11 @@ impl StructConverter {
 
 #[derive(Clone)]
 pub(crate) struct SchemaMerger {
-  graph: Arc<SchemaGraph>,
+  graph: Arc<SchemaRegistry>,
 }
 
 impl SchemaMerger {
-  pub(crate) fn new(graph: Arc<SchemaGraph>) -> Self {
+  pub(crate) fn new(graph: Arc<SchemaRegistry>) -> Self {
     Self { graph }
   }
 
@@ -451,13 +452,13 @@ impl SchemaMerger {
 
 #[derive(Clone)]
 pub(crate) struct DiscriminatorHandler {
-  graph: Arc<SchemaGraph>,
+  graph: Arc<SchemaRegistry>,
   reachable_schemas: Option<Arc<BTreeSet<String>>>,
   merger: SchemaMerger,
 }
 
 impl DiscriminatorHandler {
-  pub(crate) fn new(graph: Arc<SchemaGraph>, reachable_schemas: Option<Arc<BTreeSet<String>>>) -> Self {
+  pub(crate) fn new(graph: Arc<SchemaRegistry>, reachable_schemas: Option<Arc<BTreeSet<String>>>) -> Self {
     let merger = SchemaMerger::new(graph.clone());
     Self {
       graph,
@@ -479,7 +480,7 @@ impl DiscriminatorHandler {
       let ObjectOrReference::Ref { ref_path, .. } = all_of_ref else {
         return None;
       };
-      let parent_name = SchemaGraph::extract_ref_name(ref_path)?;
+      let parent_name = SchemaRegistry::extract_ref_name(ref_path)?;
       let parent_schema = self.graph.get_schema(&parent_name)?;
 
       parent_schema.discriminator.as_ref()?;
@@ -554,7 +555,7 @@ impl DiscriminatorHandler {
 
     let mut children: Vec<_> = mapping
       .iter()
-      .filter_map(|(val, ref_path)| SchemaGraph::extract_ref_name(ref_path).map(|name| (val.clone(), name)))
+      .filter_map(|(val, ref_path)| SchemaRegistry::extract_ref_name(ref_path).map(|name| (val.clone(), name)))
       .filter(|(_, name)| {
         if let Some(filter) = &self.reachable_schemas {
           filter.contains(name)
@@ -572,13 +573,13 @@ impl DiscriminatorHandler {
 
 #[derive(Clone)]
 pub(crate) struct FieldProcessor {
-  graph: Arc<SchemaGraph>,
+  graph: Arc<SchemaRegistry>,
   optionality_policy: FieldOptionalityPolicy,
   type_resolver: TypeResolver,
 }
 
 impl FieldProcessor {
-  fn new(graph: Arc<SchemaGraph>, optionality_policy: FieldOptionalityPolicy, type_resolver: TypeResolver) -> Self {
+  fn new(graph: Arc<SchemaRegistry>, optionality_policy: FieldOptionalityPolicy, type_resolver: TypeResolver) -> Self {
     Self {
       graph,
       optionality_policy,
@@ -695,7 +696,7 @@ impl FieldProcessor {
 
     metadata.docs.clear();
     metadata.validation_attrs.clear();
-    let extra_attrs = vec![doc_attrs::HIDDEN.to_string()];
+    let extra_attrs = vec![HIDDEN.to_string()];
 
     if let Some(ref disc_value) = disc_info.value {
       metadata.default_value = Some(serde_json::Value::String(disc_value.to_string()));
@@ -761,7 +762,7 @@ fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {
     && !schema.properties.is_empty()
 }
 
-fn compute_inheritance_depth(graph: &SchemaGraph, schema_name: &str, memo: &mut HashMap<String, usize>) -> usize {
+fn compute_inheritance_depth(graph: &SchemaRegistry, schema_name: &str, memo: &mut HashMap<String, usize>) -> usize {
   if let Some(&depth) = memo.get(schema_name) {
     return depth;
   }
@@ -775,7 +776,7 @@ fn compute_inheritance_depth(graph: &SchemaGraph, schema_name: &str, memo: &mut 
     schema
       .all_of
       .iter()
-      .filter_map(SchemaGraph::extract_ref_name_from_ref)
+      .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
       .map(|parent| compute_inheritance_depth(graph, &parent, memo))
       .max()
       .unwrap_or(0)

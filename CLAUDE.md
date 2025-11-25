@@ -466,7 +466,7 @@ crates/
 **Key Files:**
 
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator
-- [schema_graph.rs](crates/oas3-gen/src/generator/schema_graph.rs): Dependency and cycle management
+- [schema_graph.rs](crates/oas3-gen/src/generator/schema_registry.rs): Dependency and cycle management
 - [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
 - [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
 - [cache.rs](crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching for performance

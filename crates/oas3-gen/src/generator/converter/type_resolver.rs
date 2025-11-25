@@ -15,7 +15,7 @@ use crate::generator::{
     identifiers::to_rust_type_name,
     inference::{extract_enum_values, is_relaxed_enum_pattern},
   },
-  schema_graph::SchemaGraph,
+  schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
 
 /// Resolves OpenAPI schemas into Rust Type References (`TypeRef`).
@@ -23,7 +23,7 @@ use crate::generator::{
 /// Handles primitives, references, inlining enums, and union types.
 #[derive(Clone)]
 pub(crate) struct TypeResolver {
-  graph: Arc<SchemaGraph>,
+  graph: Arc<SchemaRegistry>,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   pub(crate) no_helpers: bool,
@@ -31,7 +31,7 @@ pub(crate) struct TypeResolver {
 
 impl TypeResolver {
   /// Creates a new `TypeResolver`.
-  pub(crate) fn new(graph: &Arc<SchemaGraph>, config: CodegenConfig) -> Self {
+  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: CodegenConfig) -> Self {
     Self {
       graph: graph.clone(),
       preserve_case_variants: config.preserve_case_variants,
@@ -101,8 +101,8 @@ impl TypeResolver {
     ref_path: &str,
     resolved_schema: &ObjectSchema,
   ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    let ref_name =
-      SchemaGraph::extract_ref_name(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
+    let ref_name = SchemaRegistry::extract_ref_name(ref_path)
+      .ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
 
     if resolved_schema.is_primitive() {
       return Ok(ConversionOutput::new(self.schema_to_type_ref(resolved_schema)?));
@@ -274,7 +274,7 @@ impl TypeResolver {
 
     let non_null_variant = non_null.unwrap();
 
-    if let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(non_null_variant) {
+    if let Some(ref_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(non_null_variant) {
       let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
       if self.graph.is_cyclic(&ref_name) {
         type_ref = type_ref.with_boxed();
@@ -303,7 +303,7 @@ impl TypeResolver {
     }
 
     if let Some(non_null_variant) = self.find_non_null_variant(variants) {
-      if let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(non_null_variant) {
+      if let Some(ref_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(non_null_variant) {
         return Ok(Some(TypeRef::new(to_rust_type_name(&ref_name)).with_option()));
       }
       let resolved = non_null_variant
@@ -319,7 +319,7 @@ impl TypeResolver {
     let mut fallback_type: Option<TypeRef> = None;
 
     for variant_ref in variants {
-      if let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(variant_ref) {
+      if let Some(ref_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(variant_ref) {
         return Ok(Some(TypeRef::new(to_rust_type_name(&ref_name))));
       }
 
@@ -347,7 +347,7 @@ impl TypeResolver {
       }
 
       if resolved.one_of.len() == 1
-        && let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(&resolved.one_of[0])
+        && let Some(ref_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(&resolved.one_of[0])
       {
         return Ok(Some(TypeRef::new(to_rust_type_name(&ref_name))));
       }
@@ -419,7 +419,7 @@ impl TypeResolver {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };
 
-    if let Some(ref_name) = SchemaGraph::extract_ref_name_from_ref(items_ref) {
+    if let Some(ref_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(items_ref) {
       return Ok(TypeRef::new(to_rust_type_name(&ref_name)));
     }
 
@@ -508,6 +508,6 @@ impl TypeResolver {
 fn extract_all_variant_refs(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
   variants
     .iter()
-    .filter_map(SchemaGraph::extract_ref_name_from_ref)
+    .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
     .collect()
 }

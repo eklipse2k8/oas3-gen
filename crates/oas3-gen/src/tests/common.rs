@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use oas3::spec::{ObjectSchema, Spec};
 use serde_json::json;
 
-use crate::generator::{converter::CodegenConfig, schema_graph::SchemaGraph};
+use crate::generator::{converter::CodegenConfig, schema_registry::SchemaRegistry};
 
 pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec {
   let mut spec_json = json!({
@@ -21,9 +21,9 @@ pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec 
   serde_json::from_value(spec_json).unwrap()
 }
 
-pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<SchemaGraph> {
+pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<SchemaRegistry> {
   let spec = create_test_spec(schemas);
-  let (mut graph, _) = SchemaGraph::new(spec);
+  let (mut graph, _) = SchemaRegistry::new(spec);
   graph.build_dependencies();
   graph.detect_cycles();
   Arc::new(graph)

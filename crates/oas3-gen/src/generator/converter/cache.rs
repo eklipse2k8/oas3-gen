@@ -51,11 +51,11 @@ impl SharedSchemaCache {
 
   /// Retrieves a cached name for an enum based on its values.
   pub(crate) fn get_enum_name(&self, values: &[String]) -> Option<String> {
-    if let Some(name) = self.enum_to_type.get(values) {
-      Some(name.clone())
-    } else {
-      self.precomputed_enum_names.get(values).cloned()
-    }
+    self
+      .enum_to_type
+      .get(values)
+      .or_else(|| self.precomputed_enum_names.get(values))
+      .cloned()
   }
 
   /// Checks if an enum with the given values has already been generated.

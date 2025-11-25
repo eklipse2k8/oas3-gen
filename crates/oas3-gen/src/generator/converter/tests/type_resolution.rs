@@ -6,7 +6,7 @@ use serde_json::json;
 use crate::{
   generator::{
     converter::{SchemaExt, type_resolver::TypeResolver},
-    schema_graph::SchemaGraph,
+    schema_registry::SchemaRegistry,
   },
   tests::common::{create_test_graph, default_config},
 };
@@ -283,7 +283,7 @@ fn test_array_with_ref_items() {
   assert_eq!(result.to_rust_type(), "Vec<CustomType>");
 }
 
-fn create_empty_test_graph() -> Arc<SchemaGraph> {
+fn create_empty_test_graph() -> Arc<SchemaRegistry> {
   let spec = oas3::Spec {
     openapi: "3.0.0".to_string(),
     info: oas3::spec::Info {
@@ -306,7 +306,7 @@ fn create_empty_test_graph() -> Arc<SchemaGraph> {
     extensions: BTreeMap::default(),
   };
 
-  let (graph, _) = SchemaGraph::new(spec);
+  let (graph, _) = SchemaRegistry::new(spec);
   Arc::new(graph)
 }
 

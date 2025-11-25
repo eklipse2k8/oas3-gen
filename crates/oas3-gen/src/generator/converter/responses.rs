@@ -12,7 +12,7 @@ use crate::generator::{
     inference as naming,
     status_codes::status_code_to_variant_name,
   },
-  schema_graph::SchemaGraph,
+  schema_registry::SchemaRegistry,
 };
 
 pub(crate) fn build_response_enum(
@@ -88,7 +88,7 @@ fn extract_response_schema_info(
 
   match schema_ref {
     ObjectOrReference::Ref { ref_path, .. } => {
-      let Some(schema_name) = SchemaGraph::extract_ref_name(ref_path) else {
+      let Some(schema_name) = SchemaRegistry::extract_ref_name(ref_path) else {
         return Ok((None, Some(content_type.clone())));
       };
       Ok((

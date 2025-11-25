@@ -8,7 +8,7 @@ use oas3::spec::{
 
 use crate::{
   generator::{
-    ast::{PathSegment, RustType, StructMethodKind},
+    ast::{PathSegment, RustType, StructDef, StructMethodKind},
     converter::{
       FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
       operations::OperationConverter,
@@ -17,16 +17,66 @@ use crate::{
   tests::common::{create_test_graph, default_config},
 };
 
+fn setup_converter(
+  schemas: BTreeMap<String, ObjectSchema>,
+) -> (OperationConverter<'static>, TypeUsageRecorder, SharedSchemaCache) {
+  let graph = Box::leak(Box::new(create_test_graph(schemas)));
+  let spec = Box::leak(Box::new(graph.spec().clone()));
+  let schema_converter = Box::leak(Box::new(SchemaConverter::new(
+    graph,
+    FieldOptionalityPolicy::standard(),
+    default_config(),
+  )));
+  let converter = OperationConverter::new(schema_converter, spec);
+  let usage = TypeUsageRecorder::new();
+  let cache = SharedSchemaCache::new();
+  (converter, usage, cache)
+}
+
+fn create_parameter(
+  name: &str,
+  location: ParameterIn,
+  schema_type: SchemaType,
+  format: Option<&str>,
+  required: bool,
+) -> ObjectOrReference<Parameter> {
+  ObjectOrReference::Object(Parameter {
+    name: name.to_string(),
+    location,
+    required: Some(required),
+    schema: Some(ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(schema_type)),
+      format: format.map(String::from),
+      ..Default::default()
+    })),
+    description: None,
+    deprecated: None,
+    allow_empty_value: None,
+    allow_reserved: None,
+    explode: None,
+    style: None,
+    content: None,
+    example: None,
+    examples: BTreeMap::default(),
+    extensions: BTreeMap::default(),
+  })
+}
+
+fn extract_request_struct<'a>(types: &'a [RustType], expected_name: &str) -> &'a StructDef {
+  types
+    .iter()
+    .find_map(|t| match t {
+      RustType::Struct(s) if s.name == expected_name => Some(s),
+      _ => None,
+    })
+    .expect("Request struct not found")
+}
+
 #[test]
 fn test_basic_get_operation() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
-
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let operation = Operation::default();
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
+
   let (types, info) = converter.convert(
     "my_op",
     "myOp",
@@ -46,33 +96,16 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_path_parameter() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "userId".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "userId",
+    ParameterIn::Path,
+    SchemaType::String,
+    None,
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, info) = converter.convert(
     "get_user",
     "getUser",
@@ -87,14 +120,7 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
   let request_type_name = info.request_type.as_deref().expect("Request type should exist");
   assert_eq!(request_type_name, "GetUserRequest");
 
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) if s.name == request_type_name => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
-
+  let request_struct = extract_request_struct(&types, request_type_name);
   assert_eq!(request_struct.fields.len(), 1);
   assert_eq!(request_struct.fields[0].name, "user_id");
 
@@ -118,10 +144,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
 
   let operation = Operation {
     request_body: Some(ObjectOrReference::Object(RequestBody {
@@ -141,8 +164,6 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, _) = converter.convert(
     "create_user",
     "createUser",
@@ -173,10 +194,7 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let graph = create_test_graph(BTreeMap::from([("User".to_string(), user_schema)]));
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
 
   let operation = Operation {
     responses: Some(ResponseMap::from([(
@@ -199,8 +217,6 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (_, info) = converter.convert(
     "get_user",
     "getUser",
@@ -217,34 +233,16 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_integer_path_parameter() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "id".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      format: Some("int64".to_string()),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "id",
+    ParameterIn::Path,
+    SchemaType::Integer,
+    Some("int64"),
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, info) = converter.convert(
     "get_by_id",
     "getById",
@@ -257,14 +255,7 @@ fn test_operation_with_integer_path_parameter() -> anyhow::Result<()> {
 
   assert_eq!(types.len(), 1);
   let request_type_name = info.request_type.as_deref().expect("Request type should exist");
-
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) if s.name == request_type_name => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
+  let request_struct = extract_request_struct(&types, request_type_name);
 
   assert_eq!(request_struct.fields.len(), 1);
   assert_eq!(request_struct.fields[0].name, "id");
@@ -274,34 +265,16 @@ fn test_operation_with_integer_path_parameter() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_int32_path_parameter() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "count".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      format: Some("int32".to_string()),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "count",
+    ParameterIn::Path,
+    SchemaType::Integer,
+    Some("int32"),
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, _) = converter.convert(
     "get_by_count",
     "getByCount",
@@ -312,14 +285,7 @@ fn test_operation_with_int32_path_parameter() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
-
+  let request_struct = extract_request_struct(&types, "GetByCountRequest");
   assert_eq!(request_struct.fields[0].name, "count");
   assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "i32");
   Ok(())
@@ -327,34 +293,16 @@ fn test_operation_with_int32_path_parameter() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_number_path_parameter() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "amount".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
-      format: Some("double".to_string()),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "amount",
+    ParameterIn::Path,
+    SchemaType::Number,
+    Some("double"),
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, _) = converter.convert(
     "get_by_amount",
     "getByAmount",
@@ -365,14 +313,7 @@ fn test_operation_with_number_path_parameter() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
-
+  let request_struct = extract_request_struct(&types, "GetByAmountRequest");
   assert_eq!(request_struct.fields[0].name, "amount");
   assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "f64");
   Ok(())
@@ -380,33 +321,16 @@ fn test_operation_with_number_path_parameter() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_boolean_path_parameter() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "active".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "active",
+    ParameterIn::Path,
+    SchemaType::Boolean,
+    None,
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, _) = converter.convert(
     "get_by_active",
     "getByActive",
@@ -417,14 +341,7 @@ fn test_operation_with_boolean_path_parameter() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
-
+  let request_struct = extract_request_struct(&types, "GetByActiveRequest");
   assert_eq!(request_struct.fields[0].name, "active");
   assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "bool");
   Ok(())
@@ -432,34 +349,16 @@ fn test_operation_with_boolean_path_parameter() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_uuid_path_parameter() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "uuid".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      format: Some("uuid".to_string()),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "uuid",
+    ParameterIn::Path,
+    SchemaType::String,
+    Some("uuid"),
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, _) = converter.convert(
     "get_by_uuid",
     "getByUuid",
@@ -470,14 +369,7 @@ fn test_operation_with_uuid_path_parameter() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
-
+  let request_struct = extract_request_struct(&types, "GetByUuidRequest");
   assert_eq!(request_struct.fields[0].name, "uuid");
   assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "uuid::Uuid");
   Ok(())
@@ -485,34 +377,16 @@ fn test_operation_with_uuid_path_parameter() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_date_time_path_parameter() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "timestamp".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      format: Some("date-time".to_string()),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "timestamp",
+    ParameterIn::Path,
+    SchemaType::String,
+    Some("date-time"),
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, _) = converter.convert(
     "get_by_timestamp",
     "getByTimestamp",
@@ -523,14 +397,7 @@ fn test_operation_with_date_time_path_parameter() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
-
+  let request_struct = extract_request_struct(&types, "GetByTimestampRequest");
   assert_eq!(request_struct.fields[0].name, "timestamp");
   assert_eq!(
     request_struct.fields[0].rust_type.to_rust_type(),
@@ -541,53 +408,23 @@ fn test_operation_with_date_time_path_parameter() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
-  let graph = create_test_graph(BTreeMap::new());
-  let spec = graph.spec().clone();
-  let schema_converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let converter = OperationConverter::new(&schema_converter, &spec);
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "userId".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      format: Some("int64".to_string()),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
-  operation.parameters.push(ObjectOrReference::Object(Parameter {
-    name: "postId".to_string(),
-    location: ParameterIn::Path,
-    required: Some(true),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: Option::default(),
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  }));
+  operation.parameters.push(create_parameter(
+    "userId",
+    ParameterIn::Path,
+    SchemaType::Integer,
+    Some("int64"),
+    true,
+  ));
+  operation.parameters.push(create_parameter(
+    "postId",
+    ParameterIn::Path,
+    SchemaType::String,
+    None,
+    true,
+  ));
 
-  let mut usage = TypeUsageRecorder::new();
-  let mut cache = SharedSchemaCache::new();
   let (types, _) = converter.convert(
     "get_user_post",
     "getUserPost",
@@ -598,14 +435,7 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let request_struct = types
-    .iter()
-    .find_map(|t| match t {
-      RustType::Struct(s) => Some(s),
-      _ => None,
-    })
-    .expect("Request struct not found");
-
+  let request_struct = extract_request_struct(&types, "GetUserPostRequest");
   assert_eq!(request_struct.fields.len(), 2);
   assert_eq!(request_struct.fields[0].name, "user_id");
   assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "i64");

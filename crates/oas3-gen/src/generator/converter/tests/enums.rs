@@ -1,11 +1,18 @@
-use std::{collections::BTreeMap, f64::consts::PI, sync::Arc};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  f64::consts::PI,
+  sync::Arc,
+};
 
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{DeriveTrait, EnumMethodKind, RustType, SerdeAttribute},
+    ast::{
+      DeriveTrait, EnumDef, EnumMethodKind, RustPrimitive, RustType, SerdeAttribute, TypeRef, VariantContent,
+      VariantDef,
+    },
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
       enums::{CollisionStrategy, EnumConverter},
@@ -13,7 +20,7 @@ use crate::{
       type_resolver::TypeResolver,
     },
     naming::variants::VariantNameNormalizer,
-    schema_graph::SchemaGraph,
+    schema_registry::SchemaRegistry,
   },
   tests::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config},
 };
@@ -568,7 +575,7 @@ fn test_preserve_strategy_with_multiple_collisions() {
     extensions: BTreeMap::default(),
   };
 
-  let (graph, _) = SchemaGraph::new(spec);
+  let (graph, _) = SchemaRegistry::new(spec);
   let graph = Arc::new(graph);
   let type_resolver = TypeResolver::new(&graph, default_config());
   let converter = EnumConverter::new(&graph, type_resolver, config_with_preserve_case());
@@ -614,7 +621,7 @@ fn test_string_enum_optimizer_detects_freeform_pattern() {
     extensions: BTreeMap::default(),
   };
 
-  let (graph, _) = SchemaGraph::new(spec);
+  let (graph, _) = SchemaRegistry::new(spec);
   let graph = Arc::new(graph);
   let optimizer = StringEnumOptimizer::new(&graph, false);
 
@@ -681,7 +688,7 @@ fn test_string_enum_optimizer_rejects_no_freeform() {
     extensions: BTreeMap::default(),
   };
 
-  let (graph, _) = SchemaGraph::new(spec);
+  let (graph, _) = SchemaRegistry::new(spec);
   let graph = Arc::new(graph);
   let optimizer = StringEnumOptimizer::new(&graph, false);
 
@@ -757,10 +764,7 @@ fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
 
   let auto_variant = &enum_def.variants[0];
   assert_eq!(auto_variant.name, "Auto");
-  assert!(matches!(
-    auto_variant.content,
-    crate::generator::ast::VariantContent::Unit
-  ));
+  assert!(matches!(auto_variant.content, VariantContent::Unit));
   assert_eq!(
     auto_variant.serde_attrs,
     vec![SerdeAttribute::Rename("auto".to_string())]
@@ -768,10 +772,7 @@ fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
 
   let text_variant = &enum_def.variants[1];
   assert_eq!(text_variant.name, "TextFormat");
-  assert!(matches!(
-    text_variant.content,
-    crate::generator::ast::VariantContent::Tuple(_)
-  ));
+  assert!(matches!(text_variant.content, VariantContent::Tuple(_)));
 
   Ok(())
 }
@@ -1091,19 +1092,13 @@ fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
 
 #[test]
 fn test_enum_helper_skips_without_default_trait() {
-  use std::collections::BTreeSet;
-
-  use crate::generator::ast::{RustPrimitive, TypeRef};
-
-  let enum_def = RustType::Enum(crate::generator::ast::EnumDef {
+  let enum_def = RustType::Enum(EnumDef {
     name: "TestEnum".to_string(),
     docs: vec![],
-    variants: vec![crate::generator::ast::VariantDef {
+    variants: vec![VariantDef {
       name: "Variant".to_string(),
       docs: vec![],
-      content: crate::generator::ast::VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom(
-        "TestVariant".to_string(),
-      ))]),
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("TestVariant".to_string()))]),
       serde_attrs: vec![],
       deprecated: false,
     }],

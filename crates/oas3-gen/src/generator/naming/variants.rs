@@ -19,6 +19,7 @@ pub struct NormalizedVariant {
 pub struct VariantNameNormalizer;
 
 impl VariantNameNormalizer {
+  #[must_use]
   pub fn normalize(value: &serde_json::Value) -> Option<NormalizedVariant> {
     match value {
       serde_json::Value::String(str_val) => Some(NormalizedVariant {
@@ -51,6 +52,8 @@ impl VariantNameNormalizer {
 }
 
 /// Infers a variant name for an inline schema in a union.
+#[must_use]
+#[inline]
 pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
   if !schema.enum_values.is_empty() {
     return "Enum".to_string();
@@ -109,6 +112,8 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
   }
 }
 
+#[must_use]
+#[inline]
 fn find_common_prefix_len(split_names: &[Vec<String>]) -> usize {
   let Some(first) = split_names.first() else {
     return 0;
@@ -125,6 +130,8 @@ fn find_common_prefix_len(split_names: &[Vec<String>]) -> usize {
   len
 }
 
+#[must_use]
+#[inline]
 fn find_common_suffix_len(split_names: &[Vec<String>]) -> usize {
   let Some(first) = split_names.first() else {
     return 0;
@@ -142,6 +149,8 @@ fn find_common_suffix_len(split_names: &[Vec<String>]) -> usize {
   len
 }
 
+#[must_use]
+#[inline]
 fn split_pascal_case(name: &str) -> Vec<String> {
   let mut words = vec![];
   let mut current_word = String::new();

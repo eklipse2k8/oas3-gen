@@ -28,23 +28,30 @@ impl<T> ConversionOutput<T> {
 }
 
 /// Helper to handle the common pattern of checking cache, generating an inline type, and registering it.
-pub(crate) fn handle_inline_creation<F, P>(
+///
+/// This function orchestrates inline type creation by:
+/// 1. Checking if the type already exists in cache (early return if found)
+/// 2. Running a cached name check for special cases like enums (early return if found)
+/// 3. Determining the appropriate name for the new type
+/// 4. Calling the generator function to create the type
+/// 5. Registering the new type in cache or collecting inline types
+pub(crate) fn handle_inline_creation<F, C>(
   schema: &ObjectSchema,
   base_name: &str,
   forced_name: Option<String>,
   mut cache: Option<&mut SharedSchemaCache>,
-  pre_check: P,
+  cached_name_check: C,
   generator: F,
 ) -> anyhow::Result<ConversionOutput<TypeRef>>
 where
   F: FnOnce(&str, Option<&mut SharedSchemaCache>) -> anyhow::Result<ConversionOutput<RustType>>,
-  P: FnOnce(&SharedSchemaCache) -> Option<String>,
+  C: FnOnce(&SharedSchemaCache) -> Option<String>,
 {
   if let Some(cache) = &cache {
     if let Some(existing_name) = cache.get_type_name(schema)? {
       return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
     }
-    if let Some(name) = pre_check(cache) {
+    if let Some(name) = cached_name_check(cache) {
       return Ok(ConversionOutput::new(TypeRef::new(name)));
     }
   }
@@ -57,10 +64,7 @@ where
     base_name.to_string()
   };
 
-  let result = match &mut cache {
-    Some(cache) => generator(&name, Some(cache))?,
-    None => generator(&name, None)?,
-  };
+  let result = generator(&name, cache.as_deref_mut())?;
 
   if let Some(cache) = cache {
     let type_name = cache.register_type(schema, &name, result.inline_types, result.result.clone())?;
@@ -74,17 +78,24 @@ where
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
 pub(crate) trait SchemaExt {
-  /// Returns true if the schema represents a primitive type (no properties, allOf, etc.).
+  /// Returns true if the schema represents a primitive type (no properties, oneOf, anyOf, allOf).
   fn is_primitive(&self) -> bool;
-  /// Returns true if the schema is explicitly null.
+
+  /// Returns true if the schema is explicitly null type.
   fn is_null(&self) -> bool;
-  /// Returns true if the schema is a nullable object (e.g. `type: [object, null]`).
+
+  /// Returns true if the schema is a nullable placeholder (pure null or empty object with null).
+  /// This includes schemas like `{type: "null"}` and `{type: ["object", "null"]}` with no properties.
   fn is_nullable_object(&self) -> bool;
-  /// Returns true if the schema is an array.
+
+  /// Returns true if the schema is an array type.
   fn is_array(&self) -> bool;
-  /// Returns the single `SchemaType` if only one is defined.
+
+  /// Returns the single `SchemaType` if exactly one is defined, None otherwise.
   fn single_type(&self) -> Option<SchemaType>;
-  /// Returns true if the schema should be treated as an inline struct.
+
+  /// Returns true if the schema should be treated as an inline struct definition.
+  /// This excludes refs, enums, unions, arrays, and primitives.
   fn is_inline_struct(&self, prop_schema_ref: &ObjectOrReference<ObjectSchema>) -> bool;
 }
 

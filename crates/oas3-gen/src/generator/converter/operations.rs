@@ -18,7 +18,7 @@ use crate::generator::{
     operations::{generate_unique_request_name, generate_unique_response_name},
     responses as naming_responses,
   },
-  schema_graph::SchemaGraph,
+  schema_registry::SchemaRegistry,
 };
 
 type ParameterValidation = (TypeRef, Vec<ValidationAttribute>, Option<Value>);
@@ -30,6 +30,19 @@ struct RequestBodyInfo {
   field_name: Option<String>,
   optional: bool,
   content_type: Option<String>,
+}
+
+impl RequestBodyInfo {
+  fn empty(optional: bool) -> Self {
+    Self {
+      body_type: None,
+      generated_types: vec![],
+      type_usage: vec![],
+      field_name: None,
+      optional,
+      content_type: None,
+    }
+  }
 }
 
 #[derive(Default)]
@@ -248,39 +261,18 @@ impl<'a> OperationConverter<'a> {
     let mut type_usage = vec![];
 
     let Some(body_ref) = operation.request_body.as_ref() else {
-      return Ok(RequestBodyInfo {
-        body_type: None,
-        generated_types,
-        type_usage,
-        field_name: None,
-        optional: true,
-        content_type: None,
-      });
+      return Ok(RequestBodyInfo::empty(true));
     };
 
     let body = body_ref.resolve(self.spec)?;
     let is_required = body.required.unwrap_or(false);
 
     let Some((_, media_type)) = body.content.iter().next() else {
-      return Ok(RequestBodyInfo {
-        body_type: None,
-        generated_types,
-        type_usage,
-        field_name: None,
-        optional: !is_required,
-        content_type: None,
-      });
+      return Ok(RequestBodyInfo::empty(!is_required));
     };
 
     let Some(schema_ref) = media_type.schema.as_ref() else {
-      return Ok(RequestBodyInfo {
-        body_type: None,
-        generated_types,
-        type_usage,
-        field_name: None,
-        optional: !is_required,
-        content_type: None,
-      });
+      return Ok(RequestBodyInfo::empty(!is_required));
     };
 
     let raw_body_type_name = format!("{base_name}{REQUEST_BODY_SUFFIX}");
@@ -352,7 +344,7 @@ impl<'a> OperationConverter<'a> {
         Ok(Some(TypeRef::new(final_type_name)))
       }
       ObjectOrReference::Ref { ref_path, .. } => {
-        let Some(target_name) = SchemaGraph::extract_ref_name(ref_path) else {
+        let Some(target_name) = SchemaRegistry::extract_ref_name(ref_path) else {
           return Ok(None);
         };
         let target_rust_name = to_rust_type_name(&target_name);
@@ -372,10 +364,8 @@ impl<'a> OperationConverter<'a> {
   }
 
   fn create_body_field(&self, operation: &Operation, body_type: TypeRef) -> Option<FieldDef> {
-    #[allow(clippy::question_mark)]
-    let Some(body) = operation.request_body.as_ref().and_then(|r| r.resolve(self.spec).ok()) else {
-      return None;
-    };
+    let body_ref = operation.request_body.as_ref()?;
+    let body = body_ref.resolve(self.spec).ok()?;
     let is_required = body.required.unwrap_or(false);
 
     let docs = body
@@ -408,8 +398,8 @@ impl<'a> OperationConverter<'a> {
 
     for param_ref in &operation.parameters {
       if let Ok(param) = param_ref.resolve(self.spec) {
-        let key = (param.location, param.name.clone());
-        params.retain(|p| (p.location, p.name.clone()) != key);
+        let param_key = (param.location, param.name.clone());
+        params.retain(|p| (p.location, p.name.clone()) != param_key);
         params.push(param);
       }
     }

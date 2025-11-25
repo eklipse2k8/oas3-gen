@@ -1,6 +1,5 @@
 pub(crate) mod cache;
 mod common;
-pub(crate) mod constants;
 mod enums;
 mod field_optionality;
 pub(crate) mod hashing;
@@ -26,7 +25,7 @@ pub(crate) use type_usage_recorder::TypeUsageRecorder;
 use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
 use super::{
   ast::{RustType, StructKind, TypeAliasDef, TypeRef},
-  schema_graph::SchemaGraph,
+  schema_registry::SchemaRegistry,
 };
 use crate::generator::naming::identifiers::to_rust_type_name;
 
@@ -51,7 +50,7 @@ pub(crate) struct SchemaConverter {
 impl SchemaConverter {
   /// Creates a new `SchemaConverter` with standard configuration.
   pub(crate) fn new(
-    graph: &Arc<SchemaGraph>,
+    graph: &Arc<SchemaRegistry>,
     optionality_policy: FieldOptionalityPolicy,
     config: CodegenConfig,
   ) -> Self {
@@ -69,7 +68,7 @@ impl SchemaConverter {
   ///
   /// Useful for generating only a subset of the API surface (e.g., specific tags).
   pub(crate) fn new_with_filter(
-    graph: &Arc<SchemaGraph>,
+    graph: &Arc<SchemaRegistry>,
     reachable_schemas: BTreeSet<String>,
     optionality_policy: FieldOptionalityPolicy,
     config: CodegenConfig,
@@ -166,7 +165,7 @@ impl SchemaConverter {
     self.type_resolver.schema_to_type_ref(schema)
   }
 
-  fn build_schema_name_cache(graph: &SchemaGraph) -> HashSet<String> {
+  fn build_schema_name_cache(graph: &SchemaRegistry) -> HashSet<String> {
     graph
       .schema_names()
       .into_iter()
