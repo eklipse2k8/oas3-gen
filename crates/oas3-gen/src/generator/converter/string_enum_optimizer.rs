@@ -5,7 +5,7 @@ use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 use super::{cache::SharedSchemaCache, metadata};
 use crate::generator::{
   ast::{EnumDef, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
-  naming::{identifiers::to_rust_type_name, inference as naming},
+  naming::identifiers::{ensure_unique, to_rust_type_name},
   schema_registry::SchemaRegistry,
 };
 
@@ -154,7 +154,7 @@ impl<'a> StringEnumOptimizer<'a> {
 
     for (value, description, deprecated) in values {
       let base_name = to_rust_type_name(value);
-      let variant_name = naming::ensure_unique(&base_name, &seen_names);
+      let variant_name = ensure_unique(&base_name, &seen_names);
       seen_names.insert(variant_name.clone());
 
       variants.push(VariantDef {

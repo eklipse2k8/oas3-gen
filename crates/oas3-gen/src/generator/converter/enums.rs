@@ -16,9 +16,10 @@ use crate::generator::{
     VariantDef, default_enum_derives,
   },
   naming::{
-    identifiers::to_rust_type_name,
-    inference as naming,
-    variants::{VariantNameNormalizer, infer_variant_name, strip_common_affixes},
+    identifiers::{ensure_unique, to_rust_type_name},
+    inference::{
+      VariantNameNormalizer, derive_method_names, extract_enum_values, infer_variant_name, strip_common_affixes,
+    },
   },
   schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
@@ -129,7 +130,7 @@ impl EnumConverter {
     let result = self.process_union(name, schema, kind, &discriminator_map, cache.as_deref_mut())?;
 
     if let Some(c) = cache
-      && let Some(values) = naming::extract_enum_values(schema)
+      && let Some(values) = extract_enum_values(schema)
       && let Some(RustType::Enum(e)) = result.last()
     {
       c.register_enum(values, e.name.clone());
@@ -327,14 +328,14 @@ impl EnumConverter {
     }
 
     let variant_names: Vec<String> = eligible_variants.iter().map(|v| v.variant_name.clone()).collect();
-    let derived_names = naming::derive_method_names(&enum_name, &variant_names);
+    let derived_names = derive_method_names(&enum_name, &variant_names);
 
     let mut seen_names = BTreeSet::new();
     eligible_variants
       .into_iter()
       .zip(derived_names)
       .map(|(variant_info, base_method_name)| {
-        let method_name = naming::ensure_unique(&base_method_name, &seen_names);
+        let method_name = ensure_unique(&base_method_name, &seen_names);
         seen_names.insert(method_name.clone());
 
         let method_docs = Self::generate_method_docs(
@@ -432,7 +433,7 @@ impl EnumConverter {
       type_ref = type_ref.with_boxed();
     }
 
-    let variant_name = naming::ensure_unique(&rust_type_name, seen_names);
+    let variant_name = ensure_unique(&rust_type_name, seen_names);
 
     let mut serde_attrs = vec![];
     if let Some(disc_value) = discriminator_map.get(schema_name) {
@@ -462,7 +463,7 @@ impl EnumConverter {
       let normalized = VariantNameNormalizer::normalize(const_value)
         .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
 
-      let variant_name = naming::ensure_unique(&normalized.name, seen_names);
+      let variant_name = ensure_unique(&normalized.name, seen_names);
 
       let variant = VariantDef {
         name: variant_name,
@@ -479,7 +480,7 @@ impl EnumConverter {
       .title
       .as_ref()
       .map_or_else(|| infer_variant_name(resolved_schema, index), |t| to_rust_type_name(t));
-    let variant_name = naming::ensure_unique(&base_name, seen_names);
+    let variant_name = ensure_unique(&base_name, seen_names);
 
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
       let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;

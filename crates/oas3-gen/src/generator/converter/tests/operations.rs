@@ -232,177 +232,98 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_operation_with_integer_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "id",
-    ParameterIn::Path,
-    SchemaType::Integer,
-    Some("int64"),
-    true,
-  ));
+#[allow(clippy::type_complexity)]
+fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
+  let cases: &[(&str, &str, SchemaType, Option<&str>, &str, &str)] = &[
+    (
+      "id",
+      "getById",
+      SchemaType::Integer,
+      Some("int64"),
+      "GetByIdRequest",
+      "i64",
+    ),
+    (
+      "count",
+      "getByCount",
+      SchemaType::Integer,
+      Some("int32"),
+      "GetByCountRequest",
+      "i32",
+    ),
+    (
+      "amount",
+      "getByAmount",
+      SchemaType::Number,
+      Some("double"),
+      "GetByAmountRequest",
+      "f64",
+    ),
+    (
+      "active",
+      "getByActive",
+      SchemaType::Boolean,
+      None,
+      "GetByActiveRequest",
+      "bool",
+    ),
+    (
+      "uuid",
+      "getByUuid",
+      SchemaType::String,
+      Some("uuid"),
+      "GetByUuidRequest",
+      "uuid::Uuid",
+    ),
+    (
+      "timestamp",
+      "getByTimestamp",
+      SchemaType::String,
+      Some("date-time"),
+      "GetByTimestampRequest",
+      "chrono::DateTime<chrono::Utc>",
+    ),
+  ];
 
-  let (types, info) = converter.convert(
-    "get_by_id",
-    "getById",
-    &Method::GET,
-    "/items/{id}",
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  for (param_name, op_id, schema_type, format, expected_struct, expected_type) in cases {
+    let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+    let mut operation = Operation::default();
+    operation.parameters.push(create_parameter(
+      param_name,
+      ParameterIn::Path,
+      *schema_type,
+      *format,
+      true,
+    ));
 
-  assert_eq!(types.len(), 1);
-  let request_type_name = info.request_type.as_deref().expect("Request type should exist");
-  let request_struct = extract_request_struct(&types, request_type_name);
+    let path = format!("/items/{{{param_name}}}");
+    let snake_op_id = inflections::case::to_snake_case(op_id);
 
-  assert_eq!(request_struct.fields.len(), 1);
-  assert_eq!(request_struct.fields[0].name, "id");
-  assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "i64");
-  Ok(())
-}
+    let (types, info) = converter.convert(
+      &snake_op_id,
+      op_id,
+      &Method::GET,
+      &path,
+      &operation,
+      &mut usage,
+      &mut cache,
+    )?;
 
-#[test]
-fn test_operation_with_int32_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "count",
-    ParameterIn::Path,
-    SchemaType::Integer,
-    Some("int32"),
-    true,
-  ));
+    assert_eq!(types.len(), 1, "Should generate one request struct for {op_id}");
+    let request_type_name = info.request_type.as_deref().expect("Request type should exist");
+    assert_eq!(
+      request_type_name, *expected_struct,
+      "Request struct name mismatch for {op_id}"
+    );
 
-  let (types, _) = converter.convert(
-    "get_by_count",
-    "getByCount",
-    &Method::GET,
-    "/items/{count}",
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
-
-  let request_struct = extract_request_struct(&types, "GetByCountRequest");
-  assert_eq!(request_struct.fields[0].name, "count");
-  assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "i32");
-  Ok(())
-}
-
-#[test]
-fn test_operation_with_number_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "amount",
-    ParameterIn::Path,
-    SchemaType::Number,
-    Some("double"),
-    true,
-  ));
-
-  let (types, _) = converter.convert(
-    "get_by_amount",
-    "getByAmount",
-    &Method::GET,
-    "/items/{amount}",
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
-
-  let request_struct = extract_request_struct(&types, "GetByAmountRequest");
-  assert_eq!(request_struct.fields[0].name, "amount");
-  assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "f64");
-  Ok(())
-}
-
-#[test]
-fn test_operation_with_boolean_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "active",
-    ParameterIn::Path,
-    SchemaType::Boolean,
-    None,
-    true,
-  ));
-
-  let (types, _) = converter.convert(
-    "get_by_active",
-    "getByActive",
-    &Method::GET,
-    "/items/{active}",
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
-
-  let request_struct = extract_request_struct(&types, "GetByActiveRequest");
-  assert_eq!(request_struct.fields[0].name, "active");
-  assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "bool");
-  Ok(())
-}
-
-#[test]
-fn test_operation_with_uuid_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "uuid",
-    ParameterIn::Path,
-    SchemaType::String,
-    Some("uuid"),
-    true,
-  ));
-
-  let (types, _) = converter.convert(
-    "get_by_uuid",
-    "getByUuid",
-    &Method::GET,
-    "/items/{uuid}",
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
-
-  let request_struct = extract_request_struct(&types, "GetByUuidRequest");
-  assert_eq!(request_struct.fields[0].name, "uuid");
-  assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "uuid::Uuid");
-  Ok(())
-}
-
-#[test]
-fn test_operation_with_date_time_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "timestamp",
-    ParameterIn::Path,
-    SchemaType::String,
-    Some("date-time"),
-    true,
-  ));
-
-  let (types, _) = converter.convert(
-    "get_by_timestamp",
-    "getByTimestamp",
-    &Method::GET,
-    "/items/{timestamp}",
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
-
-  let request_struct = extract_request_struct(&types, "GetByTimestampRequest");
-  assert_eq!(request_struct.fields[0].name, "timestamp");
-  assert_eq!(
-    request_struct.fields[0].rust_type.to_rust_type(),
-    "chrono::DateTime<chrono::Utc>"
-  );
+    let request_struct = extract_request_struct(&types, request_type_name);
+    assert_eq!(request_struct.fields.len(), 1, "Should have one field for {op_id}");
+    assert_eq!(
+      request_struct.fields[0].rust_type.to_rust_type(),
+      *expected_type,
+      "Type mismatch for {op_id}"
+    );
+  }
   Ok(())
 }
 

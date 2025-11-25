@@ -4,7 +4,6 @@ pub mod inference;
 pub mod operations;
 pub mod responses;
 pub mod status_codes;
-pub mod variants;
 
 #[cfg(test)]
 mod tests;

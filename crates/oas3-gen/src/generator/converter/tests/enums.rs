@@ -19,7 +19,7 @@ use crate::{
       string_enum_optimizer::StringEnumOptimizer,
       type_resolver::TypeResolver,
     },
-    naming::variants::VariantNameNormalizer,
+    naming::inference::VariantNameNormalizer,
     schema_registry::SchemaRegistry,
   },
   tests::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config},
@@ -293,7 +293,7 @@ fn test_integer_enum_values() -> anyhow::Result<()> {
       .serde_attrs
       .contains(&SerdeAttribute::Rename("42".to_string()))
   );
-  assert_eq!(enum_def.variants[3].name, "Value-5");
+  assert_eq!(enum_def.variants[3].name, "Value_5");
   assert!(
     enum_def.variants[3]
       .serde_attrs

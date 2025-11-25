@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use crate::{
   generator::{
@@ -9,6 +9,100 @@ use crate::{
   },
   tests::common::{create_test_graph, default_config},
 };
+
+fn make_string_schema() -> ObjectSchema {
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    ..Default::default()
+  }
+}
+
+fn make_array_schema(items: Option<Schema>) -> ObjectSchema {
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: items.map(Box::new),
+    ..Default::default()
+  }
+}
+
+#[test]
+fn test_primitive_type_aliases() -> anyhow::Result<()> {
+  let cases = [
+    (
+      "Identifier",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      },
+      "String",
+    ),
+    (
+      "Timestamp",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+        format: Some("int64".to_string()),
+        ..Default::default()
+      },
+      "i64",
+    ),
+  ];
+
+  for (name, schema, expected_type) in cases {
+    let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
+    let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+    let result = converter.convert_schema(name, graph.get_schema(name).unwrap(), None)?;
+
+    assert_eq!(result.len(), 1, "expected single type for {name}");
+    let RustType::TypeAlias(alias) = &result[0] else {
+      panic!("expected type alias for {name}")
+    };
+    assert_eq!(alias.name, name, "name mismatch for {name}");
+    assert_eq!(alias.target.to_rust_type(), expected_type, "type mismatch for {name}");
+  }
+  Ok(())
+}
+
+#[test]
+fn test_array_type_aliases() -> anyhow::Result<()> {
+  let strings_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
+    make_string_schema(),
+  )))));
+
+  let untyped_array_schema = make_array_schema(None);
+
+  let nested_array_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
+    ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+      items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+        ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+          ..Default::default()
+        },
+      ))))),
+      ..Default::default()
+    },
+  )))));
+
+  let cases = [
+    ("Strings", strings_schema, "Vec<String>"),
+    ("UntypedArray", untyped_array_schema, "Vec<serde_json::Value>"),
+    ("Matrix", nested_array_schema, "Vec<Vec<i64>>"),
+  ];
+
+  for (name, schema, expected_type) in cases {
+    let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
+    let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+    let result = converter.convert_schema(name, graph.get_schema(name).unwrap(), None)?;
+
+    assert_eq!(result.len(), 1, "expected single type for {name}");
+    let RustType::TypeAlias(alias) = &result[0] else {
+      panic!("expected type alias for {name}")
+    };
+    assert_eq!(alias.name, name, "name mismatch for {name}");
+    assert_eq!(alias.target.to_rust_type(), expected_type, "type mismatch for {name}");
+  }
+  Ok(())
+}
 
 #[test]
 fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
@@ -22,26 +116,16 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
           ..Default::default()
         }),
       ),
-      (
-        "name".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          ..Default::default()
-        }),
-      ),
+      ("name".to_string(), ObjectOrReference::Object(make_string_schema())),
     ]),
     ..Default::default()
   };
 
-  let pets_schema_array = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Ref {
-      ref_path: "#/components/schemas/Pet".to_string(),
-      summary: None,
-      description: None,
-    })))),
-    ..Default::default()
-  };
+  let pets_schema_array = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Ref {
+    ref_path: "#/components/schemas/Pet".to_string(),
+    summary: None,
+    description: None,
+  }))));
 
   let graph = create_test_graph(BTreeMap::from([
     ("Pet".to_string(), pet_schema),
@@ -53,135 +137,10 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("Expected type alias for array schema")
+    panic!("expected type alias for array schema")
   };
 
   assert_eq!(alias.name, "Pets");
   assert_eq!(alias.target.to_rust_type(), "Vec<Pet>");
-  Ok(())
-}
-
-#[test]
-fn test_array_type_alias_with_primitive_items() -> anyhow::Result<()> {
-  let strings_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )))),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("Strings".to_string(), strings_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let result = converter.convert_schema("Strings", graph.get_schema("Strings").unwrap(), None)?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("Expected type alias for array schema")
-  };
-
-  assert_eq!(alias.name, "Strings");
-  assert_eq!(alias.target.to_rust_type(), "Vec<String>");
-  Ok(())
-}
-
-#[test]
-fn test_primitive_type_alias() -> anyhow::Result<()> {
-  let identifier_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("Identifier".to_string(), identifier_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let result = converter.convert_schema("Identifier", graph.get_schema("Identifier").unwrap(), None)?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("Expected type alias for primitive schema")
-  };
-
-  assert_eq!(alias.name, "Identifier");
-  assert_eq!(alias.target.to_rust_type(), "String");
-  Ok(())
-}
-
-#[test]
-fn test_integer_type_alias_with_format() -> anyhow::Result<()> {
-  let timestamp_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-    format: Some("int64".to_string()),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("Timestamp".to_string(), timestamp_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let result = converter.convert_schema("Timestamp", graph.get_schema("Timestamp").unwrap(), None)?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("Expected type alias for integer schema")
-  };
-
-  assert_eq!(alias.name, "Timestamp");
-  assert_eq!(alias.target.to_rust_type(), "i64");
-  Ok(())
-}
-
-#[test]
-fn test_array_with_no_items_falls_back() -> anyhow::Result<()> {
-  let untyped_array_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: None,
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("UntypedArray".to_string(), untyped_array_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let result = converter.convert_schema("UntypedArray", graph.get_schema("UntypedArray").unwrap(), None)?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("Expected type alias for untyped array schema")
-  };
-
-  assert_eq!(alias.name, "UntypedArray");
-  assert_eq!(alias.target.to_rust_type(), "Vec<serde_json::Value>");
-  Ok(())
-}
-
-#[test]
-fn test_nested_array_type_alias() -> anyhow::Result<()> {
-  let matrix_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-        items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
-          ObjectOrReference::Object(ObjectSchema {
-            schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-            ..Default::default()
-          }),
-        )))),
-        ..Default::default()
-      }),
-    )))),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("Matrix".to_string(), matrix_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
-  let result = converter.convert_schema("Matrix", graph.get_schema("Matrix").unwrap(), None)?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("Expected type alias for nested array schema")
-  };
-
-  assert_eq!(alias.name, "Matrix");
-  assert_eq!(alias.target.to_rust_type(), "Vec<Vec<i64>>");
   Ok(())
 }

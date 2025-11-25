@@ -131,11 +131,13 @@ Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/naming.h
 CRITICAL: Choose collection types carefully to ensure deterministic code generation.
 
 **IndexMap/IndexSet** (insertion order):
+
 - `OperationRegistry`: Preserves operation order from OpenAPI spec for logical client method ordering
 - Use when spec author's ordering is meaningful and should be reflected in generated code
 - Operations should appear in client in same order as spec
 
 **BTreeMap/BTreeSet** (sorted order):
+
 - Schema storage, type generation, dependency graphs
 - Produces alphabetically sorted output independent of spec ordering
 - More stable across spec changes (reordering schemas doesn't change generated output)
@@ -143,10 +145,12 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - Example: `deduplicate_and_order_types()` intentionally uses BTreeMap for sorting
 
 **HashMap/HashSet** (non-deterministic):
+
 - NEVER use for anything that affects code generation order
 - Only acceptable for internal logic where order doesn't matter (e.g., temporary deduplication)
 
 **Rule of thumb:**
+
 - Operations/endpoints → IndexMap (spec order matters)
 - Types/schemas/dependencies → BTreeMap (alphabetical is better)
 - Internal bookkeeping → HashMap only if order truly doesn't matter
@@ -238,6 +242,30 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - All code changes require unit tests in `#[cfg(test)]` modules
 - Cover: happy paths, edge cases (empty/boundary/special chars), error conditions
 - Run `cargo test` before committing
+
+**Test Style:**
+
+- Use table-driven tests: Group related cases into arrays of `(input, expected)` tuples and iterate with descriptive assertions
+- Consolidate by logical grouping: Combine tests that exercise the same function with different inputs into a single test
+- Prefer fewer comprehensive tests over many trivial single-assertion tests
+- Extract helper functions (e.g., `make_variant()`) to reduce boilerplate in test setup
+- Include context in assertion messages: `assert_eq!(result, expected, "failed for {input:?}")`
+
+```rust
+#[test]
+fn test_normalize_numbers() {
+  let cases = [
+    (json!(404), "Value404", "404"),
+    (json!(-42), "Value-42", "-42"),
+    (json!(0), "Value0", "0"),
+  ];
+  for (val, expected_name, expected_rename) in cases {
+    let res = normalize(&val).unwrap();
+    assert_eq!(res.name, expected_name, "name mismatch for {val:?}");
+    assert_eq!(res.rename_value, expected_rename, "rename mismatch for {val:?}");
+  }
+}
+```
 
 ## Build and Development Commands
 
@@ -398,36 +426,73 @@ Cargo workspace with two crates following a three-stage pipeline: **Parse OpenAP
 ```text
 crates/
 ├── oas3-gen/                      # CLI tool (binary)
+│   ├── fixtures/                  # Test fixtures
+│   │   └── petstore/              # Petstore API fixtures
+│   │       ├── mod.rs
+│   │       ├── client.rs
+│   │       └── types.rs
 │   └── src/
 │       ├── main.rs                # Entry point
 │       ├── ui/                    # CLI interface
+│       │   ├── mod.rs
 │       │   ├── cli.rs             # Argument definitions
 │       │   ├── colors.rs          # Terminal theming
-│       │   └── commands/          # Command handlers (generate, list)
+│       │   └── commands/          # Command handlers
+│       │       ├── mod.rs
+│       │       ├── generate.rs
+│       │       └── list.rs
 │       ├── utils/                 # Cross-cutting utilities
+│       │   ├── mod.rs
 │       │   └── text.rs            # Text processing utilities
+│       ├── tests/                 # Integration test utilities
+│       │   ├── mod.rs
+│       │   └── common.rs          # Common test helpers
 │       └── generator/             # Core generation pipeline
+│           ├── mod.rs
 │           ├── orchestrator.rs    # Main pipeline coordinator
 │           ├── operation_registry.rs # Operation collection management
-│           ├── schema_graph.rs    # Dependency tracking and cycle detection
+│           ├── schema_registry.rs # Dependency tracking and cycle detection
+│           ├── tests/             # Generator tests
+│           │   ├── mod.rs
+│           │   ├── orchestrator.rs
+│           │   ├── operation_registry.rs
+│           │   └── schema_graph.rs
 │           ├── analyzer/          # Schema analysis and validation
+│           │   ├── mod.rs
 │           │   ├── errors.rs      # Error type definitions
 │           │   ├── stats.rs       # Schema statistics
 │           │   ├── transforms.rs  # Schema transformations
 │           │   ├── type_graph.rs  # Type dependency graph
-│           │   └── type_usage.rs  # Type usage tracking
+│           │   ├── type_usage.rs  # Type usage tracking
+│           │   └── tests/         # Analyzer tests
+│           │       ├── mod.rs
+│           │       ├── error_tests.rs
+│           │       ├── transform_tests.rs
+│           │       └── type_usage_tests.rs
 │           ├── naming/            # Identifier naming and conversion
+│           │   ├── mod.rs
+│           │   ├── constants.rs   # Naming constants
 │           │   ├── identifiers.rs # Rust identifier generation
-│           │   └── inference.rs   # Type name inference
+│           │   ├── inference.rs   # Type name inference
+│           │   ├── operations.rs  # Operation naming
+│           │   ├── responses.rs   # Response naming
+│           │   ├── status_codes.rs # HTTP status code naming
+│           │   └── tests/         # Naming tests
+│           │       ├── mod.rs
+│           │       ├── identifiers.rs
+│           │       ├── inference.rs
+│           │       └── responses.rs
 │           ├── ast/               # AST type definitions
+│           │   ├── mod.rs
 │           │   ├── types.rs       # Core AST types (RustType, StructDef, EnumDef, etc.)
 │           │   ├── derives.rs     # Derive macro selection
 │           │   ├── lints.rs       # Clippy lint attributes
 │           │   ├── serde_attrs.rs # Serde attribute builders
 │           │   └── validation_attrs.rs # Validation attribute builders
 │           ├── converter/         # OpenAPI → AST conversion
+│           │   ├── mod.rs
 │           │   ├── cache.rs       # Schema conversion caching
-│           │   ├── constants.rs   # Conversion constants
+│           │   ├── common.rs      # Common conversion utilities
 │           │   ├── enums.rs       # oneOf/anyOf/allOf conversion
 │           │   ├── field_optionality.rs # Field requirement logic
 │           │   ├── hashing.rs     # Schema fingerprinting
@@ -435,12 +500,23 @@ crates/
 │           │   ├── operations.rs  # Request/response type generation
 │           │   ├── path_renderer.rs # URL path template rendering
 │           │   ├── responses.rs   # Response type generation
-│           │   ├── status_codes.rs # HTTP status code handling
 │           │   ├── string_enum_optimizer.rs # String enum optimization
 │           │   ├── structs.rs     # Object schema conversion
 │           │   ├── type_resolver.rs # Type mapping and nullable patterns
-│           │   └── type_usage_recorder.rs # Type usage recording
+│           │   ├── type_usage_recorder.rs # Type usage recording
+│           │   └── tests/         # Converter tests
+│           │       ├── mod.rs
+│           │       ├── cache.rs
+│           │       ├── enums.rs
+│           │       ├── implicit_dependencies.rs
+│           │       ├── inline_objects.rs
+│           │       ├── metadata_tests.rs
+│           │       ├── operations.rs
+│           │       ├── structs.rs
+│           │       ├── type_aliases.rs
+│           │       └── type_resolution.rs
 │           └── codegen/           # AST → Rust source generation
+│               ├── mod.rs
 │               ├── attributes.rs  # Attribute generation
 │               ├── coercion.rs    # Type coercion logic
 │               ├── constants.rs   # Constant generation
@@ -449,8 +525,15 @@ crates/
 │               ├── metadata.rs    # Metadata comment generation
 │               ├── structs.rs     # Struct code generation
 │               ├── type_aliases.rs # Type alias generation
-│               └── client/        # HTTP client generation
-│                   └── methods.rs # Client method generation
+│               ├── client/        # HTTP client generation
+│               │   ├── mod.rs
+│               │   └── methods.rs # Client method generation
+│               └── tests/         # Codegen tests
+│                   ├── mod.rs
+│                   ├── coercion_tests.rs
+│                   ├── enum_tests.rs
+│                   ├── error_impl_tests.rs
+│                   └── struct_tests.rs
 └── oas3-gen-support/              # Runtime library (rlib + cdylib)
     └── src/
         └── lib.rs                 # discriminated_enum! macro and utilities
@@ -466,7 +549,7 @@ crates/
 **Key Files:**
 
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator
-- [schema_graph.rs](crates/oas3-gen/src/generator/schema_registry.rs): Dependency and cycle management
+- [schema_registry.rs](crates/oas3-gen/src/generator/schema_registry.rs): Dependency and cycle management
 - [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
 - [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
 - [cache.rs](crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching for performance

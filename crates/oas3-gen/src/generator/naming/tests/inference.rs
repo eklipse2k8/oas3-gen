@@ -1,59 +1,41 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::{
-  generator::naming::{
-    constants::REQUEST_BODY_SUFFIX,
-    inference::{InlineTypeScanner, derive_method_names, ensure_unique, infer_name_from_context, split_pascal_case},
+  generator::{
+    ast::{TypeRef, VariantContent, VariantDef},
+    naming::{
+      constants::REQUEST_BODY_SUFFIX,
+      inference::{
+        InlineTypeScanner, VariantNameNormalizer, derive_method_names, infer_name_from_context, infer_variant_name,
+        strip_common_affixes,
+      },
+    },
   },
   tests::common::create_test_graph,
 };
 
-#[test]
-fn test_ensure_unique() {
-  let cases = vec![
-    (vec!["UserResponse"], "UserResponse", "UserResponse2"),
-    (
-      vec!["UserResponse", "UserResponse2", "UserResponse3"],
-      "UserResponse",
-      "UserResponse4",
-    ),
-    (vec![], "", ""),
-    (vec!["Name2"], "Name", "Name"), // Base name free, suffix collision irrelevant
-    (vec![], "UniqueName", "UniqueName"),
-    (vec!["Value", "Value3"], "Value", "Value2"),
-  ];
-
-  for (used_list, input, expected) in cases {
-    let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
-    assert_eq!(
-      ensure_unique(input, &used),
-      expected,
-      "Failed for input '{input}' with used {used:?}"
-    );
+fn make_string_schema() -> ObjectSchema {
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    ..Default::default()
   }
 }
 
-#[test]
-fn test_split_pascal_case() {
-  let cases = vec![
-    ("UserName", vec!["User", "Name"]),
-    ("SimpleTest", vec!["Simple", "Test"]),
-    ("HTTPSConnection", vec!["HTTPS", "Connection"]),
-    ("XMLParser", vec!["XML", "Parser"]),
-    ("JSONResponse", vec!["JSON", "Response"]),
-    ("HTTPStatus", vec!["HTTP", "Status"]),
-    ("HTTPS", vec!["HTTPS"]),
-    ("XML", vec!["XML"]),
-    ("User", vec!["User"]),
-    ("Status", vec!["Status"]),
-    ("", vec![]),
-  ];
+fn make_string_enum_schema(values: Vec<Value>) -> ObjectSchema {
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: values,
+    ..Default::default()
+  }
+}
 
-  for (input, expected) in cases {
-    assert_eq!(split_pascal_case(input), expected, "Failed for input '{input}'");
+fn make_const_schema(value: Value) -> ObjectSchema {
+  ObjectSchema {
+    const_value: Some(value),
+    ..Default::default()
   }
 }
 
@@ -114,9 +96,9 @@ fn test_is_valid_common_name() {
     ("Enum", false),
     ("Struct", false),
     ("Type", false),
-    ("Typ", false),     // Too short
-    ("abc", false),     // Lowercase
-    ("123Type", false), // Not PascalCase start
+    ("Typ", false),
+    ("abc", false),
+    ("123Type", false),
   ];
 
   for (input, expected) in cases {
@@ -129,140 +111,96 @@ fn test_is_valid_common_name() {
 }
 
 #[test]
+#[allow(clippy::type_complexity)]
 fn test_compute_best_name() {
-  // Scenario 1: Single candidate
-  let candidates1: BTreeSet<(String, bool)> = [("SingleCandidate", false)]
-    .iter()
-    .map(|(s, b)| ((*s).to_string(), *b))
-    .collect();
-  let used1 = BTreeSet::new();
-  assert_eq!(
-    InlineTypeScanner::compute_best_name(&candidates1, &used1),
-    "SingleCandidate"
-  );
+  let cases: Vec<(Vec<(&str, bool)>, Vec<&str>, &str)> = vec![
+    (vec![("SingleCandidate", false)], vec![], "SingleCandidate"),
+    (vec![("Collision", false)], vec!["Collision"], "Collision2"),
+    (
+      vec![("NewName", false), ("ExistingName", true)],
+      vec!["ExistingName"],
+      "ExistingName",
+    ),
+    (vec![("NetUser", false), ("WebUser", false)], vec![], "User"),
+    (vec![("Cat", false), ("Bat", false)], vec![], "Bat"),
+    (vec![("MyGroup", false), ("YourGroup", false)], vec!["Group"], "Group2"),
+  ];
 
-  // Scenario 2: Single candidate, collision
-  let candidates2: BTreeSet<(String, bool)> = [("Collision", false)]
-    .iter()
-    .map(|(s, b)| ((*s).to_string(), *b))
-    .collect();
-  let mut used2 = BTreeSet::new();
-  used2.insert("Collision".to_string());
-  assert_eq!(InlineTypeScanner::compute_best_name(&candidates2, &used2), "Collision2");
-
-  // Scenario 3: Multiple candidates, one is from schema.
-  let candidates3: BTreeSet<(String, bool)> = [("NewName", false), ("ExistingName", true)]
-    .iter()
-    .map(|(s, b)| ((*s).to_string(), *b))
-    .collect();
-  let mut used3 = BTreeSet::new();
-  used3.insert("ExistingName".to_string());
-  // Logic: prioritize candidate that is from schema.
-  assert_eq!(
-    InlineTypeScanner::compute_best_name(&candidates3, &used3),
-    "ExistingName"
-  );
-
-  // Scenario 4: Multiple candidates, none used. LCS valid.
-  let candidates4: BTreeSet<(String, bool)> = [("NetUser", false), ("WebUser", false)]
-    .iter()
-    .map(|(s, b)| ((*s).to_string(), *b))
-    .collect();
-  let used4 = BTreeSet::new();
-  // LCS is "User". Valid.
-  assert_eq!(InlineTypeScanner::compute_best_name(&candidates4, &used4), "User");
-
-  // Scenario 5: Multiple candidates, LCS invalid (too short). Fallback to first.
-  let candidates5: BTreeSet<(String, bool)> = [("Cat", false), ("Bat", false)]
-    .iter()
-    .map(|(s, b)| ((*s).to_string(), *b))
-    .collect();
-  // LCS "at" -> invalid. Sorted: "Bat", "Cat". First is "Bat".
-  let used5 = BTreeSet::new();
-  assert_eq!(InlineTypeScanner::compute_best_name(&candidates5, &used5), "Bat");
-
-  // Scenario 6: Multiple candidates, LCS valid but used (and not in candidates).
-  let candidates6: BTreeSet<(String, bool)> = [("MyGroup", false), ("YourGroup", false)]
-    .iter()
-    .map(|(s, b)| ((*s).to_string(), *b))
-    .collect();
-  // LCS "Group".
-  let mut used6 = BTreeSet::new();
-  used6.insert("Group".to_string());
-  // LCS "Group" is in used, and "Group" is NOT in candidates.
-  // ensure_unique("Group") -> "Group2".
-  assert_eq!(InlineTypeScanner::compute_best_name(&candidates6, &used6), "Group2");
+  for (candidate_pairs, used_list, expected) in cases {
+    let candidates: BTreeSet<(String, bool)> = candidate_pairs.iter().map(|(s, b)| ((*s).to_string(), *b)).collect();
+    let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
+    assert_eq!(
+      InlineTypeScanner::compute_best_name(&candidates, &used),
+      expected,
+      "Failed for candidates {candidates:?} with used {used:?}"
+    );
+  }
 }
 
 #[test]
-fn test_inline_type_scanner_names_string_enum_optimizer_pattern() {
+fn test_inline_type_scanner_known_suffix_patterns() {
   let voice_ids_shared = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        enum_values: vec![json!("alloy"), json!("ash"), json!("ballad")],
-        ..Default::default()
-      }),
+      ObjectOrReference::Object(make_string_schema()),
+      ObjectOrReference::Object(make_string_enum_schema(vec![
+        json!("alloy"),
+        json!("ash"),
+        json!("ballad"),
+      ])),
     ],
     ..Default::default()
   };
 
-  let graph = create_test_graph(BTreeMap::from([("VoiceIdsShared".to_string(), voice_ids_shared)]));
+  let format_type = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(make_string_schema()),
+      ObjectOrReference::Object(make_const_schema(json!("json"))),
+      ObjectOrReference::Object(make_const_schema(json!("text"))),
+      ObjectOrReference::Object(make_const_schema(json!("xml"))),
+    ],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("VoiceIdsShared".to_string(), voice_ids_shared),
+    ("FormatType".to_string(), format_type),
+  ]));
 
   let scanner = InlineTypeScanner::new(&graph);
   let result = scanner.scan_and_compute_names().expect("Should scan successfully");
 
-  let enum_values = vec!["alloy".to_string(), "ash".to_string(), "ballad".to_string()];
-  let name = result.enum_names.get(&enum_values);
+  let cases = [
+    (
+      vec!["alloy".to_string(), "ash".to_string(), "ballad".to_string()],
+      "VoiceIdsSharedKnown",
+      "StringEnumOptimizer pattern with enum_values",
+    ),
+    (
+      vec!["json".to_string(), "text".to_string(), "xml".to_string()],
+      "FormatTypeKnown",
+      "anyOf with const values",
+    ),
+  ];
 
-  assert_eq!(
-    name,
-    Some(&"VoiceIdsSharedKnown".to_string()),
-    "StringEnumOptimizer pattern should be named with 'Known' suffix"
-  );
+  for (enum_values, expected_name, description) in cases {
+    let name = result.enum_names.get(&enum_values);
+    assert_eq!(
+      name,
+      Some(&expected_name.to_string()),
+      "{description} should be named with 'Known' suffix"
+    );
+  }
 }
 
 #[test]
-fn test_inline_type_scanner_names_regular_enum_without_known_suffix() {
-  let status = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: vec![json!("active"), json!("inactive"), json!("pending")],
-    ..Default::default()
-  };
+fn test_inline_type_scanner_enum_naming_without_known_suffix() {
+  let status = make_string_enum_schema(vec![json!("active"), json!("inactive"), json!("pending")]);
 
-  let graph = create_test_graph(BTreeMap::from([("Status".to_string(), status)]));
-
-  let scanner = InlineTypeScanner::new(&graph);
-  let result = scanner.scan_and_compute_names().expect("Should scan successfully");
-
-  let enum_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
-  let name = result.enum_names.get(&enum_values);
-
-  assert!(name.is_some(), "Regular enum should have a precomputed name");
-  assert!(
-    !name.unwrap().ends_with("Known"),
-    "Regular enum should not have 'Known' suffix"
-  );
-}
-
-#[test]
-fn test_inline_type_scanner_handles_anyof_with_ref() {
-  let chat_model = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: vec![json!("gpt-4"), json!("gpt-3.5-turbo")],
-    ..Default::default()
-  };
+  let chat_model = make_string_enum_schema(vec![json!("gpt-4"), json!("gpt-3.5-turbo")]);
 
   let model_ids_shared = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
+      ObjectOrReference::Object(make_string_schema()),
       ObjectOrReference::Ref {
         ref_path: "#/components/schemas/ChatModel".to_string(),
         summary: None,
@@ -273,6 +211,7 @@ fn test_inline_type_scanner_handles_anyof_with_ref() {
   };
 
   let graph = create_test_graph(BTreeMap::from([
+    ("Status".to_string(), status),
     ("ChatModel".to_string(), chat_model),
     ("ModelIdsShared".to_string(), model_ids_shared),
   ]));
@@ -280,12 +219,19 @@ fn test_inline_type_scanner_handles_anyof_with_ref() {
   let scanner = InlineTypeScanner::new(&graph);
   let result = scanner.scan_and_compute_names().expect("Should scan successfully");
 
+  let status_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
+  let status_name = result.enum_names.get(&status_values);
+  assert!(status_name.is_some(), "Regular enum should have a precomputed name");
+  assert!(
+    !status_name.unwrap().ends_with("Known"),
+    "Regular enum should not have 'Known' suffix"
+  );
+
   let chat_model_values = vec!["gpt-3.5-turbo".to_string(), "gpt-4".to_string()];
   let chat_model_name = result.enum_names.get(&chat_model_values);
-
   assert!(
     chat_model_name.is_some(),
-    "Top-level enum values should have a precomputed name"
+    "Top-level enum referenced by anyOf should have a precomputed name"
   );
   assert!(
     chat_model_name.unwrap().starts_with("ChatModel"),
@@ -294,86 +240,220 @@ fn test_inline_type_scanner_handles_anyof_with_ref() {
 }
 
 #[test]
-fn test_inline_type_scanner_anyof_with_const_values() {
-  let format_type = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        const_value: Some(json!("json")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        const_value: Some(json!("text")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        const_value: Some(json!("xml")),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
+fn test_infer_name_from_context() {
+  let cases = [
+    (
+      ObjectSchema::default(),
+      "/api/check-access-by-email",
+      "200",
+      "check_access_by_email200Response",
+      "should sanitize hyphens",
+    ),
+    (
+      ObjectSchema::default(),
+      "/api/foo-bar.baz_qux",
+      "201",
+      "foo_bar_baz_qux201Response",
+      "should sanitize multiple separators",
+    ),
+    (
+      ObjectSchema::default(),
+      "/api/create-user",
+      REQUEST_BODY_SUFFIX,
+      "create_userRequestBody",
+      "should handle request body suffix",
+    ),
+  ];
 
-  let graph = create_test_graph(BTreeMap::from([("FormatType".to_string(), format_type)]));
+  for (schema, path, status, expected, description) in cases {
+    let result = infer_name_from_context(&schema, path, status);
+    assert_eq!(result, expected, "Failed: {description}");
+    assert!(
+      !result.contains('-') && !result.contains('.'),
+      "Result should not contain hyphens or dots: {result}"
+    );
+  }
 
-  let scanner = InlineTypeScanner::new(&graph);
-  let result = scanner.scan_and_compute_names().expect("Should scan successfully");
-
-  let enum_values = vec!["json".to_string(), "text".to_string(), "xml".to_string()];
-  let name = result.enum_names.get(&enum_values);
-
-  assert_eq!(
-    name,
-    Some(&"FormatTypeKnown".to_string()),
-    "anyOf with const values should be named with 'Known' suffix"
-  );
-}
-
-#[test]
-fn test_infer_name_from_context_sanitizes_hyphens() {
-  let schema = ObjectSchema::default();
-
-  let result = infer_name_from_context(&schema, "/api/check-access-by-email", "200");
-
-  assert_eq!(result, "check_access_by_email200Response");
-  assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-}
-
-#[test]
-fn test_infer_name_from_context_sanitizes_multiple_separators() {
-  let schema = ObjectSchema::default();
-
-  let result = infer_name_from_context(&schema, "/api/foo-bar.baz_qux", "201");
-
-  assert_eq!(result, "foo_bar_baz_qux201Response");
-  assert!(
-    !result.contains('-') && !result.contains('.'),
-    "Result should not contain hyphens or dots: {result}"
-  );
-}
-
-#[test]
-fn test_infer_name_from_context_with_request_body() {
-  let schema = ObjectSchema::default();
-
-  let result = infer_name_from_context(&schema, "/api/create-user", REQUEST_BODY_SUFFIX);
-
-  assert_eq!(result, "create_userRequestBody");
-  assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
-}
-
-#[test]
-fn test_infer_name_from_context_single_property_response() {
-  let mut schema = ObjectSchema::default();
-  schema
+  let mut schema_with_property = ObjectSchema::default();
+  schema_with_property
     .properties
     .insert("user".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+  let result = infer_name_from_context(&schema_with_property, "/api/check-access", "200");
+  assert_eq!(
+    result, "userResponse",
+    "Single property response should use property name"
+  );
+}
 
-  let result = infer_name_from_context(&schema, "/api/check-access", "200");
+#[test]
+fn test_normalize_strings() {
+  let cases = [
+    (json!("active"), "Active", "active"),
+    (json!("pending_approval"), "PendingApproval", "pending_approval"),
+    (json!("pending-approval"), "PendingApproval", "pending-approval"),
+  ];
 
-  assert_eq!(result, "userResponse");
-  assert!(!result.contains('-'), "Result should not contain hyphens: {result}");
+  for (val, expected_name, expected_rename) in cases {
+    let res = VariantNameNormalizer::normalize(&val).unwrap();
+    assert_eq!(res.name, expected_name, "name mismatch for {val:?}");
+    assert_eq!(res.rename_value, expected_rename, "rename mismatch for {val:?}");
+  }
+}
+
+#[test]
+#[allow(clippy::approx_constant)]
+fn test_normalize_numbers() {
+  let cases = [
+    (json!(404), "Value404", "404"),
+    (json!(-42), "Value_42", "-42"),
+    (json!(0), "Value0", "0"),
+    (json!(3.14), "Value3_14", "3.14"),
+    (json!(-2.5), "Value_2_5", "-2.5"),
+  ];
+
+  for (val, expected_name, expected_rename) in cases {
+    let res = VariantNameNormalizer::normalize(&val).unwrap();
+    assert_eq!(res.name, expected_name, "name mismatch for {val:?}");
+    assert_eq!(res.rename_value, expected_rename, "rename mismatch for {val:?}");
+  }
+}
+
+#[test]
+fn test_normalize_booleans_and_unsupported_types() {
+  let true_res = VariantNameNormalizer::normalize(&json!(true)).unwrap();
+  assert_eq!(true_res.name, "True");
+  assert_eq!(true_res.rename_value, "true");
+
+  let false_res = VariantNameNormalizer::normalize(&json!(false)).unwrap();
+  assert_eq!(false_res.name, "False");
+  assert_eq!(false_res.rename_value, "false");
+
+  assert!(VariantNameNormalizer::normalize(&json!(null)).is_none());
+  assert!(VariantNameNormalizer::normalize(&json!({"key": "value"})).is_none());
+  assert!(VariantNameNormalizer::normalize(&json!([1, 2, 3])).is_none());
+}
+
+#[test]
+fn test_infer_variant_name_single_types() {
+  let type_cases = [
+    (SchemaType::String, "String"),
+    (SchemaType::Number, "Number"),
+    (SchemaType::Integer, "Integer"),
+    (SchemaType::Boolean, "Boolean"),
+    (SchemaType::Array, "Array"),
+    (SchemaType::Object, "Object"),
+    (SchemaType::Null, "Null"),
+  ];
+
+  for (schema_type, expected) in type_cases {
+    let schema = ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(schema_type)),
+      ..Default::default()
+    };
+    assert_eq!(
+      infer_variant_name(&schema, 0),
+      expected,
+      "type mismatch for {schema_type:?}"
+    );
+  }
+}
+
+#[test]
+fn test_infer_variant_name_special_cases() {
+  let enum_schema = ObjectSchema {
+    enum_values: vec![json!("a"), json!("b")],
+    ..Default::default()
+  };
+  assert_eq!(infer_variant_name(&enum_schema, 0), "Enum");
+
+  let multi_type_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Number])),
+    ..Default::default()
+  };
+  assert_eq!(infer_variant_name(&multi_type_schema, 0), "Mixed");
+
+  let no_type_schema = ObjectSchema::default();
+  assert_eq!(infer_variant_name(&no_type_schema, 5), "Variant5");
+}
+
+fn make_variant(name: &str) -> VariantDef {
+  VariantDef {
+    name: name.into(),
+    docs: vec![],
+    content: VariantContent::Unit,
+    serde_attrs: vec![],
+    deprecated: false,
+  }
+}
+
+#[test]
+fn test_strip_common_affixes_no_op_cases() {
+  let mut empty: Vec<VariantDef> = vec![];
+  strip_common_affixes(&mut empty);
+  assert!(empty.is_empty());
+
+  let mut single = vec![make_variant("UserResponse")];
+  strip_common_affixes(&mut single);
+  assert_eq!(single[0].name, "UserResponse");
+}
+
+#[test]
+fn test_strip_common_affixes_strips_prefix_suffix_or_both() {
+  let mut suffix_variants = vec![make_variant("CreateResponse"), make_variant("UpdateResponse")];
+  strip_common_affixes(&mut suffix_variants);
+  assert_eq!(suffix_variants[0].name, "Create");
+  assert_eq!(suffix_variants[1].name, "Update");
+
+  let mut prefix_variants = vec![make_variant("UserCreate"), make_variant("UserUpdate")];
+  strip_common_affixes(&mut prefix_variants);
+  assert_eq!(prefix_variants[0].name, "Create");
+  assert_eq!(prefix_variants[1].name, "Update");
+
+  let mut both_variants = vec![make_variant("UserCreateResponse"), make_variant("UserUpdateResponse")];
+  strip_common_affixes(&mut both_variants);
+  assert_eq!(both_variants[0].name, "Create");
+  assert_eq!(both_variants[1].name, "Update");
+}
+
+#[test]
+fn test_strip_common_affixes_no_common_parts() {
+  let mut variants = vec![make_variant("CreateUser"), make_variant("DeletePost")];
+  strip_common_affixes(&mut variants);
+  assert_eq!(variants[0].name, "CreateUser");
+  assert_eq!(variants[1].name, "DeletePost");
+}
+
+#[test]
+fn test_strip_common_affixes_safety_guards() {
+  let mut collision_variants = vec![make_variant("UserResponse"), make_variant("UserResponse")];
+  strip_common_affixes(&mut collision_variants);
+  assert_eq!(collision_variants[0].name, "UserResponse");
+  assert_eq!(collision_variants[1].name, "UserResponse");
+
+  let mut empty_name_variants = vec![make_variant("Response"), make_variant("Response")];
+  strip_common_affixes(&mut empty_name_variants);
+  assert_eq!(empty_name_variants[0].name, "Response");
+  assert_eq!(empty_name_variants[1].name, "Response");
+}
+
+#[test]
+fn test_strip_common_affixes_preserves_variant_content() {
+  let tuple_type = TypeRef::new("TestStruct");
+  let mut variants = vec![
+    VariantDef {
+      name: "CreateResponse".into(),
+      docs: vec![],
+      content: VariantContent::Tuple(vec![tuple_type]),
+      serde_attrs: vec![],
+      deprecated: false,
+    },
+    make_variant("UpdateResponse"),
+  ];
+
+  strip_common_affixes(&mut variants);
+
+  assert_eq!(variants[0].name, "Create");
+  assert_eq!(variants[1].name, "Update");
+  assert!(matches!(variants[0].content, VariantContent::Tuple(_)));
+  assert!(matches!(variants[1].content, VariantContent::Unit));
 }

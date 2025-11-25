@@ -33,7 +33,7 @@ fn create_test_spec_with_schemas(schemas: BTreeMap<String, ObjectOrReference<Obj
   }
 }
 
-fn create_simple_schema() -> ObjectSchema {
+fn make_simple_schema() -> ObjectSchema {
   ObjectSchema {
     schema_type: None,
     properties: BTreeMap::new(),
@@ -41,7 +41,7 @@ fn create_simple_schema() -> ObjectSchema {
   }
 }
 
-fn create_schema_with_ref(ref_name: &str) -> ObjectSchema {
+fn make_schema_with_ref(ref_name: &str) -> ObjectSchema {
   let mut properties = BTreeMap::new();
   properties.insert(
     "related".to_string(),
@@ -58,382 +58,193 @@ fn create_schema_with_ref(ref_name: &str) -> ObjectSchema {
   }
 }
 
-#[test]
-fn test_schema_registry_from_spec() {
-  let mut schemas = BTreeMap::new();
-  schemas.insert("User".to_string(), ObjectOrReference::Object(create_simple_schema()));
-  schemas.insert("Post".to_string(), ObjectOrReference::Object(create_simple_schema()));
-
-  let spec = create_test_spec_with_schemas(schemas);
-  let (registry, _) = SchemaRegistry::new(spec);
-
-  assert!(registry.get_schema("User").is_some());
-  assert!(registry.get_schema("Post").is_some());
-  assert!(registry.get_schema("NonExistent").is_none());
-  assert_eq!(registry.schema_names().len(), 2);
+fn make_ref(name: &str) -> ObjectOrReference<ObjectSchema> {
+  ObjectOrReference::Ref {
+    ref_path: format!("{SCHEMA_REF_PREFIX}{name}"),
+    summary: None,
+    description: None,
+  }
 }
 
 #[test]
-fn test_reference_extractor_simple_ref() {
-  let schema = create_schema_with_ref("User");
+fn test_extract_ref_name() {
+  let cases = [
+    ("#/components/schemas/User", Some("User")),
+    ("#/components/schemas/NestedSchema", Some("NestedSchema")),
+    ("#/other/path", None),
+    ("InvalidRef", None),
+  ];
+  for (input, expected) in cases {
+    let result = SchemaRegistry::extract_ref_name(input);
+    assert_eq!(result.as_deref(), expected, "failed for input {input:?}");
+  }
+}
+
+#[test]
+fn test_reference_extractor() {
+  let schema = make_schema_with_ref("User");
   let refs = ReferenceExtractor::extract_from_schema(&schema, None);
+  assert_eq!(refs.len(), 1, "simple ref: expected 1 ref");
+  assert!(refs.contains("User"), "simple ref: should contain User");
 
-  assert_eq!(refs.len(), 1);
-  assert!(refs.contains("User"));
-}
-
-#[test]
-fn test_reference_extractor_multiple_refs() {
   let mut properties = BTreeMap::new();
-  properties.insert(
-    "author".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}User"),
-      summary: None,
-      description: None,
-    },
-  );
-  properties.insert(
-    "category".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}Category"),
-      summary: None,
-      description: None,
-    },
-  );
-
+  properties.insert("author".to_string(), make_ref("User"));
+  properties.insert("category".to_string(), make_ref("Category"));
   let schema = ObjectSchema {
     schema_type: None,
     properties,
     ..Default::default()
   };
   let refs = ReferenceExtractor::extract_from_schema(&schema, None);
-
-  assert_eq!(refs.len(), 2);
-  assert!(refs.contains("User"));
-  assert!(refs.contains("Category"));
-}
-
-#[test]
-fn test_reference_extractor_combinators() {
-  let user_ref = ObjectOrReference::Ref {
-    ref_path: format!("{SCHEMA_REF_PREFIX}User"),
-    summary: None,
-    description: None,
-  };
-  let post_ref = ObjectOrReference::Ref {
-    ref_path: format!("{SCHEMA_REF_PREFIX}Post"),
-    summary: None,
-    description: None,
-  };
-  let comment_ref = ObjectOrReference::Ref {
-    ref_path: format!("{SCHEMA_REF_PREFIX}Comment"),
-    summary: None,
-    description: None,
-  };
+  assert_eq!(refs.len(), 2, "multiple refs: expected 2 refs");
+  assert!(refs.contains("User"), "multiple refs: should contain User");
+  assert!(refs.contains("Category"), "multiple refs: should contain Category");
 
   let schema = ObjectSchema {
     schema_type: None,
-    one_of: vec![user_ref],
-    any_of: vec![post_ref],
-    all_of: vec![comment_ref],
+    one_of: vec![make_ref("User")],
+    any_of: vec![make_ref("Post")],
+    all_of: vec![make_ref("Comment")],
     ..Default::default()
   };
-
   let refs = ReferenceExtractor::extract_from_schema(&schema, None);
-
-  assert_eq!(refs.len(), 3);
-  assert!(refs.contains("User"));
-  assert!(refs.contains("Post"));
-  assert!(refs.contains("Comment"));
+  assert_eq!(refs.len(), 3, "combinators: expected 3 refs");
+  assert!(refs.contains("User"), "combinators: should contain User");
+  assert!(refs.contains("Post"), "combinators: should contain Post");
+  assert!(refs.contains("Comment"), "combinators: should contain Comment");
 }
 
 #[test]
-fn test_schema_graph_no_cycles() {
+fn test_schema_registry() {
   let mut schemas = BTreeMap::new();
-  schemas.insert("A".to_string(), ObjectOrReference::Object(create_simple_schema()));
-  schemas.insert("B".to_string(), ObjectOrReference::Object(create_schema_with_ref("A")));
-  let mut c_schema = create_simple_schema();
-  c_schema.properties.insert(
-    "b".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}B"),
-      summary: None,
-      description: None,
-    },
-  );
-  schemas.insert("C".to_string(), ObjectOrReference::Object(c_schema));
+  schemas.insert("User".to_string(), ObjectOrReference::Object(make_simple_schema()));
+  schemas.insert("Post".to_string(), ObjectOrReference::Object(make_simple_schema()));
 
   let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
+  let (registry, _) = SchemaRegistry::new(spec);
 
-  graph.build_dependencies();
-  let cycles = graph.detect_cycles();
-
-  assert!(cycles.is_empty());
-  assert!(!graph.is_cyclic("A"));
-  assert!(!graph.is_cyclic("B"));
-  assert!(!graph.is_cyclic("C"));
-}
-
-#[test]
-fn test_schema_graph_simple_cycle() {
-  let mut schemas = BTreeMap::new();
-  let mut a_schema = create_simple_schema();
-  a_schema.properties.insert(
-    "b".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}B"),
-      summary: None,
-      description: None,
-    },
+  assert!(registry.get_schema("User").is_some(), "should have User schema");
+  assert!(registry.get_schema("Post").is_some(), "should have Post schema");
+  assert!(
+    registry.get_schema("NonExistent").is_none(),
+    "should not have NonExistent"
   );
-  let mut b_schema = create_simple_schema();
-  b_schema.properties.insert(
-    "a".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}A"),
-      summary: None,
-      description: None,
-    },
-  );
-  schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
-  schemas.insert("B".to_string(), ObjectOrReference::Object(b_schema));
+  assert_eq!(registry.schema_names().len(), 2, "should have 2 schemas");
 
-  let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
-
-  graph.build_dependencies();
-  let cycles = graph.detect_cycles();
-
-  assert_eq!(cycles.len(), 1);
-  assert!(!cycles[0].is_empty());
-  assert!(graph.is_cyclic("A"));
-  assert!(graph.is_cyclic("B"));
-}
-
-#[test]
-fn test_schema_graph_self_reference() {
   let mut schemas = BTreeMap::new();
-  let mut a_schema = create_simple_schema();
-  a_schema.properties.insert(
-    "self_ref".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}A"),
-      summary: None,
-      description: None,
-    },
-  );
-  schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
-
-  let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
-
-  graph.build_dependencies();
-  let cycles = graph.detect_cycles();
-
-  assert_eq!(cycles.len(), 1);
-  assert!(graph.is_cyclic("A"));
-}
-
-#[test]
-fn test_schema_graph_build_dependencies() {
-  let mut schemas = BTreeMap::new();
-  schemas.insert("User".to_string(), ObjectOrReference::Object(create_simple_schema()));
+  schemas.insert("User".to_string(), ObjectOrReference::Object(make_simple_schema()));
   schemas.insert(
     "Post".to_string(),
-    ObjectOrReference::Object(create_schema_with_ref("User")),
+    ObjectOrReference::Object(make_schema_with_ref("User")),
   );
 
   let spec = create_test_spec_with_schemas(schemas);
   let (mut graph, _) = SchemaRegistry::new(spec);
-
   graph.build_dependencies();
 
-  assert_eq!(graph.schema_names().len(), 2);
-  assert!(graph.get_schema("User").is_some());
-  assert!(graph.get_schema("Post").is_some());
+  assert_eq!(graph.schema_names().len(), 2, "build deps: should have 2 schemas");
+  assert!(graph.get_schema("User").is_some(), "build deps: should have User");
+  assert!(graph.get_schema("Post").is_some(), "build deps: should have Post");
 }
 
 #[test]
-fn test_schema_graph_detect_cycles() {
-  let mut schemas = BTreeMap::new();
-  let mut user_schema = create_simple_schema();
-  user_schema.properties.insert(
-    "posts".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}Post"),
-      summary: None,
-      description: None,
-    },
-  );
-  let mut post_schema = create_simple_schema();
-  post_schema.properties.insert(
-    "author".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}User"),
-      summary: None,
-      description: None,
-    },
-  );
+fn test_schema_graph_cycle_detection() {
+  {
+    let mut schemas = BTreeMap::new();
+    schemas.insert("A".to_string(), ObjectOrReference::Object(make_simple_schema()));
+    schemas.insert("B".to_string(), ObjectOrReference::Object(make_schema_with_ref("A")));
+    let mut c_schema = make_simple_schema();
+    c_schema.properties.insert("b".to_string(), make_ref("B"));
+    schemas.insert("C".to_string(), ObjectOrReference::Object(c_schema));
 
-  schemas.insert("User".to_string(), ObjectOrReference::Object(user_schema));
-  schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
+    let spec = create_test_spec_with_schemas(schemas);
+    let (mut graph, _) = SchemaRegistry::new(spec);
+    graph.build_dependencies();
+    let cycles = graph.detect_cycles();
 
-  let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
+    assert!(cycles.is_empty(), "linear deps: should have no cycles");
+    assert!(!graph.is_cyclic("A"), "linear deps: A should not be cyclic");
+    assert!(!graph.is_cyclic("B"), "linear deps: B should not be cyclic");
+    assert!(!graph.is_cyclic("C"), "linear deps: C should not be cyclic");
+  }
 
-  graph.build_dependencies();
-  let cycles = graph.detect_cycles();
+  {
+    let mut a_schema = make_simple_schema();
+    a_schema.properties.insert("b".to_string(), make_ref("B"));
+    let mut b_schema = make_simple_schema();
+    b_schema.properties.insert("a".to_string(), make_ref("A"));
 
-  assert!(!cycles.is_empty());
-  assert!(graph.is_cyclic("User"));
-  assert!(graph.is_cyclic("Post"));
+    let mut schemas = BTreeMap::new();
+    schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
+    schemas.insert("B".to_string(), ObjectOrReference::Object(b_schema));
+
+    let spec = create_test_spec_with_schemas(schemas);
+    let (mut graph, _) = SchemaRegistry::new(spec);
+    graph.build_dependencies();
+    let cycles = graph.detect_cycles();
+
+    assert_eq!(cycles.len(), 1, "simple cycle: should detect 1 cycle");
+    assert!(!cycles[0].is_empty(), "simple cycle: cycle should not be empty");
+    assert!(graph.is_cyclic("A"), "simple cycle: A should be cyclic");
+    assert!(graph.is_cyclic("B"), "simple cycle: B should be cyclic");
+  }
+
+  {
+    let mut a_schema = make_simple_schema();
+    a_schema.properties.insert("self_ref".to_string(), make_ref("A"));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
+
+    let spec = create_test_spec_with_schemas(schemas);
+    let (mut graph, _) = SchemaRegistry::new(spec);
+    graph.build_dependencies();
+    let cycles = graph.detect_cycles();
+
+    assert_eq!(cycles.len(), 1, "self-ref: should detect 1 cycle");
+    assert!(graph.is_cyclic("A"), "self-ref: A should be cyclic");
+  }
+
+  {
+    let mut user_schema = make_simple_schema();
+    user_schema.properties.insert("posts".to_string(), make_ref("Post"));
+    let mut post_schema = make_simple_schema();
+    post_schema.properties.insert("author".to_string(), make_ref("User"));
+
+    let mut schemas = BTreeMap::new();
+    schemas.insert("User".to_string(), ObjectOrReference::Object(user_schema));
+    schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
+
+    let spec = create_test_spec_with_schemas(schemas);
+    let (mut graph, _) = SchemaRegistry::new(spec);
+    graph.build_dependencies();
+    let cycles = graph.detect_cycles();
+
+    assert!(!cycles.is_empty(), "user-post cycle: should detect cycles");
+    assert!(graph.is_cyclic("User"), "user-post cycle: User should be cyclic");
+    assert!(graph.is_cyclic("Post"), "user-post cycle: Post should be cyclic");
+  }
 }
 
 #[test]
 fn test_schema_graph_integration() {
   let mut schemas = BTreeMap::new();
-  schemas.insert("User".to_string(), ObjectOrReference::Object(create_simple_schema()));
+  schemas.insert("User".to_string(), ObjectOrReference::Object(make_simple_schema()));
   schemas.insert(
     "Post".to_string(),
-    ObjectOrReference::Object(create_schema_with_ref("User")),
+    ObjectOrReference::Object(make_schema_with_ref("User")),
   );
 
   let spec = create_test_spec_with_schemas(schemas);
   let (mut graph, _) = SchemaRegistry::new(spec);
 
-  assert!(graph.get_schema("User").is_some());
-  assert!(graph.get_schema("Post").is_some());
-  assert_eq!(graph.schema_names().len(), 2);
+  assert!(graph.get_schema("User").is_some(), "integration: should have User");
+  assert!(graph.get_schema("Post").is_some(), "integration: should have Post");
+  assert_eq!(graph.schema_names().len(), 2, "integration: should have 2 schemas");
 
   graph.build_dependencies();
   let cycles = graph.detect_cycles();
-  assert!(cycles.is_empty());
-  assert!(!graph.is_cyclic("User"));
-}
 
-#[test]
-fn test_extract_ref_name() {
-  assert_eq!(
-    SchemaRegistry::extract_ref_name("#/components/schemas/User"),
-    Some("User".to_string())
-  );
-  assert_eq!(
-    SchemaRegistry::extract_ref_name("#/components/schemas/NestedSchema"),
-    Some("NestedSchema".to_string())
-  );
-  assert_eq!(SchemaRegistry::extract_ref_name("#/other/path"), None);
-  assert_eq!(SchemaRegistry::extract_ref_name("InvalidRef"), None);
-}
-
-#[test]
-fn test_reference_extractor() {
-  // Simple ref
-  let schema = create_schema_with_ref("User");
-  let refs = ReferenceExtractor::extract_from_schema(&schema, None);
-  assert_eq!(refs.len(), 1);
-  assert!(refs.contains("User"));
-
-  // Multiple refs
-  let mut properties = BTreeMap::new();
-  properties.insert(
-    "author".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}User"),
-      summary: None,
-      description: None,
-    },
-  );
-  properties.insert(
-    "category".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}Category"),
-      summary: None,
-      description: None,
-    },
-  );
-  let schema = ObjectSchema {
-    schema_type: None,
-    properties,
-    ..Default::default()
-  };
-  let refs = ReferenceExtractor::extract_from_schema(&schema, None);
-  assert_eq!(refs.len(), 2);
-  assert!(refs.contains("User"));
-  assert!(refs.contains("Category"));
-
-  // Combinators
-  let user_ref = ObjectOrReference::Ref {
-    ref_path: format!("{SCHEMA_REF_PREFIX}User"),
-    summary: None,
-    description: None,
-  };
-  let post_ref = ObjectOrReference::Ref {
-    ref_path: format!("{SCHEMA_REF_PREFIX}Post"),
-    summary: None,
-    description: None,
-  };
-  let comment_ref = ObjectOrReference::Ref {
-    ref_path: format!("{SCHEMA_REF_PREFIX}Comment"),
-    summary: None,
-    description: None,
-  };
-  let schema = ObjectSchema {
-    schema_type: None,
-    one_of: vec![user_ref],
-    any_of: vec![post_ref],
-    all_of: vec![comment_ref],
-    ..Default::default()
-  };
-  let refs = ReferenceExtractor::extract_from_schema(&schema, None);
-  assert_eq!(refs.len(), 3);
-  assert!(refs.contains("User"));
-  assert!(refs.contains("Post"));
-  assert!(refs.contains("Comment"));
-}
-
-#[test]
-fn test_schema_graph_dependencies() {
-  let mut schemas = BTreeMap::new();
-  schemas.insert("User".to_string(), ObjectOrReference::Object(create_simple_schema()));
-  schemas.insert(
-    "Post".to_string(),
-    ObjectOrReference::Object(create_schema_with_ref("User")),
-  );
-  let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
-  graph.build_dependencies();
-  assert_eq!(graph.schema_names().len(), 2);
-  assert!(graph.get_schema("User").is_some());
-  assert!(graph.get_schema("Post").is_some());
-
-  let mut schemas = BTreeMap::new();
-  let mut user_schema = create_simple_schema();
-  user_schema.properties.insert(
-    "posts".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}Post"),
-      summary: None,
-      description: None,
-    },
-  );
-  let mut post_schema = create_simple_schema();
-  post_schema.properties.insert(
-    "author".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}User"),
-      summary: None,
-      description: None,
-    },
-  );
-  schemas.insert("User".to_string(), ObjectOrReference::Object(user_schema));
-  schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
-  let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
-  graph.build_dependencies();
-  let cycles = graph.detect_cycles();
-  assert!(!cycles.is_empty());
-  assert!(graph.is_cyclic("User"));
-  assert!(graph.is_cyclic("Post"));
+  assert!(cycles.is_empty(), "integration: should have no cycles");
+  assert!(!graph.is_cyclic("User"), "integration: User should not be cyclic");
 }

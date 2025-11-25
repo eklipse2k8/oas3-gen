@@ -78,247 +78,252 @@ fn create_response_with_inline_schema(content_type: &str) -> Response {
   }
 }
 
-fn create_operation_with_responses(responses: BTreeMap<String, ObjectOrReference<Response>>) -> Operation {
-  Operation {
-    responses: Some(responses),
+fn make_empty_response() -> Response {
+  Response {
+    content: BTreeMap::new(),
     ..Default::default()
   }
 }
 
 #[test]
-fn test_is_success_code() {
-  assert!(is_success_code("200"));
-  assert!(is_success_code("201"));
-  assert!(is_success_code("204"));
-  assert!(is_success_code("2XX"));
-  assert!(!is_success_code("400"));
-  assert!(!is_success_code("404"));
-  assert!(!is_success_code("500"));
-  assert!(!is_success_code("default"));
+fn test_status_code_classification() {
+  let success_codes = ["200", "201", "204", "2XX"];
+  for code in success_codes {
+    assert!(is_success_code(code), "expected {code} to be success");
+    assert!(!is_error_code(code), "expected {code} not to be error");
+  }
+
+  let error_codes = ["400", "404", "422", "4XX", "500", "503", "5XX"];
+  for code in error_codes {
+    assert!(is_error_code(code), "expected {code} to be error");
+    assert!(!is_success_code(code), "expected {code} not to be success");
+  }
+
+  assert!(!is_success_code("default"), "default should not be success");
+  assert!(!is_error_code("default"), "default should not be error");
 }
 
 #[test]
-fn test_is_error_code() {
-  assert!(is_error_code("400"));
-  assert!(is_error_code("404"));
-  assert!(is_error_code("422"));
-  assert!(is_error_code("4XX"));
-  assert!(is_error_code("500"));
-  assert!(is_error_code("503"));
-  assert!(is_error_code("5XX"));
-  assert!(!is_error_code("200"));
-  assert!(!is_error_code("201"));
-  assert!(!is_error_code("default"));
-}
-
-#[test]
-fn test_extract_schema_name_from_response_with_ref() {
-  let response = create_response_with_schema_ref("UserResponse", "application/json");
-  let schema_name = extract_schema_name_from_response(&response);
-  assert_eq!(schema_name, Some("UserResponse".to_string()));
-}
-
-#[test]
-fn test_extract_schema_name_from_response_with_inline_schema() {
-  let response = create_response_with_inline_schema("application/json");
-  let schema_name = extract_schema_name_from_response(&response);
-  assert_eq!(schema_name, None);
-}
-
-#[test]
-fn test_extract_schema_name_from_response_empty_content() {
-  let response = Response {
-    content: BTreeMap::new(),
-    ..Default::default()
-  };
-  let schema_name = extract_schema_name_from_response(&response);
-  assert_eq!(schema_name, None);
-}
-
-#[test]
-fn test_extract_response_type_name_success_response() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([(
-    "200".to_string(),
-    ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
-  )]);
-
-  let operation = create_operation_with_responses(responses);
-  let type_name = extract_response_type_name(&spec, &operation);
-  assert_eq!(type_name, Some("UserResponse".to_string()));
-}
-
-#[test]
-fn test_extract_response_type_name_fallback_to_first() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([(
-    "404".to_string(),
-    ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
-  )]);
-
-  let operation = create_operation_with_responses(responses);
-  let type_name = extract_response_type_name(&spec, &operation);
-  assert_eq!(type_name, Some("ErrorResponse".to_string()));
-}
-
-#[test]
-fn test_extract_response_type_name_prefers_success() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([
+fn test_extract_schema_name_from_response() {
+  let cases: Vec<(Response, Option<&str>)> = vec![
     (
-      "404".to_string(),
-      ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+      create_response_with_schema_ref("UserResponse", "application/json"),
+      Some("UserResponse"),
+    ),
+    (create_response_with_inline_schema("application/json"), None),
+    (make_empty_response(), None),
+  ];
+
+  for (response, expected) in cases {
+    let result = extract_schema_name_from_response(&response);
+    assert_eq!(
+      result.as_deref(),
+      expected,
+      "failed for response with content: {:?}",
+      response.content.keys().collect::<Vec<_>>()
+    );
+  }
+}
+
+#[test]
+#[allow(clippy::type_complexity)]
+fn test_extract_response_type_name() {
+  let spec = create_test_spec();
+
+  let cases: Vec<(
+    Option<BTreeMap<String, ObjectOrReference<Response>>>,
+    Option<&str>,
+    &str,
+  )> = vec![
+    (
+      Some(BTreeMap::from([(
+        "200".to_string(),
+        ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+      )])),
+      Some("UserResponse"),
+      "success response",
     ),
     (
-      "200".to_string(),
-      ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
-    ),
-  ]);
-
-  let operation = create_operation_with_responses(responses);
-  let type_name = extract_response_type_name(&spec, &operation);
-  assert_eq!(type_name, Some("UserResponse".to_string()));
-}
-
-#[test]
-fn test_extract_response_type_name_no_responses() {
-  let spec = create_test_spec();
-  let operation = Operation {
-    responses: None,
-    ..Default::default()
-  };
-  let type_name = extract_response_type_name(&spec, &operation);
-  assert_eq!(type_name, None);
-}
-
-#[test]
-fn test_extract_response_content_type_json() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([(
-    "200".to_string(),
-    ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
-  )]);
-
-  let operation = create_operation_with_responses(responses);
-  let content_type = extract_response_content_type(&spec, &operation);
-  assert_eq!(content_type, Some("application/json".to_string()));
-}
-
-#[test]
-fn test_extract_response_content_type_xml() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([(
-    "200".to_string(),
-    ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/xml")),
-  )]);
-
-  let operation = create_operation_with_responses(responses);
-  let content_type = extract_response_content_type(&spec, &operation);
-  assert_eq!(content_type, Some("application/xml".to_string()));
-}
-
-#[test]
-fn test_extract_response_content_type_no_responses() {
-  let spec = create_test_spec();
-  let operation = Operation {
-    responses: None,
-    ..Default::default()
-  };
-  let content_type = extract_response_content_type(&spec, &operation);
-  assert_eq!(content_type, None);
-}
-
-#[test]
-fn test_extract_all_response_types_success_only() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([(
-    "200".to_string(),
-    ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
-  )]);
-
-  let operation = create_operation_with_responses(responses);
-  let types = extract_all_response_types(&spec, &operation);
-  assert_eq!(types.success.len(), 1);
-  assert!(types.success.contains(&"UserResponse".to_string()));
-  assert_eq!(types.error.len(), 0);
-}
-
-#[test]
-fn test_extract_all_response_types_error_only() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([(
-    "404".to_string(),
-    ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
-  )]);
-
-  let operation = create_operation_with_responses(responses);
-  let types = extract_all_response_types(&spec, &operation);
-  assert_eq!(types.success.len(), 0);
-  assert_eq!(types.error.len(), 1);
-  assert!(types.error.contains(&"ErrorResponse".to_string()));
-}
-
-#[test]
-fn test_extract_all_response_types_mixed() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([
-    (
-      "200".to_string(),
-      ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+      Some(BTreeMap::from([(
+        "404".to_string(),
+        ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+      )])),
+      Some("ErrorResponse"),
+      "fallback to first when no success",
     ),
     (
-      "404".to_string(),
-      ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+      Some(BTreeMap::from([
+        (
+          "404".to_string(),
+          ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+        ),
+        (
+          "200".to_string(),
+          ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+        ),
+      ])),
+      Some("UserResponse"),
+      "prefers success over error",
     ),
-  ]);
+    (None, None, "no responses"),
+  ];
 
-  let operation = create_operation_with_responses(responses);
-  let types = extract_all_response_types(&spec, &operation);
-  assert_eq!(types.success.len(), 1);
-  assert!(types.success.contains(&"UserResponse".to_string()));
-  assert_eq!(types.error.len(), 1);
-  assert!(types.error.contains(&"ErrorResponse".to_string()));
+  for (responses, expected, desc) in cases {
+    let operation = Operation {
+      responses,
+      ..Default::default()
+    };
+    let result = extract_response_type_name(&spec, &operation);
+    assert_eq!(result.as_deref(), expected, "failed for case: {desc}");
+  }
 }
 
 #[test]
-fn test_extract_all_response_types_no_responses() {
+#[allow(clippy::type_complexity)]
+fn test_extract_response_content_type() {
   let spec = create_test_spec();
-  let operation = Operation {
-    responses: None,
-    ..Default::default()
-  };
-  let types = extract_all_response_types(&spec, &operation);
-  assert_eq!(types.success.len(), 0);
-  assert_eq!(types.error.len(), 0);
-}
 
-#[test]
-fn test_extract_all_response_types_empty_responses() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::new();
-  let operation = create_operation_with_responses(responses);
-  let types = extract_all_response_types(&spec, &operation);
-  assert_eq!(types.success.len(), 0);
-  assert_eq!(types.error.len(), 0);
-}
-
-#[test]
-fn test_extract_all_response_types_ignores_default() {
-  let spec = create_test_spec();
-  let responses = BTreeMap::from([
+  let cases: Vec<(
+    Option<BTreeMap<String, ObjectOrReference<Response>>>,
+    Option<&str>,
+    &str,
+  )> = vec![
     (
-      "200".to_string(),
-      ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+      Some(BTreeMap::from([(
+        "200".to_string(),
+        ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+      )])),
+      Some("application/json"),
+      "json content type",
     ),
     (
-      "default".to_string(),
-      ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+      Some(BTreeMap::from([(
+        "200".to_string(),
+        ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/xml")),
+      )])),
+      Some("application/xml"),
+      "xml content type",
     ),
-  ]);
+    (None, None, "no responses"),
+  ];
 
-  let operation = create_operation_with_responses(responses);
-  let types = extract_all_response_types(&spec, &operation);
-  assert_eq!(types.success.len(), 1);
-  assert!(types.success.contains(&"UserResponse".to_string()));
-  assert_eq!(types.error.len(), 0);
+  for (responses, expected, desc) in cases {
+    let operation = Operation {
+      responses,
+      ..Default::default()
+    };
+    let result = extract_response_content_type(&spec, &operation);
+    assert_eq!(result.as_deref(), expected, "failed for case: {desc}");
+  }
+}
+
+struct AllResponseTypesCase {
+  responses: Option<BTreeMap<String, ObjectOrReference<Response>>>,
+  expected_success: Vec<&'static str>,
+  expected_error: Vec<&'static str>,
+  desc: &'static str,
+}
+
+#[test]
+fn test_extract_all_response_types() {
+  let spec = create_test_spec();
+
+  let cases = vec![
+    AllResponseTypesCase {
+      responses: Some(BTreeMap::from([(
+        "200".to_string(),
+        ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+      )])),
+      expected_success: vec!["UserResponse"],
+      expected_error: vec![],
+      desc: "success only",
+    },
+    AllResponseTypesCase {
+      responses: Some(BTreeMap::from([(
+        "404".to_string(),
+        ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+      )])),
+      expected_success: vec![],
+      expected_error: vec!["ErrorResponse"],
+      desc: "error only",
+    },
+    AllResponseTypesCase {
+      responses: Some(BTreeMap::from([
+        (
+          "200".to_string(),
+          ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+        ),
+        (
+          "404".to_string(),
+          ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+        ),
+      ])),
+      expected_success: vec!["UserResponse"],
+      expected_error: vec!["ErrorResponse"],
+      desc: "mixed success and error",
+    },
+    AllResponseTypesCase {
+      responses: None,
+      expected_success: vec![],
+      expected_error: vec![],
+      desc: "no responses",
+    },
+    AllResponseTypesCase {
+      responses: Some(BTreeMap::new()),
+      expected_success: vec![],
+      expected_error: vec![],
+      desc: "empty responses",
+    },
+    AllResponseTypesCase {
+      responses: Some(BTreeMap::from([
+        (
+          "200".to_string(),
+          ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
+        ),
+        (
+          "default".to_string(),
+          ObjectOrReference::Object(create_response_with_schema_ref("ErrorResponse", "application/json")),
+        ),
+      ])),
+      expected_success: vec!["UserResponse"],
+      expected_error: vec![],
+      desc: "ignores default response",
+    },
+  ];
+
+  for case in cases {
+    let operation = Operation {
+      responses: case.responses,
+      ..Default::default()
+    };
+    let types = extract_all_response_types(&spec, &operation);
+
+    assert_eq!(
+      types.success.len(),
+      case.expected_success.len(),
+      "success count mismatch for case: {}",
+      case.desc
+    );
+    for expected in &case.expected_success {
+      assert!(
+        types.success.contains(&(*expected).to_string()),
+        "missing success type {expected} for case: {}",
+        case.desc
+      );
+    }
+
+    assert_eq!(
+      types.error.len(),
+      case.expected_error.len(),
+      "error count mismatch for case: {}",
+      case.desc
+    );
+    for expected in &case.expected_error {
+      assert!(
+        types.error.contains(&(*expected).to_string()),
+        "missing error type {expected} for case: {}",
+        case.desc
+      );
+    }
+  }
 }
