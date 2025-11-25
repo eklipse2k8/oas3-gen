@@ -12,7 +12,7 @@ use string_cache::DefaultAtom;
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
-  constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX, doc_attrs},
+  constants::doc_attrs,
   field_optionality::{FieldContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
@@ -22,7 +22,10 @@ use crate::generator::{
     DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef,
     StructKind, TypeRef, default_struct_derives,
   },
-  naming::identifiers::{to_rust_field_name, to_rust_type_name},
+  naming::{
+    constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
+    identifiers::{to_rust_field_name, to_rust_type_name},
+  },
   schema_graph::SchemaGraph,
 };
 
@@ -157,7 +160,7 @@ impl StructConverter {
     prop_schema_ref: &ObjectOrReference<ObjectSchema>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    if Self::is_inline_struct(prop_schema_ref, prop_schema) {
+    if prop_schema.is_inline_struct(prop_schema_ref) {
       return self.generate_inline_struct(parent_name, prop_name, prop_schema, cache);
     }
 
@@ -166,69 +169,23 @@ impl StructConverter {
       .resolve_property_type_with_inlines(parent_name, prop_name, prop_schema, prop_schema_ref, cache)
   }
 
-  fn is_inline_struct(prop_schema_ref: &ObjectOrReference<ObjectSchema>, schema: &ObjectSchema) -> bool {
-    if matches!(prop_schema_ref, ObjectOrReference::Ref { .. }) {
-      return false;
-    }
-
-    if !schema.enum_values.is_empty() {
-      return false;
-    }
-
-    if !schema.one_of.is_empty() || !schema.any_of.is_empty() {
-      return false;
-    }
-
-    if schema.is_array() {
-      return false;
-    }
-
-    if schema.is_primitive() {
-      return false;
-    }
-
-    !schema.properties.is_empty()
-  }
-
   fn generate_inline_struct(
     &self,
     parent_name: &str,
     prop_name: &str,
     schema: &ObjectSchema,
-    mut cache: Option<&mut SharedSchemaCache>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    if let Some(ref cache) = cache
-      && let Some(existing_name) = cache.get_type_name(schema)?
-    {
-      return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
-    }
-
     let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
-    let struct_name = if let Some(ref mut c) = cache {
-      c.get_preferred_name(schema, &base_name)?
-    } else {
-      base_name
-    };
 
-    let result = if let Some(ref mut c) = cache {
-      self.convert_struct(&struct_name, schema, None, Some(c))?
-    } else {
-      self.convert_struct(&struct_name, schema, None, None)?
-    };
-
-    if let Some(c) = cache {
-      let type_name = c.register_type(schema, &struct_name, result.inline_types, result.result.clone())?;
-      return Ok(ConversionOutput::new(TypeRef::new(type_name)));
-    }
-
-    let mut all_types = vec![result.result];
-    let mut inline = result.inline_types;
-    all_types.append(&mut inline);
-
-    Ok(ConversionOutput::with_inline_types(
-      TypeRef::new(struct_name),
-      all_types,
-    ))
+    super::common::handle_inline_creation(
+      schema,
+      &base_name,
+      None,
+      cache,
+      |_| None,
+      |name, cache| self.convert_struct(name, schema, None, cache),
+    )
   }
 
   /// Converts a standard object schema into a Rust Struct.

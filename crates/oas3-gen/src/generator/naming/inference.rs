@@ -4,11 +4,11 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use crate::generator::{
-  converter::{
+  converter::hashing,
+  naming::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
-    hashing,
+    identifiers::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
   },
-  naming::identifiers::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
   schema_graph::SchemaGraph,
 };
 

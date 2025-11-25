@@ -8,7 +8,6 @@ pub(crate) mod metadata;
 pub(crate) mod operations;
 pub(crate) mod path_renderer;
 pub(crate) mod responses;
-pub(crate) mod status_codes;
 mod string_enum_optimizer;
 mod structs;
 pub(crate) mod type_resolver;

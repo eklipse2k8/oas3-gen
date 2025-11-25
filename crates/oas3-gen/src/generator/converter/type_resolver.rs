@@ -135,61 +135,41 @@ impl TypeResolver {
       .into_iter()
       .collect();
 
-    if let Some(ref cache) = cache {
-      if let Some(existing_name) = cache.get_type_name(prop_schema)? {
-        return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
-      }
-      if let Some(name) = cache.get_enum_name(&enum_values)
-        && cache.is_enum_generated(&enum_values)
-      {
-        return Ok(ConversionOutput::new(TypeRef::new(name)));
-      }
-    }
-
     let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
-    let enum_name = Self::determine_enum_name(prop_schema, &base_name, &enum_values, &cache)?;
-
-    let config = CodegenConfig {
-      preserve_case_variants: self.preserve_case_variants,
-      case_insensitive_enums: self.case_insensitive_enums,
-      no_helpers: self.no_helpers,
-    };
-    let converter = EnumConverter::new(&self.graph, self.clone(), config);
-    let inline_enum = converter
-      .convert_simple_enum(&enum_name, prop_schema, None)
-      .expect("convert_simple_enum should return Some when cache is None");
-
-    if let Some(c) = cache {
-      let type_name = c.register_type(prop_schema, &enum_name, vec![], inline_enum.clone())?;
-      c.register_enum(enum_values, type_name.clone());
-      Ok(ConversionOutput::new(TypeRef::new(type_name)))
-    } else {
-      Ok(ConversionOutput::with_inline_types(
-        TypeRef::new(RustPrimitive::Custom(enum_name)),
-        vec![inline_enum],
-      ))
+    let mut forced_name = None;
+    if let Some(ref c) = cache
+      && let Some(n) = c.get_enum_name(&enum_values)
+    {
+      forced_name = Some(n);
     }
-  }
 
-  /// Determines the final name for a generated enum.
-  ///
-  /// Checks the cache for existing enum names matching the values,
-  /// falls back to schema-based preferred names, or generates a unique name.
-  fn determine_enum_name(
-    schema: &ObjectSchema,
-    base_name: &str,
-    values: &[String],
-    cache: &Option<&mut SharedSchemaCache>,
-  ) -> Result<String> {
-    if let Some(c) = cache {
-      if let Some(name) = c.get_enum_name(values) {
-        return Ok(name);
-      }
-      c.get_preferred_name(schema, base_name)
-        .or_else(|_| Ok(c.make_unique_name(base_name)))
-    } else {
-      Ok(base_name.to_string())
-    }
+    super::common::handle_inline_creation(
+      prop_schema,
+      &base_name,
+      forced_name,
+      cache,
+      |cache| {
+        if let Some(name) = cache.get_enum_name(&enum_values)
+          && cache.is_enum_generated(&enum_values)
+        {
+          return Some(name);
+        }
+        None
+      },
+      |name, _cache| {
+        let config = CodegenConfig {
+          preserve_case_variants: self.preserve_case_variants,
+          case_insensitive_enums: self.case_insensitive_enums,
+          no_helpers: self.no_helpers,
+        };
+        let converter = EnumConverter::new(&self.graph, self.clone(), config);
+        let inline_enum = converter
+          .convert_simple_enum(name, prop_schema, None)
+          .expect("convert_simple_enum should return Some when cache is None");
+
+        Ok(ConversionOutput::new(inline_enum))
+      },
+    )
   }
 
   fn convert_inline_union_type(
@@ -198,7 +178,7 @@ impl TypeResolver {
     prop_name: &str,
     prop_schema: &ObjectSchema,
     uses_one_of: bool,
-    mut cache: Option<&mut SharedSchemaCache>,
+    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<TypeRef>> {
     let variants = if uses_one_of {
       &prop_schema.one_of
@@ -210,19 +190,6 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(type_ref));
     }
 
-    if let Some(ref cache) = cache {
-      if let Some(existing_name) = cache.get_type_name(prop_schema)? {
-        return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
-      }
-
-      if !is_relaxed_enum_pattern(prop_schema)
-        && let Some(values) = extract_enum_values(prop_schema)
-        && let Some(name) = cache.get_enum_name(&values)
-      {
-        return Ok(ConversionOutput::new(TypeRef::new(name)));
-      }
-    }
-
     if let Some(name) = self.find_matching_union_schema(variants) {
       let mut type_ref = TypeRef::new(to_rust_type_name(&name));
       if self.graph.is_cyclic(&name) {
@@ -232,44 +199,48 @@ impl TypeResolver {
     }
 
     let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
-    let enum_name = if let Some(ref mut c) = cache {
-      c.get_preferred_name(prop_schema, &base_name)?
-    } else {
-      base_name
-    };
 
-    let config = CodegenConfig {
-      preserve_case_variants: self.preserve_case_variants,
-      case_insensitive_enums: self.case_insensitive_enums,
-      no_helpers: self.no_helpers,
-    };
-    let converter = EnumConverter::new(&self.graph, self.clone(), config);
-    let kind = if uses_one_of {
-      UnionKind::OneOf
-    } else {
-      UnionKind::AnyOf
-    };
+    super::common::handle_inline_creation(
+      prop_schema,
+      &base_name,
+      None,
+      cache,
+      |cache| {
+        if !is_relaxed_enum_pattern(prop_schema)
+          && let Some(values) = extract_enum_values(prop_schema)
+          && let Some(name) = cache.get_enum_name(&values)
+        {
+          return Some(name);
+        }
+        None
+      },
+      |name, cache| {
+        let config = CodegenConfig {
+          preserve_case_variants: self.preserve_case_variants,
+          case_insensitive_enums: self.case_insensitive_enums,
+          no_helpers: self.no_helpers,
+        };
+        let converter = EnumConverter::new(&self.graph, self.clone(), config);
+        let kind = if uses_one_of {
+          UnionKind::OneOf
+        } else {
+          UnionKind::AnyOf
+        };
 
-    let generated_types = converter.convert_union_enum(&enum_name, prop_schema, kind, cache.as_deref_mut())?;
+        let generated_types = converter.convert_union_enum(name, prop_schema, kind, cache)?;
 
-    let main_type_name = generated_types
-      .iter()
-      .find_map(|t| match t {
-        RustType::Enum(e) if e.name == to_rust_type_name(&enum_name) => Some(e.name.clone()),
-        _ => None,
-      })
-      .unwrap_or_else(|| to_rust_type_name(&enum_name));
+        let main_type_name = generated_types
+          .iter()
+          .find_map(|t| match t {
+            RustType::Enum(e) if e.name == to_rust_type_name(name) => Some(e.name.clone()),
+            _ => None,
+          })
+          .unwrap_or_else(|| to_rust_type_name(name));
 
-    if let Some(c) = cache {
-      let (main_type, nested) = Self::extract_main_type(generated_types, &main_type_name)?;
-      let registered_name = c.register_type(prop_schema, &enum_name, nested, main_type)?;
-      Ok(ConversionOutput::new(TypeRef::new(registered_name)))
-    } else {
-      Ok(ConversionOutput::with_inline_types(
-        TypeRef::new(main_type_name),
-        generated_types,
-      ))
-    }
+        let (main_type, nested) = Self::extract_main_type(generated_types, &main_type_name)?;
+        Ok(ConversionOutput::with_inline_types(main_type, nested))
+      },
+    )
   }
 
   /// Extracts the main type from a list of generated types.

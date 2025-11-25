@@ -667,12 +667,12 @@ fn test_schema_merger_merge_all_of() {
   ]));
 
   let merger = SchemaMerger::new(graph);
-  let merged = merger.merge_all_of_schema(&composite_schema).unwrap();
+  let merged_schema = merger.merge_all_of_schema(&composite_schema).unwrap();
 
-  assert!(merged.properties.contains_key("base_prop"));
-  assert!(merged.properties.contains_key("mixin_prop"));
-  assert!(merged.properties.contains_key("own_prop"));
-  assert!(merged.required.contains(&"base_prop".to_string()));
+  assert!(merged_schema.properties.contains_key("base_prop"));
+  assert!(merged_schema.properties.contains_key("mixin_prop"));
+  assert!(merged_schema.properties.contains_key("own_prop"));
+  assert!(merged_schema.required.contains(&"base_prop".to_string()));
 }
 
 #[test]
@@ -706,12 +706,12 @@ fn test_schema_merger_preserves_discriminator() {
   ]));
 
   let merger = SchemaMerger::new(graph);
-  let merged = merger
+  let merged_schema = merger
     .merge_child_schema_with_parent(&child_schema, &parent_schema)
     .unwrap();
 
-  assert!(merged.discriminator.is_some());
-  assert_eq!(merged.discriminator.as_ref().unwrap().property_name, "type");
+  assert!(merged_schema.discriminator.is_some());
+  assert_eq!(merged_schema.discriminator.as_ref().unwrap().property_name, "type");
 }
 
 #[test]

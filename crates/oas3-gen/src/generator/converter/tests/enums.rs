@@ -8,10 +8,11 @@ use crate::{
     ast::{DeriveTrait, EnumMethodKind, RustType, SerdeAttribute},
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
-      enums::{CollisionStrategy, EnumConverter, VariantNameNormalizer},
+      enums::{CollisionStrategy, EnumConverter},
       string_enum_optimizer::StringEnumOptimizer,
       type_resolver::TypeResolver,
     },
+    naming::variants::VariantNameNormalizer,
     schema_graph::SchemaGraph,
   },
   tests::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config},

@@ -303,6 +303,15 @@ cargo test
 
 Note: Use `cargo test` without `--lib` to test the entire workspace. Using `cargo test --lib` only tests the oas3-gen-support library crate.
 
+### Code Coverage
+
+```bash
+# Generate code coverage report in Markdown format
+cargo tarpaulin --bins --skip-clean -o Markdown
+```
+
+This command generates a `tarpaulin-report.md` file with detailed coverage statistics. View the report to identify untested code paths, then delete the file when finished.
+
 ### Linting (non-destructive)
 
 ```bash

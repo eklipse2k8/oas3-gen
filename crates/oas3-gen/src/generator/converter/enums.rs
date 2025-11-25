@@ -15,7 +15,11 @@ use crate::generator::{
     EnumDef, EnumMethod, EnumMethodKind, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
     default_enum_derives,
   },
-  naming::{identifiers::to_rust_type_name, inference as naming},
+  naming::{
+    identifiers::to_rust_type_name,
+    inference as naming,
+    variants::{VariantNameNormalizer, infer_variant_name, strip_common_affixes},
+  },
   schema_graph::SchemaGraph,
 };
 
@@ -31,14 +35,6 @@ pub(crate) enum CollisionStrategy {
   Preserve,
   /// Merge with existing variant and add a serde alias.
   Deduplicate,
-}
-
-/// Holds the result of normalizing a schema value into a Rust identifier.
-pub(crate) struct NormalizedVariant {
-  /// The valid Rust identifier (e.g., "Value10_5").
-  pub(crate) name: String,
-  /// The original value string for serialization (e.g., "10.5").
-  pub(crate) rename_value: String,
 }
 
 #[derive(Clone)]
@@ -180,40 +176,6 @@ impl EnumConverter {
       serde_attrs: vec![SerdeAttribute::Rename(rename.to_string())],
       deprecated: false,
     });
-  }
-}
-
-/// Normalizes JSON values into valid Rust variant names.
-///
-/// Converts strings, numbers, and booleans into PascalCase identifiers
-/// suitable for enum variants, preserving original values for serde rename.
-pub(crate) struct VariantNameNormalizer;
-
-impl VariantNameNormalizer {
-  pub(crate) fn normalize(value: &serde_json::Value) -> Option<NormalizedVariant> {
-    if let Some(str_val) = value.as_str() {
-      Some(NormalizedVariant {
-        name: to_rust_type_name(str_val),
-        rename_value: str_val.to_string(),
-      })
-    } else if let Some(num_val) = value.as_i64() {
-      Some(NormalizedVariant {
-        name: format!("Value{num_val}"),
-        rename_value: num_val.to_string(),
-      })
-    } else if let Some(num_val) = value.as_f64() {
-      let raw_str = num_val.to_string();
-      let safe_name = raw_str.replace(['.', '-'], "_");
-      Some(NormalizedVariant {
-        name: format!("Value{safe_name}"),
-        rename_value: raw_str,
-      })
-    } else {
-      value.as_bool().map(|bool_val| NormalizedVariant {
-        name: if bool_val { "True".into() } else { "False".into() },
-        rename_value: bool_val.to_string(),
-      })
-    }
   }
 }
 
@@ -608,111 +570,4 @@ impl<'b> UnionProcessor<'b> {
       methods,
     })
   }
-}
-
-/// Infers a variant name for an inline schema in a union.
-pub(crate) fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
-  if !schema.enum_values.is_empty() {
-    return "Enum".to_string();
-  }
-  if let Some(ref schema_type) = schema.schema_type {
-    match schema_type {
-      SchemaTypeSet::Single(typ) => match typ {
-        SchemaType::String => "String".to_string(),
-        SchemaType::Number => "Number".to_string(),
-        SchemaType::Integer => "Integer".to_string(),
-        SchemaType::Boolean => "Boolean".to_string(),
-        SchemaType::Array => "Array".to_string(),
-        SchemaType::Object => "Object".to_string(),
-        SchemaType::Null => "Null".to_string(),
-      },
-      SchemaTypeSet::Multiple(_) => "Mixed".to_string(),
-    }
-  } else {
-    format!("Variant{index}")
-  }
-}
-
-/// Strips common prefixes and suffixes from variant names to make them concise.
-///
-/// Useful for generated union variants that might share long names like
-/// `CreateUserResponse`, `UpdateUserResponse` -> `Create`, `Update`.
-pub(crate) fn strip_common_affixes(variants: &mut [VariantDef]) {
-  let variant_names: Vec<_> = variants.iter().map(|v| v.name.clone()).collect();
-  if variant_names.len() < 2 {
-    return;
-  }
-
-  let split_names: Vec<Vec<String>> = variant_names.iter().map(|n| split_pascal_case(n)).collect();
-
-  let common_prefix_len = find_common_prefix_len(&split_names);
-  let common_suffix_len = find_common_suffix_len(&split_names);
-
-  let mut stripped_names = vec![];
-  for words in &split_names {
-    let start = common_prefix_len;
-    let end = words.len().saturating_sub(common_suffix_len);
-    if start >= end {
-      stripped_names.push(words.join(""));
-    } else {
-      stripped_names.push(words[start..end].join(""));
-    }
-  }
-
-  let mut seen = BTreeSet::new();
-  if stripped_names.iter().any(|n| n.is_empty() || !seen.insert(n)) {
-    return;
-  }
-
-  for (variant, new_name) in variants.iter_mut().zip(stripped_names) {
-    variant.name = new_name;
-  }
-}
-
-fn find_common_prefix_len(split_names: &[Vec<String>]) -> usize {
-  let Some(first) = split_names.first() else {
-    return 0;
-  };
-  let mut len = 0;
-  'outer: for (i, word) in first.iter().enumerate() {
-    for other in &split_names[1..] {
-      if other.get(i) != Some(word) {
-        break 'outer;
-      }
-    }
-    len = i + 1;
-  }
-  len
-}
-
-fn find_common_suffix_len(split_names: &[Vec<String>]) -> usize {
-  let Some(first) = split_names.first() else {
-    return 0;
-  };
-  let mut len = 0;
-  'outer: for i in 1..=first.len() {
-    let word = &first[first.len() - i];
-    for other in &split_names[1..] {
-      if other.len() < i || &other[other.len() - i] != word {
-        break 'outer;
-      }
-    }
-    len = i;
-  }
-  len
-}
-
-fn split_pascal_case(name: &str) -> Vec<String> {
-  let mut words = vec![];
-  let mut current_word = String::new();
-  for (i, ch) in name.chars().enumerate() {
-    if ch.is_uppercase() && i > 0 && !current_word.is_empty() {
-      words.push(std::mem::take(&mut current_word));
-    }
-    current_word.push(ch);
-  }
-  if !current_word.is_empty() {
-    words.push(current_word);
-  }
-  words
 }

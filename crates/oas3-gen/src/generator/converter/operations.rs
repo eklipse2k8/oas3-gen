@@ -5,22 +5,18 @@ use oas3::{
 };
 use serde_json::Value;
 
-use super::{
-  SchemaConverter, TypeUsageRecorder,
-  cache::SharedSchemaCache,
-  constants::{
-    BODY_FIELD_NAME, REQUEST_BODY_SUFFIX, REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX, RESPONSE_ENUM_SUFFIX, RESPONSE_SUFFIX,
-  },
-  metadata, path_renderer, responses,
-};
+use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
     DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
     RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
   },
   naming::{
+    constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
     identifiers::{to_rust_field_name, to_rust_type_name},
     inference as naming,
+    operations::{generate_unique_request_name, generate_unique_response_name},
+    responses as naming_responses,
   },
   schema_graph::SchemaGraph,
 };
@@ -63,28 +59,6 @@ impl<'a> OperationConverter<'a> {
     Self { schema_converter, spec }
   }
 
-  fn generate_unique_response_name(&self, base_name: &str) -> String {
-    let mut response_name = format!("{base_name}{RESPONSE_SUFFIX}");
-    let rust_response_name = to_rust_type_name(&response_name);
-
-    if self.schema_converter.is_schema_name(&rust_response_name) {
-      response_name = format!("{base_name}{RESPONSE_SUFFIX}{RESPONSE_ENUM_SUFFIX}");
-    }
-
-    response_name
-  }
-
-  fn generate_unique_request_name(&self, base_name: &str) -> String {
-    let mut request_name = format!("{base_name}{REQUEST_SUFFIX}");
-    let rust_request_name = to_rust_type_name(&request_name);
-
-    if self.schema_converter.is_schema_name(&rust_request_name) {
-      request_name = format!("{base_name}{REQUEST_SUFFIX}{REQUEST_PARAMS_SUFFIX}");
-    }
-
-    request_name
-  }
-
   /// Converts an OpenAPI operation into a set of Rust types and metadata.
   ///
   /// Generates request structs, response enums, and body types.
@@ -110,7 +84,7 @@ impl<'a> OperationConverter<'a> {
     usage.mark_request_iter(&body_info.type_usage);
 
     let mut response_enum_info = if operation.responses.is_some() {
-      let response_name = self.generate_unique_response_name(&base_name);
+      let response_name = generate_unique_response_name(&base_name, |name| self.schema_converter.is_schema_name(name));
       responses::build_response_enum(
         self.schema_converter,
         self.spec,
@@ -125,7 +99,7 @@ impl<'a> OperationConverter<'a> {
       None
     };
 
-    let request_name = self.generate_unique_request_name(&base_name);
+    let request_name = generate_unique_request_name(&base_name, |name| self.schema_converter.is_schema_name(name));
     let (request_struct, request_warnings, parameter_metadata) = self.build_request_struct(
       &request_name,
       path,
@@ -163,14 +137,14 @@ impl<'a> OperationConverter<'a> {
       None
     };
 
-    let response_type_name = responses::extract_response_type_name(self.spec, operation);
-    let response_content_type = responses::extract_response_content_type(self.spec, operation);
-    let (success_response_types, error_response_types) = responses::extract_all_response_types(self.spec, operation);
+    let response_type_name = naming_responses::extract_response_type_name(self.spec, operation);
+    let response_content_type = naming_responses::extract_response_content_type(self.spec, operation);
+    let response_types = naming_responses::extract_all_response_types(self.spec, operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
     }
-    usage.mark_response_iter(&success_response_types);
-    usage.mark_response_iter(&error_response_types);
+    usage.mark_response_iter(&response_types.success);
+    usage.mark_response_iter(&response_types.error);
 
     let body_metadata = body_info.field_name.as_ref().map(|field_name| OperationBody {
       field_name: field_name.clone(),
@@ -191,8 +165,8 @@ impl<'a> OperationConverter<'a> {
       response_type: response_type_name,
       response_enum: response_enum_name,
       response_content_type,
-      success_response_types,
-      error_response_types,
+      success_response_types: response_types.success,
+      error_response_types: response_types.error,
       warnings,
       parameters: parameter_metadata,
       body: body_metadata,
