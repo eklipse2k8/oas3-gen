@@ -1,6 +1,7 @@
 mod derives;
 pub mod lints;
 pub(super) mod serde_attrs;
+pub mod tokens;
 pub(super) mod types;
 pub(super) mod validation_attrs;
 
@@ -85,7 +86,7 @@ pub struct OperationInfo {
   pub request_type: Option<String>,
   pub response_type: Option<String>,
   pub response_enum: Option<String>,
-  pub response_content_type: Option<String>,
+  pub response_content_category: ContentCategory,
   pub success_response_types: Vec<String>,
   pub error_response_types: Vec<String>,
   pub warnings: Vec<String>,
@@ -111,11 +112,50 @@ pub struct OperationParameter {
   pub rust_type: TypeRef,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ContentCategory {
+  #[default]
+  Json,
+  FormUrlEncoded,
+  Multipart,
+  Text,
+  Binary,
+  Xml,
+}
+
+impl ContentCategory {
+  #[must_use]
+  pub fn from_content_type(content_type: &str) -> Self {
+    let ct = content_type.to_ascii_lowercase();
+    if ct.contains("json") {
+      Self::Json
+    } else if ct.contains("x-www-form-urlencoded") {
+      Self::FormUrlEncoded
+    } else if ct.contains("multipart") {
+      Self::Multipart
+    } else if ct.contains("text/plain") || ct.contains("text/html") {
+      Self::Text
+    } else if ct.contains("xml") {
+      Self::Xml
+    } else if ct.contains("octet-stream")
+      || ct.starts_with("image/")
+      || ct.starts_with("video/")
+      || ct.starts_with("audio/")
+      || ct.starts_with("application/pdf")
+      || (ct.starts_with("application/") && !ct.contains("json"))
+    {
+      Self::Binary
+    } else {
+      Self::Json
+    }
+  }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct OperationBody {
   pub field_name: String,
   pub optional: bool,
-  pub content_type: Option<String>,
+  pub content_category: ContentCategory,
 }
 
 /// Semantic kind of a struct to determine code generation behavior

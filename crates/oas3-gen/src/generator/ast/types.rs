@@ -62,6 +62,27 @@ impl TypeRef {
     matches!(self.base_type, RustPrimitive::String) && !self.is_array
   }
 
+  pub fn is_primitive_type(&self) -> bool {
+    matches!(
+      self.base_type,
+      RustPrimitive::I8
+        | RustPrimitive::I16
+        | RustPrimitive::I32
+        | RustPrimitive::I64
+        | RustPrimitive::I128
+        | RustPrimitive::Isize
+        | RustPrimitive::U8
+        | RustPrimitive::U16
+        | RustPrimitive::U32
+        | RustPrimitive::U64
+        | RustPrimitive::U128
+        | RustPrimitive::Usize
+        | RustPrimitive::F32
+        | RustPrimitive::F64
+        | RustPrimitive::Bool
+    ) && !self.is_array
+  }
+
   /// Get the full Rust type string
   pub fn to_rust_type(&self) -> String {
     let mut result = self.base_type.to_string();

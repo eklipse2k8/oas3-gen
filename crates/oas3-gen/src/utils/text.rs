@@ -24,9 +24,29 @@ fn wrap_format_with_mdformat(input: &str) -> String {
 
 #[inline]
 #[must_use]
-fn split_lines(input: &str) -> Vec<String> {
-  input
-    .replace("\\n", "\n")
+fn process_doc_text(input: &str) -> String {
+  let formatted = {
+    cfg_if! {
+      if #[cfg(feature = "mdformat")] {
+        wrap_format_with_mdformat(input)
+      } else {
+        input.to_string()
+      }
+    }
+  };
+  formatted.replace("\\n", "\n")
+}
+
+#[inline]
+#[must_use]
+pub(crate) fn doc_lines(input: &str) -> Vec<String> {
+  process_doc_text(input).lines().map(String::from).collect()
+}
+
+#[inline]
+#[must_use]
+pub(crate) fn doc_comment_lines(input: &str) -> Vec<String> {
+  process_doc_text(input)
     .lines()
     .map(|line| {
       if line.is_empty() {
@@ -36,18 +56,6 @@ fn split_lines(input: &str) -> Vec<String> {
       }
     })
     .collect()
-}
-
-#[inline]
-#[must_use]
-pub(crate) fn doc_comment_lines(input: &str) -> Vec<String> {
-  cfg_if! {
-    if #[cfg(feature = "mdformat")] {
-      split_lines(&wrap_format_with_mdformat(input))
-    } else {
-      split_lines(input)
-    }
-  }
 }
 
 #[cfg(feature = "mdformat")]

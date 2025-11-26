@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use anyhow::Context as _;
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -200,4 +201,8 @@ fn compute_serde_use(types: &[&RustType]) -> TokenStream {
 
 fn derives_include(derives: &BTreeSet<DeriveTrait>, target: DeriveTrait) -> bool {
   derives.contains(&target)
+}
+
+pub(crate) fn parse_type(type_name: &str) -> anyhow::Result<syn::Type> {
+  syn::parse_str(type_name).context("failed to parse type `{type_name}`")
 }

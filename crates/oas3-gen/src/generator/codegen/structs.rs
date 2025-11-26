@@ -224,7 +224,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
   let delimiter = match style {
     ParameterStyle::SpaceDelimited => "%20",
     ParameterStyle::PipeDelimited => "|",
-    _ => ",", // Form default
+    _ => ",",
   };
 
   if param.optional {

@@ -214,7 +214,7 @@ pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibili
     .map(|v| {
       let variant_name = format_ident!("{}", v.variant_name);
       let variant_docs = if let Some(ref desc) = v.description {
-        let doc_line = format!("{}: {}", v.status_code, desc);
+        let doc_line = format!("{}: {desc}", v.status_code);
         quote! { #[doc = #doc_line] }
       } else {
         let doc_line = v.status_code.clone();

@@ -1,3 +1,4 @@
+mod client;
 mod coercion_tests;
 mod constants_tests;
 mod enum_tests;

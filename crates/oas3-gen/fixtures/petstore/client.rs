@@ -29,18 +29,17 @@ impl SwaggerPetstoreClient {
     /// Create a client using the OpenAPI `servers[0]` URL.
     #[must_use]
     pub fn new() -> Self {
-        let default_client = { Client::builder().build().expect("client") };
-        let url = Url::parse(BASE_URL).expect("valid base url");
         Self {
-            client: default_client,
-            base_url: url,
+            client: Client::builder().build().expect("client"),
+            base_url: Url::parse(BASE_URL).expect("valid base url"),
         }
     }
     /// Create a client with a custom base URL.
     pub fn with_base_url(base_url: impl AsRef<str>) -> anyhow::Result<Self> {
-        let client = { Client::builder().build().expect("client") };
-        let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
-        Ok(Self { client, base_url: url })
+        Ok(Self {
+            client: Client::builder().build().context("building reqwest client")?,
+            base_url: Url::parse(base_url.as_ref()).context("parsing base url")?,
+        })
     }
     /// Create a client from an existing `reqwest::Client`.
     pub fn with_client(

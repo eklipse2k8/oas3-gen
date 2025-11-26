@@ -1,12 +1,13 @@
 use std::{collections::HashSet, sync::Arc};
 
+use quote::ToTokens;
 use strum::Display;
 
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
   ast::{LintConfig, OperationInfo, RustType},
-  codegen::{self, Visibility, metadata::CodeMetadata},
+  codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata},
   converter::{
     CodegenConfig, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
   },
@@ -109,20 +110,13 @@ impl Orchestrator {
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(header_count);
 
-    let client_tokens = codegen::client::generate_client(&self.spec, &operations_info, &rust_types)?;
+    let metadata = CodeMetadata::from_spec(&self.spec);
+    let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types);
+    let client_tokens = client_generator.into_token_stream();
     let lint_config = LintConfig::default();
-    let metadata = self.metadata();
 
     let final_code = codegen::generate_source(&client_tokens, &metadata, &lint_config, source_path, OAS3_GEN_VERSION)?;
     Ok((final_code, stats))
-  }
-
-  pub fn metadata(&self) -> CodeMetadata {
-    CodeMetadata {
-      title: self.spec.info.title.clone(),
-      version: self.spec.info.version.clone(),
-      description: self.spec.info.description.clone(),
-    }
   }
 
   pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
@@ -135,7 +129,7 @@ impl Orchestrator {
     } = artifacts;
 
     let lint_config = LintConfig::default();
-    let metadata = self.metadata();
+    let metadata = CodeMetadata::from_spec(&self.spec);
 
     analyzer::deduplicate_response_enums(&mut rust_types, &mut operations_info);
     let seed_map = usage_recorder.into_usage_map();

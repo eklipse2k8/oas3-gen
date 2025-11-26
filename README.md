@@ -27,8 +27,8 @@ Provide a path to an OpenAPI specification and specify an output file for the ge
 # generate types (structs and enums)
 oas3-gen generate -i path/to/openapi.json -o path/to/types.rs
 
-# generate client operations
-oas3-gen generate client -i path/to/openapi.json -o path/to/client.rs
+# generate client2 operations
+oas3-gen generate client2 -i path/to/openapi.json -o path/to/client2.rs
 ```
 
 #### Example
@@ -150,8 +150,8 @@ Options:
 # Basic usage to generate types
 oas3-gen generate types -i openapi.json -o types.rs
 
-# Basic usage to generate companion client
-oas3-gen generate client -i openapi.json -o client.rs
+# Basic usage to generate companion client2
+oas3-gen generate client2 -i openapi.json -o client2.rs
 
 # Generate types with crate-level visibility
 oas3-gen generate -i openapi.json -o types.rs -C crate

@@ -8,8 +8,8 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
-    DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
-    RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
+    ContentCategory, DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation,
+    ResponseEnumDef, RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -151,7 +151,9 @@ impl<'a> OperationConverter<'a> {
     };
 
     let response_type_name = naming_responses::extract_response_type_name(self.spec, operation);
-    let response_content_type = naming_responses::extract_response_content_type(self.spec, operation);
+    let response_content_category = naming_responses::extract_response_content_type(self.spec, operation)
+      .as_deref()
+      .map_or(ContentCategory::Json, ContentCategory::from_content_type);
     let response_types = naming_responses::extract_all_response_types(self.spec, operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
@@ -159,10 +161,16 @@ impl<'a> OperationConverter<'a> {
     usage.mark_response_iter(&response_types.success);
     usage.mark_response_iter(&response_types.error);
 
-    let body_metadata = body_info.field_name.as_ref().map(|field_name| OperationBody {
-      field_name: field_name.clone(),
-      optional: body_info.optional,
-      content_type: body_info.content_type.clone(),
+    let body_metadata = body_info.field_name.as_ref().map(|field_name| {
+      let content_category = body_info
+        .content_type
+        .as_deref()
+        .map_or(ContentCategory::Json, ContentCategory::from_content_type);
+      OperationBody {
+        field_name: field_name.clone(),
+        optional: body_info.optional,
+        content_category,
+      }
     });
 
     let final_operation_id = operation.operation_id.clone().unwrap_or(base_name);
@@ -177,7 +185,7 @@ impl<'a> OperationConverter<'a> {
       request_type: request_type_name,
       response_type: response_type_name,
       response_enum: response_enum_name,
-      response_content_type,
+      response_content_category,
       success_response_types: response_types.success,
       error_response_types: response_types.error,
       warnings,

@@ -31,7 +31,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
               fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 if let Some(ref errs) = self.#field_ident {
                   if let Some(first) = errs.first() {
-                    write!(f, "{}", first)
+                    write!(f, "{first}")
                   } else {
                     write!(f, #fallback)
                   }
@@ -55,7 +55,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
             impl std::fmt::Display for #type_ident {
               fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 if let Some(first) = self.#field_ident.first() {
-                  write!(f, "{}", first)
+                  write!(f, "{first}")
                 } else {
                   write!(f, #fallback)
                 }
@@ -77,7 +77,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
           impl std::fmt::Display for #type_ident {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
               if let Some(ref err) = self.#field_ident {
-                write!(f, "{}", err)
+                write!(f, "{err}")
               } else {
                 write!(f, #fallback)
               }
@@ -126,7 +126,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
       impl std::fmt::Display for #type_ident {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
           if let Some(ref msg) = self.#field_name {
-            write!(f, "{}", msg)
+            write!(f, "{msg}")
           } else {
             write!(f, #fallback)
           }
@@ -193,7 +193,7 @@ fn generate_enum_error_arms(def: &EnumDef) -> (Vec<TokenStream>, Vec<TokenStream
 
       match &variant.content {
         VariantContent::Tuple(types) if !types.is_empty() => (
-          quote! { Self::#variant_ident(err) => write!(f, "{}", err), },
+          quote! { Self::#variant_ident(err) => write!(f, "{err}"), },
           quote! { Self::#variant_ident(err) => Some(err as &(dyn std::error::Error + 'static)), },
         ),
         VariantContent::Tuple(_) | VariantContent::Unit => (
