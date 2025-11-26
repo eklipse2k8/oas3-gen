@@ -21,6 +21,12 @@ pub(crate) fn parse_type_string(type_str: &str) -> TokenStream {
   type_str.parse().unwrap_or_else(|_| quote! { serde_json::Value })
 }
 
+fn typed_literal(value: impl std::fmt::Display, type_suffix: &str) -> TokenStream {
+  format!("{value}{type_suffix}")
+    .parse()
+    .unwrap_or_else(|_| quote! { Default::default() })
+}
+
 fn coerce_to_rust_type(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
   match rust_type {
     RustPrimitive::String => coerce_to_string(value),
@@ -73,111 +79,53 @@ fn coerce_to_bool(value: &serde_json::Value) -> TokenStream {
   }
 }
 
-#[allow(clippy::match_same_arms)]
 fn coerce_to_int(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
-  let type_suffix = match rust_type {
-    RustPrimitive::I8 => "i8",
-    RustPrimitive::I16 => "i16",
-    RustPrimitive::I32 => "i32",
-    RustPrimitive::I64 => "i64",
-    RustPrimitive::I128 => "i128",
-    RustPrimitive::Isize => "isize",
-    _ => "i64",
-  };
+  let type_suffix = rust_type.to_string();
+  let to_literal = |i| typed_literal(i, &type_suffix);
 
   match value {
-    serde_json::Value::Number(n) => n.as_i64().map_or_else(
-      || quote! { Default::default() },
-      |i| {
-        let literal = format!("{i}{type_suffix}");
-        literal
-          .parse::<TokenStream>()
-          .unwrap_or_else(|_| quote! { Default::default() })
-      },
-    ),
-    serde_json::Value::String(s) => s.parse::<i64>().ok().map_or_else(
-      || quote! { Default::default() },
-      |i| {
-        let literal = format!("{i}{type_suffix}");
-        literal
-          .parse::<TokenStream>()
-          .unwrap_or_else(|_| quote! { Default::default() })
-      },
-    ),
+    serde_json::Value::Number(n) => n.as_i64().map_or_else(|| quote! { Default::default() }, to_literal),
+    serde_json::Value::String(s) => s
+      .parse::<i64>()
+      .ok()
+      .map_or_else(|| quote! { Default::default() }, to_literal),
     _ => quote! { Default::default() },
   }
 }
 
-#[allow(clippy::match_same_arms)]
 fn coerce_to_uint(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
-  let type_suffix = match rust_type {
-    RustPrimitive::U8 => "u8",
-    RustPrimitive::U16 => "u16",
-    RustPrimitive::U32 => "u32",
-    RustPrimitive::U64 => "u64",
-    RustPrimitive::U128 => "u128",
-    RustPrimitive::Usize => "usize",
-    _ => "u64",
-  };
+  let type_suffix = rust_type.to_string();
+  let to_literal = |u| typed_literal(u, &type_suffix);
 
   match value {
-    serde_json::Value::Number(n) => n.as_u64().map_or_else(
-      || quote! { Default::default() },
-      |u| {
-        let literal = format!("{u}{type_suffix}");
-        literal
-          .parse::<TokenStream>()
-          .unwrap_or_else(|_| quote! { Default::default() })
-      },
-    ),
-    serde_json::Value::String(s) => s.parse::<u64>().ok().map_or_else(
-      || quote! { Default::default() },
-      |u| {
-        let literal = format!("{u}{type_suffix}");
-        literal
-          .parse::<TokenStream>()
-          .unwrap_or_else(|_| quote! { Default::default() })
-      },
-    ),
+    serde_json::Value::Number(n) => n.as_u64().map_or_else(|| quote! { Default::default() }, to_literal),
+    serde_json::Value::String(s) => s
+      .parse::<u64>()
+      .ok()
+      .map_or_else(|| quote! { Default::default() }, to_literal),
     _ => quote! { Default::default() },
   }
 }
 
 fn coerce_to_float(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
-  #[allow(clippy::match_same_arms)]
-  let type_suffix = match rust_type {
-    RustPrimitive::F32 => "f32",
-    RustPrimitive::F64 => "f64",
-    _ => "f64",
-  };
+  let type_suffix = rust_type.to_string();
+  let to_literal = |f: f64| typed_literal(f, &type_suffix);
 
   match value {
     serde_json::Value::Number(n) => {
       if let Some(f) = n.as_f64() {
-        let literal = format!("{f}{type_suffix}");
-        literal
-          .parse::<TokenStream>()
-          .unwrap_or_else(|_| quote! { Default::default() })
+        to_literal(f)
       } else if let Some(i) = n.as_i64() {
         #[allow(clippy::cast_precision_loss)]
-        let f = i as f64;
-        let literal = format!("{f}{type_suffix}");
-        literal
-          .parse::<TokenStream>()
-          .unwrap_or_else(|_| quote! { Default::default() })
+        to_literal(i as f64)
       } else {
         quote! { Default::default() }
       }
     }
-    serde_json::Value::String(s) => s.parse::<f64>().ok().map_or_else(
-      || quote! { Default::default() },
-      |f| {
-        let literal = format!("{f}{type_suffix}");
-        literal
-          .parse::<TokenStream>()
-          .unwrap_or_else(|_| quote! { Default::default() })
-      },
-    ),
+    serde_json::Value::String(s) => s
+      .parse::<f64>()
+      .ok()
+      .map_or_else(|| quote! { Default::default() }, to_literal),
     _ => quote! { Default::default() },
   }
 }

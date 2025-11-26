@@ -17,6 +17,8 @@ use crate::generator::ast::{
   StructMethodKind, TypeRef, ValidationAttribute,
 };
 
+const UNSET_PREFIX: char = '\0';
+
 pub(crate) fn generate_struct(
   def: &StructDef,
   regex_lookup: &BTreeMap<RegexKey, String>,
@@ -128,10 +130,9 @@ fn generate_struct_method(method: &StructMethod, visibility: Visibility) -> Toke
       response_enum,
       variants,
     } => {
-      let name = format_ident!("{}", method.name);
       let docs = generate_docs(&method.docs);
       let attrs = generate_outer_attrs(&method.attrs);
-      generate_parse_response_method(&name, response_enum, variants, &docs, &attrs, visibility)
+      generate_parse_response_method(response_enum, variants, &docs, &attrs, visibility)
     }
     StructMethodKind::RenderPath { segments, query_params } => {
       generate_render_path_method(method, segments, query_params, visibility)
@@ -207,7 +208,7 @@ fn append_query_params(path_expr: &TokenStream, query_params: &[QueryParameter])
   quote! {
     use std::fmt::Write as _;
     let mut path = #path_expr;
-    let mut prefix = '\0';
+    let mut prefix = #UNSET_PREFIX;
     #(#query_statements)*
     Ok(path)
   }
@@ -233,7 +234,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
         quote! {
           if let Some(values) = &self.#ident {
             for value in values {
-              prefix = if prefix == '\0' { '?' } else { '&' };
+              prefix = if prefix == #UNSET_PREFIX { '?' } else { '&' };
               write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value)?)).unwrap();
             }
           }
@@ -242,7 +243,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
         // Unexploded array: key=val1,val2 (or other delimiter)
         quote! {
           if let Some(values) = &self.#ident && !values.is_empty() {
-            prefix = if prefix == '\0' { '?' } else { '&' };
+            prefix = if prefix == #UNSET_PREFIX { '?' } else { '&' };
             let values = values.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
             let values = values.join(#delimiter);
             write!(&mut path, #param_equal, values).unwrap();
@@ -253,7 +254,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
       // Optional scalar
       quote! {
         if let Some(value) = &self.#ident {
-          prefix = if prefix == '\0' { '?' } else { '&' };
+          prefix = if prefix == #UNSET_PREFIX { '?' } else { '&' };
           write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value)?)).unwrap();
         }
       }
@@ -263,7 +264,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
       // Exploded array (required)
       quote! {
         for value in &self.#ident {
-          prefix = if prefix == '\0' { '?' } else { '&' };
+          prefix = if prefix == #UNSET_PREFIX { '?' } else { '&' };
           write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(value)?)).unwrap();
         }
       }
@@ -271,7 +272,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
       // Unexploded array (required)
       quote! {
         if !self.#ident.is_empty() {
-          prefix = if prefix == '\0' { '?' } else { '&' };
+          prefix = if prefix == #UNSET_PREFIX { '?' } else { '&' };
           let values = self.#ident.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
           let values = values.join(#delimiter);
           write!(&mut path, #param_equal, values).unwrap();
@@ -281,7 +282,7 @@ fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
   } else {
     // Required scalar
     quote! {
-      prefix = if prefix == '\0' { '?' } else { '&' };
+      prefix = if prefix == #UNSET_PREFIX { '?' } else { '&' };
       write!(&mut path, #param_equal, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(&self.#ident)?)).unwrap();
     }
   }
@@ -311,7 +312,6 @@ fn status_code_condition(status_code: &str) -> TokenStream {
 }
 
 fn generate_parse_response_method(
-  _: &proc_macro2::Ident,
   response_enum: &str,
   variants: &[ResponseVariant],
   docs: &TokenStream,
@@ -385,16 +385,16 @@ fn generate_variant_block(
 ) -> TokenStream {
   let variant_ident = format_ident!("{variant_name}");
 
-  let result_statement = if schema.is_some() {
-    if is_specific_variant {
-      quote! { return Ok(#enum_name::#variant_ident(data)); }
-    } else {
-      quote! { Ok(#enum_name::#variant_ident(data)) }
-    }
-  } else if is_specific_variant {
-    quote! { return Ok(#enum_name::#variant_ident); }
+  let variant_expr = if schema.is_some() {
+    quote! { #enum_name::#variant_ident(data) }
   } else {
-    quote! { Ok(#enum_name::#variant_ident) }
+    quote! { #enum_name::#variant_ident }
+  };
+
+  let result_statement = if is_specific_variant {
+    quote! { return Ok(#variant_expr); }
+  } else {
+    quote! { Ok(#variant_expr) }
   };
 
   if let Some(schema_type) = schema {

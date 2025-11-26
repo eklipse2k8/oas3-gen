@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::generator::{
   ast::{
@@ -32,6 +32,48 @@ fn base_struct(kind: StructKind) -> StructDef {
   }
 }
 
+fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.methods.push(StructMethod {
+    name: "parse_response".to_string(),
+    docs: vec!["/// Parse response".to_string()],
+    kind: StructMethodKind::ParseResponse {
+      response_enum: "ResponseEnum".to_string(),
+      variants: vec![variant],
+    },
+    attrs: vec![],
+  });
+  def
+}
+
+fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> StructDef {
+  let mut def = base_struct(StructKind::OperationRequest);
+  def.fields = vec![FieldDef {
+    name: field_name.to_string(),
+    rust_type: TypeRef::new(rust_type),
+    serde_attrs: vec![],
+    extra_attrs: vec![],
+    validation_attrs: vec![],
+    default_value: None,
+    ..Default::default()
+  }];
+  def.methods.push(StructMethod {
+    name: "render_path".to_string(),
+    docs: vec![format!("/// Render path with {} parameter", rust_type)],
+    kind: StructMethodKind::RenderPath {
+      segments: vec![
+        PathSegment::Literal(path_literal.to_string()),
+        PathSegment::Parameter {
+          field: field_name.to_string(),
+        },
+      ],
+      query_params: vec![],
+    },
+    attrs: vec![],
+  });
+  def
+}
+
 #[test]
 fn generates_struct_with_supplied_derives() {
   let def = StructDef {
@@ -40,28 +82,29 @@ fn generates_struct_with_supplied_derives() {
   };
   let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
   let code = tokens.to_string();
-  assert!(code.contains("derive"));
-  assert!(code.contains("Debug"));
-  assert!(code.contains("Clone"));
-  assert!(code.contains("Serialize"));
-  assert!(code.contains("pub struct Sample"));
+  assert!(code.contains("derive"), "missing derive attribute");
+  assert!(code.contains("Debug"), "missing Debug derive");
+  assert!(code.contains("Clone"), "missing Clone derive");
+  assert!(code.contains("Serialize"), "missing Serialize derive");
+  assert!(code.contains("pub struct Sample"), "missing struct declaration");
 }
 
 #[test]
-fn emits_validation_attributes_when_present() {
-  let def = base_struct(StructKind::Schema);
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("# [validate"));
-}
-
-#[test]
-fn skips_validation_attributes_when_absent() {
-  let mut def = base_struct(StructKind::Schema);
-  def.fields[0].validation_attrs.clear();
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(!code.contains("validate"));
+fn test_validation_attribute_generation() {
+  let cases = [(true, true, "validation present"), (false, false, "validation absent")];
+  for (has_validation, should_contain_validate, desc) in cases {
+    let mut def = base_struct(StructKind::Schema);
+    if !has_validation {
+      def.fields[0].validation_attrs.clear();
+    }
+    let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+    let code = tokens.to_string();
+    assert_eq!(
+      code.contains("validate"),
+      should_contain_validate,
+      "validation attribute mismatch for case: {desc}"
+    );
+  }
 }
 
 #[test]
@@ -90,304 +133,148 @@ fn renders_struct_methods() {
   });
   let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
   let code = tokens.to_string();
-  assert!(code.contains("impl Sample"));
-  assert!(code.contains("fn render_path"));
+  assert!(code.contains("impl Sample"), "missing impl block");
+  assert!(code.contains("fn render_path"), "missing render_path method");
 }
 
 #[test]
 fn renders_response_parser_method() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.methods.push(StructMethod {
-    name: "parse_response".to_string(),
-    docs: vec!["/// Parse response".to_string()],
-    kind: StructMethodKind::ParseResponse {
-      response_enum: "ResponseEnum".to_string(),
-      variants: vec![ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
-        description: None,
-        schema_type: None,
-        content_type: None,
-      }],
-    },
-    attrs: vec![],
+  let def = make_response_parser_struct(ResponseVariant {
+    status_code: "200".to_string(),
+    variant_name: "Ok".to_string(),
+    description: None,
+    schema_type: None,
+    content_type: None,
   });
   let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
   let code = tokens.to_string();
-  assert!(code.contains("fn parse_response"));
-  assert!(code.contains("ResponseEnum"));
+  assert!(code.contains("fn parse_response"), "missing parse_response method");
+  assert!(code.contains("ResponseEnum"), "missing ResponseEnum type");
 }
 
 #[test]
-fn renders_text_response_parser_method() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.methods.push(StructMethod {
-    name: "parse_response".to_string(),
-    docs: vec!["/// Parse response".to_string()],
-    kind: StructMethodKind::ParseResponse {
-      response_enum: "ResponseEnum".to_string(),
-      variants: vec![ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
-        description: None,
-        schema_type: Some(TypeRef::new("String")),
-        content_type: Some("text/plain".to_string()),
-      }],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("req . text () . await ?"));
-  assert!(code.contains("Ok (ResponseEnum :: Ok (data))"));
-}
-
-#[test]
-fn renders_text_response_parser_with_integer_parsing() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.methods.push(StructMethod {
-    name: "parse_response".to_string(),
-    docs: vec!["/// Parse response".to_string()],
-    kind: StructMethodKind::ParseResponse {
-      response_enum: "ResponseEnum".to_string(),
-      variants: vec![ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
-        description: None,
-        schema_type: Some(TypeRef::new("i32")),
-        content_type: Some("text/plain".to_string()),
-      }],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("req . text () . await ? . parse :: < i32 > () ?"));
-  assert!(code.contains("Ok (ResponseEnum :: Ok (data))"));
+fn test_text_response_parsing() {
+  let cases = [
+    (
+      TypeRef::new("String"),
+      "req . text () . await ?",
+      "text/plain String response",
+    ),
+    (
+      TypeRef::new("i32"),
+      "req . text () . await ? . parse :: < i32 > () ?",
+      "text/plain i32 response with parsing",
+    ),
+  ];
+  for (schema_type, expected_code, desc) in cases {
+    let def = make_response_parser_struct(ResponseVariant {
+      status_code: "200".to_string(),
+      variant_name: "Ok".to_string(),
+      description: None,
+      schema_type: Some(schema_type),
+      content_type: Some("text/plain".to_string()),
+    });
+    let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+    let code = tokens.to_string();
+    assert!(code.contains(expected_code), "missing expected code for {desc}");
+    assert!(
+      code.contains("Ok (ResponseEnum :: Ok (data))"),
+      "missing success return for {desc}"
+    );
+  }
 }
 
 #[test]
 fn renders_default_json_parser_for_unknown_content_type() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.methods.push(StructMethod {
-    name: "parse_response".to_string(),
-    docs: vec!["/// Parse response".to_string()],
-    kind: StructMethodKind::ParseResponse {
-      response_enum: "ResponseEnum".to_string(),
-      variants: vec![ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
-        description: None,
-        schema_type: Some(TypeRef::new("MyStruct")),
-        content_type: Some("application/octet-stream".to_string()),
-      }],
-    },
-    attrs: vec![],
+  let def = make_response_parser_struct(ResponseVariant {
+    status_code: "200".to_string(),
+    variant_name: "Ok".to_string(),
+    description: None,
+    schema_type: Some(TypeRef::new("MyStruct")),
+    content_type: Some("application/octet-stream".to_string()),
   });
   let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
   let code = tokens.to_string();
-  assert!(code.contains("json_with_diagnostics"));
-  assert!(code.contains("MyStruct"));
+  assert!(
+    code.contains("json_with_diagnostics"),
+    "missing json_with_diagnostics call"
+  );
+  assert!(code.contains("MyStruct"), "missing MyStruct type");
 }
 
 #[test]
-fn renders_binary_parser_for_images() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.methods.push(StructMethod {
-    name: "parse_response".to_string(),
-    docs: vec!["/// Parse response".to_string()],
-    kind: StructMethodKind::ParseResponse {
-      response_enum: "ResponseEnum".to_string(),
-      variants: vec![ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
-        description: None,
-        schema_type: Some(TypeRef::new("Vec<u8>")),
-        content_type: Some("image/png".to_string()),
-      }],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("req . bytes () . await ? . to_vec ()"));
+fn test_binary_response_parsing() {
+  let cases = [("image/png", "image"), ("application/pdf", "pdf")];
+  for (content_type, desc) in cases {
+    let def = make_response_parser_struct(ResponseVariant {
+      status_code: "200".to_string(),
+      variant_name: "Ok".to_string(),
+      description: None,
+      schema_type: Some(TypeRef::new("Vec<u8>")),
+      content_type: Some(content_type.to_string()),
+    });
+    let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+    let code = tokens.to_string();
+    assert!(
+      code.contains("req . bytes () . await ? . to_vec ()"),
+      "missing bytes conversion for {desc}"
+    );
+  }
 }
 
 #[test]
-fn renders_binary_parser_for_pdf() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.methods.push(StructMethod {
-    name: "parse_response".to_string(),
-    docs: vec!["/// Parse response".to_string()],
-    kind: StructMethodKind::ParseResponse {
-      response_enum: "ResponseEnum".to_string(),
-      variants: vec![ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
-        description: None,
-        schema_type: Some(TypeRef::new("Vec<u8>")),
-        content_type: Some("application/pdf".to_string()),
-      }],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("req . bytes () . await ? . to_vec ()"));
+fn test_serde_import_generation() {
+  let cases = [
+    (
+      BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Deserialize]),
+      "use serde :: Deserialize",
+      false,
+      "Deserialize only",
+    ),
+    (
+      BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Serialize, DeriveTrait::Deserialize]),
+      "use serde :: { Deserialize , Serialize }",
+      true,
+      "both Serialize and Deserialize",
+    ),
+  ];
+  for (derives, expected_import, should_have_serialize, desc) in cases {
+    let def = StructDef {
+      derives,
+      ..base_struct(StructKind::Schema)
+    };
+    let errors = HashSet::new();
+    let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
+    let code = tokens.to_string();
+    assert!(code.contains(expected_import), "missing import for {desc}");
+    if !should_have_serialize {
+      assert!(!code.contains("Serialize"), "should not contain Serialize for {desc}");
+    }
+  }
 }
 
 #[test]
-fn codegen_emits_only_deserialize_when_needed() {
-  let def = StructDef {
-    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Deserialize]),
-    ..base_struct(StructKind::Schema)
-  };
-  let errors = std::collections::HashSet::new();
-  let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("use serde :: Deserialize"));
-  assert!(!code.contains("Serialize"));
-}
-
-#[test]
-fn codegen_emits_both_serde_traits_when_required() {
-  let def = StructDef {
-    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Serialize, DeriveTrait::Deserialize]),
-    ..base_struct(StructKind::Schema)
-  };
-  let errors = std::collections::HashSet::new();
-  let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("use serde :: { Deserialize , Serialize }"));
-}
-
-#[test]
-fn renders_path_with_integer_parameter() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.fields = vec![FieldDef {
-    name: "id".to_string(),
-    rust_type: TypeRef::new("i64"),
-    serde_attrs: vec![],
-    extra_attrs: vec![],
-    validation_attrs: vec![],
-    default_value: None,
-    ..Default::default()
-  }];
-  def.methods.push(StructMethod {
-    name: "render_path".to_string(),
-    docs: vec!["/// Render path with integer parameter".to_string()],
-    kind: StructMethodKind::RenderPath {
-      segments: vec![
-        PathSegment::Literal("/users/".to_string()),
-        PathSegment::Parameter {
-          field: "id".to_string(),
-        },
-      ],
-      query_params: vec![],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("fn render_path"));
-  assert!(code.contains("serialize_query_param"));
-  assert!(code.contains("percent_encode_path_segment"));
-}
-
-#[test]
-fn renders_path_with_boolean_parameter() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.fields = vec![FieldDef {
-    name: "active".to_string(),
-    rust_type: TypeRef::new("bool"),
-    serde_attrs: vec![],
-    extra_attrs: vec![],
-    validation_attrs: vec![],
-    default_value: None,
-    ..Default::default()
-  }];
-  def.methods.push(StructMethod {
-    name: "render_path".to_string(),
-    docs: vec!["/// Render path with boolean parameter".to_string()],
-    kind: StructMethodKind::RenderPath {
-      segments: vec![
-        PathSegment::Literal("/items/".to_string()),
-        PathSegment::Parameter {
-          field: "active".to_string(),
-        },
-      ],
-      query_params: vec![],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("serialize_query_param (& self . active)"));
-  assert!(code.contains("percent_encode_path_segment"));
-}
-
-#[test]
-fn renders_path_with_float_parameter() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.fields = vec![FieldDef {
-    name: "amount".to_string(),
-    rust_type: TypeRef::new("f64"),
-    serde_attrs: vec![],
-    extra_attrs: vec![],
-    validation_attrs: vec![],
-    default_value: None,
-    ..Default::default()
-  }];
-  def.methods.push(StructMethod {
-    name: "render_path".to_string(),
-    docs: vec!["/// Render path with float parameter".to_string()],
-    kind: StructMethodKind::RenderPath {
-      segments: vec![
-        PathSegment::Literal("/prices/".to_string()),
-        PathSegment::Parameter {
-          field: "amount".to_string(),
-        },
-      ],
-      query_params: vec![],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("serialize_query_param (& self . amount)"));
-  assert!(code.contains("percent_encode_path_segment"));
-}
-
-#[test]
-fn renders_path_with_uuid_parameter() {
-  let mut def = base_struct(StructKind::OperationRequest);
-  def.fields = vec![FieldDef {
-    name: "uuid".to_string(),
-    rust_type: TypeRef::new("uuid::Uuid"),
-    serde_attrs: vec![],
-    extra_attrs: vec![],
-    validation_attrs: vec![],
-    default_value: None,
-    ..Default::default()
-  }];
-  def.methods.push(StructMethod {
-    name: "render_path".to_string(),
-    docs: vec!["/// Render path with UUID parameter".to_string()],
-    kind: StructMethodKind::RenderPath {
-      segments: vec![
-        PathSegment::Literal("/entities/".to_string()),
-        PathSegment::Parameter {
-          field: "uuid".to_string(),
-        },
-      ],
-      query_params: vec![],
-    },
-    attrs: vec![],
-  });
-  let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
-  let code = tokens.to_string();
-  assert!(code.contains("serialize_query_param (& self . uuid)"));
-  assert!(code.contains("percent_encode_path_segment"));
+fn test_path_parameter_types() {
+  let cases = [
+    ("id", "i64", "/users/", "integer"),
+    ("active", "bool", "/items/", "boolean"),
+    ("amount", "f64", "/prices/", "float"),
+    ("uuid", "uuid::Uuid", "/entities/", "UUID"),
+  ];
+  for (field_name, rust_type, path_literal, desc) in cases {
+    let def = make_path_struct(field_name, rust_type, path_literal);
+    let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
+    let code = tokens.to_string();
+    assert!(code.contains("fn render_path"), "missing render_path for {desc}");
+    assert!(
+      code.contains(&format!("serialize_query_param (& self . {field_name})")),
+      "missing serialize_query_param for {desc}"
+    );
+    assert!(
+      code.contains("percent_encode_path_segment"),
+      "missing percent_encode_path_segment for {desc}"
+    );
+  }
 }
 
 #[test]
@@ -433,7 +320,17 @@ fn renders_path_with_mixed_parameters() {
   });
   let tokens = structs::generate_struct(&def, &BTreeMap::new(), Visibility::Public);
   let code = tokens.to_string();
-  assert!(code.contains("serialize_query_param (& self . user_id)"));
-  assert!(code.contains("serialize_query_param (& self . post_slug)"));
-  assert_eq!(code.matches("percent_encode_path_segment").count(), 2);
+  assert!(
+    code.contains("serialize_query_param (& self . user_id)"),
+    "missing user_id serialization"
+  );
+  assert!(
+    code.contains("serialize_query_param (& self . post_slug)"),
+    "missing post_slug serialization"
+  );
+  assert_eq!(
+    code.matches("percent_encode_path_segment").count(),
+    2,
+    "expected 2 percent_encode_path_segment calls"
+  );
 }

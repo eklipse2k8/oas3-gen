@@ -1,13 +1,295 @@
 use std::collections::BTreeSet;
 
 use crate::generator::{
-  ast::{DeriveTrait, EnumDef, SerdeAttribute, VariantContent, VariantDef},
-  codegen::{Visibility, enums::generate_enum},
+  ast::{
+    DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, ResponseEnumDef,
+    ResponseVariant, RustPrimitive, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+  },
+  codegen::{
+    Visibility,
+    enums::{generate_discriminated_enum, generate_enum, generate_response_enum},
+  },
 };
 
+fn make_unit_variant(name: &str) -> VariantDef {
+  VariantDef {
+    name: name.to_string(),
+    docs: vec![],
+    content: VariantContent::Unit,
+    serde_attrs: vec![],
+    deprecated: false,
+  }
+}
+
+fn default_derives() -> BTreeSet<DeriveTrait> {
+  BTreeSet::from([
+    DeriveTrait::Debug,
+    DeriveTrait::Clone,
+    DeriveTrait::Default,
+    DeriveTrait::Serialize,
+    DeriveTrait::Deserialize,
+    DeriveTrait::PartialEq,
+    DeriveTrait::Eq,
+  ])
+}
+
+fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
+  EnumDef {
+    name: name.to_string(),
+    docs: vec![],
+    variants,
+    discriminator: None,
+    derives: default_derives(),
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+  }
+}
+
 #[test]
-fn test_case_insensitive_enum_generation() {
+fn test_basic_enum_generation() {
+  let def = make_simple_enum(
+    "Color",
+    vec![
+      make_unit_variant("Red"),
+      make_unit_variant("Green"),
+      make_unit_variant("Blue"),
+    ],
+  );
+
+  let code = generate_enum(&def, Visibility::Public).to_string();
+
+  let assertions = [
+    ("pub enum Color", "should have pub enum declaration"),
+    ("Red", "should have Red variant"),
+    ("Green", "should have Green variant"),
+    ("Blue", "should have Blue variant"),
+    ("# [default]", "first variant should have #[default] attribute"),
+    ("Debug", "should derive Debug"),
+    ("Clone", "should derive Clone"),
+    ("Serialize", "should derive Serialize"),
+    ("Deserialize", "should derive Deserialize"),
+  ];
+  for (expected, msg) in assertions {
+    assert!(code.contains(expected), "{msg}");
+  }
+}
+
+#[test]
+fn test_enum_with_docs() {
   let def = EnumDef {
+    name: "Status".to_string(),
+    docs: vec![
+      "Represents the status of an item.".to_string(),
+      "Can be active or inactive.".to_string(),
+    ],
+    variants: vec![make_unit_variant("Active"), make_unit_variant("Inactive")],
+    discriminator: None,
+    derives: default_derives(),
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+  };
+
+  let code = generate_enum(&def, Visibility::Public).to_string();
+
+  assert!(
+    code.contains("# [doc = \"Represents the status of an item.\"]"),
+    "should have first doc line"
+  );
+  assert!(
+    code.contains("# [doc = \"Can be active or inactive.\"]"),
+    "should have second doc line"
+  );
+}
+
+#[test]
+fn test_enum_tuple_variants() {
+  let cases = [
+    (
+      "single type tuple",
+      vec![
+        VariantDef {
+          name: "Text".to_string(),
+          docs: vec![],
+          content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
+          serde_attrs: vec![],
+          deprecated: false,
+        },
+        VariantDef {
+          name: "Number".to_string(),
+          docs: vec![],
+          content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]),
+          serde_attrs: vec![],
+          deprecated: false,
+        },
+        make_unit_variant("Null"),
+      ],
+      vec![
+        ("Text (String)", "Text(String) variant"),
+        ("Number (i64)", "Number(i64) variant"),
+        ("Null", "Null unit variant"),
+      ],
+    ),
+    (
+      "multiple type tuple",
+      vec![VariantDef {
+        name: "KeyValue".to_string(),
+        docs: vec![],
+        content: VariantContent::Tuple(vec![
+          TypeRef::new(RustPrimitive::String),
+          TypeRef::new(RustPrimitive::I32),
+        ]),
+        serde_attrs: vec![],
+        deprecated: false,
+      }],
+      vec![("KeyValue (String , i32)", "multi-type tuple variant")],
+    ),
+  ];
+
+  for (case_name, variants, expected_content) in cases {
+    let def = make_simple_enum("Value", variants);
+    let code = generate_enum(&def, Visibility::Public).to_string();
+
+    for (expected, msg) in expected_content {
+      assert!(code.contains(expected), "{case_name}: should have {msg}");
+    }
+  }
+}
+
+#[test]
+fn test_enum_variant_attributes() {
+  let deprecated_def = EnumDef {
+    name: "ApiVersion".to_string(),
+    docs: vec![],
+    variants: vec![
+      VariantDef {
+        name: "V1".to_string(),
+        docs: vec![],
+        content: VariantContent::Unit,
+        serde_attrs: vec![],
+        deprecated: true,
+      },
+      make_unit_variant("V2"),
+    ],
+    discriminator: None,
+    derives: default_derives(),
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+  };
+
+  let deprecated_code = generate_enum(&deprecated_def, Visibility::Public).to_string();
+  assert!(
+    deprecated_code.contains("# [deprecated]"),
+    "should have deprecated attribute"
+  );
+
+  let outer_attrs_def = EnumDef {
+    name: "Flagged".to_string(),
+    docs: vec![],
+    variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
+    discriminator: None,
+    derives: default_derives(),
+    serde_attrs: vec![],
+    outer_attrs: vec!["#[non_exhaustive]".to_string()],
+    case_insensitive: false,
+    methods: vec![],
+  };
+
+  let outer_attrs_code = generate_enum(&outer_attrs_def, Visibility::Public).to_string();
+  assert!(
+    outer_attrs_code.contains("# [non_exhaustive]"),
+    "should have non_exhaustive attribute"
+  );
+}
+
+#[test]
+fn test_enum_serde_attributes() {
+  let cases = [
+    (
+      "rename",
+      EnumDef {
+        name: "Status".to_string(),
+        docs: vec![],
+        variants: vec![
+          VariantDef {
+            name: "InProgress".to_string(),
+            docs: vec![],
+            content: VariantContent::Unit,
+            serde_attrs: vec![SerdeAttribute::Rename("in_progress".to_string())],
+            deprecated: false,
+          },
+          VariantDef {
+            name: "Completed".to_string(),
+            docs: vec![],
+            content: VariantContent::Unit,
+            serde_attrs: vec![SerdeAttribute::Rename("completed".to_string())],
+            deprecated: false,
+          },
+        ],
+        discriminator: None,
+        derives: default_derives(),
+        serde_attrs: vec![],
+        outer_attrs: vec![],
+        case_insensitive: false,
+        methods: vec![],
+      },
+      vec![
+        ("# [serde (rename = \"in_progress\")]", "serde rename for InProgress"),
+        ("# [serde (rename = \"completed\")]", "serde rename for Completed"),
+      ],
+    ),
+    (
+      "discriminator tag",
+      EnumDef {
+        name: "Event".to_string(),
+        docs: vec![],
+        variants: vec![
+          make_unit_variant("Created"),
+          make_unit_variant("Updated"),
+          make_unit_variant("Deleted"),
+        ],
+        discriminator: Some("eventType".to_string()),
+        derives: default_derives(),
+        serde_attrs: vec![],
+        outer_attrs: vec![],
+        case_insensitive: false,
+        methods: vec![],
+      },
+      vec![("# [serde (tag = \"eventType\")]", "serde tag attribute")],
+    ),
+    (
+      "untagged",
+      EnumDef {
+        name: "AnyValue".to_string(),
+        docs: vec![],
+        variants: vec![make_unit_variant("StringVal"), make_unit_variant("NumberVal")],
+        discriminator: None,
+        derives: default_derives(),
+        serde_attrs: vec![SerdeAttribute::Untagged],
+        outer_attrs: vec![],
+        case_insensitive: false,
+        methods: vec![],
+      },
+      vec![("# [serde (untagged)]", "untagged serde attribute")],
+    ),
+  ];
+
+  for (case_name, def, expected_attrs) in cases {
+    let code = generate_enum(&def, Visibility::Public).to_string();
+    for (expected, msg) in expected_attrs {
+      assert!(code.contains(expected), "{case_name}: should have {msg}");
+    }
+  }
+}
+
+#[test]
+fn test_case_insensitive_enum() {
+  let base_def = EnumDef {
     name: "Status".to_string(),
     docs: vec![],
     variants: vec![
@@ -39,11 +321,11 @@ fn test_case_insensitive_enum_generation() {
     methods: vec![],
   };
 
-  let tokens = generate_enum(&def, Visibility::Public);
+  let tokens = generate_enum(&base_def, Visibility::Public);
   let code = tokens.to_string();
 
   let parts: Vec<&str> = code.split("enum Status").collect();
-  assert_eq!(parts.len(), 2);
+  assert_eq!(parts.len(), 2, "should split into derive and impl parts");
   let derive_part = parts[0];
   let impl_part = parts[1];
 
@@ -55,7 +337,275 @@ fn test_case_insensitive_enum_generation() {
     impl_part.contains("impl < 'de > serde :: Deserialize < 'de > for Status"),
     "Should implement Deserialize manually"
   );
+  assert!(
+    impl_part.contains("\"active\" => Ok (Status :: Active)"),
+    "should match active"
+  );
+  assert!(
+    impl_part.contains("\"in-progress\" => Ok (Status :: InProgress)"),
+    "should match in-progress"
+  );
 
-  assert!(impl_part.contains("\"active\" => Ok (Status :: Active)"));
-  assert!(impl_part.contains("\"in-progress\" => Ok (Status :: InProgress)"));
+  let fallback_def = EnumDef {
+    name: "Priority".to_string(),
+    docs: vec![],
+    variants: vec![
+      make_unit_variant("High"),
+      make_unit_variant("Medium"),
+      make_unit_variant("Low"),
+      make_unit_variant("Unknown"),
+    ],
+    discriminator: None,
+    derives: BTreeSet::from([
+      DeriveTrait::Debug,
+      DeriveTrait::Clone,
+      DeriveTrait::Serialize,
+      DeriveTrait::Deserialize,
+    ]),
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: true,
+    methods: vec![],
+  };
+
+  let fallback_code = generate_enum(&fallback_def, Visibility::Public).to_string();
+  assert!(
+    fallback_code.contains("_ => Ok (Priority :: Unknown)"),
+    "should fallback to Unknown variant for unrecognized values"
+  );
+}
+
+#[test]
+fn test_enum_visibility() {
+  let cases = [
+    (
+      Visibility::Crate,
+      "pub (crate) enum Internal",
+      true,
+      "pub(crate) visibility",
+    ),
+    (
+      Visibility::File,
+      "pub enum",
+      false,
+      "no pub visibility for file-private",
+    ),
+    (
+      Visibility::File,
+      "pub (crate)",
+      false,
+      "no pub(crate) visibility for file-private",
+    ),
+    (Visibility::File, "enum Private", true, "private visibility"),
+  ];
+
+  for (visibility, pattern, should_contain, msg) in cases {
+    let name = match visibility {
+      Visibility::Crate => "Internal",
+      Visibility::File => "Private",
+      Visibility::Public => "Public",
+    };
+    let def = make_simple_enum(name, vec![make_unit_variant("A"), make_unit_variant("B")]);
+    let code = generate_enum(&def, visibility).to_string();
+
+    if should_contain {
+      assert!(code.contains(pattern), "should have {msg}");
+    } else {
+      assert!(!code.contains(pattern), "should not have {msg}");
+    }
+  }
+}
+
+#[test]
+fn test_enum_constructor_methods() {
+  let simple_def = EnumDef {
+    name: "RequestBody".to_string(),
+    docs: vec![],
+    variants: vec![VariantDef {
+      name: "Json".to_string(),
+      docs: vec![],
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("JsonPayload".to_string()))]),
+      serde_attrs: vec![],
+      deprecated: false,
+    }],
+    discriminator: None,
+    derives: default_derives(),
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![EnumMethod {
+      name: "json".to_string(),
+      docs: vec!["Creates an empty JSON body.".to_string()],
+      kind: EnumMethodKind::SimpleConstructor {
+        variant_name: "Json".to_string(),
+        wrapped_type: "JsonPayload".to_string(),
+      },
+    }],
+  };
+
+  let simple_code = generate_enum(&simple_def, Visibility::Public).to_string();
+  assert!(simple_code.contains("impl RequestBody"), "should have impl block");
+  assert!(
+    simple_code.contains("pub fn json () -> Self"),
+    "should have json constructor"
+  );
+  assert!(
+    simple_code.contains("Self :: Json (JsonPayload :: default ())"),
+    "should construct with default"
+  );
+
+  let param_def = EnumDef {
+    name: "Request".to_string(),
+    docs: vec![],
+    variants: vec![VariantDef {
+      name: "Create".to_string(),
+      docs: vec![],
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("CreateParams".to_string()))]),
+      serde_attrs: vec![],
+      deprecated: false,
+    }],
+    discriminator: None,
+    derives: default_derives(),
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![EnumMethod {
+      name: "with_name".to_string(),
+      docs: vec!["Creates a request with the given name.".to_string()],
+      kind: EnumMethodKind::ParameterizedConstructor {
+        variant_name: "Create".to_string(),
+        wrapped_type: "CreateParams".to_string(),
+        param_name: "name".to_string(),
+        param_type: "String".to_string(),
+      },
+    }],
+  };
+
+  let param_code = generate_enum(&param_def, Visibility::Public).to_string();
+  assert!(
+    param_code.contains("pub fn with_name (name : String) -> Self"),
+    "should have parameterized constructor"
+  );
+  assert!(
+    param_code.contains("Self :: Create (CreateParams { name , .. Default :: default () })"),
+    "should construct with parameter"
+  );
+}
+
+#[test]
+fn test_discriminated_enum() {
+  let without_fallback = DiscriminatedEnumDef {
+    name: "Pet".to_string(),
+    docs: vec!["A pet can be a dog or cat.".to_string()],
+    discriminator_field: "petType".to_string(),
+    variants: vec![
+      DiscriminatedVariant {
+        discriminator_value: "dog".to_string(),
+        variant_name: "Dog".to_string(),
+        type_name: "DogData".to_string(),
+      },
+      DiscriminatedVariant {
+        discriminator_value: "cat".to_string(),
+        variant_name: "Cat".to_string(),
+        type_name: "CatData".to_string(),
+      },
+    ],
+    fallback: None,
+  };
+
+  let code_without = generate_discriminated_enum(&without_fallback, Visibility::Public).to_string();
+
+  let assertions_without = [
+    (
+      "oas3_gen_support :: discriminated_enum !",
+      "should use discriminated_enum macro",
+    ),
+    ("pub enum Pet", "should have pub enum declaration"),
+    ("discriminator : \"petType\"", "should have discriminator field"),
+    ("(\"dog\" , Dog (DogData))", "should have dog variant"),
+    ("(\"cat\" , Cat (CatData))", "should have cat variant"),
+  ];
+  for (expected, msg) in assertions_without {
+    assert!(code_without.contains(expected), "{msg}");
+  }
+  assert!(!code_without.contains("fallback :"), "should not have fallback");
+
+  let with_fallback = DiscriminatedEnumDef {
+    name: "Message".to_string(),
+    docs: vec![],
+    discriminator_field: "type".to_string(),
+    variants: vec![DiscriminatedVariant {
+      discriminator_value: "text".to_string(),
+      variant_name: "Text".to_string(),
+      type_name: "TextMessage".to_string(),
+    }],
+    fallback: Some(DiscriminatedVariant {
+      discriminator_value: String::new(),
+      variant_name: "Unknown".to_string(),
+      type_name: "serde_json::Value".to_string(),
+    }),
+  };
+
+  let code_with = generate_discriminated_enum(&with_fallback, Visibility::Public).to_string();
+  assert!(
+    code_with.contains("fallback : Unknown (serde_json :: Value)"),
+    "should have fallback variant"
+  );
+}
+
+#[test]
+fn test_response_enum_generation() {
+  let def = ResponseEnumDef {
+    name: "GetUserResponse".to_string(),
+    docs: vec!["Response for GET /users/{id}".to_string()],
+    variants: vec![
+      ResponseVariant {
+        status_code: "200".to_string(),
+        variant_name: "Ok".to_string(),
+        description: Some("User found".to_string()),
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".to_string()))),
+        content_type: Some("application/json".to_string()),
+      },
+      ResponseVariant {
+        status_code: "404".to_string(),
+        variant_name: "NotFound".to_string(),
+        description: Some("User not found".to_string()),
+        schema_type: None,
+        content_type: None,
+      },
+      ResponseVariant {
+        status_code: "500".to_string(),
+        variant_name: "InternalServerError".to_string(),
+        description: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".to_string()))),
+        content_type: Some("application/json".to_string()),
+      },
+    ],
+    request_type: "GetUserRequest".to_string(),
+  };
+
+  let code = generate_response_enum(&def, Visibility::Public).to_string();
+
+  let assertions = [
+    ("pub enum GetUserResponse", "should have pub enum declaration"),
+    ("# [derive (Clone , Debug)]", "should derive Clone and Debug"),
+    ("Ok (User)", "should have Ok variant with User type"),
+    ("NotFound", "should have NotFound unit variant"),
+    (
+      "InternalServerError (ErrorResponse)",
+      "should have error variant with type",
+    ),
+    (
+      "# [doc = \"200: User found\"]",
+      "should have doc with status and description",
+    ),
+    ("# [doc = \"404: User not found\"]", "should have doc for 404"),
+    (
+      "# [doc = \"500\"]",
+      "should have doc with just status when no description",
+    ),
+  ];
+  for (expected, msg) in assertions {
+    assert!(code.contains(expected), "{msg}");
+  }
 }

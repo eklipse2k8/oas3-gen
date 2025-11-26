@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -14,34 +14,29 @@ pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTr
   let mut pattern_to_const: BTreeMap<String, String> = BTreeMap::new();
 
   for rust_type in types {
-    match rust_type {
-      RustType::Struct(def) => {
-        for field in &def.fields {
-          let pattern = field.validation_attrs.iter().find_map(|attr| {
-            if let ValidationAttribute::Regex(p) = attr {
-              Some(p)
-            } else {
-              None
-            }
-          });
+    let RustType::Struct(def) = rust_type else {
+      continue;
+    };
 
-          let Some(pattern) = pattern else {
-            continue;
-          };
-          let key = RegexKey::for_struct(&def.name, &field.name);
-          let pattern_key = pattern.clone();
-          let const_name = if let Some(existing) = pattern_to_const.get(&pattern_key) {
-            existing.clone()
-          } else {
-            let name = regex_const_name(&key.parts());
-            pattern_to_const.insert(pattern_key.clone(), name.clone());
-            const_defs.insert(name.clone(), pattern_key);
-            name
-          };
-          lookup.insert(key, const_name);
+    for field in &def.fields {
+      let Some(pattern) = field.validation_attrs.iter().find_map(|attr| match attr {
+        ValidationAttribute::Regex(p) => Some(p),
+        _ => None,
+      }) else {
+        continue;
+      };
+
+      let key = RegexKey::for_struct(&def.name, &field.name);
+      let const_name = match pattern_to_const.entry(pattern.clone()) {
+        Entry::Occupied(entry) => entry.get().clone(),
+        Entry::Vacant(entry) => {
+          let name = regex_const_name(&key.parts());
+          const_defs.insert(name.clone(), pattern.clone());
+          entry.insert(name.clone());
+          name
         }
-      }
-      RustType::Enum(_) | RustType::TypeAlias(_) | RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => {}
+      };
+      lookup.insert(key, const_name);
     }
   }
 
