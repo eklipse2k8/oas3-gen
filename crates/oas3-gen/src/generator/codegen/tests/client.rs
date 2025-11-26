@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use http::Method;
-use quote::{format_ident, quote};
+use quote::format_ident;
 
 use crate::generator::{
   ast::{
@@ -47,7 +47,6 @@ fn test_build_doc_attributes() {
     description: Option<&'static str>,
     expected_contains: Vec<&'static str>,
     expected_missing: Vec<&'static str>,
-    expected_count: Option<usize>,
   }
 
   let cases = [
@@ -56,35 +55,30 @@ fn test_build_doc_attributes() {
       description: None,
       expected_contains: vec!["Test summary", "GET /test"],
       expected_missing: vec!["Test description"],
-      expected_count: None,
     },
     Case {
       summary: None,
       description: Some("Test description"),
       expected_contains: vec!["Test description", "GET /test"],
       expected_missing: vec![],
-      expected_count: None,
     },
     Case {
       summary: Some("Test summary"),
       description: Some("Test description"),
       expected_contains: vec!["Test summary", "Test description", "GET /test"],
       expected_missing: vec![],
-      expected_count: None,
     },
     Case {
       summary: Some("Test summary"),
       description: Some("Line 1\nLine 2\nLine 3"),
       expected_contains: vec!["Line 1", "Line 2", "Line 3"],
       expected_missing: vec![],
-      expected_count: None,
     },
     Case {
       summary: None,
       description: None,
       expected_contains: vec!["GET /test"],
       expected_missing: vec![],
-      expected_count: Some(1),
     },
   ];
 
@@ -97,7 +91,7 @@ fn test_build_doc_attributes() {
     }
     .build();
     let doc_attrs = ClientOperationMethod::build_doc_attributes(&operation);
-    let output = quote! { #(#doc_attrs)* }.to_string();
+    let output = doc_attrs.to_string();
 
     for expected in case.expected_contains {
       assert!(output.contains(expected), "{label}: expected to contain '{expected}'");
@@ -108,9 +102,6 @@ fn test_build_doc_attributes() {
         "{label}: expected NOT to contain '{missing}'"
       );
     }
-    if let Some(count) = case.expected_count {
-      assert_eq!(doc_attrs.len(), count, "{label}: expected {count} doc attrs");
-    }
   }
 
   let operation = TestOperation {
@@ -120,7 +111,7 @@ fn test_build_doc_attributes() {
   }
   .build();
   let doc_attrs = ClientOperationMethod::build_doc_attributes(&operation);
-  let output = quote! { #(#doc_attrs)* }.to_string();
+  let output = doc_attrs.to_string();
   let summary_pos = output.find("Test summary").unwrap();
   let description_pos = output.find("Test description").unwrap();
   let signature_pos = output.find("GET /test").unwrap();
@@ -181,8 +172,8 @@ fn test_response_handling_content_categories() {
     .build();
     let method = ClientOperationMethod::try_from_operation(&operation, &[]).unwrap();
 
-    let return_ty_str = method.return_ty.to_string();
-    let response_str = method.response_handling.to_string();
+    let return_ty_str = method.response_handling.success_type.to_string();
+    let response_str = method.response_handling.parse_body.to_string();
 
     assert_eq!(return_ty_str, case.expected_return_ty, "{label}: return type mismatch");
     for expected in case.expected_contains {
@@ -203,16 +194,16 @@ fn test_response_handling_with_response_enum() {
   .build();
   let method = ClientOperationMethod::try_from_operation(&operation, &[]).unwrap();
 
-  let return_ty_str = method.return_ty.to_string();
-  let response_str = method.response_handling.to_string();
+  let success_type_str = method.response_handling.success_type.to_string();
+  let parse_body_str = method.response_handling.parse_body.to_string();
 
   assert!(
-    return_ty_str.contains("TestResponseEnum"),
-    "return type should contain TestResponseEnum"
+    success_type_str.contains("TestResponseEnum"),
+    "success type should contain TestResponseEnum"
   );
   assert!(
-    response_str.contains("parse_response"),
-    "response should use parse_response"
+    parse_body_str.contains("parse_response"),
+    "parse_body should use parse_response"
   );
 }
 

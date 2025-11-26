@@ -5,17 +5,14 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::LitStr;
 
-use super::metadata::CodeMetadata;
-use crate::{
-  generator::{
-    ast::{
-      ContentCategory, FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef,
-      TypeRef, tokens::ConstToken,
-    },
-    codegen::{constants, parse_type},
-    naming::identifiers::to_rust_type_name,
+use super::{attributes::generate_docs, metadata::CodeMetadata};
+use crate::generator::{
+  ast::{
+    ContentCategory, FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef,
+    TypeRef, tokens::ConstToken,
   },
-  utils::text::doc_lines,
+  codegen::{constants, parse_type},
+  naming::identifiers::to_rust_type_name,
 };
 
 pub struct ClientGenerator<'a> {
@@ -126,19 +123,23 @@ fn extract_header_names(operations: &[OperationInfo]) -> BTreeSet<String> {
     .iter()
     .flat_map(|op| &op.parameters)
     .filter(|param| matches!(param.location, ParameterLocation::Header))
-    .map(|param| param.original_name.to_ascii_lowercase().clone())
+    .map(|param| param.original_name.to_ascii_lowercase())
     .collect()
+}
+
+pub(crate) struct ResponseHandling {
+  pub(crate) success_type: TokenStream,
+  pub(crate) parse_body: TokenStream,
 }
 
 pub(crate) struct ClientOperationMethod {
   pub(crate) method_name: syn::Ident,
   pub(crate) request_ident: syn::Ident,
-  pub(crate) doc_attrs: Vec<TokenStream>,
+  pub(crate) doc_attrs: TokenStream,
   pub(crate) builder_init: TokenStream,
   pub(crate) header_statements: Vec<TokenStream>,
   pub(crate) body_statement: TokenStream,
-  pub(crate) return_ty: TokenStream,
-  pub(crate) response_handling: TokenStream,
+  pub(crate) response_handling: ResponseHandling,
 }
 
 impl ClientOperationMethod {
@@ -153,7 +154,7 @@ impl ClientOperationMethod {
     let response_enum = operation.response_enum.as_ref().map(|t| parse_type(t)).transpose()?;
     let response_type = operation.response_type.as_ref().map(|t| parse_type(t)).transpose()?;
 
-    let (return_ty, response_handling) = Self::build_response_handling(
+    let response_handling = Self::build_response_handling(
       &request_ident,
       response_enum.as_ref(),
       response_type.as_ref(),
@@ -167,44 +168,38 @@ impl ClientOperationMethod {
       builder_init: Self::build_http_method_init(&operation.method),
       header_statements: Self::build_header_statements(operation),
       body_statement: Self::build_body_statement(operation, rust_types),
-      return_ty,
       response_handling,
     })
   }
 
-  pub(crate) fn build_doc_attributes(operation: &OperationInfo) -> Vec<TokenStream> {
-    let mut doc_attrs = vec![];
+  pub(crate) fn build_doc_attributes(operation: &OperationInfo) -> TokenStream {
+    let mut docs: Vec<String> = vec![];
 
     if let Some(summary) = &operation.summary {
-      for line in doc_lines(summary) {
+      for line in summary.lines() {
         let trimmed = line.trim();
         if !trimmed.is_empty() {
-          let lit = LitStr::new(trimmed, Span::call_site());
-          doc_attrs.push(quote! { #[doc = #lit] });
+          docs.push(trimmed.to_string());
         }
       }
     }
 
     if let Some(description) = &operation.description {
       if operation.summary.is_some() {
-        doc_attrs.push(quote! { #[doc = ""] });
+        docs.push(String::new());
       }
-      for line in doc_lines(description) {
-        let trimmed = line.trim();
-        let lit = LitStr::new(trimmed, Span::call_site());
-        doc_attrs.push(quote! { #[doc = #lit] });
+      for line in description.lines() {
+        docs.push(line.trim().to_string());
       }
     }
 
     if operation.summary.is_some() || operation.description.is_some() {
-      doc_attrs.push(quote! { #[doc = ""] });
+      docs.push(String::new());
     }
 
-    let signature_doc = format!("{} {}", operation.method.as_str(), operation.path);
-    let signature_lit = syn::LitStr::new(&signature_doc, proc_macro2::Span::call_site());
-    doc_attrs.push(quote! { #[doc = #signature_lit] });
+    docs.push(format!("{} {}", operation.method.as_str(), operation.path));
 
-    doc_attrs
+    generate_docs(&docs)
   }
 
   fn build_http_method_init(method: &Method) -> TokenStream {
@@ -455,17 +450,20 @@ impl ClientOperationMethod {
     response_enum: Option<&syn::Type>,
     response_type: Option<&syn::Type>,
     response_content_category: ContentCategory,
-  ) -> (TokenStream, TokenStream) {
-    let raw_response = || (quote! { reqwest::Response }, quote! { Ok(response) });
+  ) -> ResponseHandling {
+    let raw_response = || ResponseHandling {
+      success_type: quote! { reqwest::Response },
+      parse_body: quote! { Ok(response) },
+    };
 
     if let Some(response_enum) = response_enum {
-      return (
-        quote! { #response_enum },
-        quote! {
+      return ResponseHandling {
+        success_type: quote! { #response_enum },
+        parse_body: quote! {
           let parsed = #request_ident::parse_response(response).await?;
           Ok(parsed)
         },
-      );
+      };
     }
 
     let Some(response_ty) = response_type else {
@@ -473,20 +471,20 @@ impl ClientOperationMethod {
     };
 
     match response_content_category {
-      ContentCategory::Json => (
-        quote! { #response_ty },
-        quote! {
+      ContentCategory::Json => ResponseHandling {
+        success_type: quote! { #response_ty },
+        parse_body: quote! {
           let parsed = response.json::<#response_ty>().await?;
           Ok(parsed)
         },
-      ),
-      ContentCategory::Text => (
-        quote! { String },
-        quote! {
+      },
+      ContentCategory::Text => ResponseHandling {
+        success_type: quote! { String },
+        parse_body: quote! {
           let text = response.text().await?;
           Ok(text)
         },
-      ),
+      },
       ContentCategory::Binary | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
         raw_response()
       }
@@ -502,12 +500,12 @@ impl ToTokens for ClientOperationMethod {
     let builder_init = &self.builder_init;
     let header_statements = &self.header_statements;
     let body_statement = &self.body_statement;
-    let return_ty = &self.return_ty;
-    let response_handling = &self.response_handling;
+    let success_type = &self.response_handling.success_type;
+    let parse_body = &self.response_handling.parse_body;
 
     quote! {
-      #(#doc_attrs)*
-      pub async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#return_ty> {
+      #doc_attrs
+      pub async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#success_type> {
         request.validate().context("parameter validation")?;
         let url = self
           .base_url
@@ -517,7 +515,7 @@ impl ToTokens for ClientOperationMethod {
         #(#header_statements)*
         #body_statement
         let response = req_builder.send().await?;
-        #response_handling
+        #parse_body
       }
     }
     .to_tokens(tokens);

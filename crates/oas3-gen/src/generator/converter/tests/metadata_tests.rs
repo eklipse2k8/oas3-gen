@@ -60,15 +60,13 @@ fn test_is_single_schema_type() {
 
 #[test]
 fn test_extract_docs() {
-  // Test None
   assert_eq!(extract_docs(None), Vec::<String>::new());
 
-  // Test Some
   let description = "Test description\nSecond line".to_string();
   let docs = extract_docs(Some(&description));
   assert_eq!(docs.len(), 2);
-  assert_eq!(docs[0], "/// Test description");
-  assert_eq!(docs[1], "/// Second line");
+  assert_eq!(docs[0], "Test description");
+  assert_eq!(docs[1], "Second line");
 }
 
 #[test]

@@ -43,21 +43,6 @@ pub(crate) fn doc_lines(input: &str) -> Vec<String> {
   process_doc_text(input).lines().map(String::from).collect()
 }
 
-#[inline]
-#[must_use]
-pub(crate) fn doc_comment_lines(input: &str) -> Vec<String> {
-  process_doc_text(input)
-    .lines()
-    .map(|line| {
-      if line.is_empty() {
-        "/// ".to_string()
-      } else {
-        format!("/// {line}")
-      }
-    })
-    .collect()
-}
-
 #[cfg(feature = "mdformat")]
 async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
   use tokio::io::AsyncWriteExt;
@@ -90,11 +75,11 @@ async fn format_with_mdformat(input: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
   #[cfg(feature = "mdformat")]
-  use super::{build_async_format_with_mdformat, split_lines};
+  use super::build_async_format_with_mdformat;
 
   #[cfg(feature = "mdformat")]
   #[tokio::test]
-  async fn test_doc_comment_lines_with_mdformat() {
+  async fn test_doc_lines_with_mdformat() {
     let input = r"## Blockquotes
 
 > Markdown is a lightweight markup language with plain-text-formatting syntax, created in 2004 by John Gruber with Aaron Swartz.
@@ -102,17 +87,16 @@ mod tests {
 >> Markdown is often used to format readme files, for writing messages in online discussion forums, and to create rich text using a plain text editor.
 ";
     let expected = vec![
-      "/// ## Blockquotes".to_string(),
-      "/// ".to_string(),
-      "/// > Markdown is a lightweight markup language with plain-text-formatting syntax, created in 2004 by"
-        .to_string(),
-      "/// > John Gruber with Aaron Swartz.".to_string(),
-      "/// >".to_string(),
-      "/// > > Markdown is often used to format readme files, for writing messages in online discussion forums,"
-        .to_string(),
-      "/// > > and to create rich text using a plain text editor.".to_string(),
+      "## Blockquotes",
+      "",
+      "> Markdown is a lightweight markup language with plain-text-formatting syntax, created in 2004 by",
+      "> John Gruber with Aaron Swartz.",
+      ">",
+      "> > Markdown is often used to format readme files, for writing messages in online discussion forums,",
+      "> > and to create rich text using a plain text editor.",
     ];
-    let result = split_lines(&build_async_format_with_mdformat(input).await);
-    assert_eq!(result, expected);
+    let result = build_async_format_with_mdformat(input).await;
+    let lines: Vec<&str> = result.lines().collect();
+    assert_eq!(lines, expected);
   }
 }
