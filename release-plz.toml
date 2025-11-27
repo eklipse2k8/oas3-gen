@@ -1,11 +1,15 @@
 [workspace]
+release_always = false
 changelog_update = true
 git_release_enable = true
 git_tag_enable = true
+git_tag_name = "release/{version}"
 semver_check = true
+pr_branch_prefix = "release/prepare/"
 pr_labels = ["release"]
 pr_draft = false
 repo_url = "https://github.com/eklipse2k8/oas3-gen"
+release_commits = "^feat:"
 
 [changelog]
 header = """
@@ -60,8 +64,11 @@ commit_parsers = [
 name = "oas3-gen"
 changelog_path = "./CHANGELOG.md"
 changelog_include = ["oas3-gen-support"]
+changelog_update = true 
+publish_all_features = true
 
 [[package]]
 name = "oas3-gen-support"
 changelog_update = false
 git_release_enable = false
+publish = true
