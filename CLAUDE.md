@@ -309,10 +309,15 @@ cargo run -- list --help
 - `generate`: Generate Rust code from OpenAPI specification
   - `--input` / `-i`: (Required) Path to OpenAPI JSON specification file
   - `--output` / `-o`: (Required) Path where generated Rust code will be written
-  - `--visibility`: Visibility level for generated types (public, crate, or file; default: public)
+  - `--visibility` / `-C`: Visibility level for generated types (public, crate, or file; default: public)
+  - `--odata-support`: Enable OData-specific field optionality rules (makes @odata.* fields optional)
+  - `--enum-mode`: How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge)
+  - `--no-helpers`: Disable generation of ergonomic helper methods for enum variants
+  - `--only`: Include only the specified comma-separated operation IDs
+  - `--exclude`: Exclude the specified comma-separated operation IDs
+  - `--all-schemas`: Generate all schemas defined in spec (default: only schemas referenced by operations)
   - `--verbose` / `-v`: Enable verbose output with detailed progress information
   - `--quiet` / `-q`: Suppress non-essential output (errors only)
-  - `--all-schemas`: Generate all schemas defined in spec (default: only schemas referenced by operations)
 
 - `list`: List information from OpenAPI specification
   - `operations`: List all operations with their IDs, methods, and paths
@@ -427,7 +432,15 @@ Cargo workspace with two crates following a three-stage pipeline: **Parse OpenAP
 crates/
 ├── oas3-gen/                      # CLI tool (binary)
 │   ├── fixtures/                  # Test fixtures
-│   │   └── petstore/              # Petstore API fixtures
+│   │   ├── basic_api.json         # Basic API test fixture
+│   │   ├── content_types.json     # Content type handling tests
+│   │   ├── enum_deduplication.json # Enum deduplication tests
+│   │   ├── implicit_union.json    # Implicit union tests
+│   │   ├── integer_path_param.json # Integer path parameter tests
+│   │   ├── operation_filtering.json # Operation filtering tests
+│   │   ├── petstore.json          # Petstore API specification
+│   │   ├── relaxed_enum_deduplication.json # Relaxed enum deduplication tests
+│   │   └── petstore/              # Petstore generated output fixtures
 │   │       ├── mod.rs
 │   │       ├── client.rs
 │   │       └── types.rs
@@ -476,7 +489,6 @@ crates/
 │           │   ├── inference.rs   # Type name inference
 │           │   ├── operations.rs  # Operation naming
 │           │   ├── responses.rs   # Response naming
-│           │   ├── status_codes.rs # HTTP status code naming
 │           │   └── tests/         # Naming tests
 │           │       ├── mod.rs
 │           │       ├── identifiers.rs
@@ -485,10 +497,17 @@ crates/
 │           ├── ast/               # AST type definitions
 │           │   ├── mod.rs
 │           │   ├── types.rs       # Core AST types (RustType, StructDef, EnumDef, etc.)
+│           │   ├── tokens.rs      # Token stream utilities
 │           │   ├── derives.rs     # Derive macro selection
 │           │   ├── lints.rs       # Clippy lint attributes
 │           │   ├── serde_attrs.rs # Serde attribute builders
-│           │   └── validation_attrs.rs # Validation attribute builders
+│           │   ├── status_codes.rs # HTTP status code handling
+│           │   ├── validation_attrs.rs # Validation attribute builders
+│           │   └── tests/         # AST tests
+│           │       ├── mod.rs
+│           │       ├── status_codes.rs
+│           │       ├── types.rs
+│           │       └── validation_attrs.rs
 │           ├── converter/         # OpenAPI → AST conversion
 │           │   ├── mod.rs
 │           │   ├── cache.rs       # Schema conversion caching
@@ -518,6 +537,7 @@ crates/
 │           └── codegen/           # AST → Rust source generation
 │               ├── mod.rs
 │               ├── attributes.rs  # Attribute generation
+│               ├── client.rs      # HTTP client generation
 │               ├── coercion.rs    # Type coercion logic
 │               ├── constants.rs   # Constant generation
 │               ├── enums.rs       # Enum code generation
@@ -525,15 +545,15 @@ crates/
 │               ├── metadata.rs    # Metadata comment generation
 │               ├── structs.rs     # Struct code generation
 │               ├── type_aliases.rs # Type alias generation
-│               ├── client/        # HTTP client generation
-│               │   ├── mod.rs
-│               │   └── methods.rs # Client method generation
 │               └── tests/         # Codegen tests
 │                   ├── mod.rs
+│                   ├── client.rs
 │                   ├── coercion_tests.rs
+│                   ├── constants_tests.rs
 │                   ├── enum_tests.rs
 │                   ├── error_impl_tests.rs
-│                   └── struct_tests.rs
+│                   ├── struct_tests.rs
+│                   └── type_alias_tests.rs
 └── oas3-gen-support/              # Runtime library (rlib + cdylib)
     └── src/
         └── lib.rs                 # discriminated_enum! macro and utilities
@@ -620,7 +640,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 **Runtime Support:**
 
-- **oas3-gen-support** (0.20.0): Workspace runtime library with macros and utilities
+- **oas3-gen-support** (0.21.0): Workspace runtime library with macros and utilities
 
 **Development & Testing:**
 

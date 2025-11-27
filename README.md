@@ -2,7 +2,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.20.0/status.svg)](https://deps.rs/crate/oas3-gen/0.20.0)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.21.0/status.svg)](https://deps.rs/crate/oas3-gen/0.21.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.1?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification)
 <!-- prettier-ignore-end -->
@@ -73,17 +73,20 @@ pub struct Pet {
 
 ## Key Features
 
-- **Comprehensive OpenAPI 3.1 Support:** Parses schemas, parameters, request bodies, and responses from the latest OpenAPI specification.
-- **Idiomatic Code Generation:** Creates Rust structs and enums that follow common language conventions.
-- **Serde Integration:** Automatically derives `serde::Serialize` and `serde::Deserialize` for immediate use with JSON and other data formats.
-- **Documentation Generation:** Converts OpenAPI schema descriptions directly into Rust documentation comments.
-- **Complex Schema Resolution:** Correctly handles `allOf`, `oneOf`, and `anyOf` compositions to generate accurate and complex type definitions.
-- **Cycle Detection:** Intelligently detects and manages cyclical dependencies between schemas, preventing infinite recursion in type definitions.
-- **Convention-Aware Naming:** Detects `camelCase` and `snake_case` in the source schema and applies the appropriate `#[serde(rename_all = "...")]` attribute.
-- **Operation Scaffolding:** Generates types for API operation parameters, request bodies, and responses.
-- **Validation Support:** Translates OpenAPI constraints (e.g., `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`) into validation attributes.
-- **Enhanced CLI Experience:** Provides colored, timestamped output with automatic theme detection for improved readability in various terminal environments.
-- **Operation Filtering:** Selectively generate code for specific operations using `--only` or exclude operations with `--exclude` for fine-grained control.
+| Feature | Description |
+|---------|-------------|
+| Cycle Detection | Prevents infinite type recursion |
+| Doc Comments | Schema descriptions become rustdoc |
+| Enum Helpers | Ergonomic is_/as_ methods |
+| Enum Modes | Merge, preserve, or relaxed |
+| OData Support | Optional @odata.* field handling |
+| OpenAPI 3.1 | Full spec parsing support |
+| Operation Filtering | Include/exclude specific operations |
+| Operation Types | Request/response type generation |
+| Schema Composition | Handles allOf/oneOf/anyOf correctly |
+| Serde Integration | Automatic derive for serialization |
+| Smart Naming | Auto-detects camelCase/snake_case conventions |
+| Validation | Constraint attributes from spec |
 
 ### Command-Line Options
 
@@ -122,6 +125,9 @@ Required:
 
 Code Generation:
   -C, --visibility <PUB>  Module visibility for generated items [default: public] [possible values: public, crate, file]
+      --odata-support     Enable OData-specific field optionality rules (makes @odata.* fields optional)
+      --enum-mode <MODE>  How to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
+      --no-helpers        Disable generation of ergonomic helper methods for enum variants
 
 Operation Filtering:
       --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
@@ -167,6 +173,12 @@ oas3-gen generate -i openapi.json -o types.rs --exclude delete_user,list_users
 
 # Generate all schemas but only specific operation types (includes unreferenced schemas)
 oas3-gen generate -i openapi.json -o types.rs --all-schemas --only create_user
+
+# Enable OData support for Microsoft Graph
+oas3-gen generate -i graph-api.json -o types.rs --odata-support
+
+# Enable relaxed (case-insensitive) enum deserialization
+oas3-gen generate -i openapi.json -o types.rs --enum-mode relaxed
 
 # List all operations in the specification
 oas3-gen list operations -i openapi.json
