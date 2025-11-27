@@ -5,6 +5,7 @@ git_tag_enable = true
 semver_check = true
 pr_labels = ["release"]
 pr_draft = false
+repo_url = "https://github.com/eklipse2k8/oas3-gen"
 
 [changelog]
 header = """
@@ -18,10 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 """
 
 body = """
-{%- macro remote_url() -%}
-  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
-{%- endmacro -%}
-
 {% if version -%}
 ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else -%}
@@ -32,9 +29,9 @@ body = """
 ### {{ group | upper_first }}
 {% for commit in commits %}
 {%- if commit.scope -%}
-- **{{ commit.scope }}:** {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }}))
+- **{{ commit.scope }}:** {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/eklipse2k8/oas3-gen/commit/{{ commit.id }}))
 {% else -%}
-- {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }}))
+- {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/eklipse2k8/oas3-gen/commit/{{ commit.id }}))
 {% endif -%}
 {% endfor %}
 {% endfor %}
