@@ -4,8 +4,11 @@ use oas3::spec::ObjectSchema;
 
 use super::hashing;
 use crate::generator::{
-  ast::RustType,
-  naming::{identifiers::to_rust_type_name, inference as naming},
+  ast::{EnumToken, RustType, StructToken},
+  naming::{
+    identifiers::{ensure_unique, to_rust_type_name},
+    inference::{extract_enum_values, is_relaxed_enum_pattern},
+  },
 };
 
 /// Cache for sharing generated Rust types across the schema graph.
@@ -94,8 +97,8 @@ impl SharedSchemaCache {
   ) -> anyhow::Result<String> {
     let schema_hash = hashing::hash_schema(schema)?;
 
-    if !naming::is_relaxed_enum_pattern(schema)
-      && let Some(values) = naming::extract_enum_values(schema)
+    if !is_relaxed_enum_pattern(schema)
+      && let Some(values) = extract_enum_values(schema)
       && let Some(existing_name) = self.enum_to_type.get(&values)
     {
       self.schema_to_type.insert(schema_hash, existing_name.clone());
@@ -115,15 +118,15 @@ impl SharedSchemaCache {
     self.schema_to_type.insert(schema_hash, name.clone());
 
     // If this is an enum, register its values too (if not already)
-    if let Some(values) = naming::extract_enum_values(schema) {
+    if let Some(values) = extract_enum_values(schema) {
       self.enum_to_type.insert(values, name.clone());
     }
 
     // Update the name in the struct/enum definition if we renamed it
     let mut final_type_def = type_def;
     match &mut final_type_def {
-      RustType::Struct(s) => s.name.clone_from(&name),
-      RustType::Enum(e) => e.name.clone_from(&name),
+      RustType::Struct(s) => s.name = StructToken::from(name.clone()),
+      RustType::Enum(e) => e.name = EnumToken::new(&name),
       _ => {}
     }
 
@@ -136,7 +139,7 @@ impl SharedSchemaCache {
   /// Generates a unique name based on a base name, ensuring no collisions with used names.
   pub(crate) fn make_unique_name(&self, base: &str) -> String {
     let rust_name = to_rust_type_name(base);
-    naming::ensure_unique(&rust_name, &self.used_names)
+    ensure_unique(&rust_name, &self.used_names)
   }
 
   /// Consumes the cache and returns all generated Rust types.

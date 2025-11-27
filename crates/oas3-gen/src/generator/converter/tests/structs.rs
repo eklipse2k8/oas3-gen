@@ -5,7 +5,7 @@ use string_cache::DefaultAtom;
 
 use crate::{
   generator::{
-    ast::{FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute},
+    ast::{FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute, tokens::FieldNameToken},
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
       field_optionality::FieldContext,
@@ -333,7 +333,7 @@ fn test_field_optionality_policy() {
 
 fn make_field(name: &str, deprecated: bool) -> FieldDef {
   FieldDef {
-    name: name.to_string(),
+    name: FieldNameToken::new(name),
     deprecated,
     ..Default::default()
   }
@@ -350,9 +350,9 @@ fn test_deduplicate_field_names_no_duplicates() {
   StructConverter::deduplicate_field_names(&mut fields);
 
   assert_eq!(fields.len(), 3);
-  assert_eq!(fields[0].name, "foo");
-  assert_eq!(fields[1].name, "bar");
-  assert_eq!(fields[2].name, "baz");
+  assert_eq!(fields[0].name.as_str(), "foo");
+  assert_eq!(fields[1].name.as_str(), "bar");
+  assert_eq!(fields[2].name.as_str(), "baz");
 }
 
 #[test]
@@ -373,9 +373,9 @@ fn test_deduplicate_field_names_all_non_deprecated_renamed() {
   StructConverter::deduplicate_field_names(&mut fields);
 
   assert_eq!(fields.len(), 3);
-  assert_eq!(fields[0].name, "foo");
-  assert_eq!(fields[1].name, "foo_2");
-  assert_eq!(fields[2].name, "foo_3");
+  assert_eq!(fields[0].name.as_str(), "foo");
+  assert_eq!(fields[1].name.as_str(), "foo_2");
+  assert_eq!(fields[2].name.as_str(), "foo_3");
 }
 
 #[test]
@@ -389,9 +389,9 @@ fn test_deduplicate_field_names_deprecated_removed_when_mixed() {
   StructConverter::deduplicate_field_names(&mut fields);
 
   assert_eq!(fields.len(), 2);
-  assert_eq!(fields[0].name, "foo");
+  assert_eq!(fields[0].name.as_str(), "foo");
   assert!(!fields[0].deprecated);
-  assert_eq!(fields[1].name, "bar");
+  assert_eq!(fields[1].name.as_str(), "bar");
 }
 
 #[test]
@@ -401,8 +401,8 @@ fn test_deduplicate_field_names_all_deprecated_renamed() {
   StructConverter::deduplicate_field_names(&mut fields);
 
   assert_eq!(fields.len(), 2);
-  assert_eq!(fields[0].name, "foo");
-  assert_eq!(fields[1].name, "foo_2");
+  assert_eq!(fields[0].name.as_str(), "foo");
+  assert_eq!(fields[1].name.as_str(), "foo_2");
 }
 
 #[test]
@@ -426,7 +426,7 @@ fn test_deduplicate_field_names_multiple_groups() {
 
 fn make_metadata_with_docs() -> FieldMetadata {
   FieldMetadata {
-    docs: vec!["/// Some docs".to_string()],
+    docs: vec!["Some docs".to_string()],
     validation_attrs: vec![ValidationAttribute::Email],
     default_value: None,
     deprecated: false,

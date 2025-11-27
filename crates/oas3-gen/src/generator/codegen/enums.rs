@@ -9,12 +9,12 @@ use super::{
   coercion,
 };
 use crate::generator::ast::{
-  DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute, VariantContent,
-  VariantDef,
+  DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, EnumVariantToken, ResponseEnumDef, SerdeAttribute,
+  VariantContent, VariantDef,
 };
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
 
@@ -56,7 +56,7 @@ fn generate_enum_methods(def: &EnumDef, visibility: Visibility) -> TokenStream {
     return quote! {};
   }
 
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let vis = visibility.to_tokens();
 
   let methods = def.methods.iter().map(|m| {
@@ -108,7 +108,7 @@ fn generate_enum_methods(def: &EnumDef, visibility: Visibility) -> TokenStream {
 }
 
 pub(crate) fn generate_discriminated_enum(def: &DiscriminatedEnumDef, visibility: Visibility) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let disc_field = &def.discriminator_field;
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
@@ -124,32 +124,21 @@ pub(crate) fn generate_discriminated_enum(def: &DiscriminatedEnumDef, visibility
     })
     .collect();
 
-  if let Some(ref fallback) = def.fallback {
-    let fallback_variant = format_ident!("{}", fallback.variant_name);
-    let fallback_type = coercion::parse_type_string(&fallback.type_name);
+  let fallback_clause = def.fallback.as_ref().map(|fb| {
+    let fallback_variant = format_ident!("{}", fb.variant_name);
+    let fallback_type = coercion::parse_type_string(&fb.type_name);
+    quote! { fallback: #fallback_variant(#fallback_type), }
+  });
 
-    quote! {
-      #docs
-      oas3_gen_support::discriminated_enum! {
-        #vis enum #name {
-          discriminator: #disc_field,
-          variants: [
-            #(#variants),*
-          ],
-          fallback: #fallback_variant(#fallback_type),
-        }
-      }
-    }
-  } else {
-    quote! {
-      #docs
-      oas3_gen_support::discriminated_enum! {
-        #vis enum #name {
-          discriminator: #disc_field,
-          variants: [
-            #(#variants),*
-          ],
-        }
+  quote! {
+    #docs
+    oas3_gen_support::discriminated_enum! {
+      #vis enum #name {
+        discriminator: #disc_field,
+        variants: [
+          #(#variants),*
+        ],
+        #fallback_clause
       }
     }
   }
@@ -215,7 +204,7 @@ fn generate_enum_serde_attrs(def: &EnumDef) -> TokenStream {
 }
 
 pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibility) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
 
@@ -223,12 +212,12 @@ pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibili
     .variants
     .iter()
     .map(|v| {
-      let variant_name = format_ident!("{}", v.variant_name);
+      let variant_name = &v.variant_name;
       let variant_docs = if let Some(ref desc) = v.description {
-        let doc_line = format!("{}: {}", v.status_code, desc);
+        let doc_line = format!("{}: {desc}", v.status_code);
         quote! { #[doc = #doc_line] }
       } else {
-        let doc_line = v.status_code.clone();
+        let doc_line = v.status_code.to_string();
         quote! { #[doc = #doc_line] }
       };
 
@@ -257,50 +246,42 @@ pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibili
 }
 
 fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
 
-  let match_arms: Vec<TokenStream> = def
+  let (match_arms, error_variants_list): (Vec<TokenStream>, Vec<String>) = def
     .variants
     .iter()
     .map(|v| {
       let variant_name = format_ident!("{}", v.name);
-      let mut rename = v.name.clone();
-      for attr in &v.serde_attrs {
-        if let SerdeAttribute::Rename(val) = attr {
-          rename.clone_from(val);
-        }
-      }
-      let lower_val = rename.to_ascii_lowercase();
-      quote! {
-        #lower_val => Ok(#name::#variant_name),
-      }
-    })
-    .collect();
+      let serde_name = v
+        .serde_attrs
+        .iter()
+        .find_map(|attr| match attr {
+          SerdeAttribute::Rename(val) => Some(val.clone()),
+          _ => None,
+        })
+        .unwrap_or_else(|| v.name.to_string());
 
-  let error_variants_list: Vec<String> = def
-    .variants
-    .iter()
-    .map(|v| {
-      let mut rename = v.name.clone();
-      for attr in &v.serde_attrs {
-        if let SerdeAttribute::Rename(val) = attr {
-          rename.clone_from(val);
-        }
-      }
-      rename
+      let lower_val = serde_name.to_ascii_lowercase();
+      let match_arm = quote! {
+        #lower_val => Ok(#name::#variant_name),
+      };
+      (match_arm, serde_name)
     })
-    .collect();
+    .unzip();
 
   let error_variants_list_tokens = quote! { &[ #(#error_variants_list),* ] };
 
   // Check for fallback variant (Unknown/Other)
-  let fallback_arm =
-    if let Some(unknown_variant) = def.variants.iter().find(|v| v.name == "Unknown" || v.name == "Other") {
+  let fallback_arm = {
+    let fallback_candidates = [EnumVariantToken::new("Unknown"), EnumVariantToken::new("Other")];
+    if let Some(unknown_variant) = def.variants.iter().find(|v| fallback_candidates.contains(&v.name)) {
       let variant_name = format_ident!("{}", unknown_variant.name);
       quote! { _ => Ok(#name::#variant_name), }
     } else {
       quote! { _ => Err(serde::de::Error::unknown_variant(&s, #error_variants_list_tokens)), }
-    };
+    }
+  };
 
   quote! {
     impl<'de> serde::Deserialize<'de> for #name {

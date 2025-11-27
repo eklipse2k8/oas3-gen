@@ -57,175 +57,157 @@ fn create_test_spec(operations: Vec<(&str, &str, Option<&str>)>) -> Spec {
 
 #[test]
 fn test_compute_stable_id() {
-  // Test with operation_id
-  let operation = Operation {
-    operation_id: Some("getUserById".to_string()),
-    ..Default::default()
-  };
-  assert_eq!(compute_stable_id("GET", "/users/{id}", &operation), "get_user_by_id");
+  let cases = [
+    ("GET", "/users/{id}", Some("getUserById"), "get_user_by_id"),
+    ("GET", "/users/{id}", None, "get_users_by_id"),
+    ("GET", "/user-profile", Some("user-profile.get"), "user_profile_get"),
+    ("GET", "/v2/users", Some("v2GetUsers"), "v2get_users"),
+    ("GET", "/type", Some("type"), "r#type"),
+  ];
 
-  // Test without operation_id
-  let operation = Operation {
-    operation_id: None,
-    ..Default::default()
-  };
-  assert_eq!(compute_stable_id("GET", "/users/{id}", &operation), "get_users_by_id");
-
-  // Test with special characters
-  let operation = Operation {
-    operation_id: Some("user-profile.get".to_string()),
-    ..Default::default()
-  };
-  assert_eq!(
-    compute_stable_id("GET", "/user-profile", &operation),
-    "user_profile_get"
-  );
-
-  // Test with numbers
-  let operation = Operation {
-    operation_id: Some("v2GetUsers".to_string()),
-    ..Default::default()
-  };
-  assert_eq!(compute_stable_id("GET", "/v2/users", &operation), "v2get_users");
-
-  // Test with Rust keywords
-  let operation = Operation {
-    operation_id: Some("type".to_string()),
-    ..Default::default()
-  };
-  assert_eq!(compute_stable_id("GET", "/type", &operation), "r#type");
+  for (method, path, op_id, expected) in cases {
+    let operation = Operation {
+      operation_id: op_id.map(String::from),
+      ..Default::default()
+    };
+    assert_eq!(
+      compute_stable_id(method, path, &operation),
+      expected,
+      "failed for {method} {path} with operation_id={op_id:?}"
+    );
+  }
 }
 
 #[test]
 fn test_generate_operation_id() {
-  // Simple paths
-  assert_eq!(generate_operation_id("GET", "/users"), "get_users");
-  assert_eq!(generate_operation_id("POST", "/users"), "post_users");
-  assert_eq!(generate_operation_id("DELETE", "/users"), "delete_users");
+  let cases = [
+    ("GET", "/users", "get_users"),
+    ("POST", "/users", "post_users"),
+    ("DELETE", "/users", "delete_users"),
+    ("GET", "/users/{id}", "get_users_by_id"),
+    ("PUT", "/users/{userId}", "put_users_by_id"),
+    ("GET", "/users/{id}/posts", "get_users_by_id_posts"),
+    (
+      "POST",
+      "/organizations/{orgId}/members/{memberId}",
+      "post_organizations_by_id_members_by_id",
+    ),
+    ("GET", "/", "get"),
+    ("POST", "/", "post"),
+    ("GET", "/users/", "get_users"),
+    (
+      "GET",
+      "/users/{userId}/posts/{postId}/comments/{commentId}",
+      "get_users_by_id_posts_by_id_comments_by_id",
+    ),
+  ];
 
-  // Path parameters
-  assert_eq!(generate_operation_id("GET", "/users/{id}"), "get_users_by_id");
-  assert_eq!(generate_operation_id("PUT", "/users/{userId}"), "put_users_by_id");
-
-  // Nested paths
-  assert_eq!(
-    generate_operation_id("GET", "/users/{id}/posts"),
-    "get_users_by_id_posts"
-  );
-  assert_eq!(
-    generate_operation_id("POST", "/organizations/{orgId}/members/{memberId}"),
-    "post_organizations_by_id_members_by_id"
-  );
-
-  // Root path
-  assert_eq!(generate_operation_id("GET", "/"), "get");
-  assert_eq!(generate_operation_id("POST", "/"), "post");
-
-  // Trailing slash
-  assert_eq!(generate_operation_id("GET", "/users/"), "get_users");
-
-  // Multiple parameters
-  assert_eq!(
-    generate_operation_id("GET", "/users/{userId}/posts/{postId}/comments/{commentId}"),
-    "get_users_by_id_posts_by_id_comments_by_id"
-  );
+  for (method, path, expected) in cases {
+    assert_eq!(
+      generate_operation_id(method, path),
+      expected,
+      "failed for {method} {path}"
+    );
+  }
 }
 
 #[test]
-fn test_registry_operations() {
-  let spec = create_test_spec(vec![
-    ("/users", "get", Some("listUsers")),
-    ("/users/{id}", "get", None),
-    ("/posts", "post", Some("createPost")),
-  ]);
+fn test_operation_registry() {
+  // Basic operations
+  {
+    let spec = create_test_spec(vec![
+      ("/users", "get", Some("listUsers")),
+      ("/users/{id}", "get", None),
+      ("/posts", "post", Some("createPost")),
+    ]);
 
-  let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 3, "expected 3 operations");
 
-  assert_eq!(registry.len(), 3);
+    let mut entries: Vec<_> = registry.operations().collect();
+    entries.sort_by_key(|(id, _)| *id);
 
-  let mut entries: Vec<_> = registry.operations().collect();
-  entries.sort_by_key(|(id, _)| *id);
+    let (id, location) = entries[1];
+    assert_eq!(id, "get_users_by_id");
+    assert_eq!(location.method, "GET");
+    assert_eq!(location.path, "/users/{id}");
 
-  let (id, location) = entries[1];
-  assert_eq!(id, "get_users_by_id");
-  assert_eq!(location.method, "GET");
-  assert_eq!(location.path, "/users/{id}");
+    let (id, location) = entries[2];
+    assert_eq!(id, "list_users");
+    assert_eq!(location.method, "GET");
+    assert_eq!(location.path, "/users");
 
-  let (id, location) = entries[2];
-  assert_eq!(id, "list_users");
-  assert_eq!(location.method, "GET");
-  assert_eq!(location.path, "/users");
+    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["create_post", "get_users_by_id", "list_users"]);
+  }
 
-  let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
-  ids.sort_unstable();
-  assert_eq!(ids, vec!["create_post", "get_users_by_id", "list_users"]);
-}
-
-#[test]
-fn test_registry_uniqueness_and_case_sensitivity() {
   // Uniqueness
-  let spec = create_test_spec(vec![
-    ("/users", "get", None),
-    ("/users", "post", None),
-    ("/users/{id}", "get", None),
-    ("/users/{id}", "put", None),
-    ("/users/{id}", "delete", None),
-  ]);
+  {
+    let spec = create_test_spec(vec![
+      ("/users", "get", None),
+      ("/users", "post", None),
+      ("/users/{id}", "get", None),
+      ("/users/{id}", "put", None),
+      ("/users/{id}", "delete", None),
+    ]);
 
-  let registry = OperationRegistry::from_spec(&spec);
-  assert_eq!(registry.len(), 5);
-  let ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
-  let unique_count = ids.iter().collect::<HashSet<_>>().len();
-  assert_eq!(unique_count, 5, "All stable IDs should be unique");
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 5, "expected 5 operations for uniqueness test");
+    let ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let unique_count = ids.iter().collect::<HashSet<_>>().len();
+    assert_eq!(unique_count, 5, "all stable IDs should be unique");
+  }
 
-  // Case sensitivity
-  let spec = create_test_spec(vec![
-    ("/users", "get", Some("GetUsers")),
-    ("/users", "post", Some("getUsers")),
-  ]);
+  // Case sensitivity (both map to same stable_id)
+  {
+    let spec = create_test_spec(vec![
+      ("/users", "get", Some("GetUsers")),
+      ("/users", "post", Some("getUsers")),
+    ]);
 
-  let registry = OperationRegistry::from_spec(&spec);
-  assert_eq!(registry.len(), 1, "Both operations should map to same stable_id");
-  let operations: Vec<_> = registry.operations().collect();
-  assert_eq!(operations.len(), 1);
-  assert_eq!(operations[0].0, "get_users");
-}
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 1, "both operations should map to same stable_id");
+    let operations: Vec<_> = registry.operations().collect();
+    assert_eq!(operations[0].0, "get_users");
+  }
 
-#[test]
-fn test_empty_registry() {
-  let spec_json = r#"{
-    "openapi": "3.1.0",
-    "info": {
-      "title": "Empty API",
-      "version": "1.0.0"
-    },
-    "paths": {}
-  }"#;
-  let spec: Spec = oas3::from_json(spec_json).unwrap();
-  let registry = OperationRegistry::from_spec(&spec);
+  // Empty registry
+  {
+    let spec_json = r#"{
+      "openapi": "3.1.0",
+      "info": {
+        "title": "Empty API",
+        "version": "1.0.0"
+      },
+      "paths": {}
+    }"#;
+    let spec: Spec = oas3::from_json(spec_json).unwrap();
+    let registry = OperationRegistry::from_spec(&spec);
 
-  assert_eq!(registry.len(), 0);
-  assert!(registry.is_empty());
-  assert_eq!(registry.operations().count(), 0);
-}
+    assert_eq!(registry.len(), 0);
+    assert!(registry.is_empty());
+    assert_eq!(registry.operations().count(), 0);
+  }
 
-#[test]
-fn test_registry_filtered() {
-  let spec = create_test_spec(vec![
-    ("/users", "get", Some("listUsers")),
-    ("/users/{id}", "get", None),
-    ("/posts", "post", Some("createPost")),
-  ]);
+  // Filtered registry
+  {
+    let spec = create_test_spec(vec![
+      ("/users", "get", Some("listUsers")),
+      ("/users/{id}", "get", None),
+      ("/posts", "post", Some("createPost")),
+    ]);
 
-  let mut excluded = HashSet::new();
-  excluded.insert("list_users".to_string());
+    let mut excluded = HashSet::new();
+    excluded.insert("list_users".to_string());
 
-  let registry = OperationRegistry::from_spec_filtered(&spec, None, Some(&excluded));
+    let registry = OperationRegistry::from_spec_filtered(&spec, None, Some(&excluded));
 
-  assert_eq!(registry.len(), 2);
+    assert_eq!(registry.len(), 2, "filtered registry should have 2 operations");
 
-  let ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
-  assert!(!ids.contains(&"list_users"));
-  assert!(ids.contains(&"get_users_by_id"));
-  assert!(ids.contains(&"create_post"));
+    let ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    assert!(!ids.contains(&"list_users"), "list_users should be excluded");
+    assert!(ids.contains(&"get_users_by_id"), "get_users_by_id should be included");
+    assert!(ids.contains(&"create_post"), "create_post should be included");
+  }
 }

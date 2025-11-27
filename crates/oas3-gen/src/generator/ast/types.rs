@@ -4,6 +4,8 @@ use num_format::{CustomFormat, Grouping, ToFormattedString};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
+use crate::generator::ast::{DefaultAtom, StructToken};
+
 static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
   CustomFormat::builder()
     .grouping(Grouping::Standard)
@@ -60,6 +62,27 @@ impl TypeRef {
 
   pub fn is_string_like(&self) -> bool {
     matches!(self.base_type, RustPrimitive::String) && !self.is_array
+  }
+
+  pub fn is_primitive_type(&self) -> bool {
+    matches!(
+      self.base_type,
+      RustPrimitive::I8
+        | RustPrimitive::I16
+        | RustPrimitive::I32
+        | RustPrimitive::I64
+        | RustPrimitive::I128
+        | RustPrimitive::Isize
+        | RustPrimitive::U8
+        | RustPrimitive::U16
+        | RustPrimitive::U32
+        | RustPrimitive::U64
+        | RustPrimitive::U128
+        | RustPrimitive::Usize
+        | RustPrimitive::F32
+        | RustPrimitive::F64
+        | RustPrimitive::Bool
+    ) && !self.is_array
   }
 
   /// Get the full Rust type string
@@ -184,31 +207,12 @@ pub enum RustPrimitive {
   Value,
   #[serde(rename = "()")]
   Unit,
-  Custom(String),
+  Custom(DefaultAtom),
 }
 
 impl RustPrimitive {
   pub fn is_float(&self) -> bool {
     matches!(self, RustPrimitive::F32 | RustPrimitive::F64)
-  }
-
-  #[allow(unused)]
-  pub fn is_integer(&self) -> bool {
-    matches!(
-      self,
-      RustPrimitive::I8
-        | RustPrimitive::I16
-        | RustPrimitive::I32
-        | RustPrimitive::I64
-        | RustPrimitive::I128
-        | RustPrimitive::Isize
-        | RustPrimitive::U8
-        | RustPrimitive::U16
-        | RustPrimitive::U32
-        | RustPrimitive::U64
-        | RustPrimitive::U128
-        | RustPrimitive::Usize
-    )
   }
 
   pub fn from_format(format: &str) -> Option<Self> {
@@ -285,7 +289,7 @@ impl RustPrimitive {
 
 impl std::fmt::Display for RustPrimitive {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let s = match self {
+    let s: &str = match self {
       RustPrimitive::Custom(name) => name,
       _ => &serde_plain::to_string(self).unwrap(),
     };
@@ -322,7 +326,7 @@ impl std::str::FromStr for RustPrimitive {
       "uuid::Uuid" => RustPrimitive::Uuid,
       "serde_json::Value" => RustPrimitive::Value,
       "()" => RustPrimitive::Unit,
-      custom => RustPrimitive::Custom(custom.to_string()),
+      custom => RustPrimitive::Custom(custom.into()),
     })
   }
 }
@@ -336,6 +340,18 @@ impl From<&str> for RustPrimitive {
 impl From<String> for RustPrimitive {
   fn from(s: String) -> Self {
     RustPrimitive::from(s.as_str())
+  }
+}
+
+impl From<StructToken> for RustPrimitive {
+  fn from(token: StructToken) -> Self {
+    RustPrimitive::Custom(token.to_atom())
+  }
+}
+
+impl From<&StructToken> for RustPrimitive {
+  fn from(token: &StructToken) -> Self {
+    RustPrimitive::Custom(token.to_atom())
   }
 }
 
@@ -382,7 +398,7 @@ fn format_time_constructor(time_str: &str) -> String {
   }
 }
 
-fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
+pub(crate) fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
   let parts: Vec<&str> = date_str.split('-').collect();
   if parts.len() == 3 {
     let year = parts[0].parse().ok()?;
@@ -394,7 +410,7 @@ fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
   }
 }
 
-fn parse_time_parts(time_str: &str) -> Option<(u32, u32, u32)> {
+pub(crate) fn parse_time_parts(time_str: &str) -> Option<(u32, u32, u32)> {
   let parts: Vec<&str> = time_str.split(':').collect();
   if parts.len() >= 2 {
     let hour: u32 = parts[0].parse().ok()?;
@@ -441,426 +457,5 @@ pub(crate) fn render_unsigned_integer(primitive: &RustPrimitive, value: u64) -> 
     RustPrimitive::U32 => format!("{}u32", format_number_with_underscores(&value)),
     RustPrimitive::U64 => format!("{}u64", format_number_with_underscores(&value)),
     _ => value.to_string(),
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_rust_primitive_from_str_integers() {
-    assert_eq!("i8".parse::<RustPrimitive>().unwrap(), RustPrimitive::I8);
-    assert_eq!("i16".parse::<RustPrimitive>().unwrap(), RustPrimitive::I16);
-    assert_eq!("i32".parse::<RustPrimitive>().unwrap(), RustPrimitive::I32);
-    assert_eq!("i64".parse::<RustPrimitive>().unwrap(), RustPrimitive::I64);
-    assert_eq!("i128".parse::<RustPrimitive>().unwrap(), RustPrimitive::I128);
-    assert_eq!("isize".parse::<RustPrimitive>().unwrap(), RustPrimitive::Isize);
-  }
-
-  #[test]
-  fn test_rust_primitive_from_str_unsigned() {
-    assert_eq!("u8".parse::<RustPrimitive>().unwrap(), RustPrimitive::U8);
-    assert_eq!("u16".parse::<RustPrimitive>().unwrap(), RustPrimitive::U16);
-    assert_eq!("u32".parse::<RustPrimitive>().unwrap(), RustPrimitive::U32);
-    assert_eq!("u64".parse::<RustPrimitive>().unwrap(), RustPrimitive::U64);
-    assert_eq!("u128".parse::<RustPrimitive>().unwrap(), RustPrimitive::U128);
-    assert_eq!("usize".parse::<RustPrimitive>().unwrap(), RustPrimitive::Usize);
-  }
-
-  #[test]
-  fn test_rust_primitive_from_str_floats() {
-    assert_eq!("f32".parse::<RustPrimitive>().unwrap(), RustPrimitive::F32);
-    assert_eq!("f64".parse::<RustPrimitive>().unwrap(), RustPrimitive::F64);
-  }
-
-  #[test]
-  fn test_rust_primitive_from_str_others() {
-    assert_eq!("bool".parse::<RustPrimitive>().unwrap(), RustPrimitive::Bool);
-    assert_eq!("String".parse::<RustPrimitive>().unwrap(), RustPrimitive::String);
-    assert_eq!("()".parse::<RustPrimitive>().unwrap(), RustPrimitive::Unit);
-  }
-
-  #[test]
-  fn test_rust_primitive_from_str_special_types() {
-    assert_eq!("Vec<u8>".parse::<RustPrimitive>().unwrap(), RustPrimitive::Bytes);
-    assert_eq!(
-      "chrono::NaiveDate".parse::<RustPrimitive>().unwrap(),
-      RustPrimitive::Date
-    );
-    assert_eq!(
-      "chrono::DateTime<chrono::Utc>".parse::<RustPrimitive>().unwrap(),
-      RustPrimitive::DateTime
-    );
-    assert_eq!(
-      "chrono::NaiveTime".parse::<RustPrimitive>().unwrap(),
-      RustPrimitive::Time
-    );
-    assert_eq!("uuid::Uuid".parse::<RustPrimitive>().unwrap(), RustPrimitive::Uuid);
-    assert_eq!(
-      "serde_json::Value".parse::<RustPrimitive>().unwrap(),
-      RustPrimitive::Value
-    );
-  }
-
-  #[test]
-  fn test_rust_primitive_from_str_custom() {
-    assert_eq!(
-      "MyCustomType".parse::<RustPrimitive>().unwrap(),
-      RustPrimitive::Custom("MyCustomType".to_string())
-    );
-    assert_eq!(
-      "Vec<MyType>".parse::<RustPrimitive>().unwrap(),
-      RustPrimitive::Custom("Vec<MyType>".to_string())
-    );
-  }
-
-  #[test]
-  fn test_rust_primitive_display_round_trip() {
-    let primitives = vec![
-      RustPrimitive::I8,
-      RustPrimitive::I32,
-      RustPrimitive::I64,
-      RustPrimitive::U32,
-      RustPrimitive::U64,
-      RustPrimitive::F32,
-      RustPrimitive::F64,
-      RustPrimitive::Bool,
-      RustPrimitive::String,
-      RustPrimitive::Bytes,
-      RustPrimitive::Date,
-      RustPrimitive::DateTime,
-      RustPrimitive::Uuid,
-      RustPrimitive::Value,
-      RustPrimitive::Unit,
-      RustPrimitive::Custom("MyType".to_string()),
-    ];
-
-    for primitive in primitives {
-      let string = primitive.to_string();
-      let parsed: RustPrimitive = string.parse().unwrap();
-      assert_eq!(parsed, primitive, "Round-trip failed for {primitive:?}");
-    }
-  }
-
-  #[test]
-  fn test_type_ref_new_from_str() {
-    let type_ref = TypeRef::new("i32");
-    assert_eq!(type_ref.base_type, RustPrimitive::I32);
-    assert!(!type_ref.nullable);
-  }
-
-  #[test]
-  fn test_type_ref_new_from_primitive() {
-    let type_ref = TypeRef::new(RustPrimitive::F64);
-    assert_eq!(type_ref.base_type, RustPrimitive::F64);
-  }
-
-  #[test]
-  fn test_type_ref_with_wrappers() {
-    let type_ref = TypeRef::new("String").with_vec().with_option();
-    assert_eq!(type_ref.base_type, RustPrimitive::String);
-    assert!(type_ref.is_array);
-    assert!(type_ref.nullable);
-    assert_eq!(type_ref.to_rust_type(), "Option<Vec<String>>");
-  }
-
-  #[test]
-  fn test_type_ref_with_box() {
-    let type_ref = TypeRef::new("MyType").with_boxed().with_option();
-    assert_eq!(type_ref.to_rust_type(), "Option<Box<MyType>>");
-  }
-
-  #[test]
-  fn test_type_ref_default() {
-    let type_ref = TypeRef::default();
-    assert_eq!(type_ref.base_type, RustPrimitive::String);
-    assert!(!type_ref.nullable);
-    assert!(!type_ref.is_array);
-    assert!(!type_ref.boxed);
-  }
-
-  #[test]
-  fn test_rust_primitive_default() {
-    let primitive = RustPrimitive::default();
-    assert_eq!(primitive, RustPrimitive::String);
-  }
-
-  #[test]
-  fn test_format_example_null_with_option() {
-    let type_ref = TypeRef::new(RustPrimitive::String).with_option();
-    let example = serde_json::Value::Null;
-    assert_eq!(type_ref.format_example(&example), "None");
-  }
-
-  #[test]
-  fn test_format_example_null_without_option() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::Value::Null;
-    assert_eq!(type_ref.format_example(&example), "");
-  }
-
-  #[test]
-  fn test_format_example_string() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::Value::String("hello".to_string());
-    assert_eq!(type_ref.format_example(&example), "\"hello\"");
-  }
-
-  #[test]
-  fn test_format_example_number_i32() {
-    let type_ref = TypeRef::new(RustPrimitive::I32);
-    let example = serde_json::json!(42);
-    assert_eq!(type_ref.format_example(&example), "42i32");
-  }
-
-  #[allow(clippy::approx_constant)]
-  #[test]
-  fn test_format_example_number_f64() {
-    let type_ref = TypeRef::new(RustPrimitive::F64);
-    let example = serde_json::json!(3.14);
-    assert_eq!(type_ref.format_example(&example), "3.14");
-  }
-
-  #[test]
-  fn test_format_example_bool() {
-    let type_ref = TypeRef::new(RustPrimitive::Bool);
-    let example = serde_json::json!(true);
-    assert_eq!(type_ref.format_example(&example), "true");
-  }
-
-  #[test]
-  fn test_format_example_array_strings() {
-    let type_ref = TypeRef::new(RustPrimitive::String).with_vec();
-    let example = serde_json::json!(["foo", "bar", "baz"]);
-    assert_eq!(type_ref.format_example(&example), "vec![\"foo\", \"bar\", \"baz\"]");
-  }
-
-  #[test]
-  fn test_format_example_array_numbers() {
-    let type_ref = TypeRef::new(RustPrimitive::I32).with_vec();
-    let example = serde_json::json!([1, 2, 3]);
-    assert_eq!(type_ref.format_example(&example), "vec![1i32, 2i32, 3i32]");
-  }
-
-  #[test]
-  fn test_format_example_empty_array() {
-    let type_ref = TypeRef::new(RustPrimitive::String).with_vec();
-    let example = serde_json::json!([]);
-    assert_eq!(type_ref.format_example(&example), "vec![]");
-  }
-
-  #[test]
-  fn test_format_example_date() {
-    let type_ref = TypeRef::new(RustPrimitive::Date);
-    let example = serde_json::Value::String("2024-01-15".to_string());
-    assert_eq!(
-      type_ref.format_example(&example),
-      "chrono::NaiveDate::from_ymd_opt(2024, 1, 15)?"
-    );
-  }
-
-  #[test]
-  fn test_format_example_boxed_string() {
-    let type_ref = TypeRef::new(RustPrimitive::String).with_boxed();
-    let example = serde_json::Value::String("boxed".to_string());
-    assert_eq!(type_ref.format_example(&example), "Box::new(\"boxed\")");
-  }
-
-  #[test]
-  fn test_format_example_datetime() {
-    let type_ref = TypeRef::new(RustPrimitive::DateTime);
-    let example = serde_json::Value::String("2024-01-15T10:30:00Z".to_string());
-    assert_eq!(
-      type_ref.format_example(&example),
-      "chrono::DateTime::parse_from_rfc3339(\"2024-01-15T10:30:00Z\")?.with_timezone(&chrono::Utc)"
-    );
-  }
-
-  #[test]
-  fn test_format_example_time() {
-    let type_ref = TypeRef::new(RustPrimitive::Time);
-    let example = serde_json::Value::String("14:30:00".to_string());
-    assert_eq!(
-      type_ref.format_example(&example),
-      "chrono::NaiveTime::from_hms_opt(14, 30, 0)?"
-    );
-  }
-
-  #[test]
-  fn test_format_example_uuid() {
-    let type_ref = TypeRef::new(RustPrimitive::Uuid);
-    let example = serde_json::Value::String("550e8400-e29b-41d4-a716-446655440000".to_string());
-    assert_eq!(
-      type_ref.format_example(&example),
-      "uuid::Uuid::parse_str(\"550e8400-e29b-41d4-a716-446655440000\")?"
-    );
-  }
-
-  #[test]
-  fn test_format_example_array_of_dates() {
-    let type_ref = TypeRef::new(RustPrimitive::Date).with_vec();
-    let example = serde_json::json!(["2024-01-15", "2024-02-20"]);
-    assert_eq!(
-      type_ref.format_example(&example),
-      "vec![chrono::NaiveDate::from_ymd_opt(2024, 1, 15)?, \
-       chrono::NaiveDate::from_ymd_opt(2024, 2, 20)?]"
-    );
-  }
-
-  #[test]
-  fn test_format_example_nested_array() {
-    let type_ref = TypeRef::new(RustPrimitive::I32).with_vec();
-    let example = serde_json::json!([[1, 2], [3, 4]]);
-    let result = type_ref.format_example(&example);
-    assert_eq!(result, "vec![vec![1i32, 2i32], vec![3i32, 4i32]]");
-  }
-
-  #[test]
-  fn test_parse_date_parts_valid() {
-    assert_eq!(parse_date_parts("2024-01-15"), Some((2024, 1, 15)));
-  }
-
-  #[test]
-  fn test_parse_date_parts_invalid() {
-    assert_eq!(parse_date_parts("not-a-date"), None);
-    assert_eq!(parse_date_parts("2024-01"), None);
-  }
-
-  #[test]
-  fn test_parse_time_parts_valid() {
-    assert_eq!(parse_time_parts("14:30:45"), Some((14, 30, 45)));
-    assert_eq!(parse_time_parts("14:30"), Some((14, 30, 0)));
-  }
-
-  #[test]
-  fn test_parse_time_parts_with_fractional_seconds() {
-    assert_eq!(parse_time_parts("14:30:45.123"), Some((14, 30, 45)));
-  }
-
-  #[test]
-  fn test_parse_time_parts_invalid() {
-    assert_eq!(parse_time_parts("not-a-time"), None);
-    assert_eq!(parse_time_parts("25:00:00"), None);
-  }
-
-  #[test]
-  fn test_escape_string_literal_quotes() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::Value::String("page_to_fetch : \"001e0010\"".to_string());
-    assert_eq!(
-      type_ref.format_example(&example),
-      "\"page_to_fetch : \\\"001e0010\\\"\""
-    );
-  }
-
-  #[test]
-  fn test_escape_string_literal_backslash() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::Value::String("path\\to\\file".to_string());
-    assert_eq!(type_ref.format_example(&example), "\"path\\\\to\\\\file\"");
-  }
-
-  #[test]
-  fn test_escape_string_literal_newline() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::Value::String("line1\nline2".to_string());
-    assert_eq!(type_ref.format_example(&example), "\"line1\\nline2\"");
-  }
-
-  #[test]
-  fn test_escape_string_literal_tab() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::Value::String("col1\tcol2".to_string());
-    assert_eq!(type_ref.format_example(&example), "\"col1\\tcol2\"");
-  }
-
-  #[test]
-  fn test_escape_string_literal_multiple_escapes() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::Value::String("\"quoted\"\n\\backslash\\".to_string());
-    assert_eq!(
-      type_ref.format_example(&example),
-      "\"\\\"quoted\\\"\\n\\\\backslash\\\\\""
-    );
-  }
-
-  #[test]
-  fn test_escape_in_uuid() {
-    let type_ref = TypeRef::new(RustPrimitive::Uuid);
-    let example = serde_json::Value::String("\"550e8400-e29b-41d4-a716-446655440000\"".to_string());
-    assert_eq!(
-      type_ref.format_example(&example),
-      "uuid::Uuid::parse_str(\"\\\"550e8400-e29b-41d4-a716-446655440000\\\"\")?"
-    );
-  }
-
-  #[test]
-  fn test_bool_to_string_type_coercion() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::json!(true);
-    assert_eq!(type_ref.format_example(&example), "\"true\"");
-
-    let example_false = serde_json::json!(false);
-    assert_eq!(type_ref.format_example(&example_false), "\"false\"");
-  }
-
-  #[test]
-  fn test_bool_native_type() {
-    let type_ref = TypeRef::new(RustPrimitive::Bool);
-    let example = serde_json::json!(true);
-    assert_eq!(type_ref.format_example(&example), "true");
-  }
-
-  #[test]
-  fn test_number_to_string_type_coercion() {
-    let type_ref = TypeRef::new(RustPrimitive::String);
-    let example = serde_json::json!(2.2);
-    assert_eq!(type_ref.format_example(&example), "\"2.2\"");
-
-    let example_int = serde_json::json!(42);
-    assert_eq!(type_ref.format_example(&example_int), "\"42\"");
-  }
-
-  #[test]
-  fn test_number_native_type() {
-    let type_ref = TypeRef::new(RustPrimitive::I32);
-    let example = serde_json::json!(42);
-    assert_eq!(type_ref.format_example(&example), "42i32");
-  }
-
-  #[test]
-  fn test_option_string_with_bool_example() {
-    let type_ref = TypeRef::new(RustPrimitive::String).with_option();
-    let example = serde_json::json!(true);
-    assert_eq!(type_ref.format_example(&example), "\"true\"");
-  }
-
-  #[test]
-  fn test_option_string_with_number_example() {
-    let type_ref = TypeRef::new(RustPrimitive::String).with_option();
-    let example = serde_json::json!(2.2);
-    assert_eq!(type_ref.format_example(&example), "\"2.2\"");
-  }
-
-  #[test]
-  fn test_complete_header_example_flow() {
-    let type_ref = TypeRef::new(RustPrimitive::String).with_option();
-
-    let bool_example = serde_json::json!(true);
-    let formatted = type_ref.format_example(&bool_example);
-    assert_eq!(formatted, "\"true\"");
-    let with_to_string = format!("{formatted}.to_string()");
-    assert_eq!(with_to_string, "\"true\".to_string()");
-    let with_some = format!("Some({with_to_string})");
-    assert_eq!(with_some, "Some(\"true\".to_string())");
-
-    let number_example = serde_json::json!(2.2);
-    let formatted = type_ref.format_example(&number_example);
-    assert_eq!(formatted, "\"2.2\"");
-    let with_to_string = format!("{formatted}.to_string()");
-    assert_eq!(with_to_string, "\"2.2\".to_string()");
-    let with_some = format!("Some({with_to_string})");
-    assert_eq!(with_some, "Some(\"2.2\".to_string())");
   }
 }

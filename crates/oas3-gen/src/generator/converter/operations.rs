@@ -8,8 +8,9 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
-    DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation, ResponseEnumDef,
-    RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
+    ContentCategory, DeriveTrait, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo,
+    OperationParameter, ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef,
+    TypeAliasToken, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -27,7 +28,7 @@ struct RequestBodyInfo {
   body_type: Option<TypeRef>,
   generated_types: Vec<RustType>,
   type_usage: Vec<String>,
-  field_name: Option<String>,
+  field_name: Option<FieldNameToken>,
   optional: bool,
   content_type: Option<String>,
 }
@@ -102,12 +103,11 @@ impl<'a> OperationConverter<'a> {
         self.schema_converter,
         self.spec,
         &response_name,
-        None,
         operation,
         path,
         schema_cache,
       )
-      .map(|def| (response_name, def))
+      .map(|def| (EnumToken::new(&response_name), def))
     } else {
       None
     };
@@ -125,33 +125,35 @@ impl<'a> OperationConverter<'a> {
     let has_fields = !request_struct.fields.is_empty();
     let should_generate_request_struct = has_fields || response_enum_info.is_some();
 
-    let mut request_type_name = None;
+    let mut request_type_name: Option<StructToken> = None;
     if should_generate_request_struct {
       let rust_request_name = request_struct.name.clone();
-      usage.mark_request(&rust_request_name);
+      usage.mark_request(rust_request_name.clone());
       types.push(RustType::Struct(request_struct));
       request_type_name = Some(rust_request_name);
     }
 
     if let Some((_, def)) = response_enum_info.as_mut() {
-      def.request_type = request_type_name.clone().unwrap_or_default();
+      def.request_type.clone_from(&request_type_name);
     }
 
-    let response_enum_name = if let Some((name, def)) = response_enum_info {
-      usage.mark_response(&def.name);
+    let response_enum = if let Some((enum_token, def)) = response_enum_info {
+      usage.mark_response(def.name.clone());
       for variant in &def.variants {
         if let Some(schema_type) = &variant.schema_type {
           usage.mark_response_type_ref(schema_type);
         }
       }
       types.push(RustType::ResponseEnum(def));
-      Some(name)
+      Some(enum_token)
     } else {
       None
     };
 
     let response_type_name = naming_responses::extract_response_type_name(self.spec, operation);
-    let response_content_type = naming_responses::extract_response_content_type(self.spec, operation);
+    let response_content_category = naming_responses::extract_response_content_type(self.spec, operation)
+      .as_deref()
+      .map_or(ContentCategory::Json, ContentCategory::from_content_type);
     let response_types = naming_responses::extract_all_response_types(self.spec, operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
@@ -159,10 +161,16 @@ impl<'a> OperationConverter<'a> {
     usage.mark_response_iter(&response_types.success);
     usage.mark_response_iter(&response_types.error);
 
-    let body_metadata = body_info.field_name.as_ref().map(|field_name| OperationBody {
-      field_name: field_name.clone(),
-      optional: body_info.optional,
-      content_type: body_info.content_type.clone(),
+    let body_metadata = body_info.field_name.as_ref().map(|field_name| {
+      let content_category = body_info
+        .content_type
+        .as_deref()
+        .map_or(ContentCategory::Json, ContentCategory::from_content_type);
+      OperationBody {
+        field_name: field_name.clone(),
+        optional: body_info.optional,
+        content_category,
+      }
     });
 
     let final_operation_id = operation.operation_id.clone().unwrap_or(base_name);
@@ -176,8 +184,8 @@ impl<'a> OperationConverter<'a> {
       description: operation.description.clone(),
       request_type: request_type_name,
       response_type: response_type_name,
-      response_enum: response_enum_name,
-      response_content_type,
+      response_enum,
+      response_content_category,
       success_response_types: response_types.success,
       error_response_types: response_types.error,
       warnings,
@@ -194,7 +202,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     operation: &Operation,
     body_type: Option<TypeRef>,
-    response_enum_info: Option<&(String, ResponseEnumDef)>,
+    response_enum_info: Option<&(EnumToken, ResponseEnumDef)>,
   ) -> anyhow::Result<(StructDef, Vec<String>, Vec<OperationParameter>)> {
     let mut warnings = vec![];
     let mut fields = vec![];
@@ -226,15 +234,15 @@ impl<'a> OperationConverter<'a> {
       &param_mappings.query,
     )];
 
-    if let Some((response_enum_name, response_enum_def)) = response_enum_info {
+    if let Some((response_enum, response_enum_def)) = response_enum_info {
       methods.push(responses::build_parse_response_method(
-        response_enum_name,
+        response_enum,
         &response_enum_def.variants,
       ));
     }
 
     let struct_def = StructDef {
-      name: to_rust_type_name(name),
+      name: StructToken::from_raw(name),
       docs,
       fields,
       derives: [DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Default]
@@ -291,7 +299,7 @@ impl<'a> OperationConverter<'a> {
     )?;
 
     let content_type = body.content.keys().next().cloned();
-    let field_name = body_type.as_ref().map(|_| BODY_FIELD_NAME.to_string());
+    let field_name = body_type.as_ref().map(|_| FieldNameToken::new(BODY_FIELD_NAME));
 
     Ok(RequestBodyInfo {
       body_type,
@@ -349,7 +357,7 @@ impl<'a> OperationConverter<'a> {
         };
         let target_rust_name = to_rust_type_name(&target_name);
         let alias = TypeAliasDef {
-          name: rust_type_name.clone(),
+          name: TypeAliasToken::new(rust_type_name.clone()),
           docs: metadata::extract_docs(description),
           target: TypeRef::new(target_rust_name.clone()),
         };
@@ -374,7 +382,7 @@ impl<'a> OperationConverter<'a> {
       .map_or_else(Vec::new, |d| metadata::extract_docs(Some(d)));
 
     Some(FieldDef {
-      name: BODY_FIELD_NAME.to_string(),
+      name: FieldNameToken::new(BODY_FIELD_NAME),
       docs,
       rust_type: if is_required {
         body_type
@@ -423,7 +431,8 @@ impl<'a> OperationConverter<'a> {
       rust_type.clone().with_option()
     };
 
-    let rust_field = to_rust_field_name(&param.name);
+    let rust_field_str = to_rust_field_name(&param.name);
+    let rust_field = FieldNameToken::new(rust_field_str.clone());
 
     let location = match param.location {
       ParameterIn::Path => ParameterLocation::Path,
@@ -482,11 +491,11 @@ impl<'a> OperationConverter<'a> {
   fn map_parameter(param: &Parameter, field: &FieldDef, mappings: &mut ParameterMappings) {
     match param.location {
       ParameterIn::Path => mappings.path.push(path_renderer::PathParamMapping {
-        rust_field: field.name.clone(),
+        rust_field: field.name.to_string(),
         original_name: param.name.clone(),
       }),
       ParameterIn::Query => mappings.query.push(path_renderer::QueryParamMapping {
-        rust_field: field.name.clone(),
+        rust_field: field.name.to_string(),
         original_name: param.name.clone(),
         explode: path_renderer::query_param_explode(param),
         style: param.style,

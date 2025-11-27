@@ -3,26 +3,27 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::generator::{
   analyzer::{TypeUsage, build_type_usage_map, type_graph::TypeDependencyGraph},
   ast::{
-    DeriveTrait, EnumDef, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive, RustType, StructDef, StructKind,
-    TypeAliasDef, TypeRef, VariantContent, VariantDef,
+    ContentCategory, DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant,
+    RustPrimitive, RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken,
+    TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
-fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<String, (bool, bool)> {
+fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<EnumToken, (bool, bool)> {
   entries
     .iter()
-    .map(|(name, flags)| ((*name).to_string(), *flags))
+    .map(|(name, flags)| (EnumToken::new(*name), *flags))
     .collect()
 }
 
 #[test]
 fn test_dependency_graph_simple_struct() {
   let user_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "address".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("Address".to_string())),
+      name: FieldNameToken::new("address"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("Address".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
@@ -33,10 +34,10 @@ fn test_dependency_graph_simple_struct() {
   });
 
   let address_struct = RustType::Struct(StructDef {
-    name: "Address".to_string(),
+    name: StructToken::new("Address"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "street".to_string(),
+      name: FieldNameToken::new("street"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -52,18 +53,21 @@ fn test_dependency_graph_simple_struct() {
   let usage_map = build_type_usage_map(seeds(&[]), &types);
 
   assert_eq!(usage_map.len(), 2);
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::Bidirectional));
-  assert_eq!(usage_map.get("Address"), Some(&TypeUsage::Bidirectional));
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::Bidirectional));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("Address")),
+    Some(&TypeUsage::Bidirectional)
+  );
 }
 
 #[test]
 fn test_propagation_request_to_nested() {
   let request_struct = RustType::Struct(StructDef {
-    name: "CreateUserRequest".to_string(),
+    name: StructToken::new("CreateUserRequest"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
+      name: FieldNameToken::new("user"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
@@ -74,10 +78,10 @@ fn test_propagation_request_to_nested() {
   });
 
   let user_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -91,18 +95,21 @@ fn test_propagation_request_to_nested() {
   let types = vec![request_struct, user_struct];
   let usage_map = build_type_usage_map(seeds(&[("CreateUserRequest", (true, false))]), &types);
 
-  assert_eq!(usage_map.get("CreateUserRequest"), Some(&TypeUsage::RequestOnly));
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::RequestOnly));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("CreateUserRequest")),
+    Some(&TypeUsage::RequestOnly)
+  );
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::RequestOnly));
 }
 
 #[test]
 fn test_propagation_response_to_nested() {
   let response_struct = RustType::Struct(StructDef {
-    name: "UserResponse".to_string(),
+    name: StructToken::new("UserResponse"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
+      name: FieldNameToken::new("user"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
@@ -113,10 +120,10 @@ fn test_propagation_response_to_nested() {
   });
 
   let user_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -130,18 +137,21 @@ fn test_propagation_response_to_nested() {
   let types = vec![response_struct, user_struct];
   let usage_map = build_type_usage_map(seeds(&[("UserResponse", (false, true))]), &types);
 
-  assert_eq!(usage_map.get("UserResponse"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("UserResponse")),
+    Some(&TypeUsage::ResponseOnly)
+  );
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::ResponseOnly));
 }
 
 #[test]
 fn test_propagation_bidirectional() {
   let request_struct = RustType::Struct(StructDef {
-    name: "UpdateUserRequest".to_string(),
+    name: StructToken::new("UpdateUserRequest"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
+      name: FieldNameToken::new("user"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
@@ -152,11 +162,11 @@ fn test_propagation_bidirectional() {
   });
 
   let response_struct = RustType::Struct(StructDef {
-    name: "UserResponse".to_string(),
+    name: StructToken::new("UserResponse"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("User".to_string())),
+      name: FieldNameToken::new("user"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
@@ -167,10 +177,10 @@ fn test_propagation_bidirectional() {
   });
 
   let user_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -187,19 +197,25 @@ fn test_propagation_bidirectional() {
     &types,
   );
 
-  assert_eq!(usage_map.get("UpdateUserRequest"), Some(&TypeUsage::RequestOnly));
-  assert_eq!(usage_map.get("UserResponse"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::Bidirectional));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("UpdateUserRequest")),
+    Some(&TypeUsage::RequestOnly)
+  );
+  assert_eq!(
+    usage_map.get(&EnumToken::new("UserResponse")),
+    Some(&TypeUsage::ResponseOnly)
+  );
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::Bidirectional));
 }
 
 #[test]
 fn test_transitive_dependency_chain() {
   let a_struct = RustType::Struct(StructDef {
-    name: "A".to_string(),
+    name: StructToken::new("A"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "b".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("B".to_string())),
+      name: FieldNameToken::new("b"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("B".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug]),
@@ -210,11 +226,11 @@ fn test_transitive_dependency_chain() {
   });
 
   let b_struct = RustType::Struct(StructDef {
-    name: "B".to_string(),
+    name: StructToken::new("B"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "c".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("C".to_string())),
+      name: FieldNameToken::new("c"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("C".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug]),
@@ -225,10 +241,10 @@ fn test_transitive_dependency_chain() {
   });
 
   let c_struct = RustType::Struct(StructDef {
-    name: "C".to_string(),
+    name: StructToken::new("C"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "value".to_string(),
+      name: FieldNameToken::new("value"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -242,20 +258,20 @@ fn test_transitive_dependency_chain() {
   let types = vec![a_struct, b_struct, c_struct];
   let usage_map = build_type_usage_map(seeds(&[("A", (false, true))]), &types);
 
-  assert_eq!(usage_map.get("A"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("B"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("C"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("A")), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("B")), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("C")), Some(&TypeUsage::ResponseOnly));
 }
 
 #[test]
 fn test_enum_with_tuple_variant() {
   let enum_def = RustType::Enum(EnumDef {
-    name: "Result".to_string(),
+    name: EnumToken::new("Result"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Success".to_string(),
+      name: EnumVariantToken::new("Success"),
       docs: vec![],
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("User".to_string()))]),
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("User".into()))]),
       serde_attrs: vec![],
       deprecated: false,
     }],
@@ -268,10 +284,10 @@ fn test_enum_with_tuple_variant() {
   });
 
   let user_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -285,23 +301,23 @@ fn test_enum_with_tuple_variant() {
   let types = vec![enum_def, user_struct];
   let usage_map = build_type_usage_map(seeds(&[("Result", (false, true))]), &types);
 
-  assert_eq!(usage_map.get("Result"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("Result")), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::ResponseOnly));
 }
 
 #[test]
 fn test_type_alias_dependency() {
   let alias = RustType::TypeAlias(TypeAliasDef {
-    name: "UserId".to_string(),
+    name: TypeAliasToken::new("UserId"),
     docs: vec![],
-    target: TypeRef::new(RustPrimitive::Custom("User".to_string())),
+    target: TypeRef::new(RustPrimitive::Custom("User".into())),
   });
 
   let user_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "id".to_string(),
+      name: FieldNameToken::new("id"),
       rust_type: TypeRef::new(RustPrimitive::I64),
       ..Default::default()
     }],
@@ -315,18 +331,18 @@ fn test_type_alias_dependency() {
   let types = vec![alias, user_struct];
   let usage_map = build_type_usage_map(seeds(&[("UserId", (false, true))]), &types);
 
-  assert_eq!(usage_map.get("UserId"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("UserId")), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::ResponseOnly));
 }
 
 #[test]
 fn test_no_propagation_without_operations() {
   let user_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "address".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("Address".to_string())),
+      name: FieldNameToken::new("address"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("Address".into())),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug]),
@@ -337,7 +353,7 @@ fn test_no_propagation_without_operations() {
   });
 
   let address_struct = RustType::Struct(StructDef {
-    name: "Address".to_string(),
+    name: StructToken::new("Address"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::from([DeriveTrait::Debug]),
@@ -351,18 +367,21 @@ fn test_no_propagation_without_operations() {
   let usage_map = build_type_usage_map(seeds(&[]), &types);
 
   assert_eq!(usage_map.len(), 2);
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::Bidirectional));
-  assert_eq!(usage_map.get("Address"), Some(&TypeUsage::Bidirectional));
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::Bidirectional));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("Address")),
+    Some(&TypeUsage::Bidirectional)
+  );
 }
 
 #[test]
 fn test_cyclic_dependency_handling() {
   let a_struct = RustType::Struct(StructDef {
-    name: "A".to_string(),
+    name: StructToken::new("A"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "b".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("B".to_string())).with_boxed(),
+      name: FieldNameToken::new("b"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("B".into())).with_boxed(),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug]),
@@ -373,11 +392,11 @@ fn test_cyclic_dependency_handling() {
   });
 
   let b_struct = RustType::Struct(StructDef {
-    name: "B".to_string(),
+    name: StructToken::new("B"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "a".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("A".to_string())).with_boxed(),
+      name: FieldNameToken::new("a"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("A".into())).with_boxed(),
       ..Default::default()
     }],
     derives: BTreeSet::from([DeriveTrait::Debug]),
@@ -390,17 +409,17 @@ fn test_cyclic_dependency_handling() {
   let types = vec![a_struct, b_struct];
   let usage_map = build_type_usage_map(seeds(&[("A", (false, true))]), &types);
 
-  assert_eq!(usage_map.get("A"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("B"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("A")), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(usage_map.get(&EnumToken::new("B")), Some(&TypeUsage::ResponseOnly));
 }
 
 #[test]
 fn test_response_enum_does_not_propagate_to_request_type() {
   let request_struct = RustType::Struct(StructDef {
-    name: "CreateUserRequestParams".to_string(),
+    name: StructToken::new("CreateUserRequestParams"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -412,10 +431,10 @@ fn test_response_enum_does_not_propagate_to_request_type() {
   });
 
   let response_struct = RustType::Struct(StructDef {
-    name: "User".to_string(),
+    name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "id".to_string(),
+      name: FieldNameToken::new("id"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -427,15 +446,15 @@ fn test_response_enum_does_not_propagate_to_request_type() {
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: "CreateUserResponseEnum".to_string(),
+    name: EnumToken::new("CreateUserResponseEnum"),
     docs: vec![],
-    request_type: "CreateUserRequestParams".to_string(),
+    request_type: Some(StructToken::new("CreateUserRequestParams")),
     variants: vec![ResponseVariant {
-      status_code: "200".to_string(),
-      variant_name: "Ok".to_string(),
+      status_code: StatusCodeToken::Ok200,
+      variant_name: EnumVariantToken::new("Ok"),
       description: None,
-      schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".to_string()))),
-      content_type: None,
+      schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
+      content_category: ContentCategory::Json,
     }],
   });
 
@@ -446,15 +465,21 @@ fn test_response_enum_does_not_propagate_to_request_type() {
   ]);
   let usage_map = build_type_usage_map(seed, &types);
 
-  assert_eq!(usage_map.get("CreateUserRequestParams"), Some(&TypeUsage::RequestOnly));
-  assert_eq!(usage_map.get("User"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("CreateUserResponseEnum"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("CreateUserRequestParams")),
+    Some(&TypeUsage::RequestOnly)
+  );
+  assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("CreateUserResponseEnum")),
+    Some(&TypeUsage::ResponseOnly)
+  );
 }
 
 #[test]
 fn test_response_enum_propagates_to_variant_types_only() {
   let response_a = RustType::Struct(StructDef {
-    name: "ResponseA".to_string(),
+    name: StructToken::new("ResponseA"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::new(),
@@ -465,7 +490,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
   });
 
   let response_b = RustType::Struct(StructDef {
-    name: "ResponseB".to_string(),
+    name: StructToken::new("ResponseB"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::new(),
@@ -476,7 +501,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
   });
 
   let request_struct = RustType::Struct(StructDef {
-    name: "RequestParams".to_string(),
+    name: StructToken::new("RequestParams"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::new(),
@@ -487,23 +512,23 @@ fn test_response_enum_propagates_to_variant_types_only() {
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: "MyResponseEnum".to_string(),
+    name: EnumToken::new("MyResponseEnum"),
     docs: vec![],
-    request_type: "RequestParams".to_string(),
+    request_type: Some(StructToken::new("RequestParams")),
     variants: vec![
       ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
+        status_code: StatusCodeToken::Ok200,
+        variant_name: EnumVariantToken::new("Ok"),
         description: None,
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".to_string()))),
-        content_type: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
+        content_category: ContentCategory::Json,
       },
       ResponseVariant {
-        status_code: "400".to_string(),
-        variant_name: "BadRequest".to_string(),
+        status_code: StatusCodeToken::BadRequest400,
+        variant_name: EnumVariantToken::new("BadRequest"),
         description: None,
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".to_string()))),
-        content_type: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
+        content_category: ContentCategory::Json,
       },
     ],
   });
@@ -512,20 +537,32 @@ fn test_response_enum_propagates_to_variant_types_only() {
   let seed = seeds(&[("RequestParams", (true, false)), ("MyResponseEnum", (false, true))]);
   let usage_map = build_type_usage_map(seed, &types);
 
-  assert_eq!(usage_map.get("RequestParams"), Some(&TypeUsage::RequestOnly));
-  assert_eq!(usage_map.get("ResponseA"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("ResponseB"), Some(&TypeUsage::ResponseOnly));
-  assert_eq!(usage_map.get("MyResponseEnum"), Some(&TypeUsage::ResponseOnly));
+  assert_eq!(
+    usage_map.get(&EnumToken::new("RequestParams")),
+    Some(&TypeUsage::RequestOnly)
+  );
+  assert_eq!(
+    usage_map.get(&EnumToken::new("ResponseA")),
+    Some(&TypeUsage::ResponseOnly)
+  );
+  assert_eq!(
+    usage_map.get(&EnumToken::new("ResponseB")),
+    Some(&TypeUsage::ResponseOnly)
+  );
+  assert_eq!(
+    usage_map.get(&EnumToken::new("MyResponseEnum")),
+    Some(&TypeUsage::ResponseOnly)
+  );
 }
 
 #[test]
 fn test_request_body_chain_with_response_enum() {
   let request_body_struct = RustType::Struct(StructDef {
-    name: "CreateChatCompletionRequest".to_string(),
+    name: StructToken::new("CreateChatCompletionRequest"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "model".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("ModelIds".to_string())),
+      name: FieldNameToken::new("model"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("ModelIds".into())),
       ..Default::default()
     }],
     derives: BTreeSet::new(),
@@ -536,10 +573,10 @@ fn test_request_body_chain_with_response_enum() {
   });
 
   let model_enum = RustType::Enum(EnumDef {
-    name: "ModelIds".to_string(),
+    name: EnumToken::new("ModelIds"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Gpt4".to_string(),
+      name: EnumVariantToken::new("Gpt4"),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],
@@ -554,17 +591,17 @@ fn test_request_body_chain_with_response_enum() {
   });
 
   let request_body_alias = RustType::TypeAlias(TypeAliasDef {
-    name: "CreateChatCompletionRequestBody".to_string(),
+    name: TypeAliasToken::new("CreateChatCompletionRequestBody"),
     docs: vec![],
-    target: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequest".to_string())),
+    target: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequest".into())),
   });
 
   let request_params = RustType::Struct(StructDef {
-    name: "CreateChatCompletionRequestParams".to_string(),
+    name: StructToken::new("CreateChatCompletionRequestParams"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "body".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequestBody".to_string())),
+      name: FieldNameToken::new("body"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequestBody".into())),
       ..Default::default()
     }],
     derives: BTreeSet::new(),
@@ -575,7 +612,7 @@ fn test_request_body_chain_with_response_enum() {
   });
 
   let response_struct = RustType::Struct(StructDef {
-    name: "CreateChatCompletionResponse".to_string(),
+    name: StructToken::new("CreateChatCompletionResponse"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::new(),
@@ -586,17 +623,17 @@ fn test_request_body_chain_with_response_enum() {
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: "CreateChatCompletionResponseEnum".to_string(),
+    name: EnumToken::new("CreateChatCompletionResponseEnum"),
     docs: vec![],
-    request_type: "CreateChatCompletionRequestParams".to_string(),
+    request_type: Some(StructToken::new("CreateChatCompletionRequestParams")),
     variants: vec![ResponseVariant {
-      status_code: "200".to_string(),
-      variant_name: "Ok".to_string(),
+      status_code: StatusCodeToken::Ok200,
+      variant_name: EnumVariantToken::new("Ok"),
       description: None,
       schema_type: Some(TypeRef::new(RustPrimitive::Custom(
-        "CreateChatCompletionResponse".to_string(),
+        "CreateChatCompletionResponse".into(),
       ))),
-      content_type: None,
+      content_category: ContentCategory::Json,
     }],
   });
 
@@ -619,32 +656,32 @@ fn test_request_body_chain_with_response_enum() {
   let usage_map = build_type_usage_map(seed, &types);
 
   assert_eq!(
-    usage_map.get("CreateChatCompletionRequest"),
+    usage_map.get(&EnumToken::new("CreateChatCompletionRequest")),
     Some(&TypeUsage::RequestOnly),
     "Request body schema should remain request-only"
   );
   assert_eq!(
-    usage_map.get("ModelIds"),
+    usage_map.get(&EnumToken::new("ModelIds")),
     Some(&TypeUsage::RequestOnly),
     "Model enum should remain request-only"
   );
   assert_eq!(
-    usage_map.get("CreateChatCompletionRequestBody"),
+    usage_map.get(&EnumToken::new("CreateChatCompletionRequestBody")),
     Some(&TypeUsage::RequestOnly),
     "Request body alias should remain request-only"
   );
   assert_eq!(
-    usage_map.get("CreateChatCompletionRequestParams"),
+    usage_map.get(&EnumToken::new("CreateChatCompletionRequestParams")),
     Some(&TypeUsage::RequestOnly),
     "Request params should remain request-only despite ResponseEnum reference"
   );
   assert_eq!(
-    usage_map.get("CreateChatCompletionResponse"),
+    usage_map.get(&EnumToken::new("CreateChatCompletionResponse")),
     Some(&TypeUsage::ResponseOnly),
     "Response should be response-only"
   );
   assert_eq!(
-    usage_map.get("CreateChatCompletionResponseEnum"),
+    usage_map.get(&EnumToken::new("CreateChatCompletionResponseEnum")),
     Some(&TypeUsage::ResponseOnly),
     "Response enum should be response-only"
   );
@@ -653,7 +690,7 @@ fn test_request_body_chain_with_response_enum() {
 #[test]
 fn test_response_enum_dependency_extraction() {
   let request_struct = RustType::Struct(StructDef {
-    name: "RequestParams".to_string(),
+    name: StructToken::new("RequestParams"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::new(),
@@ -664,7 +701,7 @@ fn test_response_enum_dependency_extraction() {
   });
 
   let response_a = RustType::Struct(StructDef {
-    name: "ResponseA".to_string(),
+    name: StructToken::new("ResponseA"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::new(),
@@ -675,7 +712,7 @@ fn test_response_enum_dependency_extraction() {
   });
 
   let response_b = RustType::Struct(StructDef {
-    name: "ResponseB".to_string(),
+    name: StructToken::new("ResponseB"),
     docs: vec![],
     fields: vec![],
     derives: BTreeSet::new(),
@@ -686,23 +723,23 @@ fn test_response_enum_dependency_extraction() {
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: "MyResponseEnum".to_string(),
+    name: EnumToken::new("MyResponseEnum"),
     docs: vec![],
-    request_type: "RequestParams".to_string(),
+    request_type: Some(StructToken::new("RequestParams")),
     variants: vec![
       ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
+        status_code: StatusCodeToken::Ok200,
+        variant_name: EnumVariantToken::new("Ok"),
         description: None,
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".to_string()))),
-        content_type: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
+        content_category: ContentCategory::Json,
       },
       ResponseVariant {
-        status_code: "400".to_string(),
-        variant_name: "BadRequest".to_string(),
+        status_code: StatusCodeToken::BadRequest400,
+        variant_name: EnumVariantToken::new("BadRequest"),
         description: None,
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".to_string()))),
-        content_type: None,
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
+        content_category: ContentCategory::Json,
       },
     ],
   });

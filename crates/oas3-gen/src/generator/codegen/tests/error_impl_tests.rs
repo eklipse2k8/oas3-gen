@@ -1,18 +1,21 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::generator::{
-  ast::{EnumDef, FieldDef, RustPrimitive, RustType, StructDef, StructKind, TypeRef, VariantContent, VariantDef},
+  ast::{
+    EnumDef, EnumToken, EnumVariantToken, FieldDef, RustPrimitive, RustType, StructDef, StructKind, StructToken,
+    TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
+  },
   codegen::error_impls,
 };
 
 #[test]
 fn test_generate_error_struct_impl_with_error_field() {
   let struct_def = StructDef {
-    name: "MyError".to_string(),
+    name: StructToken::new("MyError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "error".to_string(),
-      rust_type: TypeRef::new(RustPrimitive::Custom("InnerError".to_string())),
+      name: FieldNameToken::new("error"),
+      rust_type: TypeRef::new(RustPrimitive::Custom("InnerError".into())),
       ..Default::default()
     }],
     derives: BTreeSet::new(),
@@ -34,10 +37,10 @@ fn test_generate_error_struct_impl_with_error_field() {
 #[test]
 fn test_generate_error_struct_impl_with_message_field() {
   let struct_def = StructDef {
-    name: "MyError".to_string(),
+    name: StructToken::new("MyError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "message".to_string(),
+      name: FieldNameToken::new("message"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -60,10 +63,10 @@ fn test_generate_error_struct_impl_with_message_field() {
 #[test]
 fn test_generate_error_struct_impl_without_error_fields() {
   let struct_def = StructDef {
-    name: "MyError".to_string(),
+    name: StructToken::new("MyError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "code".to_string(),
+      name: FieldNameToken::new("code"),
       rust_type: TypeRef::new(RustPrimitive::I32),
       ..Default::default()
     }],
@@ -81,10 +84,10 @@ fn test_generate_error_struct_impl_without_error_fields() {
 #[test]
 fn test_generate_error_enum_impl_with_tuple_variants() {
   let enum_def = EnumDef {
-    name: "MyError".to_string(),
+    name: EnumToken::new("MyError"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "BadRequest".to_string(),
+      name: EnumVariantToken::new("BadRequest"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],
@@ -110,10 +113,10 @@ fn test_generate_error_enum_impl_with_tuple_variants() {
 #[test]
 fn test_generate_error_enum_impl_with_unit_variants() {
   let enum_def = EnumDef {
-    name: "MyError".to_string(),
+    name: EnumToken::new("MyError"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "NotFound".to_string(),
+      name: EnumVariantToken::new("NotFound"),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],
@@ -134,10 +137,10 @@ fn test_generate_error_enum_impl_with_unit_variants() {
 #[test]
 fn test_try_generate_error_impl_for_error_struct() {
   let struct_def = StructDef {
-    name: "ApiError".to_string(),
+    name: StructToken::new("ApiError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "message".to_string(),
+      name: FieldNameToken::new("message"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -150,7 +153,7 @@ fn test_try_generate_error_impl_for_error_struct() {
 
   let rust_type = RustType::Struct(struct_def);
   let mut error_schemas = HashSet::new();
-  error_schemas.insert("ApiError".to_string());
+  error_schemas.insert(EnumToken::new("ApiError"));
 
   let result = error_impls::generate_error_impl(&rust_type);
   assert!(result.is_some());
@@ -159,10 +162,10 @@ fn test_try_generate_error_impl_for_error_struct() {
 #[test]
 fn test_try_generate_error_impl_for_error_enum() {
   let enum_def = EnumDef {
-    name: "ApiError".to_string(),
+    name: EnumToken::new("ApiError"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Error".to_string(),
+      name: EnumVariantToken::new("Error"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],
@@ -178,7 +181,7 @@ fn test_try_generate_error_impl_for_error_enum() {
 
   let rust_type = RustType::Enum(enum_def);
   let mut error_schemas = HashSet::new();
-  error_schemas.insert("ApiError".to_string());
+  error_schemas.insert(EnumToken::new("ApiError"));
 
   let result = error_impls::generate_error_impl(&rust_type);
   assert!(result.is_some());

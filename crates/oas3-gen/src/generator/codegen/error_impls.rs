@@ -31,7 +31,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
               fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 if let Some(ref errs) = self.#field_ident {
                   if let Some(first) = errs.first() {
-                    write!(f, "{}", first)
+                    write!(f, "{first}")
                   } else {
                     write!(f, #fallback)
                   }
@@ -55,7 +55,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
             impl std::fmt::Display for #type_ident {
               fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 if let Some(first) = self.#field_ident.first() {
-                  write!(f, "{}", first)
+                  write!(f, "{first}")
                 } else {
                   write!(f, #fallback)
                 }
@@ -77,7 +77,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
           impl std::fmt::Display for #type_ident {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
               if let Some(ref err) = self.#field_ident {
-                write!(f, "{}", err)
+                write!(f, "{err}")
               } else {
                 write!(f, #fallback)
               }
@@ -126,7 +126,7 @@ fn generate_for_struct(def: &StructDef) -> Option<TokenStream> {
       impl std::fmt::Display for #type_ident {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
           if let Some(ref msg) = self.#field_name {
-            write!(f, "{}", msg)
+            write!(f, "{msg}")
           } else {
             write!(f, #fallback)
           }
@@ -155,7 +155,7 @@ fn generate_for_enum(def: &EnumDef) -> Option<TokenStream> {
     return None;
   }
 
-  let type_ident = format_ident!("{}", &def.name);
+  let type_ident = &def.name;
   let (display_arms, source_arms) = generate_enum_error_arms(def);
 
   Some(quote! {
@@ -189,11 +189,10 @@ fn generate_enum_error_arms(def: &EnumDef) -> (Vec<TokenStream>, Vec<TokenStream
     .variants
     .iter()
     .map(|variant| {
-      let variant_ident = format_ident!("{}", &variant.name);
-
+      let variant_ident = &variant.name;
       match &variant.content {
         VariantContent::Tuple(types) if !types.is_empty() => (
-          quote! { Self::#variant_ident(err) => write!(f, "{}", err), },
+          quote! { Self::#variant_ident(err) => write!(f, "{err}"), },
           quote! { Self::#variant_ident(err) => Some(err as &(dyn std::error::Error + 'static)), },
         ),
         VariantContent::Tuple(_) | VariantContent::Unit => (

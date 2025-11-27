@@ -12,13 +12,14 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, FieldDef, RustType, SerdeAttribute, TypeRef, VariantContent,
-    VariantDef, default_enum_derives,
+    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, RustType, SerdeAttribute,
+    TypeRef, VariantContent, VariantDef, default_enum_derives,
   },
   naming::{
-    identifiers::to_rust_type_name,
-    inference as naming,
-    variants::{VariantNameNormalizer, infer_variant_name, strip_common_affixes},
+    identifiers::{ensure_unique, to_rust_type_name},
+    inference::{
+      VariantNameNormalizer, derive_method_names, extract_enum_values, infer_variant_name, strip_common_affixes,
+    },
   },
   schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
@@ -45,6 +46,14 @@ pub(crate) struct EnumConverter {
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   pub(crate) no_helpers: bool,
+}
+
+struct EligibleVariant {
+  variant_name: EnumVariantToken,
+  type_name: String,
+  docs: Vec<String>,
+  first_required_field: Option<(String, String)>,
+  has_required_fields: bool,
 }
 
 impl EnumConverter {
@@ -88,8 +97,8 @@ impl EnumConverter {
     let enum_def = self.build_simple_enum(name, schema, strategy);
 
     if let (Some(c), RustType::Enum(e)) = (cache, &enum_def) {
-      c.register_enum(enum_values, e.name.clone());
-      c.mark_name_used(e.name.clone());
+      c.register_enum(enum_values, e.name.to_string());
+      c.mark_name_used(e.name.to_string());
     }
 
     Some(enum_def)
@@ -129,10 +138,10 @@ impl EnumConverter {
     let result = self.process_union(name, schema, kind, &discriminator_map, cache.as_deref_mut())?;
 
     if let Some(c) = cache
-      && let Some(values) = naming::extract_enum_values(schema)
+      && let Some(values) = extract_enum_values(schema)
       && let Some(RustType::Enum(e)) = result.last()
     {
-      c.register_enum(values, e.name.clone());
+      c.register_enum(values, e.name.to_string());
     }
 
     Ok(result)
@@ -168,7 +177,7 @@ impl EnumConverter {
     }
 
     RustType::Enum(EnumDef {
-      name: to_rust_type_name(name),
+      name: EnumToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,
@@ -180,9 +189,9 @@ impl EnumConverter {
     })
   }
 
-  fn push_variant(variants: &mut Vec<VariantDef>, name: String, rename: &str) {
+  fn push_variant(variants: &mut Vec<VariantDef>, name: impl Into<EnumVariantToken>, rename: &str) {
     variants.push(VariantDef {
-      name,
+      name: name.into(),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![SerdeAttribute::Rename(rename.to_string())],
@@ -248,20 +257,12 @@ impl EnumConverter {
   /// - If exactly one field is required: generates parameterized constructor (e.g., `enum.variant_name(value)`)
   /// - If multiple fields are required: skips method generation (too complex for helpers)
   fn generate_methods(&self, variants: &[VariantDef], inline_types: &[RustType], enum_name: &str) -> Vec<EnumMethod> {
-    struct EligibleVariant {
-      variant_name: String,
-      type_name: String,
-      docs: Vec<String>,
-      first_required_field: Option<(String, String)>,
-      has_required_fields: bool,
-    }
-
     let enum_name = to_rust_type_name(enum_name);
 
     let struct_map: BTreeMap<_, _> = inline_types
       .iter()
       .filter_map(|t| match t {
-        RustType::Struct(s) => Some((&s.name, s)),
+        RustType::Struct(s) => Some((s.name.to_string(), s)),
         _ => None,
       })
       .collect();
@@ -307,7 +308,7 @@ impl EnumConverter {
 
         let first_required_field = if required_fields.len() == 1 {
           let field = required_fields[0];
-          Some((field.name.clone(), field.rust_type.to_rust_type()))
+          Some((field.name.to_string(), field.rust_type.to_rust_type()))
         } else {
           None
         };
@@ -326,19 +327,19 @@ impl EnumConverter {
       return vec![];
     }
 
-    let variant_names: Vec<String> = eligible_variants.iter().map(|v| v.variant_name.clone()).collect();
-    let derived_names = naming::derive_method_names(&enum_name, &variant_names);
+    let variant_names: Vec<String> = eligible_variants.iter().map(|v| v.variant_name.to_string()).collect();
+    let derived_names = derive_method_names(&enum_name, &variant_names);
 
     let mut seen_names = BTreeSet::new();
     eligible_variants
       .into_iter()
       .zip(derived_names)
       .map(|(variant_info, base_method_name)| {
-        let method_name = naming::ensure_unique(&base_method_name, &seen_names);
+        let method_name = ensure_unique(&base_method_name, &seen_names);
         seen_names.insert(method_name.clone());
 
         let method_docs = Self::generate_method_docs(
-          &variant_info.variant_name,
+          &variant_info.variant_name.to_string(),
           &variant_info.docs,
           !variant_info.has_required_fields,
           variant_info
@@ -352,7 +353,7 @@ impl EnumConverter {
             name: method_name,
             docs: method_docs,
             kind: EnumMethodKind::ParameterizedConstructor {
-              variant_name: variant_info.variant_name,
+              variant_name: variant_info.variant_name.to_string(),
               wrapped_type: variant_info.type_name,
               param_name,
               param_type,
@@ -363,7 +364,7 @@ impl EnumConverter {
             name: method_name,
             docs: method_docs,
             kind: EnumMethodKind::SimpleConstructor {
-              variant_name: variant_info.variant_name,
+              variant_name: variant_info.variant_name.to_string(),
               wrapped_type: variant_info.type_name,
             },
           }
@@ -432,7 +433,7 @@ impl EnumConverter {
       type_ref = type_ref.with_boxed();
     }
 
-    let variant_name = naming::ensure_unique(&rust_type_name, seen_names);
+    let variant_name = ensure_unique(&rust_type_name, seen_names);
 
     let mut serde_attrs = vec![];
     if let Some(disc_value) = discriminator_map.get(schema_name) {
@@ -440,7 +441,7 @@ impl EnumConverter {
     }
 
     let variant = VariantDef {
-      name: variant_name,
+      name: EnumVariantToken::from(variant_name),
       docs: metadata::extract_docs(resolved_schema.description.as_ref()),
       content: VariantContent::Tuple(vec![type_ref]),
       serde_attrs,
@@ -462,10 +463,10 @@ impl EnumConverter {
       let normalized = VariantNameNormalizer::normalize(const_value)
         .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
 
-      let variant_name = naming::ensure_unique(&normalized.name, seen_names);
+      let variant_name = ensure_unique(&normalized.name, seen_names);
 
       let variant = VariantDef {
-        name: variant_name,
+        name: EnumVariantToken::from(variant_name),
         docs: metadata::extract_docs(resolved_schema.description.as_ref()),
         content: VariantContent::Unit,
         serde_attrs: vec![SerdeAttribute::Rename(normalized.rename_value)],
@@ -479,7 +480,7 @@ impl EnumConverter {
       .title
       .as_ref()
       .map_or_else(|| infer_variant_name(resolved_schema, index), |t| to_rust_type_name(t));
-    let variant_name = naming::ensure_unique(&base_name, seen_names);
+    let variant_name = ensure_unique(&base_name, seen_names);
 
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
       let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;
@@ -501,7 +502,7 @@ impl EnumConverter {
     };
 
     let variant = VariantDef {
-      name: variant_name,
+      name: EnumVariantToken::from(variant_name),
       docs: metadata::extract_docs(resolved_schema.description.as_ref()),
       content,
       serde_attrs: vec![],
@@ -527,7 +528,7 @@ impl EnumConverter {
     };
 
     RustType::Enum(EnumDef {
-      name: to_rust_type_name(name),
+      name: EnumToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),

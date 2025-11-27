@@ -10,7 +10,7 @@ use super::{
   enums::{EnumConverter, UnionKind},
 };
 use crate::generator::{
-  ast::{RustPrimitive, RustType, TypeRef},
+  ast::{EnumToken, RustPrimitive, RustType, TypeRef},
   naming::{
     identifiers::to_rust_type_name,
     inference::{extract_enum_values, is_relaxed_enum_pattern},
@@ -229,15 +229,8 @@ impl TypeResolver {
 
         let generated_types = converter.convert_union_enum(name, prop_schema, kind, cache)?;
 
-        let main_type_name = generated_types
-          .iter()
-          .find_map(|t| match t {
-            RustType::Enum(e) if e.name == to_rust_type_name(name) => Some(e.name.clone()),
-            _ => None,
-          })
-          .unwrap_or_else(|| to_rust_type_name(name));
-
-        let (main_type, nested) = Self::extract_main_type(generated_types, &main_type_name)?;
+        let expected_name = EnumToken::from_raw(name);
+        let (main_type, nested) = Self::extract_main_type(generated_types, &expected_name)?;
         Ok(ConversionOutput::with_inline_types(main_type, nested))
       },
     )
@@ -247,11 +240,11 @@ impl TypeResolver {
   ///
   /// Searches for a type matching the target name. If not found,
   /// falls back to the last type in the list (which is typically the main enum).
-  fn extract_main_type(mut types: Vec<RustType>, target_name: &str) -> Result<(RustType, Vec<RustType>)> {
+  fn extract_main_type(mut types: Vec<RustType>, target_name: &EnumToken) -> Result<(RustType, Vec<RustType>)> {
     let pos = types
       .iter()
       .position(|t| match t {
-        RustType::Enum(e) => e.name == target_name,
+        RustType::Enum(e) => e.name == *target_name,
         _ => false,
       })
       .or_else(|| (!types.is_empty()).then_some(types.len() - 1))

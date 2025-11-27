@@ -3,7 +3,7 @@ use regex::Regex;
 
 use crate::{
   generator::ast::{RustPrimitive, TypeRef, ValidationAttribute},
-  utils::text::doc_comment_lines,
+  utils::text::doc_lines,
 };
 
 /// Metadata extracted from a schema for a struct field.
@@ -50,9 +50,9 @@ pub(crate) fn is_single_schema_type(schema: &ObjectSchema, schema_type: SchemaTy
   )
 }
 
-/// Extracts documentation comments from a schema description.
+/// Extracts documentation lines from a schema description.
 pub(crate) fn extract_docs(desc: Option<&String>) -> Vec<String> {
-  desc.map_or_else(Vec::new, |d| doc_comment_lines(d))
+  desc.map_or_else(Vec::new, |d| doc_lines(d))
 }
 
 /// Extracts the default value from a schema.

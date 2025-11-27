@@ -8,7 +8,7 @@ pub(crate) mod operations;
 pub(crate) mod path_renderer;
 pub(crate) mod responses;
 mod string_enum_optimizer;
-mod structs;
+pub(crate) mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
 
@@ -24,7 +24,7 @@ pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
 use super::{
-  ast::{RustType, StructKind, TypeAliasDef, TypeRef},
+  ast::{RustType, StructKind, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
 };
 use crate::generator::naming::identifiers::to_rust_type_name;
@@ -141,7 +141,7 @@ impl SchemaConverter {
 
     let type_ref = self.type_resolver.schema_to_type_ref(schema)?;
     let alias = RustType::TypeAlias(TypeAliasDef {
-      name: to_rust_type_name(name),
+      name: TypeAliasToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       target: type_ref,
     });

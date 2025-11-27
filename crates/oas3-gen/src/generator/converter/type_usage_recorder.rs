@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::generator::ast::{RustPrimitive, TypeRef};
+use crate::generator::ast::{EnumToken, RustPrimitive, TypeRef};
 
 #[derive(Debug, Clone, Copy, Default)]
 struct UsageFlags {
@@ -27,7 +27,7 @@ impl UsageFlags {
 /// Used for dependency analysis and filtering unused types.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct TypeUsageRecorder {
-  entries: BTreeMap<String, UsageFlags>,
+  entries: BTreeMap<EnumToken, UsageFlags>,
 }
 
 impl TypeUsageRecorder {
@@ -39,28 +39,28 @@ impl TypeUsageRecorder {
   }
 
   /// Marks a type name as used in a request.
-  pub(crate) fn mark_request<S: AsRef<str>>(&mut self, type_name: S) {
-    let type_name = type_name.as_ref();
-    if type_name.is_empty() {
+  pub(crate) fn mark_request(&mut self, type_name: impl Into<EnumToken>) {
+    let token = type_name.into();
+    if token.is_empty() {
       return;
     }
-    self.entries.entry(type_name.to_string()).or_default().mark_request();
+    self.entries.entry(token).or_default().mark_request();
   }
 
   /// Marks a type name as used in a response.
-  pub(crate) fn mark_response<S: AsRef<str>>(&mut self, type_name: S) {
-    let type_name = type_name.as_ref();
-    if type_name.is_empty() {
+  pub(crate) fn mark_response(&mut self, type_name: impl Into<EnumToken>) {
+    let token = type_name.into();
+    if token.is_empty() {
       return;
     }
-    self.entries.entry(type_name.to_string()).or_default().mark_response();
+    self.entries.entry(token).or_default().mark_response();
   }
 
   /// Marks multiple types as requests.
-  pub(crate) fn mark_request_iter<I, S>(&mut self, types: I)
+  pub(crate) fn mark_request_iter<I, T>(&mut self, types: I)
   where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
+    I: IntoIterator<Item = T>,
+    T: Into<EnumToken>,
   {
     for type_name in types {
       self.mark_request(type_name);
@@ -68,10 +68,10 @@ impl TypeUsageRecorder {
   }
 
   /// Marks multiple types as responses.
-  pub(crate) fn mark_response_iter<I, S>(&mut self, types: I)
+  pub(crate) fn mark_response_iter<I, T>(&mut self, types: I)
   where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
+    I: IntoIterator<Item = T>,
+    T: Into<EnumToken>,
   {
     for type_name in types {
       self.mark_response(type_name);
@@ -79,7 +79,7 @@ impl TypeUsageRecorder {
   }
 
   /// Returns a map of TypeName -> (is_request, is_response).
-  pub(crate) fn into_usage_map(self) -> BTreeMap<String, (bool, bool)> {
+  pub(crate) fn into_usage_map(self) -> BTreeMap<EnumToken, (bool, bool)> {
     self
       .entries
       .into_iter()
@@ -90,7 +90,7 @@ impl TypeUsageRecorder {
   /// Analyzes a `TypeRef` and marks used types (e.g. custom structs inside `Box`).
   pub(crate) fn mark_response_type_ref(&mut self, type_ref: &TypeRef) {
     if let RustPrimitive::Custom(name) = &type_ref.base_type {
-      self.mark_response(name);
+      self.mark_response(name.as_ref());
     }
   }
 }

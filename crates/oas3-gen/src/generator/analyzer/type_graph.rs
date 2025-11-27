@@ -79,7 +79,7 @@ impl TypeDependencyGraph {
 
   fn extract_from_type_ref(type_ref: &TypeRef, deps: &mut BTreeSet<String>) {
     if let RustPrimitive::Custom(name) = &type_ref.base_type {
-      deps.insert(name.clone());
+      deps.insert(name.to_string());
     }
   }
 }

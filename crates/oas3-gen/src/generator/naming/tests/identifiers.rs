@@ -1,120 +1,167 @@
-use crate::generator::naming::identifiers::{
-  header_const_name, regex_const_name, to_rust_field_name, to_rust_type_name,
+use std::collections::BTreeSet;
+
+use crate::generator::{
+  ast::{RegexKey, StructToken, tokens::ConstToken},
+  naming::identifiers::{ensure_unique, split_pascal_case, to_rust_field_name, to_rust_type_name},
 };
 
 #[test]
 fn test_field_names() {
-  assert_eq!(to_rust_field_name("foo-bar"), "foo_bar");
-  assert_eq!(to_rust_field_name("match"), "r#match");
-  assert_eq!(to_rust_field_name("self"), "self_");
-  assert_eq!(to_rust_field_name("123name"), "_123name");
-  assert_eq!(to_rust_field_name(""), "_");
-  assert_eq!(to_rust_field_name("  "), "_");
-}
-
-#[test]
-fn test_field_names_negative_prefix() {
-  assert_eq!(to_rust_field_name("-created-date"), "negative_created_date");
-  assert_eq!(to_rust_field_name("-id"), "negative_id");
-  assert_eq!(to_rust_field_name("-modified-date"), "negative_modified_date");
-  assert_eq!(to_rust_field_name("-"), "_");
+  let cases = [
+    // Basic transformations
+    ("foo-bar", "foo_bar"),
+    ("match", "r#match"),
+    ("self", "self_"),
+    ("123name", "_123name"),
+    ("", "_"),
+    ("  ", "_"),
+    // Negative prefix handling
+    ("-created-date", "negative_created_date"),
+    ("-id", "negative_id"),
+    ("-modified-date", "negative_modified_date"),
+    ("-", "_"),
+  ];
+  for (input, expected) in cases {
+    assert_eq!(to_rust_field_name(input), expected, "failed for input {input:?}");
+  }
 }
 
 #[test]
 fn test_type_names() {
-  assert_eq!(to_rust_type_name("oAuth"), "OAuth");
-  assert_eq!(to_rust_type_name("-INF"), "NegativeInf");
-  assert_eq!(to_rust_type_name("123Response"), "T123Response");
-  assert_eq!(to_rust_type_name(""), "Unnamed");
-  assert_eq!(to_rust_type_name("  "), "Unnamed");
+  let cases = [
+    // Basic transformations
+    ("oAuth", "OAuth"),
+    ("-INF", "NegativeInf"),
+    ("123Response", "T123Response"),
+    ("", "Unnamed"),
+    ("  ", "Unnamed"),
+    // Preserve pascal case with uppercase sequences
+    ("BetaResponseMCPToolUseBlock", "BetaResponseMCPToolUseBlock"),
+    ("XMLHttpRequest", "XMLHttpRequest"),
+    ("IOError", "IOError"),
+    ("HTTPSConnection", "HTTPSConnection"),
+    ("betaResponseMCPToolUseBlock", "BetaResponseMCPToolUseBlock"),
+    ("xmlHttpRequest", "XmlHttpRequest"),
+    ("beta_response_mcp_tool_use_block", "BetaResponseMcpToolUseBlock"),
+    ("beta-response-mcp-tool-use-block", "BetaResponseMcpToolUseBlock"),
+    ("beta_ResponseMCP", "BetaResponseMcp"),
+    ("Beta-Response-MCP", "BetaResponseMcp"),
+    // Normalize separated uppercase
+    ("NOT_FORCED", "NotForced"),
+    ("ADD", "Add"),
+    ("DELETE", "Delete"),
+    ("PDF_FILE", "PdfFile"),
+    ("HTTP_URL", "HttpUrl"),
+    // Preserve mixed case without separators
+    ("PDFFile", "PDFFile"),
+    ("HTTPConnection", "HTTPConnection"),
+    ("URLPath", "URLPath"),
+    // Negative prefix handling
+    ("-created-date", "NegativeCreatedDate"),
+    ("-id", "NegativeId"),
+    ("-modified-date", "NegativeModifiedDate"),
+    ("-child-position", "NegativeChildPosition"),
+    ("-", "Unnamed"),
+    // Reserved words in pascal case
+    ("clone", "r#Clone"),
+    ("Vec", "r#Vec"),
+  ];
+  for (input, expected) in cases {
+    assert_eq!(to_rust_type_name(input), expected, "failed for input {input:?}");
+  }
 }
 
 #[test]
-fn test_type_names_preserve_pascal_case() {
-  assert_eq!(
-    to_rust_type_name("BetaResponseMCPToolUseBlock"),
-    "BetaResponseMCPToolUseBlock"
-  );
-  assert_eq!(to_rust_type_name("XMLHttpRequest"), "XMLHttpRequest");
-  assert_eq!(to_rust_type_name("IOError"), "IOError");
-  assert_eq!(to_rust_type_name("HTTPSConnection"), "HTTPSConnection");
-  assert_eq!(
-    to_rust_type_name("betaResponseMCPToolUseBlock"),
-    "BetaResponseMCPToolUseBlock"
-  );
-  assert_eq!(to_rust_type_name("xmlHttpRequest"), "XmlHttpRequest");
-  assert_eq!(
-    to_rust_type_name("beta_response_mcp_tool_use_block"),
-    "BetaResponseMcpToolUseBlock"
-  );
-  assert_eq!(
-    to_rust_type_name("beta-response-mcp-tool-use-block"),
-    "BetaResponseMcpToolUseBlock"
-  );
-  assert_eq!(to_rust_type_name("beta_ResponseMCP"), "BetaResponseMcp");
-  assert_eq!(to_rust_type_name("Beta-Response-MCP"), "BetaResponseMcp");
+fn test_const_token_from_regex_key() {
+  let cases = [
+    (("foo.bar", "baz"), "REGEX_FOO_BAR_BAZ"),
+    (("1a", "2b"), "REGEX_T1A_2B"),
+  ];
+  for ((type_name, field_name), expected) in cases {
+    let type_token = StructToken::from_raw(type_name);
+    let key = RegexKey::for_struct(&type_token, field_name);
+    let token = ConstToken::from(&key);
+    assert_eq!(
+      token.to_string(),
+      expected,
+      "failed for type={type_name:?}, field={field_name:?}"
+    );
+  }
 }
 
 #[test]
-fn test_type_names_normalize_separated_uppercase() {
-  assert_eq!(to_rust_type_name("NOT_FORCED"), "NotForced");
-  assert_eq!(to_rust_type_name("ADD"), "Add");
-  assert_eq!(to_rust_type_name("DELETE"), "Delete");
-  assert_eq!(to_rust_type_name("PDF_FILE"), "PdfFile");
-  assert_eq!(to_rust_type_name("HTTP_URL"), "HttpUrl");
+fn test_const_token_from_raw() {
+  let cases = [
+    ("x-my-header", "X_MY_HEADER"),
+    ("Content-Type", "CONTENT_TYPE"),
+    ("123-custom", "_123_CUSTOM"),
+    ("", "UNNAMED"),
+    ("  ", "UNNAMED"),
+  ];
+  for (input, expected) in cases {
+    let token = ConstToken::from_raw(input);
+    assert_eq!(token.to_string(), expected, "failed for input {input:?}");
+  }
 }
 
 #[test]
-fn test_type_names_preserve_mixed_case_no_separators() {
-  assert_eq!(to_rust_type_name("PDFFile"), "PDFFile");
-  assert_eq!(to_rust_type_name("HTTPConnection"), "HTTPConnection");
-  assert_eq!(to_rust_type_name("URLPath"), "URLPath");
+fn test_const_token_case_insensitive() {
+  let case_pairs = [
+    ("X-API-Key", "x-api-key"),
+    ("Content-Type", "content-type"),
+    ("AUTHORIZATION", "authorization"),
+  ];
+  for (upper, lower) in case_pairs {
+    assert_eq!(
+      ConstToken::from_raw(upper).to_string(),
+      ConstToken::from_raw(lower).to_string(),
+      "constant identifiers should be case-insensitive for {upper:?} vs {lower:?}"
+    );
+  }
 }
 
 #[test]
-fn test_type_names_negative_prefix() {
-  assert_eq!(to_rust_type_name("-created-date"), "NegativeCreatedDate");
-  assert_eq!(to_rust_type_name("-id"), "NegativeId");
-  assert_eq!(to_rust_type_name("-modified-date"), "NegativeModifiedDate");
-  assert_eq!(to_rust_type_name("-child-position"), "NegativeChildPosition");
-  assert_eq!(to_rust_type_name("-"), "Unnamed");
+fn test_ensure_unique() {
+  let cases = vec![
+    (vec!["UserResponse"], "UserResponse", "UserResponse2"),
+    (
+      vec!["UserResponse", "UserResponse2", "UserResponse3"],
+      "UserResponse",
+      "UserResponse4",
+    ),
+    (vec![], "", ""),
+    (vec!["Name2"], "Name", "Name"),
+    (vec![], "UniqueName", "UniqueName"),
+    (vec!["Value", "Value3"], "Value", "Value2"),
+  ];
+
+  for (used_list, input, expected) in cases {
+    let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
+    assert_eq!(
+      ensure_unique(input, &used),
+      expected,
+      "Failed for input '{input}' with used {used:?}"
+    );
+  }
 }
 
 #[test]
-fn test_type_name_reserved_pascal() {
-  assert_eq!(to_rust_type_name("clone"), "r#Clone");
-  assert_eq!(to_rust_type_name("Vec"), "r#Vec");
-}
+fn test_split_pascal_case() {
+  let cases = vec![
+    ("UserName", vec!["User", "Name"]),
+    ("SimpleTest", vec!["Simple", "Test"]),
+    ("HTTPSConnection", vec!["HTTPS", "Connection"]),
+    ("XMLParser", vec!["XML", "Parser"]),
+    ("JSONResponse", vec!["JSON", "Response"]),
+    ("HTTPStatus", vec!["HTTP", "Status"]),
+    ("HTTPS", vec!["HTTPS"]),
+    ("XML", vec!["XML"]),
+    ("User", vec!["User"]),
+    ("Status", vec!["Status"]),
+    ("", vec![]),
+  ];
 
-#[test]
-fn test_const_name() {
-  assert_eq!(regex_const_name(&["foo.bar", "baz"]), "REGEX_FOO_BAR_BAZ");
-  assert_eq!(regex_const_name(&["1a", "2b"]), "REGEX__1A_2B");
-}
-
-#[test]
-fn test_header_const_name() {
-  assert_eq!(header_const_name("x-my-header"), "X_MY_HEADER");
-  assert_eq!(header_const_name("Content-Type"), "CONTENT_TYPE");
-  assert_eq!(header_const_name("123-custom"), "_123_CUSTOM");
-  assert_eq!(header_const_name(""), "HEADER");
-}
-
-#[test]
-fn test_header_const_name_case_insensitive() {
-  assert_eq!(
-    header_const_name("X-API-Key"),
-    header_const_name("x-api-key"),
-    "header constant names should be case-insensitive"
-  );
-  assert_eq!(
-    header_const_name("Content-Type"),
-    header_const_name("content-type"),
-    "header constant names should be case-insensitive"
-  );
-  assert_eq!(
-    header_const_name("AUTHORIZATION"),
-    header_const_name("authorization"),
-    "header constant names should be case-insensitive"
-  );
+  for (input, expected) in cases {
+    assert_eq!(split_pascal_case(input), expected, "Failed for input '{input}'");
+  }
 }

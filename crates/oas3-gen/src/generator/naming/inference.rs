@@ -4,25 +4,25 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use crate::generator::{
+  ast::{EnumVariantToken, VariantDef},
   converter::hashing,
   naming::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
-    identifiers::{FORBIDDEN_IDENTIFIERS, sanitize, to_rust_type_name},
+    identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, sanitize, split_pascal_case, to_rust_type_name},
   },
   schema_registry::SchemaRegistry,
 };
 
-/// Scans the schema graph to discover and name inline types (enums, objects) ahead of time.
-///
-/// This helps to avoid name collisions and ensures consistent naming for reused inline schemas.
-pub(crate) struct InlineTypeScanner<'a> {
-  graph: &'a SchemaRegistry,
+#[must_use]
+fn is_freeform_string(schema: &ObjectSchema) -> bool {
+  schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
+    && schema.enum_values.is_empty()
+    && schema.const_value.is_none()
 }
 
-#[derive(Default)]
-pub(crate) struct ScanResult {
-  pub(crate) names: BTreeMap<String, String>,
-  pub(crate) enum_names: BTreeMap<Vec<String>, String>,
+#[must_use]
+fn is_constrained(schema: &ObjectSchema) -> bool {
+  !schema.enum_values.is_empty() || schema.const_value.is_some()
 }
 
 /// Checks if a schema matches the "relaxed enum" pattern.
@@ -30,27 +30,24 @@ pub(crate) struct ScanResult {
 /// A relaxed enum is defined as having a freeform string variant (no enum values, no const)
 /// alongside other variants that are constrained (enum values or const).
 pub(crate) fn is_relaxed_enum_pattern(schema: &ObjectSchema) -> bool {
-  let variants: Vec<_> = schema.any_of.iter().chain(&schema.one_of).collect();
+  has_mixed_string_variants(schema.any_of.iter().chain(&schema.one_of))
+}
+
+fn has_mixed_string_variants<'a>(variants: impl Iterator<Item = &'a ObjectOrReference<ObjectSchema>>) -> bool {
+  let variants: Vec<_> = variants.collect();
 
   if variants.is_empty() {
     return false;
   }
 
-  let has_freeform_string = variants.iter().any(|variant| match variant {
-    ObjectOrReference::Object(s) => {
-      s.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
-        && s.enum_values.is_empty()
-        && s.const_value.is_none()
-    }
-    ObjectOrReference::Ref { .. } => false,
-  });
+  let has_freeform = variants
+    .iter()
+    .any(|v| matches!(v, ObjectOrReference::Object(s) if is_freeform_string(s)));
+  let has_constrained = variants
+    .iter()
+    .any(|v| matches!(v, ObjectOrReference::Object(s) if is_constrained(s)));
 
-  let has_constrained_variant = variants.iter().any(|variant| match variant {
-    ObjectOrReference::Object(s) => !s.enum_values.is_empty() || s.const_value.is_some(),
-    ObjectOrReference::Ref { .. } => false,
-  });
-
-  has_freeform_string && has_constrained_variant
+  has_freeform && has_constrained
 }
 
 /// Extracts enum values from a schema, handling standard enums, oneOf/anyOf patterns,
@@ -78,16 +75,11 @@ pub(crate) fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> 
     return None;
   }
 
-  let has_freeform_string = variants.iter().any(|variant| match variant {
-    ObjectOrReference::Object(s) => {
-      s.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
-        && s.enum_values.is_empty()
-        && s.const_value.is_none()
-    }
-    ObjectOrReference::Ref { .. } => false,
-  });
+  let has_freeform = variants
+    .iter()
+    .any(|v| matches!(v, ObjectOrReference::Object(s) if is_freeform_string(s)));
 
-  if has_freeform_string {
+  if has_freeform {
     let values: BTreeSet<_> = variants
       .iter()
       .filter_map(|variant| match variant {
@@ -132,6 +124,292 @@ pub(crate) fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> 
   }
 
   None
+}
+
+/// Holds the result of normalizing a schema value into a Rust identifier.
+pub struct NormalizedVariant {
+  /// The valid Rust identifier (e.g., "Value10_5").
+  pub name: String,
+  /// The original value string for serialization (e.g., "10.5").
+  pub rename_value: String,
+}
+
+/// Normalizes JSON values into valid Rust variant names.
+///
+/// Converts strings, numbers, and booleans into PascalCase identifiers
+/// suitable for enum variants, preserving original values for serde rename.
+pub struct VariantNameNormalizer;
+
+impl VariantNameNormalizer {
+  #[must_use]
+  pub fn normalize(value: &serde_json::Value) -> Option<NormalizedVariant> {
+    match value {
+      serde_json::Value::String(str_val) => Some(NormalizedVariant {
+        name: to_rust_type_name(str_val),
+        rename_value: str_val.clone(),
+      }),
+      serde_json::Value::Number(num) => {
+        let raw_str = if num.is_i64() {
+          num.as_i64().unwrap().to_string()
+        } else if num.is_f64() {
+          num.as_f64().unwrap().to_string()
+        } else {
+          return None;
+        };
+        let safe_name = raw_str.replace(['.', '-'], "_");
+        Some(NormalizedVariant {
+          name: format!("Value{safe_name}"),
+          rename_value: raw_str,
+        })
+      }
+      serde_json::Value::Bool(bool_val) => Some(NormalizedVariant {
+        name: if *bool_val { "True".into() } else { "False".into() },
+        rename_value: bool_val.to_string(),
+      }),
+      _ => None,
+    }
+  }
+}
+
+/// Infers a variant name for an inline schema in a union.
+#[must_use]
+pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
+  if !schema.enum_values.is_empty() {
+    return "Enum".to_string();
+  }
+  if let Some(ref schema_type) = schema.schema_type {
+    match schema_type {
+      SchemaTypeSet::Single(typ) => match typ {
+        SchemaType::String => "String".to_string(),
+        SchemaType::Number => "Number".to_string(),
+        SchemaType::Integer => "Integer".to_string(),
+        SchemaType::Boolean => "Boolean".to_string(),
+        SchemaType::Array => "Array".to_string(),
+        SchemaType::Object => "Object".to_string(),
+        SchemaType::Null => "Null".to_string(),
+      },
+      SchemaTypeSet::Multiple(_) => "Mixed".to_string(),
+    }
+  } else {
+    format!("Variant{index}")
+  }
+}
+
+/// Strips common PascalCase word segments from variant names to make them concise.
+///
+/// This function identifies word boundaries in PascalCase names, finds segments
+/// shared by ALL variants at the beginning (prefix) and end (suffix), then removes
+/// them. Changes are only applied if all resulting names remain non-empty and unique.
+///
+/// # Algorithm
+///
+/// 1. Split each name into PascalCase word segments
+///    - `"CreateUserResponse"` -> `["Create", "User", "Response"]`
+/// 2. Find the longest common prefix (word segments shared at the start)
+/// 3. Find the longest common suffix (word segments shared at the end)
+/// 4. Strip both from each name, rejoining the remaining segments
+/// 5. Validate: abort if any name becomes empty or duplicates arise
+///
+/// # Examples
+///
+/// **Shared suffix:**
+/// - Input: `["CreateUserResponse", "UpdateUserResponse", "DeleteUserResponse"]`
+/// - Common prefix: 0 words (Create != Update != Delete)
+/// - Common suffix: 2 words (User, Response)
+/// - Output: `["Create", "Update", "Delete"]`
+///
+/// **Shared prefix and suffix:**
+/// - Input: `["UserCreateRequest", "UserUpdateRequest", "UserDeleteRequest"]`
+/// - Common prefix: 1 word (User)
+/// - Common suffix: 1 word (Request)
+/// - Output: `["Create", "Update", "Delete"]`
+///
+/// **No change (would create duplicates):**
+/// - Input: `["GetUserRequest", "GetUserResponse"]`
+/// - Common prefix: 2 words (Get, User)
+/// - Common suffix: 0 words
+/// - Stripped: `["Request", "Response"]` - valid, so applied
+///
+/// **No change (would empty a name):**
+/// - Input: `["User", "UserProfile"]`
+/// - Common prefix: 1 word (User)
+/// - Stripping would empty the first variant, so no changes applied
+pub fn strip_common_affixes(variants: &mut [VariantDef]) {
+  if variants.len() < 2 {
+    return;
+  }
+
+  let word_segments: Vec<Vec<String>> = variants
+    .iter()
+    .map(|v| split_pascal_case(&v.name.to_string()))
+    .collect();
+  let first = &word_segments[0];
+  let rest = &word_segments[1..];
+
+  let common_prefix_len = count_matching_prefix_segments(first, rest);
+  let common_suffix_len = count_matching_suffix_segments(first, rest);
+
+  let stripped_names: Vec<String> = word_segments
+    .iter()
+    .map(|segments| extract_middle_segments(segments, common_prefix_len, common_suffix_len))
+    .collect();
+
+  if !all_non_empty_and_unique(&stripped_names) {
+    return;
+  }
+
+  for (variant, new_name) in variants.iter_mut().zip(stripped_names) {
+    variant.name = EnumVariantToken::from(new_name);
+  }
+}
+
+#[must_use]
+fn count_matching_prefix_segments(first: &[String], rest: &[Vec<String>]) -> usize {
+  (0..first.len())
+    .take_while(|&idx| rest.iter().all(|other| other.get(idx) == Some(&first[idx])))
+    .count()
+}
+
+#[must_use]
+fn count_matching_suffix_segments(first: &[String], rest: &[Vec<String>]) -> usize {
+  (1..=first.len())
+    .take_while(|&offset| {
+      let first_word = &first[first.len() - offset];
+      rest
+        .iter()
+        .all(|other| other.len() >= offset && &other[other.len() - offset] == first_word)
+    })
+    .count()
+}
+
+#[must_use]
+fn extract_middle_segments(segments: &[String], prefix_len: usize, suffix_len: usize) -> String {
+  let end_idx = segments.len().saturating_sub(suffix_len);
+  if prefix_len < end_idx {
+    segments[prefix_len..end_idx].join("")
+  } else {
+    segments.join("")
+  }
+}
+
+#[must_use]
+fn all_non_empty_and_unique(names: &[String]) -> bool {
+  if names.iter().any(String::is_empty) {
+    return false;
+  }
+  let unique: BTreeSet<&String> = names.iter().collect();
+  unique.len() == names.len()
+}
+
+/// Derives method names for multiple enum variants, ensuring they remain unique
+/// after filtering out common words with the enum name.
+///
+/// Algorithm:
+/// 1. Split enum name into words (e.g., `"MyEnum"` -> `["My", "Enum"]`).
+/// 2. For each variant, split into words.
+/// 3. Remove words present in the enum name from the variant name.
+/// 4. If the result is unique and non-empty, use it.
+/// 5. Otherwise, fall back to the full variant name (snake_cased).
+pub(crate) fn derive_method_names(enum_name: &str, variant_names: &[String]) -> Vec<String> {
+  if variant_names.is_empty() {
+    return vec![];
+  }
+
+  let enum_words: BTreeSet<_> = split_pascal_case(enum_name).into_iter().collect();
+
+  let candidates: Vec<(String, String)> = variant_names
+    .iter()
+    .map(|variant_name| {
+      let variant_words = split_pascal_case(variant_name);
+      let unique_words: Vec<_> = variant_words
+        .iter()
+        .filter(|word| !enum_words.contains(*word))
+        .cloned()
+        .collect();
+
+      let original = variant_name.to_snake_case();
+      let simplified = if unique_words.is_empty() {
+        original.clone()
+      } else {
+        unique_words.join("").to_snake_case()
+      };
+      (original, simplified)
+    })
+    .collect();
+
+  let mut simplified_counts = BTreeMap::new();
+  for (_, simplified) in &candidates {
+    *simplified_counts.entry(simplified.clone()).or_insert(0) += 1;
+  }
+
+  candidates
+    .into_iter()
+    .map(|(original, simplified)| {
+      if simplified_counts[&simplified] > 1 {
+        original
+      } else {
+        simplified
+      }
+    })
+    .collect()
+}
+
+/// Infers a name for an inline schema based on its context (path, operation).
+///
+/// Used when a schema doesn't have a title or ref name.
+pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
+  let is_request = context == REQUEST_BODY_SUFFIX;
+
+  let with_suffix = |base: &str| {
+    let sanitized_base = sanitize(base);
+    if is_request {
+      format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
+    } else {
+      format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
+    }
+  };
+
+  if schema.properties.len() == 1
+    && let Some((prop_name, _)) = schema.properties.iter().next()
+  {
+    let singular = cruet::to_singular(prop_name);
+    let sanitized_singular = sanitize(&singular);
+    return if is_request {
+      sanitized_singular
+    } else {
+      format!("{sanitized_singular}{RESPONSE_SUFFIX}")
+    };
+  }
+
+  let segments: Vec<_> = path
+    .split('/')
+    .filter(|s| !s.is_empty() && !s.starts_with('{'))
+    .collect();
+
+  segments
+    .last()
+    .map(|&s| with_suffix(&cruet::to_singular(s)))
+    .or_else(|| segments.first().map(|&s| with_suffix(s)))
+    .unwrap_or_else(|| {
+      if is_request {
+        REQUEST_BODY_SUFFIX.to_string()
+      } else {
+        format!("{RESPONSE_PREFIX}{context}")
+      }
+    })
+}
+
+/// Scans the schema graph to discover and name inline types (enums, objects) ahead of time.
+///
+/// This helps to avoid name collisions and ensures consistent naming for reused inline schemas.
+pub(crate) struct InlineTypeScanner<'a> {
+  graph: &'a SchemaRegistry,
+}
+
+#[derive(Default)]
+pub(crate) struct ScanResult {
+  pub(crate) names: BTreeMap<String, String>,
+  pub(crate) enum_names: BTreeMap<Vec<String>, String>,
 }
 
 impl<'a> InlineTypeScanner<'a> {
@@ -273,25 +551,7 @@ impl<'a> InlineTypeScanner<'a> {
   }
 
   fn is_string_enum_optimizer_pattern(schema: &ObjectSchema) -> bool {
-    if schema.any_of.is_empty() {
-      return false;
-    }
-
-    let has_freeform_string = schema.any_of.iter().any(|variant| match variant {
-      ObjectOrReference::Object(s) => {
-        s.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
-          && s.enum_values.is_empty()
-          && s.const_value.is_none()
-      }
-      ObjectOrReference::Ref { .. } => false,
-    });
-
-    let has_constrained_variant = schema.any_of.iter().any(|variant| match variant {
-      ObjectOrReference::Object(s) => !s.enum_values.is_empty() || s.const_value.is_some(),
-      ObjectOrReference::Ref { .. } => false,
-    });
-
-    has_freeform_string && has_constrained_variant
+    !schema.any_of.is_empty() && has_mixed_string_variants(schema.any_of.iter())
   }
 
   fn is_inline_target(schema: &ObjectSchema) -> bool {
@@ -377,152 +637,4 @@ impl<'a> InlineTypeScanner<'a> {
 
     true
   }
-}
-
-/// Ensures a name is unique within a set of used names, appending a numeric suffix if needed.
-pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
-  if !used_names.contains(base_name) {
-    return base_name.to_string();
-  }
-  let mut i = 2;
-  loop {
-    let new_name = format!("{base_name}{i}");
-    if !used_names.contains(&new_name) {
-      return new_name;
-    }
-    i += 1;
-  }
-}
-
-/// Derives method names for multiple enum variants, ensuring they remain unique
-/// after filtering out common words with the enum name.
-///
-/// Algorithm:
-/// 1. Split enum name into words (e.g., `"MyEnum"` -> `["My", "Enum"]`).
-/// 2. For each variant, split into words.
-/// 3. Remove words present in the enum name from the variant name.
-/// 4. If the result is unique and non-empty, use it.
-/// 5. Otherwise, fall back to the full variant name (snake_cased).
-pub(crate) fn derive_method_names(enum_name: &str, variant_names: &[String]) -> Vec<String> {
-  if variant_names.is_empty() {
-    return vec![];
-  }
-
-  let enum_words: BTreeSet<_> = split_pascal_case(enum_name).into_iter().collect();
-
-  // Pre-calculate candidates: (original_snake, simplified_snake)
-  let candidates: Vec<(String, String)> = variant_names
-    .iter()
-    .map(|variant_name| {
-      let variant_words = split_pascal_case(variant_name);
-      let unique_words: Vec<_> = variant_words
-        .iter()
-        .filter(|word| !enum_words.contains(*word))
-        .cloned()
-        .collect();
-
-      let original = variant_name.to_snake_case();
-      let simplified = if unique_words.is_empty() {
-        original.clone()
-      } else {
-        unique_words.join("").to_snake_case()
-      };
-      (original, simplified)
-    })
-    .collect();
-
-  // Count occurrences of simplified names to detect collisions
-  let mut simplified_counts = BTreeMap::new();
-  for (_, simplified) in &candidates {
-    *simplified_counts.entry(simplified.clone()).or_insert(0) += 1;
-  }
-
-  candidates
-    .into_iter()
-    .map(|(original, simplified)| {
-      if simplified_counts[&simplified] > 1 {
-        original
-      } else {
-        simplified
-      }
-    })
-    .collect()
-}
-
-/// Splits a PascalCase string into words.
-/// Handles adjacent uppercase letters correctly (e.g., `"XMLParser"` -> `["XML", "Parser"]`).
-pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
-  if name.is_empty() {
-    return vec![];
-  }
-
-  let mut words = vec![];
-  let mut current_word = String::new();
-  let chars: Vec<char> = name.chars().collect();
-
-  for (i, &ch) in chars.iter().enumerate() {
-    if ch.is_uppercase() && !current_word.is_empty() {
-      // Check boundary conditions for splitting
-      let prev_is_lower = i > 0 && chars[i - 1].is_lowercase();
-      let next_is_lower = i + 1 < chars.len() && chars[i + 1].is_lowercase();
-
-      if prev_is_lower || next_is_lower {
-        words.push(std::mem::take(&mut current_word));
-      }
-    }
-    current_word.push(ch);
-  }
-
-  if !current_word.is_empty() {
-    words.push(current_word);
-  }
-
-  words
-}
-
-/// Infers a name for an inline schema based on its context (path, operation).
-///
-/// Used when a schema doesn't have a title or ref name.
-pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
-  let is_request = context == REQUEST_BODY_SUFFIX;
-
-  let with_suffix = |base: &str| {
-    let sanitized_base = sanitize(base);
-    if is_request {
-      format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
-    } else {
-      format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
-    }
-  };
-
-  // If schema has exactly one property, try to name it after that property
-  if schema.properties.len() == 1
-    && let Some((prop_name, _)) = schema.properties.iter().next()
-  {
-    let singular = cruet::to_singular(prop_name);
-    let sanitized_singular = sanitize(&singular);
-    return if is_request {
-      sanitized_singular
-    } else {
-      format!("{sanitized_singular}{RESPONSE_SUFFIX}")
-    };
-  }
-
-  // Otherwise, derive from path segments
-  let segments: Vec<_> = path
-    .split('/')
-    .filter(|s| !s.is_empty() && !s.starts_with('{'))
-    .collect();
-
-  segments
-    .last()
-    .map(|&s| with_suffix(&cruet::to_singular(s)))
-    .or_else(|| segments.first().map(|&s| with_suffix(s)))
-    .unwrap_or_else(|| {
-      if is_request {
-        REQUEST_BODY_SUFFIX.to_string()
-      } else {
-        format!("{RESPONSE_PREFIX}{context}")
-      }
-    })
 }

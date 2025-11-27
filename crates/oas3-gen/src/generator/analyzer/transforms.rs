@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::type_usage::TypeUsage;
 use crate::generator::ast::{
-  DeriveTrait, EnumDef, FieldDef, OperationInfo, RustType, StructDef, StructKind, StructMethodKind, TypeRef,
-  default_struct_derives,
+  ContentCategory, DeriveTrait, EnumDef, EnumToken, FieldDef, OperationInfo, RustType, StatusCodeToken, StructDef,
+  StructKind, StructMethodKind, TypeRef, default_struct_derives,
 };
 
 const SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
 
-pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage: &BTreeMap<String, TypeUsage>) {
+pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage: &BTreeMap<EnumToken, TypeUsage>) {
   for rust_type in rust_types {
     match rust_type {
       RustType::Struct(def) => process_struct(def, type_usage),
@@ -18,8 +18,9 @@ pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage:
   }
 }
 
-fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<String, TypeUsage>) {
-  let usage = get_usage(&def.name, type_usage);
+fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) {
+  let key: EnumToken = def.name.as_str().into();
+  let usage = get_usage(&key, type_usage);
 
   let derives = calculate_struct_derives(def.kind, usage);
   def.derives = derives;
@@ -32,7 +33,7 @@ fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<String, TypeUsage>)
   adjust_skip_serializing_none(def, needs_serialization);
 }
 
-fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<String, TypeUsage>) {
+fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) {
   let usage = get_usage(&def.name, type_usage);
 
   let mut derives = def.derives.clone();
@@ -44,7 +45,7 @@ fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<String, TypeUsage>) {
   def.derives = derives;
 }
 
-fn get_usage(name: &str, map: &BTreeMap<String, TypeUsage>) -> TypeUsage {
+fn get_usage(name: &EnumToken, map: &BTreeMap<EnumToken, TypeUsage>) -> TypeUsage {
   map.get(name).copied().unwrap_or(TypeUsage::Bidirectional)
 }
 
@@ -105,7 +106,7 @@ fn has_nullable_fields(fields: &[FieldDef]) -> bool {
   fields.iter().any(|field| field.rust_type.nullable)
 }
 
-type ResponseEnumSignature = Vec<(String, String, String, Option<String>)>;
+type ResponseEnumSignature = Vec<(StatusCodeToken, String, String, ContentCategory)>;
 
 struct DuplicateCandidate {
   index: usize,
@@ -122,12 +123,12 @@ pub(crate) fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operati
         .iter()
         .map(|v| {
           (
-            v.status_code.clone(),
-            v.variant_name.clone(),
+            v.status_code,
+            v.variant_name.to_string(),
             v.schema_type
               .as_ref()
               .map_or_else(|| "None".to_string(), TypeRef::to_rust_type),
-            v.content_type.clone(),
+            v.content_category,
           )
         })
         .collect();
@@ -136,7 +137,7 @@ pub(crate) fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operati
 
       signature_map.entry(signature).or_default().push(DuplicateCandidate {
         index: i,
-        name: def.name.clone(),
+        name: def.name.to_string(),
       });
     }
   }
@@ -169,10 +170,10 @@ pub(crate) fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operati
   }
 
   for op in operations_info.iter_mut() {
-    if let Some(ref current_name) = op.response_enum
-      && let Some(new_name) = replacements.get(current_name)
+    if let Some(ref current_enum) = op.response_enum
+      && let Some(new_name) = replacements.get(&current_enum.to_string())
     {
-      op.response_enum = Some(new_name.clone());
+      op.response_enum = Some(EnumToken::new(new_name));
     }
   }
 
@@ -180,9 +181,9 @@ pub(crate) fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operati
     if let RustType::Struct(def) = rt {
       for method in &mut def.methods {
         if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
-          && let Some(new_name) = replacements.get(response_enum)
+          && let Some(new_name) = replacements.get(&response_enum.to_string())
         {
-          *response_enum = new_name.clone();
+          *response_enum = EnumToken::new(new_name);
         }
       }
     }

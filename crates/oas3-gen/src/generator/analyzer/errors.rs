@@ -1,12 +1,15 @@
 use std::collections::HashSet;
 
 use super::type_graph::TypeDependencyGraph;
-use crate::generator::ast::{OperationInfo, RustType};
+use crate::generator::ast::{EnumToken, OperationInfo, RustType};
 
 pub(crate) struct ErrorAnalyzer;
 
 impl ErrorAnalyzer {
-  pub(crate) fn build_error_schema_set(operations_info: &[OperationInfo], rust_types: &[RustType]) -> HashSet<String> {
+  pub(crate) fn build_error_schema_set(
+    operations_info: &[OperationInfo],
+    rust_types: &[RustType],
+  ) -> HashSet<EnumToken> {
     let mut error_schemas = HashSet::new();
     let mut success_schemas = HashSet::new();
 
@@ -31,10 +34,10 @@ impl ErrorAnalyzer {
     roots: &HashSet<String>,
     rust_types: &[RustType],
     success_schemas: &HashSet<String>,
-  ) -> HashSet<String> {
+  ) -> HashSet<EnumToken> {
     let dep_graph = TypeDependencyGraph::build(rust_types);
 
-    let mut result = roots.clone();
+    let mut result: HashSet<EnumToken> = roots.iter().map(EnumToken::new).collect();
     let mut queue: Vec<String> = roots.iter().cloned().collect();
     let mut visited = HashSet::new();
 
@@ -45,8 +48,11 @@ impl ErrorAnalyzer {
 
       if let Some(deps) = dep_graph.get_dependencies(&type_name) {
         for nested_type in deps {
-          if !success_schemas.contains(nested_type) && result.insert(nested_type.clone()) {
-            queue.push(nested_type.clone());
+          if !success_schemas.contains(nested_type) {
+            let token = EnumToken::new(nested_type);
+            if result.insert(token) {
+              queue.push(nested_type.clone());
+            }
           }
         }
       }

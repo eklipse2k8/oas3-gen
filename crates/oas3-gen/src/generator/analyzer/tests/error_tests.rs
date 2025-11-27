@@ -5,17 +5,17 @@ use http::Method;
 use crate::generator::{
   analyzer::ErrorAnalyzer,
   ast::{
-    EnumDef, FieldDef, OperationInfo, RustPrimitive, RustType, StructDef, StructKind, TypeRef, VariantContent,
-    VariantDef,
+    ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
+    StructToken, TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
 fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
   RustType::Struct(StructDef {
-    name: name.to_string(),
+    name: StructToken::new(name),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "field".to_string(),
+      name: FieldNameToken::new("field"),
       docs: vec![],
       rust_type: TypeRef::new(field_type),
       ..Default::default()
@@ -31,7 +31,7 @@ fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
 fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
   let variants = if has_tuple_variant {
     vec![VariantDef {
-      name: "Error".to_string(),
+      name: "Error".into(),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],
@@ -39,7 +39,7 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
     }]
   } else {
     vec![VariantDef {
-      name: "Unit".to_string(),
+      name: "Unit".into(),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],
@@ -48,7 +48,7 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
   };
 
   RustType::Enum(EnumDef {
-    name: name.to_string(),
+    name: EnumToken::new(name),
     docs: vec![],
     variants,
     derives: BTreeSet::new(),
@@ -71,7 +71,7 @@ fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<
     request_type: None,
     response_type: None,
     response_enum: None,
-    response_content_type: None,
+    response_content_category: ContentCategory::Json,
     success_response_types: success_types,
     error_response_types: error_types,
     warnings: vec![],
@@ -98,7 +98,7 @@ fn test_build_error_schema_set_empty_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorType"));
+  assert!(result.contains(&EnumToken::new("ErrorType")));
 }
 
 #[test]
@@ -115,8 +115,8 @@ fn test_build_error_schema_set_only_error_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("Error1"));
-  assert!(result.contains("Error2"));
+  assert!(result.contains(&EnumToken::new("Error1")));
+  assert!(result.contains(&EnumToken::new("Error2")));
 }
 
 #[test]
@@ -137,12 +137,12 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["RootError".to_string()])];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "RootError".to_string(),
+      name: StructToken::new("RootError"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -157,8 +157,8 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("RootError"));
-  assert!(result.contains("NestedError"));
+  assert!(result.contains(&EnumToken::new("RootError")));
+  assert!(result.contains(&EnumToken::new("NestedError")));
 }
 
 #[test]
@@ -166,12 +166,12 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["ErrorEnum".to_string()])];
   let rust_types = vec![
     RustType::Enum(EnumDef {
-      name: "ErrorEnum".to_string(),
+      name: "ErrorEnum".into(),
       docs: vec![],
       variants: vec![VariantDef {
-        name: "Variant".to_string(),
+        name: "Variant".into(),
         docs: vec![],
-        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("InnerError".to_string()))]),
+        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("InnerError".into()))]),
         serde_attrs: vec![],
         deprecated: false,
       }],
@@ -188,8 +188,8 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("ErrorEnum"));
-  assert!(result.contains("InnerError"));
+  assert!(result.contains(&EnumToken::new("ErrorEnum")));
+  assert!(result.contains(&EnumToken::new("InnerError")));
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn test_build_error_schema_set_skips_unit_enum_variants() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorEnum"));
+  assert!(result.contains(&EnumToken::new("ErrorEnum")));
 }
 
 #[test]
@@ -208,12 +208,12 @@ fn test_build_error_schema_set_handles_deep_nesting() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["Level1".to_string()])];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "Level1".to_string(),
+      name: StructToken::new("Level1"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("Level2".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("Level2".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -223,12 +223,12 @@ fn test_build_error_schema_set_handles_deep_nesting() {
       kind: StructKind::Schema,
     }),
     RustType::Struct(StructDef {
-      name: "Level2".to_string(),
+      name: StructToken::new("Level2"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("Level3".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("Level3".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -243,9 +243,9 @@ fn test_build_error_schema_set_handles_deep_nesting() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 3);
-  assert!(result.contains("Level1"));
-  assert!(result.contains("Level2"));
-  assert!(result.contains("Level3"));
+  assert!(result.contains(&EnumToken::new("Level1")));
+  assert!(result.contains(&EnumToken::new("Level2")));
+  assert!(result.contains(&EnumToken::new("Level3")));
 }
 
 #[test]
@@ -256,12 +256,12 @@ fn test_build_error_schema_set_stops_at_success_types() {
   ];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "ErrorType".to_string(),
+      name: StructToken::new("ErrorType"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -276,8 +276,11 @@ fn test_build_error_schema_set_stops_at_success_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorType"));
-  assert!(!result.contains("SuccessType"), "Should not expand into success types");
+  assert!(result.contains(&EnumToken::new("ErrorType")));
+  assert!(
+    !result.contains(&EnumToken::new("SuccessType")),
+    "Should not expand into success types"
+  );
 }
 
 #[test]
@@ -288,7 +291,7 @@ fn test_build_error_schema_set_handles_missing_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("MissingType"));
+  assert!(result.contains(&EnumToken::new("MissingType")));
 }
 
 #[test]
@@ -296,12 +299,12 @@ fn test_build_error_schema_set_handles_circular_references() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["CircularA".to_string()])];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "CircularA".to_string(),
+      name: StructToken::new("CircularA"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "b".to_string(),
+        name: FieldNameToken::new("b"),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -311,12 +314,12 @@ fn test_build_error_schema_set_handles_circular_references() {
       kind: StructKind::Schema,
     }),
     RustType::Struct(StructDef {
-      name: "CircularB".to_string(),
+      name: StructToken::new("CircularB"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "a".to_string(),
+        name: FieldNameToken::new("a"),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -330,8 +333,8 @@ fn test_build_error_schema_set_handles_circular_references() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("CircularA"));
-  assert!(result.contains("CircularB"));
+  assert!(result.contains(&EnumToken::new("CircularA")));
+  assert!(result.contains(&EnumToken::new("CircularB")));
 }
 
 #[test]
@@ -342,17 +345,17 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
     vec!["ErrorWithPrimitives".to_string()],
   )];
   let rust_types = vec![RustType::Struct(StructDef {
-    name: "ErrorWithPrimitives".to_string(),
+    name: StructToken::new("ErrorWithPrimitives"),
     docs: vec![],
     fields: vec![
       FieldDef {
-        name: "string_field".to_string(),
+        name: FieldNameToken::new("string_field"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::String),
         ..Default::default()
       },
       FieldDef {
-        name: "int_field".to_string(),
+        name: FieldNameToken::new("int_field"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::I64),
         ..Default::default()
@@ -368,7 +371,7 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorWithPrimitives"));
+  assert!(result.contains(&EnumToken::new("ErrorWithPrimitives")));
 }
 
 #[test]
@@ -383,5 +386,5 @@ fn test_build_error_schema_set_multiple_operations_same_error() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1, "Should deduplicate common errors");
-  assert!(result.contains("CommonError"));
+  assert!(result.contains(&EnumToken::new("CommonError")));
 }

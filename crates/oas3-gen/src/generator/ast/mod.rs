@@ -1,8 +1,13 @@
 mod derives;
 pub mod lints;
 pub(super) mod serde_attrs;
+mod status_codes;
+pub mod tokens;
 pub(super) mod types;
 pub(super) mod validation_attrs;
+
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeSet;
 
@@ -11,6 +16,10 @@ pub use derives::{DeriveTrait, default_enum_derives, default_struct_derives};
 use http::Method;
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
+pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
+pub use tokens::{
+  DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TypeAliasToken,
+};
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
@@ -25,7 +34,7 @@ pub struct DiscriminatedVariant {
 /// Discriminated enum definition (uses macro for custom ser/de)
 #[derive(Debug, Clone)]
 pub struct DiscriminatedEnumDef {
-  pub name: String,
+  pub name: EnumToken,
   pub docs: Vec<String>,
   pub discriminator_field: String,
   pub variants: Vec<DiscriminatedVariant>,
@@ -35,20 +44,20 @@ pub struct DiscriminatedEnumDef {
 /// Response enum variant definition
 #[derive(Debug, Clone)]
 pub struct ResponseVariant {
-  pub status_code: String,
-  pub variant_name: String,
+  pub status_code: StatusCodeToken,
+  pub variant_name: EnumVariantToken,
   pub description: Option<String>,
   pub schema_type: Option<TypeRef>,
-  pub content_type: Option<String>,
+  pub content_category: ContentCategory,
 }
 
 /// Response enum definition for operation responses
 #[derive(Debug, Clone)]
 pub struct ResponseEnumDef {
-  pub name: String,
+  pub name: EnumToken,
   pub docs: Vec<String>,
   pub variants: Vec<ResponseVariant>,
-  pub request_type: String,
+  pub request_type: Option<StructToken>,
 }
 
 /// Top-level Rust type representation
@@ -62,13 +71,13 @@ pub enum RustType {
 }
 
 impl RustType {
-  pub fn type_name(&self) -> &str {
+  pub fn type_name(&self) -> DefaultAtom {
     match self {
-      RustType::Struct(def) => &def.name,
-      RustType::Enum(def) => &def.name,
-      RustType::TypeAlias(def) => &def.name,
-      RustType::DiscriminatedEnum(def) => &def.name,
-      RustType::ResponseEnum(def) => &def.name,
+      RustType::Struct(def) => def.name.to_atom(),
+      RustType::Enum(def) => def.name.to_atom(),
+      RustType::TypeAlias(def) => def.name.to_atom(),
+      RustType::DiscriminatedEnum(def) => def.name.to_atom(),
+      RustType::ResponseEnum(def) => def.name.to_atom(),
     }
   }
 }
@@ -82,10 +91,10 @@ pub struct OperationInfo {
   pub path: String,
   pub summary: Option<String>,
   pub description: Option<String>,
-  pub request_type: Option<String>,
+  pub request_type: Option<StructToken>,
   pub response_type: Option<String>,
-  pub response_enum: Option<String>,
-  pub response_content_type: Option<String>,
+  pub response_enum: Option<EnumToken>,
+  pub response_content_category: ContentCategory,
   pub success_response_types: Vec<String>,
   pub error_response_types: Vec<String>,
   pub warnings: Vec<String>,
@@ -105,17 +114,56 @@ pub enum ParameterLocation {
 #[derive(Debug, Clone, Default)]
 pub struct OperationParameter {
   pub original_name: String,
-  pub rust_field: String,
+  pub rust_field: FieldNameToken,
   pub location: ParameterLocation,
   pub required: bool,
   pub rust_type: TypeRef,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum ContentCategory {
+  #[default]
+  Json,
+  FormUrlEncoded,
+  Multipart,
+  Text,
+  Binary,
+  Xml,
+}
+
+impl ContentCategory {
+  #[must_use]
+  pub fn from_content_type(content_type: &str) -> Self {
+    let ct = content_type.to_ascii_lowercase();
+    if ct.contains("json") {
+      Self::Json
+    } else if ct.contains("x-www-form-urlencoded") {
+      Self::FormUrlEncoded
+    } else if ct.contains("multipart") {
+      Self::Multipart
+    } else if ct.contains("text/plain") || ct.contains("text/html") {
+      Self::Text
+    } else if ct.contains("xml") {
+      Self::Xml
+    } else if ct.contains("octet-stream")
+      || ct.starts_with("image/")
+      || ct.starts_with("video/")
+      || ct.starts_with("audio/")
+      || ct.starts_with("application/pdf")
+      || (ct.starts_with("application/") && !ct.contains("json"))
+    {
+      Self::Binary
+    } else {
+      Self::Json
+    }
+  }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct OperationBody {
-  pub field_name: String,
+  pub field_name: FieldNameToken,
   pub optional: bool,
-  pub content_type: Option<String>,
+  pub content_category: ContentCategory,
 }
 
 /// Semantic kind of a struct to determine code generation behavior
@@ -133,7 +181,7 @@ pub enum StructKind {
 /// Rust struct definition
 #[derive(Debug, Clone, Default)]
 pub struct StructDef {
-  pub name: String,
+  pub name: StructToken,
   pub docs: Vec<String>,
   pub fields: Vec<FieldDef>,
   pub derives: BTreeSet<DeriveTrait>,
@@ -146,7 +194,7 @@ pub struct StructDef {
 /// Associated method definition for a struct
 #[derive(Debug, Clone)]
 pub struct StructMethod {
-  pub name: String,
+  pub name: MethodNameToken,
   pub docs: Vec<String>,
   pub kind: StructMethodKind,
   pub attrs: Vec<String>,
@@ -154,7 +202,7 @@ pub struct StructMethod {
 
 #[derive(Debug, Clone, Default)]
 pub struct QueryParameter {
-  pub field: String,
+  pub field: FieldNameToken,
   pub encoded_name: String,
   pub explode: bool,
   pub optional: bool,
@@ -169,7 +217,7 @@ pub enum StructMethodKind {
     query_params: Vec<QueryParameter>,
   },
   ParseResponse {
-    response_enum: String,
+    response_enum: EnumToken,
     variants: Vec<ResponseVariant>,
   },
 }
@@ -177,7 +225,7 @@ pub enum StructMethodKind {
 #[derive(Debug, Clone)]
 pub enum PathSegment {
   Literal(String),
-  Parameter { field: String },
+  Parameter { field: FieldNameToken },
 }
 
 /// Associated method definition for an enum
@@ -206,7 +254,7 @@ pub enum EnumMethodKind {
 #[derive(Debug, Clone, Default, Builder)]
 #[builder(default, setter(into))]
 pub struct FieldDef {
-  pub name: String,
+  pub name: FieldNameToken,
   pub docs: Vec<String>,
   pub rust_type: TypeRef,
   pub serde_attrs: Vec<SerdeAttribute>,
@@ -222,7 +270,7 @@ pub struct FieldDef {
 /// Rust enum definition
 #[derive(Debug, Clone, Default)]
 pub struct EnumDef {
-  pub name: String,
+  pub name: EnumToken,
   pub docs: Vec<String>,
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
@@ -236,7 +284,7 @@ pub struct EnumDef {
 /// Rust enum variant definition
 #[derive(Debug, Clone, Default)]
 pub struct VariantDef {
-  pub name: String,
+  pub name: EnumVariantToken,
   pub docs: Vec<String>,
   pub content: VariantContent,
   pub serde_attrs: Vec<SerdeAttribute>,
@@ -254,7 +302,7 @@ pub enum VariantContent {
 /// Type alias definition
 #[derive(Debug, Clone, Default)]
 pub struct TypeAliasDef {
-  pub name: String,
+  pub name: TypeAliasToken,
   pub docs: Vec<String>,
   pub target: TypeRef,
 }

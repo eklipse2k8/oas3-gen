@@ -4,8 +4,11 @@ use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{cache::SharedSchemaCache, metadata};
 use crate::generator::{
-  ast::{EnumDef, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
-  naming::{identifiers::to_rust_type_name, inference as naming},
+  ast::{
+    EnumDef, EnumToken, EnumVariantToken, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+    default_enum_derives,
+  },
+  naming::identifiers::{ensure_unique, to_rust_type_name},
   schema_registry::SchemaRegistry,
 };
 
@@ -154,11 +157,11 @@ impl<'a> StringEnumOptimizer<'a> {
 
     for (value, description, deprecated) in values {
       let base_name = to_rust_type_name(value);
-      let variant_name = naming::ensure_unique(&base_name, &seen_names);
+      let variant_name = ensure_unique(&base_name, &seen_names);
       seen_names.insert(variant_name.clone());
 
       variants.push(VariantDef {
-        name: variant_name,
+        name: EnumVariantToken::from(variant_name),
         docs: metadata::extract_docs(description.as_ref()),
         content: VariantContent::Unit,
         serde_attrs: vec![SerdeAttribute::Rename(value.clone())],
@@ -167,8 +170,8 @@ impl<'a> StringEnumOptimizer<'a> {
     }
 
     RustType::Enum(EnumDef {
-      name: name.to_string(),
-      docs: vec!["/// Known values for the string enum.".to_string()],
+      name: EnumToken::new(name),
+      docs: vec!["Known values for the string enum.".to_string()],
       variants,
       discriminator: None,
       derives: default_enum_derives(true),
@@ -182,15 +185,15 @@ impl<'a> StringEnumOptimizer<'a> {
   fn build_outer_enum(name: &str, known_type_name: &str, schema: &ObjectSchema) -> RustType {
     let variants = vec![
       VariantDef {
-        name: "Known".to_string(),
-        docs: vec!["/// A known value.".to_string()],
+        name: EnumVariantToken::new("Known"),
+        docs: vec!["A known value.".to_string()],
         content: VariantContent::Tuple(vec![TypeRef::new(known_type_name)]),
         serde_attrs: vec![SerdeAttribute::Default],
         deprecated: false,
       },
       VariantDef {
-        name: "Other".to_string(),
-        docs: vec!["/// An unknown value.".to_string()],
+        name: EnumVariantToken::new("Other"),
+        docs: vec!["An unknown value.".to_string()],
         content: VariantContent::Tuple(vec![TypeRef::new("String")]),
         serde_attrs: vec![],
         deprecated: false,
@@ -198,7 +201,7 @@ impl<'a> StringEnumOptimizer<'a> {
     ];
 
     RustType::Enum(EnumDef {
-      name: name.to_string(),
+      name: EnumToken::new(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,

@@ -1,6 +1,6 @@
 use std::{
   char::{ToLowercase, ToUppercase},
-  collections::HashSet,
+  collections::{BTreeSet, HashSet},
   iter::Peekable,
   sync::LazyLock,
 };
@@ -29,7 +29,6 @@ static RESERVED_PASCAL_CASE: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     .collect()
 });
 
-// Compile static regexes only once for sanitization.
 static INVALID_CHARS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^A-Za-z0-9_]+").unwrap());
 static MULTI_UNDERSCORE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"_+").unwrap());
 
@@ -48,6 +47,51 @@ pub(crate) fn sanitize(input: &str) -> String {
   collapsed.trim_matches('_').to_string()
 }
 
+/// Splits a PascalCase string into words.
+/// Handles adjacent uppercase letters correctly (e.g., `"XMLParser"` -> `["XML", "Parser"]`).
+pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
+  if name.is_empty() {
+    return vec![];
+  }
+
+  let mut words = vec![];
+  let mut current_word = String::new();
+  let chars: Vec<char> = name.chars().collect();
+
+  for (i, &ch) in chars.iter().enumerate() {
+    if ch.is_uppercase() && !current_word.is_empty() {
+      let prev_is_lower = i > 0 && chars[i - 1].is_lowercase();
+      let next_is_lower = i + 1 < chars.len() && chars[i + 1].is_lowercase();
+
+      if prev_is_lower || next_is_lower {
+        words.push(std::mem::take(&mut current_word));
+      }
+    }
+    current_word.push(ch);
+  }
+
+  if !current_word.is_empty() {
+    words.push(current_word);
+  }
+
+  words
+}
+
+/// Ensures a name is unique within a set of used names, appending a numeric suffix if needed.
+pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
+  if !used_names.contains(base_name) {
+    return base_name.to_string();
+  }
+  let mut i = 2;
+  loop {
+    let new_name = format!("{base_name}{i}");
+    if !used_names.contains(&new_name) {
+      return new_name;
+    }
+    i += 1;
+  }
+}
+
 /// Converts a string into a valid Rust field name (`snake_case`).
 ///
 /// # Rules:
@@ -59,12 +103,8 @@ pub(crate) fn sanitize(input: &str) -> String {
 /// 6. If the result starts with a digit, it's prefixed with `_`.
 /// 7. If the result is empty, it becomes `_`.
 pub(crate) fn to_rust_field_name(name: &str) -> String {
-  // Check for leading `-` which indicates a "negative" or inverse meaning
-  let (has_leading_minus, name_without_minus) = if let Some(stripped) = name.strip_prefix('-') {
-    (true, stripped)
-  } else {
-    (false, name)
-  };
+  let has_leading_minus = name.starts_with('-');
+  let name_without_minus = name.strip_prefix('-').unwrap_or(name);
 
   let mut ident = sanitize(name_without_minus).to_snake_case();
 
@@ -72,7 +112,6 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
     return "_".to_string();
   }
 
-  // Prepend "negative_" if original name started with `-`
   if has_leading_minus {
     ident = format!("negative_{ident}");
   }
@@ -85,10 +124,20 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
     return format!("r#{ident}");
   }
 
+  prefix_if_digit_start(&mut ident, '_');
+  ident
+}
+
+pub(crate) fn to_rust_const_name(input: &str) -> String {
+  let sanitized = sanitize(input);
+  if sanitized.is_empty() {
+    return "UNNAMED".to_string();
+  }
+
+  let mut ident = sanitized.to_constant_case();
   if ident.starts_with(|c: char| c.is_ascii_digit()) {
     ident.insert(0, '_');
   }
-
   ident
 }
 
@@ -102,26 +151,18 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
 /// 5. If the result starts with a digit, it's prefixed with `T`.
 /// 6. If the result is empty, it becomes `Unnamed`.
 pub(crate) fn to_rust_type_name(name: &str) -> String {
-  // Check for leading `-` which indicates a "negative" or inverse meaning
-  let (has_leading_minus, name_without_minus) = if let Some(stripped) = name.strip_prefix('-') {
-    (true, stripped)
-  } else {
-    (false, name)
-  };
+  let has_leading_minus = name.starts_with('-');
+  let name_without_minus = name.strip_prefix('-').unwrap_or(name);
 
-  // Check if the string already appears to be in mixed case format
-  // (has both uppercase and lowercase letters with no separators)
   let has_separators = name_without_minus.contains(['-', '_', '.', ' ']);
   let has_upper = name_without_minus.chars().any(|c| c.is_ascii_uppercase());
   let has_lower = name_without_minus.chars().any(|c| c.is_ascii_lowercase());
   let appears_mixed_case = !has_separators && has_upper && has_lower;
 
   let mut ident = if appears_mixed_case {
-    // Preserve existing capitalization, just clean non-alphanumeric characters
     let ascii = any_ascii(name_without_minus);
     let cleaned: String = ascii.chars().filter(char::is_ascii_alphanumeric).collect();
 
-    // Ensure first letter is uppercase for PascalCase
     if cleaned.is_empty() {
       cleaned
     } else {
@@ -132,10 +173,8 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
       }
     }
   } else {
-    // Apply conversion using capitalize_words for any string with separators or not in mixed case
     let ascii = any_ascii(name_without_minus);
 
-    // Use capitalize_words to handle capitalization, treating non-alphanumeric and camelCase boundaries as separators
     ascii
       .chars()
       .capitalize_words_with_boundaries()
@@ -147,7 +186,6 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
     return "Unnamed".to_string();
   }
 
-  // Prepend "Negative" if original name started with `-`
   if has_leading_minus {
     ident = format!("Negative{ident}");
   }
@@ -156,38 +194,18 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
     return format!("r#{ident}");
   }
 
-  if ident.starts_with(|c: char| c.is_ascii_digit()) {
-    ident.insert(0, 'T');
-  }
-
+  prefix_if_digit_start(&mut ident, 'T');
   ident
 }
 
-/// Converts a slice of string parts into a valid Rust constant name for a regex.
-pub(crate) fn regex_const_name(key: &[&str]) -> String {
-  let joined = key.iter().map(|part| sanitize(part)).collect::<Vec<_>>().join("_");
-
-  let mut ident = joined.to_constant_case();
-
+fn prefix_if_digit_start(ident: &mut String, prefix: char) {
   if ident.starts_with(|c: char| c.is_ascii_digit()) {
-    ident.insert(0, '_');
+    ident.insert(0, prefix);
   }
-
-  format!("REGEX_{ident}")
 }
 
-/// Converts a header name into a valid Rust constant identifier (`SCREAMING_SNAKE_CASE`).
-pub(crate) fn header_const_name(header: &str) -> String {
-  let sanitized = sanitize(header);
-  if sanitized.is_empty() {
-    return "HEADER".to_string();
-  }
-
-  let mut ident = sanitized.to_constant_case();
-  if ident.starts_with(|c: char| c.is_ascii_digit()) {
-    ident.insert(0, '_');
-  }
-  ident
+pub(crate) fn to_http_header_name(name: &str) -> String {
+  name.to_ascii_lowercase()
 }
 
 /// An extension trait for char iterators to add word capitalization.
@@ -232,7 +250,6 @@ where
 {
   type Item = char;
 
-  #[inline]
   fn next(&mut self) -> Option<Self::Item> {
     if let Some(ref mut upper_iter) = self.pending_upper {
       if let Some(c) = upper_iter.next() {

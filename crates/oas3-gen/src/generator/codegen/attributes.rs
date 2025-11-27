@@ -9,13 +9,7 @@ pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
     return quote! {};
   }
-  let doc_lines: Vec<TokenStream> = docs
-    .iter()
-    .map(|line| {
-      let clean = line.strip_prefix("/// ").unwrap_or(line);
-      quote! { #[doc = #clean] }
-    })
-    .collect();
+  let doc_lines: Vec<TokenStream> = docs.iter().map(|line| quote! { #[doc = #line] }).collect();
   quote! { #(#doc_lines)* }
 }
 
@@ -29,7 +23,7 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
       ParameterLocation::Header => "`Header`",
       ParameterLocation::Cookie => "`Cookie`",
     };
-    docs.push(format!("/// - Location: {location_str}"));
+    docs.push(format!("- Location: {location_str}"));
   }
 
   if let Some(ref example) = field.example_value {
@@ -42,11 +36,11 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
     } else {
       formatted_example
     };
-    docs.push(format!("/// - Example: `{display_example}`"));
+    docs.push(format!("- Example: `{display_example}`"));
   }
 
   if let Some(ref multiple_of) = field.multiple_of {
-    docs.push(format!("/// Validation: Must be a multiple of {multiple_of}"));
+    docs.push(format!("Validation: Must be a multiple of {multiple_of}"));
   }
 
   generate_docs(&docs)
