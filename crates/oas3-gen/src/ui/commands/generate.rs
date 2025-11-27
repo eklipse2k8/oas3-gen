@@ -149,7 +149,7 @@ impl<'a> GenerateLogger<'a> {
   fn log_generating(&self) {
     let message = match self.config.mode {
       GenerateMode::Types => "Generating Rust types...",
-      GenerateMode::Client => "Generating Rust client2...",
+      GenerateMode::Client => "Generating Rust client...",
     };
     self.info(&message.with(self.colors.primary()).to_string());
   }
@@ -254,7 +254,7 @@ impl<'a> GenerateLogger<'a> {
     if !self.config.quiet {
       let message = match self.config.mode {
         GenerateMode::Types => "Successfully generated Rust types",
-        GenerateMode::Client => "Successfully generated Rust client2",
+        GenerateMode::Client => "Successfully generated Rust client",
       };
       println!();
       println!(
