@@ -24,7 +24,7 @@ pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
 use super::{
-  ast::{RustType, StructKind, TypeAliasDef, TypeRef, TypeAliasToken},
+  ast::{RustType, StructKind, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
 };
 use crate::generator::naming::identifiers::to_rust_type_name;

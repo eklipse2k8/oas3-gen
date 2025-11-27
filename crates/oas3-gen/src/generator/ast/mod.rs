@@ -17,7 +17,9 @@ use http::Method;
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
-pub use tokens::{DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TypeAliasToken};
+pub use tokens::{
+  DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TypeAliasToken,
+};
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 

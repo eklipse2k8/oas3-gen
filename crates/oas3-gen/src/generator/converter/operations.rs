@@ -10,7 +10,7 @@ use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo,
     OperationParameter, ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef,
-    TypeRef, ValidationAttribute, TypeAliasToken,
+    TypeAliasToken, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},

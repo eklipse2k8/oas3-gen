@@ -1,5 +1,5 @@
 use crate::generator::{
-  ast::{RustPrimitive, TypeAliasDef, TypeRef, TypeAliasToken},
+  ast::{RustPrimitive, TypeAliasDef, TypeAliasToken, TypeRef},
   codegen::{Visibility, type_aliases::generate_type_alias},
 };
 

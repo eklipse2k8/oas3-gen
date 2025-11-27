@@ -1,6 +1,6 @@
 use crate::generator::{
   ast::{
-    FieldDef, RustType, StructDef, StructToken, TypeAliasDef, TypeRef, ValidationAttribute, TypeAliasToken,
+    FieldDef, RustType, StructDef, StructToken, TypeAliasDef, TypeAliasToken, TypeRef, ValidationAttribute,
     tokens::{FieldNameToken, HeaderToken},
   },
   codegen::constants::{generate_header_constants, generate_regex_constants},

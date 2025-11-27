@@ -4,8 +4,8 @@ use crate::generator::{
   analyzer::{TypeUsage, build_type_usage_map, type_graph::TypeDependencyGraph},
   ast::{
     ContentCategory, DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant,
-    RustPrimitive, RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeRef,
-    VariantContent, VariantDef, tokens::FieldNameToken, TypeAliasToken,
+    RustPrimitive, RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken,
+    TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
