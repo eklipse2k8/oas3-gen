@@ -8,7 +8,9 @@ use oas3::spec::{
 
 use crate::{
   generator::{
-    ast::{FieldNameToken, PathSegment, RustType, StructDef, StructMethodKind, StructToken},
+    ast::{
+      ContentCategory, FieldNameToken, PathSegment, RustPrimitive, RustType, StructDef, StructMethodKind, StructToken,
+    },
     converter::{
       FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
       operations::OperationConverter,
@@ -384,5 +386,107 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
   assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
   assert!(matches!(&segments[2], PathSegment::Literal(s) if s == "/posts/"));
   assert!(matches!(&segments[3], PathSegment::Parameter { field } if field == &FieldNameToken::new("post_id")));
+  Ok(())
+}
+
+#[test]
+fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
+  let content_types = [
+    ("application/octet-stream", ContentCategory::Binary),
+    ("image/png", ContentCategory::Binary),
+    ("video/mp4", ContentCategory::Binary),
+    ("audio/mpeg", ContentCategory::Binary),
+    ("application/pdf", ContentCategory::Binary),
+  ];
+
+  for (content_type, expected_category) in content_types {
+    let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+
+    let operation = Operation {
+      operation_id: Some("downloadFile".to_string()),
+      responses: Some(ResponseMap::from([
+        (
+          "200".to_string(),
+          ObjectOrReference::Object(Response {
+            content: BTreeMap::from([(
+              content_type.to_string(),
+              MediaType {
+                schema: Some(ObjectOrReference::Object(ObjectSchema {
+                  schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                  format: Some("binary".to_string()),
+                  ..Default::default()
+                })),
+                ..Default::default()
+              },
+            )]),
+            ..Default::default()
+          }),
+        ),
+        (
+          "4XX".to_string(),
+          ObjectOrReference::Object(Response {
+            content: BTreeMap::from([(
+              "application/json".to_string(),
+              MediaType {
+                schema: Some(ObjectOrReference::Object(ObjectSchema {
+                  schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+                  ..Default::default()
+                })),
+                ..Default::default()
+              },
+            )]),
+            ..Default::default()
+          }),
+        ),
+      ])),
+      ..Default::default()
+    };
+
+    let (types, info) = converter.convert(
+      "download_file",
+      "downloadFile",
+      &Method::GET,
+      "/files/download",
+      &operation,
+      &mut usage,
+      &mut cache,
+    )?;
+
+    let response_enum = types
+      .iter()
+      .find_map(|t| match t {
+        RustType::ResponseEnum(e) if e.name == "DownloadFileResponse" => Some(e),
+        _ => None,
+      })
+      .unwrap_or_else(|| panic!("Response enum not found for {content_type}"));
+
+    let ok_variant = response_enum
+      .variants
+      .iter()
+      .find(|v| v.variant_name == "Ok")
+      .unwrap_or_else(|| panic!("Ok variant not found for {content_type}"));
+
+    assert_eq!(
+      ok_variant.content_category, expected_category,
+      "content_category mismatch for {content_type}"
+    );
+
+    let schema_type = ok_variant
+      .schema_type
+      .as_ref()
+      .unwrap_or_else(|| panic!("schema_type not found for {content_type}"));
+
+    assert_eq!(
+      schema_type.base_type,
+      RustPrimitive::Bytes,
+      "binary response should use Vec<u8> for {content_type}, got {:?}",
+      schema_type.base_type
+    );
+
+    assert!(
+      info.response_enum.is_some(),
+      "response_enum should be set for {content_type}"
+    );
+  }
   Ok(())
 }

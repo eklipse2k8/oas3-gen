@@ -188,7 +188,7 @@ impl<'a> StringEnumOptimizer<'a> {
         name: EnumVariantToken::new("Known"),
         docs: vec!["A known value.".to_string()],
         content: VariantContent::Tuple(vec![TypeRef::new(known_type_name)]),
-        serde_attrs: vec![SerdeAttribute::Default],
+        serde_attrs: vec![],
         deprecated: false,
       },
       VariantDef {

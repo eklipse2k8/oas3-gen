@@ -85,6 +85,11 @@ fn extract_response_schema_info(
     return Ok((None, ContentCategory::Json));
   };
   let content_category = ContentCategory::from_content_type(content_type);
+
+  if content_category == ContentCategory::Binary {
+    return Ok((Some(TypeRef::new(RustPrimitive::Bytes)), content_category));
+  }
+
   let Some(schema_ref) = media_type.schema.as_ref() else {
     return Ok((None, content_category));
   };
