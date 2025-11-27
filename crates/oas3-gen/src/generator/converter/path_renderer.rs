@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use oas3::spec::{Parameter, ParameterStyle};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
-use crate::generator::ast::{MethodNameToken, PathSegment, QueryParameter, StructMethod, StructMethodKind};
+use crate::generator::ast::{
+  FieldNameToken, MethodNameToken, PathSegment, QueryParameter, StructMethod, StructMethodKind,
+};
 
 const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
@@ -31,7 +33,7 @@ pub(crate) fn build_render_path_method(
   let query_parameters = query_params
     .iter()
     .map(|m| QueryParameter {
-      field: m.rust_field.clone(),
+      field: FieldNameToken::new(&m.rust_field),
       encoded_name: encode_query_name(&m.original_name),
       explode: m.explode,
       optional: m.optional,
@@ -71,7 +73,7 @@ fn parse_path_segments(path: &str, path_params: &[PathParamMapping]) -> Vec<Path
     let param_name = &path[brace_start + 1..brace_end];
     if let Some(rust_field) = param_map.get(param_name) {
       segments.push(PathSegment::Parameter {
-        field: (*rust_field).to_string(),
+        field: FieldNameToken::new(*rust_field),
       });
     } else {
       segments.push(PathSegment::Literal(path[brace_start..=brace_end].to_string()));
@@ -133,7 +135,7 @@ mod tests {
     let result = parse_path_segments("/users/{userId}", &mappings);
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/users/"));
-    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == "user_id"));
+    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
   }
 
   #[test]
@@ -151,9 +153,9 @@ mod tests {
     let result = parse_path_segments("/users/{userId}/posts/{postId}", &mappings);
     assert_eq!(result.len(), 4);
     assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/users/"));
-    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == "user_id"));
+    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
     assert!(matches!(&result[2], PathSegment::Literal(s) if s == "/posts/"));
-    assert!(matches!(&result[3], PathSegment::Parameter { field } if field == "post_id"));
+    assert!(matches!(&result[3], PathSegment::Parameter { field } if field == &FieldNameToken::new("post_id")));
   }
 
   #[test]
@@ -165,7 +167,7 @@ mod tests {
     let result = parse_path_segments("/items/{id}", &mappings);
     assert_eq!(result.len(), 2);
     assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/items/"));
-    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == "id"));
+    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("id")));
   }
 
   #[test]
@@ -183,9 +185,9 @@ mod tests {
     let result = parse_path_segments("/{org}/{repo}", &mappings);
     assert_eq!(result.len(), 4);
     assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/"));
-    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == "org"));
+    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("org")));
     assert!(matches!(&result[2], PathSegment::Literal(s) if s == "/"));
-    assert!(matches!(&result[3], PathSegment::Parameter { field } if field == "repo"));
+    assert!(matches!(&result[3], PathSegment::Parameter { field } if field == &FieldNameToken::new("repo")));
   }
 
   #[test]
@@ -197,7 +199,7 @@ mod tests {
     let result = parse_path_segments("/items/{id}/tags/{tagId}", &mappings);
     assert_eq!(result.len(), 4);
     assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/items/"));
-    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == "id"));
+    assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("id")));
     assert!(matches!(&result[2], PathSegment::Literal(s) if s == "/tags/"));
     assert!(matches!(&result[3], PathSegment::Literal(s) if s == "{tagId}"));
   }

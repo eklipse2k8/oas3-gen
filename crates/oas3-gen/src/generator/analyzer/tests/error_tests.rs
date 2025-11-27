@@ -6,7 +6,7 @@ use crate::generator::{
   analyzer::ErrorAnalyzer,
   ast::{
     ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
-    StructToken, TypeRef, VariantContent, VariantDef,
+    StructToken, TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
@@ -15,7 +15,7 @@ fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
     name: StructToken::new(name),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "field".to_string(),
+      name: FieldNameToken::new("field"),
       docs: vec![],
       rust_type: TypeRef::new(field_type),
       ..Default::default()
@@ -140,7 +140,7 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
       name: StructToken::new("RootError"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".into())),
         ..Default::default()
@@ -211,7 +211,7 @@ fn test_build_error_schema_set_handles_deep_nesting() {
       name: StructToken::new("Level1"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("Level2".into())),
         ..Default::default()
@@ -226,7 +226,7 @@ fn test_build_error_schema_set_handles_deep_nesting() {
       name: StructToken::new("Level2"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("Level3".into())),
         ..Default::default()
@@ -259,7 +259,7 @@ fn test_build_error_schema_set_stops_at_success_types() {
       name: StructToken::new("ErrorType"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "nested".to_string(),
+        name: FieldNameToken::new("nested"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".into())),
         ..Default::default()
@@ -302,7 +302,7 @@ fn test_build_error_schema_set_handles_circular_references() {
       name: StructToken::new("CircularA"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "b".to_string(),
+        name: FieldNameToken::new("b"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".into())),
         ..Default::default()
@@ -317,7 +317,7 @@ fn test_build_error_schema_set_handles_circular_references() {
       name: StructToken::new("CircularB"),
       docs: vec![],
       fields: vec![FieldDef {
-        name: "a".to_string(),
+        name: FieldNameToken::new("a"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".into())),
         ..Default::default()
@@ -349,13 +349,13 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
     docs: vec![],
     fields: vec![
       FieldDef {
-        name: "string_field".to_string(),
+        name: FieldNameToken::new("string_field"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::String),
         ..Default::default()
       },
       FieldDef {
-        name: "int_field".to_string(),
+        name: FieldNameToken::new("int_field"),
         docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::I64),
         ..Default::default()

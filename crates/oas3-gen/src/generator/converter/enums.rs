@@ -308,7 +308,7 @@ impl EnumConverter {
 
         let first_required_field = if required_fields.len() == 1 {
           let field = required_fields[0];
-          Some((field.name.clone(), field.rust_type.to_rust_type()))
+          Some((field.name.to_string(), field.rust_type.to_rust_type()))
         } else {
           None
         };

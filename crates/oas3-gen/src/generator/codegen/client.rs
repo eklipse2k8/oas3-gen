@@ -8,8 +8,8 @@ use syn::LitStr;
 use super::{attributes::generate_docs, metadata::CodeMetadata};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType,
-    StructDef, StructToken, TypeRef,
+    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, ParameterLocation,
+    RustPrimitive, RustType, StructDef, StructToken, TypeRef,
     tokens::{ConstToken, HeaderToken},
   },
   codegen::{constants, parse_type},
@@ -225,9 +225,9 @@ impl ClientOperationMethod {
       .filter(|param| matches!(param.location, ParameterLocation::Header))
       .map(|param| {
         let const_token = ConstToken::from_raw(param.original_name.as_str());
-        let field_ident = format_ident!("{}", param.rust_field);
+        let field_ident = &param.rust_field;
 
-        let value_conversion = Self::build_header_value_conversion(&param.rust_type, &field_ident, param.required);
+        let value_conversion = Self::build_header_value_conversion(&param.rust_type, field_ident, param.required);
 
         if param.required {
           quote! {
@@ -248,7 +248,7 @@ impl ClientOperationMethod {
       .collect()
   }
 
-  fn build_header_value_conversion(rust_type: &TypeRef, field_ident: &syn::Ident, required: bool) -> TokenStream {
+  fn build_header_value_conversion(rust_type: &TypeRef, field_ident: &FieldNameToken, required: bool) -> TokenStream {
     let value_expr = if required {
       quote! { request.#field_ident }
     } else {
@@ -283,19 +283,19 @@ impl ClientOperationMethod {
     operation: &OperationInfo,
     rust_types: &[RustType],
   ) -> TokenStream {
-    let field_ident = format_ident!("{}", body.field_name);
+    let field_ident = &body.field_name;
 
     match body.content_category {
-      ContentCategory::Json => Self::build_json_body(&field_ident, body.optional),
-      ContentCategory::FormUrlEncoded => Self::build_form_body(&field_ident, body.optional),
-      ContentCategory::Multipart => Self::build_multipart_body(&field_ident, body.optional, operation, rust_types),
-      ContentCategory::Text => Self::build_text_body(&field_ident, body.optional),
-      ContentCategory::Binary => Self::build_binary_body(&field_ident, body.optional),
-      ContentCategory::Xml => Self::build_xml_body(&field_ident, body.optional),
+      ContentCategory::Json => Self::build_json_body(field_ident, body.optional),
+      ContentCategory::FormUrlEncoded => Self::build_form_body(field_ident, body.optional),
+      ContentCategory::Multipart => Self::build_multipart_body(field_ident, body.optional, operation, rust_types),
+      ContentCategory::Text => Self::build_text_body(field_ident, body.optional),
+      ContentCategory::Binary => Self::build_binary_body(field_ident, body.optional),
+      ContentCategory::Xml => Self::build_xml_body(field_ident, body.optional),
     }
   }
 
-  fn wrap_optional_body<F>(field_ident: &syn::Ident, optional: bool, make_statement: F) -> TokenStream
+  fn wrap_optional_body<F>(field_ident: &FieldNameToken, optional: bool, make_statement: F) -> TokenStream
   where
     F: FnOnce(TokenStream) -> TokenStream,
   {
@@ -313,20 +313,20 @@ impl ClientOperationMethod {
     }
   }
 
-  fn build_json_body(field_ident: &syn::Ident, optional: bool) -> TokenStream {
+  fn build_json_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
     Self::wrap_optional_body(field_ident, optional, |body_expr| {
       quote! { req_builder = req_builder.json(#body_expr); }
     })
   }
 
-  fn build_form_body(field_ident: &syn::Ident, optional: bool) -> TokenStream {
+  fn build_form_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
     Self::wrap_optional_body(field_ident, optional, |body_expr| {
       quote! { req_builder = req_builder.form(#body_expr); }
     })
   }
 
   pub(crate) fn build_multipart_body(
-    field_ident: &syn::Ident,
+    field_ident: &FieldNameToken,
     optional: bool,
     operation: &OperationInfo,
     rust_types: &[RustType],
@@ -351,11 +351,11 @@ impl ClientOperationMethod {
   fn resolve_multipart_struct<'a>(
     operation: &OperationInfo,
     rust_types: &'a [RustType],
-    field_ident: &syn::Ident,
+    field_ident: &FieldNameToken,
   ) -> Option<&'a StructDef> {
     let req_type = operation.request_type.as_ref()?;
     let req_struct = Self::find_struct_by_name(req_type, rust_types)?;
-    let field_def = req_struct.fields.iter().find(|f| *field_ident == f.name)?;
+    let field_def = req_struct.fields.iter().find(|f| *field_ident == f.name.as_str())?;
     if let RustPrimitive::Custom(name) = &field_def.rust_type.base_type {
       let field_token = StructToken::from(name.clone());
       Self::find_struct_by_name(&field_token, rust_types)
@@ -382,7 +382,7 @@ impl ClientOperationMethod {
 
   fn generate_multipart_part(field: &FieldDef) -> TokenStream {
     let ident = format_ident!("{}", field.name);
-    let name = &field.name;
+    let name = field.name.as_str();
     let is_bytes = matches!(field.rust_type.base_type, RustPrimitive::Bytes);
 
     let value_to_part = |val: TokenStream| {
@@ -426,19 +426,19 @@ impl ClientOperationMethod {
     }
   }
 
-  fn build_text_body(field_ident: &syn::Ident, optional: bool) -> TokenStream {
+  fn build_text_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
     Self::wrap_optional_body(field_ident, optional, |body_expr| {
       quote! { req_builder = req_builder.body((#body_expr).to_string()); }
     })
   }
 
-  fn build_binary_body(field_ident: &syn::Ident, optional: bool) -> TokenStream {
+  fn build_binary_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
     Self::wrap_optional_body(field_ident, optional, |body_expr| {
       quote! { req_builder = req_builder.body((#body_expr).clone()); }
     })
   }
 
-  fn build_xml_body(field_ident: &syn::Ident, optional: bool) -> TokenStream {
+  fn build_xml_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
     Self::wrap_optional_body(field_ident, optional, |body_expr| {
       quote! {
         let xml_string = (#body_expr).to_string();

@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, EnumToken, EnumVariantToken, FieldDef, MethodNameToken, PathSegment, QueryParameter, ResponseVariant,
-    RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef,
-    ValidationAttribute,
+    ContentCategory, DeriveTrait, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, PathSegment,
+    QueryParameter, ResponseVariant, RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind,
+    StructToken, TypeRef, ValidationAttribute,
   },
   codegen::{self, Visibility, structs},
 };
@@ -14,7 +14,7 @@ fn base_struct(kind: StructKind) -> StructDef {
     name: StructToken::new("Sample"),
     docs: vec!["/// Sample struct".to_string()],
     fields: vec![FieldDef {
-      name: "field".to_string(),
+      name: FieldNameToken::new("field"),
       rust_type: TypeRef::new("String"),
       serde_attrs: vec![],
       extra_attrs: vec![],
@@ -50,7 +50,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
 fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> StructDef {
   let mut def = base_struct(StructKind::OperationRequest);
   def.fields = vec![FieldDef {
-    name: field_name.to_string(),
+    name: FieldNameToken::new(field_name),
     rust_type: TypeRef::new(rust_type),
     serde_attrs: vec![],
     extra_attrs: vec![],
@@ -65,7 +65,7 @@ fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> St
       segments: vec![
         PathSegment::Literal(path_literal.to_string()),
         PathSegment::Parameter {
-          field: field_name.to_string(),
+          field: FieldNameToken::new(field_name),
         },
       ],
       query_params: vec![],
@@ -118,11 +118,11 @@ fn renders_struct_methods() {
       segments: vec![
         PathSegment::Literal("/users/".to_string()),
         PathSegment::Parameter {
-          field: "field".to_string(),
+          field: FieldNameToken::new("field"),
         },
       ],
       query_params: vec![QueryParameter {
-        field: "field".to_string(),
+        field: FieldNameToken::new("field"),
         encoded_name: "field".to_string(),
         explode: false,
         optional: false,
@@ -280,7 +280,7 @@ fn renders_path_with_mixed_parameters() {
   let mut def = base_struct(StructKind::OperationRequest);
   def.fields = vec![
     FieldDef {
-      name: "user_id".to_string(),
+      name: FieldNameToken::new("user_id"),
       rust_type: TypeRef::new("i64"),
       serde_attrs: vec![],
       extra_attrs: vec![],
@@ -289,7 +289,7 @@ fn renders_path_with_mixed_parameters() {
       ..Default::default()
     },
     FieldDef {
-      name: "post_slug".to_string(),
+      name: FieldNameToken::new("post_slug"),
       rust_type: TypeRef::new("String"),
       serde_attrs: vec![],
       extra_attrs: vec![],
@@ -305,11 +305,11 @@ fn renders_path_with_mixed_parameters() {
       segments: vec![
         PathSegment::Literal("/users/".to_string()),
         PathSegment::Parameter {
-          field: "user_id".to_string(),
+          field: FieldNameToken::new("user_id"),
         },
         PathSegment::Literal("/posts/".to_string()),
         PathSegment::Parameter {
-          field: "post_slug".to_string(),
+          field: FieldNameToken::new("post_slug"),
         },
       ],
       query_params: vec![],

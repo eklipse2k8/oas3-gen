@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashSet};
 use crate::generator::{
   ast::{
     EnumDef, EnumToken, EnumVariantToken, FieldDef, RustPrimitive, RustType, StructDef, StructKind, StructToken,
-    TypeRef, VariantContent, VariantDef,
+    TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
   },
   codegen::error_impls,
 };
@@ -14,7 +14,7 @@ fn test_generate_error_struct_impl_with_error_field() {
     name: StructToken::new("MyError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "error".to_string(),
+      name: FieldNameToken::new("error"),
       rust_type: TypeRef::new(RustPrimitive::Custom("InnerError".into())),
       ..Default::default()
     }],
@@ -40,7 +40,7 @@ fn test_generate_error_struct_impl_with_message_field() {
     name: StructToken::new("MyError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "message".to_string(),
+      name: FieldNameToken::new("message"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -66,7 +66,7 @@ fn test_generate_error_struct_impl_without_error_fields() {
     name: StructToken::new("MyError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "code".to_string(),
+      name: FieldNameToken::new("code"),
       rust_type: TypeRef::new(RustPrimitive::I32),
       ..Default::default()
     }],
@@ -140,7 +140,7 @@ fn test_try_generate_error_impl_for_error_struct() {
     name: StructToken::new("ApiError"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "message".to_string(),
+      name: FieldNameToken::new("message"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],

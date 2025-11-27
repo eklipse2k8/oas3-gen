@@ -5,7 +5,7 @@ use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant,
     RustPrimitive, RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeRef,
-    VariantContent, VariantDef,
+    VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
@@ -22,7 +22,7 @@ fn test_dependency_graph_simple_struct() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "address".to_string(),
+      name: FieldNameToken::new("address"),
       rust_type: TypeRef::new(RustPrimitive::Custom("Address".into())),
       ..Default::default()
     }],
@@ -37,7 +37,7 @@ fn test_dependency_graph_simple_struct() {
     name: StructToken::new("Address"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "street".to_string(),
+      name: FieldNameToken::new("street"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -66,7 +66,7 @@ fn test_propagation_request_to_nested() {
     name: StructToken::new("CreateUserRequest"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
+      name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
@@ -81,7 +81,7 @@ fn test_propagation_request_to_nested() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -108,7 +108,7 @@ fn test_propagation_response_to_nested() {
     name: StructToken::new("UserResponse"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
+      name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
@@ -123,7 +123,7 @@ fn test_propagation_response_to_nested() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -150,7 +150,7 @@ fn test_propagation_bidirectional() {
     name: StructToken::new("UpdateUserRequest"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
+      name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
@@ -165,7 +165,7 @@ fn test_propagation_bidirectional() {
     name: StructToken::new("UserResponse"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "user".to_string(),
+      name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
@@ -180,7 +180,7 @@ fn test_propagation_bidirectional() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -214,7 +214,7 @@ fn test_transitive_dependency_chain() {
     name: StructToken::new("A"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "b".to_string(),
+      name: FieldNameToken::new("b"),
       rust_type: TypeRef::new(RustPrimitive::Custom("B".into())),
       ..Default::default()
     }],
@@ -229,7 +229,7 @@ fn test_transitive_dependency_chain() {
     name: StructToken::new("B"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "c".to_string(),
+      name: FieldNameToken::new("c"),
       rust_type: TypeRef::new(RustPrimitive::Custom("C".into())),
       ..Default::default()
     }],
@@ -244,7 +244,7 @@ fn test_transitive_dependency_chain() {
     name: StructToken::new("C"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "value".to_string(),
+      name: FieldNameToken::new("value"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -287,7 +287,7 @@ fn test_enum_with_tuple_variant() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -317,7 +317,7 @@ fn test_type_alias_dependency() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "id".to_string(),
+      name: FieldNameToken::new("id"),
       rust_type: TypeRef::new(RustPrimitive::I64),
       ..Default::default()
     }],
@@ -341,7 +341,7 @@ fn test_no_propagation_without_operations() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "address".to_string(),
+      name: FieldNameToken::new("address"),
       rust_type: TypeRef::new(RustPrimitive::Custom("Address".into())),
       ..Default::default()
     }],
@@ -380,7 +380,7 @@ fn test_cyclic_dependency_handling() {
     name: StructToken::new("A"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "b".to_string(),
+      name: FieldNameToken::new("b"),
       rust_type: TypeRef::new(RustPrimitive::Custom("B".into())).with_boxed(),
       ..Default::default()
     }],
@@ -395,7 +395,7 @@ fn test_cyclic_dependency_handling() {
     name: StructToken::new("B"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "a".to_string(),
+      name: FieldNameToken::new("a"),
       rust_type: TypeRef::new(RustPrimitive::Custom("A".into())).with_boxed(),
       ..Default::default()
     }],
@@ -419,7 +419,7 @@ fn test_response_enum_does_not_propagate_to_request_type() {
     name: StructToken::new("CreateUserRequestParams"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "name".to_string(),
+      name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -434,7 +434,7 @@ fn test_response_enum_does_not_propagate_to_request_type() {
     name: StructToken::new("User"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "id".to_string(),
+      name: FieldNameToken::new("id"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
@@ -561,7 +561,7 @@ fn test_request_body_chain_with_response_enum() {
     name: StructToken::new("CreateChatCompletionRequest"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "model".to_string(),
+      name: FieldNameToken::new("model"),
       rust_type: TypeRef::new(RustPrimitive::Custom("ModelIds".into())),
       ..Default::default()
     }],
@@ -600,7 +600,7 @@ fn test_request_body_chain_with_response_enum() {
     name: StructToken::new("CreateChatCompletionRequestParams"),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "body".to_string(),
+      name: FieldNameToken::new("body"),
       rust_type: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequestBody".into())),
       ..Default::default()
     }],

@@ -19,7 +19,7 @@ use super::{
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, EnumToken, FieldDef, FieldDefBuilder, RustType, SerdeAttribute,
-    StructDef, StructKind, StructToken, TypeRef, default_struct_derives,
+    StructDef, StructKind, StructToken, TypeRef, default_struct_derives, tokens::FieldNameToken,
   },
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
@@ -320,7 +320,7 @@ impl StructConverter {
   pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
     let mut indices_by_name: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (i, field) in fields.iter().enumerate() {
-      indices_by_name.entry(field.name.clone()).or_default().push(i);
+      indices_by_name.entry(field.name.to_string()).or_default().push(i);
     }
 
     let mut indices_to_remove = HashSet::<usize>::new();
@@ -333,7 +333,7 @@ impl StructConverter {
         indices_to_remove.extend(deprecated);
       } else {
         for (suffix_num, &idx) in colliding_indices.iter().enumerate().skip(1) {
-          fields[idx].name = format!("{name}_{}", suffix_num + 1);
+          fields[idx].name = FieldNameToken::new(format!("{name}_{}", suffix_num + 1));
         }
       }
     }
@@ -737,7 +737,7 @@ impl FieldProcessor {
             value_type.to_rust_type()
           ));
           additional_field = Some(FieldDef {
-            name: "additional_properties".to_string(),
+            name: FieldNameToken::new("additional_properties"),
             docs: vec!["/// Additional properties not defined in the schema.".to_string()],
             rust_type: map_type,
             serde_attrs: vec![SerdeAttribute::Flatten],

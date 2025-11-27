@@ -26,7 +26,7 @@ pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTr
         continue;
       };
 
-      let key = RegexKey::for_struct(&def.name, &field.name);
+      let key = RegexKey::for_struct(&def.name, field.name.as_str());
       let const_token = match pattern_to_const.entry(pattern.clone()) {
         Entry::Occupied(entry) => entry.get().clone(),
         Entry::Vacant(entry) => {

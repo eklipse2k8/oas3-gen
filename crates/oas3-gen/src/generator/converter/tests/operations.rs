@@ -8,7 +8,7 @@ use oas3::spec::{
 
 use crate::{
   generator::{
-    ast::{PathSegment, RustType, StructDef, StructMethodKind, StructToken},
+    ast::{FieldNameToken, PathSegment, RustType, StructDef, StructMethodKind, StructToken},
     converter::{
       FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
       operations::OperationConverter,
@@ -117,7 +117,11 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
   )?;
 
   assert_eq!(types.len(), 1, "Should generate one request struct");
-  let request_type_name = info.request_type.as_ref().map(StructToken::as_str).expect("Request type should exist");
+  let request_type_name = info
+    .request_type
+    .as_ref()
+    .map(StructToken::as_str)
+    .expect("Request type should exist");
   assert_eq!(request_type_name, "GetUserRequest");
 
   let request_struct = extract_request_struct(&types, request_type_name);
@@ -134,7 +138,7 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
   };
   assert_eq!(segments.len(), 2);
   assert!(matches!(&segments[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == "user_id"));
+  assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
   Ok(())
 }
 
@@ -310,7 +314,11 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     )?;
 
     assert_eq!(types.len(), 1, "Should generate one request struct for {op_id}");
-    let request_type_name = info.request_type.as_ref().map(StructToken::as_str).expect("Request type should exist");
+    let request_type_name = info
+      .request_type
+      .as_ref()
+      .map(StructToken::as_str)
+      .expect("Request type should exist");
     assert_eq!(
       request_type_name, *expected_struct,
       "Request struct name mismatch for {op_id}"
@@ -373,8 +381,8 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
   };
   assert_eq!(segments.len(), 4);
   assert!(matches!(&segments[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == "user_id"));
+  assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
   assert!(matches!(&segments[2], PathSegment::Literal(s) if s == "/posts/"));
-  assert!(matches!(&segments[3], PathSegment::Parameter { field } if field == "post_id"));
+  assert!(matches!(&segments[3], PathSegment::Parameter { field } if field == &FieldNameToken::new("post_id")));
   Ok(())
 }

@@ -8,7 +8,7 @@ pub(crate) mod operations;
 pub(crate) mod path_renderer;
 pub(crate) mod responses;
 mod string_enum_optimizer;
-mod structs;
+pub(crate) mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
 

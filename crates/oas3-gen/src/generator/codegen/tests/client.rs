@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
 
 use http::Method;
-use quote::format_ident;
 
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, OperationBody, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
-    StructToken, TypeRef,
+    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, RustPrimitive, RustType,
+    StructDef, StructKind, StructToken, TypeRef,
   },
   codegen::client::ClientOperationMethod,
 };
@@ -211,7 +210,7 @@ fn test_response_handling_with_response_enum() {
 #[test]
 fn test_multipart_generation() {
   let binary_field = FieldDef {
-    name: "file".to_string(),
+    name: FieldNameToken::new("file"),
     rust_type: TypeRef {
       base_type: RustPrimitive::Bytes,
       is_array: false,
@@ -223,7 +222,7 @@ fn test_multipart_generation() {
   };
 
   let text_field = FieldDef {
-    name: "description".to_string(),
+    name: FieldNameToken::new("description"),
     rust_type: TypeRef {
       base_type: RustPrimitive::String,
       is_array: false,
@@ -248,7 +247,7 @@ fn test_multipart_generation() {
   let request_struct = StructDef {
     name: StructToken::new("UploadRequest"),
     fields: vec![FieldDef {
-      name: "body".to_string(),
+      name: FieldNameToken::new("body"),
       rust_type: TypeRef {
         base_type: RustPrimitive::Custom("MultipartBody".into()),
         is_array: false,
@@ -282,13 +281,13 @@ fn test_multipart_generation() {
     warnings: vec![],
     parameters: vec![],
     body: Some(OperationBody {
-      field_name: "body".to_string(),
+      field_name: FieldNameToken::new("body"),
       optional: false,
       content_category: ContentCategory::Multipart,
     }),
   };
 
-  let field_ident = format_ident!("body");
+  let field_ident = FieldNameToken::new("body");
 
   let rust_types = vec![RustType::Struct(request_struct), RustType::Struct(body_struct)];
   let strict_operation = make_operation("UploadRequest");

@@ -6,8 +6,8 @@ use oas3::{
 use super::{SchemaConverter, cache::SharedSchemaCache};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant, RustPrimitive, StatusCodeToken,
-    StructKind, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
+    ContentCategory, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant, RustPrimitive,
+    StatusCodeToken, StructKind, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
   },
   naming::{
     constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},

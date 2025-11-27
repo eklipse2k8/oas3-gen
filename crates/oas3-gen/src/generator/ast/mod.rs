@@ -17,7 +17,7 @@ use http::Method;
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
-pub use tokens::{DefaultAtom, EnumToken, EnumVariantToken, MethodNameToken, StructToken};
+pub use tokens::{DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken};
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
@@ -112,7 +112,7 @@ pub enum ParameterLocation {
 #[derive(Debug, Clone, Default)]
 pub struct OperationParameter {
   pub original_name: String,
-  pub rust_field: String,
+  pub rust_field: FieldNameToken,
   pub location: ParameterLocation,
   pub required: bool,
   pub rust_type: TypeRef,
@@ -159,7 +159,7 @@ impl ContentCategory {
 
 #[derive(Debug, Clone, Default)]
 pub struct OperationBody {
-  pub field_name: String,
+  pub field_name: FieldNameToken,
   pub optional: bool,
   pub content_category: ContentCategory,
 }
@@ -200,7 +200,7 @@ pub struct StructMethod {
 
 #[derive(Debug, Clone, Default)]
 pub struct QueryParameter {
-  pub field: String,
+  pub field: FieldNameToken,
   pub encoded_name: String,
   pub explode: bool,
   pub optional: bool,
@@ -223,7 +223,7 @@ pub enum StructMethodKind {
 #[derive(Debug, Clone)]
 pub enum PathSegment {
   Literal(String),
-  Parameter { field: String },
+  Parameter { field: FieldNameToken },
 }
 
 /// Associated method definition for an enum
@@ -252,7 +252,7 @@ pub enum EnumMethodKind {
 #[derive(Debug, Clone, Default, Builder)]
 #[builder(default, setter(into))]
 pub struct FieldDef {
-  pub name: String,
+  pub name: FieldNameToken,
   pub docs: Vec<String>,
   pub rust_type: TypeRef,
   pub serde_attrs: Vec<SerdeAttribute>,

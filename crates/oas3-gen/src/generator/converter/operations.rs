@@ -8,9 +8,9 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, EnumToken, FieldDef, OperationBody, OperationInfo, OperationParameter,
-    ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef, TypeRef,
-    ValidationAttribute,
+    ContentCategory, DeriveTrait, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo,
+    OperationParameter, ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef,
+    TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -28,7 +28,7 @@ struct RequestBodyInfo {
   body_type: Option<TypeRef>,
   generated_types: Vec<RustType>,
   type_usage: Vec<String>,
-  field_name: Option<String>,
+  field_name: Option<FieldNameToken>,
   optional: bool,
   content_type: Option<String>,
 }
@@ -299,7 +299,7 @@ impl<'a> OperationConverter<'a> {
     )?;
 
     let content_type = body.content.keys().next().cloned();
-    let field_name = body_type.as_ref().map(|_| BODY_FIELD_NAME.to_string());
+    let field_name = body_type.as_ref().map(|_| FieldNameToken::new(BODY_FIELD_NAME));
 
     Ok(RequestBodyInfo {
       body_type,
@@ -382,7 +382,7 @@ impl<'a> OperationConverter<'a> {
       .map_or_else(Vec::new, |d| metadata::extract_docs(Some(d)));
 
     Some(FieldDef {
-      name: BODY_FIELD_NAME.to_string(),
+      name: FieldNameToken::new(BODY_FIELD_NAME),
       docs,
       rust_type: if is_required {
         body_type
@@ -431,7 +431,8 @@ impl<'a> OperationConverter<'a> {
       rust_type.clone().with_option()
     };
 
-    let rust_field = to_rust_field_name(&param.name);
+    let rust_field_str = to_rust_field_name(&param.name);
+    let rust_field = FieldNameToken::new(rust_field_str.clone());
 
     let location = match param.location {
       ParameterIn::Path => ParameterLocation::Path,
@@ -490,11 +491,11 @@ impl<'a> OperationConverter<'a> {
   fn map_parameter(param: &Parameter, field: &FieldDef, mappings: &mut ParameterMappings) {
     match param.location {
       ParameterIn::Path => mappings.path.push(path_renderer::PathParamMapping {
-        rust_field: field.name.clone(),
+        rust_field: field.name.to_string(),
         original_name: param.name.clone(),
       }),
       ParameterIn::Query => mappings.query.push(path_renderer::QueryParamMapping {
-        rust_field: field.name.clone(),
+        rust_field: field.name.to_string(),
         original_name: param.name.clone(),
         explode: path_renderer::query_param_explode(param),
         style: param.style,

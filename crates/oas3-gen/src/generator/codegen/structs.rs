@@ -91,7 +91,7 @@ impl<'a> StructGenerator<'a> {
           .iter()
           .map(|attr| match attr {
             ValidationAttribute::Regex(_) => {
-              let key = RegexKey::for_struct(type_name, &field.name);
+              let key = RegexKey::for_struct(type_name, field.name.as_str());
               self.regex_lookup.get(&key).map_or_else(
                 || attr.clone(),
                 |const_token| ValidationAttribute::Regex(const_token.to_string()),
@@ -257,7 +257,7 @@ impl<'a> StructGenerator<'a> {
         PathSegment::Parameter { field } => {
           format_string.push_str("{}");
           fallback_string.push_str("{}");
-          let ident = format_ident!("{field}");
+          let ident = field;
           args.push(quote! {
             oas3_gen_support::percent_encode_path_segment(&oas3_gen_support::serialize_query_param(&self.#ident)?)
           });
@@ -307,7 +307,7 @@ impl<'a> StructGenerator<'a> {
   }
 
   fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
-    let ident = format_ident!("{}", param.field);
+    let ident = &param.field;
     let format_str = format!("\"{{prefix}}{}={{}}\"", param.encoded_name);
     let style = param.style.unwrap_or(ParameterStyle::Form);
     let delimiter = match style {

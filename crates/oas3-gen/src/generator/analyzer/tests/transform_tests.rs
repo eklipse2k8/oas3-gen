@@ -4,7 +4,7 @@ use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
   ast::{
     DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, RustType, StructDef, StructKind, StructToken, TypeRef,
-    ValidationAttribute, VariantContent, VariantDef,
+    ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
@@ -13,7 +13,7 @@ fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
     name: StructToken::new(name),
     docs: vec![],
     fields: vec![FieldDef {
-      name: "field".to_string(),
+      name: FieldNameToken::new("field"),
       rust_type: if nullable {
         TypeRef::new("String").with_option()
       } else {
