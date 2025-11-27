@@ -4,7 +4,7 @@ use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{cache::SharedSchemaCache, metadata};
 use crate::generator::{
-  ast::{EnumDef, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
+  ast::{EnumDef, EnumToken, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef, default_enum_derives},
   naming::identifiers::{ensure_unique, to_rust_type_name},
   schema_registry::SchemaRegistry,
 };
@@ -167,7 +167,7 @@ impl<'a> StringEnumOptimizer<'a> {
     }
 
     RustType::Enum(EnumDef {
-      name: name.to_string(),
+      name: EnumToken::new(name),
       docs: vec!["/// Known values for the string enum.".to_string()],
       variants,
       discriminator: None,
@@ -198,7 +198,7 @@ impl<'a> StringEnumOptimizer<'a> {
     ];
 
     RustType::Enum(EnumDef {
-      name: name.to_string(),
+      name: EnumToken::new(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,

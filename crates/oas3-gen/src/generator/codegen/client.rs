@@ -8,8 +8,9 @@ use syn::LitStr;
 use super::{attributes::generate_docs, metadata::CodeMetadata};
 use crate::generator::{
   ast::{
-    ContentCategory, FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType, StructDef,
-    TypeRef, tokens::ConstToken,
+    ContentCategory, EnumToken, FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType,
+    StructDef, TypeRef,
+    tokens::{ConstToken, HeaderToken},
   },
   codegen::{constants, parse_type},
   naming::identifiers::to_rust_type_name,
@@ -44,9 +45,8 @@ impl<'a> ClientGenerator<'a> {
   }
 
   fn header_consts(&self) -> TokenStream {
-    let header_names = extract_header_names(self.operations);
-    let header_refs: Vec<&String> = header_names.iter().collect();
-    constants::generate_header_constants(&header_refs)
+    let headers: Vec<HeaderToken> = extract_header_names(self.operations).into_iter().collect();
+    constants::generate_header_constants(&headers)
   }
 
   fn method_tokens(&self) -> anyhow::Result<Vec<TokenStream>> {
@@ -118,12 +118,12 @@ impl ToTokens for ClientGenerator<'_> {
   }
 }
 
-fn extract_header_names(operations: &[OperationInfo]) -> BTreeSet<String> {
+fn extract_header_names(operations: &[OperationInfo]) -> BTreeSet<HeaderToken> {
   operations
     .iter()
     .flat_map(|op| &op.parameters)
     .filter(|param| matches!(param.location, ParameterLocation::Header))
-    .map(|param| param.original_name.to_ascii_lowercase())
+    .map(|param| HeaderToken::from(param.original_name.as_str()))
     .collect()
 }
 
@@ -151,12 +151,11 @@ impl ClientOperationMethod {
       );
     };
 
-    let response_enum = operation.response_enum.as_ref().map(|t| parse_type(t)).transpose()?;
     let response_type = operation.response_type.as_ref().map(|t| parse_type(t)).transpose()?;
 
     let response_handling = Self::build_response_handling(
       &request_ident,
-      response_enum.as_ref(),
+      operation.response_enum.as_ref(),
       response_type.as_ref(),
       operation.response_content_category,
     );
@@ -225,7 +224,7 @@ impl ClientOperationMethod {
       .iter()
       .filter(|param| matches!(param.location, ParameterLocation::Header))
       .map(|param| {
-        let const_token = ConstToken::from(param.original_name.as_str());
+        let const_token = ConstToken::from_raw(param.original_name.as_str());
         let field_ident = format_ident!("{}", param.rust_field);
 
         let value_conversion = Self::build_header_value_conversion(&param.rust_type, &field_ident, param.required);
@@ -447,7 +446,7 @@ impl ClientOperationMethod {
 
   fn build_response_handling(
     request_ident: &syn::Ident,
-    response_enum: Option<&syn::Type>,
+    response_enum: Option<&EnumToken>,
     response_type: Option<&syn::Type>,
     response_content_category: ContentCategory,
   ) -> ResponseHandling {

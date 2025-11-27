@@ -5,7 +5,6 @@ use std::process::Stdio;
 use tokio::{process::Command, runtime::Handle};
 
 #[cfg(feature = "mdformat")]
-#[inline]
 #[must_use]
 async fn build_async_format_with_mdformat(input: &str) -> String {
   if input.len() > 100 {
@@ -16,13 +15,11 @@ async fn build_async_format_with_mdformat(input: &str) -> String {
 }
 
 #[cfg(feature = "mdformat")]
-#[inline]
 #[must_use]
 fn wrap_format_with_mdformat(input: &str) -> String {
   tokio::task::block_in_place(|| Handle::current().block_on(async { build_async_format_with_mdformat(input).await }))
 }
 
-#[inline]
 #[must_use]
 fn process_doc_text(input: &str) -> String {
   let formatted = {
@@ -37,7 +34,6 @@ fn process_doc_text(input: &str) -> String {
   formatted.replace("\\n", "\n")
 }
 
-#[inline]
 #[must_use]
 pub(crate) fn doc_lines(input: &str) -> Vec<String> {
   process_doc_text(input).lines().map(String::from).collect()

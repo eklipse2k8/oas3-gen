@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{EnumDef, RustType},
+    ast::{EnumDef, EnumToken, RustType},
     converter::{
       FieldOptionalityPolicy, SchemaConverter, cache::SharedSchemaCache, enums::EnumConverter, hashing,
       string_enum_optimizer::StringEnumOptimizer, type_resolver::TypeResolver,
@@ -188,7 +188,7 @@ fn test_full_schema_conversion_with_deduplication() {
   );
 
   if let RustType::Enum(outer) = &model_ids_result[0] {
-    assert_eq!(outer.name, "ModelIdsShared");
+    assert_eq!(outer.name.to_string(), "ModelIdsShared");
     let known_variant = outer.variants.iter().find(|v| v.name == "Known");
     assert!(known_variant.is_some(), "Should have Known variant");
   } else {
@@ -288,7 +288,7 @@ fn test_cache_operations() {
   let schema2 = make_string_enum_schema(&["x", "y"]);
 
   let enum1 = RustType::Enum(EnumDef {
-    name: "FirstEnum".to_string(),
+    name: EnumToken::new("FirstEnum"),
     docs: vec![],
     variants: vec![],
     discriminator: None,
@@ -300,7 +300,7 @@ fn test_cache_operations() {
   });
 
   let enum2 = RustType::Enum(EnumDef {
-    name: "SecondEnum".to_string(),
+    name: EnumToken::new("SecondEnum"),
     docs: vec![],
     variants: vec![],
     discriminator: None,

@@ -5,8 +5,8 @@ use http::Method;
 use crate::generator::{
   analyzer::ErrorAnalyzer,
   ast::{
-    ContentCategory, EnumDef, FieldDef, OperationInfo, RustPrimitive, RustType, StructDef, StructKind, TypeRef,
-    VariantContent, VariantDef,
+    ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
+    TypeRef, VariantContent, VariantDef,
   },
 };
 
@@ -48,7 +48,7 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
   };
 
   RustType::Enum(EnumDef {
-    name: name.to_string(),
+    name: EnumToken::new(name),
     docs: vec![],
     variants,
     derives: BTreeSet::new(),
@@ -98,7 +98,7 @@ fn test_build_error_schema_set_empty_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorType"));
+  assert!(result.contains(&EnumToken::new("ErrorType")));
 }
 
 #[test]
@@ -115,8 +115,8 @@ fn test_build_error_schema_set_only_error_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("Error1"));
-  assert!(result.contains("Error2"));
+  assert!(result.contains(&EnumToken::new("Error1")));
+  assert!(result.contains(&EnumToken::new("Error2")));
 }
 
 #[test]
@@ -157,8 +157,8 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("RootError"));
-  assert!(result.contains("NestedError"));
+  assert!(result.contains(&EnumToken::new("RootError")));
+  assert!(result.contains(&EnumToken::new("NestedError")));
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["ErrorEnum".to_string()])];
   let rust_types = vec![
     RustType::Enum(EnumDef {
-      name: "ErrorEnum".to_string(),
+      name: EnumToken::new("ErrorEnum"),
       docs: vec![],
       variants: vec![VariantDef {
         name: "Variant".to_string(),
@@ -188,8 +188,8 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("ErrorEnum"));
-  assert!(result.contains("InnerError"));
+  assert!(result.contains(&EnumToken::new("ErrorEnum")));
+  assert!(result.contains(&EnumToken::new("InnerError")));
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn test_build_error_schema_set_skips_unit_enum_variants() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorEnum"));
+  assert!(result.contains(&EnumToken::new("ErrorEnum")));
 }
 
 #[test]
@@ -243,9 +243,9 @@ fn test_build_error_schema_set_handles_deep_nesting() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 3);
-  assert!(result.contains("Level1"));
-  assert!(result.contains("Level2"));
-  assert!(result.contains("Level3"));
+  assert!(result.contains(&EnumToken::new("Level1")));
+  assert!(result.contains(&EnumToken::new("Level2")));
+  assert!(result.contains(&EnumToken::new("Level3")));
 }
 
 #[test]
@@ -276,8 +276,11 @@ fn test_build_error_schema_set_stops_at_success_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorType"));
-  assert!(!result.contains("SuccessType"), "Should not expand into success types");
+  assert!(result.contains(&EnumToken::new("ErrorType")));
+  assert!(
+    !result.contains(&EnumToken::new("SuccessType")),
+    "Should not expand into success types"
+  );
 }
 
 #[test]
@@ -288,7 +291,7 @@ fn test_build_error_schema_set_handles_missing_types() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("MissingType"));
+  assert!(result.contains(&EnumToken::new("MissingType")));
 }
 
 #[test]
@@ -330,8 +333,8 @@ fn test_build_error_schema_set_handles_circular_references() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 2);
-  assert!(result.contains("CircularA"));
-  assert!(result.contains("CircularB"));
+  assert!(result.contains(&EnumToken::new("CircularA")));
+  assert!(result.contains(&EnumToken::new("CircularB")));
 }
 
 #[test]
@@ -368,7 +371,7 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1);
-  assert!(result.contains("ErrorWithPrimitives"));
+  assert!(result.contains(&EnumToken::new("ErrorWithPrimitives")));
 }
 
 #[test]
@@ -383,5 +386,5 @@ fn test_build_error_schema_set_multiple_operations_same_error() {
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 
   assert_eq!(result.len(), 1, "Should deduplicate common errors");
-  assert!(result.contains("CommonError"));
+  assert!(result.contains(&EnumToken::new("CommonError")));
 }

@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 
 use crate::generator::{
   ast::{
-    DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, ResponseEnumDef,
-    ResponseVariant, RustPrimitive, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+    ContentCategory, DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
+    EnumToken, EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, StatusCodeToken,
+    TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -35,7 +36,7 @@ fn default_derives() -> BTreeSet<DeriveTrait> {
 
 fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
   EnumDef {
-    name: name.to_string(),
+    name: EnumToken::new(name),
     docs: vec![],
     variants,
     discriminator: None,
@@ -79,7 +80,7 @@ fn test_basic_enum_generation() {
 #[test]
 fn test_enum_with_docs() {
   let def = EnumDef {
-    name: "Status".to_string(),
+    name: EnumToken::new("Status"),
     docs: vec![
       "Represents the status of an item.".to_string(),
       "Can be active or inactive.".to_string(),
@@ -162,7 +163,7 @@ fn test_enum_tuple_variants() {
 #[test]
 fn test_enum_variant_attributes() {
   let deprecated_def = EnumDef {
-    name: "ApiVersion".to_string(),
+    name: EnumToken::new("ApiVersion"),
     docs: vec![],
     variants: vec![
       VariantDef {
@@ -189,7 +190,7 @@ fn test_enum_variant_attributes() {
   );
 
   let outer_attrs_def = EnumDef {
-    name: "Flagged".to_string(),
+    name: EnumToken::new("Flagged"),
     docs: vec![],
     variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
     discriminator: None,
@@ -213,7 +214,7 @@ fn test_enum_serde_attributes() {
     (
       "rename",
       EnumDef {
-        name: "Status".to_string(),
+        name: EnumToken::new("Status"),
         docs: vec![],
         variants: vec![
           VariantDef {
@@ -246,7 +247,7 @@ fn test_enum_serde_attributes() {
     (
       "discriminator tag",
       EnumDef {
-        name: "Event".to_string(),
+        name: EnumToken::new("Event"),
         docs: vec![],
         variants: vec![
           make_unit_variant("Created"),
@@ -265,7 +266,7 @@ fn test_enum_serde_attributes() {
     (
       "untagged",
       EnumDef {
-        name: "AnyValue".to_string(),
+        name: EnumToken::new("AnyValue"),
         docs: vec![],
         variants: vec![make_unit_variant("StringVal"), make_unit_variant("NumberVal")],
         discriminator: None,
@@ -290,7 +291,7 @@ fn test_enum_serde_attributes() {
 #[test]
 fn test_case_insensitive_enum() {
   let base_def = EnumDef {
-    name: "Status".to_string(),
+    name: EnumToken::new("Status"),
     docs: vec![],
     variants: vec![
       VariantDef {
@@ -347,7 +348,7 @@ fn test_case_insensitive_enum() {
   );
 
   let fallback_def = EnumDef {
-    name: "Priority".to_string(),
+    name: EnumToken::new("Priority"),
     docs: vec![],
     variants: vec![
       make_unit_variant("High"),
@@ -419,7 +420,7 @@ fn test_enum_visibility() {
 #[test]
 fn test_enum_constructor_methods() {
   let simple_def = EnumDef {
-    name: "RequestBody".to_string(),
+    name: EnumToken::new("RequestBody"),
     docs: vec![],
     variants: vec![VariantDef {
       name: "Json".to_string(),
@@ -455,7 +456,7 @@ fn test_enum_constructor_methods() {
   );
 
   let param_def = EnumDef {
-    name: "Request".to_string(),
+    name: EnumToken::new("Request"),
     docs: vec![],
     variants: vec![VariantDef {
       name: "Create".to_string(),
@@ -495,7 +496,7 @@ fn test_enum_constructor_methods() {
 #[test]
 fn test_discriminated_enum() {
   let without_fallback = DiscriminatedEnumDef {
-    name: "Pet".to_string(),
+    name: EnumToken::new("Pet"),
     docs: vec!["A pet can be a dog or cat.".to_string()],
     discriminator_field: "petType".to_string(),
     variants: vec![
@@ -531,7 +532,7 @@ fn test_discriminated_enum() {
   assert!(!code_without.contains("fallback :"), "should not have fallback");
 
   let with_fallback = DiscriminatedEnumDef {
-    name: "Message".to_string(),
+    name: EnumToken::new("Message"),
     docs: vec![],
     discriminator_field: "type".to_string(),
     variants: vec![DiscriminatedVariant {
@@ -556,29 +557,29 @@ fn test_discriminated_enum() {
 #[test]
 fn test_response_enum_generation() {
   let def = ResponseEnumDef {
-    name: "GetUserResponse".to_string(),
+    name: EnumToken::new("GetUserResponse"),
     docs: vec!["Response for GET /users/{id}".to_string()],
     variants: vec![
       ResponseVariant {
-        status_code: "200".to_string(),
-        variant_name: "Ok".to_string(),
+        status_code: StatusCodeToken::Ok200,
+        variant_name: EnumVariantToken::new("Ok"),
         description: Some("User found".to_string()),
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".to_string()))),
-        content_type: Some("application/json".to_string()),
+        content_category: ContentCategory::Json,
       },
       ResponseVariant {
-        status_code: "404".to_string(),
-        variant_name: "NotFound".to_string(),
+        status_code: StatusCodeToken::NotFound404,
+        variant_name: EnumVariantToken::new("NotFound"),
         description: Some("User not found".to_string()),
         schema_type: None,
-        content_type: None,
+        content_category: ContentCategory::Json,
       },
       ResponseVariant {
-        status_code: "500".to_string(),
-        variant_name: "InternalServerError".to_string(),
+        status_code: StatusCodeToken::InternalServerError500,
+        variant_name: EnumVariantToken::new("InternalServerError"),
         description: None,
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".to_string()))),
-        content_type: Some("application/json".to_string()),
+        content_category: ContentCategory::Json,
       },
     ],
     request_type: "GetUserRequest".to_string(),

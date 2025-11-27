@@ -14,7 +14,7 @@ use crate::generator::ast::{
 };
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
 
@@ -56,7 +56,7 @@ fn generate_enum_methods(def: &EnumDef, visibility: Visibility) -> TokenStream {
     return quote! {};
   }
 
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let vis = visibility.to_tokens();
 
   let methods = def.methods.iter().map(|m| {
@@ -108,7 +108,7 @@ fn generate_enum_methods(def: &EnumDef, visibility: Visibility) -> TokenStream {
 }
 
 pub(crate) fn generate_discriminated_enum(def: &DiscriminatedEnumDef, visibility: Visibility) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let disc_field = &def.discriminator_field;
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
@@ -204,7 +204,7 @@ fn generate_enum_serde_attrs(def: &EnumDef) -> TokenStream {
 }
 
 pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibility) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
 
@@ -212,12 +212,12 @@ pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibili
     .variants
     .iter()
     .map(|v| {
-      let variant_name = format_ident!("{}", v.variant_name);
+      let variant_name = &v.variant_name;
       let variant_docs = if let Some(ref desc) = v.description {
         let doc_line = format!("{}: {desc}", v.status_code);
         quote! { #[doc = #doc_line] }
       } else {
-        let doc_line = v.status_code.clone();
+        let doc_line = v.status_code.to_string();
         quote! { #[doc = #doc_line] }
       };
 
@@ -246,7 +246,7 @@ pub(crate) fn generate_response_enum(def: &ResponseEnumDef, visibility: Visibili
 }
 
 fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
-  let name = format_ident!("{}", def.name);
+  let name = &def.name;
 
   let (match_arms, error_variants_list): (Vec<TokenStream>, Vec<String>) = def
     .variants

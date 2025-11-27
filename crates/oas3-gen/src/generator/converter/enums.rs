@@ -12,8 +12,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, FieldDef, RustType, SerdeAttribute, TypeRef, VariantContent,
-    VariantDef, default_enum_derives,
+    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, EnumToken, FieldDef, RustType, SerdeAttribute, TypeRef,
+    VariantContent, VariantDef, default_enum_derives,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -89,8 +89,8 @@ impl EnumConverter {
     let enum_def = self.build_simple_enum(name, schema, strategy);
 
     if let (Some(c), RustType::Enum(e)) = (cache, &enum_def) {
-      c.register_enum(enum_values, e.name.clone());
-      c.mark_name_used(e.name.clone());
+      c.register_enum(enum_values, e.name.to_string());
+      c.mark_name_used(e.name.to_string());
     }
 
     Some(enum_def)
@@ -133,7 +133,7 @@ impl EnumConverter {
       && let Some(values) = extract_enum_values(schema)
       && let Some(RustType::Enum(e)) = result.last()
     {
-      c.register_enum(values, e.name.clone());
+      c.register_enum(values, e.name.to_string());
     }
 
     Ok(result)
@@ -169,7 +169,7 @@ impl EnumConverter {
     }
 
     RustType::Enum(EnumDef {
-      name: to_rust_type_name(name),
+      name: EnumToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,
@@ -528,7 +528,7 @@ impl EnumConverter {
     };
 
     RustType::Enum(EnumDef {
-      name: to_rust_type_name(name),
+      name: EnumToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),

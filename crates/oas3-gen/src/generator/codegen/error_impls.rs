@@ -155,7 +155,7 @@ fn generate_for_enum(def: &EnumDef) -> Option<TokenStream> {
     return None;
   }
 
-  let type_ident = format_ident!("{}", &def.name);
+  let type_ident = &def.name;
   let (display_arms, source_arms) = generate_enum_error_arms(def);
 
   Some(quote! {

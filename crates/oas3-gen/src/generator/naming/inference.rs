@@ -173,7 +173,6 @@ impl VariantNameNormalizer {
 
 /// Infers a variant name for an inline schema in a union.
 #[must_use]
-#[inline]
 pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
   if !schema.enum_values.is_empty() {
     return "Enum".to_string();

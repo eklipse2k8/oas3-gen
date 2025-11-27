@@ -128,6 +128,19 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
   ident
 }
 
+pub(crate) fn to_rust_const_name(input: &str) -> String {
+  let sanitized = sanitize(input);
+  if sanitized.is_empty() {
+    return "UNNAMED".to_string();
+  }
+
+  let mut ident = sanitized.to_constant_case();
+  if ident.starts_with(|c: char| c.is_ascii_digit()) {
+    ident.insert(0, '_');
+  }
+  ident
+}
+
 /// Converts a string into a valid Rust type name (`PascalCase`).
 ///
 /// # Rules:
@@ -185,32 +198,14 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
   ident
 }
 
-/// Converts a slice of string parts into a valid Rust constant name for a regex.
-pub(crate) fn regex_const_name(key: &[&str]) -> String {
-  let joined = key.iter().map(|part| sanitize(part)).collect::<Vec<_>>().join("_");
-
-  let mut ident = joined.to_constant_case();
-  prefix_if_digit_start(&mut ident, '_');
-
-  format!("REGEX_{ident}")
-}
-
-/// Converts a header name into a valid Rust constant identifier (`SCREAMING_SNAKE_CASE`).
-pub(crate) fn header_const_name(header: &str) -> String {
-  let sanitized = sanitize(header);
-  if sanitized.is_empty() {
-    return "HEADER".to_string();
-  }
-
-  let mut ident = sanitized.to_constant_case();
-  prefix_if_digit_start(&mut ident, '_');
-  ident
-}
-
 fn prefix_if_digit_start(ident: &mut String, prefix: char) {
   if ident.starts_with(|c: char| c.is_ascii_digit()) {
     ident.insert(0, prefix);
   }
+}
+
+pub(crate) fn to_http_header_name(name: &str) -> String {
+  name.to_ascii_lowercase()
 }
 
 /// An extension trait for char iterators to add word capitalization.
@@ -255,7 +250,6 @@ where
 {
   type Item = char;
 
-  #[inline]
   fn next(&mut self) -> Option<Self::Item> {
     if let Some(ref mut upper_iter) = self.pending_upper {
       if let Some(c) = upper_iter.next() {

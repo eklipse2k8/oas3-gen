@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::ast::{self, DeriveTrait, RustType};
+use super::ast::{self, DeriveTrait, EnumToken, RustType};
 
 pub mod attributes;
 pub mod client;
@@ -45,7 +45,7 @@ pub fn format(code: &TokenStream) -> anyhow::Result<String> {
 
 pub fn generate_file(
   types: &[RustType],
-  error_schemas: &HashSet<String>,
+  error_schemas: &HashSet<EnumToken>,
   visibility: Visibility,
   metadata: &metadata::CodeMetadata,
   lint_config: &super::ast::LintConfig,
@@ -94,7 +94,7 @@ pub fn generate_source(
   Ok(format!("{header}\n\n{formatted_code}\n"))
 }
 
-pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<String>, visibility: Visibility) -> TokenStream {
+pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, visibility: Visibility) -> TokenStream {
   let ordered = deduplicate_and_order_types(types);
   let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
   let serde_use = compute_serde_use(&ordered);
@@ -143,12 +143,12 @@ fn type_priority(rust_type: &RustType) -> u8 {
 
 fn generate_type(
   rust_type: &RustType,
-  regex_lookup: &BTreeMap<ast::RegexKey, String>,
-  error_schemas: &HashSet<String>,
+  regex_lookup: &BTreeMap<ast::RegexKey, ast::tokens::ConstToken>,
+  error_schemas: &HashSet<EnumToken>,
   visibility: Visibility,
 ) -> TokenStream {
   let type_tokens = match rust_type {
-    RustType::Struct(def) => structs::generate_struct(def, regex_lookup, visibility),
+    RustType::Struct(def) => structs::StructGenerator::new(regex_lookup, visibility).generate(def),
     RustType::Enum(def) => enums::generate_enum(def, visibility),
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
     RustType::DiscriminatedEnum(def) => enums::generate_discriminated_enum(def, visibility),
@@ -165,9 +165,11 @@ fn generate_type(
   }
 }
 
-fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<String>) -> Option<TokenStream> {
+fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<EnumToken>) -> Option<TokenStream> {
   match rust_type {
-    RustType::Struct(def) if error_schemas.contains(&def.name) => error_impls::generate_error_impl(rust_type),
+    RustType::Struct(def) if error_schemas.contains(&EnumToken::new(&def.name)) => {
+      error_impls::generate_error_impl(rust_type)
+    }
     RustType::Enum(def) if error_schemas.contains(&def.name) => error_impls::generate_error_impl(rust_type),
     _ => None,
   }

@@ -8,8 +8,8 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, FieldDef, OperationBody, OperationInfo, OperationParameter, ParameterLocation,
-    ResponseEnumDef, RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
+    ContentCategory, DeriveTrait, EnumToken, FieldDef, OperationBody, OperationInfo, OperationParameter,
+    ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -107,7 +107,7 @@ impl<'a> OperationConverter<'a> {
         path,
         schema_cache,
       )
-      .map(|def| (response_name, def))
+      .map(|def| (EnumToken::new(&response_name), def))
     } else {
       None
     };
@@ -137,15 +137,15 @@ impl<'a> OperationConverter<'a> {
       def.request_type = request_type_name.clone().unwrap_or_default();
     }
 
-    let response_enum_name = if let Some((name, def)) = response_enum_info {
-      usage.mark_response(&def.name);
+    let response_enum = if let Some((enum_token, def)) = response_enum_info {
+      usage.mark_response(def.name.clone());
       for variant in &def.variants {
         if let Some(schema_type) = &variant.schema_type {
           usage.mark_response_type_ref(schema_type);
         }
       }
       types.push(RustType::ResponseEnum(def));
-      Some(name)
+      Some(enum_token)
     } else {
       None
     };
@@ -184,7 +184,7 @@ impl<'a> OperationConverter<'a> {
       description: operation.description.clone(),
       request_type: request_type_name,
       response_type: response_type_name,
-      response_enum: response_enum_name,
+      response_enum,
       response_content_category,
       success_response_types: response_types.success,
       error_response_types: response_types.error,
@@ -202,7 +202,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     operation: &Operation,
     body_type: Option<TypeRef>,
-    response_enum_info: Option<&(String, ResponseEnumDef)>,
+    response_enum_info: Option<&(EnumToken, ResponseEnumDef)>,
   ) -> anyhow::Result<(StructDef, Vec<String>, Vec<OperationParameter>)> {
     let mut warnings = vec![];
     let mut fields = vec![];
@@ -234,9 +234,9 @@ impl<'a> OperationConverter<'a> {
       &param_mappings.query,
     )];
 
-    if let Some((response_enum_name, response_enum_def)) = response_enum_info {
+    if let Some((response_enum, response_enum_def)) = response_enum_info {
       methods.push(responses::build_parse_response_method(
-        response_enum_name,
+        response_enum,
         &response_enum_def.variants,
       ));
     }

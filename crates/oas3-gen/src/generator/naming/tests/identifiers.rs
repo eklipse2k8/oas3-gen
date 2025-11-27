@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
-use crate::generator::naming::identifiers::{
-  ensure_unique, header_const_name, regex_const_name, split_pascal_case, to_rust_field_name, to_rust_type_name,
+use crate::generator::{
+  ast::{RegexKey, tokens::ConstToken},
+  naming::identifiers::{ensure_unique, split_pascal_case, to_rust_field_name, to_rust_type_name},
 };
 
 #[test]
@@ -71,31 +72,39 @@ fn test_type_names() {
 }
 
 #[test]
-fn test_regex_const_name() {
+fn test_const_token_from_regex_key() {
   let cases = [
-    (vec!["foo.bar", "baz"], "REGEX_FOO_BAR_BAZ"),
-    (vec!["1a", "2b"], "REGEX__1A_2B"),
+    (("foo.bar", "baz"), "REGEX_FOO_BAR_BAZ"),
+    (("1a", "2b"), "REGEX__1A_2B"),
   ];
-  for (input, expected) in cases {
-    assert_eq!(regex_const_name(&input), expected, "failed for input {input:?}");
+  for ((type_name, field_name), expected) in cases {
+    let key = RegexKey::for_struct(type_name, field_name);
+    let token = ConstToken::from(&key);
+    assert_eq!(
+      token.to_string(),
+      expected,
+      "failed for type={type_name:?}, field={field_name:?}"
+    );
   }
 }
 
 #[test]
-fn test_header_const_name() {
+fn test_const_token_from_raw() {
   let cases = [
     ("x-my-header", "X_MY_HEADER"),
     ("Content-Type", "CONTENT_TYPE"),
     ("123-custom", "_123_CUSTOM"),
-    ("", "HEADER"),
+    ("", "UNNAMED"),
+    ("  ", "UNNAMED"),
   ];
   for (input, expected) in cases {
-    assert_eq!(header_const_name(input), expected, "failed for input {input:?}");
+    let token = ConstToken::from_raw(input);
+    assert_eq!(token.to_string(), expected, "failed for input {input:?}");
   }
 }
 
 #[test]
-fn test_header_const_name_case_insensitive() {
+fn test_const_token_case_insensitive() {
   let case_pairs = [
     ("X-API-Key", "x-api-key"),
     ("Content-Type", "content-type"),
@@ -103,9 +112,9 @@ fn test_header_const_name_case_insensitive() {
   ];
   for (upper, lower) in case_pairs {
     assert_eq!(
-      header_const_name(upper),
-      header_const_name(lower),
-      "header constant names should be case-insensitive for {upper:?} vs {lower:?}"
+      ConstToken::from_raw(upper).to_string(),
+      ConstToken::from_raw(lower).to_string(),
+      "constant identifiers should be case-insensitive for {upper:?} vs {lower:?}"
     );
   }
 }

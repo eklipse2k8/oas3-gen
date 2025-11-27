@@ -18,8 +18,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef,
-    StructKind, TypeRef, default_struct_derives,
+    DiscriminatedEnumDef, DiscriminatedVariant, EnumToken, FieldDef, FieldDefBuilder, RustType, SerdeAttribute,
+    StructDef, StructKind, TypeRef, default_struct_derives,
   },
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
@@ -540,7 +540,7 @@ impl DiscriminatorHandler {
     });
 
     Ok(RustType::DiscriminatedEnum(DiscriminatedEnumDef {
-      name: enum_name,
+      name: EnumToken::new(enum_name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       discriminator_field: discriminator_field.clone(),
       variants,

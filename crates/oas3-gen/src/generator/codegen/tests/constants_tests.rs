@@ -1,5 +1,5 @@
 use crate::generator::{
-  ast::{FieldDef, RustType, StructDef, TypeAliasDef, TypeRef, ValidationAttribute},
+  ast::{FieldDef, RustType, StructDef, TypeAliasDef, TypeRef, ValidationAttribute, tokens::HeaderToken},
   codegen::constants::{generate_header_constants, generate_regex_constants},
 };
 
@@ -108,7 +108,7 @@ fn test_generate_regex_constants_skips_non_structs() {
 
 #[test]
 fn test_generate_header_constants_empty() {
-  let headers: Vec<&String> = vec![];
+  let headers: Vec<HeaderToken> = vec![];
   let tokens = generate_header_constants(&headers);
 
   assert!(tokens.is_empty());
@@ -116,8 +116,7 @@ fn test_generate_header_constants_empty() {
 
 #[test]
 fn test_generate_header_constants_single() {
-  let header = "x-request-id".to_string();
-  let headers: Vec<&String> = vec![&header];
+  let headers: Vec<HeaderToken> = vec![HeaderToken::from("x-request-id")];
   let tokens = generate_header_constants(&headers);
   let code = tokens.to_string();
 
@@ -134,10 +133,11 @@ fn test_generate_header_constants_single() {
 
 #[test]
 fn test_generate_header_constants_multiple() {
-  let h1 = "x-request-id".to_string();
-  let h2 = "x-correlation-id".to_string();
-  let h3 = "content-type".to_string();
-  let headers: Vec<&String> = vec![&h1, &h2, &h3];
+  let headers: Vec<HeaderToken> = vec![
+    HeaderToken::from("x-request-id"),
+    HeaderToken::from("x-correlation-id"),
+    HeaderToken::from("content-type"),
+  ];
   let tokens = generate_header_constants(&headers);
   let code = tokens.to_string();
 

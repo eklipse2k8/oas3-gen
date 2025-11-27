@@ -5,7 +5,8 @@ use quote::format_ident;
 
 use crate::generator::{
   ast::{
-    ContentCategory, FieldDef, OperationBody, OperationInfo, RustPrimitive, RustType, StructDef, StructKind, TypeRef,
+    ContentCategory, EnumToken, FieldDef, OperationBody, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
+    TypeRef,
   },
   codegen::client::ClientOperationMethod,
 };
@@ -29,7 +30,7 @@ impl TestOperation<'_> {
       description: self.description.map(String::from),
       request_type: Some("TestRequest".to_string()),
       response_type: Some("TestResponse".to_string()),
-      response_enum: self.response_enum.map(String::from),
+      response_enum: self.response_enum.map(EnumToken::new),
       response_content_category: self.response_content_category.unwrap_or(ContentCategory::Json),
       success_response_types: vec![],
       error_response_types: vec![],
