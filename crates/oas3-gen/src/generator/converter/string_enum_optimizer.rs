@@ -171,7 +171,7 @@ impl<'a> StringEnumOptimizer<'a> {
 
     RustType::Enum(EnumDef {
       name: EnumToken::new(name),
-      docs: vec!["/// Known values for the string enum.".to_string()],
+      docs: vec!["Known values for the string enum.".to_string()],
       variants,
       discriminator: None,
       derives: default_enum_derives(true),
@@ -186,14 +186,14 @@ impl<'a> StringEnumOptimizer<'a> {
     let variants = vec![
       VariantDef {
         name: EnumVariantToken::new("Known"),
-        docs: vec!["/// A known value.".to_string()],
+        docs: vec!["A known value.".to_string()],
         content: VariantContent::Tuple(vec![TypeRef::new(known_type_name)]),
         serde_attrs: vec![SerdeAttribute::Default],
         deprecated: false,
       },
       VariantDef {
         name: EnumVariantToken::new("Other"),
-        docs: vec!["/// An unknown value.".to_string()],
+        docs: vec!["An unknown value.".to_string()],
         content: VariantContent::Tuple(vec![TypeRef::new("String")]),
         serde_attrs: vec![],
         deprecated: false,

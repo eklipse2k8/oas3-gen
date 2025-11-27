@@ -44,7 +44,7 @@ pub(crate) fn build_render_path_method(
 
   StructMethod {
     name: MethodNameToken::new("render_path"),
-    docs: vec!["/// Render the request path with parameters.".to_string()],
+    docs: vec!["Render the request path with parameters.".to_string()],
     kind: StructMethodKind::RenderPath {
       segments: parse_path_segments(path, path_params),
       query_params: query_parameters,

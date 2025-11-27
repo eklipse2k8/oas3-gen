@@ -738,7 +738,7 @@ impl FieldProcessor {
           ));
           additional_field = Some(FieldDef {
             name: FieldNameToken::new("additional_properties"),
-            docs: vec!["/// Additional properties not defined in the schema.".to_string()],
+            docs: vec!["Additional properties not defined in the schema.".to_string()],
             rust_type: map_type,
             serde_attrs: vec![SerdeAttribute::Flatten],
             ..Default::default()

@@ -12,7 +12,7 @@ use crate::generator::{
 fn base_struct(kind: StructKind) -> StructDef {
   StructDef {
     name: StructToken::new("Sample"),
-    docs: vec!["/// Sample struct".to_string()],
+    docs: vec!["Sample struct".to_string()],
     fields: vec![FieldDef {
       name: FieldNameToken::new("field"),
       rust_type: TypeRef::new("String"),
@@ -37,7 +37,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
   let mut def = base_struct(StructKind::OperationRequest);
   def.methods.push(StructMethod {
     name: MethodNameToken::new("parse_response"),
-    docs: vec!["/// Parse response".to_string()],
+    docs: vec!["Parse response".to_string()],
     kind: StructMethodKind::ParseResponse {
       response_enum: EnumToken::new("ResponseEnum"),
       variants: vec![variant],
@@ -60,7 +60,7 @@ fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> St
   }];
   def.methods.push(StructMethod {
     name: MethodNameToken::new("render_path"),
-    docs: vec![format!("/// Render path with {} parameter", rust_type)],
+    docs: vec![format!("Render path with {} parameter", rust_type)],
     kind: StructMethodKind::RenderPath {
       segments: vec![
         PathSegment::Literal(path_literal.to_string()),
@@ -113,7 +113,7 @@ fn renders_struct_methods() {
   let mut def = base_struct(StructKind::OperationRequest);
   def.methods.push(StructMethod {
     name: MethodNameToken::new("render_path"),
-    docs: vec!["/// Render path".to_string()],
+    docs: vec!["Render path".to_string()],
     kind: StructMethodKind::RenderPath {
       segments: vec![
         PathSegment::Literal("/users/".to_string()),
@@ -300,7 +300,7 @@ fn renders_path_with_mixed_parameters() {
   ];
   def.methods.push(StructMethod {
     name: MethodNameToken::new("render_path"),
-    docs: vec!["/// Render path with mixed parameters".to_string()],
+    docs: vec!["Render path with mixed parameters".to_string()],
     kind: StructMethodKind::RenderPath {
       segments: vec![
         PathSegment::Literal("/users/".to_string()),

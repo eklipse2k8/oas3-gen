@@ -68,7 +68,7 @@ pub(crate) fn build_response_enum(
 
   Some(ResponseEnumDef {
     name: EnumToken::new(&base_name),
-    docs: vec![format!("/// Response types for {}", operation.operation_id.as_ref()?)],
+    docs: vec![format!("Response types for {}", operation.operation_id.as_ref()?)],
     variants,
     request_type: None,
   })
@@ -134,7 +134,7 @@ fn extract_response_schema_info(
 pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
   StructMethod {
     name: MethodNameToken::new("parse_response"),
-    docs: vec!["/// Parse the HTTP response into the response enum.".to_string()],
+    docs: vec!["Parse the HTTP response into the response enum.".to_string()],
     kind: StructMethodKind::ParseResponse {
       response_enum: response_enum.clone(),
       variants: variants.to_vec(),
