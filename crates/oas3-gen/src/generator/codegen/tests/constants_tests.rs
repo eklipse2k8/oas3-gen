@@ -1,6 +1,6 @@
 use crate::generator::{
   ast::{
-    FieldDef, RustType, StructDef, StructToken, TypeAliasDef, TypeRef, ValidationAttribute,
+    FieldDef, RustType, StructDef, StructToken, TypeAliasDef, TypeRef, ValidationAttribute, TypeAliasToken,
     tokens::{FieldNameToken, HeaderToken},
   },
   codegen::constants::{generate_header_constants, generate_regex_constants},
@@ -99,7 +99,7 @@ fn test_generate_regex_constants_deduplicates_patterns() {
 fn test_generate_regex_constants_skips_non_structs() {
   let struct_type = make_struct("User", vec![make_field("email", Some(r"pattern"))]);
   let alias = RustType::TypeAlias(TypeAliasDef {
-    name: "UserId".to_string(),
+    name: TypeAliasToken::new("UserId"),
     target: TypeRef::new("String"),
     ..Default::default()
   });

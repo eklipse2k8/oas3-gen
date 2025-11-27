@@ -197,6 +197,11 @@ define_ident_token!(
 );
 
 define_ident_token!(
+  /// Token representing a rust type alias
+  TypeAliasToken => to_rust_type_name
+);
+
+define_ident_token!(
   /// Token representing a valid Rust method name
   MethodNameToken => to_rust_field_name
 );

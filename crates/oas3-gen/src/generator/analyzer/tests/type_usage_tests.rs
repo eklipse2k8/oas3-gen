@@ -5,7 +5,7 @@ use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant,
     RustPrimitive, RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeRef,
-    VariantContent, VariantDef, tokens::FieldNameToken,
+    VariantContent, VariantDef, tokens::FieldNameToken, TypeAliasToken,
   },
 };
 
@@ -308,7 +308,7 @@ fn test_enum_with_tuple_variant() {
 #[test]
 fn test_type_alias_dependency() {
   let alias = RustType::TypeAlias(TypeAliasDef {
-    name: "UserId".to_string(),
+    name: TypeAliasToken::new("UserId"),
     docs: vec![],
     target: TypeRef::new(RustPrimitive::Custom("User".into())),
   });
@@ -591,7 +591,7 @@ fn test_request_body_chain_with_response_enum() {
   });
 
   let request_body_alias = RustType::TypeAlias(TypeAliasDef {
-    name: "CreateChatCompletionRequestBody".to_string(),
+    name: TypeAliasToken::new("CreateChatCompletionRequestBody"),
     docs: vec![],
     target: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequest".into())),
   });

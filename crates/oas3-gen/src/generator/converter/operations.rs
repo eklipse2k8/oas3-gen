@@ -10,7 +10,7 @@ use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo,
     OperationParameter, ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef,
-    TypeRef, ValidationAttribute,
+    TypeRef, ValidationAttribute, TypeAliasToken,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -357,7 +357,7 @@ impl<'a> OperationConverter<'a> {
         };
         let target_rust_name = to_rust_type_name(&target_name);
         let alias = TypeAliasDef {
-          name: rust_type_name.clone(),
+          name: TypeAliasToken::new(rust_type_name.clone()),
           docs: metadata::extract_docs(description),
           target: TypeRef::new(target_rust_name.clone()),
         };

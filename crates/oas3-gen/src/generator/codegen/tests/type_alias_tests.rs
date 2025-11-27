@@ -1,5 +1,5 @@
 use crate::generator::{
-  ast::{RustPrimitive, TypeAliasDef, TypeRef},
+  ast::{RustPrimitive, TypeAliasDef, TypeRef, TypeAliasToken},
   codegen::{Visibility, type_aliases::generate_type_alias},
 };
 
@@ -12,7 +12,7 @@ fn test_basic_type_aliases() {
   let cases = [
     (
       TypeAliasDef {
-        name: "Identifier".to_string(),
+        name: TypeAliasToken::new("Identifier"),
         docs: vec![],
         target: TypeRef::new(RustPrimitive::String),
       },
@@ -20,7 +20,7 @@ fn test_basic_type_aliases() {
     ),
     (
       TypeAliasDef {
-        name: "Count".to_string(),
+        name: TypeAliasToken::new("Count"),
         docs: vec![],
         target: TypeRef::new(RustPrimitive::I64),
       },
@@ -28,7 +28,7 @@ fn test_basic_type_aliases() {
     ),
     (
       TypeAliasDef {
-        name: "Timestamp".to_string(),
+        name: TypeAliasToken::new("Timestamp"),
         docs: vec![],
         target: TypeRef::new(RustPrimitive::DateTime),
       },
@@ -51,7 +51,7 @@ fn test_basic_type_aliases() {
 #[test]
 fn test_type_alias_with_docs() {
   let def = TypeAliasDef {
-    name: "UserId".to_string(),
+    name: TypeAliasToken::new("UserId"),
     docs: vec![
       "Unique identifier for a user.".to_string(),
       "Format: UUID string.".to_string(),
@@ -79,7 +79,7 @@ fn test_type_alias_with_docs() {
 #[test]
 fn test_type_alias_visibility_levels() {
   let def = TypeAliasDef {
-    name: "TestAlias".to_string(),
+    name: TypeAliasToken::new("TestAlias"),
     docs: vec![],
     target: TypeRef::new(RustPrimitive::Bool),
   };
@@ -129,7 +129,7 @@ fn test_type_alias_with_wrapper_types() {
 
   for ((target, expected_suffix), name) in cases.into_iter().zip(names) {
     let def = TypeAliasDef {
-      name: name.to_string(),
+      name: TypeAliasToken::new(name),
       docs: vec![],
       target,
     };
@@ -145,7 +145,7 @@ fn test_type_alias_with_wrapper_types() {
 #[test]
 fn test_type_alias_custom_types() {
   let def = TypeAliasDef {
-    name: "PetList".to_string(),
+    name: TypeAliasToken::new("PetList"),
     docs: vec!["List of pets from the API.".to_string()],
     target: TypeRef::new(RustPrimitive::Custom("Vec<Pet>".into())),
   };
