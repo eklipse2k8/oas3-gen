@@ -9,7 +9,8 @@ use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metada
 use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, EnumToken, FieldDef, OperationBody, OperationInfo, OperationParameter,
-    ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, TypeAliasDef, TypeRef, ValidationAttribute,
+    ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef, TypeRef,
+    ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -102,7 +103,6 @@ impl<'a> OperationConverter<'a> {
         self.schema_converter,
         self.spec,
         &response_name,
-        None,
         operation,
         path,
         schema_cache,
@@ -125,16 +125,16 @@ impl<'a> OperationConverter<'a> {
     let has_fields = !request_struct.fields.is_empty();
     let should_generate_request_struct = has_fields || response_enum_info.is_some();
 
-    let mut request_type_name = None;
+    let mut request_type_name: Option<StructToken> = None;
     if should_generate_request_struct {
       let rust_request_name = request_struct.name.clone();
-      usage.mark_request(&rust_request_name);
+      usage.mark_request(rust_request_name.clone());
       types.push(RustType::Struct(request_struct));
       request_type_name = Some(rust_request_name);
     }
 
     if let Some((_, def)) = response_enum_info.as_mut() {
-      def.request_type = request_type_name.clone().unwrap_or_default();
+      def.request_type.clone_from(&request_type_name);
     }
 
     let response_enum = if let Some((enum_token, def)) = response_enum_info {
@@ -242,7 +242,7 @@ impl<'a> OperationConverter<'a> {
     }
 
     let struct_def = StructDef {
-      name: to_rust_type_name(name),
+      name: StructToken::from_raw(name),
       docs,
       fields,
       derives: [DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Default]

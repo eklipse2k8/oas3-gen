@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::generator::{
-  ast::{RegexKey, tokens::ConstToken},
+  ast::{RegexKey, StructToken, tokens::ConstToken},
   naming::identifiers::{ensure_unique, split_pascal_case, to_rust_field_name, to_rust_type_name},
 };
 
@@ -75,10 +75,11 @@ fn test_type_names() {
 fn test_const_token_from_regex_key() {
   let cases = [
     (("foo.bar", "baz"), "REGEX_FOO_BAR_BAZ"),
-    (("1a", "2b"), "REGEX__1A_2B"),
+    (("1a", "2b"), "REGEX_T1A_2B"),
   ];
   for ((type_name, field_name), expected) in cases {
-    let key = RegexKey::for_struct(type_name, field_name);
+    let type_token = StructToken::from_raw(type_name);
+    let key = RegexKey::for_struct(&type_token, field_name);
     let token = ConstToken::from(&key);
     assert_eq!(
       token.to_string(),

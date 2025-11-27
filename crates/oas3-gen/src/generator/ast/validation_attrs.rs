@@ -4,21 +4,21 @@ use oas3::spec::ObjectSchema;
 use serde_json::Number;
 
 use crate::generator::{
-  ast::{RustPrimitive, TypeRef, types::render_unsigned_integer},
+  ast::{RustPrimitive, StructToken, TypeRef, types::render_unsigned_integer},
   converter::metadata,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RegexKey {
-  owner_type: String,
+  owner_type: StructToken,
   owner_variant: Option<String>,
   field: String,
 }
 
 impl RegexKey {
-  pub fn for_struct(type_name: &str, field_name: &str) -> Self {
+  pub fn for_struct(type_name: &StructToken, field_name: &str) -> Self {
     Self {
-      owner_type: type_name.to_string(),
+      owner_type: type_name.clone(),
       owner_variant: None,
       field: field_name.to_string(),
     }

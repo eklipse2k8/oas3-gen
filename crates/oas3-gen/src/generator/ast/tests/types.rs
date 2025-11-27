@@ -29,8 +29,8 @@ fn test_rust_primitive_from_str() {
     ("chrono::NaiveTime", RustPrimitive::Time),
     ("uuid::Uuid", RustPrimitive::Uuid),
     ("serde_json::Value", RustPrimitive::Value),
-    ("MyCustomType", RustPrimitive::Custom("MyCustomType".to_string())),
-    ("Vec<MyType>", RustPrimitive::Custom("Vec<MyType>".to_string())),
+    ("MyCustomType", RustPrimitive::Custom("MyCustomType".into())),
+    ("Vec<MyType>", RustPrimitive::Custom("Vec<MyType>".into())),
   ];
 
   for (input, expected) in cases {
@@ -59,7 +59,7 @@ fn test_rust_primitive_display_and_default() {
     RustPrimitive::Uuid,
     RustPrimitive::Value,
     RustPrimitive::Unit,
-    RustPrimitive::Custom("MyType".to_string()),
+    RustPrimitive::Custom("MyType".into()),
   ];
 
   for primitive in primitives {

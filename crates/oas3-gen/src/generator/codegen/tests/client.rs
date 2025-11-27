@@ -6,7 +6,7 @@ use quote::format_ident;
 use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, OperationBody, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
-    TypeRef,
+    StructToken, TypeRef,
   },
   codegen::client::ClientOperationMethod,
 };
@@ -28,7 +28,7 @@ impl TestOperation<'_> {
       path: "/test".to_string(),
       summary: self.summary.map(String::from),
       description: self.description.map(String::from),
-      request_type: Some("TestRequest".to_string()),
+      request_type: Some(StructToken::new("TestRequest")),
       response_type: Some("TestResponse".to_string()),
       response_enum: self.response_enum.map(EnumToken::new),
       response_content_category: self.response_content_category.unwrap_or(ContentCategory::Json),
@@ -235,7 +235,7 @@ fn test_multipart_generation() {
   };
 
   let body_struct = StructDef {
-    name: "MultipartBody".to_string(),
+    name: StructToken::new("MultipartBody"),
     fields: vec![binary_field, text_field],
     docs: vec![],
     derives: BTreeSet::new(),
@@ -246,11 +246,11 @@ fn test_multipart_generation() {
   };
 
   let request_struct = StructDef {
-    name: "UploadRequest".to_string(),
+    name: StructToken::new("UploadRequest"),
     fields: vec![FieldDef {
       name: "body".to_string(),
       rust_type: TypeRef {
-        base_type: RustPrimitive::Custom("MultipartBody".to_string()),
+        base_type: RustPrimitive::Custom("MultipartBody".into()),
         is_array: false,
         nullable: false,
         boxed: false,
@@ -273,7 +273,7 @@ fn test_multipart_generation() {
     path: "/upload".to_string(),
     summary: None,
     description: None,
-    request_type: Some(request_type.to_string()),
+    request_type: Some(StructToken::new(request_type)),
     response_type: None,
     response_enum: None,
     response_content_category: ContentCategory::Json,

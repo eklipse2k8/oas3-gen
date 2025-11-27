@@ -167,7 +167,7 @@ fn generate_type(
 
 fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<EnumToken>) -> Option<TokenStream> {
   match rust_type {
-    RustType::Struct(def) if error_schemas.contains(&EnumToken::new(&def.name)) => {
+    RustType::Struct(def) if error_schemas.contains(&EnumToken::from(&def.name)) => {
       error_impls::generate_error_impl(rust_type)
     }
     RustType::Enum(def) if error_schemas.contains(&def.name) => error_impls::generate_error_impl(rust_type),

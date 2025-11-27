@@ -9,7 +9,7 @@ use super::{attributes::generate_docs, metadata::CodeMetadata};
 use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, OperationBody, OperationInfo, ParameterLocation, RustPrimitive, RustType,
-    StructDef, TypeRef,
+    StructDef, StructToken, TypeRef,
     tokens::{ConstToken, HeaderToken},
   },
   codegen::{constants, parse_type},
@@ -356,12 +356,17 @@ impl ClientOperationMethod {
     let req_type = operation.request_type.as_ref()?;
     let req_struct = Self::find_struct_by_name(req_type, rust_types)?;
     let field_def = req_struct.fields.iter().find(|f| *field_ident == f.name)?;
-    Self::find_struct_by_name(&field_def.rust_type.base_type.to_string(), rust_types)
+    if let RustPrimitive::Custom(name) = &field_def.rust_type.base_type {
+      let field_token = StructToken::from(name.clone());
+      Self::find_struct_by_name(&field_token, rust_types)
+    } else {
+      None
+    }
   }
 
-  fn find_struct_by_name<'a>(name: &str, types: &'a [RustType]) -> Option<&'a StructDef> {
+  fn find_struct_by_name<'a>(name: &StructToken, types: &'a [RustType]) -> Option<&'a StructDef> {
     types.iter().find_map(|t| match t {
-      RustType::Struct(s) if s.name == name => Some(s),
+      RustType::Struct(s) if &s.name == name => Some(s),
       _ => None,
     })
   }

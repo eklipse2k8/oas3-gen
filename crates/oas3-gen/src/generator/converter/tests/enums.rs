@@ -1098,7 +1098,7 @@ fn test_enum_helper_skips_without_default_trait() {
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Variant"),
       docs: vec![],
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("TestVariant".to_string()))]),
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("TestVariant".into()))]),
       serde_attrs: vec![],
       deprecated: false,
     }],

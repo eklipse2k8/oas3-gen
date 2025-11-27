@@ -4,7 +4,7 @@ use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
     EnumToken, EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, StatusCodeToken,
-    TypeRef, VariantContent, VariantDef,
+    StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -425,7 +425,7 @@ fn test_enum_constructor_methods() {
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Json"),
       docs: vec![],
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("JsonPayload".to_string()))]),
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("JsonPayload".into()))]),
       serde_attrs: vec![],
       deprecated: false,
     }],
@@ -461,7 +461,7 @@ fn test_enum_constructor_methods() {
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Create"),
       docs: vec![],
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("CreateParams".to_string()))]),
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("CreateParams".into()))]),
       serde_attrs: vec![],
       deprecated: false,
     }],
@@ -564,7 +564,7 @@ fn test_response_enum_generation() {
         status_code: StatusCodeToken::Ok200,
         variant_name: EnumVariantToken::new("Ok"),
         description: Some("User found".to_string()),
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".to_string()))),
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
         content_category: ContentCategory::Json,
       },
       ResponseVariant {
@@ -578,11 +578,11 @@ fn test_response_enum_generation() {
         status_code: StatusCodeToken::InternalServerError500,
         variant_name: EnumVariantToken::new("InternalServerError"),
         description: None,
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".to_string()))),
+        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into()))),
         content_category: ContentCategory::Json,
       },
     ],
-    request_type: "GetUserRequest".to_string(),
+    request_type: Some(StructToken::new("GetUserRequest")),
   };
 
   let code = generate_response_enum(&def, Visibility::Public).to_string();

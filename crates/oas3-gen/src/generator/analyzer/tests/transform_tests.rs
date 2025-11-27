@@ -3,14 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
   ast::{
-    DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, RustType, StructDef, StructKind, TypeRef,
+    DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, RustType, StructDef, StructKind, StructToken, TypeRef,
     ValidationAttribute, VariantContent, VariantDef,
   },
 };
 
 fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
   StructDef {
-    name: name.to_string(),
+    name: StructToken::new(name),
     docs: vec![],
     fields: vec![FieldDef {
       name: "field".to_string(),
@@ -59,7 +59,7 @@ fn create_enum(name: &str) -> EnumDef {
 
 fn process_struct_helper(def: StructDef, usage: TypeUsage) -> StructDef {
   let mut usage_map = BTreeMap::new();
-  usage_map.insert(EnumToken::new(&def.name), usage);
+  usage_map.insert(EnumToken::from(&def.name), usage);
   let mut rust_types = vec![RustType::Struct(def)];
   update_derives_from_usage(&mut rust_types, &usage_map);
   match rust_types.into_iter().next().unwrap() {

@@ -8,7 +8,7 @@ use oas3::spec::{
 
 use crate::{
   generator::{
-    ast::{PathSegment, RustType, StructDef, StructMethodKind},
+    ast::{PathSegment, RustType, StructDef, StructMethodKind, StructToken},
     converter::{
       FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
       operations::OperationConverter,
@@ -117,7 +117,7 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
   )?;
 
   assert_eq!(types.len(), 1, "Should generate one request struct");
-  let request_type_name = info.request_type.as_deref().expect("Request type should exist");
+  let request_type_name = info.request_type.as_ref().map(StructToken::as_str).expect("Request type should exist");
   assert_eq!(request_type_name, "GetUserRequest");
 
   let request_struct = extract_request_struct(&types, request_type_name);
@@ -310,7 +310,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     )?;
 
     assert_eq!(types.len(), 1, "Should generate one request struct for {op_id}");
-    let request_type_name = info.request_type.as_deref().expect("Request type should exist");
+    let request_type_name = info.request_type.as_ref().map(StructToken::as_str).expect("Request type should exist");
     assert_eq!(
       request_type_name, *expected_struct,
       "Request struct name mismatch for {op_id}"

@@ -4,6 +4,8 @@ use num_format::{CustomFormat, Grouping, ToFormattedString};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
+use crate::generator::ast::{DefaultAtom, StructToken};
+
 static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
   CustomFormat::builder()
     .grouping(Grouping::Standard)
@@ -205,7 +207,7 @@ pub enum RustPrimitive {
   Value,
   #[serde(rename = "()")]
   Unit,
-  Custom(String),
+  Custom(DefaultAtom),
 }
 
 impl RustPrimitive {
@@ -287,7 +289,7 @@ impl RustPrimitive {
 
 impl std::fmt::Display for RustPrimitive {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let s = match self {
+    let s: &str = match self {
       RustPrimitive::Custom(name) => name,
       _ => &serde_plain::to_string(self).unwrap(),
     };
@@ -324,7 +326,7 @@ impl std::str::FromStr for RustPrimitive {
       "uuid::Uuid" => RustPrimitive::Uuid,
       "serde_json::Value" => RustPrimitive::Value,
       "()" => RustPrimitive::Unit,
-      custom => RustPrimitive::Custom(custom.to_string()),
+      custom => RustPrimitive::Custom(custom.into()),
     })
   }
 }
@@ -338,6 +340,18 @@ impl From<&str> for RustPrimitive {
 impl From<String> for RustPrimitive {
   fn from(s: String) -> Self {
     RustPrimitive::from(s.as_str())
+  }
+}
+
+impl From<StructToken> for RustPrimitive {
+  fn from(token: StructToken) -> Self {
+    RustPrimitive::Custom(token.to_atom())
+  }
+}
+
+impl From<&StructToken> for RustPrimitive {
+  fn from(token: &StructToken) -> Self {
+    RustPrimitive::Custom(token.to_atom())
   }
 }
 

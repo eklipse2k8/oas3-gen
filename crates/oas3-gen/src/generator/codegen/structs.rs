@@ -14,7 +14,7 @@ use super::{
 };
 use crate::generator::ast::{
   ContentCategory, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive, StatusCodeToken,
-  StructDef, StructMethod, StructMethodKind, TypeRef, ValidationAttribute,
+  StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   tokens::{ConstToken, EnumToken, EnumVariantToken},
 };
 
@@ -72,7 +72,7 @@ impl<'a> StructGenerator<'a> {
     }
   }
 
-  fn generate_fields(&self, type_name: &str, fields: &[FieldDef]) -> Vec<TokenStream> {
+  fn generate_fields(&self, type_name: &StructToken, fields: &[FieldDef]) -> Vec<TokenStream> {
     let vis = self.visibility.to_tokens();
     fields
       .iter()

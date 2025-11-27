@@ -17,7 +17,7 @@ use http::Method;
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
-pub use tokens::{DefaultAtom, EnumToken, EnumVariantToken};
+pub use tokens::{DefaultAtom, EnumToken, EnumVariantToken, StructToken};
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
@@ -55,7 +55,7 @@ pub struct ResponseEnumDef {
   pub name: EnumToken,
   pub docs: Vec<String>,
   pub variants: Vec<ResponseVariant>,
-  pub request_type: String,
+  pub request_type: Option<StructToken>,
 }
 
 /// Top-level Rust type representation
@@ -71,7 +71,7 @@ pub enum RustType {
 impl RustType {
   pub fn type_name(&self) -> DefaultAtom {
     match self {
-      RustType::Struct(def) => def.name.as_str().into(),
+      RustType::Struct(def) => def.name.to_atom(),
       RustType::Enum(def) => def.name.to_atom(),
       RustType::TypeAlias(def) => def.name.as_str().into(),
       RustType::DiscriminatedEnum(def) => def.name.to_atom(),
@@ -89,7 +89,7 @@ pub struct OperationInfo {
   pub path: String,
   pub summary: Option<String>,
   pub description: Option<String>,
-  pub request_type: Option<String>,
+  pub request_type: Option<StructToken>,
   pub response_type: Option<String>,
   pub response_enum: Option<EnumToken>,
   pub response_content_category: ContentCategory,
@@ -179,7 +179,7 @@ pub enum StructKind {
 /// Rust struct definition
 #[derive(Debug, Clone, Default)]
 pub struct StructDef {
-  pub name: String,
+  pub name: StructToken,
   pub docs: Vec<String>,
   pub fields: Vec<FieldDef>,
   pub derives: BTreeSet<DeriveTrait>,

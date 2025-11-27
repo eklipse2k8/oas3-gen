@@ -44,11 +44,28 @@ macro_rules! define_ident_token {
       pub fn to_atom(&self) -> DefaultAtom {
         self.0.clone()
       }
+
+      #[must_use]
+      pub fn as_str(&self) -> &str {
+        &self.0
+      }
     }
 
     impl Display for $name {
       fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
+      }
+    }
+
+    impl PartialEq<&str> for $name {
+      fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+      }
+    }
+
+    impl PartialEq<$name> for &str {
+      fn eq(&self, other: &$name) -> bool {
+        *self == other.as_str()
       }
     }
 
@@ -165,6 +182,11 @@ macro_rules! define_literal_token {
 }
 
 define_ident_token!(
+  /// Token representing a Struct
+  StructToken => to_rust_type_name
+);
+
+define_ident_token!(
   /// Token representing an Enum
   EnumToken => to_rust_type_name
 );
@@ -212,5 +234,17 @@ impl From<&str> for HeaderToken {
       const_token: ConstToken::from_raw(s),
       header_name: HeaderNameToken::from_raw(s),
     }
+  }
+}
+
+impl From<StructToken> for EnumToken {
+  fn from(token: StructToken) -> Self {
+    Self(token.to_atom())
+  }
+}
+
+impl From<&StructToken> for EnumToken {
+  fn from(token: &StructToken) -> Self {
+    Self(token.to_atom())
   }
 }

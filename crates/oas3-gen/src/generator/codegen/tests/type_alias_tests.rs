@@ -112,11 +112,11 @@ fn test_type_alias_with_wrapper_types() {
       "type OptionalInt = Option<i32>;",
     ),
     (
-      TypeRef::new(RustPrimitive::Custom("Pet".to_string())).with_vec(),
+      TypeRef::new(RustPrimitive::Custom("Pet".into())).with_vec(),
       "type Pets = Vec<Pet>;",
     ),
     (
-      TypeRef::new(RustPrimitive::Custom("LargeStruct".to_string())).with_boxed(),
+      TypeRef::new(RustPrimitive::Custom("LargeStruct".into())).with_boxed(),
       "type BoxedStruct = Box<LargeStruct>;",
     ),
     (
@@ -147,7 +147,7 @@ fn test_type_alias_custom_types() {
   let def = TypeAliasDef {
     name: "PetList".to_string(),
     docs: vec!["List of pets from the API.".to_string()],
-    target: TypeRef::new(RustPrimitive::Custom("Vec<Pet>".to_string())),
+    target: TypeRef::new(RustPrimitive::Custom("Vec<Pet>".into())),
   };
 
   let tokens = generate_type_alias(&def, Visibility::Crate);

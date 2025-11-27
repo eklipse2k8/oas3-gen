@@ -3,14 +3,15 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, EnumToken, EnumVariantToken, FieldDef, PathSegment, QueryParameter, ResponseVariant,
-    RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, TypeRef, ValidationAttribute,
+    RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef,
+    ValidationAttribute,
   },
   codegen::{self, Visibility, structs},
 };
 
 fn base_struct(kind: StructKind) -> StructDef {
   StructDef {
-    name: "Sample".to_string(),
+    name: StructToken::new("Sample"),
     docs: vec!["/// Sample struct".to_string()],
     fields: vec![FieldDef {
       name: "field".to_string(),

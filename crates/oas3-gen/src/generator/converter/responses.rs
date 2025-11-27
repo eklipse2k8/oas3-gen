@@ -21,7 +21,6 @@ pub(crate) fn build_response_enum(
   schema_converter: &SchemaConverter,
   spec: &Spec,
   name: &str,
-  request_type: Option<&String>,
   operation: &Operation,
   path: &str,
   schema_cache: &mut SharedSchemaCache,
@@ -71,7 +70,7 @@ pub(crate) fn build_response_enum(
     name: EnumToken::new(&base_name),
     docs: vec![format!("/// Response types for {}", operation.operation_id.as_ref()?)],
     variants,
-    request_type: request_type.map_or_else(String::new, Clone::clone),
+    request_type: None,
   })
 }
 

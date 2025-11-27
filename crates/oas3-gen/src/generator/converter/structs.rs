@@ -19,7 +19,7 @@ use super::{
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, EnumToken, FieldDef, FieldDefBuilder, RustType, SerdeAttribute,
-    StructDef, StructKind, TypeRef, default_struct_derives,
+    StructDef, StructKind, StructToken, TypeRef, default_struct_derives,
   },
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
@@ -199,12 +199,12 @@ impl StructConverter {
   ) -> anyhow::Result<ConversionOutput<RustType>> {
     let is_discriminated = is_discriminated_base_type(schema);
     let struct_name = if is_discriminated {
-      format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))
+      StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)))
     } else {
-      to_rust_type_name(name)
+      StructToken::from_raw(name)
     };
 
-    let field_result = self.convert_fields(&struct_name, schema, None, Some(name), cache)?;
+    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name), cache)?;
     let additional_props = self.field_processor.prepare_additional_properties(schema)?;
 
     let mut fields = field_result.result;
@@ -247,7 +247,7 @@ impl StructConverter {
       anyhow::bail!("Parent schema for discriminated child '{name}' is not a valid discriminator base");
     }
 
-    let struct_name = to_rust_type_name(name);
+    let struct_name = StructToken::from_raw(name);
 
     let cache_key = format!("{name}{MERGED_SCHEMA_CACHE_SUFFIX}");
     let merged_schema = if let Some(cached) = merged_schema_cache.get(&cache_key) {
@@ -258,7 +258,7 @@ impl StructConverter {
       new_merged
     };
 
-    let field_result = self.convert_fields(&struct_name, &merged_schema, None, Some(name), cache)?;
+    let field_result = self.convert_fields(struct_name.as_str(), &merged_schema, None, Some(name), cache)?;
     let additional_props = self.field_processor.prepare_additional_properties(&merged_schema)?;
 
     let mut fields = field_result.result;
@@ -303,11 +303,12 @@ impl StructConverter {
     if is_discriminated {
       let base_struct_name = match &main_type {
         RustType::Struct(def) => def.name.clone(),
-        _ => format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)),
+        _ => StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))),
       };
-      let discriminated_enum = self
-        .discriminator_handler
-        .create_discriminated_enum(name, schema, &base_struct_name)?;
+      let discriminated_enum =
+        self
+          .discriminator_handler
+          .create_discriminated_enum(name, schema, base_struct_name.as_str())?;
       all_types.push(discriminated_enum);
     }
 

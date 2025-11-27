@@ -1,5 +1,5 @@
 use crate::generator::{
-  ast::{FieldDef, RustType, StructDef, TypeAliasDef, TypeRef, ValidationAttribute, tokens::HeaderToken},
+  ast::{FieldDef, RustType, StructDef, StructToken, TypeAliasDef, TypeRef, ValidationAttribute, tokens::HeaderToken},
   codegen::constants::{generate_header_constants, generate_regex_constants},
 };
 
@@ -15,7 +15,7 @@ fn make_field(name: &str, pattern: Option<&str>) -> FieldDef {
 
 fn make_struct(name: &str, fields: Vec<FieldDef>) -> RustType {
   RustType::Struct(StructDef {
-    name: name.to_string(),
+    name: StructToken::new(name),
     fields,
     ..Default::default()
   })

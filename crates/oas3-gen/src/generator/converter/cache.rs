@@ -4,7 +4,7 @@ use oas3::spec::ObjectSchema;
 
 use super::hashing;
 use crate::generator::{
-  ast::{EnumToken, RustType},
+  ast::{EnumToken, RustType, StructToken},
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::{extract_enum_values, is_relaxed_enum_pattern},
@@ -125,7 +125,7 @@ impl SharedSchemaCache {
     // Update the name in the struct/enum definition if we renamed it
     let mut final_type_def = type_def;
     match &mut final_type_def {
-      RustType::Struct(s) => s.name.clone_from(&name),
+      RustType::Struct(s) => s.name = StructToken::from(name.clone()),
       RustType::Enum(e) => e.name = EnumToken::new(&name),
       _ => {}
     }

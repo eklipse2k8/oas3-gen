@@ -262,7 +262,7 @@ impl EnumConverter {
     let struct_map: BTreeMap<_, _> = inline_types
       .iter()
       .filter_map(|t| match t {
-        RustType::Struct(s) => Some((&s.name, s)),
+        RustType::Struct(s) => Some((s.name.to_string(), s)),
         _ => None,
       })
       .collect();

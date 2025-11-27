@@ -6,13 +6,13 @@ use crate::generator::{
   analyzer::ErrorAnalyzer,
   ast::{
     ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
-    TypeRef, VariantContent, VariantDef,
+    StructToken, TypeRef, VariantContent, VariantDef,
   },
 };
 
 fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
   RustType::Struct(StructDef {
-    name: name.to_string(),
+    name: StructToken::new(name),
     docs: vec![],
     fields: vec![FieldDef {
       name: "field".to_string(),
@@ -137,12 +137,12 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["RootError".to_string()])];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "RootError".to_string(),
+      name: StructToken::new("RootError"),
       docs: vec![],
       fields: vec![FieldDef {
         name: "nested".to_string(),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -171,7 +171,7 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
       variants: vec![VariantDef {
         name: "Variant".into(),
         docs: vec![],
-        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("InnerError".to_string()))]),
+        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("InnerError".into()))]),
         serde_attrs: vec![],
         deprecated: false,
       }],
@@ -208,12 +208,12 @@ fn test_build_error_schema_set_handles_deep_nesting() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["Level1".to_string()])];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "Level1".to_string(),
+      name: StructToken::new("Level1"),
       docs: vec![],
       fields: vec![FieldDef {
         name: "nested".to_string(),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("Level2".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("Level2".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -223,12 +223,12 @@ fn test_build_error_schema_set_handles_deep_nesting() {
       kind: StructKind::Schema,
     }),
     RustType::Struct(StructDef {
-      name: "Level2".to_string(),
+      name: StructToken::new("Level2"),
       docs: vec![],
       fields: vec![FieldDef {
         name: "nested".to_string(),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("Level3".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("Level3".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -256,12 +256,12 @@ fn test_build_error_schema_set_stops_at_success_types() {
   ];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "ErrorType".to_string(),
+      name: StructToken::new("ErrorType"),
       docs: vec![],
       fields: vec![FieldDef {
         name: "nested".to_string(),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -299,12 +299,12 @@ fn test_build_error_schema_set_handles_circular_references() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["CircularA".to_string()])];
   let rust_types = vec![
     RustType::Struct(StructDef {
-      name: "CircularA".to_string(),
+      name: StructToken::new("CircularA"),
       docs: vec![],
       fields: vec![FieldDef {
         name: "b".to_string(),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -314,12 +314,12 @@ fn test_build_error_schema_set_handles_circular_references() {
       kind: StructKind::Schema,
     }),
     RustType::Struct(StructDef {
-      name: "CircularB".to_string(),
+      name: StructToken::new("CircularB"),
       docs: vec![],
       fields: vec![FieldDef {
         name: "a".to_string(),
         docs: vec![],
-        rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".to_string())),
+        rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".into())),
         ..Default::default()
       }],
       derives: BTreeSet::new(),
@@ -345,7 +345,7 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
     vec!["ErrorWithPrimitives".to_string()],
   )];
   let rust_types = vec![RustType::Struct(StructDef {
-    name: "ErrorWithPrimitives".to_string(),
+    name: StructToken::new("ErrorWithPrimitives"),
     docs: vec![],
     fields: vec![
       FieldDef {
