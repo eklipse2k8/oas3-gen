@@ -17,7 +17,7 @@ use http::Method;
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
-pub use tokens::{DefaultAtom, EnumToken, EnumVariantToken, StructToken};
+pub use tokens::{DefaultAtom, EnumToken, EnumVariantToken, MethodNameToken, StructToken};
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
@@ -192,7 +192,7 @@ pub struct StructDef {
 /// Associated method definition for a struct
 #[derive(Debug, Clone)]
 pub struct StructMethod {
-  pub name: String,
+  pub name: MethodNameToken,
   pub docs: Vec<String>,
   pub kind: StructMethodKind,
   pub attrs: Vec<String>,

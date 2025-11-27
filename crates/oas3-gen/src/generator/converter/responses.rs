@@ -6,7 +6,7 @@ use oas3::{
 use super::{SchemaConverter, cache::SharedSchemaCache};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, StatusCodeToken,
+    ContentCategory, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant, RustPrimitive, StatusCodeToken,
     StructKind, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
   },
   naming::{
@@ -133,7 +133,7 @@ fn extract_response_schema_info(
 
 pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
   StructMethod {
-    name: "parse_response".to_string(),
+    name: MethodNameToken::new("parse_response"),
     docs: vec!["/// Parse the HTTP response into the response enum.".to_string()],
     kind: StructMethodKind::ParseResponse {
       response_enum: response_enum.clone(),

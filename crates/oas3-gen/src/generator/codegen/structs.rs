@@ -15,7 +15,7 @@ use super::{
 use crate::generator::ast::{
   ContentCategory, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive, StatusCodeToken,
   StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
-  tokens::{ConstToken, EnumToken, EnumVariantToken},
+  tokens::{ConstToken, EnumToken, EnumVariantToken, MethodNameToken},
 };
 
 const QUERY_PREFIX_UNSET: char = '\0';
@@ -135,7 +135,7 @@ impl<'a> StructGenerator<'a> {
       } => {
         let docs = generate_docs(&method.docs);
         let attrs = generate_outer_attrs(&method.attrs);
-        self.generate_parse_response_method(response_enum, variants, &docs, &attrs)
+        self.generate_parse_response_method(&method.name, response_enum, variants, &docs, &attrs)
       }
       StructMethodKind::RenderPath { segments, query_params } => {
         self.generate_render_path_method(method, segments, query_params)
@@ -149,7 +149,7 @@ impl<'a> StructGenerator<'a> {
     segments: &[PathSegment],
     query_params: &[QueryParameter],
   ) -> TokenStream {
-    let name = format_ident!("{}", method.name);
+    let name = &method.name;
     let docs = generate_docs(&method.docs);
     let attrs = generate_outer_attrs(&method.attrs);
     let vis = self.visibility.to_tokens();
@@ -166,6 +166,7 @@ impl<'a> StructGenerator<'a> {
 
   fn generate_parse_response_method(
     &self,
+    method_name: &MethodNameToken,
     response_enum: &EnumToken,
     variants: &[ResponseVariant],
     docs: &TokenStream,
@@ -222,7 +223,7 @@ impl<'a> StructGenerator<'a> {
     quote! {
       #docs
       #attrs
-      #vis async fn parse_response(req: reqwest::Response) -> anyhow::Result<#response_enum> {
+      #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
         #status_decl
         #(#status_matches)*
         #fallback

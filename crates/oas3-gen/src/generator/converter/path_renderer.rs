@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use oas3::spec::{Parameter, ParameterStyle};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
-use crate::generator::ast::{PathSegment, QueryParameter, StructMethod, StructMethodKind};
+use crate::generator::ast::{MethodNameToken, PathSegment, QueryParameter, StructMethod, StructMethodKind};
 
 const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
 
@@ -41,7 +41,7 @@ pub(crate) fn build_render_path_method(
     .collect();
 
   StructMethod {
-    name: "render_path".to_string(),
+    name: MethodNameToken::new("render_path"),
     docs: vec!["/// Render the request path with parameters.".to_string()],
     kind: StructMethodKind::RenderPath {
       segments: parse_path_segments(path, path_params),

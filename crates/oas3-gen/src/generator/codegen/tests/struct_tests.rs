@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, EnumToken, EnumVariantToken, FieldDef, PathSegment, QueryParameter, ResponseVariant,
+    ContentCategory, DeriveTrait, EnumToken, EnumVariantToken, FieldDef, MethodNameToken, PathSegment, QueryParameter, ResponseVariant,
     RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef,
     ValidationAttribute,
   },
@@ -36,7 +36,7 @@ fn base_struct(kind: StructKind) -> StructDef {
 fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
   let mut def = base_struct(StructKind::OperationRequest);
   def.methods.push(StructMethod {
-    name: "parse_response".to_string(),
+    name: MethodNameToken::new("parse_response"),
     docs: vec!["/// Parse response".to_string()],
     kind: StructMethodKind::ParseResponse {
       response_enum: EnumToken::new("ResponseEnum"),
@@ -59,7 +59,7 @@ fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> St
     ..Default::default()
   }];
   def.methods.push(StructMethod {
-    name: "render_path".to_string(),
+    name: MethodNameToken::new("render_path"),
     docs: vec![format!("/// Render path with {} parameter", rust_type)],
     kind: StructMethodKind::RenderPath {
       segments: vec![
@@ -112,7 +112,7 @@ fn test_validation_attribute_generation() {
 fn renders_struct_methods() {
   let mut def = base_struct(StructKind::OperationRequest);
   def.methods.push(StructMethod {
-    name: "render_path".to_string(),
+    name: MethodNameToken::new("render_path"),
     docs: vec!["/// Render path".to_string()],
     kind: StructMethodKind::RenderPath {
       segments: vec![
@@ -299,7 +299,7 @@ fn renders_path_with_mixed_parameters() {
     },
   ];
   def.methods.push(StructMethod {
-    name: "render_path".to_string(),
+    name: MethodNameToken::new("render_path"),
     docs: vec!["/// Render path with mixed parameters".to_string()],
     kind: StructMethodKind::RenderPath {
       segments: vec![

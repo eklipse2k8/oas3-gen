@@ -11,7 +11,7 @@ use syn::{Ident, LitStr};
 
 use crate::generator::{
   ast::RegexKey,
-  naming::identifiers::{sanitize, to_http_header_name, to_rust_const_name, to_rust_type_name},
+  naming::identifiers::{sanitize, to_http_header_name, to_rust_const_name, to_rust_field_name, to_rust_type_name},
 };
 
 macro_rules! define_ident_token {
@@ -194,6 +194,16 @@ define_ident_token!(
 define_ident_token!(
   /// Token representing an Enum variant
   EnumVariantToken => to_rust_type_name
+);
+
+define_ident_token!(
+  /// Token representing a valid Rust method name
+  MethodNameToken => to_rust_field_name
+);
+
+define_ident_token!(
+  /// Token representing a valid Rust struct field name
+  FieldNameToken => to_rust_field_name
 );
 
 define_ident_token!(
