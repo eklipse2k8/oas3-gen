@@ -487,6 +487,271 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       info.response_enum.is_some(),
       "response_enum should be set for {content_type}"
     );
+
+    let error_variant = response_enum
+      .variants
+      .iter()
+      .find(|v| v.variant_name == "ClientError")
+      .unwrap_or_else(|| panic!("ClientError variant not found for {content_type}"));
+
+    assert_eq!(
+      error_variant.content_category,
+      ContentCategory::Json,
+      "error response should be Json for {content_type}"
+    );
+
+    assert!(
+      error_variant.schema_type.is_some(),
+      "error response should preserve schema type for {content_type}"
+    );
   }
+  Ok(())
+}
+
+#[test]
+fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+
+  let operation = Operation {
+    operation_id: Some("getItem".to_string()),
+    responses: Some(ResponseMap::from([(
+      "200".to_string(),
+      ObjectOrReference::Object(Response {
+        content: BTreeMap::from([(
+          "application/json".to_string(),
+          MediaType {
+            schema: Some(ObjectOrReference::Object(ObjectSchema {
+              schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+              ..Default::default()
+            })),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
+
+  let (types, _) = converter.convert(
+    "get_item",
+    "getItem",
+    &Method::GET,
+    "/items",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
+
+  let response_enum = types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let default_variant = response_enum.variants.iter().find(|v| v.variant_name == "Unknown");
+
+  assert!(default_variant.is_some(), "Default variant should be added");
+  assert!(
+    default_variant.unwrap().schema_type.is_none(),
+    "Default variant should have no schema type"
+  );
+  Ok(())
+}
+
+#[test]
+fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
+  let error_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("Error".to_string(), error_schema)]));
+
+  let operation = Operation {
+    operation_id: Some("getItem".to_string()),
+    responses: Some(ResponseMap::from([
+      (
+        "200".to_string(),
+        ObjectOrReference::Object(Response {
+          content: BTreeMap::from([(
+            "application/json".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+      ),
+      (
+        "default".to_string(),
+        ObjectOrReference::Object(Response {
+          description: Some("Error response".to_string()),
+          content: BTreeMap::from([(
+            "application/json".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/Error".to_string(),
+                summary: None,
+                description: None,
+              }),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+      ),
+    ])),
+    ..Default::default()
+  };
+
+  let (types, _) = converter.convert(
+    "get_item",
+    "getItem",
+    &Method::GET,
+    "/items",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
+
+  let response_enum = types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let auto_added_unknown = response_enum
+    .variants
+    .iter()
+    .filter(|v| v.variant_name == "Unknown")
+    .count();
+
+  assert_eq!(
+    auto_added_unknown, 1,
+    "Should only have one Unknown variant (from the default response, not auto-added)"
+  );
+
+  let default_variant = response_enum.variants.iter().find(|v| v.status_code.is_default());
+
+  assert!(default_variant.is_some(), "Default variant should exist");
+  assert!(
+    default_variant.unwrap().schema_type.is_some(),
+    "Default variant should have schema type from spec"
+  );
+  Ok(())
+}
+
+#[test]
+fn test_response_with_primitive_type() -> anyhow::Result<()> {
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+
+  let operation = Operation {
+    operation_id: Some("getCount".to_string()),
+    responses: Some(ResponseMap::from([(
+      "200".to_string(),
+      ObjectOrReference::Object(Response {
+        content: BTreeMap::from([(
+          "application/json".to_string(),
+          MediaType {
+            schema: Some(ObjectOrReference::Object(ObjectSchema {
+              schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+              format: Some("int64".to_string()),
+              ..Default::default()
+            })),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
+
+  let (types, _) = converter.convert(
+    "get_count",
+    "getCount",
+    &Method::GET,
+    "/count",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
+
+  let response_enum = types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "GetCountResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let ok_variant = response_enum
+    .variants
+    .iter()
+    .find(|v| v.variant_name == "Ok")
+    .expect("Ok variant not found");
+
+  assert!(ok_variant.schema_type.is_some(), "Should have schema type");
+  assert_eq!(
+    ok_variant.schema_type.as_ref().unwrap().base_type,
+    RustPrimitive::I64,
+    "Should use i64 for int64 format"
+  );
+  Ok(())
+}
+
+#[test]
+fn test_response_with_no_content() -> anyhow::Result<()> {
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+
+  let operation = Operation {
+    operation_id: Some("deleteItem".to_string()),
+    responses: Some(ResponseMap::from([(
+      "204".to_string(),
+      ObjectOrReference::Object(Response {
+        description: Some("No content".to_string()),
+        content: BTreeMap::new(),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
+
+  let (types, _) = converter.convert(
+    "delete_item",
+    "deleteItem",
+    &Method::DELETE,
+    "/items/{id}",
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
+
+  let response_enum = types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "DeleteItemResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let no_content_variant = response_enum
+    .variants
+    .iter()
+    .find(|v| v.variant_name == "NoContent")
+    .expect("NoContent variant not found");
+
+  assert!(
+    no_content_variant.schema_type.is_none(),
+    "No content response should have no schema type"
+  );
   Ok(())
 }

@@ -51,9 +51,7 @@ pub(crate) struct EnumConverter {
 struct EligibleVariant {
   variant_name: EnumVariantToken,
   type_name: String,
-  docs: Vec<String>,
   first_required_field: Option<(String, String)>,
-  has_required_fields: bool,
 }
 
 impl EnumConverter {
@@ -285,13 +283,12 @@ impl EnumConverter {
           Some((
             struct_def.derives.contains(&DeriveTrait::Default),
             struct_def.fields.clone(),
-            struct_def.docs.clone(),
           ))
         } else {
           self.try_analyze_referenced_struct(&type_name)
         };
 
-        let (has_default, fields, docs) = struct_info?;
+        let (has_default, fields) = struct_info?;
 
         if !has_default {
           return None;
@@ -316,9 +313,7 @@ impl EnumConverter {
         Some(EligibleVariant {
           variant_name: variant.name.clone(),
           type_name,
-          docs,
           first_required_field,
-          has_required_fields: !required_fields.is_empty(),
         })
       })
       .collect();
@@ -340,8 +335,6 @@ impl EnumConverter {
 
         let method_docs = Self::generate_method_docs(
           &variant_info.variant_name.to_string(),
-          &variant_info.docs,
-          !variant_info.has_required_fields,
           variant_info
             .first_required_field
             .as_ref()
@@ -373,17 +366,17 @@ impl EnumConverter {
       .collect()
   }
 
-  /// Analyzes a referenced struct type to extract its Default derive status, fields, and documentation.
+  /// Analyzes a referenced struct type to extract its Default derive status and fields.
   ///
   /// This is used for generating helper methods when a variant wraps a referenced type (not inline).
   /// Returns None if the type is not a struct or cannot be converted.
-  fn try_analyze_referenced_struct(&self, type_name: &str) -> Option<(bool, Vec<FieldDef>, Vec<String>)> {
+  fn try_analyze_referenced_struct(&self, type_name: &str) -> Option<(bool, Vec<FieldDef>)> {
     let schema_name = type_name.trim_start_matches("Box<").trim_end_matches('>');
     let schema = self.graph.get_schema(schema_name)?;
 
-    if schema.schema_type != Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object))
-      && schema.properties.is_empty()
-    {
+    let is_object_type = schema.schema_type == Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object));
+    let has_properties = !schema.properties.is_empty();
+    if !is_object_type && !has_properties {
       return None;
     }
 
@@ -393,29 +386,17 @@ impl EnumConverter {
       .ok()?;
 
     match &struct_result.result {
-      RustType::Struct(s) => Some((
-        s.derives.contains(&DeriveTrait::Default),
-        s.fields.clone(),
-        s.docs.clone(),
-      )),
+      RustType::Struct(s) => Some((s.derives.contains(&DeriveTrait::Default), s.fields.clone())),
       _ => None,
     }
   }
 
-  fn generate_method_docs(
-    variant_name: &str,
-    struct_docs: &[String],
-    is_simple: bool,
-    param_name: Option<&str>,
-  ) -> Vec<String> {
-    if is_simple {
-      vec![format!("Creates a `{variant_name}` variant with default values.")]
-    } else if let Some(param) = param_name {
-      vec![format!(
+  fn generate_method_docs(variant_name: &str, required_param_name: Option<&str>) -> Vec<String> {
+    match required_param_name {
+      None => vec![format!("Creates a `{variant_name}` variant with default values.")],
+      Some(param) => vec![format!(
         "Creates a `{variant_name}` variant with the specified `{param}`."
-      )]
-    } else {
-      struct_docs.to_vec()
+      )],
     }
   }
 

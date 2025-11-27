@@ -86,7 +86,7 @@ fn extract_response_schema_info(
   };
   let content_category = ContentCategory::from_content_type(content_type);
 
-  if content_category == ContentCategory::Binary {
+  if content_category == ContentCategory::Binary && status_code.is_success() {
     return Ok((Some(TypeRef::new(RustPrimitive::Bytes)), content_category));
   }
 
@@ -94,12 +94,9 @@ fn extract_response_schema_info(
     return Ok((None, content_category));
   };
 
-  match schema_ref {
+  let type_ref = match schema_ref {
     ObjectOrReference::Ref { ref_path, .. } => {
-      let Some(schema_name) = SchemaRegistry::extract_ref_name(ref_path) else {
-        return Ok((None, content_category));
-      };
-      Ok((Some(TypeRef::new(to_rust_type_name(&schema_name))), content_category))
+      SchemaRegistry::extract_ref_name(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name)))
     }
     ObjectOrReference::Object(inline_schema) => {
       if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() {
@@ -107,16 +104,14 @@ fn extract_response_schema_info(
       }
 
       if inline_schema.properties.is_empty()
-        && let Ok(type_ref) = schema_converter.schema_to_type_ref(inline_schema)
-        && !matches!(type_ref.base_type, RustPrimitive::Custom(_))
+        && let Ok(primitive_ref) = schema_converter.schema_to_type_ref(inline_schema)
+        && !matches!(primitive_ref.base_type, RustPrimitive::Custom(_))
       {
-        return Ok((Some(type_ref), content_category));
+        return Ok((Some(primitive_ref), content_category));
       }
 
-      let cached_type_name = schema_cache.get_type_name(inline_schema)?;
-
-      let rust_type_name = if let Some(name) = cached_type_name {
-        name
+      let type_name = if let Some(cached) = schema_cache.get_type_name(inline_schema)? {
+        cached
       } else {
         let base_name = naming::infer_name_from_context(inline_schema, path, status_code.as_str());
         let unique_name = schema_cache.make_unique_name(&base_name);
@@ -131,9 +126,11 @@ fn extract_response_schema_info(
         schema_cache.register_type(inline_schema, &unique_name, result.inline_types, result.result)?
       };
 
-      Ok((Some(TypeRef::new(rust_type_name)), content_category))
+      Some(TypeRef::new(type_name))
     }
-  }
+  };
+
+  Ok((type_ref, content_category))
 }
 
 pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
