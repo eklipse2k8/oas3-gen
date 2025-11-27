@@ -9,8 +9,8 @@ use super::{
   coercion,
 };
 use crate::generator::ast::{
-  DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute, VariantContent,
-  VariantDef,
+  DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, EnumVariantToken, ResponseEnumDef, SerdeAttribute,
+  VariantContent, VariantDef,
 };
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
@@ -260,7 +260,7 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
           SerdeAttribute::Rename(val) => Some(val.clone()),
           _ => None,
         })
-        .unwrap_or_else(|| v.name.clone());
+        .unwrap_or_else(|| v.name.to_string());
 
       let lower_val = serde_name.to_ascii_lowercase();
       let match_arm = quote! {
@@ -273,13 +273,15 @@ fn generate_case_insensitive_deserialize(def: &EnumDef) -> TokenStream {
   let error_variants_list_tokens = quote! { &[ #(#error_variants_list),* ] };
 
   // Check for fallback variant (Unknown/Other)
-  let fallback_arm =
-    if let Some(unknown_variant) = def.variants.iter().find(|v| v.name == "Unknown" || v.name == "Other") {
+  let fallback_arm = {
+    let fallback_candidates = [EnumVariantToken::new("Unknown"), EnumVariantToken::new("Other")];
+    if let Some(unknown_variant) = def.variants.iter().find(|v| fallback_candidates.contains(&v.name)) {
       let variant_name = format_ident!("{}", unknown_variant.name);
       quote! { _ => Ok(#name::#variant_name), }
     } else {
       quote! { _ => Err(serde::de::Error::unknown_variant(&s, #error_variants_list_tokens)), }
-    };
+    }
+  };
 
   quote! {
     impl<'de> serde::Deserialize<'de> for #name {

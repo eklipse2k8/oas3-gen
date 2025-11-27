@@ -14,7 +14,7 @@ use crate::generator::{
 
 fn make_unit_variant(name: &str) -> VariantDef {
   VariantDef {
-    name: name.to_string(),
+    name: EnumVariantToken::from(name),
     docs: vec![],
     content: VariantContent::Unit,
     serde_attrs: vec![],
@@ -113,14 +113,14 @@ fn test_enum_tuple_variants() {
       "single type tuple",
       vec![
         VariantDef {
-          name: "Text".to_string(),
+          name: EnumVariantToken::new("Text"),
           docs: vec![],
           content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
           serde_attrs: vec![],
           deprecated: false,
         },
         VariantDef {
-          name: "Number".to_string(),
+          name: EnumVariantToken::new("Number"),
           docs: vec![],
           content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]),
           serde_attrs: vec![],
@@ -137,7 +137,7 @@ fn test_enum_tuple_variants() {
     (
       "multiple type tuple",
       vec![VariantDef {
-        name: "KeyValue".to_string(),
+        name: EnumVariantToken::new("KeyValue"),
         docs: vec![],
         content: VariantContent::Tuple(vec![
           TypeRef::new(RustPrimitive::String),
@@ -167,7 +167,7 @@ fn test_enum_variant_attributes() {
     docs: vec![],
     variants: vec![
       VariantDef {
-        name: "V1".to_string(),
+        name: EnumVariantToken::new("V1"),
         docs: vec![],
         content: VariantContent::Unit,
         serde_attrs: vec![],
@@ -218,14 +218,14 @@ fn test_enum_serde_attributes() {
         docs: vec![],
         variants: vec![
           VariantDef {
-            name: "InProgress".to_string(),
+            name: EnumVariantToken::new("InProgress"),
             docs: vec![],
             content: VariantContent::Unit,
             serde_attrs: vec![SerdeAttribute::Rename("in_progress".to_string())],
             deprecated: false,
           },
           VariantDef {
-            name: "Completed".to_string(),
+            name: EnumVariantToken::new("Completed"),
             docs: vec![],
             content: VariantContent::Unit,
             serde_attrs: vec![SerdeAttribute::Rename("completed".to_string())],
@@ -295,14 +295,14 @@ fn test_case_insensitive_enum() {
     docs: vec![],
     variants: vec![
       VariantDef {
-        name: "Active".to_string(),
+        name: EnumVariantToken::new("Active"),
         docs: vec![],
         content: VariantContent::Unit,
         serde_attrs: vec![SerdeAttribute::Rename("active".to_string())],
         deprecated: false,
       },
       VariantDef {
-        name: "InProgress".to_string(),
+        name: EnumVariantToken::new("InProgress"),
         docs: vec![],
         content: VariantContent::Unit,
         serde_attrs: vec![SerdeAttribute::Rename("in-progress".to_string())],
@@ -423,7 +423,7 @@ fn test_enum_constructor_methods() {
     name: EnumToken::new("RequestBody"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Json".to_string(),
+      name: EnumVariantToken::new("Json"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("JsonPayload".to_string()))]),
       serde_attrs: vec![],
@@ -459,7 +459,7 @@ fn test_enum_constructor_methods() {
     name: EnumToken::new("Request"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Create".to_string(),
+      name: EnumVariantToken::new("Create"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("CreateParams".to_string()))]),
       serde_attrs: vec![],

@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::{
   generator::{
-    ast::{TypeRef, VariantContent, VariantDef},
+    ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
     naming::{
       constants::REQUEST_BODY_SUFFIX,
       inference::{
@@ -378,7 +378,7 @@ fn test_infer_variant_name_special_cases() {
 
 fn make_variant(name: &str) -> VariantDef {
   VariantDef {
-    name: name.into(),
+    name: EnumVariantToken::from(name),
     docs: vec![],
     content: VariantContent::Unit,
     serde_attrs: vec![],
@@ -394,46 +394,46 @@ fn test_strip_common_affixes_no_op_cases() {
 
   let mut single = vec![make_variant("UserResponse")];
   strip_common_affixes(&mut single);
-  assert_eq!(single[0].name, "UserResponse");
+  assert_eq!(single[0].name, EnumVariantToken::new("UserResponse"));
 }
 
 #[test]
 fn test_strip_common_affixes_strips_prefix_suffix_or_both() {
   let mut suffix_variants = vec![make_variant("CreateResponse"), make_variant("UpdateResponse")];
   strip_common_affixes(&mut suffix_variants);
-  assert_eq!(suffix_variants[0].name, "Create");
-  assert_eq!(suffix_variants[1].name, "Update");
+  assert_eq!(suffix_variants[0].name, EnumVariantToken::new("Create"));
+  assert_eq!(suffix_variants[1].name, EnumVariantToken::new("Update"));
 
   let mut prefix_variants = vec![make_variant("UserCreate"), make_variant("UserUpdate")];
   strip_common_affixes(&mut prefix_variants);
-  assert_eq!(prefix_variants[0].name, "Create");
-  assert_eq!(prefix_variants[1].name, "Update");
+  assert_eq!(prefix_variants[0].name, EnumVariantToken::new("Create"));
+  assert_eq!(prefix_variants[1].name, EnumVariantToken::new("Update"));
 
   let mut both_variants = vec![make_variant("UserCreateResponse"), make_variant("UserUpdateResponse")];
   strip_common_affixes(&mut both_variants);
-  assert_eq!(both_variants[0].name, "Create");
-  assert_eq!(both_variants[1].name, "Update");
+  assert_eq!(both_variants[0].name, EnumVariantToken::new("Create"));
+  assert_eq!(both_variants[1].name, EnumVariantToken::new("Update"));
 }
 
 #[test]
 fn test_strip_common_affixes_no_common_parts() {
   let mut variants = vec![make_variant("CreateUser"), make_variant("DeletePost")];
   strip_common_affixes(&mut variants);
-  assert_eq!(variants[0].name, "CreateUser");
-  assert_eq!(variants[1].name, "DeletePost");
+  assert_eq!(variants[0].name, EnumVariantToken::new("CreateUser"));
+  assert_eq!(variants[1].name, EnumVariantToken::new("DeletePost"));
 }
 
 #[test]
 fn test_strip_common_affixes_safety_guards() {
   let mut collision_variants = vec![make_variant("UserResponse"), make_variant("UserResponse")];
   strip_common_affixes(&mut collision_variants);
-  assert_eq!(collision_variants[0].name, "UserResponse");
-  assert_eq!(collision_variants[1].name, "UserResponse");
+  assert_eq!(collision_variants[0].name, EnumVariantToken::new("UserResponse"));
+  assert_eq!(collision_variants[1].name, EnumVariantToken::new("UserResponse"));
 
   let mut empty_name_variants = vec![make_variant("Response"), make_variant("Response")];
   strip_common_affixes(&mut empty_name_variants);
-  assert_eq!(empty_name_variants[0].name, "Response");
-  assert_eq!(empty_name_variants[1].name, "Response");
+  assert_eq!(empty_name_variants[0].name, EnumVariantToken::new("Response"));
+  assert_eq!(empty_name_variants[1].name, EnumVariantToken::new("Response"));
 }
 
 #[test]
@@ -441,7 +441,7 @@ fn test_strip_common_affixes_preserves_variant_content() {
   let tuple_type = TypeRef::new("TestStruct");
   let mut variants = vec![
     VariantDef {
-      name: "CreateResponse".into(),
+      name: EnumVariantToken::from("CreateResponse"),
       docs: vec![],
       content: VariantContent::Tuple(vec![tuple_type]),
       serde_attrs: vec![],
@@ -452,8 +452,8 @@ fn test_strip_common_affixes_preserves_variant_content() {
 
   strip_common_affixes(&mut variants);
 
-  assert_eq!(variants[0].name, "Create");
-  assert_eq!(variants[1].name, "Update");
+  assert_eq!(variants[0].name, EnumVariantToken::new("Create"));
+  assert_eq!(variants[1].name, EnumVariantToken::new("Update"));
   assert!(matches!(variants[0].content, VariantContent::Tuple(_)));
   assert!(matches!(variants[1].content, VariantContent::Unit));
 }

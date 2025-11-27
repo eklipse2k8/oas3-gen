@@ -4,7 +4,7 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use crate::generator::{
-  ast::VariantDef,
+  ast::{EnumVariantToken, VariantDef},
   converter::hashing,
   naming::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
@@ -239,7 +239,10 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
     return;
   }
 
-  let word_segments: Vec<Vec<String>> = variants.iter().map(|v| split_pascal_case(&v.name)).collect();
+  let word_segments: Vec<Vec<String>> = variants
+    .iter()
+    .map(|v| split_pascal_case(&v.name.to_string()))
+    .collect();
   let first = &word_segments[0];
   let rest = &word_segments[1..];
 
@@ -256,7 +259,7 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
   }
 
   for (variant, new_name) in variants.iter_mut().zip(stripped_names) {
-    variant.name = new_name;
+    variant.name = EnumVariantToken::from(new_name);
   }
 }
 

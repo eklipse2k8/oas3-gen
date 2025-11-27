@@ -2,7 +2,8 @@ use std::collections::{BTreeSet, HashSet};
 
 use crate::generator::{
   ast::{
-    EnumDef, EnumToken, FieldDef, RustPrimitive, RustType, StructDef, StructKind, TypeRef, VariantContent, VariantDef,
+    EnumDef, EnumToken, EnumVariantToken, FieldDef, RustPrimitive, RustType, StructDef, StructKind, TypeRef,
+    VariantContent, VariantDef,
   },
   codegen::error_impls,
 };
@@ -86,7 +87,7 @@ fn test_generate_error_enum_impl_with_tuple_variants() {
     name: EnumToken::new("MyError"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "BadRequest".to_string(),
+      name: EnumVariantToken::new("BadRequest"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],
@@ -115,7 +116,7 @@ fn test_generate_error_enum_impl_with_unit_variants() {
     name: EnumToken::new("MyError"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "NotFound".to_string(),
+      name: EnumVariantToken::new("NotFound"),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],
@@ -164,7 +165,7 @@ fn test_try_generate_error_impl_for_error_enum() {
     name: EnumToken::new("ApiError"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Error".to_string(),
+      name: EnumVariantToken::new("Error"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],

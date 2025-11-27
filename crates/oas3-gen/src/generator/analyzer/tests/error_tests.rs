@@ -31,7 +31,7 @@ fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
 fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
   let variants = if has_tuple_variant {
     vec![VariantDef {
-      name: "Error".to_string(),
+      name: "Error".into(),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],
@@ -39,7 +39,7 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
     }]
   } else {
     vec![VariantDef {
-      name: "Unit".to_string(),
+      name: "Unit".into(),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],
@@ -166,10 +166,10 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
   let operations_info = vec![create_operation_info("op1", vec![], vec!["ErrorEnum".to_string()])];
   let rust_types = vec![
     RustType::Enum(EnumDef {
-      name: EnumToken::new("ErrorEnum"),
+      name: "ErrorEnum".into(),
       docs: vec![],
       variants: vec![VariantDef {
-        name: "Variant".to_string(),
+        name: "Variant".into(),
         docs: vec![],
         content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("InnerError".to_string()))]),
         serde_attrs: vec![],

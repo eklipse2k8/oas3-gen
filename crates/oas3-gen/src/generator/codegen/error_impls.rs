@@ -189,8 +189,7 @@ fn generate_enum_error_arms(def: &EnumDef) -> (Vec<TokenStream>, Vec<TokenStream
     .variants
     .iter()
     .map(|variant| {
-      let variant_ident = format_ident!("{}", &variant.name);
-
+      let variant_ident = &variant.name;
       match &variant.content {
         VariantContent::Tuple(types) if !types.is_empty() => (
           quote! { Self::#variant_ident(err) => write!(f, "{err}"), },

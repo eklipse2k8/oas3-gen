@@ -268,7 +268,7 @@ fn test_enum_with_tuple_variant() {
     name: EnumToken::new("Result"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Success".to_string(),
+      name: EnumVariantToken::new("Success"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("User".to_string()))]),
       serde_attrs: vec![],
@@ -575,7 +575,7 @@ fn test_request_body_chain_with_response_enum() {
     name: EnumToken::new("ModelIds"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Gpt4".to_string(),
+      name: EnumVariantToken::new("Gpt4"),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],

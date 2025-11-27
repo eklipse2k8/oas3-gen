@@ -5,7 +5,7 @@ use std::{
 
 use inflections::Inflect;
 use proc_macro2::{Span, TokenStream};
-use quote::ToTokens;
+use quote::{IdentFragment, ToTokens};
 pub use string_cache::DefaultAtom;
 use syn::{Ident, LitStr};
 
@@ -23,13 +23,14 @@ macro_rules! define_ident_token {
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
     pub struct $name(DefaultAtom);
 
+    #[allow(dead_code)]
     impl $name {
-      #[allow(dead_code)]
+      #[must_use]
       pub fn new(ident: impl AsRef<str>) -> Self {
         Self(ident.as_ref().into())
       }
 
-      #[allow(dead_code)]
+      #[must_use]
       pub fn from_raw(value: impl AsRef<str>) -> Self {
         Self($convert_fn(value.as_ref()).into())
       }
@@ -89,6 +90,16 @@ macro_rules! define_ident_token {
         token.to_tokens(tokens);
       }
     }
+
+    impl IdentFragment for $name {
+      fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
+      }
+
+      fn span(&self) -> Option<Span> {
+        Some(Span::call_site())
+      }
+    }
   };
 }
 
@@ -101,13 +112,14 @@ macro_rules! define_literal_token {
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct $name(DefaultAtom);
 
+    #[allow(dead_code)]
     impl $name {
-      #[allow(dead_code)]
+      #[must_use]
       pub fn new(literal: impl AsRef<str>) -> Self {
         Self(literal.as_ref().into())
       }
 
-      #[allow(dead_code)]
+      #[must_use]
       pub fn from_raw(value: impl AsRef<str>) -> Self {
         Self($convert_fn(value.as_ref()).into())
       }

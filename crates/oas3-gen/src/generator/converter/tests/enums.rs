@@ -10,8 +10,8 @@ use serde_json::json;
 use crate::{
   generator::{
     ast::{
-      DeriveTrait, EnumDef, EnumMethodKind, EnumToken, RustPrimitive, RustType, SerdeAttribute, TypeRef,
-      VariantContent, VariantDef,
+      DeriveTrait, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType, SerdeAttribute,
+      TypeRef, VariantContent, VariantDef,
     },
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
@@ -275,25 +275,25 @@ fn test_integer_enum_values() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "IntEnum");
   assert_eq!(enum_def.variants.len(), 4);
-  assert_eq!(enum_def.variants[0].name, "Value0");
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Value0"));
   assert!(
     enum_def.variants[0]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("0".to_string()))
   );
-  assert_eq!(enum_def.variants[1].name, "Value1");
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Value1"));
   assert!(
     enum_def.variants[1]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("1".to_string()))
   );
-  assert_eq!(enum_def.variants[2].name, "Value42");
+  assert_eq!(enum_def.variants[2].name, EnumVariantToken::new("Value42"));
   assert!(
     enum_def.variants[2]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("42".to_string()))
   );
-  assert_eq!(enum_def.variants[3].name, "Value_5");
+  assert_eq!(enum_def.variants[3].name, EnumVariantToken::new("Value_5"));
   assert!(
     enum_def.variants[3]
       .serde_attrs
@@ -320,13 +320,13 @@ fn test_float_enum_values() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "FloatEnum");
   assert_eq!(enum_def.variants.len(), 4);
-  assert_eq!(enum_def.variants[0].name, "Value0");
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Value0"));
   assert!(
     enum_def.variants[0]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("0".to_string()))
   );
-  assert_eq!(enum_def.variants[1].name, "Value1_5");
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Value1_5"));
   assert!(
     enum_def.variants[1]
       .serde_attrs
@@ -353,13 +353,13 @@ fn test_boolean_enum_values() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "BoolEnum");
   assert_eq!(enum_def.variants.len(), 2);
-  assert_eq!(enum_def.variants[0].name, "True");
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("True"));
   assert!(
     enum_def.variants[0]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("true".to_string()))
   );
-  assert_eq!(enum_def.variants[1].name, "False");
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("False"));
   assert!(
     enum_def.variants[1]
       .serde_attrs
@@ -385,10 +385,10 @@ fn test_mixed_type_enum_values() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "MixedEnum");
   assert_eq!(enum_def.variants.len(), 4);
-  assert_eq!(enum_def.variants[0].name, "String");
-  assert_eq!(enum_def.variants[1].name, "Value42");
-  assert_eq!(enum_def.variants[2].name, "Value1_5");
-  assert_eq!(enum_def.variants[3].name, "True");
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("String"));
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Value42"));
+  assert_eq!(enum_def.variants[2].name, EnumVariantToken::new("Value1_5"));
+  assert_eq!(enum_def.variants[3].name, EnumVariantToken::new("True"));
   Ok(())
 }
 
@@ -431,7 +431,7 @@ fn test_case_insensitive_duplicates_with_deduplication() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "CaseEnum");
   assert_eq!(enum_def.variants.len(), 2);
-  assert_eq!(enum_def.variants[0].name, "Item");
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Item"));
   assert!(
     enum_def.variants[0]
       .serde_attrs
@@ -442,7 +442,7 @@ fn test_case_insensitive_duplicates_with_deduplication() -> anyhow::Result<()> {
       .serde_attrs
       .contains(&SerdeAttribute::Alias("item".to_string()))
   );
-  assert_eq!(enum_def.variants[1].name, "Select");
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Select"));
   assert!(
     enum_def.variants[1]
       .serde_attrs
@@ -474,25 +474,25 @@ fn test_case_insensitive_duplicates_with_preservation() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "CaseEnum");
   assert_eq!(enum_def.variants.len(), 4);
-  assert_eq!(enum_def.variants[0].name, "Item");
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Item"));
   assert!(
     enum_def.variants[0]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("ITEM".to_string()))
   );
-  assert_eq!(enum_def.variants[1].name, "Item1");
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Item1"));
   assert!(
     enum_def.variants[1]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("item".to_string()))
   );
-  assert_eq!(enum_def.variants[2].name, "Select");
+  assert_eq!(enum_def.variants[2].name, EnumVariantToken::new("Select"));
   assert!(
     enum_def.variants[2]
       .serde_attrs
       .contains(&SerdeAttribute::Rename("SELECT".to_string()))
   );
-  assert_eq!(enum_def.variants[3].name, "Select3");
+  assert_eq!(enum_def.variants[3].name, EnumVariantToken::new("Select3"));
   assert!(
     enum_def.variants[3]
       .serde_attrs
@@ -589,9 +589,9 @@ fn test_preserve_strategy_with_multiple_collisions() {
 
   if let Some(RustType::Enum(enum_def)) = result {
     assert_eq!(enum_def.variants.len(), 3);
-    assert_eq!(enum_def.variants[0].name, "Active");
-    assert_eq!(enum_def.variants[1].name, "Active1");
-    assert_eq!(enum_def.variants[2].name, "Active2");
+    assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Active"));
+    assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Active1"));
+    assert_eq!(enum_def.variants[2].name, EnumVariantToken::new("Active2"));
   } else {
     panic!("Expected enum result");
   }
@@ -763,7 +763,7 @@ fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
   assert_eq!(enum_def.variants.len(), 2);
 
   let auto_variant = &enum_def.variants[0];
-  assert_eq!(auto_variant.name, "Auto");
+  assert_eq!(auto_variant.name, EnumVariantToken::new("Auto"));
   assert!(matches!(auto_variant.content, VariantContent::Unit));
   assert_eq!(
     auto_variant.serde_attrs,
@@ -771,7 +771,7 @@ fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
   );
 
   let text_variant = &enum_def.variants[1];
-  assert_eq!(text_variant.name, "TextFormat");
+  assert_eq!(text_variant.name, EnumVariantToken::new("TextFormat"));
   assert!(matches!(text_variant.content, VariantContent::Tuple(_)));
 
   Ok(())
@@ -1096,7 +1096,7 @@ fn test_enum_helper_skips_without_default_trait() {
     name: EnumToken::new("TestEnum"),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Variant".to_string(),
+      name: EnumVariantToken::new("Variant"),
       docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("TestVariant".to_string()))]),
       serde_attrs: vec![],

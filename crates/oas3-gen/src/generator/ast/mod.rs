@@ -282,7 +282,7 @@ pub struct EnumDef {
 /// Rust enum variant definition
 #[derive(Debug, Clone, Default)]
 pub struct VariantDef {
-  pub name: String,
+  pub name: EnumVariantToken,
   pub docs: Vec<String>,
   pub content: VariantContent,
   pub serde_attrs: Vec<SerdeAttribute>,

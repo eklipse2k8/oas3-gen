@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{EnumDef, EnumToken, RustType},
+    ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
     converter::{
       FieldOptionalityPolicy, SchemaConverter, cache::SharedSchemaCache, enums::EnumConverter, hashing,
       string_enum_optimizer::StringEnumOptimizer, type_resolver::TypeResolver,
@@ -134,7 +134,7 @@ fn test_string_enum_optimizer_reuses_cached_enum() {
 
   let outer_enum = &types[0];
   if let RustType::Enum(e) = outer_enum {
-    let known_variant = e.variants.iter().find(|v| v.name == "Known");
+    let known_variant = e.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
     assert!(known_variant.is_some(), "Should have Known variant");
   } else {
     panic!("Expected enum type");
@@ -189,7 +189,7 @@ fn test_full_schema_conversion_with_deduplication() {
 
   if let RustType::Enum(outer) = &model_ids_result[0] {
     assert_eq!(outer.name.to_string(), "ModelIdsShared");
-    let known_variant = outer.variants.iter().find(|v| v.name == "Known");
+    let known_variant = outer.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
     assert!(known_variant.is_some(), "Should have Known variant");
   } else {
     panic!("Expected enum type for ModelIdsShared");

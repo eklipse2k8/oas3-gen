@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
   ast::{
-    DeriveTrait, EnumDef, EnumToken, FieldDef, RustType, StructDef, StructKind, TypeRef, ValidationAttribute,
-    VariantContent, VariantDef,
+    DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, RustType, StructDef, StructKind, TypeRef,
+    ValidationAttribute, VariantContent, VariantDef,
   },
 };
 
@@ -41,7 +41,7 @@ fn create_enum(name: &str) -> EnumDef {
     name: EnumToken::new(name),
     docs: vec![],
     variants: vec![VariantDef {
-      name: "Variant".to_string(),
+      name: EnumVariantToken::new("Variant"),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],

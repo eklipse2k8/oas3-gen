@@ -12,8 +12,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, EnumToken, FieldDef, RustType, SerdeAttribute, TypeRef,
-    VariantContent, VariantDef, default_enum_derives,
+    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, RustType, SerdeAttribute,
+    TypeRef, VariantContent, VariantDef, default_enum_derives,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -46,6 +46,14 @@ pub(crate) struct EnumConverter {
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   pub(crate) no_helpers: bool,
+}
+
+struct EligibleVariant {
+  variant_name: EnumVariantToken,
+  type_name: String,
+  docs: Vec<String>,
+  first_required_field: Option<(String, String)>,
+  has_required_fields: bool,
 }
 
 impl EnumConverter {
@@ -181,9 +189,9 @@ impl EnumConverter {
     })
   }
 
-  fn push_variant(variants: &mut Vec<VariantDef>, name: String, rename: &str) {
+  fn push_variant(variants: &mut Vec<VariantDef>, name: impl Into<EnumVariantToken>, rename: &str) {
     variants.push(VariantDef {
-      name,
+      name: name.into(),
       docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![SerdeAttribute::Rename(rename.to_string())],
@@ -249,14 +257,6 @@ impl EnumConverter {
   /// - If exactly one field is required: generates parameterized constructor (e.g., `enum.variant_name(value)`)
   /// - If multiple fields are required: skips method generation (too complex for helpers)
   fn generate_methods(&self, variants: &[VariantDef], inline_types: &[RustType], enum_name: &str) -> Vec<EnumMethod> {
-    struct EligibleVariant {
-      variant_name: String,
-      type_name: String,
-      docs: Vec<String>,
-      first_required_field: Option<(String, String)>,
-      has_required_fields: bool,
-    }
-
     let enum_name = to_rust_type_name(enum_name);
 
     let struct_map: BTreeMap<_, _> = inline_types
@@ -327,7 +327,7 @@ impl EnumConverter {
       return vec![];
     }
 
-    let variant_names: Vec<String> = eligible_variants.iter().map(|v| v.variant_name.clone()).collect();
+    let variant_names: Vec<String> = eligible_variants.iter().map(|v| v.variant_name.to_string()).collect();
     let derived_names = derive_method_names(&enum_name, &variant_names);
 
     let mut seen_names = BTreeSet::new();
@@ -339,7 +339,7 @@ impl EnumConverter {
         seen_names.insert(method_name.clone());
 
         let method_docs = Self::generate_method_docs(
-          &variant_info.variant_name,
+          &variant_info.variant_name.to_string(),
           &variant_info.docs,
           !variant_info.has_required_fields,
           variant_info
@@ -353,7 +353,7 @@ impl EnumConverter {
             name: method_name,
             docs: method_docs,
             kind: EnumMethodKind::ParameterizedConstructor {
-              variant_name: variant_info.variant_name,
+              variant_name: variant_info.variant_name.to_string(),
               wrapped_type: variant_info.type_name,
               param_name,
               param_type,
@@ -364,7 +364,7 @@ impl EnumConverter {
             name: method_name,
             docs: method_docs,
             kind: EnumMethodKind::SimpleConstructor {
-              variant_name: variant_info.variant_name,
+              variant_name: variant_info.variant_name.to_string(),
               wrapped_type: variant_info.type_name,
             },
           }
@@ -441,7 +441,7 @@ impl EnumConverter {
     }
 
     let variant = VariantDef {
-      name: variant_name,
+      name: EnumVariantToken::from(variant_name),
       docs: metadata::extract_docs(resolved_schema.description.as_ref()),
       content: VariantContent::Tuple(vec![type_ref]),
       serde_attrs,
@@ -466,7 +466,7 @@ impl EnumConverter {
       let variant_name = ensure_unique(&normalized.name, seen_names);
 
       let variant = VariantDef {
-        name: variant_name,
+        name: EnumVariantToken::from(variant_name),
         docs: metadata::extract_docs(resolved_schema.description.as_ref()),
         content: VariantContent::Unit,
         serde_attrs: vec![SerdeAttribute::Rename(normalized.rename_value)],
@@ -502,7 +502,7 @@ impl EnumConverter {
     };
 
     let variant = VariantDef {
-      name: variant_name,
+      name: EnumVariantToken::from(variant_name),
       docs: metadata::extract_docs(resolved_schema.description.as_ref()),
       content,
       serde_attrs: vec![],
