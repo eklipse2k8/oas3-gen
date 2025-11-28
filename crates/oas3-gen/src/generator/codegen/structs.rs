@@ -446,7 +446,11 @@ impl<'a> StructGenerator<'a> {
         }
       }
       ContentCategory::Binary => {
-        quote! { req.bytes().await?.to_vec() }
+        if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
+          quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
+        } else {
+          quote! { req.bytes().await?.to_vec() }
+        }
       }
       ContentCategory::Json | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
         quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
