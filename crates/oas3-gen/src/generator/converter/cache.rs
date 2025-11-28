@@ -142,6 +142,18 @@ impl SharedSchemaCache {
     ensure_unique(&rust_name, &self.used_names)
   }
 
+  /// Checks if a name is already used by a different schema.
+  ///
+  /// Returns true if the name is in use AND the schema hash doesn't match any existing entry.
+  pub(crate) fn name_conflicts_with_different_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<bool> {
+    if !self.used_names.contains(name) {
+      return Ok(false);
+    }
+    let schema_hash = hashing::hash_schema(schema)?;
+    let same_schema = self.schema_to_type.get(&schema_hash).is_some_and(|n| n == name);
+    Ok(!same_schema)
+  }
+
   /// Consumes the cache and returns all generated Rust types.
   pub(crate) fn into_types(self) -> Vec<RustType> {
     self.generated_types

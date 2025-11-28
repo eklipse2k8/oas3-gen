@@ -11,12 +11,26 @@ use super::{
 };
 use crate::generator::{
   ast::{EnumToken, RustPrimitive, RustType, TypeRef},
+  converter::common::handle_inline_creation,
   naming::{
     identifiers::to_rust_type_name,
     inference::{extract_enum_values, is_relaxed_enum_pattern},
   },
   schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
+
+/// Checks if a union schema has a cached enum name.
+///
+/// Used during inline type creation to find existing generated enums
+/// that match the union's enum value pattern.
+fn check_cached_enum_name_for_union(schema: &ObjectSchema, cache: &SharedSchemaCache) -> Option<String> {
+  if !is_relaxed_enum_pattern(schema)
+    && let Some(values) = extract_enum_values(schema)
+  {
+    return cache.get_enum_name(&values);
+  }
+  None
+}
 
 /// Resolves OpenAPI schemas into Rust Type References (`TypeRef`).
 ///
@@ -38,6 +52,22 @@ impl TypeResolver {
       case_insensitive_enums: config.case_insensitive_enums,
       no_helpers: config.no_helpers,
     }
+  }
+
+  fn config(&self) -> CodegenConfig {
+    CodegenConfig {
+      preserve_case_variants: self.preserve_case_variants,
+      case_insensitive_enums: self.case_insensitive_enums,
+      no_helpers: self.no_helpers,
+    }
+  }
+
+  fn make_type_ref(&self, schema_name: &str) -> TypeRef {
+    let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
+    if self.graph.is_cyclic(schema_name) {
+      type_ref = type_ref.with_boxed();
+    }
+    type_ref
   }
 
   /// Resolves a schema to a `TypeRef`, potentially wrapping it in `Option` or `Vec`.
@@ -89,6 +119,12 @@ impl TypeResolver {
       return self.convert_inline_union_type(parent_name, prop_name, prop_schema, has_one_of, cache);
     }
 
+    if prop_schema.is_array()
+      && let Some(result) = self.try_convert_array_with_union_items(prop_name, prop_schema, cache)?
+    {
+      return Ok(result);
+    }
+
     Ok(ConversionOutput::new(self.schema_to_type_ref(prop_schema)?))
   }
 
@@ -108,12 +144,7 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.schema_to_type_ref(resolved_schema)?));
     }
 
-    let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
-    if self.graph.is_cyclic(&ref_name) {
-      type_ref = type_ref.with_boxed();
-    }
-
-    Ok(ConversionOutput::new(type_ref))
+    Ok(ConversionOutput::new(self.make_type_ref(&ref_name)))
   }
 
   fn handle_inline_enum(
@@ -157,12 +188,7 @@ impl TypeResolver {
         None
       },
       |name, _cache| {
-        let config = CodegenConfig {
-          preserve_case_variants: self.preserve_case_variants,
-          case_insensitive_enums: self.case_insensitive_enums,
-          no_helpers: self.no_helpers,
-        };
-        let converter = EnumConverter::new(&self.graph, self.clone(), config);
+        let converter = EnumConverter::new(&self.graph, self.clone(), self.config());
         let inline_enum = converter
           .convert_simple_enum(name, prop_schema, None)
           .expect("convert_simple_enum should return Some when cache is None");
@@ -191,11 +217,7 @@ impl TypeResolver {
     }
 
     if let Some(name) = self.find_matching_union_schema(variants) {
-      let mut type_ref = TypeRef::new(to_rust_type_name(&name));
-      if self.graph.is_cyclic(&name) {
-        type_ref = type_ref.with_boxed();
-      }
-      return Ok(ConversionOutput::new(type_ref));
+      return Ok(ConversionOutput::new(self.make_type_ref(&name)));
     }
 
     let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
@@ -205,34 +227,8 @@ impl TypeResolver {
       &base_name,
       None,
       cache,
-      |cache| {
-        if !is_relaxed_enum_pattern(prop_schema)
-          && let Some(values) = extract_enum_values(prop_schema)
-          && let Some(name) = cache.get_enum_name(&values)
-        {
-          return Some(name);
-        }
-        None
-      },
-      |name, cache| {
-        let config = CodegenConfig {
-          preserve_case_variants: self.preserve_case_variants,
-          case_insensitive_enums: self.case_insensitive_enums,
-          no_helpers: self.no_helpers,
-        };
-        let converter = EnumConverter::new(&self.graph, self.clone(), config);
-        let kind = if uses_one_of {
-          UnionKind::OneOf
-        } else {
-          UnionKind::AnyOf
-        };
-
-        let generated_types = converter.convert_union_enum(name, prop_schema, kind, cache)?;
-
-        let expected_name = EnumToken::from_raw(name);
-        let (main_type, nested) = Self::extract_main_type(generated_types, &expected_name)?;
-        Ok(ConversionOutput::with_inline_types(main_type, nested))
-      },
+      |cache| check_cached_enum_name_for_union(prop_schema, cache),
+      |name, cache| self.generate_union_type(name, prop_schema, uses_one_of, cache),
     )
   }
 
@@ -254,6 +250,30 @@ impl TypeResolver {
     Ok((main, types))
   }
 
+  /// Generates a union enum type from a schema with oneOf/anyOf variants.
+  ///
+  /// Used by both inline union property conversion and array-with-union-items conversion.
+  fn generate_union_type(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    uses_one_of: bool,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> anyhow::Result<ConversionOutput<RustType>> {
+    let converter = EnumConverter::new(&self.graph, self.clone(), self.config());
+    let kind = if uses_one_of {
+      UnionKind::OneOf
+    } else {
+      UnionKind::AnyOf
+    };
+
+    let generated_types = converter.convert_union_enum(name, schema, kind, cache)?;
+
+    let expected_name = EnumToken::from_raw(name);
+    let (main_type, nested) = Self::extract_main_type(generated_types, &expected_name)?;
+    Ok(ConversionOutput::with_inline_types(main_type, nested))
+  }
+
   fn try_build_nullable_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> anyhow::Result<Option<TypeRef>> {
     if variants.len() != 2 {
       return Ok(None);
@@ -268,11 +288,7 @@ impl TypeResolver {
     let non_null_variant = non_null.unwrap();
 
     if let Some(ref_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(non_null_variant) {
-      let mut type_ref = TypeRef::new(to_rust_type_name(&ref_name));
-      if self.graph.is_cyclic(&ref_name) {
-        type_ref = type_ref.with_boxed();
-      }
-      return Ok(Some(type_ref.with_option()));
+      return Ok(Some(self.make_type_ref(&ref_name).with_option()));
     }
 
     let resolved = non_null_variant
@@ -288,11 +304,7 @@ impl TypeResolver {
     variants: &[ObjectOrReference<ObjectSchema>],
   ) -> anyhow::Result<Option<TypeRef>> {
     if let Some(name) = self.find_matching_union_schema(variants) {
-      let mut type_ref = TypeRef::new(to_rust_type_name(&name));
-      if self.graph.is_cyclic(&name) {
-        type_ref = type_ref.with_boxed();
-      }
-      return Ok(Some(type_ref));
+      return Ok(Some(self.make_type_ref(&name)));
     }
 
     if let Some(non_null_variant) = self.find_non_null_variant(variants) {
@@ -421,17 +433,85 @@ impl TypeResolver {
     self.schema_to_type_ref(&items_schema)
   }
 
+  /// Converts array properties whose items are inline `oneOf`/`anyOf` unions.
+  ///
+  /// When an array's items schema contains a union (e.g., `items: { oneOf: [...] }`),
+  /// this generates a dedicated enum type for the union variants and returns
+  /// `Vec<GeneratedEnumName>` instead of a generic `Vec<serde_json::Value>`.
+  ///
+  /// Returns `None` if the array items are not an inline union, allowing the caller
+  /// to fall back to standard array handling.
+  fn try_convert_array_with_union_items(
+    &self,
+    prop_name: &str,
+    prop_schema: &ObjectSchema,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> anyhow::Result<Option<ConversionOutput<TypeRef>>> {
+    let Some(items_ref) = prop_schema.items.as_ref().and_then(|b| match b.as_ref() {
+      Schema::Object(o) => Some(o),
+      Schema::Boolean(_) => None,
+    }) else {
+      return Ok(None);
+    };
+
+    if let ObjectOrReference::Ref { .. } = &**items_ref {
+      return Ok(None);
+    }
+
+    let items_schema = items_ref.resolve(self.graph.spec()).context("Resolving array items")?;
+
+    let has_one_of = !items_schema.one_of.is_empty();
+    let has_any_of = !items_schema.any_of.is_empty();
+
+    if !has_one_of && !has_any_of {
+      return Ok(None);
+    }
+
+    let singular_name = cruet::to_singular(prop_name);
+    let base_kind_name = format!("{}Kind", singular_name.to_pascal_case());
+
+    let variants = if has_one_of {
+      &items_schema.one_of
+    } else {
+      &items_schema.any_of
+    };
+    let common_prefix = extract_common_variant_prefix(variants);
+
+    let name_to_use = if let Some(prefix) = common_prefix {
+      format!("{prefix}{base_kind_name}")
+    } else if let Some(ref c) = cache
+      && c.name_conflicts_with_different_schema(&base_kind_name, &items_schema)?
+    {
+      c.make_unique_name(&base_kind_name)
+    } else {
+      base_kind_name
+    };
+
+    let result = handle_inline_creation(
+      &items_schema,
+      &name_to_use,
+      None,
+      cache,
+      |cache| check_cached_enum_name_for_union(&items_schema, cache),
+      |name, cache| self.generate_union_type(name, &items_schema, has_one_of, cache),
+    )?;
+
+    let unique_items = prop_schema.unique_items.unwrap_or(false);
+    let vec_type_ref = result.result.with_vec().with_unique_items(unique_items);
+
+    Ok(Some(ConversionOutput::with_inline_types(
+      vec_type_ref,
+      result.inline_types,
+    )))
+  }
+
   fn try_resolve_by_title(&self, schema: &ObjectSchema) -> Option<TypeRef> {
     let title = schema.title.as_ref()?;
     if schema.schema_type.is_some() {
       return None;
     }
     self.graph.get_schema(title)?;
-    let mut type_ref = TypeRef::new(to_rust_type_name(title));
-    if self.graph.is_cyclic(title) {
-      type_ref = type_ref.with_boxed();
-    }
-    Some(type_ref)
+    Some(self.make_type_ref(title))
   }
 
   fn find_matching_union_schema(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Option<String> {
@@ -503,4 +583,42 @@ fn extract_all_variant_refs(variants: &[ObjectOrReference<ObjectSchema>]) -> BTr
     .iter()
     .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
     .collect()
+}
+
+/// Extracts a shared PascalCase prefix from union variant reference names.
+///
+/// Used to generate semantically meaningful enum names for inline unions. When all
+/// variants share a common prefix (e.g., `ContentBlockStart`, `ContentBlockDelta`,
+/// `ContentBlockStop`), this returns `"ContentBlock"` so the generated enum can be
+/// named `ContentBlockKind` rather than a generic name derived from the property.
+///
+/// Returns `None` if fewer than 2 variants have references or no common prefix exists.
+fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<String> {
+  use crate::generator::naming::identifiers::split_pascal_case;
+
+  let ref_names: Vec<String> = variants
+    .iter()
+    .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
+    .collect();
+
+  if ref_names.len() < 2 {
+    return None;
+  }
+
+  let segments: Vec<Vec<String>> = ref_names.iter().map(|n| split_pascal_case(n)).collect();
+
+  let first = &segments[0];
+  if first.is_empty() {
+    return None;
+  }
+
+  let common_len = (0..first.len())
+    .take_while(|&idx| segments[1..].iter().all(|other| other.get(idx) == Some(&first[idx])))
+    .count();
+
+  if common_len == 0 {
+    return None;
+  }
+
+  Some(first[..common_len].join(""))
 }
