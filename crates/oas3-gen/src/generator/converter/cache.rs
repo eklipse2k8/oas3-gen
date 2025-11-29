@@ -17,7 +17,7 @@ use crate::generator::{
 pub(crate) struct SharedSchemaCache {
   schema_to_type: BTreeMap<String, String>,
   enum_to_type: BTreeMap<Vec<String>, String>,
-  union_refs_to_type: BTreeMap<BTreeSet<String>, String>,
+  union_refs_to_type: BTreeMap<(BTreeSet<String>, Option<String>), String>,
   generated_types: Vec<RustType>,
   used_names: BTreeSet<String>,
   precomputed_names: BTreeMap<String, String>,
@@ -73,14 +73,17 @@ impl SharedSchemaCache {
     self.enum_to_type.insert(values, name);
   }
 
-  /// Retrieves a cached name for a union enum based on its variant refs.
-  pub(crate) fn get_union_name(&self, refs: &BTreeSet<String>) -> Option<String> {
-    self.union_refs_to_type.get(refs).cloned()
+  /// Retrieves a cached name for a union enum based on its variant refs and discriminator.
+  pub(crate) fn get_union_name(&self, refs: &BTreeSet<String>, discriminator: Option<&str>) -> Option<String> {
+    self
+      .union_refs_to_type
+      .get(&(refs.clone(), discriminator.map(String::from)))
+      .cloned()
   }
 
-  /// Registers a union enum name for a set of variant refs.
-  pub(crate) fn register_union(&mut self, refs: BTreeSet<String>, name: String) {
-    self.union_refs_to_type.insert(refs, name);
+  /// Registers a union enum name for a set of variant refs and discriminator.
+  pub(crate) fn register_union(&mut self, refs: BTreeSet<String>, discriminator: Option<String>, name: String) {
+    self.union_refs_to_type.insert((refs, discriminator), name);
   }
 
   /// Marks a type name as used to prevent collisions.

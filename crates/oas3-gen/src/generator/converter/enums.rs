@@ -7,8 +7,14 @@ use anyhow::Context;
 use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{
-  CodegenConfig, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
-  string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
+  CodegenConfig,
+  cache::SharedSchemaCache,
+  common::SchemaExt,
+  field_optionality::FieldOptionalityPolicy,
+  metadata,
+  string_enum_optimizer::StringEnumOptimizer,
+  structs::{SchemaMerger, StructConverter},
+  type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
@@ -223,12 +229,19 @@ impl EnumConverter {
         continue;
       }
 
-      let (variant, mut generated) =
-        if let Some(schema_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(variant_ref) {
-          self.create_ref_variant(&schema_name, &resolved, discriminator_map, &mut seen_names)
+      let ref_name_opt = ReferenceExtractor::extract_ref_name_from_obj_ref(variant_ref).or_else(|| {
+        if resolved.all_of.len() == 1 {
+          ReferenceExtractor::extract_ref_name_from_obj_ref(&resolved.all_of[0])
         } else {
-          self.create_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
-        };
+          None
+        }
+      });
+
+      let (variant, mut generated) = if let Some(schema_name) = ref_name_opt {
+        self.create_ref_variant(&schema_name, &resolved, discriminator_map, &mut seen_names)
+      } else {
+        self.create_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
+      };
 
       variants.push(variant);
       inline_types.append(&mut generated);
@@ -239,7 +252,7 @@ impl EnumConverter {
     let methods = if self.no_helpers {
       vec![]
     } else {
-      self.generate_methods(&variants, &inline_types, name)
+      self.generate_methods(&variants, &inline_types, name, cache)
     };
 
     let main_enum = Self::build_union_enum_def(name, schema, kind, variants, methods);
@@ -254,7 +267,13 @@ impl EnumConverter {
   /// - If all fields are optional: generates simple constructor (e.g., `enum.variant_name()`)
   /// - If exactly one field is required: generates parameterized constructor (e.g., `enum.variant_name(value)`)
   /// - If multiple fields are required: skips method generation (too complex for helpers)
-  fn generate_methods(&self, variants: &[VariantDef], inline_types: &[RustType], enum_name: &str) -> Vec<EnumMethod> {
+  fn generate_methods(
+    &self,
+    variants: &[VariantDef],
+    inline_types: &[RustType],
+    enum_name: &str,
+    mut cache: Option<&mut SharedSchemaCache>,
+  ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
 
     let struct_map: BTreeMap<_, _> = inline_types
@@ -285,7 +304,7 @@ impl EnumConverter {
             struct_def.fields.clone(),
           ))
         } else {
-          self.try_analyze_referenced_struct(&type_name)
+          self.try_analyze_referenced_struct(&type_name, cache.as_deref_mut())
         };
 
         let (has_default, fields) = struct_info?;
@@ -370,7 +389,11 @@ impl EnumConverter {
   ///
   /// This is used for generating helper methods when a variant wraps a referenced type (not inline).
   /// Returns None if the type is not a struct or cannot be converted.
-  fn try_analyze_referenced_struct(&self, type_name: &str) -> Option<(bool, Vec<FieldDef>)> {
+  fn try_analyze_referenced_struct(
+    &self,
+    type_name: &str,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> Option<(bool, Vec<FieldDef>)> {
     let schema_name = type_name.trim_start_matches("Box<").trim_end_matches('>');
     let schema = self.graph.get_schema(schema_name)?;
 
@@ -382,7 +405,7 @@ impl EnumConverter {
 
     let struct_result = self
       .struct_converter
-      .convert_struct(schema_name, schema, None, None)
+      .convert_struct(schema_name, schema, None, cache)
       .ok()?;
 
     match &struct_result.result {
@@ -438,8 +461,15 @@ impl EnumConverter {
     resolved_schema: &ObjectSchema,
     enum_name: &str,
     seen_names: &mut BTreeSet<String>,
-    cache: Option<&mut SharedSchemaCache>,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
+    let mut resolved_schema_merged = resolved_schema.clone();
+    if !resolved_schema.all_of.is_empty() {
+      let merger = SchemaMerger::new(self.graph.clone());
+      resolved_schema_merged = merger.merge_all_of_schema(resolved_schema)?;
+    }
+    let resolved_schema = &resolved_schema_merged;
+
     if let Some(const_value) = &resolved_schema.const_value {
       let normalized = VariantNameNormalizer::normalize(const_value)
         .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
@@ -464,8 +494,31 @@ impl EnumConverter {
     let variant_name = ensure_unique(&base_name, seen_names);
 
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
-      let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;
-      (VariantContent::Tuple(vec![type_ref]), vec![])
+      let mut array_conversion = None;
+      if resolved_schema.is_array() {
+        array_conversion = self.type_resolver.try_convert_array_with_union_items(
+          &variant_name,
+          resolved_schema,
+          cache.as_deref_mut(),
+        )?;
+      }
+
+      if let Some(conversion) = array_conversion {
+        (VariantContent::Tuple(vec![conversion.result]), conversion.inline_types)
+      } else if !resolved_schema.one_of.is_empty() || !resolved_schema.any_of.is_empty() {
+        let uses_one_of = !resolved_schema.one_of.is_empty();
+        let result = self.type_resolver.convert_inline_union_type(
+          enum_name,
+          &variant_name.clone(),
+          resolved_schema,
+          uses_one_of,
+          cache,
+        )?;
+        (VariantContent::Tuple(vec![result.result]), result.inline_types)
+      } else {
+        let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;
+        (VariantContent::Tuple(vec![type_ref]), vec![])
+      }
     } else {
       let struct_name_prefix = format!("{enum_name}{variant_name}");
       let result = self
@@ -496,16 +549,16 @@ impl EnumConverter {
   fn build_union_enum_def(
     name: &str,
     schema: &ObjectSchema,
-    kind: UnionKind,
+    _kind: UnionKind,
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> RustType {
     let has_discriminator = schema.discriminator.is_some();
 
-    let (serde_attrs, derives) = if kind == UnionKind::AnyOf && !has_discriminator {
-      (vec![SerdeAttribute::Untagged], default_enum_derives(false))
-    } else {
+    let (serde_attrs, derives) = if has_discriminator {
       (vec![], default_enum_derives(false))
+    } else {
+      (vec![SerdeAttribute::Untagged], default_enum_derives(false))
     };
 
     RustType::Enum(EnumDef {

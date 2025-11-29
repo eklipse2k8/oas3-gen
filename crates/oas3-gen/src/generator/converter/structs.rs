@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Context as _;
 use inflections::Inflect;
-use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema};
+use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaTypeSet};
 use string_cache::DefaultAtom;
 
 use super::{
@@ -367,18 +367,21 @@ impl SchemaMerger {
     let mut merged_properties = BTreeMap::new();
     let mut merged_required = BTreeSet::new();
     let mut merged_discriminator = parent_schema.discriminator.clone();
+    let mut merged_schema_type = parent_schema.schema_type.clone();
 
     self.collect_all_of_properties(
       child_schema,
       &mut merged_properties,
       &mut merged_required,
       &mut merged_discriminator,
+      &mut merged_schema_type,
     )?;
 
     let mut merged_schema = child_schema.clone();
     merged_schema.properties = merged_properties;
     merged_schema.required = merged_required.into_iter().collect();
     merged_schema.discriminator = merged_discriminator;
+    merged_schema.schema_type = merged_schema_type;
     merged_schema.all_of.clear();
 
     if merged_schema.additional_properties.is_none() {
@@ -394,18 +397,24 @@ impl SchemaMerger {
     let mut merged_properties = BTreeMap::new();
     let mut merged_required = BTreeSet::new();
     let mut merged_discriminator = None;
+    let mut merged_schema_type = None;
 
     self.collect_all_of_properties(
       schema,
       &mut merged_properties,
       &mut merged_required,
       &mut merged_discriminator,
+      &mut merged_schema_type,
     )?;
 
     let mut merged_schema = schema.clone();
     merged_schema.properties = merged_properties;
     merged_schema.required = merged_required.into_iter().collect();
-    merged_schema.discriminator.clone_from(&merged_discriminator);
+    merged_schema.discriminator = merged_discriminator;
+    if merged_schema_type.is_some() {
+      merged_schema.schema_type = merged_schema_type;
+    }
+    merged_schema.all_of.clear();
 
     Ok(merged_schema)
   }
@@ -416,12 +425,13 @@ impl SchemaMerger {
     properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
     required: &mut BTreeSet<String>,
     discriminator: &mut Option<Discriminator>,
+    schema_type: &mut Option<SchemaTypeSet>,
   ) -> anyhow::Result<()> {
     for all_of_ref in &schema.all_of {
       let all_of_schema = all_of_ref
         .resolve(self.graph.spec())
         .with_context(|| "Schema resolution failed for allOf item")?;
-      self.collect_all_of_properties(&all_of_schema, properties, required, discriminator)?;
+      self.collect_all_of_properties(&all_of_schema, properties, required, discriminator, schema_type)?;
     }
 
     for (prop_name, prop_ref) in &schema.properties {
@@ -431,6 +441,10 @@ impl SchemaMerger {
 
     if schema.discriminator.is_some() {
       discriminator.clone_from(&schema.discriminator);
+    }
+
+    if schema.schema_type.is_some() {
+      schema_type.clone_from(&schema.schema_type);
     }
     Ok(())
   }

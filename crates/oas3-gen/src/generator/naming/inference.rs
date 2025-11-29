@@ -10,8 +10,78 @@ use crate::generator::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
     identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, sanitize, split_pascal_case, to_rust_type_name},
   },
-  schema_registry::SchemaRegistry,
+  schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
+
+pub(crate) struct CommonVariantName {
+  pub(crate) name: String,
+  pub(crate) has_suffix: bool,
+}
+
+/// Extracts a semantic name from union variant references by combining the first
+/// common prefix segment with the common suffix.
+///
+/// For variants like `BetaResponseCharLocationCitation`, `BetaResponseUrlCitation`,
+/// `BetaResponseFileCitation`, this returns `CommonVariantName { name: "BetaCitation", has_suffix: true }`.
+///
+/// For variants like `BetaTool`, `BetaBashTool20241022`, this returns `CommonVariantName { name: "Beta", has_suffix: false }`.
+///
+/// The `has_suffix` field indicates whether a common suffix was found. When true, the extracted name
+/// is semantically complete and should be used as-is. When false, the property name should
+/// be appended for clarity.
+///
+/// Returns `None` if fewer than 2 variants have references or no common prefix exists.
+pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<CommonVariantName> {
+  let ref_names: Vec<String> = variants
+    .iter()
+    .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
+    .collect();
+
+  if ref_names.len() < 2 {
+    return None;
+  }
+
+  let segments: Vec<Vec<String>> = ref_names.iter().map(|n| split_pascal_case(n)).collect();
+
+  let first = &segments[0];
+  if first.is_empty() {
+    return None;
+  }
+
+  let common_prefix_len = (0..first.len())
+    .take_while(|&idx| segments[1..].iter().all(|other| other.get(idx) == Some(&first[idx])))
+    .count();
+
+  let min_len = segments.iter().map(Vec::len).min().unwrap_or(0);
+  let common_suffix_len = (0..min_len)
+    .take_while(|&idx| {
+      let first_suffix = &first[first.len() - 1 - idx];
+      segments[1..].iter().all(|other| {
+        other
+          .get(other.len().saturating_sub(1 + idx))
+          .is_some_and(|s| s == first_suffix)
+      })
+    })
+    .count();
+
+  if common_prefix_len == 0 {
+    return None;
+  }
+
+  if common_suffix_len > 0 {
+    let prefix_part = first[0].clone();
+    let suffix_part = first[first.len() - common_suffix_len..].join("");
+    Some(CommonVariantName {
+      name: format!("{prefix_part}{suffix_part}"),
+      has_suffix: true,
+    })
+  } else {
+    Some(CommonVariantName {
+      name: first[..common_prefix_len].join(""),
+      has_suffix: false,
+    })
+  }
+}
 
 #[must_use]
 fn is_freeform_string(schema: &ObjectSchema) -> bool {
@@ -191,6 +261,19 @@ pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
       SchemaTypeSet::Multiple(_) => "Mixed".to_string(),
     }
   } else {
+    // Try to infer name from oneOf/anyOf variants
+    let variants = if schema.one_of.is_empty() {
+      &schema.any_of
+    } else {
+      &schema.one_of
+    };
+
+    if !variants.is_empty()
+      && let Some(common) = extract_common_variant_prefix(variants)
+    {
+      return common.name;
+    }
+
     format!("Variant{index}")
   }
 }

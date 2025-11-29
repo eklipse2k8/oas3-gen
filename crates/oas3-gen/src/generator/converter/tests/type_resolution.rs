@@ -555,7 +555,7 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
 
 #[test]
 fn test_extract_common_variant_prefix() {
-  use super::super::type_resolver::extract_common_variant_prefix;
+  use crate::generator::naming::inference::extract_common_variant_prefix;
 
   struct Case {
     variants: Vec<&'static str>,
@@ -639,12 +639,170 @@ fn test_extract_common_variant_prefix() {
     let result = extract_common_variant_prefix(&variants);
 
     assert_eq!(
-      result.as_deref(),
+      result.as_ref().map(|r| r.name.as_str()),
       case.expected,
       "{}: expected {:?}, got {:?}",
       case.description,
       case.expected,
-      result
+      result.as_ref().map(|r| r.name.as_str())
     );
+  }
+}
+
+#[test]
+fn test_union_naming_with_common_suffix() {
+  let citation_a = make_object_schema_with_property("type", make_string_schema());
+  let citation_b = make_object_schema_with_property("url", make_string_schema());
+  let citation_c = make_object_schema_with_property("file", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("BetaResponseCharLocationCitation".to_string(), citation_a),
+    ("BetaResponseUrlCitation".to_string(), citation_b),
+    ("BetaResponseFileCitation".to_string(), citation_c),
+  ]));
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let union_schema = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/BetaResponseCharLocationCitation".to_string(),
+        summary: None,
+        description: None,
+      },
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/BetaResponseUrlCitation".to_string(),
+        summary: None,
+        description: None,
+      },
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/BetaResponseFileCitation".to_string(),
+        summary: None,
+        description: None,
+      },
+    ],
+    ..Default::default()
+  };
+
+  let result = resolver
+    .resolve_property_type_with_inlines(
+      "BetaResponse",
+      "citation",
+      &union_schema,
+      &ObjectOrReference::Object(union_schema.clone()),
+      None,
+    )
+    .unwrap();
+
+  assert_eq!(result.result.to_rust_type(), "BetaCitationKind");
+  assert_eq!(result.inline_types.len(), 1);
+  if let crate::generator::ast::RustType::Enum(enum_def) = &result.inline_types[0] {
+    assert_eq!(enum_def.name.as_str(), "BetaCitationKind");
+  } else {
+    panic!("Expected enum type");
+  }
+}
+
+#[test]
+fn test_union_naming_without_common_suffix() {
+  let tool_a = make_object_schema_with_property("name", make_string_schema());
+  let tool_b = make_object_schema_with_property("command", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("BetaTool".to_string(), tool_a),
+    ("BetaBashTool20241022".to_string(), tool_b),
+  ]));
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let union_schema = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/BetaTool".to_string(),
+        summary: None,
+        description: None,
+      },
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/BetaBashTool20241022".to_string(),
+        summary: None,
+        description: None,
+      },
+    ],
+    ..Default::default()
+  };
+
+  let result = resolver
+    .resolve_property_type_with_inlines(
+      "Request",
+      "tool",
+      &union_schema,
+      &ObjectOrReference::Object(union_schema.clone()),
+      None,
+    )
+    .unwrap();
+
+  assert_eq!(result.result.to_rust_type(), "BetaToolKind");
+  assert_eq!(result.inline_types.len(), 1);
+  if let crate::generator::ast::RustType::Enum(enum_def) = &result.inline_types[0] {
+    assert_eq!(enum_def.name.as_str(), "BetaToolKind");
+  } else {
+    panic!("Expected enum type");
+  }
+}
+
+#[test]
+fn test_array_union_naming_with_common_suffix() {
+  let event_a = make_object_schema_with_property("started", make_string_schema());
+  let event_b = make_object_schema_with_property("data", make_string_schema());
+  let event_c = make_object_schema_with_property("stopped", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("BetaMessageStartEvent".to_string(), event_a),
+    ("BetaMessageDeltaEvent".to_string(), event_b),
+    ("BetaMessageStopEvent".to_string(), event_c),
+  ]));
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let array_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+      ObjectOrReference::Object(ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/BetaMessageStartEvent".to_string(),
+            summary: None,
+            description: None,
+          },
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/BetaMessageDeltaEvent".to_string(),
+            summary: None,
+            description: None,
+          },
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/BetaMessageStopEvent".to_string(),
+            summary: None,
+            description: None,
+          },
+        ],
+        ..Default::default()
+      }),
+    )))),
+    ..Default::default()
+  };
+
+  let result = resolver
+    .resolve_property_type_with_inlines(
+      "Stream",
+      "events",
+      &array_schema,
+      &ObjectOrReference::Object(array_schema.clone()),
+      None,
+    )
+    .unwrap();
+
+  assert_eq!(result.result.to_rust_type(), "Vec<BetaEventKind>");
+  assert_eq!(result.inline_types.len(), 1);
+  if let crate::generator::ast::RustType::Enum(enum_def) = &result.inline_types[0] {
+    assert_eq!(enum_def.name.as_str(), "BetaEventKind");
+  } else {
+    panic!("Expected enum type");
   }
 }
