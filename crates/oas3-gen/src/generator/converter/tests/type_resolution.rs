@@ -552,3 +552,99 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
     "should be Option<TypeA>"
   );
 }
+
+#[test]
+fn test_extract_common_variant_prefix() {
+  use super::super::type_resolver::extract_common_variant_prefix;
+
+  struct Case {
+    variants: Vec<&'static str>,
+    expected: Option<&'static str>,
+    description: &'static str,
+  }
+
+  let cases = [
+    Case {
+      variants: vec![
+        "BetaResponseCharLocationCitation",
+        "BetaResponseUrlCitation",
+        "BetaResponseFileCitation",
+      ],
+      expected: Some("BetaCitation"),
+      description: "first prefix (Beta) + suffix (Citation) - terse naming",
+    },
+    Case {
+      variants: vec!["ContentBlockStart", "ContentBlockDelta", "ContentBlockStop"],
+      expected: Some("ContentBlock"),
+      description: "full common prefix (ContentBlock), no suffix",
+    },
+    Case {
+      variants: vec!["Tool", "BashTool"],
+      expected: None,
+      description: "no common prefix (Tool vs Bash) - returns None",
+    },
+    Case {
+      variants: vec!["TypeA", "TypeB", "TypeC"],
+      expected: Some("Type"),
+      description: "common prefix (Type) only, no suffix",
+    },
+    Case {
+      variants: vec!["AlphaFoo", "BetaBar", "GammaQux"],
+      expected: None,
+      description: "no common prefix - returns None",
+    },
+    Case {
+      variants: vec!["RequestBody"],
+      expected: None,
+      description: "single variant - returns None",
+    },
+    Case {
+      variants: vec![],
+      expected: None,
+      description: "empty variants - returns None",
+    },
+    Case {
+      variants: vec!["ApiErrorNotFound", "ApiErrorBadRequest", "ApiErrorUnauthorized"],
+      expected: Some("ApiError"),
+      description: "full common prefix (ApiError), no suffix",
+    },
+    Case {
+      variants: vec!["BetaMessageStartEvent", "BetaMessageDeltaEvent", "BetaMessageStopEvent"],
+      expected: Some("BetaEvent"),
+      description: "first prefix (Beta) + suffix (Event) - terse naming",
+    },
+    Case {
+      variants: vec!["FooBarBaz", "FooQuxBaz"],
+      expected: Some("FooBaz"),
+      description: "first prefix (Foo) + suffix (Baz) - terse naming",
+    },
+    Case {
+      variants: vec!["StreamEventStart", "StreamEventData", "StreamEventEnd"],
+      expected: Some("StreamEvent"),
+      description: "full common prefix (StreamEvent), no suffix",
+    },
+  ];
+
+  for case in cases {
+    let variants: Vec<ObjectOrReference<ObjectSchema>> = case
+      .variants
+      .iter()
+      .map(|name| ObjectOrReference::Ref {
+        ref_path: format!("#/components/schemas/{name}"),
+        summary: None,
+        description: None,
+      })
+      .collect();
+
+    let result = extract_common_variant_prefix(&variants);
+
+    assert_eq!(
+      result.as_deref(),
+      case.expected,
+      "{}: expected {:?}, got {:?}",
+      case.description,
+      case.expected,
+      result
+    );
+  }
+}

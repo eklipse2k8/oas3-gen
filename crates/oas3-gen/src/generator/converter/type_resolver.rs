@@ -32,6 +32,18 @@ fn check_cached_enum_name_for_union(schema: &ObjectSchema, cache: &SharedSchemaC
   None
 }
 
+/// Checks if a union with the given variant refs has already been cached.
+fn check_cached_union_by_refs(
+  variants: &[ObjectOrReference<ObjectSchema>],
+  cache: &SharedSchemaCache,
+) -> Option<String> {
+  let refs = extract_all_variant_refs(variants);
+  if refs.len() >= 2 {
+    return cache.get_union_name(&refs);
+  }
+  None
+}
+
 /// Resolves OpenAPI schemas into Rust Type References (`TypeRef`).
 ///
 /// Handles primitives, references, inlining enums, and union types.
@@ -204,7 +216,7 @@ impl TypeResolver {
     prop_name: &str,
     prop_schema: &ObjectSchema,
     uses_one_of: bool,
-    cache: Option<&mut SharedSchemaCache>,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<TypeRef>> {
     let variants = if uses_one_of {
       &prop_schema.one_of
@@ -216,20 +228,94 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(type_ref));
     }
 
+    if let Some(result) =
+      self.try_convert_nullable_array_with_union_items(prop_name, prop_schema, variants, &mut cache)?
+    {
+      return Ok(result);
+    }
+
     if let Some(name) = self.find_matching_union_schema(variants) {
       return Ok(ConversionOutput::new(self.make_type_ref(&name)));
     }
 
-    let base_name = format!("{parent_name}{}", prop_name.to_pascal_case());
+    let variant_refs = extract_all_variant_refs(variants);
 
-    super::common::handle_inline_creation(
+    if let Some(ref c) = cache
+      && variant_refs.len() >= 2
+      && let Some(name) = c.get_union_name(&variant_refs)
+    {
+      return Ok(ConversionOutput::new(self.make_type_ref(&name)));
+    }
+
+    let common_prefix = extract_common_variant_prefix(variants);
+    let prop_pascal = prop_name.to_pascal_case();
+
+    let base_name = if let Some(prefix) = common_prefix {
+      format!("{prefix}{prop_pascal}Kind")
+    } else {
+      format!("{parent_name}{prop_pascal}")
+    };
+
+    let result = super::common::handle_inline_creation(
       prop_schema,
       &base_name,
       None,
-      cache,
-      |cache| check_cached_enum_name_for_union(prop_schema, cache),
+      cache.as_deref_mut(),
+      |cache| {
+        check_cached_union_by_refs(variants, cache).or_else(|| check_cached_enum_name_for_union(prop_schema, cache))
+      },
       |name, cache| self.generate_union_type(name, prop_schema, uses_one_of, cache),
-    )
+    )?;
+
+    if let Some(ref mut c) = cache
+      && variant_refs.len() >= 2
+    {
+      c.register_union(variant_refs, result.result.base_type.to_string());
+    }
+
+    Ok(result)
+  }
+
+  fn try_convert_nullable_array_with_union_items(
+    &self,
+    prop_name: &str,
+    prop_schema: &ObjectSchema,
+    variants: &[ObjectOrReference<ObjectSchema>],
+    cache: &mut Option<&mut SharedSchemaCache>,
+  ) -> anyhow::Result<Option<ConversionOutput<TypeRef>>> {
+    if variants.len() != 2 {
+      return Ok(None);
+    }
+
+    let (non_null, has_null) = self.partition_nullable_variants(variants)?;
+    if !has_null || non_null.is_none() {
+      return Ok(None);
+    }
+
+    let non_null_variant = non_null.unwrap();
+    if ReferenceExtractor::extract_ref_name_from_obj_ref(non_null_variant).is_some() {
+      return Ok(None);
+    }
+
+    let resolved = non_null_variant
+      .resolve(self.graph.spec())
+      .context("Resolving non-null variant for array check")?;
+
+    if !resolved.is_array() || !self.array_items_have_union(&resolved) {
+      return Ok(None);
+    }
+
+    let result = self.try_convert_array_with_union_items(prop_name, &resolved, cache.as_deref_mut())?;
+    if let Some(mut output) = result {
+      output.result = output.result.with_option();
+      let unique_items = prop_schema.unique_items.unwrap_or(false);
+      if unique_items {
+        output.result = output.result.with_unique_items(true);
+      }
+      return Ok(Some(output));
+    }
+
+    Ok(None)
   }
 
   /// Extracts the main type from a list of generated types.
@@ -295,7 +381,22 @@ impl TypeResolver {
       .resolve(self.graph.spec())
       .context("Resolving non-null union variant")?;
 
+    if resolved.is_array() && self.array_items_have_union(&resolved) {
+      return Ok(None);
+    }
+
     Ok(Some(self.schema_to_type_ref(&resolved)?.with_option()))
+  }
+
+  fn array_items_have_union(&self, schema: &ObjectSchema) -> bool {
+    schema
+      .items
+      .as_ref()
+      .and_then(|b| match b.as_ref() {
+        Schema::Object(o) => o.resolve(self.graph.spec()).ok(),
+        Schema::Boolean(_) => None,
+      })
+      .is_some_and(|items| !items.one_of.is_empty() || !items.any_of.is_empty())
   }
 
   /// Tries to convert a union schema into a single `TypeRef` (e.g. `Option<T>`, `Vec<T>`).
@@ -454,7 +555,7 @@ impl TypeResolver {
     &self,
     prop_name: &str,
     prop_schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Option<ConversionOutput<TypeRef>>> {
     let Some(items_ref) = prop_schema.items.as_ref().and_then(|b| match b.as_ref() {
       Schema::Object(o) => Some(o),
@@ -476,14 +577,32 @@ impl TypeResolver {
       return Ok(None);
     }
 
-    let singular_name = cruet::to_singular(prop_name);
-    let base_kind_name = format!("{}Kind", singular_name.to_pascal_case());
-
     let variants = if has_one_of {
       &items_schema.one_of
     } else {
       &items_schema.any_of
     };
+
+    if let Some(name) = self.find_matching_union_schema(variants) {
+      let unique_items = prop_schema.unique_items.unwrap_or(false);
+      let type_ref = self.make_type_ref(&name).with_vec().with_unique_items(unique_items);
+      return Ok(Some(ConversionOutput::new(type_ref)));
+    }
+
+    let variant_refs = extract_all_variant_refs(variants);
+
+    if let Some(ref c) = cache
+      && variant_refs.len() >= 2
+      && let Some(name) = c.get_union_name(&variant_refs)
+    {
+      let unique_items = prop_schema.unique_items.unwrap_or(false);
+      let type_ref = self.make_type_ref(&name).with_vec().with_unique_items(unique_items);
+      return Ok(Some(ConversionOutput::new(type_ref)));
+    }
+
+    let singular_name = cruet::to_singular(prop_name);
+    let base_kind_name = format!("{}Kind", singular_name.to_pascal_case());
+
     let common_prefix = extract_common_variant_prefix(variants);
 
     let name_to_use = if let Some(prefix) = common_prefix {
@@ -500,10 +619,18 @@ impl TypeResolver {
       &items_schema,
       &name_to_use,
       None,
-      cache,
-      |cache| check_cached_enum_name_for_union(&items_schema, cache),
+      cache.as_deref_mut(),
+      |cache| {
+        check_cached_union_by_refs(variants, cache).or_else(|| check_cached_enum_name_for_union(&items_schema, cache))
+      },
       |name, cache| self.generate_union_type(name, &items_schema, has_one_of, cache),
     )?;
+
+    if let Some(ref mut c) = cache
+      && variant_refs.len() >= 2
+    {
+      c.register_union(variant_refs, result.result.base_type.to_string());
+    }
 
     let unique_items = prop_schema.unique_items.unwrap_or(false);
     let vec_type_ref = result.result.with_vec().with_unique_items(unique_items);
@@ -594,15 +721,18 @@ fn extract_all_variant_refs(variants: &[ObjectOrReference<ObjectSchema>]) -> BTr
     .collect()
 }
 
-/// Extracts a shared PascalCase prefix from union variant reference names.
+/// Extracts a semantic name from union variant references by combining the first
+/// common prefix segment with the common suffix.
 ///
-/// Used to generate semantically meaningful enum names for inline unions. When all
-/// variants share a common prefix (e.g., `ContentBlockStart`, `ContentBlockDelta`,
-/// `ContentBlockStop`), this returns `"ContentBlock"` so the generated enum can be
-/// named `ContentBlockKind` rather than a generic name derived from the property.
+/// For variants like `BetaResponseCharLocationCitation`, `BetaResponseUrlCitation`,
+/// `BetaResponseFileCitation`, this returns `"BetaCitation"` - combining the first
+/// shared prefix segment (`Beta`) with the common suffix (`Citation`).
 ///
-/// Returns `None` if fewer than 2 variants have references or no common prefix exists.
-fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<String> {
+/// This produces idiomatic Rust enum names like `BetaCitationKind` with variants
+/// `CharLocation`, `Url`, `File` rather than verbose names like `BetaResponseCitationKind`.
+///
+/// Returns `None` if fewer than 2 variants have references or no common affix exists.
+pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<String> {
   use crate::generator::naming::identifiers::split_pascal_case;
 
   let ref_names: Vec<String> = variants
@@ -621,13 +751,31 @@ fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -
     return None;
   }
 
-  let common_len = (0..first.len())
+  let common_prefix_len = (0..first.len())
     .take_while(|&idx| segments[1..].iter().all(|other| other.get(idx) == Some(&first[idx])))
     .count();
 
-  if common_len == 0 {
+  let min_len = segments.iter().map(Vec::len).min().unwrap_or(0);
+  let common_suffix_len = (0..min_len)
+    .take_while(|&idx| {
+      let first_suffix = &first[first.len() - 1 - idx];
+      segments[1..].iter().all(|other| {
+        other
+          .get(other.len().saturating_sub(1 + idx))
+          .is_some_and(|s| s == first_suffix)
+      })
+    })
+    .count();
+
+  if common_prefix_len == 0 {
     return None;
   }
 
-  Some(first[..common_len].join(""))
+  if common_suffix_len > 0 {
+    let prefix_part = first[0].clone();
+    let suffix_part = first[first.len() - common_suffix_len..].join("");
+    Some(format!("{prefix_part}{suffix_part}"))
+  } else {
+    Some(first[..common_prefix_len].join(""))
+  }
 }
