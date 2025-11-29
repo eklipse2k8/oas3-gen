@@ -493,3 +493,62 @@ fn test_array_with_union_items_inline_generation() {
     "ref items should not generate inline types"
   );
 }
+
+#[test]
+fn test_multi_ref_oneof_returns_none_for_fallback() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+  let type_b = make_object_schema_with_property("field_b", make_string_schema());
+  let type_c = make_object_schema_with_property("field_c", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+    ("TypeC".to_string(), type_c),
+  ]));
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let multi_ref_variants = vec![
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeA".to_string(),
+      summary: None,
+      description: None,
+    },
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeB".to_string(),
+      summary: None,
+      description: None,
+    },
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeC".to_string(),
+      summary: None,
+      description: None,
+    },
+  ];
+
+  let result = resolver.try_convert_union_to_type_ref(&multi_ref_variants).unwrap();
+  assert!(
+    result.is_none(),
+    "multi-ref oneOf should return None to trigger enum generation, got: {:?}",
+    result.map(|r| r.to_rust_type())
+  );
+
+  let single_ref_with_null = vec![
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeA".to_string(),
+      summary: None,
+      description: None,
+    },
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+      ..Default::default()
+    }),
+  ];
+
+  let result = resolver.try_convert_union_to_type_ref(&single_ref_with_null).unwrap();
+  assert!(result.is_some(), "single ref with null should collapse to Option<T>");
+  assert_eq!(
+    result.unwrap().to_rust_type(),
+    "Option<TypeA>",
+    "should be Option<TypeA>"
+  );
+}

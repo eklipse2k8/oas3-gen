@@ -5,7 +5,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::LitStr;
 
-use super::{attributes::generate_docs, metadata::CodeMetadata};
+use super::{Visibility, attributes::generate_docs, metadata::CodeMetadata};
 use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, ParameterLocation,
@@ -20,14 +20,21 @@ pub struct ClientGenerator<'a> {
   metadata: &'a CodeMetadata,
   operations: &'a [OperationInfo],
   rust_types: &'a [RustType],
+  visibility: Visibility,
 }
 
 impl<'a> ClientGenerator<'a> {
-  pub fn new(metadata: &'a CodeMetadata, operations: &'a [OperationInfo], rust_types: &'a [RustType]) -> Self {
+  pub fn new(
+    metadata: &'a CodeMetadata,
+    operations: &'a [OperationInfo],
+    rust_types: &'a [RustType],
+    visibility: Visibility,
+  ) -> Self {
     Self {
       metadata,
       operations,
       rust_types,
+      visibility,
     }
   }
 
@@ -53,7 +60,10 @@ impl<'a> ClientGenerator<'a> {
     self
       .operations
       .iter()
-      .map(|op| ClientOperationMethod::try_from_operation(op, self.rust_types).map(quote::ToTokens::into_token_stream))
+      .map(|op| {
+        ClientOperationMethod::try_from_operation(op, self.rust_types, self.visibility)
+          .map(quote::ToTokens::into_token_stream)
+      })
       .collect()
   }
 }
@@ -63,6 +73,7 @@ impl ToTokens for ClientGenerator<'_> {
     let client_ident = self.client_ident();
     let base_url_lit = self.base_url_lit();
     let header_consts = self.header_consts();
+    let vis = self.visibility.to_tokens();
 
     let Ok(method_tokens) = self.method_tokens() else {
       return;
@@ -77,20 +88,20 @@ impl ToTokens for ClientGenerator<'_> {
       use reqwest::header::HeaderValue;
       use validator::Validate;
 
-      const BASE_URL: &str = #base_url_lit;
+      #vis const BASE_URL: &str = #base_url_lit;
 
       #header_consts
 
       #[derive(Debug, Clone)]
-      pub struct #client_ident {
-        client: Client,
-        base_url: Url,
+      #vis struct #client_ident {
+        #vis client: Client,
+        #vis base_url: Url,
       }
 
       impl #client_ident {
         /// Create a client using the OpenAPI `servers[0]` URL.
         #[must_use]
-        pub fn new() -> Self {
+        #vis fn new() -> Self {
           Self {
             client: Client::builder().build().expect("client"),
             base_url: Url::parse(BASE_URL).expect("valid base url"),
@@ -98,7 +109,7 @@ impl ToTokens for ClientGenerator<'_> {
         }
 
         /// Create a client with a custom base URL.
-        pub fn with_base_url(base_url: impl AsRef<str>) -> anyhow::Result<Self> {
+        #vis fn with_base_url(base_url: impl AsRef<str>) -> anyhow::Result<Self> {
           Ok(Self {
             client: Client::builder().build().context("building reqwest client")?,
             base_url: Url::parse(base_url.as_ref()).context("parsing base url")?,
@@ -106,7 +117,7 @@ impl ToTokens for ClientGenerator<'_> {
         }
 
         /// Create a client from an existing `reqwest::Client`.
-        pub fn with_client(base_url: impl AsRef<str>, client: Client) -> anyhow::Result<Self> {
+        #vis fn with_client(base_url: impl AsRef<str>, client: Client) -> anyhow::Result<Self> {
           let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
           Ok(Self { client, base_url: url })
         }
@@ -140,10 +151,15 @@ pub(crate) struct ClientOperationMethod {
   pub(crate) header_statements: Vec<TokenStream>,
   pub(crate) body_statement: TokenStream,
   pub(crate) response_handling: ResponseHandling,
+  pub(crate) visibility: Visibility,
 }
 
 impl ClientOperationMethod {
-  pub(crate) fn try_from_operation(operation: &OperationInfo, rust_types: &[RustType]) -> anyhow::Result<Self> {
+  pub(crate) fn try_from_operation(
+    operation: &OperationInfo,
+    rust_types: &[RustType],
+    visibility: Visibility,
+  ) -> anyhow::Result<Self> {
     let Some(request_ident) = operation.request_type.as_ref().map(|r| format_ident!("{r}")) else {
       anyhow::bail!(
         "operation `{}` is missing request type information",
@@ -168,6 +184,7 @@ impl ClientOperationMethod {
       header_statements: Self::build_header_statements(operation),
       body_statement: Self::build_body_statement(operation, rust_types),
       response_handling,
+      visibility,
     })
   }
 
@@ -506,10 +523,11 @@ impl ToTokens for ClientOperationMethod {
     let body_statement = &self.body_statement;
     let success_type = &self.response_handling.success_type;
     let parse_body = &self.response_handling.parse_body;
+    let vis = self.visibility.to_tokens();
 
     quote! {
       #doc_attrs
-      pub async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#success_type> {
+      #vis async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#success_type> {
         request.validate().context("parameter validation")?;
         let url = self
           .base_url

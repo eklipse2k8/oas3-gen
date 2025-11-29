@@ -321,6 +321,15 @@ impl TypeResolver {
   }
 
   fn find_best_union_fallback(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> anyhow::Result<Option<TypeRef>> {
+    let ref_count = variants
+      .iter()
+      .filter(|v| ReferenceExtractor::extract_ref_name_from_obj_ref(v).is_some())
+      .count();
+
+    if ref_count >= 2 {
+      return Ok(None);
+    }
+
     let mut fallback_type: Option<TypeRef> = None;
 
     for variant_ref in variants {

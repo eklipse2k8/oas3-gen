@@ -7,7 +7,7 @@ use crate::generator::{
     ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, RustPrimitive, RustType,
     StructDef, StructKind, StructToken, TypeRef,
   },
-  codegen::client::ClientOperationMethod,
+  codegen::{Visibility, client::ClientOperationMethod},
 };
 
 #[derive(Default)]
@@ -170,7 +170,7 @@ fn test_response_handling_content_categories() {
       ..Default::default()
     }
     .build();
-    let method = ClientOperationMethod::try_from_operation(&operation, &[]).unwrap();
+    let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
 
     let return_ty_str = method.response_handling.success_type.to_string();
     let response_str = method.response_handling.parse_body.to_string();
@@ -192,7 +192,7 @@ fn test_response_handling_with_response_enum() {
     ..Default::default()
   }
   .build();
-  let method = ClientOperationMethod::try_from_operation(&operation, &[]).unwrap();
+  let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
 
   let success_type_str = method.response_handling.success_type.to_string();
   let parse_body_str = method.response_handling.parse_body.to_string();
