@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::type_usage::TypeUsage;
 use crate::generator::ast::{
-  ContentCategory, DeriveTrait, EnumDef, EnumToken, FieldDef, OperationInfo, RustType, StatusCodeToken, StructDef,
-  StructKind, StructMethodKind, TypeRef, default_struct_derives,
+  ContentCategory, DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OperationInfo, RustType, SerdeMode,
+  StatusCodeToken, StructDef, StructKind, StructMethodKind, TypeRef, default_struct_derives,
 };
 
 const SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
@@ -13,6 +13,7 @@ pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage:
     match rust_type {
       RustType::Struct(def) => process_struct(def, type_usage),
       RustType::Enum(def) => process_enum(def, type_usage),
+      RustType::DiscriminatedEnum(def) => process_discriminated_enum(def, type_usage),
       _ => {}
     }
   }
@@ -43,6 +44,15 @@ fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) 
   apply_usage_derives(&mut derives, usage, false);
 
   def.derives = derives;
+}
+
+fn process_discriminated_enum(def: &mut DiscriminatedEnumDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) {
+  let usage = get_usage(&def.name, type_usage);
+  def.serde_mode = match usage {
+    TypeUsage::RequestOnly => SerdeMode::SerializeOnly,
+    TypeUsage::ResponseOnly => SerdeMode::DeserializeOnly,
+    TypeUsage::Bidirectional => SerdeMode::Both,
+  };
 }
 
 fn get_usage(name: &EnumToken, map: &BTreeMap<EnumToken, TypeUsage>) -> TypeUsage {

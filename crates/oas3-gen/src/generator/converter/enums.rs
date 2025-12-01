@@ -18,8 +18,9 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, RustType, SerdeAttribute,
-    TypeRef, VariantContent, VariantDef, default_enum_derives,
+    DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
+    EnumVariantToken, FieldDef, RustType, SerdeAttribute, SerdeMode, TypeRef, VariantContent, VariantDef,
+    default_enum_derives,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -123,23 +124,7 @@ impl EnumConverter {
       }
     }
 
-    let discriminator_map = if kind == UnionKind::OneOf {
-      schema
-        .discriminator
-        .as_ref()
-        .and_then(|d| d.mapping.as_ref())
-        .map(|mapping| {
-          mapping
-            .iter()
-            .filter_map(|(val, ref_path)| SchemaRegistry::extract_ref_name(ref_path).map(|name| (name, val.clone())))
-            .collect()
-        })
-        .unwrap_or_default()
-    } else {
-      BTreeMap::new()
-    };
-
-    let result = self.process_union(name, schema, kind, &discriminator_map, cache.as_deref_mut())?;
+    let result = self.process_union(name, schema, kind, cache.as_deref_mut())?;
 
     if let Some(c) = cache
       && let Some(values) = extract_enum_values(schema)
@@ -208,7 +193,6 @@ impl EnumConverter {
     name: &str,
     schema: &ObjectSchema,
     kind: UnionKind,
-    discriminator_map: &BTreeMap<String, String>,
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
     let variants_src = match kind {
@@ -238,7 +222,7 @@ impl EnumConverter {
       });
 
       let (variant, mut generated) = if let Some(schema_name) = ref_name_opt {
-        self.create_ref_variant(&schema_name, &resolved, discriminator_map, &mut seen_names)
+        self.create_ref_variant(&schema_name, &resolved, &mut seen_names)
       } else {
         self.create_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
       };
@@ -427,7 +411,6 @@ impl EnumConverter {
     &self,
     schema_name: &str,
     resolved_schema: &ObjectSchema,
-    discriminator_map: &BTreeMap<String, String>,
     seen_names: &mut BTreeSet<String>,
   ) -> (VariantDef, Vec<RustType>) {
     let rust_type_name = to_rust_type_name(schema_name);
@@ -439,16 +422,11 @@ impl EnumConverter {
 
     let variant_name = ensure_unique(&rust_type_name, seen_names);
 
-    let mut serde_attrs = vec![];
-    if let Some(disc_value) = discriminator_map.get(schema_name) {
-      serde_attrs.push(SerdeAttribute::Rename(disc_value.clone()));
-    }
-
     let variant = VariantDef {
       name: EnumVariantToken::from(variant_name),
       docs: metadata::extract_docs(resolved_schema.description.as_ref()),
       content: VariantContent::Tuple(vec![type_ref]),
-      serde_attrs,
+      serde_attrs: vec![],
       deprecated: resolved_schema.deprecated.unwrap_or(false),
     };
 
@@ -553,24 +531,97 @@ impl EnumConverter {
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> RustType {
-    let has_discriminator = schema.discriminator.is_some();
-
-    let (serde_attrs, derives) = if has_discriminator {
-      (vec![], default_enum_derives(false))
-    } else {
-      (vec![SerdeAttribute::Untagged], default_enum_derives(false))
-    };
+    if let Some(discriminator) = &schema.discriminator
+      && let Some(mapping) = &discriminator.mapping
+      && Self::all_variants_are_refs(&variants, mapping)
+    {
+      let disc_variants = Self::build_discriminated_variants(&variants, mapping);
+      return RustType::DiscriminatedEnum(DiscriminatedEnumDef {
+        name: EnumToken::from_raw(name),
+        docs: metadata::extract_docs(schema.description.as_ref()),
+        discriminator_field: discriminator.property_name.clone(),
+        variants: disc_variants,
+        fallback: None,
+        serde_mode: SerdeMode::default(),
+      });
+    }
 
     RustType::Enum(EnumDef {
       name: EnumToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
-      discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),
-      derives,
-      serde_attrs,
+      discriminator: None,
+      derives: default_enum_derives(false),
+      serde_attrs: vec![SerdeAttribute::Untagged],
       outer_attrs: vec![],
       case_insensitive: false,
       methods,
     })
+  }
+
+  fn all_variants_are_refs(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {
+    if variants.is_empty() || mapping.is_empty() {
+      return false;
+    }
+
+    let variant_types: BTreeSet<String> = variants
+      .iter()
+      .filter_map(|v| match &v.content {
+        VariantContent::Tuple(types) if types.len() == 1 => {
+          let base = types[0].base_type.to_string();
+          let unboxed = base
+            .strip_prefix("Box<")
+            .and_then(|s| s.strip_suffix('>'))
+            .unwrap_or(&base);
+          Some(unboxed.to_string())
+        }
+        _ => None,
+      })
+      .collect();
+
+    mapping.values().all(|ref_path| {
+      SchemaRegistry::extract_ref_name(ref_path)
+        .map(|ref_name| to_rust_type_name(&ref_name))
+        .is_some_and(|type_name| variant_types.contains(&type_name))
+    })
+  }
+
+  fn build_discriminated_variants(
+    variants: &[VariantDef],
+    mapping: &BTreeMap<String, String>,
+  ) -> Vec<DiscriminatedVariant> {
+    mapping
+      .iter()
+      .filter_map(|(disc_value, ref_path)| {
+        let ref_name = SchemaRegistry::extract_ref_name(ref_path)?;
+        let type_name = to_rust_type_name(&ref_name);
+
+        let variant = variants.iter().find(|v| {
+          if let VariantContent::Tuple(types) = &v.content
+            && types.len() == 1
+          {
+            let base = types[0].base_type.to_string();
+            let unboxed = base
+              .strip_prefix("Box<")
+              .and_then(|s| s.strip_suffix('>'))
+              .unwrap_or(&base);
+            unboxed == type_name
+          } else {
+            false
+          }
+        })?;
+
+        let actual_type = match &variant.content {
+          VariantContent::Tuple(types) => types[0].to_rust_type(),
+          VariantContent::Unit => return None,
+        };
+
+        Some(DiscriminatedVariant {
+          discriminator_value: disc_value.clone(),
+          variant_name: variant.name.to_string(),
+          type_name: actual_type,
+        })
+      })
+      .collect()
   }
 }

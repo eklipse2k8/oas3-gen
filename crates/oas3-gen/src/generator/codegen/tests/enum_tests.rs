@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
-    EnumToken, EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, StatusCodeToken,
-    StructToken, TypeRef, VariantContent, VariantDef,
+    EnumToken, EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
+    StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -512,24 +512,40 @@ fn test_discriminated_enum() {
       },
     ],
     fallback: None,
+    serde_mode: SerdeMode::Both,
   };
 
   let code_without = generate_discriminated_enum(&without_fallback, Visibility::Public).to_string();
 
   let assertions_without = [
     (
-      "oas3_gen_support :: discriminated_enum !",
-      "should use discriminated_enum macro",
+      "# [derive (Debug , Clone , PartialEq)]",
+      "should derive Debug, Clone, PartialEq",
     ),
     ("pub enum Pet", "should have pub enum declaration"),
-    ("discriminator : \"petType\"", "should have discriminator field"),
-    ("(\"dog\" , Dog (DogData))", "should have dog variant"),
-    ("(\"cat\" , Cat (CatData))", "should have cat variant"),
+    ("Dog (DogData)", "should have dog variant"),
+    ("Cat (CatData)", "should have cat variant"),
+    (
+      "pub const DISCRIMINATOR_FIELD",
+      "should have discriminator field constant",
+    ),
+    ("\"petType\"", "should have discriminator field value"),
+    ("impl Default for Pet", "should have Default impl"),
+    ("impl serde :: Serialize for Pet", "should have Serialize impl"),
+    (
+      "impl < 'de > serde :: Deserialize < 'de > for Pet",
+      "should have Deserialize impl",
+    ),
+    ("Some (\"dog\")", "should have dog discriminator match"),
+    ("Some (\"cat\")", "should have cat discriminator match"),
+    (
+      "missing_field (Self :: DISCRIMINATOR_FIELD)",
+      "should error on missing discriminator",
+    ),
   ];
   for (expected, msg) in assertions_without {
-    assert!(code_without.contains(expected), "{msg}");
+    assert!(code_without.contains(expected), "{msg}:\n{code_without}");
   }
-  assert!(!code_without.contains("fallback :"), "should not have fallback");
 
   let with_fallback = DiscriminatedEnumDef {
     name: EnumToken::new("Message"),
@@ -545,12 +561,79 @@ fn test_discriminated_enum() {
       variant_name: "Unknown".to_string(),
       type_name: "serde_json::Value".to_string(),
     }),
+    serde_mode: SerdeMode::Both,
   };
 
   let code_with = generate_discriminated_enum(&with_fallback, Visibility::Public).to_string();
+  let fallback_assertions = [
+    ("Unknown (serde_json :: Value)", "should have fallback variant in enum"),
+    (
+      "Self :: Unknown (< serde_json :: Value >",
+      "should use fallback in Default impl",
+    ),
+    (
+      "None => serde_json :: from_value (value) . map (Self :: Unknown)",
+      "should use fallback when discriminator missing",
+    ),
+  ];
+  for (expected, msg) in fallback_assertions {
+    assert!(code_with.contains(expected), "{msg}:\n{code_with}");
+  }
   assert!(
-    code_with.contains("fallback : Unknown (serde_json :: Value)"),
-    "should have fallback variant"
+    !code_with.contains("missing_field"),
+    "should not error on missing field when fallback exists"
+  );
+}
+
+#[test]
+fn test_discriminated_enum_serialize_only() {
+  let def = DiscriminatedEnumDef {
+    name: EnumToken::new("RequestType"),
+    docs: vec![],
+    discriminator_field: "kind".to_string(),
+    variants: vec![DiscriminatedVariant {
+      discriminator_value: "create".to_string(),
+      variant_name: "Create".to_string(),
+      type_name: "CreateRequest".to_string(),
+    }],
+    fallback: None,
+    serde_mode: SerdeMode::SerializeOnly,
+  };
+
+  let code = generate_discriminated_enum(&def, Visibility::Public).to_string();
+  assert!(
+    code.contains("impl serde :: Serialize for RequestType"),
+    "should have Serialize impl"
+  );
+  assert!(
+    !code.contains("impl < 'de > serde :: Deserialize"),
+    "should NOT have Deserialize impl"
+  );
+}
+
+#[test]
+fn test_discriminated_enum_deserialize_only() {
+  let def = DiscriminatedEnumDef {
+    name: EnumToken::new("ResponseType"),
+    docs: vec![],
+    discriminator_field: "kind".to_string(),
+    variants: vec![DiscriminatedVariant {
+      discriminator_value: "success".to_string(),
+      variant_name: "Success".to_string(),
+      type_name: "SuccessResponse".to_string(),
+    }],
+    fallback: None,
+    serde_mode: SerdeMode::DeserializeOnly,
+  };
+
+  let code = generate_discriminated_enum(&def, Visibility::Public).to_string();
+  assert!(
+    !code.contains("impl serde :: Serialize"),
+    "should NOT have Serialize impl"
+  );
+  assert!(
+    code.contains("impl < 'de > serde :: Deserialize < 'de > for ResponseType"),
+    "should have Deserialize impl"
   );
 }
 

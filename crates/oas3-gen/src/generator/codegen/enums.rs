@@ -10,7 +10,7 @@ use super::{
 };
 use crate::generator::ast::{
   DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, EnumVariantToken, ResponseEnumDef, SerdeAttribute,
-  VariantContent, VariantDef,
+  SerdeMode, VariantContent, VariantDef,
 };
 
 pub(crate) fn generate_enum(def: &EnumDef, visibility: Visibility) -> TokenStream {
@@ -113,32 +113,174 @@ pub(crate) fn generate_discriminated_enum(def: &DiscriminatedEnumDef, visibility
   let docs = generate_docs(&def.docs);
   let vis = visibility.to_tokens();
 
-  let variants: Vec<TokenStream> = def
+  let enum_variants: Vec<TokenStream> = def
+    .variants
+    .iter()
+    .map(|v| {
+      let variant_name = format_ident!("{}", v.variant_name);
+      let type_name = coercion::parse_type_string(&v.type_name);
+      quote! { #variant_name(#type_name) }
+    })
+    .collect();
+
+  let fallback_variant_def = def.fallback.as_ref().map(|fb| {
+    let fallback_variant = format_ident!("{}", fb.variant_name);
+    let fallback_type = coercion::parse_type_string(&fb.type_name);
+    quote! { #fallback_variant(#fallback_type) }
+  });
+
+  let all_variants = if let Some(fb) = fallback_variant_def {
+    quote! { #(#enum_variants),*, #fb }
+  } else {
+    quote! { #(#enum_variants),* }
+  };
+
+  let enum_def = quote! {
+    #docs
+    #[derive(Debug, Clone, PartialEq)]
+    #vis enum #name {
+      #all_variants
+    }
+  };
+
+  let discriminator_const = quote! {
+    impl #name {
+      #vis const DISCRIMINATOR_FIELD: &'static str = #disc_field;
+    }
+  };
+
+  let default_impl = generate_discriminated_default_impl(def);
+  let serialize_impl = generate_discriminated_serialize_impl(def);
+  let deserialize_impl = generate_discriminated_deserialize_impl(def);
+
+  quote! {
+    #enum_def
+    #discriminator_const
+    #default_impl
+    #serialize_impl
+    #deserialize_impl
+  }
+}
+
+fn generate_discriminated_default_impl(def: &DiscriminatedEnumDef) -> TokenStream {
+  let name = &def.name;
+
+  if let Some(ref fb) = def.fallback {
+    let fallback_variant = format_ident!("{}", fb.variant_name);
+    let fallback_type = coercion::parse_type_string(&fb.type_name);
+    quote! {
+      impl Default for #name {
+        fn default() -> Self {
+          Self::#fallback_variant(<#fallback_type>::default())
+        }
+      }
+    }
+  } else if let Some(first) = def.variants.first() {
+    let first_variant = format_ident!("{}", first.variant_name);
+    let first_type = coercion::parse_type_string(&first.type_name);
+    quote! {
+      impl Default for #name {
+        fn default() -> Self {
+          Self::#first_variant(<#first_type>::default())
+        }
+      }
+    }
+  } else {
+    quote! {}
+  }
+}
+
+fn generate_discriminated_serialize_impl(def: &DiscriminatedEnumDef) -> TokenStream {
+  if def.serde_mode == SerdeMode::DeserializeOnly {
+    return quote! {};
+  }
+
+  let name = &def.name;
+
+  let variant_arms: Vec<TokenStream> = def
+    .variants
+    .iter()
+    .map(|v| {
+      let variant_name = format_ident!("{}", v.variant_name);
+      quote! { Self::#variant_name(v) => v.serialize(serializer) }
+    })
+    .collect();
+
+  let fallback_arm = def.fallback.as_ref().map(|fb| {
+    let fallback_variant = format_ident!("{}", fb.variant_name);
+    quote! { Self::#fallback_variant(v) => v.serialize(serializer) }
+  });
+
+  let all_arms = if let Some(fb) = fallback_arm {
+    quote! { #(#variant_arms,)* #fb }
+  } else {
+    quote! { #(#variant_arms),* }
+  };
+
+  quote! {
+    impl serde::Serialize for #name {
+      fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+      where
+        S: serde::Serializer,
+      {
+        match self {
+          #all_arms
+        }
+      }
+    }
+  }
+}
+
+fn generate_discriminated_deserialize_impl(def: &DiscriminatedEnumDef) -> TokenStream {
+  if def.serde_mode == SerdeMode::SerializeOnly {
+    return quote! {};
+  }
+
+  let name = &def.name;
+  let disc_field = &def.discriminator_field;
+
+  let variant_arms: Vec<TokenStream> = def
     .variants
     .iter()
     .map(|v| {
       let disc_value = &v.discriminator_value;
       let variant_name = format_ident!("{}", v.variant_name);
-      let type_name = coercion::parse_type_string(&v.type_name);
-      quote! { (#disc_value, #variant_name(#type_name)) }
+      quote! {
+        Some(#disc_value) => serde_json::from_value(value)
+          .map(Self::#variant_name)
+          .map_err(serde::de::Error::custom)
+      }
     })
     .collect();
 
-  let fallback_clause = def.fallback.as_ref().map(|fb| {
+  let none_handling = if let Some(ref fb) = def.fallback {
     let fallback_variant = format_ident!("{}", fb.variant_name);
-    let fallback_type = coercion::parse_type_string(&fb.type_name);
-    quote! { fallback: #fallback_variant(#fallback_type), }
-  });
+    quote! {
+      None => serde_json::from_value(value)
+        .map(Self::#fallback_variant)
+        .map_err(serde::de::Error::custom)
+    }
+  } else {
+    quote! {
+      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD))
+    }
+  };
 
   quote! {
-    #docs
-    oas3_gen_support::discriminated_enum! {
-      #vis enum #name {
-        discriminator: #disc_field,
-        variants: [
-          #(#variants),*
-        ],
-        #fallback_clause
+    impl<'de> serde::Deserialize<'de> for #name {
+      fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+      where
+        D: serde::Deserializer<'de>,
+      {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+          #(#variant_arms,)*
+          #none_handling,
+          Some(other) => Err(serde::de::Error::custom(format!(
+            "Unknown discriminator value '{}' for field '{}'",
+            other, #disc_field
+          ))),
+        }
       }
     }
   }

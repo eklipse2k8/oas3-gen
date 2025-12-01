@@ -19,7 +19,7 @@ use super::{
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, EnumToken, FieldDef, FieldDefBuilder, RustType, SerdeAttribute,
-    StructDef, StructKind, StructToken, TypeRef, default_struct_derives, tokens::FieldNameToken,
+    SerdeMode, StructDef, StructKind, StructToken, TypeRef, default_struct_derives, tokens::FieldNameToken,
   },
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
@@ -560,6 +560,7 @@ impl DiscriminatorHandler {
       discriminator_field: discriminator_field.clone(),
       variants,
       fallback,
+      serde_mode: SerdeMode::default(),
     }))
   }
 

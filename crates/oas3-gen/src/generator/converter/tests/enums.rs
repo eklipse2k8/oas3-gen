@@ -107,22 +107,20 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
-  let RustType::Enum(enum_def) = result.last().unwrap() else {
-    panic!("Expected enum as last type")
+  let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
+    panic!("Expected DiscriminatedEnum as last type")
   };
 
   assert_eq!(enum_def.name.to_string(), "TestUnion");
+  assert_eq!(enum_def.discriminator_field, "type");
   assert_eq!(enum_def.variants.len(), 2);
-  assert!(
-    enum_def.variants[0]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("type_a".to_string()))
-  );
-  assert!(
-    enum_def.variants[1]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("type_b".to_string()))
-  );
+  let variant_values: BTreeSet<_> = enum_def
+    .variants
+    .iter()
+    .map(|v| v.discriminator_value.as_str())
+    .collect();
+  assert!(variant_values.contains("type_a"));
+  assert!(variant_values.contains("type_b"));
   Ok(())
 }
 
@@ -247,13 +245,13 @@ fn test_anyof_with_discriminator_no_untagged() -> anyhow::Result<()> {
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
-  let RustType::Enum(enum_def) = result.last().unwrap() else {
-    panic!("Expected enum as last type")
+  let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
+    panic!("Expected DiscriminatedEnum as last type")
   };
 
   assert_eq!(enum_def.name.to_string(), "TestUnion");
-  assert_eq!(enum_def.discriminator, Some("type".to_string()));
-  assert!(!enum_def.serde_attrs.contains(&SerdeAttribute::Untagged));
+  assert_eq!(enum_def.discriminator_field, "type");
+  assert_eq!(enum_def.variants.len(), 2);
   Ok(())
 }
 

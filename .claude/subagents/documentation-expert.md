@@ -292,25 +292,26 @@ pub struct Node {
 
 ### Discriminated Unions
 
-Uses custom macro for oneOf with discriminator:
+Generates inline code for oneOf with discriminator:
 
 ```rust
-discriminated_enum! {
-    #[derive(Debug, Clone)]
-    pub enum Pet {
-        #[discriminator = "dog"]
-        Dog(DogData),
-        #[discriminator = "cat"]
-        Cat(CatData),
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pet {
+    Dog(DogData),
+    Cat(CatData),
 }
-```
-
+impl Pet {
+    pub const DISCRIMINATOR_FIELD: &'static str = "petType";
+}
+impl Default for Pet { /* ... */ }
+impl serde::Serialize for Pet { /* ... */ }
+impl<'de> serde::Deserialize<'de> for Pet { /* ... */ }
 ```
 
 ### Troubleshooting Guide
 
 **docs/troubleshooting.md**:
+
 ```markdown
 # Troubleshooting
 

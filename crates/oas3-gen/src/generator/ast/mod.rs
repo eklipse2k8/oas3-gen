@@ -31,6 +31,15 @@ pub struct DiscriminatedVariant {
   pub type_name: String,
 }
 
+/// Serde mode for discriminated enums
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SerdeMode {
+  #[default]
+  Both,
+  SerializeOnly,
+  DeserializeOnly,
+}
+
 /// Discriminated enum definition (uses macro for custom ser/de)
 #[derive(Debug, Clone)]
 pub struct DiscriminatedEnumDef {
@@ -39,6 +48,7 @@ pub struct DiscriminatedEnumDef {
   pub discriminator_field: String,
   pub variants: Vec<DiscriminatedVariant>,
   pub fallback: Option<DiscriminatedVariant>,
+  pub serde_mode: SerdeMode,
 }
 
 /// Response enum variant definition
