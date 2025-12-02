@@ -487,7 +487,7 @@ fn test_apply_discriminator_attributes_child_discriminator_hides_and_sets_value(
 #[test]
 fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
   let metadata = make_metadata_with_docs();
-  let serde_attrs = vec![];
+  let serde_attrs = vec![SerdeAttribute::Rename("@odata.type".to_string())];
   let type_ref = make_string_type_ref();
 
   let disc_info = DiscriminatorInfo {
@@ -508,8 +508,11 @@ fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
     Some(serde_json::Value::String(String::new())),
     "string type should get empty default"
   );
-  assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
-  assert!(!result.serde_attrs.contains(&SerdeAttribute::SkipDeserializing));
+  assert_eq!(
+    result.serde_attrs,
+    vec![SerdeAttribute::Skip],
+    "only Skip should remain"
+  );
   assert!(result.extra_attrs.iter().any(|a| a.contains("doc(hidden)")));
 }
 

@@ -719,6 +719,7 @@ impl FieldProcessor {
       serde_attrs.push(SerdeAttribute::SkipDeserializing);
       serde_attrs.push(SerdeAttribute::Default);
     } else {
+      serde_attrs.clear();
       serde_attrs.push(SerdeAttribute::Skip);
       if final_type.is_string_like() {
         metadata.default_value = Some(serde_json::Value::String(String::new()));
