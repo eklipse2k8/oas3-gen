@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use http::Method;
 
 use crate::generator::{
@@ -237,11 +235,11 @@ fn test_multipart_generation() {
     name: StructToken::new("MultipartBody"),
     fields: vec![binary_field, text_field],
     docs: vec![],
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
     kind: StructKind::RequestBody,
+    ..Default::default()
   };
 
   let request_struct = StructDef {
@@ -258,11 +256,11 @@ fn test_multipart_generation() {
       ..Default::default()
     }],
     docs: vec![],
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
     kind: StructKind::OperationRequest,
+    ..Default::default()
   };
 
   let make_operation = |request_type: &str| OperationInfo {

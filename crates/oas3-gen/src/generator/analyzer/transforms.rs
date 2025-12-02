@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::type_usage::TypeUsage;
 use crate::generator::ast::{
-  ContentCategory, DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OperationInfo, RustType, SerdeMode,
-  StatusCodeToken, StructDef, StructKind, StructMethodKind, TypeRef, default_struct_derives,
+  ContentCategory, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OperationInfo, RustType, SerdeMode,
+  StatusCodeToken, StructDef, StructKind, StructMethodKind, TypeRef,
 };
 
 const SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
@@ -23,8 +23,7 @@ fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<EnumToken, TypeUsag
   let key: EnumToken = def.name.as_str().into();
   let usage = get_usage(&key, type_usage);
 
-  let derives = calculate_struct_derives(def.kind, usage);
-  def.derives = derives;
+  def.serde_mode = usage_to_serde_mode(usage);
 
   if usage == TypeUsage::ResponseOnly {
     strip_validation_attrs(&mut def.fields);
@@ -36,60 +35,23 @@ fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<EnumToken, TypeUsag
 
 fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) {
   let usage = get_usage(&def.name, type_usage);
-
-  let mut derives = def.derives.clone();
-  derives.remove(&DeriveTrait::Serialize);
-  derives.remove(&DeriveTrait::Deserialize);
-
-  apply_usage_derives(&mut derives, usage, false);
-
-  def.derives = derives;
+  def.serde_mode = usage_to_serde_mode(usage);
 }
 
 fn process_discriminated_enum(def: &mut DiscriminatedEnumDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) {
   let usage = get_usage(&def.name, type_usage);
-  def.serde_mode = match usage {
-    TypeUsage::RequestOnly => SerdeMode::SerializeOnly,
-    TypeUsage::ResponseOnly => SerdeMode::DeserializeOnly,
-    TypeUsage::Bidirectional => SerdeMode::Both,
-  };
+  def.serde_mode = usage_to_serde_mode(usage);
 }
 
 fn get_usage(name: &EnumToken, map: &BTreeMap<EnumToken, TypeUsage>) -> TypeUsage {
   map.get(name).copied().unwrap_or(TypeUsage::Bidirectional)
 }
 
-fn calculate_struct_derives(kind: StructKind, usage: TypeUsage) -> BTreeSet<DeriveTrait> {
-  let mut derives = default_struct_derives();
-
-  if kind == StructKind::OperationRequest {
-    derives.remove(&DeriveTrait::PartialEq);
-    derives.insert(DeriveTrait::Validate);
-  } else {
-    apply_usage_derives(&mut derives, usage, true);
-  }
-
-  derives
-}
-
-fn apply_usage_derives(derives: &mut BTreeSet<DeriveTrait>, usage: TypeUsage, supports_validation: bool) {
+fn usage_to_serde_mode(usage: TypeUsage) -> SerdeMode {
   match usage {
-    TypeUsage::RequestOnly => {
-      derives.insert(DeriveTrait::Serialize);
-      if supports_validation {
-        derives.insert(DeriveTrait::Validate);
-      }
-    }
-    TypeUsage::ResponseOnly => {
-      derives.insert(DeriveTrait::Deserialize);
-    }
-    TypeUsage::Bidirectional => {
-      derives.insert(DeriveTrait::Serialize);
-      derives.insert(DeriveTrait::Deserialize);
-      if supports_validation {
-        derives.insert(DeriveTrait::Validate);
-      }
-    }
+    TypeUsage::RequestOnly => SerdeMode::SerializeOnly,
+    TypeUsage::ResponseOnly => SerdeMode::DeserializeOnly,
+    TypeUsage::Bidirectional => SerdeMode::Both,
   }
 }
 

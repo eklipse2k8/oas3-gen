@@ -10,8 +10,8 @@ use serde_json::json;
 use crate::{
   generator::{
     ast::{
-      DeriveTrait, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType, SerdeAttribute,
-      TypeRef, VariantContent, VariantDef,
+      DeriveTrait, DerivesProvider, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType,
+      SerdeAttribute, TypeRef, VariantContent, VariantDef,
     },
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
@@ -43,8 +43,8 @@ fn test_simple_string_enum() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "SimpleEnum");
   assert_eq!(enum_def.variants.len(), 2);
-  assert!(enum_def.derives.contains(&DeriveTrait::Eq));
-  assert!(enum_def.derives.contains(&DeriveTrait::Hash));
+  assert!(enum_def.derives().contains(&DeriveTrait::Eq));
+  assert!(enum_def.derives().contains(&DeriveTrait::Hash));
   Ok(())
 }
 
@@ -1101,11 +1101,11 @@ fn test_enum_helper_skips_without_default_trait() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   });
 
   if let RustType::Enum(e) = enum_def {

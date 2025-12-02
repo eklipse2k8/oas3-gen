@@ -19,7 +19,7 @@ use super::{
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, EnumToken, FieldDef, FieldDefBuilder, RustType, SerdeAttribute,
-    SerdeMode, StructDef, StructKind, StructToken, TypeRef, default_struct_derives, tokens::FieldNameToken,
+    SerdeMode, StructDef, StructKind, StructToken, TypeRef, tokens::FieldNameToken,
   },
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
@@ -222,11 +222,11 @@ impl StructConverter {
       name: struct_name,
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
-      derives: default_struct_derives(),
       serde_attrs,
       outer_attrs: vec![],
       methods: vec![],
       kind: kind.unwrap_or(StructKind::Schema),
+      ..Default::default()
     });
 
     Ok(ConversionOutput::with_inline_types(
@@ -277,11 +277,11 @@ impl StructConverter {
       name: struct_name,
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
-      derives: default_struct_derives(),
       serde_attrs,
       outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
+      ..Default::default()
     }));
 
     let mut inline_types = field_result.inline_types;

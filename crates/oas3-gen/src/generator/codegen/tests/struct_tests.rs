@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, PathSegment,
+    ContentCategory, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, PathSegment,
     QueryParameter, ResponseVariant, RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind,
     StructToken, TypeRef, ValidationAttribute,
   },
@@ -25,11 +25,11 @@ fn base_struct(kind: StructKind) -> StructDef {
       default_value: None,
       ..Default::default()
     }],
-    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
     kind,
+    ..Default::default()
   }
 }
 
@@ -77,16 +77,12 @@ fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> St
 
 #[test]
 fn generates_struct_with_supplied_derives() {
-  let def = StructDef {
-    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Serialize]),
-    ..base_struct(StructKind::Schema)
-  };
+  let def = base_struct(StructKind::Schema);
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
   assert!(code.contains("derive"), "missing derive attribute");
   assert!(code.contains("Debug"), "missing Debug derive");
   assert!(code.contains("Clone"), "missing Clone derive");
-  assert!(code.contains("Serialize"), "missing Serialize derive");
   assert!(code.contains("pub struct Sample"), "missing struct declaration");
 }
 
@@ -222,33 +218,12 @@ fn test_binary_response_parsing() {
 
 #[test]
 fn test_serde_import_generation() {
-  let cases = [
-    (
-      BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Deserialize]),
-      "use serde :: Deserialize",
-      false,
-      "Deserialize only",
-    ),
-    (
-      BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Serialize, DeriveTrait::Deserialize]),
-      "use serde :: { Deserialize , Serialize }",
-      true,
-      "both Serialize and Deserialize",
-    ),
-  ];
-  for (derives, expected_import, should_have_serialize, desc) in cases {
-    let def = StructDef {
-      derives,
-      ..base_struct(StructKind::Schema)
-    };
-    let errors = HashSet::new();
-    let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
-    let code = tokens.to_string();
-    assert!(code.contains(expected_import), "missing import for {desc}");
-    if !should_have_serialize {
-      assert!(!code.contains("Serialize"), "should not contain Serialize for {desc}");
-    }
-  }
+  let def = base_struct(StructKind::Schema);
+  let errors = HashSet::new();
+  let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
+  let code = tokens.to_string();
+  assert!(code.contains("Debug"), "missing Debug derive");
+  assert!(code.contains("Clone"), "missing Clone derive");
 }
 
 #[test]

@@ -9,10 +9,8 @@ pub(super) mod validation_attrs;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeSet;
-
 use derive_builder::Builder;
-pub use derives::{DeriveTrait, default_enum_derives, default_struct_derives};
+pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 use http::Method;
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
@@ -109,6 +107,28 @@ impl RustType {
       RustType::TypeAlias(def) => def.name.to_atom(),
       RustType::DiscriminatedEnum(def) => def.name.to_atom(),
       RustType::ResponseEnum(def) => def.name.to_atom(),
+    }
+  }
+
+  #[must_use]
+  pub fn is_serializable(&self) -> SerdeImpl {
+    match self {
+      RustType::Struct(def) => def.is_serializable(),
+      RustType::Enum(def) => def.is_serializable(),
+      RustType::DiscriminatedEnum(def) => def.is_serializable(),
+      RustType::ResponseEnum(def) => def.is_serializable(),
+      RustType::TypeAlias(_) => SerdeImpl::None,
+    }
+  }
+
+  #[must_use]
+  pub fn is_deserializable(&self) -> SerdeImpl {
+    match self {
+      RustType::Struct(def) => def.is_deserializable(),
+      RustType::Enum(def) => def.is_deserializable(),
+      RustType::DiscriminatedEnum(def) => def.is_deserializable(),
+      RustType::ResponseEnum(def) => def.is_deserializable(),
+      RustType::TypeAlias(_) => SerdeImpl::None,
     }
   }
 }
@@ -215,11 +235,11 @@ pub struct StructDef {
   pub name: StructToken,
   pub docs: Vec<String>,
   pub fields: Vec<FieldDef>,
-  pub derives: BTreeSet<DeriveTrait>,
   pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<String>,
   pub methods: Vec<StructMethod>,
   pub kind: StructKind,
+  pub serde_mode: SerdeMode,
 }
 
 /// Associated method definition for a struct
@@ -305,11 +325,11 @@ pub struct EnumDef {
   pub docs: Vec<String>,
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
-  pub derives: BTreeSet<DeriveTrait>,
   pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<String>,
   pub case_insensitive: bool,
   pub methods: Vec<EnumMethod>,
+  pub serde_mode: SerdeMode,
 }
 
 impl EnumDef {

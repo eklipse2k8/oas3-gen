@@ -13,8 +13,8 @@ use super::{
   coercion,
 };
 use crate::generator::ast::{
-  ContentCategory, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive, StatusCodeToken,
-  StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+  ContentCategory, DerivesProvider, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive,
+  StatusCodeToken, StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   tokens::{ConstToken, EnumToken, EnumVariantToken, MethodNameToken},
 };
 
@@ -40,7 +40,7 @@ impl<'a> StructGenerator<'a> {
     let docs = generate_docs(&def.docs);
     let vis = self.visibility.to_tokens();
 
-    let derives = super::attributes::generate_derives_from_slice(&def.derives);
+    let derives = super::attributes::generate_derives_from_slice(&def.derives());
 
     let outer_attrs = generate_outer_attrs(&def.outer_attrs);
     let serde_attrs = generate_serde_attrs(&def.serde_attrs);

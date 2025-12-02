@@ -8,7 +8,9 @@ use super::{
   },
   coercion,
 };
-use crate::generator::ast::{DeriveTrait, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeMode};
+use crate::generator::ast::{
+  DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeMode,
+};
 
 /// Generates standard Rust enums that use serde's derive macros for serialization.
 ///
@@ -71,11 +73,7 @@ impl<'a> EnumGenerator<'a> {
     let docs = generate_docs(&self.def.docs);
     let vis = self.visibility.to_tokens();
 
-    let mut derives_list = self.def.derives.clone();
-    if self.def.case_insensitive {
-      derives_list.remove(&DeriveTrait::Deserialize);
-    }
-    let derives = generate_derives_from_slice(&derives_list);
+    let derives = generate_derives_from_slice(&self.def.derives());
 
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = self.generate_serde_attrs();
@@ -332,9 +330,11 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       })
       .collect();
 
+    let derives = generate_derives_from_slice(&self.def.derives());
+
     let enum_def = quote! {
       #docs
-      #[derive(Debug, Clone, PartialEq)]
+      #derives
       #vis enum #name {
         #(#variants),*
       }
@@ -533,9 +533,11 @@ impl<'a> ResponseEnumGenerator<'a> {
       })
       .collect();
 
+    let derives = generate_derives_from_slice(&self.def.derives());
+
     quote! {
       #docs
-      #[derive(Clone, Debug)]
+      #derives
       #vis enum #name {
         #(#variants),*
       }

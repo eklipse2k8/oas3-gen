@@ -4,10 +4,7 @@ use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 
 use super::{cache::SharedSchemaCache, metadata};
 use crate::generator::{
-  ast::{
-    EnumDef, EnumToken, EnumVariantToken, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
-    default_enum_derives,
-  },
+  ast::{EnumDef, EnumToken, EnumVariantToken, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef},
   naming::identifiers::{ensure_unique, to_rust_type_name},
   schema_registry::SchemaRegistry,
 };
@@ -174,11 +171,11 @@ impl<'a> StringEnumOptimizer<'a> {
       docs: vec!["Known values for the string enum.".to_string()],
       variants,
       discriminator: None,
-      derives: default_enum_derives(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
       case_insensitive: self.case_insensitive,
       methods: vec![],
+      ..Default::default()
     })
   }
 
@@ -205,11 +202,11 @@ impl<'a> StringEnumOptimizer<'a> {
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,
-      derives: default_enum_derives(false),
       serde_attrs: vec![SerdeAttribute::Untagged],
       outer_attrs: vec![],
       case_insensitive: false,
       methods: vec![],
+      ..Default::default()
     })
   }
 }

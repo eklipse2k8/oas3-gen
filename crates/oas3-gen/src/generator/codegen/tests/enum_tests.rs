@@ -1,10 +1,8 @@
-use std::collections::BTreeSet;
-
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
-    EnumToken, EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
-    StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
+    ContentCategory, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
+    EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken,
+    StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -22,29 +20,17 @@ fn make_unit_variant(name: &str) -> VariantDef {
   }
 }
 
-fn default_derives() -> BTreeSet<DeriveTrait> {
-  BTreeSet::from([
-    DeriveTrait::Debug,
-    DeriveTrait::Clone,
-    DeriveTrait::Default,
-    DeriveTrait::Serialize,
-    DeriveTrait::Deserialize,
-    DeriveTrait::PartialEq,
-    DeriveTrait::Eq,
-  ])
-}
-
 fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
   EnumDef {
     name: EnumToken::new(name),
     docs: vec![],
     variants,
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   }
 }
 
@@ -87,11 +73,11 @@ fn test_enum_with_docs() {
     ],
     variants: vec![make_unit_variant("Active"), make_unit_variant("Inactive")],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   };
 
   let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
@@ -176,11 +162,11 @@ fn test_enum_variant_attributes() {
       make_unit_variant("V2"),
     ],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   };
 
   let deprecated_code = EnumGenerator::new(&deprecated_def, Visibility::Public)
@@ -196,11 +182,11 @@ fn test_enum_variant_attributes() {
     docs: vec![],
     variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec!["#[non_exhaustive]".to_string()],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   };
 
   let outer_attrs_code = EnumGenerator::new(&outer_attrs_def, Visibility::Public)
@@ -237,11 +223,11 @@ fn test_enum_serde_attributes() {
           },
         ],
         discriminator: None,
-        derives: default_derives(),
         serde_attrs: vec![],
         outer_attrs: vec![],
         case_insensitive: false,
         methods: vec![],
+        ..Default::default()
       },
       vec![
         ("# [serde (rename = \"in_progress\")]", "serde rename for InProgress"),
@@ -259,11 +245,11 @@ fn test_enum_serde_attributes() {
           make_unit_variant("Deleted"),
         ],
         discriminator: Some("eventType".to_string()),
-        derives: default_derives(),
         serde_attrs: vec![],
         outer_attrs: vec![],
         case_insensitive: false,
         methods: vec![],
+        ..Default::default()
       },
       vec![("# [serde (tag = \"eventType\")]", "serde tag attribute")],
     ),
@@ -274,11 +260,11 @@ fn test_enum_serde_attributes() {
         docs: vec![],
         variants: vec![make_unit_variant("StringVal"), make_unit_variant("NumberVal")],
         discriminator: None,
-        derives: default_derives(),
         serde_attrs: vec![SerdeAttribute::Untagged],
         outer_attrs: vec![],
         case_insensitive: false,
         methods: vec![],
+        ..Default::default()
       },
       vec![("# [serde (untagged)]", "untagged serde attribute")],
     ),
@@ -314,16 +300,11 @@ fn test_case_insensitive_enum() {
       },
     ],
     discriminator: None,
-    derives: BTreeSet::from([
-      DeriveTrait::Debug,
-      DeriveTrait::Clone,
-      DeriveTrait::Serialize,
-      DeriveTrait::Deserialize,
-    ]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
     methods: vec![],
+    ..Default::default()
   };
 
   let tokens = EnumGenerator::new(&base_def, Visibility::Public).generate();
@@ -361,16 +342,11 @@ fn test_case_insensitive_enum() {
       make_unit_variant("Unknown"),
     ],
     discriminator: None,
-    derives: BTreeSet::from([
-      DeriveTrait::Debug,
-      DeriveTrait::Clone,
-      DeriveTrait::Serialize,
-      DeriveTrait::Deserialize,
-    ]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
     methods: vec![],
+    ..Default::default()
   };
 
   let fallback_code = EnumGenerator::new(&fallback_def, Visibility::Public)
@@ -436,7 +412,6 @@ fn test_enum_constructor_methods() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -448,6 +423,7 @@ fn test_enum_constructor_methods() {
         wrapped_type: "JsonPayload".to_string(),
       },
     }],
+    ..Default::default()
   };
 
   let simple_code = EnumGenerator::new(&simple_def, Visibility::Public)
@@ -474,7 +450,6 @@ fn test_enum_constructor_methods() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -488,6 +463,7 @@ fn test_enum_constructor_methods() {
         param_type: "String".to_string(),
       },
     }],
+    ..Default::default()
   };
 
   let param_code = EnumGenerator::new(&param_def, Visibility::Public)
@@ -692,7 +668,7 @@ fn test_response_enum_generation() {
 
   let assertions = [
     ("pub enum GetUserResponse", "should have pub enum declaration"),
-    ("# [derive (Clone , Debug)]", "should derive Clone and Debug"),
+    ("# [derive (Debug , Clone)]", "should derive Debug and Clone"),
     ("Ok (User)", "should have Ok variant with User type"),
     ("NotFound", "should have NotFound unit variant"),
     (

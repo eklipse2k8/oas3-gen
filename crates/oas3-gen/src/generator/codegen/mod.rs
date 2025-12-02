@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::Context as _;
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::ast::{self, DeriveTrait, EnumToken, RustType};
+use super::ast::{self, EnumToken, RustType, SerdeImpl};
 
 pub mod attributes;
 pub mod client;
@@ -97,11 +97,23 @@ pub fn generate_source(
 pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, visibility: Visibility) -> TokenStream {
   let ordered = deduplicate_and_order_types(types);
   let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
-  let serde_use = compute_serde_use(&ordered);
-  let type_tokens: Vec<TokenStream> = ordered
-    .iter()
-    .map(|ty| generate_type(ty, &regex_lookup, error_schemas, visibility))
-    .collect();
+
+  let mut needs_serialize = false;
+  let mut needs_deserialize = false;
+  let mut type_tokens = vec![];
+
+  for ty in &ordered {
+    needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
+    needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
+    type_tokens.push(generate_type(ty, &regex_lookup, error_schemas, visibility));
+  }
+
+  let serde_use = match (needs_serialize, needs_deserialize) {
+    (true, true) => quote! { use serde::{Deserialize, Serialize}; },
+    (true, false) => quote! { use serde::Serialize; },
+    (false, true) => quote! { use serde::Deserialize; },
+    (false, false) => quote! {},
+  };
 
   quote! {
     #serde_use
@@ -173,36 +185,6 @@ fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<EnumTok
     RustType::Enum(def) if error_schemas.contains(&def.name) => error_impls::generate_error_impl(rust_type),
     _ => None,
   }
-}
-
-fn compute_serde_use(types: &[&RustType]) -> TokenStream {
-  let mut needs_serialize = false;
-  let mut needs_deserialize = false;
-
-  for ty in types {
-    match ty {
-      RustType::Struct(def) => {
-        needs_serialize |= derives_include(&def.derives, DeriveTrait::Serialize);
-        needs_deserialize |= derives_include(&def.derives, DeriveTrait::Deserialize);
-      }
-      RustType::Enum(def) => {
-        needs_serialize |= derives_include(&def.derives, DeriveTrait::Serialize);
-        needs_deserialize |= derives_include(&def.derives, DeriveTrait::Deserialize) || def.case_insensitive;
-      }
-      RustType::ResponseEnum(_) | RustType::DiscriminatedEnum(_) | RustType::TypeAlias(_) => {}
-    }
-  }
-
-  match (needs_serialize, needs_deserialize) {
-    (true, true) => quote! { use serde::{Deserialize, Serialize}; },
-    (true, false) => quote! { use serde::Serialize; },
-    (false, true) => quote! { use serde::Deserialize; },
-    (false, false) => quote! {},
-  }
-}
-
-fn derives_include(derives: &BTreeSet<DeriveTrait>, target: DeriveTrait) -> bool {
-  derives.contains(&target)
 }
 
 pub(crate) fn parse_type(type_name: &str) -> anyhow::Result<syn::Type> {

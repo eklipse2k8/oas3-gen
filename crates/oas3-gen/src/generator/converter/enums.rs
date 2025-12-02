@@ -18,9 +18,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
-    EnumVariantToken, FieldDef, RustType, SerdeAttribute, SerdeMode, TypeRef, VariantContent, VariantDef,
-    default_enum_derives,
+    DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
+    EnumToken, EnumVariantToken, FieldDef, RustType, SerdeAttribute, SerdeMode, TypeRef, VariantContent, VariantDef,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -170,11 +169,11 @@ impl EnumConverter {
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,
-      derives: default_enum_derives(true),
       serde_attrs: vec![],
       outer_attrs: vec![],
       case_insensitive: self.case_insensitive_enums,
       methods: vec![],
+      ..Default::default()
     })
   }
 
@@ -284,7 +283,7 @@ impl EnumConverter {
 
         let struct_info = if let Some(&struct_def) = struct_map.get(&type_name) {
           Some((
-            struct_def.derives.contains(&DeriveTrait::Default),
+            struct_def.derives().contains(&DeriveTrait::Default),
             struct_def.fields.clone(),
           ))
         } else {
@@ -393,7 +392,7 @@ impl EnumConverter {
       .ok()?;
 
     match &struct_result.result {
-      RustType::Struct(s) => Some((s.derives.contains(&DeriveTrait::Default), s.fields.clone())),
+      RustType::Struct(s) => Some((s.derives().contains(&DeriveTrait::Default), s.fields.clone())),
       _ => None,
     }
   }
@@ -551,11 +550,11 @@ impl EnumConverter {
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
       discriminator: None,
-      derives: default_enum_derives(false),
       serde_attrs: vec![SerdeAttribute::Untagged],
       outer_attrs: vec![],
       case_insensitive: false,
       methods,
+      ..Default::default()
     })
   }
 

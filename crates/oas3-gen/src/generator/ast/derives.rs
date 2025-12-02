@@ -2,6 +2,16 @@ use std::collections::BTreeSet;
 
 use strum::Display;
 
+use super::{DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeMode, StructDef, StructKind, VariantContent};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SerdeImpl {
+  #[default]
+  None,
+  Derive,
+  Custom,
+}
+
 #[derive(Debug, Clone, Copy, Display, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DeriveTrait {
   Debug,
@@ -17,33 +27,138 @@ pub enum DeriveTrait {
   Default,
 }
 
-pub fn default_struct_derives() -> BTreeSet<DeriveTrait> {
-  [
-    DeriveTrait::Debug,
-    DeriveTrait::Clone,
-    DeriveTrait::PartialEq,
-    DeriveTrait::Default,
-  ]
-  .into_iter()
-  .collect()
+pub trait DerivesProvider {
+  fn derives(&self) -> BTreeSet<DeriveTrait>;
+  fn is_serializable(&self) -> SerdeImpl;
+  fn is_deserializable(&self) -> SerdeImpl;
 }
 
-pub fn default_enum_derives(is_simple: bool) -> BTreeSet<DeriveTrait> {
-  let mut derives: BTreeSet<_> = [
-    DeriveTrait::Debug,
-    DeriveTrait::Clone,
-    DeriveTrait::PartialEq,
-    DeriveTrait::Serialize,
-    DeriveTrait::Deserialize,
-    DeriveTrait::Default,
-  ]
-  .into_iter()
-  .collect();
+impl DerivesProvider for StructDef {
+  fn derives(&self) -> BTreeSet<DeriveTrait> {
+    let mut derives = BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Default]);
 
-  if is_simple {
-    derives.insert(DeriveTrait::Eq);
-    derives.insert(DeriveTrait::Hash);
+    match self.kind {
+      StructKind::OperationRequest => {
+        derives.insert(DeriveTrait::Validate);
+      }
+      StructKind::Schema | StructKind::RequestBody => {
+        derives.insert(DeriveTrait::PartialEq);
+        if self.is_serializable() == SerdeImpl::Derive {
+          derives.insert(DeriveTrait::Serialize);
+          derives.insert(DeriveTrait::Validate);
+        }
+        if self.is_deserializable() == SerdeImpl::Derive {
+          derives.insert(DeriveTrait::Deserialize);
+        }
+      }
+    }
+
+    derives
   }
 
-  derives
+  fn is_serializable(&self) -> SerdeImpl {
+    match self.kind {
+      StructKind::OperationRequest => SerdeImpl::None,
+      StructKind::Schema | StructKind::RequestBody => match self.serde_mode {
+        SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
+        SerdeMode::DeserializeOnly => SerdeImpl::None,
+      },
+    }
+  }
+
+  fn is_deserializable(&self) -> SerdeImpl {
+    match self.kind {
+      StructKind::OperationRequest => SerdeImpl::None,
+      StructKind::Schema | StructKind::RequestBody => match self.serde_mode {
+        SerdeMode::DeserializeOnly | SerdeMode::Both => SerdeImpl::Derive,
+        SerdeMode::SerializeOnly => SerdeImpl::None,
+      },
+    }
+  }
+}
+
+impl DerivesProvider for EnumDef {
+  fn derives(&self) -> BTreeSet<DeriveTrait> {
+    let mut derives = BTreeSet::from([
+      DeriveTrait::Debug,
+      DeriveTrait::Clone,
+      DeriveTrait::PartialEq,
+      DeriveTrait::Default,
+    ]);
+
+    if self.is_simple() {
+      derives.insert(DeriveTrait::Eq);
+      derives.insert(DeriveTrait::Hash);
+    }
+
+    if self.is_serializable() == SerdeImpl::Derive {
+      derives.insert(DeriveTrait::Serialize);
+    }
+    if self.is_deserializable() == SerdeImpl::Derive {
+      derives.insert(DeriveTrait::Deserialize);
+    }
+
+    derives
+  }
+
+  fn is_serializable(&self) -> SerdeImpl {
+    match self.serde_mode {
+      SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
+      SerdeMode::DeserializeOnly => SerdeImpl::None,
+    }
+  }
+
+  fn is_deserializable(&self) -> SerdeImpl {
+    match self.serde_mode {
+      SerdeMode::DeserializeOnly | SerdeMode::Both => {
+        if self.case_insensitive {
+          SerdeImpl::Custom
+        } else {
+          SerdeImpl::Derive
+        }
+      }
+      SerdeMode::SerializeOnly => SerdeImpl::None,
+    }
+  }
+}
+
+impl EnumDef {
+  #[must_use]
+  pub fn is_simple(&self) -> bool {
+    self.variants.iter().all(|v| matches!(v.content, VariantContent::Unit))
+  }
+}
+
+impl DerivesProvider for DiscriminatedEnumDef {
+  fn derives(&self) -> BTreeSet<DeriveTrait> {
+    BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::PartialEq])
+  }
+
+  fn is_serializable(&self) -> SerdeImpl {
+    match self.serde_mode {
+      SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Custom,
+      SerdeMode::DeserializeOnly => SerdeImpl::None,
+    }
+  }
+
+  fn is_deserializable(&self) -> SerdeImpl {
+    match self.serde_mode {
+      SerdeMode::DeserializeOnly | SerdeMode::Both => SerdeImpl::Custom,
+      SerdeMode::SerializeOnly => SerdeImpl::None,
+    }
+  }
+}
+
+impl DerivesProvider for ResponseEnumDef {
+  fn derives(&self) -> BTreeSet<DeriveTrait> {
+    BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
+  }
+
+  fn is_serializable(&self) -> SerdeImpl {
+    SerdeImpl::None
+  }
+
+  fn is_deserializable(&self) -> SerdeImpl {
+    SerdeImpl::None
+  }
 }
