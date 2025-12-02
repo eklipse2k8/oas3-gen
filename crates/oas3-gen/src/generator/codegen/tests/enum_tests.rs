@@ -8,7 +8,7 @@ use crate::generator::{
   },
   codegen::{
     Visibility,
-    enums::{generate_discriminated_enum, generate_enum, generate_response_enum},
+    enums::{DiscriminatedEnumGenerator, EnumGenerator, ResponseEnumGenerator},
   },
 };
 
@@ -59,7 +59,7 @@ fn test_basic_enum_generation() {
     ],
   );
 
-  let code = generate_enum(&def, Visibility::Public).to_string();
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
 
   let assertions = [
     ("pub enum Color", "should have pub enum declaration"),
@@ -94,7 +94,7 @@ fn test_enum_with_docs() {
     methods: vec![],
   };
 
-  let code = generate_enum(&def, Visibility::Public).to_string();
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
 
   assert!(
     code.contains("# [doc = \"Represents the status of an item.\"]"),
@@ -152,7 +152,7 @@ fn test_enum_tuple_variants() {
 
   for (case_name, variants, expected_content) in cases {
     let def = make_simple_enum("Value", variants);
-    let code = generate_enum(&def, Visibility::Public).to_string();
+    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
 
     for (expected, msg) in expected_content {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
@@ -183,7 +183,9 @@ fn test_enum_variant_attributes() {
     methods: vec![],
   };
 
-  let deprecated_code = generate_enum(&deprecated_def, Visibility::Public).to_string();
+  let deprecated_code = EnumGenerator::new(&deprecated_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     deprecated_code.contains("# [deprecated]"),
     "should have deprecated attribute"
@@ -201,7 +203,9 @@ fn test_enum_variant_attributes() {
     methods: vec![],
   };
 
-  let outer_attrs_code = generate_enum(&outer_attrs_def, Visibility::Public).to_string();
+  let outer_attrs_code = EnumGenerator::new(&outer_attrs_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     outer_attrs_code.contains("# [non_exhaustive]"),
     "should have non_exhaustive attribute"
@@ -281,7 +285,7 @@ fn test_enum_serde_attributes() {
   ];
 
   for (case_name, def, expected_attrs) in cases {
-    let code = generate_enum(&def, Visibility::Public).to_string();
+    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
     for (expected, msg) in expected_attrs {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
     }
@@ -322,7 +326,7 @@ fn test_case_insensitive_enum() {
     methods: vec![],
   };
 
-  let tokens = generate_enum(&base_def, Visibility::Public);
+  let tokens = EnumGenerator::new(&base_def, Visibility::Public).generate();
   let code = tokens.to_string();
 
   let parts: Vec<&str> = code.split("enum Status").collect();
@@ -369,7 +373,9 @@ fn test_case_insensitive_enum() {
     methods: vec![],
   };
 
-  let fallback_code = generate_enum(&fallback_def, Visibility::Public).to_string();
+  let fallback_code = EnumGenerator::new(&fallback_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     fallback_code.contains("_ => Ok (Priority :: Unknown)"),
     "should fallback to Unknown variant for unrecognized values"
@@ -407,7 +413,7 @@ fn test_enum_visibility() {
       Visibility::Public => "Public",
     };
     let def = make_simple_enum(name, vec![make_unit_variant("A"), make_unit_variant("B")]);
-    let code = generate_enum(&def, visibility).to_string();
+    let code = EnumGenerator::new(&def, visibility).generate().to_string();
 
     if should_contain {
       assert!(code.contains(pattern), "should have {msg}");
@@ -444,7 +450,9 @@ fn test_enum_constructor_methods() {
     }],
   };
 
-  let simple_code = generate_enum(&simple_def, Visibility::Public).to_string();
+  let simple_code = EnumGenerator::new(&simple_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(simple_code.contains("impl RequestBody"), "should have impl block");
   assert!(
     simple_code.contains("pub fn json () -> Self"),
@@ -482,7 +490,9 @@ fn test_enum_constructor_methods() {
     }],
   };
 
-  let param_code = generate_enum(&param_def, Visibility::Public).to_string();
+  let param_code = EnumGenerator::new(&param_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     param_code.contains("pub fn with_name (name : String) -> Self"),
     "should have parameterized constructor"
@@ -515,7 +525,9 @@ fn test_discriminated_enum() {
     serde_mode: SerdeMode::Both,
   };
 
-  let code_without = generate_discriminated_enum(&without_fallback, Visibility::Public).to_string();
+  let code_without = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
+    .generate()
+    .to_string();
 
   let assertions_without = [
     (
@@ -564,7 +576,9 @@ fn test_discriminated_enum() {
     serde_mode: SerdeMode::Both,
   };
 
-  let code_with = generate_discriminated_enum(&with_fallback, Visibility::Public).to_string();
+  let code_with = DiscriminatedEnumGenerator::new(&with_fallback, Visibility::Public)
+    .generate()
+    .to_string();
   let fallback_assertions = [
     ("Unknown (serde_json :: Value)", "should have fallback variant in enum"),
     (
@@ -600,7 +614,9 @@ fn test_discriminated_enum_serialize_only() {
     serde_mode: SerdeMode::SerializeOnly,
   };
 
-  let code = generate_discriminated_enum(&def, Visibility::Public).to_string();
+  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     code.contains("impl serde :: Serialize for RequestType"),
     "should have Serialize impl"
@@ -626,7 +642,9 @@ fn test_discriminated_enum_deserialize_only() {
     serde_mode: SerdeMode::DeserializeOnly,
   };
 
-  let code = generate_discriminated_enum(&def, Visibility::Public).to_string();
+  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     !code.contains("impl serde :: Serialize"),
     "should NOT have Serialize impl"
@@ -668,7 +686,9 @@ fn test_response_enum_generation() {
     request_type: Some(StructToken::new("GetUserRequest")),
   };
 
-  let code = generate_response_enum(&def, Visibility::Public).to_string();
+  let code = ResponseEnumGenerator::new(&def, Visibility::Public)
+    .generate()
+    .to_string();
 
   let assertions = [
     ("pub enum GetUserResponse", "should have pub enum declaration"),

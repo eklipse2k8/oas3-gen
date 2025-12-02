@@ -149,10 +149,10 @@ fn generate_type(
 ) -> TokenStream {
   let type_tokens = match rust_type {
     RustType::Struct(def) => structs::StructGenerator::new(regex_lookup, visibility).generate(def),
-    RustType::Enum(def) => enums::generate_enum(def, visibility),
+    RustType::Enum(def) => enums::EnumGenerator::new(def, visibility).generate(),
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
-    RustType::DiscriminatedEnum(def) => enums::generate_discriminated_enum(def, visibility),
-    RustType::ResponseEnum(def) => enums::generate_response_enum(def, visibility),
+    RustType::DiscriminatedEnum(def) => enums::DiscriminatedEnumGenerator::new(def, visibility).generate(),
+    RustType::ResponseEnum(def) => enums::ResponseEnumGenerator::new(def, visibility).generate(),
   };
 
   if let Some(error_impl) = try_generate_error_impl(rust_type, error_schemas) {

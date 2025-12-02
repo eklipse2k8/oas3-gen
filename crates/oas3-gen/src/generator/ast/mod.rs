@@ -51,6 +51,17 @@ pub struct DiscriminatedEnumDef {
   pub serde_mode: SerdeMode,
 }
 
+impl DiscriminatedEnumDef {
+  #[must_use]
+  pub fn default_variant(&self) -> Option<&DiscriminatedVariant> {
+    self.fallback.as_ref().or_else(|| self.variants.first())
+  }
+
+  pub fn all_variants(&self) -> impl Iterator<Item = &DiscriminatedVariant> {
+    self.variants.iter().chain(self.fallback.as_ref())
+  }
+}
+
 /// Response enum variant definition
 #[derive(Debug, Clone)]
 pub struct ResponseVariant {
@@ -59,6 +70,16 @@ pub struct ResponseVariant {
   pub description: Option<String>,
   pub schema_type: Option<TypeRef>,
   pub content_category: ContentCategory,
+}
+
+impl ResponseVariant {
+  #[must_use]
+  pub fn doc_line(&self) -> String {
+    match &self.description {
+      Some(desc) => format!("{}: {desc}", self.status_code),
+      None => self.status_code.to_string(),
+    }
+  }
 }
 
 /// Response enum definition for operation responses
@@ -291,6 +312,14 @@ pub struct EnumDef {
   pub methods: Vec<EnumMethod>,
 }
 
+impl EnumDef {
+  #[must_use]
+  pub fn fallback_variant(&self) -> Option<&VariantDef> {
+    const FALLBACK_NAMES: &[&str] = &["Unknown", "Other"];
+    self.variants.iter().find(|v| FALLBACK_NAMES.contains(&v.name.as_str()))
+  }
+}
+
 /// Rust enum variant definition
 #[derive(Debug, Clone, Default)]
 pub struct VariantDef {
@@ -301,12 +330,36 @@ pub struct VariantDef {
   pub deprecated: bool,
 }
 
+impl VariantDef {
+  #[must_use]
+  pub fn serde_name(&self) -> String {
+    self
+      .serde_attrs
+      .iter()
+      .find_map(|attr| match attr {
+        SerdeAttribute::Rename(val) => Some(val.clone()),
+        _ => None,
+      })
+      .unwrap_or_else(|| self.name.to_string())
+  }
+}
+
 /// Enum variant content (Unit, Tuple, or Struct)
 #[derive(Debug, Clone, Default)]
 pub enum VariantContent {
   #[default]
   Unit,
   Tuple(Vec<TypeRef>),
+}
+
+impl VariantContent {
+  #[must_use]
+  pub fn tuple_types(&self) -> Option<&[TypeRef]> {
+    match self {
+      Self::Unit => None,
+      Self::Tuple(types) => Some(types),
+    }
+  }
 }
 
 /// Type alias definition
