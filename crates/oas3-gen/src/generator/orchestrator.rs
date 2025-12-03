@@ -111,7 +111,7 @@ impl Orchestrator {
     stats.client_headers_generated = Some(header_count);
 
     let metadata = CodeMetadata::from_spec(&self.spec);
-    let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types);
+    let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility);
     let client_tokens = client_generator.into_token_stream();
     let lint_config = LintConfig::default();
 

@@ -10,8 +10,8 @@ use serde_json::json;
 use crate::{
   generator::{
     ast::{
-      DeriveTrait, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType, SerdeAttribute,
-      TypeRef, VariantContent, VariantDef,
+      DeriveTrait, DerivesProvider, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken,
+      RustPrimitive, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
     },
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
@@ -43,8 +43,8 @@ fn test_simple_string_enum() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.name.to_string(), "SimpleEnum");
   assert_eq!(enum_def.variants.len(), 2);
-  assert!(enum_def.derives.contains(&DeriveTrait::Eq));
-  assert!(enum_def.derives.contains(&DeriveTrait::Hash));
+  assert!(enum_def.derives().contains(&DeriveTrait::Eq));
+  assert!(enum_def.derives().contains(&DeriveTrait::Hash));
   Ok(())
 }
 
@@ -107,22 +107,20 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
-  let RustType::Enum(enum_def) = result.last().unwrap() else {
-    panic!("Expected enum as last type")
+  let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
+    panic!("Expected DiscriminatedEnum as last type")
   };
 
   assert_eq!(enum_def.name.to_string(), "TestUnion");
+  assert_eq!(enum_def.discriminator_field, "type");
   assert_eq!(enum_def.variants.len(), 2);
-  assert!(
-    enum_def.variants[0]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("type_a".to_string()))
-  );
-  assert!(
-    enum_def.variants[1]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("type_b".to_string()))
-  );
+  let variant_values: BTreeSet<_> = enum_def
+    .variants
+    .iter()
+    .map(|v| v.discriminator_value.as_str())
+    .collect();
+  assert!(variant_values.contains("type_a"));
+  assert!(variant_values.contains("type_b"));
   Ok(())
 }
 
@@ -247,13 +245,13 @@ fn test_anyof_with_discriminator_no_untagged() -> anyhow::Result<()> {
   let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
   let result = converter.convert_schema("TestUnion", graph.get_schema("TestUnion").unwrap(), None)?;
 
-  let RustType::Enum(enum_def) = result.last().unwrap() else {
-    panic!("Expected enum as last type")
+  let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
+    panic!("Expected DiscriminatedEnum as last type")
   };
 
   assert_eq!(enum_def.name.to_string(), "TestUnion");
-  assert_eq!(enum_def.discriminator, Some("type".to_string()));
-  assert!(!enum_def.serde_attrs.contains(&SerdeAttribute::Untagged));
+  assert_eq!(enum_def.discriminator_field, "type");
+  assert_eq!(enum_def.variants.len(), 2);
   Ok(())
 }
 
@@ -945,8 +943,8 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       variant_name,
       wrapped_type,
     } => {
-      assert_eq!(variant_name, "Simple");
-      assert_eq!(wrapped_type, "TestUnionSimple");
+      assert_eq!(variant_name, &EnumVariantToken::from("Simple"));
+      assert_eq!(wrapped_type.to_rust_type(), "TestUnionSimple");
     }
     EnumMethodKind::ParameterizedConstructor { .. } => panic!("Expected SimpleConstructor"),
   }
@@ -964,10 +962,10 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       param_name,
       param_type,
     } => {
-      assert_eq!(variant_name, "SingleParam");
-      assert_eq!(wrapped_type, "TestUnionSingleParam");
+      assert_eq!(variant_name, &EnumVariantToken::from("SingleParam"));
+      assert_eq!(wrapped_type.to_rust_type(), "TestUnionSingleParam");
       assert_eq!(param_name, "req_field");
-      assert_eq!(param_type, "String");
+      assert_eq!(param_type.to_rust_type(), "String");
     }
     EnumMethodKind::SimpleConstructor { .. } => panic!("Expected ParameterizedConstructor"),
   }
@@ -1083,9 +1081,11 @@ fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
   };
 
   assert_eq!(enum_def.methods.len(), 2);
-  let names: Vec<_> = enum_def.methods.iter().map(|m| &m.name).collect();
-  assert!(names.contains(&&"active".to_string()));
-  assert!(names.contains(&&"active2".to_string()) || names.iter().any(|n| *n != "active"));
+  let names: Vec<_> = enum_def.methods.iter().map(|m| m.name.clone()).collect();
+  assert!(names.contains(&MethodNameToken::from("active")));
+  assert!(
+    names.contains(&MethodNameToken::from("active2")) || names.iter().any(|n| n != &MethodNameToken::from("active"))
+  );
 
   Ok(())
 }
@@ -1103,11 +1103,11 @@ fn test_enum_helper_skips_without_default_trait() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   });
 
   if let RustType::Enum(e) = enum_def {

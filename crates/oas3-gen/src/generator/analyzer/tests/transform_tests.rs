@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
   ast::{
-    DeriveTrait, EnumDef, EnumToken, EnumVariantToken, FieldDef, RustType, StructDef, StructKind, StructToken, TypeRef,
-    ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
+    DeriveTrait, DerivesProvider, EnumDef, EnumToken, EnumVariantToken, FieldDef, RustType, StructDef, StructKind,
+    StructToken, TypeRef, ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
@@ -28,11 +28,11 @@ fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
       ],
       ..Default::default()
     }],
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
     kind,
+    ..Default::default()
   }
 }
 
@@ -48,12 +48,11 @@ fn create_enum(name: &str) -> EnumDef {
       deprecated: false,
     }],
     discriminator: None,
-    // Default derives usually present on enums
-    derives: BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   }
 }
 
@@ -88,10 +87,10 @@ fn test_schema_request_only() {
   let def = create_struct("User", StructKind::Schema, true);
   let def = process_struct_helper(def, TypeUsage::RequestOnly);
 
-  assert!(def.derives.contains(&DeriveTrait::Serialize));
-  assert!(def.derives.contains(&DeriveTrait::Validate));
-  assert!(!def.derives.contains(&DeriveTrait::Deserialize));
-  assert!(def.derives.contains(&DeriveTrait::Debug));
+  assert!(def.derives().contains(&DeriveTrait::Serialize));
+  assert!(def.derives().contains(&DeriveTrait::Validate));
+  assert!(!def.derives().contains(&DeriveTrait::Deserialize));
+  assert!(def.derives().contains(&DeriveTrait::Debug));
 
   // Check Attributes (Request needs skip_serializing_none if nullable)
   assert!(def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
@@ -105,9 +104,9 @@ fn test_schema_response_only() {
   let def = create_struct("UserResponse", StructKind::Schema, true);
   let def = process_struct_helper(def, TypeUsage::ResponseOnly);
 
-  assert!(def.derives.contains(&DeriveTrait::Deserialize));
-  assert!(!def.derives.contains(&DeriveTrait::Serialize));
-  assert!(!def.derives.contains(&DeriveTrait::Validate));
+  assert!(def.derives().contains(&DeriveTrait::Deserialize));
+  assert!(!def.derives().contains(&DeriveTrait::Serialize));
+  assert!(!def.derives().contains(&DeriveTrait::Validate));
 
   // Check Attributes (Response does NOT need skip_serializing_none)
   assert!(!def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
@@ -121,9 +120,9 @@ fn test_schema_bidirectional() {
   let def = create_struct("UserDto", StructKind::Schema, true);
   let def = process_struct_helper(def, TypeUsage::Bidirectional);
 
-  assert!(def.derives.contains(&DeriveTrait::Serialize));
-  assert!(def.derives.contains(&DeriveTrait::Deserialize));
-  assert!(def.derives.contains(&DeriveTrait::Validate));
+  assert!(def.derives().contains(&DeriveTrait::Serialize));
+  assert!(def.derives().contains(&DeriveTrait::Deserialize));
+  assert!(def.derives().contains(&DeriveTrait::Validate));
 
   // Should have skip attribute
   assert!(def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
@@ -136,9 +135,9 @@ fn test_operation_request_special_handling() {
   let def = process_struct_helper(def, TypeUsage::RequestOnly);
 
   // OpRequest always has Validate
-  assert!(def.derives.contains(&DeriveTrait::Validate));
+  assert!(def.derives().contains(&DeriveTrait::Validate));
   // OpRequest does NOT get Serialize/Deserialize from the standard flow for Schema
-  assert!(!def.derives.contains(&DeriveTrait::Serialize));
+  assert!(!def.derives().contains(&DeriveTrait::Serialize));
 
   // OpRequest explicitly excludes skip_serializing_none
   assert!(!def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
@@ -149,10 +148,10 @@ fn test_enum_processing_request_only() {
   let def = create_enum("Status");
   let def = process_enum_helper(def, TypeUsage::RequestOnly);
 
-  assert!(def.derives.contains(&DeriveTrait::Debug)); // Preserved
-  assert!(def.derives.contains(&DeriveTrait::Serialize)); // Added
-  assert!(!def.derives.contains(&DeriveTrait::Validate)); // Added
-  assert!(!def.derives.contains(&DeriveTrait::Deserialize));
+  assert!(def.derives().contains(&DeriveTrait::Debug)); // Preserved
+  assert!(def.derives().contains(&DeriveTrait::Serialize)); // Added
+  assert!(!def.derives().contains(&DeriveTrait::Validate)); // Enums don't get Validate
+  assert!(!def.derives().contains(&DeriveTrait::Deserialize));
 }
 
 #[test]
@@ -160,9 +159,9 @@ fn test_enum_processing_response_only() {
   let def = create_enum("StatusResp");
   let def = process_enum_helper(def, TypeUsage::ResponseOnly);
 
-  assert!(def.derives.contains(&DeriveTrait::Debug)); // Preserved
-  assert!(def.derives.contains(&DeriveTrait::Deserialize)); // Added
-  assert!(!def.derives.contains(&DeriveTrait::Serialize));
+  assert!(def.derives().contains(&DeriveTrait::Debug)); // Preserved
+  assert!(def.derives().contains(&DeriveTrait::Deserialize)); // Added
+  assert!(!def.derives().contains(&DeriveTrait::Serialize));
 }
 
 #[test]

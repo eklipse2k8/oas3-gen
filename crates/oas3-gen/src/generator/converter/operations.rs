@@ -8,9 +8,9 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo,
-    OperationParameter, ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef,
-    TypeAliasToken, TypeRef, ValidationAttribute,
+    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationParameter,
+    ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken,
+    TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -245,13 +245,11 @@ impl<'a> OperationConverter<'a> {
       name: StructToken::from_raw(name),
       docs,
       fields,
-      derives: [DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Default]
-        .into_iter()
-        .collect(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods,
       kind: StructKind::OperationRequest,
+      ..Default::default()
     };
 
     Ok((struct_def, warnings, parameter_info))
@@ -477,13 +475,11 @@ impl<'a> OperationConverter<'a> {
     };
 
     let schema = schema_ref.resolve(self.spec)?;
-    let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
+    let type_ref = self.schema_converter.resolve_type(&schema)?;
     let is_required = param.required.unwrap_or(false);
-    let mut validation = metadata::extract_validation_attrs(is_required, &schema, &type_ref);
-    if let Some(regex_attr) = ValidationAttribute::extract_regex_if_applicable(&param.name, &schema, &type_ref) {
-      validation.push(regex_attr);
-    }
-    let default = metadata::extract_default_value(&schema);
+    let extractor = metadata::MetadataExtractor::new(&param.name, is_required, &schema, &type_ref);
+    let validation = extractor.extract_all_validation();
+    let default = extractor.extract_default_value();
 
     Ok((type_ref, validation, default))
   }

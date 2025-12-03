@@ -1,12 +1,8 @@
 use std::fmt;
 
-use oas3::spec::ObjectSchema;
 use serde_json::Number;
 
-use crate::generator::{
-  ast::{RustPrimitive, StructToken, TypeRef, types::render_unsigned_integer},
-  converter::metadata,
-};
+use crate::generator::ast::{RustPrimitive, StructToken, types::render_unsigned_integer};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RegexKey {
@@ -53,17 +49,6 @@ pub enum ValidationAttribute {
     exclusive_max: Option<Number>,
   },
   Regex(String),
-}
-
-impl ValidationAttribute {
-  pub(crate) fn extract_regex_if_applicable(
-    field_name: &str,
-    schema: &ObjectSchema,
-    type_ref: &TypeRef,
-  ) -> Option<Self> {
-    let pattern = metadata::extract_validation_pattern(field_name, schema)?;
-    metadata::filter_regex_validation(type_ref, Some(pattern.clone())).map(ValidationAttribute::Regex)
-  }
 }
 
 impl PartialEq for ValidationAttribute {

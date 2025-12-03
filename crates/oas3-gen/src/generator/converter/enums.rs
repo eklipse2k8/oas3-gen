@@ -4,16 +4,16 @@ use std::{
 };
 
 use anyhow::Context;
-use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::ObjectSchema;
 
 use super::{
-  CodegenConfig, cache::SharedSchemaCache, field_optionality::FieldOptionalityPolicy, metadata,
+  CodegenConfig, cache::SharedSchemaCache, common::SchemaExt, field_optionality::FieldOptionalityPolicy, metadata,
   string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, RustType, SerdeAttribute,
-    TypeRef, VariantContent, VariantDef, default_enum_derives,
+    DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
+    RustType, SerdeAttribute, StructDef, TypeRef, VariantContent, VariantDef,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -48,16 +48,10 @@ pub(crate) struct EnumConverter {
   pub(crate) no_helpers: bool,
 }
 
-struct EligibleVariant {
-  variant_name: EnumVariantToken,
-  type_name: String,
-  first_required_field: Option<(String, String)>,
-}
-
 impl EnumConverter {
   /// Creates a new EnumConverter instance.
   pub(crate) fn new(graph: &Arc<SchemaRegistry>, type_resolver: TypeResolver, config: CodegenConfig) -> Self {
-    let struct_converter = StructConverter::new(graph.clone(), config, None, FieldOptionalityPolicy::standard());
+    let struct_converter = StructConverter::new(graph, config, None, FieldOptionalityPolicy::standard());
     Self {
       graph: graph.clone(),
       type_resolver,
@@ -117,23 +111,7 @@ impl EnumConverter {
       }
     }
 
-    let discriminator_map = if kind == UnionKind::OneOf {
-      schema
-        .discriminator
-        .as_ref()
-        .and_then(|d| d.mapping.as_ref())
-        .map(|mapping| {
-          mapping
-            .iter()
-            .filter_map(|(val, ref_path)| SchemaRegistry::extract_ref_name(ref_path).map(|name| (name, val.clone())))
-            .collect()
-        })
-        .unwrap_or_default()
-    } else {
-      BTreeMap::new()
-    };
-
-    let result = self.process_union(name, schema, kind, &discriminator_map, cache.as_deref_mut())?;
+    let result = self.process_union(name, schema, kind, cache.as_deref_mut())?;
 
     if let Some(c) = cache
       && let Some(values) = extract_enum_values(schema)
@@ -161,7 +139,7 @@ impl EnumConverter {
             .push(SerdeAttribute::Alias(normalized.rename_value));
         }
         Some(_) => {
-          let unique_name = format!("{}{}", normalized.name, i);
+          let unique_name = format!("{}{i}", normalized.name);
           let idx = variants.len();
           seen_names.insert(unique_name.clone(), idx);
           Self::push_variant(&mut variants, unique_name, &normalized.rename_value);
@@ -178,22 +156,18 @@ impl EnumConverter {
       name: EnumToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
-      discriminator: None,
-      derives: default_enum_derives(true),
-      serde_attrs: vec![],
-      outer_attrs: vec![],
       case_insensitive: self.case_insensitive_enums,
-      methods: vec![],
+      ..Default::default()
     })
   }
 
   fn push_variant(variants: &mut Vec<VariantDef>, name: impl Into<EnumVariantToken>, rename: &str) {
     variants.push(VariantDef {
       name: name.into(),
-      docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![SerdeAttribute::Rename(rename.to_string())],
       deprecated: false,
+      ..Default::default()
     });
   }
 
@@ -202,7 +176,6 @@ impl EnumConverter {
     name: &str,
     schema: &ObjectSchema,
     kind: UnionKind,
-    discriminator_map: &BTreeMap<String, String>,
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
     let variants_src = match kind {
@@ -219,16 +192,23 @@ impl EnumConverter {
         .resolve(self.graph.spec())
         .with_context(|| format!("Schema resolution failed for union variant {i}"))?;
 
-      if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
+      if resolved.is_null() {
         continue;
       }
 
-      let (variant, mut generated) =
-        if let Some(schema_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(variant_ref) {
-          self.create_ref_variant(&schema_name, &resolved, discriminator_map, &mut seen_names)
+      let ref_name_opt = ReferenceExtractor::extract_ref_name_from_obj_ref(variant_ref).or_else(|| {
+        if resolved.all_of.len() == 1 {
+          ReferenceExtractor::extract_ref_name_from_obj_ref(&resolved.all_of[0])
         } else {
-          self.create_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
-        };
+          None
+        }
+      });
+
+      let (variant, mut generated) = if let Some(schema_name) = ref_name_opt {
+        self.create_ref_variant(&schema_name, &resolved, &mut seen_names)
+      } else {
+        self.create_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
+      };
 
       variants.push(variant);
       inline_types.append(&mut generated);
@@ -239,7 +219,7 @@ impl EnumConverter {
     let methods = if self.no_helpers {
       vec![]
     } else {
-      self.generate_methods(&variants, &inline_types, name)
+      self.generate_methods(&variants, &inline_types, name, cache)
     };
 
     let main_enum = Self::build_union_enum_def(name, schema, kind, variants, methods);
@@ -249,14 +229,14 @@ impl EnumConverter {
   }
 
   /// Generates helper methods for creating enum variants with default or single-parameter constructors.
-  ///
-  /// For each variant wrapping a struct with Default derive:
-  /// - If all fields are optional: generates simple constructor (e.g., `enum.variant_name()`)
-  /// - If exactly one field is required: generates parameterized constructor (e.g., `enum.variant_name(value)`)
-  /// - If multiple fields are required: skips method generation (too complex for helpers)
-  fn generate_methods(&self, variants: &[VariantDef], inline_types: &[RustType], enum_name: &str) -> Vec<EnumMethod> {
+  fn generate_methods(
+    &self,
+    variants: &[VariantDef],
+    inline_types: &[RustType],
+    enum_name: &str,
+    mut cache: Option<&mut SharedSchemaCache>,
+  ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
-
     let struct_map: BTreeMap<_, _> = inline_types
       .iter()
       .filter_map(|t| match t {
@@ -265,138 +245,84 @@ impl EnumConverter {
       })
       .collect();
 
-    let eligible_variants: Vec<EligibleVariant> = variants
+    let eligible: Vec<_> = variants
       .iter()
-      .filter_map(|variant| {
-        let VariantContent::Tuple(types) = &variant.content else {
-          return None;
-        };
-
-        if types.len() != 1 {
-          return None;
-        }
-
-        let type_ref = &types[0];
-        let type_name = type_ref.to_rust_type();
-
-        let struct_info = if let Some(&struct_def) = struct_map.get(&type_name) {
-          Some((
-            struct_def.derives.contains(&DeriveTrait::Default),
-            struct_def.fields.clone(),
-          ))
-        } else {
-          self.try_analyze_referenced_struct(&type_name)
-        };
-
-        let (has_default, fields) = struct_info?;
-
-        if !has_default {
-          return None;
-        }
-
-        let required_fields: Vec<_> = fields
-          .iter()
-          .filter(|f| f.default_value.is_none() && !f.rust_type.nullable)
-          .collect();
-
-        if required_fields.len() > 1 {
-          return None;
-        }
-
-        let first_required_field = if required_fields.len() == 1 {
-          let field = required_fields[0];
-          Some((field.name.to_string(), field.rust_type.to_rust_type()))
-        } else {
-          None
-        };
-
-        Some(EligibleVariant {
-          variant_name: variant.name.clone(),
-          type_name,
-          first_required_field,
-        })
+      .filter_map(|v| {
+        let type_ref = v.single_wrapped_type()?;
+        let method_kind = self.get_method_kind_for_type(type_ref, &v.name, &struct_map, cache.as_deref_mut())?;
+        Some((v.name.clone(), method_kind))
       })
       .collect();
 
-    if eligible_variants.is_empty() {
+    if eligible.is_empty() {
       return vec![];
     }
 
-    let variant_names: Vec<String> = eligible_variants.iter().map(|v| v.variant_name.to_string()).collect();
-    let derived_names = derive_method_names(&enum_name, &variant_names);
+    let variant_names: Vec<String> = eligible.iter().map(|(name, _)| name.to_string()).collect();
+    let method_names = derive_method_names(&enum_name, &variant_names);
 
-    let mut seen_names = BTreeSet::new();
-    eligible_variants
+    let mut seen = BTreeSet::new();
+    eligible
       .into_iter()
-      .zip(derived_names)
-      .map(|(variant_info, base_method_name)| {
-        let method_name = ensure_unique(&base_method_name, &seen_names);
-        seen_names.insert(method_name.clone());
-
-        let method_docs = Self::generate_method_docs(
-          &variant_info.variant_name.to_string(),
-          variant_info
-            .first_required_field
-            .as_ref()
-            .map(|(name, _)| name.as_str()),
-        );
-
-        if let Some((param_name, param_type)) = variant_info.first_required_field {
-          EnumMethod {
-            name: method_name,
-            docs: method_docs,
-            kind: EnumMethodKind::ParameterizedConstructor {
-              variant_name: variant_info.variant_name.to_string(),
-              wrapped_type: variant_info.type_name,
-              param_name,
-              param_type,
-            },
-          }
-        } else {
-          EnumMethod {
-            name: method_name,
-            docs: method_docs,
-            kind: EnumMethodKind::SimpleConstructor {
-              variant_name: variant_info.variant_name.to_string(),
-              wrapped_type: variant_info.type_name,
-            },
-          }
-        }
+      .zip(method_names)
+      .map(|((variant_name, kind), base_name)| {
+        let method_name = ensure_unique(&base_name, &seen);
+        seen.insert(method_name.clone());
+        EnumMethod::new(method_name, &variant_name, kind)
       })
       .collect()
   }
 
-  /// Analyzes a referenced struct type to extract its Default derive status and fields.
-  ///
-  /// This is used for generating helper methods when a variant wraps a referenced type (not inline).
-  /// Returns None if the type is not a struct or cannot be converted.
-  fn try_analyze_referenced_struct(&self, type_name: &str) -> Option<(bool, Vec<FieldDef>)> {
-    let schema_name = type_name.trim_start_matches("Box<").trim_end_matches('>');
-    let schema = self.graph.get_schema(schema_name)?;
+  fn get_method_kind_for_type(
+    &self,
+    type_ref: &TypeRef,
+    variant_name: &EnumVariantToken,
+    struct_map: &BTreeMap<String, &StructDef>,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> Option<EnumMethodKind> {
+    let base_name = type_ref.unboxed_base_type_name();
+    let struct_def = if let Some(&s) = struct_map.get(&base_name) {
+      Some(s.clone())
+    } else {
+      self.lookup_struct_def(type_ref, cache)
+    };
 
-    let is_object_type = schema.schema_type == Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object));
-    let has_properties = !schema.properties.is_empty();
-    if !is_object_type && !has_properties {
+    let s = struct_def.as_ref()?;
+    if !s.has_default() || type_ref.is_array {
+      return None;
+    }
+
+    let required: Vec<_> = s.required_fields().collect();
+    match required.len() {
+      0 => Some(EnumMethodKind::SimpleConstructor {
+        variant_name: variant_name.clone(),
+        wrapped_type: type_ref.clone(),
+      }),
+      1 => Some(EnumMethodKind::ParameterizedConstructor {
+        variant_name: variant_name.clone(),
+        wrapped_type: type_ref.clone(),
+        param_name: required[0].name.to_string(),
+        param_type: required[0].rust_type.clone(),
+      }),
+      _ => None,
+    }
+  }
+
+  fn lookup_struct_def(&self, type_ref: &TypeRef, cache: Option<&mut SharedSchemaCache>) -> Option<StructDef> {
+    let schema_name = type_ref.unboxed_base_type_name();
+    let schema = self.graph.get_schema(&schema_name)?;
+
+    if !schema.is_object() && schema.properties.is_empty() {
       return None;
     }
 
     let struct_result = self
       .struct_converter
-      .convert_struct(schema_name, schema, None, None)
+      .convert_struct(&schema_name, schema, None, cache)
       .ok()?;
-
-    match &struct_result.result {
-      RustType::Struct(s) => Some((s.derives.contains(&DeriveTrait::Default), s.fields.clone())),
+    match struct_result.result {
+      RustType::Struct(s) => Some(s),
       _ => None,
-    }
-  }
-
-  fn generate_method_docs(variant_name: &str, required_param_name: Option<&str>) -> Vec<String> {
-    match required_param_name {
-      None => vec![format!("Creates a `{variant_name}` variant with default values.")],
-      Some(param) => vec![format!(
-        "Creates a `{variant_name}` variant with the specified `{param}`."
-      )],
     }
   }
 
@@ -404,7 +330,6 @@ impl EnumConverter {
     &self,
     schema_name: &str,
     resolved_schema: &ObjectSchema,
-    discriminator_map: &BTreeMap<String, String>,
     seen_names: &mut BTreeSet<String>,
   ) -> (VariantDef, Vec<RustType>) {
     let rust_type_name = to_rust_type_name(schema_name);
@@ -416,17 +341,12 @@ impl EnumConverter {
 
     let variant_name = ensure_unique(&rust_type_name, seen_names);
 
-    let mut serde_attrs = vec![];
-    if let Some(disc_value) = discriminator_map.get(schema_name) {
-      serde_attrs.push(SerdeAttribute::Rename(disc_value.clone()));
-    }
-
     let variant = VariantDef {
       name: EnumVariantToken::from(variant_name),
       docs: metadata::extract_docs(resolved_schema.description.as_ref()),
       content: VariantContent::Tuple(vec![type_ref]),
-      serde_attrs,
       deprecated: resolved_schema.deprecated.unwrap_or(false),
+      ..Default::default()
     };
 
     (variant, vec![])
@@ -438,8 +358,14 @@ impl EnumConverter {
     resolved_schema: &ObjectSchema,
     enum_name: &str,
     seen_names: &mut BTreeSet<String>,
-    cache: Option<&mut SharedSchemaCache>,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
+    let mut resolved_schema_merged = resolved_schema.clone();
+    if !resolved_schema.all_of.is_empty() {
+      resolved_schema_merged = self.type_resolver.merge_all_of_schema(resolved_schema)?;
+    }
+    let resolved_schema = &resolved_schema_merged;
+
     if let Some(const_value) = &resolved_schema.const_value {
       let normalized = VariantNameNormalizer::normalize(const_value)
         .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
@@ -464,8 +390,30 @@ impl EnumConverter {
     let variant_name = ensure_unique(&base_name, seen_names);
 
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
-      let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;
-      (VariantContent::Tuple(vec![type_ref]), vec![])
+      let mut array_conversion = None;
+      if resolved_schema.is_array() {
+        array_conversion =
+          self
+            .type_resolver
+            .resolve_nullable_array_union(&variant_name, resolved_schema, cache.as_deref_mut())?;
+      }
+
+      if let Some(conversion) = array_conversion {
+        (VariantContent::Tuple(vec![conversion.result]), conversion.inline_types)
+      } else if !resolved_schema.one_of.is_empty() || !resolved_schema.any_of.is_empty() {
+        let uses_one_of = !resolved_schema.one_of.is_empty();
+        let result = self.type_resolver.resolve_inline_union_type(
+          enum_name,
+          &variant_name,
+          resolved_schema,
+          uses_one_of,
+          cache,
+        )?;
+        (VariantContent::Tuple(vec![result.result]), result.inline_types)
+      } else {
+        let type_ref = self.type_resolver.resolve_type(resolved_schema)?;
+        (VariantContent::Tuple(vec![type_ref]), vec![])
+      }
     } else {
       let struct_name_prefix = format!("{enum_name}{variant_name}");
       let result = self
@@ -496,28 +444,75 @@ impl EnumConverter {
   fn build_union_enum_def(
     name: &str,
     schema: &ObjectSchema,
-    kind: UnionKind,
+    _kind: UnionKind,
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> RustType {
-    let has_discriminator = schema.discriminator.is_some();
-
-    let (serde_attrs, derives) = if kind == UnionKind::AnyOf && !has_discriminator {
-      (vec![SerdeAttribute::Untagged], default_enum_derives(false))
-    } else {
-      (vec![], default_enum_derives(false))
-    };
+    if let Some(discriminator) = &schema.discriminator
+      && let Some(mapping) = &discriminator.mapping
+      && Self::all_variants_are_refs(&variants, mapping)
+    {
+      let disc_variants = Self::build_discriminated_variants(&variants, mapping);
+      return RustType::DiscriminatedEnum(DiscriminatedEnumDef {
+        name: EnumToken::from_raw(name),
+        docs: metadata::extract_docs(schema.description.as_ref()),
+        discriminator_field: discriminator.property_name.clone(),
+        variants: disc_variants,
+        ..Default::default()
+      });
+    }
 
     RustType::Enum(EnumDef {
       name: EnumToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
-      discriminator: schema.discriminator.as_ref().map(|d| d.property_name.clone()),
-      derives,
-      serde_attrs,
-      outer_attrs: vec![],
+      serde_attrs: vec![SerdeAttribute::Untagged],
       case_insensitive: false,
       methods,
+      ..Default::default()
     })
+  }
+
+  fn all_variants_are_refs(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {
+    if variants.is_empty() || mapping.is_empty() {
+      return false;
+    }
+
+    let variant_types: BTreeSet<String> = variants.iter().filter_map(VariantDef::unboxed_type_name).collect();
+
+    mapping
+      .values()
+      .filter_map(|ref_path| Self::ref_path_to_type_name(ref_path))
+      .all(|type_name| variant_types.contains(&type_name))
+  }
+
+  fn build_discriminated_variants(
+    variants: &[VariantDef],
+    mapping: &BTreeMap<String, String>,
+  ) -> Vec<DiscriminatedVariant> {
+    mapping
+      .iter()
+      .filter_map(|(disc_value, ref_path)| {
+        let expected_type = Self::ref_path_to_type_name(ref_path)?;
+        let variant = Self::find_variant_by_type(variants, &expected_type)?;
+        let type_ref = variant.single_wrapped_type()?;
+
+        Some(DiscriminatedVariant {
+          discriminator_value: disc_value.clone(),
+          variant_name: variant.name.to_string(),
+          type_name: type_ref.clone(),
+        })
+      })
+      .collect()
+  }
+
+  fn ref_path_to_type_name(ref_path: &str) -> Option<String> {
+    SchemaRegistry::extract_ref_name(ref_path).map(|name| to_rust_type_name(&name))
+  }
+
+  fn find_variant_by_type<'a>(variants: &'a [VariantDef], type_name: &str) -> Option<&'a VariantDef> {
+    variants
+      .iter()
+      .find(|v| v.unboxed_type_name().is_some_and(|name| name == type_name))
   }
 }

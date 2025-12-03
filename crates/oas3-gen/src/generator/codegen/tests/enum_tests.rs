@@ -1,14 +1,12 @@
-use std::collections::BTreeSet;
-
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
-    EnumToken, EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, StatusCodeToken,
+    ContentCategory, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
+    EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken,
     StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
-    enums::{generate_discriminated_enum, generate_enum, generate_response_enum},
+    enums::{DiscriminatedEnumGenerator, EnumGenerator, ResponseEnumGenerator},
   },
 };
 
@@ -22,29 +20,17 @@ fn make_unit_variant(name: &str) -> VariantDef {
   }
 }
 
-fn default_derives() -> BTreeSet<DeriveTrait> {
-  BTreeSet::from([
-    DeriveTrait::Debug,
-    DeriveTrait::Clone,
-    DeriveTrait::Default,
-    DeriveTrait::Serialize,
-    DeriveTrait::Deserialize,
-    DeriveTrait::PartialEq,
-    DeriveTrait::Eq,
-  ])
-}
-
 fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
   EnumDef {
     name: EnumToken::new(name),
     docs: vec![],
     variants,
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   }
 }
 
@@ -59,7 +45,7 @@ fn test_basic_enum_generation() {
     ],
   );
 
-  let code = generate_enum(&def, Visibility::Public).to_string();
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
 
   let assertions = [
     ("pub enum Color", "should have pub enum declaration"),
@@ -87,14 +73,14 @@ fn test_enum_with_docs() {
     ],
     variants: vec![make_unit_variant("Active"), make_unit_variant("Inactive")],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   };
 
-  let code = generate_enum(&def, Visibility::Public).to_string();
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
 
   assert!(
     code.contains("# [doc = \"Represents the status of an item.\"]"),
@@ -152,7 +138,7 @@ fn test_enum_tuple_variants() {
 
   for (case_name, variants, expected_content) in cases {
     let def = make_simple_enum("Value", variants);
-    let code = generate_enum(&def, Visibility::Public).to_string();
+    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
 
     for (expected, msg) in expected_content {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
@@ -176,14 +162,16 @@ fn test_enum_variant_attributes() {
       make_unit_variant("V2"),
     ],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   };
 
-  let deprecated_code = generate_enum(&deprecated_def, Visibility::Public).to_string();
+  let deprecated_code = EnumGenerator::new(&deprecated_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     deprecated_code.contains("# [deprecated]"),
     "should have deprecated attribute"
@@ -194,14 +182,16 @@ fn test_enum_variant_attributes() {
     docs: vec![],
     variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec!["#[non_exhaustive]".to_string()],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   };
 
-  let outer_attrs_code = generate_enum(&outer_attrs_def, Visibility::Public).to_string();
+  let outer_attrs_code = EnumGenerator::new(&outer_attrs_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     outer_attrs_code.contains("# [non_exhaustive]"),
     "should have non_exhaustive attribute"
@@ -233,11 +223,11 @@ fn test_enum_serde_attributes() {
           },
         ],
         discriminator: None,
-        derives: default_derives(),
         serde_attrs: vec![],
         outer_attrs: vec![],
         case_insensitive: false,
         methods: vec![],
+        ..Default::default()
       },
       vec![
         ("# [serde (rename = \"in_progress\")]", "serde rename for InProgress"),
@@ -255,11 +245,11 @@ fn test_enum_serde_attributes() {
           make_unit_variant("Deleted"),
         ],
         discriminator: Some("eventType".to_string()),
-        derives: default_derives(),
         serde_attrs: vec![],
         outer_attrs: vec![],
         case_insensitive: false,
         methods: vec![],
+        ..Default::default()
       },
       vec![("# [serde (tag = \"eventType\")]", "serde tag attribute")],
     ),
@@ -270,18 +260,18 @@ fn test_enum_serde_attributes() {
         docs: vec![],
         variants: vec![make_unit_variant("StringVal"), make_unit_variant("NumberVal")],
         discriminator: None,
-        derives: default_derives(),
         serde_attrs: vec![SerdeAttribute::Untagged],
         outer_attrs: vec![],
         case_insensitive: false,
         methods: vec![],
+        ..Default::default()
       },
       vec![("# [serde (untagged)]", "untagged serde attribute")],
     ),
   ];
 
   for (case_name, def, expected_attrs) in cases {
-    let code = generate_enum(&def, Visibility::Public).to_string();
+    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
     for (expected, msg) in expected_attrs {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
     }
@@ -310,19 +300,14 @@ fn test_case_insensitive_enum() {
       },
     ],
     discriminator: None,
-    derives: BTreeSet::from([
-      DeriveTrait::Debug,
-      DeriveTrait::Clone,
-      DeriveTrait::Serialize,
-      DeriveTrait::Deserialize,
-    ]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
     methods: vec![],
+    ..Default::default()
   };
 
-  let tokens = generate_enum(&base_def, Visibility::Public);
+  let tokens = EnumGenerator::new(&base_def, Visibility::Public).generate();
   let code = tokens.to_string();
 
   let parts: Vec<&str> = code.split("enum Status").collect();
@@ -357,19 +342,16 @@ fn test_case_insensitive_enum() {
       make_unit_variant("Unknown"),
     ],
     discriminator: None,
-    derives: BTreeSet::from([
-      DeriveTrait::Debug,
-      DeriveTrait::Clone,
-      DeriveTrait::Serialize,
-      DeriveTrait::Deserialize,
-    ]),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
     methods: vec![],
+    ..Default::default()
   };
 
-  let fallback_code = generate_enum(&fallback_def, Visibility::Public).to_string();
+  let fallback_code = EnumGenerator::new(&fallback_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     fallback_code.contains("_ => Ok (Priority :: Unknown)"),
     "should fallback to Unknown variant for unrecognized values"
@@ -407,7 +389,7 @@ fn test_enum_visibility() {
       Visibility::Public => "Public",
     };
     let def = make_simple_enum(name, vec![make_unit_variant("A"), make_unit_variant("B")]);
-    let code = generate_enum(&def, visibility).to_string();
+    let code = EnumGenerator::new(&def, visibility).generate().to_string();
 
     if should_contain {
       assert!(code.contains(pattern), "should have {msg}");
@@ -430,21 +412,23 @@ fn test_enum_constructor_methods() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![EnumMethod {
-      name: "json".to_string(),
+      name: "json".into(),
       docs: vec!["Creates an empty JSON body.".to_string()],
       kind: EnumMethodKind::SimpleConstructor {
-        variant_name: "Json".to_string(),
-        wrapped_type: "JsonPayload".to_string(),
+        variant_name: "Json".into(),
+        wrapped_type: TypeRef::new("JsonPayload"),
       },
     }],
+    ..Default::default()
   };
 
-  let simple_code = generate_enum(&simple_def, Visibility::Public).to_string();
+  let simple_code = EnumGenerator::new(&simple_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(simple_code.contains("impl RequestBody"), "should have impl block");
   assert!(
     simple_code.contains("pub fn json () -> Self"),
@@ -466,23 +450,25 @@ fn test_enum_constructor_methods() {
       deprecated: false,
     }],
     discriminator: None,
-    derives: default_derives(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![EnumMethod {
-      name: "with_name".to_string(),
+      name: "with_name".into(),
       docs: vec!["Creates a request with the given name.".to_string()],
       kind: EnumMethodKind::ParameterizedConstructor {
-        variant_name: "Create".to_string(),
-        wrapped_type: "CreateParams".to_string(),
+        variant_name: "Create".into(),
+        wrapped_type: TypeRef::new("CreateParams"),
         param_name: "name".to_string(),
-        param_type: "String".to_string(),
+        param_type: TypeRef::new("String"),
       },
     }],
+    ..Default::default()
   };
 
-  let param_code = generate_enum(&param_def, Visibility::Public).to_string();
+  let param_code = EnumGenerator::new(&param_def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     param_code.contains("pub fn with_name (name : String) -> Self"),
     "should have parameterized constructor"
@@ -503,33 +489,51 @@ fn test_discriminated_enum() {
       DiscriminatedVariant {
         discriminator_value: "dog".to_string(),
         variant_name: "Dog".to_string(),
-        type_name: "DogData".to_string(),
+        type_name: TypeRef::new("DogData"),
       },
       DiscriminatedVariant {
         discriminator_value: "cat".to_string(),
         variant_name: "Cat".to_string(),
-        type_name: "CatData".to_string(),
+        type_name: TypeRef::new("CatData"),
       },
     ],
     fallback: None,
+    serde_mode: SerdeMode::Both,
   };
 
-  let code_without = generate_discriminated_enum(&without_fallback, Visibility::Public).to_string();
+  let code_without = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
+    .generate()
+    .to_string();
 
   let assertions_without = [
     (
-      "oas3_gen_support :: discriminated_enum !",
-      "should use discriminated_enum macro",
+      "# [derive (Debug , Clone , PartialEq)]",
+      "should derive Debug, Clone, PartialEq",
     ),
     ("pub enum Pet", "should have pub enum declaration"),
-    ("discriminator : \"petType\"", "should have discriminator field"),
-    ("(\"dog\" , Dog (DogData))", "should have dog variant"),
-    ("(\"cat\" , Cat (CatData))", "should have cat variant"),
+    ("Dog (DogData)", "should have dog variant"),
+    ("Cat (CatData)", "should have cat variant"),
+    (
+      "pub const DISCRIMINATOR_FIELD",
+      "should have discriminator field constant",
+    ),
+    ("\"petType\"", "should have discriminator field value"),
+    ("impl Default for Pet", "should have Default impl"),
+    ("impl serde :: Serialize for Pet", "should have Serialize impl"),
+    (
+      "impl < 'de > serde :: Deserialize < 'de > for Pet",
+      "should have Deserialize impl",
+    ),
+    ("Some (\"dog\")", "should have dog discriminator match"),
+    ("Some (\"cat\")", "should have cat discriminator match"),
+    (
+      "missing_field (Self :: DISCRIMINATOR_FIELD)",
+      "should error on missing discriminator",
+    ),
   ];
   for (expected, msg) in assertions_without {
-    assert!(code_without.contains(expected), "{msg}");
+    assert!(code_without.contains(expected), "{msg}:\n{code_without}");
   }
-  assert!(!code_without.contains("fallback :"), "should not have fallback");
 
   let with_fallback = DiscriminatedEnumDef {
     name: EnumToken::new("Message"),
@@ -538,19 +542,92 @@ fn test_discriminated_enum() {
     variants: vec![DiscriminatedVariant {
       discriminator_value: "text".to_string(),
       variant_name: "Text".to_string(),
-      type_name: "TextMessage".to_string(),
+      type_name: TypeRef::new("TextMessage"),
     }],
     fallback: Some(DiscriminatedVariant {
       discriminator_value: String::new(),
       variant_name: "Unknown".to_string(),
-      type_name: "serde_json::Value".to_string(),
+      type_name: TypeRef::new("serde_json::Value"),
     }),
+    serde_mode: SerdeMode::Both,
   };
 
-  let code_with = generate_discriminated_enum(&with_fallback, Visibility::Public).to_string();
+  let code_with = DiscriminatedEnumGenerator::new(&with_fallback, Visibility::Public)
+    .generate()
+    .to_string();
+  let fallback_assertions = [
+    ("Unknown (serde_json :: Value)", "should have fallback variant in enum"),
+    (
+      "Self :: Unknown (< serde_json :: Value >",
+      "should use fallback in Default impl",
+    ),
+    (
+      "None => serde_json :: from_value (value) . map (Self :: Unknown)",
+      "should use fallback when discriminator missing",
+    ),
+  ];
+  for (expected, msg) in fallback_assertions {
+    assert!(code_with.contains(expected), "{msg}:\n{code_with}");
+  }
   assert!(
-    code_with.contains("fallback : Unknown (serde_json :: Value)"),
-    "should have fallback variant"
+    !code_with.contains("missing_field"),
+    "should not error on missing field when fallback exists"
+  );
+}
+
+#[test]
+fn test_discriminated_enum_serialize_only() {
+  let def = DiscriminatedEnumDef {
+    name: EnumToken::new("RequestType"),
+    docs: vec![],
+    discriminator_field: "kind".to_string(),
+    variants: vec![DiscriminatedVariant {
+      discriminator_value: "create".to_string(),
+      variant_name: "Create".to_string(),
+      type_name: TypeRef::new("CreateRequest"),
+    }],
+    fallback: None,
+    serde_mode: SerdeMode::SerializeOnly,
+  };
+
+  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
+    .generate()
+    .to_string();
+  assert!(
+    code.contains("impl serde :: Serialize for RequestType"),
+    "should have Serialize impl"
+  );
+  assert!(
+    !code.contains("impl < 'de > serde :: Deserialize"),
+    "should NOT have Deserialize impl"
+  );
+}
+
+#[test]
+fn test_discriminated_enum_deserialize_only() {
+  let def = DiscriminatedEnumDef {
+    name: EnumToken::new("ResponseType"),
+    docs: vec![],
+    discriminator_field: "kind".to_string(),
+    variants: vec![DiscriminatedVariant {
+      discriminator_value: "success".to_string(),
+      variant_name: "Success".to_string(),
+      type_name: TypeRef::new("SuccessResponse"),
+    }],
+    fallback: None,
+    serde_mode: SerdeMode::DeserializeOnly,
+  };
+
+  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
+    .generate()
+    .to_string();
+  assert!(
+    !code.contains("impl serde :: Serialize"),
+    "should NOT have Serialize impl"
+  );
+  assert!(
+    code.contains("impl < 'de > serde :: Deserialize < 'de > for ResponseType"),
+    "should have Deserialize impl"
   );
 }
 
@@ -585,11 +662,13 @@ fn test_response_enum_generation() {
     request_type: Some(StructToken::new("GetUserRequest")),
   };
 
-  let code = generate_response_enum(&def, Visibility::Public).to_string();
+  let code = ResponseEnumGenerator::new(&def, Visibility::Public)
+    .generate()
+    .to_string();
 
   let assertions = [
     ("pub enum GetUserResponse", "should have pub enum declaration"),
-    ("# [derive (Clone , Debug)]", "should derive Clone and Debug"),
+    ("# [derive (Debug , Clone)]", "should derive Debug and Clone"),
     ("Ok (User)", "should have Ok variant with User type"),
     ("NotFound", "should have NotFound unit variant"),
     (

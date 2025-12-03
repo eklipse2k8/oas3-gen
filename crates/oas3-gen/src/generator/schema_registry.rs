@@ -384,6 +384,14 @@ impl SchemaRegistry {
     self.discriminator_cache.get(schema_name)
   }
 
+  /// Looks up a schema name by its union fingerprint.
+  ///
+  /// A union fingerprint is the set of schema names referenced in oneOf/anyOf variants.
+  /// This provides O(1) lookup instead of iterating all schemas.
+  pub(crate) fn lookup_union_by_fingerprint(&self, fingerprint: &BTreeSet<String>) -> Option<&String> {
+    self.union_fingerprints.get(fingerprint)
+  }
+
   /// Computes all schemas reachable from operations and their transitive dependencies.
   ///
   /// Algorithm: Two-phase reachability analysis

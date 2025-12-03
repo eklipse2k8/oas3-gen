@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 
 use num_format::{CustomFormat, Grouping, ToFormattedString};
+use quote::{ToTokens, quote};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
@@ -62,6 +63,10 @@ impl TypeRef {
 
   pub fn is_string_like(&self) -> bool {
     matches!(self.base_type, RustPrimitive::String) && !self.is_array
+  }
+
+  pub fn unboxed_base_type_name(&self) -> String {
+    self.base_type.to_string()
   }
 
   pub fn is_primitive_type(&self) -> bool {
@@ -294,6 +299,47 @@ impl std::fmt::Display for RustPrimitive {
       _ => &serde_plain::to_string(self).unwrap(),
     };
     write!(f, "{s}")
+  }
+}
+
+impl ToTokens for RustPrimitive {
+  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    let s = self.to_string();
+    let ty: syn::Type = syn::parse_str(&s).unwrap_or_else(|_| panic!("Failed to parse RustPrimitive: {s}"));
+    ty.to_tokens(tokens);
+  }
+}
+
+impl ToTokens for TypeRef {
+  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    let inner = &self.base_type;
+    let mut type_tokens = quote! { #inner };
+
+    if self.boxed {
+      type_tokens = quote! { Box<#type_tokens> };
+    }
+
+    if self.is_array {
+      type_tokens = quote! { Vec<#type_tokens> };
+    }
+
+    if self.nullable {
+      type_tokens = quote! { Option<#type_tokens> };
+    }
+
+    type_tokens.to_tokens(tokens);
+  }
+}
+
+impl PartialEq<&str> for TypeRef {
+  fn eq(&self, other: &&str) -> bool {
+    self.to_rust_type() == *other
+  }
+}
+
+impl PartialEq<String> for TypeRef {
+  fn eq(&self, other: &String) -> bool {
+    self.to_rust_type() == *other
   }
 }
 

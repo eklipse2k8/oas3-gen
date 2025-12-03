@@ -17,6 +17,7 @@ use crate::generator::{
 pub(crate) struct SharedSchemaCache {
   schema_to_type: BTreeMap<String, String>,
   enum_to_type: BTreeMap<Vec<String>, String>,
+  union_refs_to_type: BTreeMap<(BTreeSet<String>, Option<String>), String>,
   generated_types: Vec<RustType>,
   used_names: BTreeSet<String>,
   precomputed_names: BTreeMap<String, String>,
@@ -29,6 +30,7 @@ impl SharedSchemaCache {
     Self {
       schema_to_type: BTreeMap::new(),
       enum_to_type: BTreeMap::new(),
+      union_refs_to_type: BTreeMap::new(),
       generated_types: vec![],
       used_names: BTreeSet::new(),
       precomputed_names: BTreeMap::new(),
@@ -69,6 +71,19 @@ impl SharedSchemaCache {
   /// Registers an enum name for a set of values.
   pub(crate) fn register_enum(&mut self, values: Vec<String>, name: String) {
     self.enum_to_type.insert(values, name);
+  }
+
+  /// Retrieves a cached name for a union enum based on its variant refs and discriminator.
+  pub(crate) fn get_union_name(&self, refs: &BTreeSet<String>, discriminator: Option<&str>) -> Option<String> {
+    self
+      .union_refs_to_type
+      .get(&(refs.clone(), discriminator.map(String::from)))
+      .cloned()
+  }
+
+  /// Registers a union enum name for a set of variant refs and discriminator.
+  pub(crate) fn register_union(&mut self, refs: BTreeSet<String>, discriminator: Option<String>, name: String) {
+    self.union_refs_to_type.insert((refs, discriminator), name);
   }
 
   /// Marks a type name as used to prevent collisions.
@@ -140,6 +155,18 @@ impl SharedSchemaCache {
   pub(crate) fn make_unique_name(&self, base: &str) -> String {
     let rust_name = to_rust_type_name(base);
     ensure_unique(&rust_name, &self.used_names)
+  }
+
+  /// Checks if a name is already used by a different schema.
+  ///
+  /// Returns true if the name is in use AND the schema hash doesn't match any existing entry.
+  pub(crate) fn name_conflicts_with_different_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<bool> {
+    if !self.used_names.contains(name) {
+      return Ok(false);
+    }
+    let schema_hash = hashing::hash_schema(schema)?;
+    let same_schema = self.schema_to_type.get(&schema_hash).is_some_and(|n| n == name);
+    Ok(!same_schema)
   }
 
   /// Consumes the cache and returns all generated Rust types.

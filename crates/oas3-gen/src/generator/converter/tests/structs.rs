@@ -10,7 +10,8 @@ use crate::{
       FieldOptionalityPolicy, SchemaConverter,
       field_optionality::FieldContext,
       metadata::FieldMetadata,
-      structs::{DiscriminatorHandler, DiscriminatorInfo, FieldProcessor, SchemaMerger, StructConverter},
+      structs::{DiscriminatorInfo, FieldProcessor, StructConverter},
+      type_resolver::TypeResolver,
     },
   },
   tests::common::{create_test_graph, default_config},
@@ -222,8 +223,8 @@ fn test_schema_merger_merge_child_with_parent() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let merger = SchemaMerger::new(graph);
-  let merged_schema = merger.merge_child_schema_with_parent(&child, &parent).unwrap();
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let merged_schema = type_resolver.merge_child_schema_with_parent(&child, &parent).unwrap();
 
   assert!(merged_schema.properties.contains_key("parent_prop"));
   assert!(merged_schema.properties.contains_key("child_prop"));
@@ -260,8 +261,8 @@ fn test_schema_merger_conflict_resolution() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let merger = SchemaMerger::new(graph);
-  let merged_schema = merger.merge_child_schema_with_parent(&child, &parent).unwrap();
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let merged_schema = type_resolver.merge_child_schema_with_parent(&child, &parent).unwrap();
 
   // Child should override parent
   let prop = merged_schema.properties.get("prop").unwrap();
@@ -302,10 +303,10 @@ fn test_discriminator_handler_detect_parent() {
   graph_map.insert("Child".to_string(), child_schema.clone());
 
   let graph = create_test_graph(graph_map);
-  let handler = DiscriminatorHandler::new(graph, None);
+  let type_resolver = TypeResolver::new(&graph, default_config());
 
   let mut cache = HashMap::new();
-  let result = handler.detect_discriminated_parent(&child_schema, &mut cache);
+  let result = type_resolver.detect_discriminated_parent(&child_schema, &mut cache);
 
   assert!(result.is_some());
   assert!(result.unwrap().discriminator.is_some());
@@ -487,7 +488,7 @@ fn test_apply_discriminator_attributes_child_discriminator_hides_and_sets_value(
 #[test]
 fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
   let metadata = make_metadata_with_docs();
-  let serde_attrs = vec![];
+  let serde_attrs = vec![SerdeAttribute::Rename("@odata.type".to_string())];
   let type_ref = make_string_type_ref();
 
   let disc_info = DiscriminatorInfo {
@@ -508,8 +509,11 @@ fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
     Some(serde_json::Value::String(String::new())),
     "string type should get empty default"
   );
-  assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
-  assert!(!result.serde_attrs.contains(&SerdeAttribute::SkipDeserializing));
+  assert_eq!(
+    result.serde_attrs,
+    vec![SerdeAttribute::Skip],
+    "only Skip should remain"
+  );
   assert!(result.extra_attrs.iter().any(|a| a.contains("doc(hidden)")));
 }
 
@@ -666,8 +670,8 @@ fn test_schema_merger_merge_all_of() {
     ("Composite".to_string(), composite_schema.clone()),
   ]));
 
-  let merger = SchemaMerger::new(graph);
-  let merged_schema = merger.merge_all_of_schema(&composite_schema).unwrap();
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let merged_schema = type_resolver.merge_all_of_schema(&composite_schema).unwrap();
 
   assert!(merged_schema.properties.contains_key("base_prop"));
   assert!(merged_schema.properties.contains_key("mixin_prop"));
@@ -705,8 +709,8 @@ fn test_schema_merger_preserves_discriminator() {
     ("Child".to_string(), child_schema.clone()),
   ]));
 
-  let merger = SchemaMerger::new(graph);
-  let merged_schema = merger
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let merged_schema = type_resolver
     .merge_child_schema_with_parent(&child_schema, &parent_schema)
     .unwrap();
 
@@ -718,10 +722,10 @@ fn test_schema_merger_preserves_discriminator() {
 fn test_discriminator_handler_no_parent_returns_none() {
   let schema = ObjectSchema::default();
   let graph = create_test_graph(BTreeMap::new());
-  let handler = DiscriminatorHandler::new(graph, None);
+  let type_resolver = TypeResolver::new(&graph, default_config());
 
   let mut cache = HashMap::new();
-  let result = handler.detect_discriminated_parent(&schema, &mut cache);
+  let result = type_resolver.detect_discriminated_parent(&schema, &mut cache);
 
   assert!(result.is_none());
 }
@@ -735,10 +739,10 @@ fn test_discriminator_handler_inline_all_of_returns_none() {
   }));
 
   let graph = create_test_graph(BTreeMap::new());
-  let handler = DiscriminatorHandler::new(graph, None);
+  let type_resolver = TypeResolver::new(&graph, default_config());
 
   let mut cache = HashMap::new();
-  let result = handler.detect_discriminated_parent(&schema, &mut cache);
+  let result = type_resolver.detect_discriminated_parent(&schema, &mut cache);
 
   assert!(
     result.is_none(),

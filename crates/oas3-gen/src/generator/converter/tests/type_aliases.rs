@@ -144,3 +144,187 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
   assert_eq!(alias.target.to_rust_type(), "Vec<Pet>");
   Ok(())
 }
+
+#[test]
+fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
+  let text_event = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([
+      (
+        "type".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          const_value: Some(serde_json::json!("text")),
+          ..Default::default()
+        }),
+      ),
+      ("message".to_string(), ObjectOrReference::Object(make_string_schema())),
+    ]),
+    ..Default::default()
+  };
+
+  let image_event = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([
+      (
+        "type".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          const_value: Some(serde_json::json!("image")),
+          ..Default::default()
+        }),
+      ),
+      ("url".to_string(), ObjectOrReference::Object(make_string_schema())),
+    ]),
+    ..Default::default()
+  };
+
+  let event_list_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/TextEvent".to_string(),
+            summary: None,
+            description: None,
+          },
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/ImageEvent".to_string(),
+            summary: None,
+            description: None,
+          },
+        ],
+        ..Default::default()
+      },
+    ))))),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TextEvent".to_string(), text_event),
+    ("ImageEvent".to_string(), image_event),
+    ("EventList".to_string(), event_list_schema),
+  ]));
+
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let result = converter.convert_schema("EventList", graph.get_schema("EventList").unwrap(), None)?;
+
+  assert_eq!(result.len(), 2, "expected type alias + inline enum");
+
+  let alias = result.iter().find_map(|t| match t {
+    RustType::TypeAlias(a) => Some(a),
+    _ => None,
+  });
+  assert!(alias.is_some(), "expected a type alias");
+  let alias = alias.unwrap();
+  assert_eq!(alias.name, "EventList");
+  assert_eq!(alias.target.to_rust_type(), "Vec<EventListKind>");
+
+  let inline_enum = result.iter().find_map(|t| match t {
+    RustType::Enum(e) => Some(e),
+    _ => None,
+  });
+  assert!(inline_enum.is_some(), "expected inline enum for union items");
+  let inline_enum = inline_enum.unwrap();
+  assert_eq!(inline_enum.name.as_str(), "EventListKind");
+  assert_eq!(inline_enum.variants.len(), 2);
+
+  Ok(())
+}
+
+#[test]
+fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
+  let text_event = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([
+      (
+        "type".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          const_value: Some(serde_json::json!("text")),
+          ..Default::default()
+        }),
+      ),
+      ("message".to_string(), ObjectOrReference::Object(make_string_schema())),
+    ]),
+    ..Default::default()
+  };
+
+  let image_event = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([
+      (
+        "type".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          const_value: Some(serde_json::json!("image")),
+          ..Default::default()
+        }),
+      ),
+      ("url".to_string(), ObjectOrReference::Object(make_string_schema())),
+    ]),
+    ..Default::default()
+  };
+
+  let nullable_event_list_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Array, SchemaType::Null])),
+    items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/TextEvent".to_string(),
+            summary: None,
+            description: None,
+          },
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/ImageEvent".to_string(),
+            summary: None,
+            description: None,
+          },
+        ],
+        ..Default::default()
+      },
+    ))))),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TextEvent".to_string(), text_event),
+    ("ImageEvent".to_string(), image_event),
+    ("NullableEventList".to_string(), nullable_event_list_schema),
+  ]));
+
+  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let result = converter.convert_schema(
+    "NullableEventList",
+    graph.get_schema("NullableEventList").unwrap(),
+    None,
+  )?;
+
+  assert_eq!(result.len(), 2, "expected type alias + inline enum");
+
+  let alias = result.iter().find_map(|t| match t {
+    RustType::TypeAlias(a) => Some(a),
+    _ => None,
+  });
+  assert!(alias.is_some(), "expected a type alias");
+  let alias = alias.unwrap();
+  assert_eq!(alias.name, "NullableEventList");
+  assert_eq!(
+    alias.target.to_rust_type(),
+    "Option<Vec<NullableEventListKind>>",
+    "nullable array should be wrapped in Option"
+  );
+
+  let inline_enum = result.iter().find_map(|t| match t {
+    RustType::Enum(e) => Some(e),
+    _ => None,
+  });
+  assert!(inline_enum.is_some(), "expected inline enum for union items");
+  let inline_enum = inline_enum.unwrap();
+  assert_eq!(inline_enum.name.as_str(), "NullableEventListKind");
+  assert_eq!(inline_enum.variants.len(), 2);
+
+  Ok(())
+}

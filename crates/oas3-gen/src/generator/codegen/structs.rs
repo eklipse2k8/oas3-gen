@@ -13,8 +13,8 @@ use super::{
   coercion,
 };
 use crate::generator::ast::{
-  ContentCategory, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive, StatusCodeToken,
-  StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+  ContentCategory, DerivesProvider, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive,
+  StatusCodeToken, StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   tokens::{ConstToken, EnumToken, EnumVariantToken, MethodNameToken},
 };
 
@@ -40,7 +40,7 @@ impl<'a> StructGenerator<'a> {
     let docs = generate_docs(&def.docs);
     let vis = self.visibility.to_tokens();
 
-    let derives = super::attributes::generate_derives_from_slice(&def.derives);
+    let derives = super::attributes::generate_derives_from_slice(&def.derives());
 
     let outer_attrs = generate_outer_attrs(&def.outer_attrs);
     let serde_attrs = generate_serde_attrs(&def.serde_attrs);
@@ -112,7 +112,7 @@ impl<'a> StructGenerator<'a> {
           quote! {}
         };
 
-        let type_tokens = coercion::parse_type_string(&field.rust_type.to_rust_type());
+        let type_tokens = &field.rust_type;
 
         quote! {
           #(#extra_attrs)*
@@ -433,7 +433,7 @@ impl<'a> StructGenerator<'a> {
   }
 
   fn generate_data_expression(schema_type: &TypeRef, content_category: ContentCategory) -> TokenStream {
-    let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
+    let type_token = schema_type;
 
     match content_category {
       ContentCategory::Text => {
@@ -446,7 +446,11 @@ impl<'a> StructGenerator<'a> {
         }
       }
       ContentCategory::Binary => {
-        quote! { req.bytes().await?.to_vec() }
+        if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
+          quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
+        } else {
+          quote! { req.bytes().await?.to_vec() }
+        }
       }
       ContentCategory::Json | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
         quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }

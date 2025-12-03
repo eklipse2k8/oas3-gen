@@ -1,25 +1,179 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType};
 
 use crate::generator::{
   ast::{EnumVariantToken, VariantDef},
-  converter::hashing,
+  converter::{SchemaExt, hashing},
   naming::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
     identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, sanitize, split_pascal_case, to_rust_type_name},
   },
-  schema_registry::SchemaRegistry,
+  schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
 
-#[must_use]
-fn is_freeform_string(schema: &ObjectSchema) -> bool {
-  schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
-    && schema.enum_values.is_empty()
-    && schema.const_value.is_none()
+const RESERVED_TYPE_NAMES: &[&str] = &["Enum", "Struct", "Type", "Object"];
+
+/// Returns an iterator over all union variants (`anyOf` and `oneOf`) in a schema.
+///
+/// # Example
+/// ```text
+/// schema.any_of = [A, B], schema.one_of = [C] => yields A, B, C
+/// ```
+///
+/// # Complexity
+/// O(1) - creates a chained iterator without allocation.
+fn union_variants(schema: &ObjectSchema) -> impl Iterator<Item = &ObjectOrReference<ObjectSchema>> {
+  schema.any_of.iter().chain(&schema.one_of)
 }
 
+pub(crate) struct CommonVariantName {
+  pub(crate) name: String,
+  pub(crate) has_suffix: bool,
+}
+
+/// Extracts a semantic name from union variant references by combining the first
+/// common prefix segment with the common suffix.
+///
+/// For variants like `BetaResponseCharLocationCitation`, `BetaResponseUrlCitation`,
+/// `BetaResponseFileCitation`, this returns `CommonVariantName { name: "BetaCitation", has_suffix: true }`.
+///
+/// For variants like `BetaTool`, `BetaBashTool20241022`, this returns `CommonVariantName { name: "Beta", has_suffix: false }`.
+///
+/// The `has_suffix` field indicates whether a common suffix was found. When true, the extracted name
+/// is semantically complete and should be used as-is. When false, the property name should
+/// be appended for clarity.
+///
+/// Returns `None` if fewer than 2 variants have references or no common prefix exists.
+pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<CommonVariantName> {
+  let ref_names: Vec<String> = variants
+    .iter()
+    .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
+    .collect();
+
+  if ref_names.len() < 2 {
+    return None;
+  }
+
+  let segments: Vec<Vec<String>> = ref_names.iter().map(|n| split_pascal_case(n)).collect();
+  let first = segments.first().filter(|s| !s.is_empty())?;
+  let rest = &segments[1..];
+
+  let prefix_len = common_prefix_len(first, rest);
+  if prefix_len == 0 {
+    return None;
+  }
+
+  let suffix_len = common_suffix_len(first, rest);
+  Some(build_common_variant_name(first, prefix_len, suffix_len))
+}
+
+/// Counts word segments shared at the start of all PascalCase-split name lists.
+///
+/// # Example
+/// ```text
+/// first = ["User", "Create", "Request"]
+/// rest  = [["User", "Update", "Request"], ["User", "Delete", "Request"]]
+/// => 1 (only "User" is common prefix)
+/// ```
+///
+/// # Complexity
+/// O(p * n) where p = prefix length, n = number of variants in `rest`.
+#[must_use]
+fn common_prefix_len(first: &[String], rest: &[Vec<String>]) -> usize {
+  first
+    .iter()
+    .enumerate()
+    .take_while(|(i, seg)| rest.iter().all(|other| other.get(*i) == Some(seg)))
+    .count()
+}
+
+/// Counts word segments shared at the end of all PascalCase-split name lists.
+///
+/// # Example
+/// ```text
+/// first = ["Create", "User", "Response"]
+/// rest  = [["Update", "User", "Response"], ["Delete", "User", "Response"]]
+/// => 2 ("User", "Response" are common suffix)
+/// ```
+///
+/// # Complexity
+/// O(s * n) where s = suffix length, n = number of variants in `rest`.
+#[must_use]
+fn common_suffix_len(first: &[String], rest: &[Vec<String>]) -> usize {
+  let min_len = std::iter::once(first.len())
+    .chain(rest.iter().map(Vec::len))
+    .min()
+    .unwrap_or(0);
+
+  (1..=min_len)
+    .take_while(|&offset| {
+      let seg = &first[first.len() - offset];
+      rest.iter().all(|other| other.get(other.len() - offset) == Some(seg))
+    })
+    .count()
+}
+
+/// Constructs a `CommonVariantName` from word segments using prefix/suffix lengths.
+///
+/// If a suffix exists, combines the first segment with the suffix (e.g., "Beta" + "Citation").
+/// Otherwise, joins all prefix segments.
+///
+/// # Example
+/// ```text
+/// segments = ["Beta", "Response", "Url", "Citation"], prefix_len = 1, suffix_len = 1
+/// => CommonVariantName { name: "BetaCitation", has_suffix: true }
+///
+/// segments = ["Beta", "Tool"], prefix_len = 1, suffix_len = 0
+/// => CommonVariantName { name: "Beta", has_suffix: false }
+/// ```
+///
+/// # Complexity
+/// O(k) where k = number of segments joined.
+#[must_use]
+fn build_common_variant_name(segments: &[String], prefix_len: usize, suffix_len: usize) -> CommonVariantName {
+  if suffix_len > 0 {
+    let suffix = segments[segments.len() - suffix_len..].join("");
+    CommonVariantName {
+      name: format!("{}{suffix}", segments[0]),
+      has_suffix: true,
+    }
+  } else {
+    CommonVariantName {
+      name: segments[..prefix_len].join(""),
+      has_suffix: false,
+    }
+  }
+}
+
+/// Returns true if schema is an unconstrained string type (no enum/const restrictions).
+///
+/// # Example
+/// ```text
+/// { "type": "string" }                    => true
+/// { "type": "string", "enum": ["a"] }     => false
+/// { "type": "string", "const": "x" }      => false
+/// ```
+///
+/// # Complexity
+/// O(1) - field access only.
+#[must_use]
+fn is_freeform_string(schema: &ObjectSchema) -> bool {
+  schema.is_string() && schema.enum_values.is_empty() && schema.const_value.is_none()
+}
+
+/// Returns true if schema has enum values or a const constraint.
+///
+/// # Example
+/// ```text
+/// { "enum": ["a", "b"] }  => true
+/// { "const": "x" }        => true
+/// { "type": "string" }    => false
+/// ```
+///
+/// # Complexity
+/// O(1) - field access only.
 #[must_use]
 fn is_constrained(schema: &ObjectSchema) -> bool {
   !schema.enum_values.is_empty() || schema.const_value.is_some()
@@ -30,9 +184,22 @@ fn is_constrained(schema: &ObjectSchema) -> bool {
 /// A relaxed enum is defined as having a freeform string variant (no enum values, no const)
 /// alongside other variants that are constrained (enum values or const).
 pub(crate) fn is_relaxed_enum_pattern(schema: &ObjectSchema) -> bool {
-  has_mixed_string_variants(schema.any_of.iter().chain(&schema.one_of))
+  has_mixed_string_variants(union_variants(schema))
 }
 
+/// Checks if variants contain both freeform strings and constrained strings.
+///
+/// Used to detect "relaxed enum" patterns where an API accepts known enum values
+/// plus arbitrary strings for forward compatibility.
+///
+/// # Example
+/// ```text
+/// anyOf: [{ type: string }, { type: string, enum: ["a", "b"] }] => true
+/// anyOf: [{ type: string, enum: ["a"] }, { type: string, enum: ["b"] }] => false
+/// ```
+///
+/// # Complexity
+/// O(n) where n = number of variants (two passes).
 fn has_mixed_string_variants<'a>(variants: impl Iterator<Item = &'a ObjectOrReference<ObjectSchema>>) -> bool {
   let variants: Vec<_> = variants.collect();
 
@@ -55,22 +222,11 @@ fn has_mixed_string_variants<'a>(variants: impl Iterator<Item = &'a ObjectOrRefe
 ///
 /// Returns `None` if no valid enum values could be extracted.
 pub(crate) fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> {
-  if !schema.enum_values.is_empty() {
-    let string_values: Vec<_> = schema
-      .enum_values
-      .iter()
-      .filter_map(|v| v.as_str().map(String::from))
-      .collect();
-
-    if !string_values.is_empty() {
-      let mut sorted = string_values;
-      sorted.sort();
-      return Some(sorted);
-    }
+  if let Some(values) = extract_standard_enum_values(schema) {
+    return Some(values);
   }
 
-  let variants: Vec<_> = schema.any_of.iter().chain(&schema.one_of).collect();
-
+  let variants: Vec<_> = union_variants(schema).collect();
   if variants.is_empty() {
     return None;
   }
@@ -80,50 +236,109 @@ pub(crate) fn extract_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> 
     .any(|v| matches!(v, ObjectOrReference::Object(s) if is_freeform_string(s)));
 
   if has_freeform {
-    let values: BTreeSet<_> = variants
-      .iter()
-      .filter_map(|variant| match variant {
-        ObjectOrReference::Object(s) => {
-          let enum_values = s.enum_values.iter().filter_map(|v| v.as_str().map(String::from));
-          let const_value = s.const_value.as_ref().and_then(|v| v.as_str().map(String::from));
-          Some(enum_values.chain(const_value))
-        }
-        ObjectOrReference::Ref { .. } => None,
-      })
-      .flatten()
-      .collect();
-
-    return if values.is_empty() {
-      None
-    } else {
-      Some(values.into_iter().collect())
-    };
+    return extract_relaxed_enum_values(&variants);
   }
 
   if !schema.one_of.is_empty() {
-    let mut const_values = BTreeSet::new();
-
-    for variant in &schema.one_of {
-      match variant {
-        ObjectOrReference::Object(s) => {
-          if let Some(const_str) = s.const_value.as_ref().and_then(|v| v.as_str()) {
-            const_values.insert(const_str.to_string());
-          } else {
-            return None;
-          }
-        }
-        ObjectOrReference::Ref { .. } => return None,
-      }
-    }
-
-    return if const_values.is_empty() {
-      None
-    } else {
-      Some(const_values.into_iter().collect())
-    };
+    return extract_oneof_const_values(&schema.one_of);
   }
 
   None
+}
+
+/// Extracts string values from a schema's direct `enum` field.
+///
+/// # Example
+/// ```text
+/// { "enum": ["active", "pending", 123] } => Some(["active", "pending"])
+/// { "type": "string" }                   => None
+/// ```
+///
+/// # Complexity
+/// O(n log n) where n = number of enum values (due to sorting).
+fn extract_standard_enum_values(schema: &ObjectSchema) -> Option<Vec<String>> {
+  if schema.enum_values.is_empty() {
+    return None;
+  }
+
+  let mut values: Vec<_> = schema
+    .enum_values
+    .iter()
+    .filter_map(|v| v.as_str().map(String::from))
+    .collect();
+
+  if values.is_empty() {
+    return None;
+  }
+
+  values.sort();
+  Some(values)
+}
+
+/// Extracts all enum/const string values from relaxed enum variants.
+///
+/// Collects values from inline schemas' `enum` arrays and `const` fields,
+/// ignoring `$ref` variants and freeform strings.
+///
+/// # Example
+/// ```text
+/// anyOf: [{ type: string }, { const: "a" }, { enum: ["b", "c"] }]
+/// => Some(["a", "b", "c"])
+/// ```
+///
+/// # Complexity
+/// O(v * e) where v = variants, e = enum values per variant. Uses BTreeSet for deduplication.
+fn extract_relaxed_enum_values(variants: &[&ObjectOrReference<ObjectSchema>]) -> Option<Vec<String>> {
+  let values: BTreeSet<_> = variants
+    .iter()
+    .filter_map(|variant| match variant {
+      ObjectOrReference::Object(s) => {
+        let enum_values = s.enum_values.iter().filter_map(|v| v.as_str().map(String::from));
+        let const_value = s.const_value.as_ref().and_then(|v| v.as_str().map(String::from));
+        Some(enum_values.chain(const_value))
+      }
+      ObjectOrReference::Ref { .. } => None,
+    })
+    .flatten()
+    .collect();
+
+  if values.is_empty() {
+    None
+  } else {
+    Some(values.into_iter().collect())
+  }
+}
+
+/// Extracts const values from a oneOf where all variants are const strings.
+///
+/// Returns `None` if any variant is a `$ref` or lacks a string const value.
+///
+/// # Example
+/// ```text
+/// oneOf: [{ const: "a" }, { const: "b" }] => Some(["a", "b"])
+/// oneOf: [{ const: "a" }, { $ref: "..." }] => None
+/// ```
+///
+/// # Complexity
+/// O(n log n) where n = number of oneOf variants (BTreeSet insertion).
+fn extract_oneof_const_values(one_of: &[ObjectOrReference<ObjectSchema>]) -> Option<Vec<String>> {
+  let mut const_values = BTreeSet::new();
+
+  for variant in one_of {
+    match variant {
+      ObjectOrReference::Object(s) => {
+        let const_str = s.const_value.as_ref().and_then(|v| v.as_str())?;
+        const_values.insert(const_str.to_string());
+      }
+      ObjectOrReference::Ref { .. } => return None,
+    }
+  }
+
+  if const_values.is_empty() {
+    None
+  } else {
+    Some(const_values.into_iter().collect())
+  }
 }
 
 /// Holds the result of normalizing a schema value into a Rust identifier.
@@ -177,22 +392,27 @@ pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
   if !schema.enum_values.is_empty() {
     return "Enum".to_string();
   }
-  if let Some(ref schema_type) = schema.schema_type {
-    match schema_type {
-      SchemaTypeSet::Single(typ) => match typ {
-        SchemaType::String => "String".to_string(),
-        SchemaType::Number => "Number".to_string(),
-        SchemaType::Integer => "Integer".to_string(),
-        SchemaType::Boolean => "Boolean".to_string(),
-        SchemaType::Array => "Array".to_string(),
-        SchemaType::Object => "Object".to_string(),
-        SchemaType::Null => "Null".to_string(),
-      },
-      SchemaTypeSet::Multiple(_) => "Mixed".to_string(),
-    }
-  } else {
-    format!("Variant{index}")
+  if let Some(typ) = schema.single_type() {
+    return match typ {
+      SchemaType::String => "String".to_string(),
+      SchemaType::Number => "Number".to_string(),
+      SchemaType::Integer => "Integer".to_string(),
+      SchemaType::Boolean => "Boolean".to_string(),
+      SchemaType::Array => "Array".to_string(),
+      SchemaType::Object => "Object".to_string(),
+      SchemaType::Null => "Null".to_string(),
+    };
   }
+  if schema.schema_type.is_some() {
+    return "Mixed".to_string();
+  }
+  let variants = if schema.one_of.is_empty() {
+    &schema.any_of
+  } else {
+    &schema.one_of
+  };
+
+  extract_common_variant_prefix(variants).map_or_else(|| format!("Variant{index}"), |c| c.name)
 }
 
 /// Strips common PascalCase word segments from variant names to make them concise.
@@ -246,8 +466,8 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
   let first = &word_segments[0];
   let rest = &word_segments[1..];
 
-  let common_prefix_len = count_matching_prefix_segments(first, rest);
-  let common_suffix_len = count_matching_suffix_segments(first, rest);
+  let common_prefix_len = common_prefix_len(first, rest);
+  let common_suffix_len = common_suffix_len(first, rest);
 
   let stripped_names: Vec<String> = word_segments
     .iter()
@@ -263,25 +483,21 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
   }
 }
 
-#[must_use]
-fn count_matching_prefix_segments(first: &[String], rest: &[Vec<String>]) -> usize {
-  (0..first.len())
-    .take_while(|&idx| rest.iter().all(|other| other.get(idx) == Some(&first[idx])))
-    .count()
-}
-
-#[must_use]
-fn count_matching_suffix_segments(first: &[String], rest: &[Vec<String>]) -> usize {
-  (1..=first.len())
-    .take_while(|&offset| {
-      let first_word = &first[first.len() - offset];
-      rest
-        .iter()
-        .all(|other| other.len() >= offset && &other[other.len() - offset] == first_word)
-    })
-    .count()
-}
-
+/// Joins word segments after stripping common prefix and suffix.
+///
+/// Returns the full joined string if stripping would produce an empty result.
+///
+/// # Example
+/// ```text
+/// segments = ["User", "Create", "Response"], prefix_len = 1, suffix_len = 1
+/// => "Create"
+///
+/// segments = ["Response"], prefix_len = 1, suffix_len = 0
+/// => "Response" (unchanged, stripping would empty it)
+/// ```
+///
+/// # Complexity
+/// O(k) where k = number of segments joined.
 #[must_use]
 fn extract_middle_segments(segments: &[String], prefix_len: usize, suffix_len: usize) -> String {
   let end_idx = segments.len().saturating_sub(suffix_len);
@@ -292,6 +508,19 @@ fn extract_middle_segments(segments: &[String], prefix_len: usize, suffix_len: u
   }
 }
 
+/// Returns true if all strings are non-empty and unique.
+///
+/// Used to validate that affix stripping produces valid variant names.
+///
+/// # Example
+/// ```text
+/// ["Create", "Update", "Delete"] => true
+/// ["Create", "Create"]           => false (duplicate)
+/// ["Create", ""]                 => false (empty)
+/// ```
+///
+/// # Complexity
+/// O(n log n) where n = number of names (BTreeSet insertion).
 #[must_use]
 fn all_non_empty_and_unique(names: &[String]) -> bool {
   if names.iter().any(String::is_empty) {
@@ -439,6 +668,13 @@ impl<'a> InlineTypeScanner<'a> {
     })
   }
 
+  /// Iterates all schemas in the registry, collecting naming candidates for inline types.
+  ///
+  /// Populates both schema hash -> name candidates and enum values -> name candidates maps.
+  /// Marks candidates from top-level schemas with `is_from_schema = true` for priority.
+  ///
+  /// # Complexity
+  /// O(s * p) where s = schemas, p = properties per schema (recursive).
   fn collect_all_naming_candidates(
     &self,
     inline_schema_candidates: &mut BTreeMap<String, BTreeSet<(String, bool)>>,
@@ -471,6 +707,12 @@ impl<'a> InlineTypeScanner<'a> {
     Ok(())
   }
 
+  /// Resolves final names for enums, selecting the best candidate for each enum value set.
+  ///
+  /// Updates `used_names` to prevent collisions with subsequently resolved names.
+  ///
+  /// # Complexity
+  /// O(e * c) where e = enum sets, c = candidates per set.
   fn resolve_enum_names(
     enum_value_candidates: BTreeMap<Vec<String>, BTreeSet<(String, bool)>>,
     used_names: &mut BTreeSet<String>,
@@ -486,6 +728,12 @@ impl<'a> InlineTypeScanner<'a> {
     final_enum_names
   }
 
+  /// Resolves final names for inline schemas by hash, selecting best candidate per hash.
+  ///
+  /// Updates `used_names` to prevent collisions with subsequently resolved names.
+  ///
+  /// # Complexity
+  /// O(h * c) where h = schema hashes, c = candidates per hash.
   fn resolve_schema_names(
     inline_schema_candidates: BTreeMap<String, BTreeSet<(String, bool)>>,
     used_names: &mut BTreeSet<String>,
@@ -501,6 +749,10 @@ impl<'a> InlineTypeScanner<'a> {
     final_schema_names
   }
 
+  /// Collects all existing schema names as Rust type names for collision detection.
+  ///
+  /// # Complexity
+  /// O(n) where n = number of schemas in the registry.
   fn get_existing_names(&self) -> BTreeSet<String> {
     self
       .graph
@@ -510,6 +762,19 @@ impl<'a> InlineTypeScanner<'a> {
       .collect()
   }
 
+  /// Recursively collects naming candidates from inline object properties and allOf schemas.
+  ///
+  /// For each inline schema, generates a candidate name from `{parent}{PropName}` and
+  /// records both the schema hash and any enum values for deduplication.
+  ///
+  /// # Example
+  /// ```text
+  /// parent = "User", property = "status" with inline enum
+  /// => candidate "UserStatus" added to both schema and enum candidate maps
+  /// ```
+  ///
+  /// # Complexity
+  /// O(p * d) where p = properties, d = nesting depth (recursive).
   fn collect_inline_candidates(
     parent_name: &str,
     schema: &ObjectSchema,
@@ -550,10 +815,28 @@ impl<'a> InlineTypeScanner<'a> {
     Ok(())
   }
 
+  /// Detects the StringEnumOptimizer pattern: anyOf with freeform + constrained strings.
+  ///
+  /// These schemas get a "Known" suffix to distinguish the enum of known values.
+  ///
+  /// # Example
+  /// ```text
+  /// anyOf: [{ type: string }, { type: string, enum: ["a", "b"] }] => true
+  /// oneOf: [{ type: string }, { type: string, enum: ["a", "b"] }] => false (oneOf, not anyOf)
+  /// ```
+  ///
+  /// # Complexity
+  /// O(n) where n = number of anyOf variants.
   fn is_string_enum_optimizer_pattern(schema: &ObjectSchema) -> bool {
     !schema.any_of.is_empty() && has_mixed_string_variants(schema.any_of.iter())
   }
 
+  /// Returns true if schema should be tracked as an inline type candidate.
+  ///
+  /// Inline targets include: enums, oneOf/anyOf unions, and objects without additionalProperties.
+  ///
+  /// # Complexity
+  /// O(1) - field access only.
   fn is_inline_target(schema: &ObjectSchema) -> bool {
     !schema.enum_values.is_empty()
       || !schema.one_of.is_empty()
@@ -601,23 +884,22 @@ impl<'a> InlineTypeScanner<'a> {
       return String::new();
     };
 
-    let first_reversed: Vec<char> = first.chars().rev().collect();
+    let first_chars: Vec<char> = first.chars().collect();
+    let rest_chars: Vec<Vec<char>> = rest.iter().map(|s| s.chars().collect()).collect();
 
-    let common_length = first_reversed
-      .iter()
-      .enumerate()
-      .take_while(|(index, char_from_first)| {
-        rest.iter().all(|other_string| {
-          other_string
-            .chars()
-            .rev()
-            .nth(*index)
-            .is_some_and(|c| c == **char_from_first)
-        })
+    let min_len = std::iter::once(first_chars.len())
+      .chain(rest_chars.iter().map(Vec::len))
+      .min()
+      .unwrap_or(0);
+
+    let suffix_len = (1..=min_len)
+      .take_while(|&offset| {
+        let ch = first_chars[first_chars.len() - offset];
+        rest_chars.iter().all(|other| other[other.len() - offset] == ch)
       })
       .count();
 
-    first_reversed.into_iter().take(common_length).rev().collect()
+    first_chars[first_chars.len() - suffix_len..].iter().collect()
   }
 
   /// Checks if a name is a valid common name (not reserved, follows conventions).
@@ -625,7 +907,7 @@ impl<'a> InlineTypeScanner<'a> {
     if name.len() < 4 {
       return false;
     }
-    if matches!(name, "Enum" | "Struct" | "Type" | "Object") {
+    if RESERVED_TYPE_NAMES.contains(&name) {
       return false;
     }
     if !name.chars().next().is_some_and(char::is_uppercase) {

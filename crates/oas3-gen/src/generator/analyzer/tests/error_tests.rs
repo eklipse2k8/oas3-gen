@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use http::Method;
 
 use crate::generator::{
@@ -20,11 +18,11 @@ fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
       rust_type: TypeRef::new(field_type),
       ..Default::default()
     }],
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
     kind: StructKind::Schema,
+    ..Default::default()
   })
 }
 
@@ -51,12 +49,12 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
     name: EnumToken::new(name),
     docs: vec![],
     variants,
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     discriminator: None,
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   })
 }
 
@@ -145,11 +143,11 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
         rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".into())),
         ..Default::default()
       }],
-      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
+      ..Default::default()
     }),
     create_test_struct("NestedError", RustPrimitive::String),
   ];
@@ -175,12 +173,12 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
         serde_attrs: vec![],
         deprecated: false,
       }],
-      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       discriminator: None,
       case_insensitive: false,
       methods: vec![],
+      ..Default::default()
     }),
     create_test_struct("InnerError", RustPrimitive::String),
   ];
@@ -216,11 +214,11 @@ fn test_build_error_schema_set_handles_deep_nesting() {
         rust_type: TypeRef::new(RustPrimitive::Custom("Level2".into())),
         ..Default::default()
       }],
-      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
+      ..Default::default()
     }),
     RustType::Struct(StructDef {
       name: StructToken::new("Level2"),
@@ -231,11 +229,11 @@ fn test_build_error_schema_set_handles_deep_nesting() {
         rust_type: TypeRef::new(RustPrimitive::Custom("Level3".into())),
         ..Default::default()
       }],
-      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
+      ..Default::default()
     }),
     create_test_struct("Level3", RustPrimitive::String),
   ];
@@ -264,11 +262,11 @@ fn test_build_error_schema_set_stops_at_success_types() {
         rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".into())),
         ..Default::default()
       }],
-      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
+      ..Default::default()
     }),
     create_test_struct("SuccessType", RustPrimitive::String),
   ];
@@ -307,11 +305,11 @@ fn test_build_error_schema_set_handles_circular_references() {
         rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".into())),
         ..Default::default()
       }],
-      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
+      ..Default::default()
     }),
     RustType::Struct(StructDef {
       name: StructToken::new("CircularB"),
@@ -322,11 +320,11 @@ fn test_build_error_schema_set_handles_circular_references() {
         rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".into())),
         ..Default::default()
       }],
-      derives: BTreeSet::new(),
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods: vec![],
       kind: StructKind::Schema,
+      ..Default::default()
     }),
   ];
 
@@ -361,11 +359,11 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
         ..Default::default()
       },
     ],
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
     kind: StructKind::Schema,
+    ..Default::default()
   })];
 
   let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);

@@ -104,7 +104,7 @@ fn extract_response_schema_info(
       }
 
       if inline_schema.properties.is_empty()
-        && let Ok(primitive_ref) = schema_converter.schema_to_type_ref(inline_schema)
+        && let Ok(primitive_ref) = schema_converter.resolve_type(inline_schema)
         && !matches!(primitive_ref.base_type, RustPrimitive::Custom(_))
       {
         return Ok((Some(primitive_ref), content_category));

@@ -1,7 +1,4 @@
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
@@ -292,11 +289,11 @@ fn test_cache_operations() {
     docs: vec![],
     variants: vec![],
     discriminator: None,
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   });
 
   let enum2 = RustType::Enum(EnumDef {
@@ -304,11 +301,11 @@ fn test_cache_operations() {
     docs: vec![],
     variants: vec![],
     discriminator: None,
-    derives: BTreeSet::new(),
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    ..Default::default()
   });
 
   let mut type_cache = SharedSchemaCache::new();

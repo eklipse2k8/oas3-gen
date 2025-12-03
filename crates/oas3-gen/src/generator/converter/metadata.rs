@@ -1,6 +1,7 @@
-use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::ObjectSchema;
 use regex::Regex;
 
+use super::SchemaExt;
 use crate::{
   generator::ast::{RustPrimitive, TypeRef, ValidationAttribute},
   utils::text::doc_lines,
@@ -19,35 +20,8 @@ pub(crate) struct FieldMetadata {
 impl FieldMetadata {
   /// Extracts metadata from a schema and type reference.
   pub(crate) fn from_schema(prop_name: &str, is_required: bool, schema: &ObjectSchema, type_ref: &TypeRef) -> Self {
-    let mut validation_attrs = extract_validation_attrs(is_required, schema, type_ref);
-    if let Some(regex_attr) = ValidationAttribute::extract_regex_if_applicable(prop_name, schema, type_ref) {
-      validation_attrs.push(regex_attr);
-    }
-
-    Self {
-      docs: extract_docs(schema.description.as_ref()),
-      validation_attrs,
-      default_value: extract_default_value(schema),
-      deprecated: schema.deprecated.unwrap_or(false),
-      multiple_of: schema.multiple_of.clone(),
-    }
+    MetadataExtractor::new(prop_name, is_required, schema, type_ref).extract()
   }
-}
-
-/// Checks if the format represents a non-string type that should not have string validations.
-pub(crate) fn is_non_string_format(format: &str) -> bool {
-  matches!(
-    format,
-    "date" | "date-time" | "duration" | "time" | "binary" | "byte" | "uuid"
-  )
-}
-
-/// Checks if the schema has a specific single type.
-pub(crate) fn is_single_schema_type(schema: &ObjectSchema, schema_type: SchemaType) -> bool {
-  matches!(
-    schema.schema_type.as_ref(),
-    Some(SchemaTypeSet::Single(t)) if *t == schema_type
-  )
 }
 
 /// Extracts documentation lines from a schema description.
@@ -55,171 +29,203 @@ pub(crate) fn extract_docs(desc: Option<&String>) -> Vec<String> {
   desc.map_or_else(Vec::new, |d| doc_lines(d))
 }
 
-/// Extracts the default value from a schema.
-///
-/// Checks in order: `default`, `const`, and single-value enums.
-pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
-  schema
-    .default
-    .clone()
-    .or_else(|| schema.const_value.clone())
-    .or_else(|| {
-      if schema.enum_values.len() == 1 {
-        schema.enum_values.first().cloned()
-      } else {
-        None
-      }
-    })
-}
-
-/// Extracts a validation regex pattern from a string schema.
-///
-/// Returns `None` if:
-/// - Schema is not a string type
-/// - Format represents a non-string type (date, uuid, etc.)
-/// - Schema has enum values (validated by enum type itself)
-/// - Pattern is invalid regex syntax
-pub(crate) fn extract_validation_pattern<'s>(prop_name: &str, schema: &'s ObjectSchema) -> Option<&'s String> {
-  if !is_single_schema_type(schema, SchemaType::String) {
-    return None;
-  }
-
-  let pattern = schema.pattern.as_ref()?;
-
-  if let Some(format) = schema.format.as_ref()
-    && is_non_string_format(format)
-  {
-    return None;
-  }
-
-  if !schema.enum_values.is_empty() {
-    return None;
-  }
-
-  if Regex::new(pattern).is_err() {
-    eprintln!("Warning: Invalid regex pattern '{pattern}' for property '{prop_name}'");
-    return None;
-  }
-
-  Some(pattern)
-}
-
-/// Filters regex validation based on the Rust type.
-///
-/// Certain Rust types (DateTime, Date, Time, Uuid) have their own validation
-/// and should not have additional regex validation applied.
-pub(crate) fn filter_regex_validation(rust_type: &TypeRef, regex: Option<String>) -> Option<String> {
-  match &rust_type.base_type {
-    RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid => None,
-    _ => regex,
-  }
-}
-
-/// Extracts validation attributes for the `validator` crate.
-///
-/// Generates attributes based on schema constraints:
-/// - Email/URL validation from format field
-/// - Range validation for numbers
-/// - Length validation for strings and arrays
-pub(crate) fn extract_validation_attrs(
+pub(crate) struct MetadataExtractor<'a> {
+  prop_name: &'a str,
   is_required: bool,
-  schema: &ObjectSchema,
-  type_ref: &TypeRef,
-) -> Vec<ValidationAttribute> {
-  let mut attrs = vec![];
+  schema: &'a ObjectSchema,
+  type_ref: &'a TypeRef,
+}
 
-  if let Some(ref format) = schema.format {
-    match format.as_str() {
-      "email" => attrs.push(ValidationAttribute::Email),
-      "uri" | "url" => attrs.push(ValidationAttribute::Url),
-      _ => {}
+impl<'a> MetadataExtractor<'a> {
+  pub(crate) fn new(prop_name: &'a str, is_required: bool, schema: &'a ObjectSchema, type_ref: &'a TypeRef) -> Self {
+    Self {
+      prop_name,
+      is_required,
+      schema,
+      type_ref,
     }
   }
 
-  if let Some(ref schema_type) = schema.schema_type {
-    if matches!(
-      schema_type,
-      SchemaTypeSet::Single(SchemaType::Number | SchemaType::Integer)
-    ) && let Some(range_attr) = build_range_validation_attr(schema, type_ref)
+  pub(crate) fn extract(&self) -> FieldMetadata {
+    FieldMetadata {
+      docs: self.extract_docs(),
+      validation_attrs: self.extract_all_validation(),
+      default_value: self.extract_default_value(),
+      deprecated: self.schema.deprecated.unwrap_or(false),
+      multiple_of: self.schema.multiple_of.clone(),
+    }
+  }
+
+  pub(crate) fn extract_docs(&self) -> Vec<String> {
+    extract_docs(self.schema.description.as_ref())
+  }
+
+  pub(crate) fn extract_default_value(&self) -> Option<serde_json::Value> {
+    self
+      .schema
+      .default
+      .clone()
+      .or_else(|| self.schema.const_value.clone())
+      .or_else(|| {
+        if self.schema.enum_values.len() == 1 {
+          self.schema.enum_values.first().cloned()
+        } else {
+          None
+        }
+      })
+  }
+
+  pub(crate) fn extract_all_validation(&self) -> Vec<ValidationAttribute> {
+    let mut attrs = self.extract_validation_attrs();
+    if let Some(regex) = self.extract_regex_validation() {
+      attrs.push(regex);
+    }
+    attrs
+  }
+
+  /// Extracts validation attributes (Email, Url, Length, Range).
+  pub(crate) fn extract_validation_attrs(&self) -> Vec<ValidationAttribute> {
+    let mut attrs = vec![];
+
+    if let Some(ref format) = self.schema.format {
+      match format.as_str() {
+        "email" => attrs.push(ValidationAttribute::Email),
+        "uri" | "url" => attrs.push(ValidationAttribute::Url),
+        _ => {}
+      }
+    }
+
+    if self.schema.is_numeric()
+      && let Some(range_attr) = self.build_range_validation_attr()
     {
       attrs.push(range_attr);
     }
 
-    if is_single_schema_type(schema, SchemaType::String)
-      && schema.enum_values.is_empty()
-      && let Some(length_attr) = build_string_length_validation_attr(is_required, schema)
+    if self.schema.is_string()
+      && self.schema.enum_values.is_empty()
+      && let Some(length_attr) = self.build_string_length_validation_attr()
     {
       attrs.push(length_attr);
     }
 
-    if is_single_schema_type(schema, SchemaType::Array)
-      && let Some(length_attr) = build_array_length_validation_attr(schema)
+    if self.schema.is_array()
+      && let Some(length_attr) = self.build_array_length_validation_attr()
     {
       attrs.push(length_attr);
     }
+
+    attrs
   }
 
-  attrs
-}
-
-pub(crate) fn build_range_validation_attr(schema: &ObjectSchema, type_ref: &TypeRef) -> Option<ValidationAttribute> {
-  let exclusive_min = schema.exclusive_minimum.clone();
-  let exclusive_max = schema.exclusive_maximum.clone();
-  let min = schema.minimum.clone();
-  let max = schema.maximum.clone();
-
-  if exclusive_min.is_none() && exclusive_max.is_none() && min.is_none() && max.is_none() {
-    return None;
+  pub(crate) fn extract_regex_validation(&self) -> Option<ValidationAttribute> {
+    let pattern = self.extract_validation_pattern()?;
+    self
+      .filter_regex_validation(Some(pattern.clone()))
+      .map(ValidationAttribute::Regex)
   }
 
-  Some(ValidationAttribute::Range {
-    primitive: type_ref.base_type.clone(),
-    min,
-    max,
-    exclusive_min,
-    exclusive_max,
-  })
-}
+  pub(crate) fn extract_validation_pattern(&self) -> Option<&String> {
+    if !self.schema.is_string() {
+      return None;
+    }
 
-pub(crate) fn build_string_length_validation_attr(
-  is_required: bool,
-  schema: &ObjectSchema,
-) -> Option<ValidationAttribute> {
-  if let Some(format) = schema.format.as_ref()
-    && is_non_string_format(format)
-  {
-    return None;
+    let pattern = self.schema.pattern.as_ref()?;
+
+    if let Some(format) = self.schema.format.as_ref()
+      && Self::is_non_string_format(format)
+    {
+      return None;
+    }
+
+    if !self.schema.enum_values.is_empty() {
+      return None;
+    }
+
+    if Regex::new(pattern).is_err() {
+      eprintln!(
+        "Warning: Invalid regex pattern '{pattern}' for property '{}'",
+        self.prop_name
+      );
+      return None;
+    }
+
+    Some(pattern)
   }
 
-  build_length_attribute(schema.min_length, schema.max_length, is_required)
-}
+  /// Filters regex validation based on the Rust type.
+  ///
+  /// Certain Rust types (DateTime, Date, Time, Uuid) have their own validation
+  /// and should not have additional regex validation applied.
+  pub(crate) fn filter_regex_validation(&self, regex: Option<String>) -> Option<String> {
+    match &self.type_ref.base_type {
+      RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid => None,
+      _ => regex,
+    }
+  }
 
-pub(crate) fn build_array_length_validation_attr(schema: &ObjectSchema) -> Option<ValidationAttribute> {
-  build_length_attribute(schema.min_items, schema.max_items, false)
-}
+  pub(crate) fn is_non_string_format(format: &str) -> bool {
+    matches!(
+      format,
+      "date" | "date-time" | "duration" | "time" | "binary" | "byte" | "uuid"
+    )
+  }
 
-pub(crate) fn build_length_attribute(
-  min: Option<u64>,
-  max: Option<u64>,
-  is_required_non_empty: bool,
-) -> Option<ValidationAttribute> {
-  match (min, max) {
-    (Some(min), Some(max)) => Some(ValidationAttribute::Length {
-      min: Some(min),
-      max: Some(max),
-    }),
-    (Some(min), None) => Some(ValidationAttribute::Length {
-      min: Some(min),
-      max: None,
-    }),
-    (None, Some(max)) => Some(ValidationAttribute::Length {
-      min: None,
-      max: Some(max),
-    }),
-    (None, None) if is_required_non_empty => Some(ValidationAttribute::Length {
-      min: Some(1),
-      max: None,
-    }),
-    _ => None,
+  pub(crate) fn build_range_validation_attr(&self) -> Option<ValidationAttribute> {
+    let exclusive_min = self.schema.exclusive_minimum.clone();
+    let exclusive_max = self.schema.exclusive_maximum.clone();
+    let min = self.schema.minimum.clone();
+    let max = self.schema.maximum.clone();
+
+    if exclusive_min.is_none() && exclusive_max.is_none() && min.is_none() && max.is_none() {
+      return None;
+    }
+
+    Some(ValidationAttribute::Range {
+      primitive: self.type_ref.base_type.clone(),
+      min,
+      max,
+      exclusive_min,
+      exclusive_max,
+    })
+  }
+
+  pub(crate) fn build_string_length_validation_attr(&self) -> Option<ValidationAttribute> {
+    if let Some(format) = self.schema.format.as_ref()
+      && Self::is_non_string_format(format)
+    {
+      return None;
+    }
+
+    Self::build_length_attribute(self.schema.min_length, self.schema.max_length, self.is_required)
+  }
+
+  pub(crate) fn build_array_length_validation_attr(&self) -> Option<ValidationAttribute> {
+    Self::build_length_attribute(self.schema.min_items, self.schema.max_items, false)
+  }
+
+  pub(crate) fn build_length_attribute(
+    min: Option<u64>,
+    max: Option<u64>,
+    is_required_non_empty: bool,
+  ) -> Option<ValidationAttribute> {
+    match (min, max) {
+      (Some(min), Some(max)) => Some(ValidationAttribute::Length {
+        min: Some(min),
+        max: Some(max),
+      }),
+      (Some(min), None) => Some(ValidationAttribute::Length {
+        min: Some(min),
+        max: None,
+      }),
+      (None, Some(max)) => Some(ValidationAttribute::Length {
+        min: None,
+        max: Some(max),
+      }),
+      (None, None) if is_required_non_empty => Some(ValidationAttribute::Length {
+        min: Some(1),
+        max: None,
+      }),
+      _ => None,
+    }
   }
 }
