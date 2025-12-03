@@ -64,6 +64,10 @@ impl TypeRef {
     matches!(self.base_type, RustPrimitive::String) && !self.is_array
   }
 
+  pub fn unboxed_base_type_name(&self) -> String {
+    self.base_type.to_string()
+  }
+
   pub fn is_primitive_type(&self) -> bool {
     matches!(
       self.base_type,

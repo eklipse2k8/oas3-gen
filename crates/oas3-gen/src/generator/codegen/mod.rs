@@ -108,6 +108,7 @@ pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, v
     type_tokens.push(generate_type(ty, &regex_lookup, error_schemas, visibility));
   }
 
+  // TODO: Create a more general way to track imports needed by types
   let serde_use = match (needs_serialize, needs_deserialize) {
     (true, true) => quote! { use serde::{Deserialize, Serialize}; },
     (true, false) => quote! { use serde::Serialize; },

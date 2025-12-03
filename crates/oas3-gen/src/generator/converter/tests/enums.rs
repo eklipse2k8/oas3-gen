@@ -10,8 +10,8 @@ use serde_json::json;
 use crate::{
   generator::{
     ast::{
-      DeriveTrait, DerivesProvider, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType,
-      SerdeAttribute, TypeRef, VariantContent, VariantDef,
+      DeriveTrait, DerivesProvider, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken,
+      RustPrimitive, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
     },
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
@@ -943,7 +943,7 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       variant_name,
       wrapped_type,
     } => {
-      assert_eq!(variant_name, "Simple");
+      assert_eq!(variant_name, &EnumVariantToken::from("Simple"));
       assert_eq!(wrapped_type, "TestUnionSimple");
     }
     EnumMethodKind::ParameterizedConstructor { .. } => panic!("Expected SimpleConstructor"),
@@ -962,7 +962,7 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       param_name,
       param_type,
     } => {
-      assert_eq!(variant_name, "SingleParam");
+      assert_eq!(variant_name, &EnumVariantToken::from("SingleParam"));
       assert_eq!(wrapped_type, "TestUnionSingleParam");
       assert_eq!(param_name, "req_field");
       assert_eq!(param_type, "String");
@@ -1081,9 +1081,11 @@ fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
   };
 
   assert_eq!(enum_def.methods.len(), 2);
-  let names: Vec<_> = enum_def.methods.iter().map(|m| &m.name).collect();
-  assert!(names.contains(&&"active".to_string()));
-  assert!(names.contains(&&"active2".to_string()) || names.iter().any(|n| *n != "active"));
+  let names: Vec<_> = enum_def.methods.iter().map(|m| m.name.clone()).collect();
+  assert!(names.contains(&MethodNameToken::from("active")));
+  assert!(
+    names.contains(&MethodNameToken::from("active2")) || names.iter().any(|n| n != &MethodNameToken::from("active"))
+  );
 
   Ok(())
 }

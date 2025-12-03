@@ -416,10 +416,10 @@ fn test_enum_constructor_methods() {
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![EnumMethod {
-      name: "json".to_string(),
+      name: "json".into(),
       docs: vec!["Creates an empty JSON body.".to_string()],
       kind: EnumMethodKind::SimpleConstructor {
-        variant_name: "Json".to_string(),
+        variant_name: "Json".into(),
         wrapped_type: "JsonPayload".to_string(),
       },
     }],
@@ -454,10 +454,10 @@ fn test_enum_constructor_methods() {
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![EnumMethod {
-      name: "with_name".to_string(),
+      name: "with_name".into(),
       docs: vec!["Creates a request with the given name.".to_string()],
       kind: EnumMethodKind::ParameterizedConstructor {
-        variant_name: "Create".to_string(),
+        variant_name: "Create".into(),
         wrapped_type: "CreateParams".to_string(),
         param_name: "name".to_string(),
         param_type: "String".to_string(),

@@ -39,7 +39,7 @@ impl CreatePetsRequest {
     }
 }
 ///Response types for createPets
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum CreatePetsResponse {
     ///201: Null response
     Created,
@@ -91,7 +91,7 @@ impl ListPetsRequest {
     }
 }
 ///Response types for listPets
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum ListPetsResponse {
     ///200: A paged array of pets
     Ok(Pets),
@@ -139,7 +139,7 @@ impl ShowPetByIdRequest {
     }
 }
 ///Response types for showPetById
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum ShowPetByIdResponse {
     ///200: Expected response to a valid request
     Ok(Pet),

@@ -150,12 +150,11 @@ impl<'a> EnumGenerator<'a> {
           variant_name,
           wrapped_type,
         } => {
-          let variant = format_ident!("{}", variant_name);
           let type_name = coercion::parse_type_string(wrapped_type);
           quote! {
             #docs
             #vis fn #method_name() -> Self {
-              Self::#variant(#type_name::default())
+              Self::#variant_name(#type_name::default())
             }
           }
         }
@@ -165,14 +164,13 @@ impl<'a> EnumGenerator<'a> {
           param_name,
           param_type,
         } => {
-          let variant = format_ident!("{}", variant_name);
           let type_name = coercion::parse_type_string(wrapped_type);
-          let param_ident = format_ident!("{}", param_name);
+          let param_ident = format_ident!("{param_name}");
           let param_ty = coercion::parse_type_string(param_type);
           quote! {
             #docs
             #vis fn #method_name(#param_ident: #param_ty) -> Self {
-              Self::#variant(#type_name {
+              Self::#variant_name(#type_name {
                 #param_ident,
                 ..Default::default()
               })

@@ -39,7 +39,7 @@ pub enum SerdeMode {
 }
 
 /// Discriminated enum definition (uses macro for custom ser/de)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DiscriminatedEnumDef {
   pub name: EnumToken,
   pub docs: Vec<String>,
@@ -242,6 +242,17 @@ pub struct StructDef {
   pub serde_mode: SerdeMode,
 }
 
+impl StructDef {
+  #[must_use]
+  pub fn has_default(&self) -> bool {
+    self.derives().contains(&DeriveTrait::Default)
+  }
+
+  pub fn required_fields(&self) -> impl Iterator<Item = &FieldDef> {
+    self.fields.iter().filter(|f| f.is_required())
+  }
+}
+
 /// Associated method definition for a struct
 #[derive(Debug, Clone)]
 pub struct StructMethod {
@@ -282,19 +293,39 @@ pub enum PathSegment {
 /// Associated method definition for an enum
 #[derive(Debug, Clone)]
 pub struct EnumMethod {
-  pub name: String,
+  pub name: MethodNameToken,
   pub docs: Vec<String>,
   pub kind: EnumMethodKind,
+}
+
+impl EnumMethod {
+  pub fn new(name: impl Into<MethodNameToken>, variant_name: &EnumVariantToken, kind: EnumMethodKind) -> Self {
+    let docs = match &kind {
+      EnumMethodKind::SimpleConstructor { .. } => {
+        vec![format!("Creates a `{variant_name}` variant with default values.")]
+      }
+      EnumMethodKind::ParameterizedConstructor { param_name, .. } => {
+        vec![format!(
+          "Creates a `{variant_name}` variant with the specified `{param_name}`."
+        )]
+      }
+    };
+    Self {
+      name: name.into(),
+      docs,
+      kind,
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
 pub enum EnumMethodKind {
   SimpleConstructor {
-    variant_name: String,
+    variant_name: EnumVariantToken,
     wrapped_type: String,
   },
   ParameterizedConstructor {
-    variant_name: String,
+    variant_name: EnumVariantToken,
     wrapped_type: String,
     param_name: String,
     param_type: String,
@@ -316,6 +347,13 @@ pub struct FieldDef {
   pub parameter_location: Option<ParameterLocation>,
   pub deprecated: bool,
   pub multiple_of: Option<serde_json::Number>,
+}
+
+impl FieldDef {
+  #[must_use]
+  pub fn is_required(&self) -> bool {
+    self.default_value.is_none() && !self.rust_type.nullable
+  }
 }
 
 /// Rust enum definition
@@ -362,6 +400,16 @@ impl VariantDef {
       })
       .unwrap_or_else(|| self.name.to_string())
   }
+
+  #[must_use]
+  pub fn single_wrapped_type(&self) -> Option<&TypeRef> {
+    self.content.single_type()
+  }
+
+  #[must_use]
+  pub fn unboxed_type_name(&self) -> Option<String> {
+    self.content.single_type().map(TypeRef::unboxed_base_type_name)
+  }
 }
 
 /// Enum variant content (Unit, Tuple, or Struct)
@@ -378,6 +426,14 @@ impl VariantContent {
     match self {
       Self::Unit => None,
       Self::Tuple(types) => Some(types),
+    }
+  }
+
+  #[must_use]
+  pub fn single_type(&self) -> Option<&TypeRef> {
+    match self {
+      Self::Tuple(types) if types.len() == 1 => Some(&types[0]),
+      _ => None,
     }
   }
 }

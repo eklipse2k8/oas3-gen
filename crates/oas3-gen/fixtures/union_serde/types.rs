@@ -391,7 +391,7 @@ impl GetEventsRequest {
   }
 }
 ///Response types for getEvents
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum GetEventsResponse {
   ///200: Event stream
   Ok(EventList),
@@ -587,7 +587,7 @@ impl SendContentRequest {
 }
 pub type SendContentRequestBody = ContentRequest;
 ///Response types for sendContent
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum SendContentResponse {
   ///200: Success
   Ok(ContentResponse),
