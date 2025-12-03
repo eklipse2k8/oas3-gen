@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Context;
-use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::ObjectSchema;
 
 use super::{
   CodegenConfig,
@@ -198,7 +198,7 @@ impl EnumConverter {
         .resolve(self.graph.spec())
         .with_context(|| format!("Schema resolution failed for union variant {i}"))?;
 
-      if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null)) {
+      if resolved.is_null() {
         continue;
       }
 
@@ -318,8 +318,7 @@ impl EnumConverter {
     let schema_name = type_name.trim_start_matches("Box<").trim_end_matches('>');
     let schema = self.graph.get_schema(schema_name)?;
 
-    let is_object = schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::Object));
-    if !is_object && schema.properties.is_empty() {
+    if !schema.is_object() && schema.properties.is_empty() {
       return None;
     }
 

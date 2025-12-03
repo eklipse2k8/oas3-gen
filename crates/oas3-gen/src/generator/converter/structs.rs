@@ -278,8 +278,6 @@ impl StructConverter {
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
       serde_attrs,
-      outer_attrs: vec![],
-      methods: vec![],
       kind: StructKind::Schema,
       ..Default::default()
     }));

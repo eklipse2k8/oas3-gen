@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType};
 
 use crate::generator::{
   ast::{EnumVariantToken, VariantDef},
-  converter::hashing,
+  converter::{SchemaExt, hashing},
   naming::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
     identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, sanitize, split_pascal_case, to_rust_type_name},
@@ -160,9 +160,7 @@ fn build_common_variant_name(segments: &[String], prefix_len: usize, suffix_len:
 /// O(1) - field access only.
 #[must_use]
 fn is_freeform_string(schema: &ObjectSchema) -> bool {
-  schema.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
-    && schema.enum_values.is_empty()
-    && schema.const_value.is_none()
+  schema.is_string() && schema.enum_values.is_empty() && schema.const_value.is_none()
 }
 
 /// Returns true if schema has enum values or a const constraint.
@@ -394,28 +392,27 @@ pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
   if !schema.enum_values.is_empty() {
     return "Enum".to_string();
   }
-  if let Some(ref schema_type) = schema.schema_type {
-    match schema_type {
-      SchemaTypeSet::Single(typ) => match typ {
-        SchemaType::String => "String".to_string(),
-        SchemaType::Number => "Number".to_string(),
-        SchemaType::Integer => "Integer".to_string(),
-        SchemaType::Boolean => "Boolean".to_string(),
-        SchemaType::Array => "Array".to_string(),
-        SchemaType::Object => "Object".to_string(),
-        SchemaType::Null => "Null".to_string(),
-      },
-      SchemaTypeSet::Multiple(_) => "Mixed".to_string(),
-    }
-  } else {
-    let variants = if schema.one_of.is_empty() {
-      &schema.any_of
-    } else {
-      &schema.one_of
+  if let Some(typ) = schema.single_type() {
+    return match typ {
+      SchemaType::String => "String".to_string(),
+      SchemaType::Number => "Number".to_string(),
+      SchemaType::Integer => "Integer".to_string(),
+      SchemaType::Boolean => "Boolean".to_string(),
+      SchemaType::Array => "Array".to_string(),
+      SchemaType::Object => "Object".to_string(),
+      SchemaType::Null => "Null".to_string(),
     };
-
-    extract_common_variant_prefix(variants).map_or_else(|| format!("Variant{index}"), |c| c.name)
   }
+  if schema.schema_type.is_some() {
+    return "Mixed".to_string();
+  }
+  let variants = if schema.one_of.is_empty() {
+    &schema.any_of
+  } else {
+    &schema.one_of
+  };
+
+  extract_common_variant_prefix(variants).map_or_else(|| format!("Variant{index}"), |c| c.name)
 }
 
 /// Strips common PascalCase word segments from variant names to make them concise.

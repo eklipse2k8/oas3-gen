@@ -91,8 +91,26 @@ pub(crate) trait SchemaExt {
   /// Returns true if the schema is an array type.
   fn is_array(&self) -> bool;
 
+  /// Returns true if the schema is a string type.
+  fn is_string(&self) -> bool;
+
+  /// Returns true if the schema is an object type.
+  fn is_object(&self) -> bool;
+
+  /// Returns true if the schema is a numeric type (integer or number).
+  fn is_numeric(&self) -> bool;
+
+  /// Returns true if the schema is a nullable array type `[array, null]`.
+  fn is_nullable_array(&self) -> bool;
+
+  /// Returns true if the schema has exactly the single specified type.
+  fn is_single_type(&self, schema_type: SchemaType) -> bool;
+
   /// Returns the single `SchemaType` if exactly one is defined, None otherwise.
   fn single_type(&self) -> Option<SchemaType>;
+
+  /// Returns the non-null type from a two-type nullable set (e.g., `[string, null]` -> `string`).
+  fn non_null_type(&self) -> Option<SchemaType>;
 
   /// Returns true if the schema should be treated as an inline struct definition.
   /// This excludes refs, enums, unions, arrays, and primitives.
@@ -109,7 +127,7 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn is_null(&self) -> bool {
-    self.schema_type == Some(SchemaTypeSet::Single(SchemaType::Null))
+    self.is_single_type(SchemaType::Null)
   }
 
   fn is_nullable_object(&self) -> bool {
@@ -127,12 +145,52 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn is_array(&self) -> bool {
-    self.schema_type == Some(SchemaTypeSet::Single(SchemaType::Array))
+    self.is_single_type(SchemaType::Array)
+  }
+
+  fn is_string(&self) -> bool {
+    self.is_single_type(SchemaType::String)
+  }
+
+  fn is_object(&self) -> bool {
+    self.is_single_type(SchemaType::Object)
+  }
+
+  fn is_numeric(&self) -> bool {
+    matches!(
+      &self.schema_type,
+      Some(SchemaTypeSet::Single(SchemaType::Number | SchemaType::Integer))
+    )
+  }
+
+  fn is_nullable_array(&self) -> bool {
+    match &self.schema_type {
+      Some(SchemaTypeSet::Multiple(types)) => {
+        types.len() == 2 && types.contains(&SchemaType::Array) && types.contains(&SchemaType::Null)
+      }
+      _ => false,
+    }
+  }
+
+  fn is_single_type(&self, schema_type: SchemaType) -> bool {
+    matches!(
+      &self.schema_type,
+      Some(SchemaTypeSet::Single(t)) if *t == schema_type
+    )
   }
 
   fn single_type(&self) -> Option<SchemaType> {
     match &self.schema_type {
       Some(SchemaTypeSet::Single(t)) => Some(*t),
+      _ => None,
+    }
+  }
+
+  fn non_null_type(&self) -> Option<SchemaType> {
+    match &self.schema_type {
+      Some(SchemaTypeSet::Multiple(types)) if types.len() == 2 && types.contains(&SchemaType::Null) => {
+        types.iter().find(|t| **t != SchemaType::Null).copied()
+      }
       _ => None,
     }
   }

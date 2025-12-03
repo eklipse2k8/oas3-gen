@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::{Context, Result};
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType};
 
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
@@ -101,11 +101,14 @@ impl TypeResolver {
       return Ok(type_ref);
     }
 
-    if let Some(ref schema_type) = schema.schema_type {
-      return match schema_type {
-        SchemaTypeSet::Single(typ) => self.map_single_primitive_type(*typ, schema),
-        SchemaTypeSet::Multiple(types) => self.convert_nullable_primitive(types, schema),
-      };
+    if let Some(typ) = schema.single_type() {
+      return self.map_single_primitive_type(typ, schema);
+    }
+    if let Some(non_null) = schema.non_null_type() {
+      return Ok(self.map_single_primitive_type(non_null, schema)?.with_option());
+    }
+    if schema.schema_type.is_some() {
+      return Ok(TypeRef::new("serde_json::Value"));
     }
 
     Ok(TypeRef::new("serde_json::Value"))
@@ -525,17 +528,6 @@ impl TypeResolver {
       type_ref = type_ref.with_option();
     }
     Ok(type_ref)
-  }
-
-  fn convert_nullable_primitive(&self, types: &[SchemaType], schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
-    if types.len() == 2
-      && types.contains(&SchemaType::Null)
-      && let Some(non_null_type) = types.iter().find(|t| **t != SchemaType::Null)
-    {
-      let type_ref = self.map_single_primitive_type(*non_null_type, schema)?;
-      return Ok(type_ref.with_option());
-    }
-    Ok(TypeRef::new("serde_json::Value"))
   }
 
   fn convert_array_items(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {

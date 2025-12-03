@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
 
-use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::ObjectSchema;
 
-use super::{cache::SharedSchemaCache, metadata};
+use super::{SchemaExt, cache::SharedSchemaCache, metadata};
 use crate::generator::{
   ast::{EnumDef, EnumToken, EnumVariantToken, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef},
   naming::identifiers::{ensure_unique, to_rust_type_name},
@@ -48,9 +48,7 @@ impl<'a> StringEnumOptimizer<'a> {
   fn has_freeform_string(&self, schema: &ObjectSchema) -> bool {
     schema.any_of.iter().any(|s| {
       s.resolve(self.graph.spec()).ok().is_some_and(|resolved| {
-        resolved.const_value.is_none()
-          && resolved.enum_values.is_empty()
-          && resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::String))
+        resolved.const_value.is_none() && resolved.enum_values.is_empty() && resolved.is_string()
       })
     })
   }
@@ -75,7 +73,7 @@ impl<'a> StringEnumOptimizer<'a> {
         continue;
       }
 
-      if resolved.schema_type == Some(SchemaTypeSet::Single(SchemaType::String)) {
+      if resolved.is_string() {
         for enum_value in &resolved.enum_values {
           if let Some(str_val) = enum_value.as_str()
             && seen_values.insert(str_val.to_string())
@@ -170,11 +168,7 @@ impl<'a> StringEnumOptimizer<'a> {
       name: EnumToken::new(name),
       docs: vec!["Known values for the string enum.".to_string()],
       variants,
-      discriminator: None,
-      serde_attrs: vec![],
-      outer_attrs: vec![],
       case_insensitive: self.case_insensitive,
-      methods: vec![],
       ..Default::default()
     })
   }
@@ -201,11 +195,8 @@ impl<'a> StringEnumOptimizer<'a> {
       name: EnumToken::new(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
       variants,
-      discriminator: None,
       serde_attrs: vec![SerdeAttribute::Untagged],
-      outer_attrs: vec![],
       case_insensitive: false,
-      methods: vec![],
       ..Default::default()
     })
   }

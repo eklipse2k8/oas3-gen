@@ -139,6 +139,17 @@ impl SchemaConverter {
         .finalize_struct_types(name, schema, result.result, result.inline_types);
     }
 
+    if let Some(output) = self.try_convert_array_type_alias_with_union_items(name, schema, cache)? {
+      let alias = RustType::TypeAlias(TypeAliasDef {
+        name: TypeAliasToken::from_raw(name),
+        docs: metadata::extract_docs(schema.description.as_ref()),
+        target: output.result,
+      });
+      let mut result = vec![alias];
+      result.extend(output.inline_types);
+      return Ok(result);
+    }
+
     let type_ref = self.type_resolver.schema_to_type_ref(schema)?;
     let alias = RustType::TypeAlias(TypeAliasDef {
       name: TypeAliasToken::from_raw(name),
@@ -179,6 +190,31 @@ impl SchemaConverter {
   /// Checks if a name corresponds to a known schema in the graph.
   pub(crate) fn is_schema_name(&self, name: &str) -> bool {
     self.cached_schema_names.contains(name)
+  }
+
+  fn try_convert_array_type_alias_with_union_items(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> anyhow::Result<Option<ConversionOutput<TypeRef>>> {
+    if !schema.is_array() && !schema.is_nullable_array() {
+      return Ok(None);
+    }
+
+    if let Some(output) = self
+      .type_resolver
+      .try_convert_array_with_union_items(name, schema, cache)?
+    {
+      let type_ref = if schema.is_nullable_array() {
+        output.result.with_option()
+      } else {
+        output.result
+      };
+      return Ok(Some(ConversionOutput::with_inline_types(type_ref, output.inline_types)));
+    }
+
+    Ok(None)
   }
 }
 

@@ -254,7 +254,7 @@ impl StructDef {
 }
 
 /// Associated method definition for a struct
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StructMethod {
   pub name: MethodNameToken,
   pub docs: Vec<String>,
@@ -282,6 +282,15 @@ pub enum StructMethodKind {
     response_enum: EnumToken,
     variants: Vec<ResponseVariant>,
   },
+}
+
+impl Default for StructMethodKind {
+  fn default() -> Self {
+    Self::RenderPath {
+      segments: vec![],
+      query_params: vec![],
+    }
+  }
 }
 
 #[derive(Debug, Clone)]

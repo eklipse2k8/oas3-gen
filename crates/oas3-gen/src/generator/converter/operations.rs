@@ -477,11 +477,9 @@ impl<'a> OperationConverter<'a> {
     let schema = schema_ref.resolve(self.spec)?;
     let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
     let is_required = param.required.unwrap_or(false);
-    let mut validation = metadata::extract_validation_attrs(is_required, &schema, &type_ref);
-    if let Some(regex_attr) = ValidationAttribute::extract_regex_if_applicable(&param.name, &schema, &type_ref) {
-      validation.push(regex_attr);
-    }
-    let default = metadata::extract_default_value(&schema);
+    let extractor = metadata::MetadataExtractor::new(&param.name, is_required, &schema, &type_ref);
+    let validation = extractor.extract_all_validation();
+    let default = extractor.extract_default_value();
 
     Ok((type_ref, validation, default))
   }
