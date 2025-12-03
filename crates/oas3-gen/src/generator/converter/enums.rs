@@ -7,14 +7,8 @@ use anyhow::Context;
 use oas3::spec::ObjectSchema;
 
 use super::{
-  CodegenConfig,
-  cache::SharedSchemaCache,
-  common::SchemaExt,
-  field_optionality::FieldOptionalityPolicy,
-  metadata,
-  string_enum_optimizer::StringEnumOptimizer,
-  structs::{SchemaMerger, StructConverter},
-  type_resolver::TypeResolver,
+  CodegenConfig, cache::SharedSchemaCache, common::SchemaExt, field_optionality::FieldOptionalityPolicy, metadata,
+  string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
@@ -57,7 +51,7 @@ pub(crate) struct EnumConverter {
 impl EnumConverter {
   /// Creates a new EnumConverter instance.
   pub(crate) fn new(graph: &Arc<SchemaRegistry>, type_resolver: TypeResolver, config: CodegenConfig) -> Self {
-    let struct_converter = StructConverter::new(graph.clone(), config, None, FieldOptionalityPolicy::standard());
+    let struct_converter = StructConverter::new(graph, config, None, FieldOptionalityPolicy::standard());
     Self {
       graph: graph.clone(),
       type_resolver,
@@ -255,8 +249,7 @@ impl EnumConverter {
       .iter()
       .filter_map(|v| {
         let type_ref = v.single_wrapped_type()?;
-        let type_name = type_ref.to_rust_type();
-        let method_kind = self.get_method_kind_for_type(&type_name, &v.name, &struct_map, cache.as_deref_mut())?;
+        let method_kind = self.get_method_kind_for_type(type_ref, &v.name, &struct_map, cache.as_deref_mut())?;
         Some((v.name.clone(), method_kind))
       })
       .collect();
@@ -282,19 +275,20 @@ impl EnumConverter {
 
   fn get_method_kind_for_type(
     &self,
-    type_name: &str,
+    type_ref: &TypeRef,
     variant_name: &EnumVariantToken,
     struct_map: &BTreeMap<String, &StructDef>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> Option<EnumMethodKind> {
-    let struct_def = if let Some(&s) = struct_map.get(type_name) {
+    let base_name = type_ref.unboxed_base_type_name();
+    let struct_def = if let Some(&s) = struct_map.get(&base_name) {
       Some(s.clone())
     } else {
-      self.lookup_struct_def(type_name, cache)
+      self.lookup_struct_def(type_ref, cache)
     };
 
     let s = struct_def.as_ref()?;
-    if !s.has_default() {
+    if !s.has_default() || type_ref.is_array {
       return None;
     }
 
@@ -302,21 +296,21 @@ impl EnumConverter {
     match required.len() {
       0 => Some(EnumMethodKind::SimpleConstructor {
         variant_name: variant_name.clone(),
-        wrapped_type: type_name.to_string(),
+        wrapped_type: type_ref.clone(),
       }),
       1 => Some(EnumMethodKind::ParameterizedConstructor {
         variant_name: variant_name.clone(),
-        wrapped_type: type_name.to_string(),
+        wrapped_type: type_ref.clone(),
         param_name: required[0].name.to_string(),
-        param_type: required[0].rust_type.to_rust_type(),
+        param_type: required[0].rust_type.clone(),
       }),
       _ => None,
     }
   }
 
-  fn lookup_struct_def(&self, type_name: &str, cache: Option<&mut SharedSchemaCache>) -> Option<StructDef> {
-    let schema_name = type_name.trim_start_matches("Box<").trim_end_matches('>');
-    let schema = self.graph.get_schema(schema_name)?;
+  fn lookup_struct_def(&self, type_ref: &TypeRef, cache: Option<&mut SharedSchemaCache>) -> Option<StructDef> {
+    let schema_name = type_ref.unboxed_base_type_name();
+    let schema = self.graph.get_schema(&schema_name)?;
 
     if !schema.is_object() && schema.properties.is_empty() {
       return None;
@@ -324,7 +318,7 @@ impl EnumConverter {
 
     let struct_result = self
       .struct_converter
-      .convert_struct(schema_name, schema, None, cache)
+      .convert_struct(&schema_name, schema, None, cache)
       .ok()?;
     match struct_result.result {
       RustType::Struct(s) => Some(s),
@@ -368,8 +362,7 @@ impl EnumConverter {
   ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
     let mut resolved_schema_merged = resolved_schema.clone();
     if !resolved_schema.all_of.is_empty() {
-      let merger = SchemaMerger::new(self.graph.clone());
-      resolved_schema_merged = merger.merge_all_of_schema(resolved_schema)?;
+      resolved_schema_merged = self.type_resolver.merge_all_of_schema(resolved_schema)?;
     }
     let resolved_schema = &resolved_schema_merged;
 
@@ -399,18 +392,17 @@ impl EnumConverter {
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
       let mut array_conversion = None;
       if resolved_schema.is_array() {
-        array_conversion = self.type_resolver.try_convert_array_with_union_items(
-          &variant_name,
-          resolved_schema,
-          cache.as_deref_mut(),
-        )?;
+        array_conversion =
+          self
+            .type_resolver
+            .resolve_nullable_array_union(&variant_name, resolved_schema, cache.as_deref_mut())?;
       }
 
       if let Some(conversion) = array_conversion {
         (VariantContent::Tuple(vec![conversion.result]), conversion.inline_types)
       } else if !resolved_schema.one_of.is_empty() || !resolved_schema.any_of.is_empty() {
         let uses_one_of = !resolved_schema.one_of.is_empty();
-        let result = self.type_resolver.convert_inline_union_type(
+        let result = self.type_resolver.resolve_inline_union_type(
           enum_name,
           &variant_name,
           resolved_schema,
@@ -419,7 +411,7 @@ impl EnumConverter {
         )?;
         (VariantContent::Tuple(vec![result.result]), result.inline_types)
       } else {
-        let type_ref = self.type_resolver.schema_to_type_ref(resolved_schema)?;
+        let type_ref = self.type_resolver.resolve_type(resolved_schema)?;
         (VariantContent::Tuple(vec![type_ref]), vec![])
       }
     } else {
@@ -508,7 +500,7 @@ impl EnumConverter {
         Some(DiscriminatedVariant {
           discriminator_value: disc_value.clone(),
           variant_name: variant.name.to_string(),
-          type_name: type_ref.to_rust_type(),
+          type_name: type_ref.clone(),
         })
       })
       .collect()

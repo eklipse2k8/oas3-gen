@@ -112,7 +112,7 @@ impl<'a> StructGenerator<'a> {
           quote! {}
         };
 
-        let type_tokens = coercion::parse_type_string(&field.rust_type.to_rust_type());
+        let type_tokens = &field.rust_type;
 
         quote! {
           #(#extra_attrs)*
@@ -433,7 +433,7 @@ impl<'a> StructGenerator<'a> {
   }
 
   fn generate_data_expression(schema_type: &TypeRef, content_category: ContentCategory) -> TokenStream {
-    let type_token = coercion::parse_type_string(&schema_type.to_rust_type());
+    let type_token = schema_type;
 
     match content_category {
       ContentCategory::Text => {

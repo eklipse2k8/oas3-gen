@@ -115,6 +115,9 @@ pub(crate) trait SchemaExt {
   /// Returns true if the schema should be treated as an inline struct definition.
   /// This excludes refs, enums, unions, arrays, and primitives.
   fn is_inline_struct(&self, prop_schema_ref: &ObjectOrReference<ObjectSchema>) -> bool;
+
+  /// Returns true if the schema is a discriminated base type with a non-empty mapping.
+  fn is_discriminated_base_type(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -217,5 +220,14 @@ impl SchemaExt for ObjectSchema {
     }
 
     !self.properties.is_empty()
+  }
+
+  fn is_discriminated_base_type(&self) -> bool {
+    self
+      .discriminator
+      .as_ref()
+      .and_then(|d| d.mapping.as_ref().map(|m| !m.is_empty()))
+      .unwrap_or(false)
+      && !self.properties.is_empty()
   }
 }

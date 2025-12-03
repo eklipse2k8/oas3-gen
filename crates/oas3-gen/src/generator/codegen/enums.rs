@@ -6,7 +6,6 @@ use super::{
   attributes::{
     generate_deprecated_attr, generate_derives_from_slice, generate_docs, generate_outer_attrs, generate_serde_attrs,
   },
-  coercion,
 };
 use crate::generator::ast::{
   DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeMode,
@@ -115,10 +114,7 @@ impl<'a> EnumGenerator<'a> {
         let deprecated_attr = generate_deprecated_attr(v.deprecated);
         let default_attr = (idx == 0).then(|| quote! { #[default] });
         let content = v.content.tuple_types().map(|types| {
-          let type_tokens: Vec<_> = types
-            .iter()
-            .map(|t| coercion::parse_type_string(&t.to_rust_type()))
-            .collect();
+          let type_tokens: Vec<_> = types.iter().map(|t| quote! { #t }).collect();
           quote! { ( #(#type_tokens),* ) }
         });
 
@@ -150,11 +146,13 @@ impl<'a> EnumGenerator<'a> {
           variant_name,
           wrapped_type,
         } => {
-          let type_name = coercion::parse_type_string(wrapped_type);
+          let inner_type = &wrapped_type.base_type;
+          let constructor = box_if_needed(wrapped_type.boxed, quote! { #inner_type::default() });
+
           quote! {
             #docs
             #vis fn #method_name() -> Self {
-              Self::#variant_name(#type_name::default())
+              Self::#variant_name(#constructor)
             }
           }
         }
@@ -164,16 +162,23 @@ impl<'a> EnumGenerator<'a> {
           param_name,
           param_type,
         } => {
-          let type_name = coercion::parse_type_string(wrapped_type);
+          let inner_type = &wrapped_type.base_type;
           let param_ident = format_ident!("{param_name}");
-          let param_ty = coercion::parse_type_string(param_type);
-          quote! {
-            #docs
-            #vis fn #method_name(#param_ident: #param_ty) -> Self {
-              Self::#variant_name(#type_name {
+
+          let constructor = box_if_needed(
+            wrapped_type.boxed,
+            quote! {
+              #inner_type {
                 #param_ident,
                 ..Default::default()
-              })
+              }
+            },
+          );
+
+          quote! {
+            #docs
+            #vis fn #method_name(#param_ident: #param_type) -> Self {
+              Self::#variant_name(#constructor)
             }
           }
         }
@@ -323,7 +328,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       .all_variants()
       .map(|v| {
         let variant_name = format_ident!("{}", v.variant_name);
-        let type_name = coercion::parse_type_string(&v.type_name);
+        let type_name = &v.type_name;
         quote! { #variant_name(#type_name) }
       })
       .collect();
@@ -364,7 +369,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
 
     let name = &self.def.name;
     let variant_ident = format_ident!("{}", default_variant.variant_name);
-    let type_tokens = coercion::parse_type_string(&default_variant.type_name);
+    let type_tokens = &default_variant.type_name;
 
     quote! {
       impl Default for #name {
@@ -520,8 +525,7 @@ impl<'a> ResponseEnumGenerator<'a> {
         let variant_name = &v.variant_name;
         let doc_line = v.doc_line();
         let content = v.schema_type.as_ref().map(|schema| {
-          let type_token = coercion::parse_type_string(&schema.to_rust_type());
-          quote! { (#type_token) }
+          quote! { (#schema) }
         });
 
         quote! {
@@ -540,5 +544,13 @@ impl<'a> ResponseEnumGenerator<'a> {
         #(#variants),*
       }
     }
+  }
+}
+
+fn box_if_needed(boxed: bool, inner: TokenStream) -> TokenStream {
+  if boxed {
+    quote! { Box::new(#inner) }
+  } else {
+    inner
   }
 }

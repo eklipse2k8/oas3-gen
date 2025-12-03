@@ -81,7 +81,7 @@ fn test_title_resolution() {
     let graph = create_test_graph(BTreeMap::from([(schema_name, named_schema)]));
     let resolver = TypeResolver::new(&graph, default_config());
 
-    let result = resolver.schema_to_type_ref(&schema).unwrap();
+    let result = resolver.resolve_type(&schema).unwrap();
     assert_eq!(result.to_rust_type(), expected_type, "failed for case: {case_name}");
   }
 }
@@ -188,7 +188,7 @@ fn test_union_to_type_ref_conversion() {
   ];
 
   for (case_name, variants, expected_type) in cases {
-    let result = resolver.try_convert_union_to_type_ref(&variants).unwrap();
+    let result = resolver.resolve_union(&variants).unwrap();
     match expected_type {
       Some(expected) => {
         assert!(result.is_some(), "expected Some for case: {case_name}");
@@ -257,7 +257,7 @@ fn test_array_type_resolution() {
   ];
 
   for (case_name, schema, expected_type) in cases {
-    let result = resolver.schema_to_type_ref(&schema).unwrap();
+    let result = resolver.resolve_type(&schema).unwrap();
     assert_eq!(result.to_rust_type(), expected_type, "failed for case: {case_name}");
   }
 }
@@ -339,7 +339,7 @@ fn test_basic_type_resolution() {
   ];
 
   for (case_name, schema, expected_type) in cases {
-    let result = resolver.schema_to_type_ref(&schema).unwrap();
+    let result = resolver.resolve_type(&schema).unwrap();
     assert_eq!(result.to_rust_type(), expected_type, "failed for case: {case_name}");
   }
 }
@@ -422,7 +422,7 @@ fn test_array_with_union_items_inline_generation() {
   };
 
   let oneof_result = resolver
-    .resolve_property_type_with_inlines(
+    .resolve_property_type(
       "CreateMessageParams",
       "tools",
       &oneof_array_schema,
@@ -460,7 +460,7 @@ fn test_array_with_union_items_inline_generation() {
   }
 
   let anyof_result = resolver
-    .resolve_property_type_with_inlines(
+    .resolve_property_type(
       "Response",
       "items",
       &anyof_array_schema,
@@ -479,7 +479,7 @@ fn test_array_with_union_items_inline_generation() {
   );
 
   let ref_result = resolver
-    .resolve_property_type_with_inlines(
+    .resolve_property_type(
       "Parent",
       "items",
       &ref_array_schema,
@@ -525,7 +525,7 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
     },
   ];
 
-  let result = resolver.try_convert_union_to_type_ref(&multi_ref_variants).unwrap();
+  let result = resolver.resolve_union(&multi_ref_variants).unwrap();
   assert!(
     result.is_none(),
     "multi-ref oneOf should return None to trigger enum generation, got: {:?}",
@@ -544,7 +544,7 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
     }),
   ];
 
-  let result = resolver.try_convert_union_to_type_ref(&single_ref_with_null).unwrap();
+  let result = resolver.resolve_union(&single_ref_with_null).unwrap();
   assert!(result.is_some(), "single ref with null should collapse to Option<T>");
   assert_eq!(
     result.unwrap().to_rust_type(),
@@ -684,7 +684,7 @@ fn test_union_naming_with_common_suffix() {
   };
 
   let result = resolver
-    .resolve_property_type_with_inlines(
+    .resolve_property_type(
       "BetaResponse",
       "citation",
       &union_schema,
@@ -730,7 +730,7 @@ fn test_union_naming_without_common_suffix() {
   };
 
   let result = resolver
-    .resolve_property_type_with_inlines(
+    .resolve_property_type(
       "Request",
       "tool",
       &union_schema,
@@ -789,7 +789,7 @@ fn test_array_union_naming_with_common_suffix() {
   };
 
   let result = resolver
-    .resolve_property_type_with_inlines(
+    .resolve_property_type(
       "Stream",
       "events",
       &array_schema,

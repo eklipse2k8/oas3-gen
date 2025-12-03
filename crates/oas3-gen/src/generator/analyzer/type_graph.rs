@@ -62,10 +62,10 @@ impl TypeDependencyGraph {
 
   fn extract_from_discriminated_enum(def: &DiscriminatedEnumDef, deps: &mut BTreeSet<String>) {
     for variant in &def.variants {
-      deps.insert(variant.type_name.clone());
+      Self::extract_from_type_ref(&variant.type_name, deps);
     }
     if let Some(fallback) = &def.fallback {
-      deps.insert(fallback.type_name.clone());
+      Self::extract_from_type_ref(&fallback.type_name, deps);
     }
   }
 

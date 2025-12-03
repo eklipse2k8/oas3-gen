@@ -58,7 +58,7 @@ impl SchemaConverter {
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(graph.clone(), config, None, optionality_policy),
+      struct_converter: StructConverter::new(graph, config, None, optionality_policy),
       enum_converter: EnumConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
@@ -77,12 +77,7 @@ impl SchemaConverter {
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(
-        graph.clone(),
-        config,
-        Some(Arc::new(reachable_schemas)),
-        optionality_policy,
-      ),
+      struct_converter: StructConverter::new(graph, config, Some(Arc::new(reachable_schemas)), optionality_policy),
       enum_converter: EnumConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
@@ -150,7 +145,7 @@ impl SchemaConverter {
       return Ok(result);
     }
 
-    let type_ref = self.type_resolver.schema_to_type_ref(schema)?;
+    let type_ref = self.type_resolver.resolve_type(schema)?;
     let alias = RustType::TypeAlias(TypeAliasDef {
       name: TypeAliasToken::from_raw(name),
       docs: metadata::extract_docs(schema.description.as_ref()),
@@ -172,8 +167,8 @@ impl SchemaConverter {
   }
 
   /// Resolves a schema to a Rust type reference (e.g. `String`, `Vec<i32>`, `MyStruct`).
-  pub(crate) fn schema_to_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
-    self.type_resolver.schema_to_type_ref(schema)
+  pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
+    self.type_resolver.resolve_type(schema)
   }
 
   fn build_schema_name_cache(graph: &SchemaRegistry) -> HashSet<String> {
@@ -202,10 +197,7 @@ impl SchemaConverter {
       return Ok(None);
     }
 
-    if let Some(output) = self
-      .type_resolver
-      .try_convert_array_with_union_items(name, schema, cache)?
-    {
+    if let Some(output) = self.type_resolver.resolve_nullable_array_union(name, schema, cache)? {
       let type_ref = if schema.is_nullable_array() {
         output.result.with_option()
       } else {

@@ -26,7 +26,7 @@ pub use validation_attrs::{RegexKey, ValidationAttribute};
 pub struct DiscriminatedVariant {
   pub discriminator_value: String,
   pub variant_name: String,
-  pub type_name: String,
+  pub type_name: TypeRef,
 }
 
 /// Serde mode for discriminated enums
@@ -39,7 +39,8 @@ pub enum SerdeMode {
 }
 
 /// Discriminated enum definition (uses macro for custom ser/de)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Builder)]
+#[builder(default, setter(into))]
 pub struct DiscriminatedEnumDef {
   pub name: EnumToken,
   pub docs: Vec<String>,
@@ -331,13 +332,13 @@ impl EnumMethod {
 pub enum EnumMethodKind {
   SimpleConstructor {
     variant_name: EnumVariantToken,
-    wrapped_type: String,
+    wrapped_type: TypeRef,
   },
   ParameterizedConstructor {
     variant_name: EnumVariantToken,
-    wrapped_type: String,
+    wrapped_type: TypeRef,
     param_name: String,
-    param_type: String,
+    param_type: TypeRef,
   },
 }
 

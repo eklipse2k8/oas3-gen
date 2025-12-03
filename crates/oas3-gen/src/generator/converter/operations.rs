@@ -475,7 +475,7 @@ impl<'a> OperationConverter<'a> {
     };
 
     let schema = schema_ref.resolve(self.spec)?;
-    let type_ref = self.schema_converter.schema_to_type_ref(&schema)?;
+    let type_ref = self.schema_converter.resolve_type(&schema)?;
     let is_required = param.required.unwrap_or(false);
     let extractor = metadata::MetadataExtractor::new(&param.name, is_required, &schema, &type_ref);
     let validation = extractor.extract_all_validation();

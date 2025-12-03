@@ -1,12 +1,11 @@
 use std::{
-  cmp::Reverse,
   collections::{BTreeMap, BTreeSet, HashMap, HashSet},
   sync::Arc,
 };
 
 use anyhow::Context as _;
 use inflections::Inflect;
-use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema};
 use string_cache::DefaultAtom;
 
 use super::{
@@ -18,14 +17,14 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, EnumToken, FieldDef, FieldDefBuilder, RustType, SerdeAttribute,
-    SerdeMode, StructDef, StructKind, StructToken, TypeRef, tokens::FieldNameToken,
+    FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
+    tokens::FieldNameToken,
   },
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
     identifiers::{to_rust_field_name, to_rust_type_name},
   },
-  schema_registry::{ReferenceExtractor, SchemaRegistry},
+  schema_registry::SchemaRegistry,
 };
 
 const HIDDEN: &str = "#[doc(hidden)]";
@@ -55,30 +54,22 @@ pub(crate) struct DiscriminatorInfo {
 /// Converter for OpenAPI object schemas into Rust Structs.
 #[derive(Clone)]
 pub(crate) struct StructConverter {
-  graph: Arc<SchemaRegistry>,
   type_resolver: TypeResolver,
-  merger: SchemaMerger,
   field_processor: FieldProcessor,
-  discriminator_handler: DiscriminatorHandler,
 }
 
 impl StructConverter {
   pub(crate) fn new(
-    graph: Arc<SchemaRegistry>,
+    graph: &Arc<SchemaRegistry>,
     config: CodegenConfig,
     reachable_schemas: Option<Arc<BTreeSet<String>>>,
     optionality_policy: FieldOptionalityPolicy,
   ) -> Self {
-    let type_resolver = TypeResolver::new(&graph, config);
-    let merger = SchemaMerger::new(graph.clone());
-    let field_processor = FieldProcessor::new(graph.clone(), optionality_policy, type_resolver.clone());
-    let discriminator_handler = DiscriminatorHandler::new(graph.clone(), reachable_schemas);
+    let type_resolver = TypeResolver::new_with_filter(graph, config, reachable_schemas);
+    let field_processor = FieldProcessor::new(optionality_policy, type_resolver.clone());
     Self {
-      graph,
       type_resolver,
-      merger,
       field_processor,
-      discriminator_handler,
     }
   }
 
@@ -93,7 +84,7 @@ impl StructConverter {
     let num_properties = schema.properties.len();
     let required_set: std::collections::HashSet<&String> = schema.required.iter().collect();
 
-    let discriminator_mapping = schema_name.and_then(|name| self.graph.get_discriminator_mapping(name));
+    let discriminator_mapping = schema_name.and_then(|name| self.type_resolver.graph().get_discriminator_mapping(name));
 
     let mut fields = Vec::with_capacity(num_properties);
     let mut inline_types = vec![];
@@ -106,7 +97,7 @@ impl StructConverter {
       let is_required = required_set.contains(prop_name);
 
       let prop_schema = prop_schema_ref
-        .resolve(self.graph.spec())
+        .resolve(self.type_resolver.graph().spec())
         .with_context(|| format!("Schema resolution failed for property '{prop_name}'"))?;
 
       let cache_borrow = cache.as_deref_mut();
@@ -141,13 +132,13 @@ impl StructConverter {
     let mut merged_schema_cache = HashMap::new();
 
     if let Some(parent_schema) = self
-      .discriminator_handler
+      .type_resolver
       .detect_discriminated_parent(schema, &mut merged_schema_cache)
     {
       return self.convert_discriminated_child(name, schema, &parent_schema, &mut merged_schema_cache, cache);
     }
 
-    let merged_schema = self.merger.merge_all_of_schema(schema)?;
+    let merged_schema = self.type_resolver.merge_all_of_schema(schema)?;
     let result = self.convert_struct(name, &merged_schema, None, cache)?;
 
     self.finalize_struct_types(name, &merged_schema, result.result, result.inline_types)
@@ -167,7 +158,7 @@ impl StructConverter {
 
     self
       .type_resolver
-      .resolve_property_type_with_inlines(parent_name, prop_name, prop_schema, prop_schema_ref, cache)
+      .resolve_property_type(parent_name, prop_name, prop_schema, prop_schema_ref, cache)
   }
 
   fn generate_inline_struct(
@@ -197,7 +188,7 @@ impl StructConverter {
     kind: Option<StructKind>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<RustType>> {
-    let is_discriminated = is_discriminated_base_type(schema);
+    let is_discriminated = schema.is_discriminated_base_type();
     let struct_name = if is_discriminated {
       StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)))
     } else {
@@ -253,7 +244,9 @@ impl StructConverter {
     let merged_schema = if let Some(cached) = merged_schema_cache.get(&cache_key) {
       cached.clone()
     } else {
-      let new_merged = self.merger.merge_child_schema_with_parent(schema, parent_schema)?;
+      let new_merged = self
+        .type_resolver
+        .merge_child_schema_with_parent(schema, parent_schema)?;
       merged_schema_cache.insert(cache_key, new_merged.clone());
       new_merged
     };
@@ -294,7 +287,7 @@ impl StructConverter {
     main_type: RustType,
     mut inline_types: Vec<RustType>,
   ) -> anyhow::Result<Vec<RustType>> {
-    let is_discriminated = is_discriminated_base_type(schema);
+    let is_discriminated = schema.is_discriminated_base_type();
     let capacity = if is_discriminated { 2 } else { 1 } + inline_types.len();
     let mut all_types = Vec::with_capacity(capacity);
 
@@ -303,10 +296,9 @@ impl StructConverter {
         RustType::Struct(def) => def.name.clone(),
         _ => StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))),
       };
-      let discriminated_enum =
-        self
-          .discriminator_handler
-          .create_discriminated_enum(name, schema, base_struct_name.as_str())?;
+      let discriminated_enum = self
+        .type_resolver
+        .create_discriminated_enum(name, schema, base_struct_name.as_str())?;
       all_types.push(discriminated_enum);
     }
 
@@ -348,254 +340,14 @@ impl StructConverter {
 }
 
 #[derive(Clone)]
-pub(crate) struct SchemaMerger {
-  graph: Arc<SchemaRegistry>,
-}
-
-impl SchemaMerger {
-  pub(crate) fn new(graph: Arc<SchemaRegistry>) -> Self {
-    Self { graph }
-  }
-
-  pub(crate) fn merge_child_schema_with_parent(
-    &self,
-    child_schema: &ObjectSchema,
-    parent_schema: &ObjectSchema,
-  ) -> anyhow::Result<ObjectSchema> {
-    let mut merged_properties = BTreeMap::new();
-    let mut merged_required = BTreeSet::new();
-    let mut merged_discriminator = parent_schema.discriminator.clone();
-    let mut merged_schema_type = parent_schema.schema_type.clone();
-
-    self.collect_all_of_properties(
-      child_schema,
-      &mut merged_properties,
-      &mut merged_required,
-      &mut merged_discriminator,
-      &mut merged_schema_type,
-    )?;
-
-    let mut merged_schema = child_schema.clone();
-    merged_schema.properties = merged_properties;
-    merged_schema.required = merged_required.into_iter().collect();
-    merged_schema.discriminator = merged_discriminator;
-    merged_schema.schema_type = merged_schema_type;
-    merged_schema.all_of.clear();
-
-    if merged_schema.additional_properties.is_none() {
-      merged_schema
-        .additional_properties
-        .clone_from(&parent_schema.additional_properties);
-    }
-
-    Ok(merged_schema)
-  }
-
-  pub(crate) fn merge_all_of_schema(&self, schema: &ObjectSchema) -> anyhow::Result<ObjectSchema> {
-    let mut merged_properties = BTreeMap::new();
-    let mut merged_required = BTreeSet::new();
-    let mut merged_discriminator = None;
-    let mut merged_schema_type = None;
-
-    self.collect_all_of_properties(
-      schema,
-      &mut merged_properties,
-      &mut merged_required,
-      &mut merged_discriminator,
-      &mut merged_schema_type,
-    )?;
-
-    let mut merged_schema = schema.clone();
-    merged_schema.properties = merged_properties;
-    merged_schema.required = merged_required.into_iter().collect();
-    merged_schema.discriminator = merged_discriminator;
-    if merged_schema_type.is_some() {
-      merged_schema.schema_type = merged_schema_type;
-    }
-    merged_schema.all_of.clear();
-
-    Ok(merged_schema)
-  }
-
-  fn collect_all_of_properties(
-    &self,
-    schema: &ObjectSchema,
-    properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
-    required: &mut BTreeSet<String>,
-    discriminator: &mut Option<Discriminator>,
-    schema_type: &mut Option<SchemaTypeSet>,
-  ) -> anyhow::Result<()> {
-    for all_of_ref in &schema.all_of {
-      let all_of_schema = all_of_ref
-        .resolve(self.graph.spec())
-        .with_context(|| "Schema resolution failed for allOf item")?;
-      self.collect_all_of_properties(&all_of_schema, properties, required, discriminator, schema_type)?;
-    }
-
-    for (prop_name, prop_ref) in &schema.properties {
-      properties.insert(prop_name.clone(), prop_ref.clone());
-    }
-    required.extend(schema.required.iter().cloned());
-
-    if schema.discriminator.is_some() {
-      discriminator.clone_from(&schema.discriminator);
-    }
-
-    if schema.schema_type.is_some() {
-      schema_type.clone_from(&schema.schema_type);
-    }
-    Ok(())
-  }
-
-  fn get_merged_schema(
-    &self,
-    schema_name: &str,
-    schema: &ObjectSchema,
-    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
-  ) -> anyhow::Result<ObjectSchema> {
-    if let Some(cached) = merged_schema_cache.get(schema_name) {
-      return Ok(cached.clone());
-    }
-
-    let merged = self.merge_all_of_schema(schema)?;
-    merged_schema_cache.insert(schema_name.to_string(), merged.clone());
-    Ok(merged)
-  }
-}
-
-#[derive(Clone)]
-pub(crate) struct DiscriminatorHandler {
-  graph: Arc<SchemaRegistry>,
-  reachable_schemas: Option<Arc<BTreeSet<String>>>,
-  merger: SchemaMerger,
-}
-
-impl DiscriminatorHandler {
-  pub(crate) fn new(graph: Arc<SchemaRegistry>, reachable_schemas: Option<Arc<BTreeSet<String>>>) -> Self {
-    let merger = SchemaMerger::new(graph.clone());
-    Self {
-      graph,
-      reachable_schemas,
-      merger,
-    }
-  }
-
-  pub(crate) fn detect_discriminated_parent(
-    &self,
-    schema: &ObjectSchema,
-    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
-  ) -> Option<ObjectSchema> {
-    if schema.all_of.is_empty() {
-      return None;
-    }
-
-    schema.all_of.iter().find_map(|all_of_ref| {
-      let ObjectOrReference::Ref { ref_path, .. } = all_of_ref else {
-        return None;
-      };
-      let parent_name = SchemaRegistry::extract_ref_name(ref_path)?;
-      let parent_schema = self.graph.get_schema(&parent_name)?;
-
-      parent_schema.discriminator.as_ref()?;
-
-      let merged_parent = self
-        .merger
-        .get_merged_schema(&parent_name, parent_schema, merged_schema_cache)
-        .ok()?;
-      if is_discriminated_base_type(&merged_parent) {
-        Some(merged_parent)
-      } else {
-        None
-      }
-    })
-  }
-
-  pub(crate) fn create_discriminated_enum(
-    &self,
-    base_name: &str,
-    schema: &ObjectSchema,
-    base_struct_name: &str,
-  ) -> anyhow::Result<RustType> {
-    let Some(discriminator_field) = schema.discriminator.as_ref().map(|d| &d.property_name) else {
-      anyhow::bail!("Failed to find discriminator property for schema '{base_name}'");
-    };
-
-    let children = self.extract_discriminator_children(schema);
-    let enum_name = to_rust_type_name(base_name);
-
-    let mut variants = vec![];
-    for (disc_value, child_schema_name) in children {
-      let child_type_name = to_rust_type_name(&child_schema_name);
-      let variant_name = child_type_name
-        .strip_prefix(&enum_name)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-          let mut chars = s.chars();
-          match chars.next() {
-            None => String::new(),
-            Some(first) => first.to_uppercase().chain(chars).collect(),
-          }
-        })
-        .unwrap_or(child_type_name.clone());
-
-      variants.push(DiscriminatedVariant {
-        discriminator_value: disc_value,
-        variant_name,
-        type_name: format!("Box<{child_type_name}>"),
-      });
-    }
-
-    let base_variant_name = to_rust_type_name(base_name.split('.').next_back().unwrap_or(base_name));
-    let fallback = Some(DiscriminatedVariant {
-      discriminator_value: String::new(),
-      variant_name: base_variant_name,
-      type_name: format!("Box<{base_struct_name}>"),
-    });
-
-    Ok(RustType::DiscriminatedEnum(DiscriminatedEnumDef {
-      name: EnumToken::new(enum_name),
-      docs: metadata::extract_docs(schema.description.as_ref()),
-      discriminator_field: discriminator_field.clone(),
-      variants,
-      fallback,
-      serde_mode: SerdeMode::default(),
-    }))
-  }
-
-  fn extract_discriminator_children(&self, schema: &ObjectSchema) -> Vec<(String, String)> {
-    let Some(mapping) = schema.discriminator.as_ref().and_then(|d| d.mapping.as_ref()) else {
-      return vec![];
-    };
-
-    let mut children: Vec<_> = mapping
-      .iter()
-      .filter_map(|(val, ref_path)| SchemaRegistry::extract_ref_name(ref_path).map(|name| (val.clone(), name)))
-      .filter(|(_, name)| {
-        if let Some(filter) = &self.reachable_schemas {
-          filter.contains(name)
-        } else {
-          true
-        }
-      })
-      .collect();
-
-    let mut depth_memo = HashMap::new();
-    children.sort_by_key(|(_, name)| Reverse(compute_inheritance_depth(&self.graph, name, &mut depth_memo)));
-    children
-  }
-}
-
-#[derive(Clone)]
 pub(crate) struct FieldProcessor {
-  graph: Arc<SchemaRegistry>,
   optionality_policy: FieldOptionalityPolicy,
   type_resolver: TypeResolver,
 }
 
 impl FieldProcessor {
-  fn new(graph: Arc<SchemaRegistry>, optionality_policy: FieldOptionalityPolicy, type_resolver: TypeResolver) -> Self {
+  fn new(optionality_policy: FieldOptionalityPolicy, type_resolver: TypeResolver) -> Self {
     Self {
-      graph,
       optionality_policy,
       type_resolver,
     }
@@ -742,10 +494,10 @@ impl FieldProcessor {
         }
         Schema::Object(schema_ref) => {
           let additional_schema = schema_ref
-            .resolve(self.graph.spec())
+            .resolve(self.type_resolver.graph().spec())
             .with_context(|| "Schema resolution failed for additionalProperties")?;
 
-          let value_type = self.type_resolver.schema_to_type_ref(&additional_schema)?;
+          let value_type = self.type_resolver.resolve_type(&additional_schema)?;
           let map_type = TypeRef::new(format!(
             "std::collections::HashMap<String, {}>",
             value_type.to_rust_type()
@@ -766,38 +518,4 @@ impl FieldProcessor {
       additional_field,
     })
   }
-}
-
-fn is_discriminated_base_type(schema: &ObjectSchema) -> bool {
-  schema
-    .discriminator
-    .as_ref()
-    .and_then(|d| d.mapping.as_ref().map(|m| !m.is_empty()))
-    .unwrap_or(false)
-    && !schema.properties.is_empty()
-}
-
-fn compute_inheritance_depth(graph: &SchemaRegistry, schema_name: &str, memo: &mut HashMap<String, usize>) -> usize {
-  if let Some(&depth) = memo.get(schema_name) {
-    return depth;
-  }
-  let Some(schema) = graph.get_schema(schema_name) else {
-    return 0;
-  };
-
-  let depth = if schema.all_of.is_empty() {
-    0
-  } else {
-    schema
-      .all_of
-      .iter()
-      .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
-      .map(|parent| compute_inheritance_depth(graph, &parent, memo))
-      .max()
-      .unwrap_or(0)
-      + 1
-  };
-
-  memo.insert(schema_name.to_string(), depth);
-  depth
 }

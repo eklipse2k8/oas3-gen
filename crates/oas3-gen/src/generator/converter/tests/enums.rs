@@ -944,7 +944,7 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       wrapped_type,
     } => {
       assert_eq!(variant_name, &EnumVariantToken::from("Simple"));
-      assert_eq!(wrapped_type, "TestUnionSimple");
+      assert_eq!(wrapped_type.to_rust_type(), "TestUnionSimple");
     }
     EnumMethodKind::ParameterizedConstructor { .. } => panic!("Expected SimpleConstructor"),
   }
@@ -963,9 +963,9 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       param_type,
     } => {
       assert_eq!(variant_name, &EnumVariantToken::from("SingleParam"));
-      assert_eq!(wrapped_type, "TestUnionSingleParam");
+      assert_eq!(wrapped_type.to_rust_type(), "TestUnionSingleParam");
       assert_eq!(param_name, "req_field");
-      assert_eq!(param_type, "String");
+      assert_eq!(param_type.to_rust_type(), "String");
     }
     EnumMethodKind::SimpleConstructor { .. } => panic!("Expected ParameterizedConstructor"),
   }

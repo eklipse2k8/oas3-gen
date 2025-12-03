@@ -420,7 +420,7 @@ fn test_enum_constructor_methods() {
       docs: vec!["Creates an empty JSON body.".to_string()],
       kind: EnumMethodKind::SimpleConstructor {
         variant_name: "Json".into(),
-        wrapped_type: "JsonPayload".to_string(),
+        wrapped_type: TypeRef::new("JsonPayload"),
       },
     }],
     ..Default::default()
@@ -458,9 +458,9 @@ fn test_enum_constructor_methods() {
       docs: vec!["Creates a request with the given name.".to_string()],
       kind: EnumMethodKind::ParameterizedConstructor {
         variant_name: "Create".into(),
-        wrapped_type: "CreateParams".to_string(),
+        wrapped_type: TypeRef::new("CreateParams"),
         param_name: "name".to_string(),
-        param_type: "String".to_string(),
+        param_type: TypeRef::new("String"),
       },
     }],
     ..Default::default()
@@ -489,12 +489,12 @@ fn test_discriminated_enum() {
       DiscriminatedVariant {
         discriminator_value: "dog".to_string(),
         variant_name: "Dog".to_string(),
-        type_name: "DogData".to_string(),
+        type_name: TypeRef::new("DogData"),
       },
       DiscriminatedVariant {
         discriminator_value: "cat".to_string(),
         variant_name: "Cat".to_string(),
-        type_name: "CatData".to_string(),
+        type_name: TypeRef::new("CatData"),
       },
     ],
     fallback: None,
@@ -542,12 +542,12 @@ fn test_discriminated_enum() {
     variants: vec![DiscriminatedVariant {
       discriminator_value: "text".to_string(),
       variant_name: "Text".to_string(),
-      type_name: "TextMessage".to_string(),
+      type_name: TypeRef::new("TextMessage"),
     }],
     fallback: Some(DiscriminatedVariant {
       discriminator_value: String::new(),
       variant_name: "Unknown".to_string(),
-      type_name: "serde_json::Value".to_string(),
+      type_name: TypeRef::new("serde_json::Value"),
     }),
     serde_mode: SerdeMode::Both,
   };
@@ -584,7 +584,7 @@ fn test_discriminated_enum_serialize_only() {
     variants: vec![DiscriminatedVariant {
       discriminator_value: "create".to_string(),
       variant_name: "Create".to_string(),
-      type_name: "CreateRequest".to_string(),
+      type_name: TypeRef::new("CreateRequest"),
     }],
     fallback: None,
     serde_mode: SerdeMode::SerializeOnly,
@@ -612,7 +612,7 @@ fn test_discriminated_enum_deserialize_only() {
     variants: vec![DiscriminatedVariant {
       discriminator_value: "success".to_string(),
       variant_name: "Success".to_string(),
-      type_name: "SuccessResponse".to_string(),
+      type_name: TypeRef::new("SuccessResponse"),
     }],
     fallback: None,
     serde_mode: SerdeMode::DeserializeOnly,
