@@ -1025,8 +1025,7 @@ dependencies = [
 [[package]]
 name = "oas3"
 version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16f67c885c7b19aaf652e84102035258ecb4e0425a4f71037e187798e367bd87"
+source = "git+https://github.com/eklipse2k8/oas3-rs.git?branch=fix%2Fcallback-references#89051aab14f2d08f3bd2d93859b3232116e8e5ed"
 dependencies = [
  "derive_more",
  "http",
