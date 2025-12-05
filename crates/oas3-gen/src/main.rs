@@ -62,5 +62,6 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 #[path = "../fixtures"]
 mod fixtures {
+  pub mod all_the_components;
   pub mod union_serde;
 }

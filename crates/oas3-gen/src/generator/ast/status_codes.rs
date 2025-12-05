@@ -4,7 +4,7 @@ use oas3::spec::Response;
 
 use crate::generator::{ast::EnumVariantToken, naming::identifiers::to_rust_type_name};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum StatusCodeToken {
   Ok200,
   Created201,
@@ -34,6 +34,7 @@ pub enum StatusCodeToken {
   Redirection3XX,
   ClientError4XX,
   ServerError5XX,
+  #[default]
   Default,
   Unknown(u16),
 }

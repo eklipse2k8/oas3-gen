@@ -177,8 +177,8 @@ fn test_content_types_generation() {
 
   let content_type_checks = [
     ("json_with_diagnostics", "JSON handling for application/json"),
-    ("req.text().await?", "text handling for text/plain"),
-    ("req.bytes().await?", "binary handling for image/png"),
+    ("response.text().await?", "text handling for text/plain"),
+    ("response.bytes().await?", "binary handling for image/png"),
   ];
   for (expected, context) in content_type_checks {
     assert!(code.contains(expected), "missing {context}");

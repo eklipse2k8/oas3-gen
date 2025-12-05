@@ -186,6 +186,9 @@ impl<'a> GenerateLogger<'a> {
     }
     self.stat("", format!("{} type aliases", stats.type_aliases_generated));
     self.stat("Operations converted:", stats.operations_converted.to_string());
+    if stats.links_generated > 0 {
+      self.stat("Links generated:", stats.links_generated.to_string());
+    }
   }
 
   fn print_client_stats(&self, stats: &GenerationStats) {

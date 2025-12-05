@@ -705,7 +705,8 @@ mod tests {
       .body(event_json)
       .unwrap();
     let reqwest_response = reqwest::Response::from(mock_response);
-    let result = GetEventsRequest::parse_response(reqwest_response).await.unwrap();
+    let request = GetEventsRequest::default();
+    let result = request.parse_response(reqwest_response).await.unwrap();
     let GetEventsResponse::Ok(list) = result else {
       panic!("Expected Ok response, got {result:?}");
     };
@@ -723,7 +724,8 @@ mod tests {
       .body(content_json)
       .unwrap();
     let reqwest_response = reqwest::Response::from(mock_response);
-    let result = SendContentRequest::parse_response(reqwest_response).await.unwrap();
+    let request = SendContentRequest::default();
+    let result = request.parse_response(reqwest_response).await.unwrap();
     let SendContentResponse::Ok(resp) = result else {
       panic!("Expected Ok response, got {result:?}");
     };

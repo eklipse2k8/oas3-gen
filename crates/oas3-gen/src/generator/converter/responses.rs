@@ -1,13 +1,16 @@
+use std::collections::BTreeSet;
+
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, Operation, Response},
+  spec::{ObjectOrReference, ObjectSchema, Operation, Response},
 };
 
-use super::{SchemaConverter, cache::SharedSchemaCache};
+use super::{SchemaConverter, cache::SharedSchemaCache, links::LinkConverter};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant, RustPrimitive,
-    StatusCodeToken, StructKind, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
+    ContentCategory, EnumToken, EnumVariantToken, MethodNameToken, ResolvedLink, ResponseEnumDef, ResponseVariant,
+    ResponseVariantLinks, RustPrimitive, StatusCodeToken, StructKind, StructMethod, StructMethodKind, StructToken,
+    TypeRef, status_code_to_variant_name,
   },
   naming::{
     constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
@@ -27,6 +30,7 @@ pub(crate) fn build_response_enum(
 ) -> Option<ResponseEnumDef> {
   let responses = operation.responses.as_ref()?;
 
+  let link_converter = LinkConverter::new(spec);
   let mut variants = vec![];
   let base_name = to_rust_type_name(name);
 
@@ -42,12 +46,39 @@ pub(crate) fn build_response_enum(
         .ok()
         .unwrap_or((None, ContentCategory::Json));
 
+    let link_defs = link_converter.extract_links_from_response(&response);
+
+    let links = if link_defs.is_empty() {
+      None
+    } else {
+      let links_struct_name = format!("{base_name}{variant_name}Links");
+      let resolved_links: Vec<ResolvedLink> = link_defs
+        .iter()
+        .map(|link_def| {
+          let target_request_name = format!("{}Request", to_rust_type_name(&link_def.target_operation_id));
+          ResolvedLink {
+            link_def: link_def.clone(),
+            target_request_type: StructToken::from_raw(&target_request_name),
+          }
+        })
+        .collect();
+
+      let response_body_fields = extract_response_body_fields(spec, &response);
+
+      Some(ResponseVariantLinks {
+        links_struct_name: StructToken::from_raw(&links_struct_name),
+        resolved_links,
+        response_body_fields,
+      })
+    };
+
     variants.push(ResponseVariant {
       status_code,
       variant_name,
       description: response.description.clone(),
       schema_type,
       content_category,
+      links,
     });
   }
 
@@ -63,6 +94,7 @@ pub(crate) fn build_response_enum(
       description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
       schema_type: None,
       content_category: ContentCategory::Json,
+      links: None,
     });
   }
 
@@ -143,4 +175,42 @@ pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &
     },
     attrs: vec![],
   }
+}
+
+fn extract_response_body_fields(spec: &Spec, response: &Response) -> BTreeSet<String> {
+  let Some((_, media_type)) = response.content.iter().next() else {
+    return BTreeSet::new();
+  };
+
+  let Some(schema_ref) = media_type.schema.as_ref() else {
+    return BTreeSet::new();
+  };
+
+  match schema_ref {
+    ObjectOrReference::Ref { ref_path, .. } => extract_fields_from_ref(spec, ref_path),
+    ObjectOrReference::Object(inline_schema) => extract_fields_from_schema(inline_schema),
+  }
+}
+
+fn extract_fields_from_ref(spec: &Spec, ref_path: &str) -> BTreeSet<String> {
+  let Some(name) = ref_path.strip_prefix("#/components/schemas/") else {
+    return BTreeSet::new();
+  };
+
+  let Some(components) = &spec.components else {
+    return BTreeSet::new();
+  };
+
+  let Some(schema_ref) = components.schemas.get(name) else {
+    return BTreeSet::new();
+  };
+
+  match schema_ref {
+    ObjectOrReference::Object(schema) => extract_fields_from_schema(schema),
+    ObjectOrReference::Ref { .. } => BTreeSet::new(),
+  }
+}
+
+fn extract_fields_from_schema(schema: &ObjectSchema) -> BTreeSet<String> {
+  schema.properties.keys().cloned().collect()
 }

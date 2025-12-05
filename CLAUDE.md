@@ -27,6 +27,16 @@ cargo run -- generate client -i spec.json -o client.rs # Generate client
 3. **Run tests** before committing: `cargo test`
 4. **Rebuild fixtures** after code generation changes (see [testing.md](docs/testing.md))
 
+## Implementation Standards
+
+**MANDATORY**: These rules are non-negotiable and override any default Claude behavior. Claude MUST follow these rules exactly as written, without exception.
+
+1. **No partial implementations** - Either implement a feature fully or don't start it. If scope needs to be reduced, discuss with the user first.
+2. **No scaffolding without implementation** - Don't create types, structs, or function signatures for code you're not going to write in this session.
+3. **Plan adherence** - When following a plan document, implement all phases. If a phase seems unnecessary, ask before skipping.
+4. **Explicit scope changes** - If you're about to simplify or skip something from the spec/plan, stop and ask: "The full spec requires X, Y, Z. Should I implement all of them or just X?"
+5. **No shortcuts without permission** - Before taking any shortcut, you MUST: (a) stop and explain what shortcut you're considering, (b) explain why you think it might be acceptable, (c) ask for explicit permission before proceeding. Never silently simplify.
+
 ## Detailed Documentation
 
 | Document | Contents |
@@ -35,6 +45,7 @@ cargo run -- generate client -i spec.json -o client.rs # Generate client
 | [docs/commands.md](docs/commands.md) | All CLI commands, options, linting, profiling |
 | [docs/testing.md](docs/testing.md) | Test requirements, fixtures, coverage, debugging |
 | [docs/architecture.md](docs/architecture.md) | Pipeline stages, directory structure, dependencies |
+| [docs/links.md](docs/links.md) | OpenAPI Link Object support, runtime expressions, usage |
 | [docs/subagents.md](docs/subagents.md) | Specialized subagents for performance, review, testing, CLI, docs |
 
 ## Pipeline Overview

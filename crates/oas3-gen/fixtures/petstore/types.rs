@@ -26,14 +26,17 @@ impl CreatePetsRequest {
     }
     ///Parse the HTTP response into the response enum.
     pub async fn parse_response(
-        req: reqwest::Response,
+        self,
+        response: reqwest::Response,
     ) -> anyhow::Result<CreatePetsResponse> {
-        let status = req.status();
+        let status = response.status();
         if status.is_success() {
-            let _ = req.bytes().await?;
+            let _ = response.bytes().await?;
             return Ok(CreatePetsResponse::Created);
         }
-        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req)
+        let data = oas3_gen_support::Diagnostics::<
+            Error,
+        >::json_with_diagnostics(response)
             .await?;
         Ok(CreatePetsResponse::Unknown(data))
     }
@@ -77,15 +80,20 @@ impl ListPetsRequest {
     }
     ///Parse the HTTP response into the response enum.
     pub async fn parse_response(
-        req: reqwest::Response,
+        self,
+        response: reqwest::Response,
     ) -> anyhow::Result<ListPetsResponse> {
-        let status = req.status();
+        let status = response.status();
         if status.is_success() {
-            let data = oas3_gen_support::Diagnostics::<Pets>::json_with_diagnostics(req)
+            let data = oas3_gen_support::Diagnostics::<
+                Pets,
+            >::json_with_diagnostics(response)
                 .await?;
             return Ok(ListPetsResponse::Ok(data));
         }
-        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req)
+        let data = oas3_gen_support::Diagnostics::<
+            Error,
+        >::json_with_diagnostics(response)
             .await?;
         Ok(ListPetsResponse::Unknown(data))
     }
@@ -125,15 +133,20 @@ impl ShowPetByIdRequest {
     }
     ///Parse the HTTP response into the response enum.
     pub async fn parse_response(
-        req: reqwest::Response,
+        self,
+        response: reqwest::Response,
     ) -> anyhow::Result<ShowPetByIdResponse> {
-        let status = req.status();
+        let status = response.status();
         if status.is_success() {
-            let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req)
+            let data = oas3_gen_support::Diagnostics::<
+                Pet,
+            >::json_with_diagnostics(response)
                 .await?;
             return Ok(ShowPetByIdResponse::Ok(data));
         }
-        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req)
+        let data = oas3_gen_support::Diagnostics::<
+            Error,
+        >::json_with_diagnostics(response)
             .await?;
         Ok(ShowPetByIdResponse::Unknown(data))
     }

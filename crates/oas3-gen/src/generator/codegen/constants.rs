@@ -5,7 +5,7 @@ use quote::quote;
 
 use crate::generator::ast::{
   RegexKey, RustType, ValidationAttribute,
-  tokens::{ConstToken, HeaderToken},
+  tokens::{ConstToken, HeaderToken, LinkServerToken},
 };
 
 pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTreeMap<RegexKey, ConstToken>) {
@@ -69,6 +69,27 @@ pub(crate) fn generate_header_constants(headers: &[HeaderToken]) -> TokenStream 
       let header_name = &header.header_name;
       quote! {
         pub const #const_token: http::HeaderName = http::HeaderName::from_static(#header_name);
+      }
+    })
+    .collect();
+
+  quote! { #(#const_tokens)* }
+}
+
+pub(crate) fn generate_link_server_constants(servers: &[LinkServerToken]) -> TokenStream {
+  if servers.is_empty() {
+    return quote! {};
+  }
+
+  let const_tokens: Vec<TokenStream> = servers
+    .iter()
+    .map(|server| {
+      let const_token = &server.const_token;
+      let server_url = &server.server_url;
+      let doc = format!("Alternative server URL for the `{}` link.", server.link_name);
+      quote! {
+        #[doc = #doc]
+        pub const #const_token: &str = #server_url;
       }
     })
     .collect();

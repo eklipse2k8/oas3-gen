@@ -33,7 +33,9 @@ skip-tree = ["rustix"]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = [
+  "https://github.com/eklipse2k8/oas3-rs.git",
+]
 
 [sources.allow-org]
 github = []

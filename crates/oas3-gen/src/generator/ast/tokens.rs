@@ -252,6 +252,25 @@ impl From<&str> for HeaderToken {
   }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LinkServerToken {
+  pub const_token: ConstToken,
+  pub link_name: String,
+  pub server_url: String,
+}
+
+impl LinkServerToken {
+  #[must_use]
+  pub fn new(link_name: &str, server_url: &str) -> Self {
+    let const_name = format!("{link_name}_SERVER_URL");
+    Self {
+      const_token: ConstToken::from_raw(&const_name),
+      link_name: link_name.to_string(),
+      server_url: server_url.to_string(),
+    }
+  }
+}
+
 impl From<StructToken> for EnumToken {
   fn from(token: StructToken) -> Self {
     Self(token.to_atom())

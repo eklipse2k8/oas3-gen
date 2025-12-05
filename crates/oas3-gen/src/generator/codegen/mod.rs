@@ -6,6 +6,13 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use super::ast::{self, EnumToken, RustType, SerdeImpl};
+use crate::generator::{
+  ast::{RegexKey, ResponseEnumDef, tokens::ConstToken},
+  codegen::{
+    enums::{DiscriminatedEnumGenerator, EnumGenerator, ResponseEnumGenerator},
+    structs::StructGenerator,
+  },
+};
 
 pub mod attributes;
 pub mod client;
@@ -161,11 +168,21 @@ fn generate_type(
   visibility: Visibility,
 ) -> TokenStream {
   let type_tokens = match rust_type {
-    RustType::Struct(def) => structs::StructGenerator::new(regex_lookup, visibility).generate(def),
-    RustType::Enum(def) => enums::EnumGenerator::new(def, visibility).generate(),
+    RustType::Struct(def) => StructGenerator::new(regex_lookup, visibility).generate(def),
+    RustType::Enum(def) => EnumGenerator::new(def, visibility).generate(),
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
-    RustType::DiscriminatedEnum(def) => enums::DiscriminatedEnumGenerator::new(def, visibility).generate(),
-    RustType::ResponseEnum(def) => enums::ResponseEnumGenerator::new(def, visibility).generate(),
+    RustType::DiscriminatedEnum(def) => DiscriminatedEnumGenerator::new(def, visibility).generate(),
+    RustType::ResponseEnum(def) => {
+      let generator = ResponseEnumGenerator::new(def, visibility);
+      let enum_tokens = generator.generate();
+      let links_tokens = generate_response_links(def, regex_lookup, visibility);
+      let links_code = generator.generate_links_code();
+      quote! {
+        #enum_tokens
+        #links_tokens
+        #links_code
+      }
+    }
   };
 
   if let Some(error_impl) = try_generate_error_impl(rust_type, error_schemas) {
@@ -175,6 +192,28 @@ fn generate_type(
     }
   } else {
     type_tokens
+  }
+}
+
+fn generate_response_links(
+  def: &ResponseEnumDef,
+  regex_lookup: &BTreeMap<RegexKey, ConstToken>,
+  visibility: Visibility,
+) -> TokenStream {
+  let struct_generator = StructGenerator::new(regex_lookup, visibility);
+  let mut all_tokens = vec![];
+
+  for variant in &def.variants {
+    if let Some(links) = &variant.links
+      && !links.resolved_links.is_empty()
+    {
+      let links_struct = struct_generator.generate_links_struct(links);
+      all_tokens.push(links_struct);
+    }
+  }
+
+  quote! {
+    #(#all_tokens)*
   }
 }
 

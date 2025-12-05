@@ -142,6 +142,7 @@ fn renders_response_parser_method() {
     description: None,
     schema_type: None,
     content_category: ContentCategory::Json,
+    links: None,
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
@@ -154,12 +155,12 @@ fn test_text_response_parsing() {
   let cases = [
     (
       TypeRef::new("String"),
-      "req . text () . await ?",
+      "response . text () . await ?",
       "text/plain String response",
     ),
     (
       TypeRef::new("i32"),
-      "req . text () . await ? . parse :: < i32 > () ?",
+      "response . text () . await ? . parse :: < i32 > () ?",
       "text/plain i32 response with parsing",
     ),
   ];
@@ -170,6 +171,7 @@ fn test_text_response_parsing() {
       description: None,
       schema_type: Some(schema_type),
       content_category: ContentCategory::Text,
+      links: None,
     });
     let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
     let code = tokens.to_string();
@@ -189,6 +191,7 @@ fn renders_json_parser_for_custom_struct() {
     description: None,
     schema_type: Some(TypeRef::new("MyStruct")),
     content_category: ContentCategory::Json,
+    links: None,
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
@@ -207,11 +210,12 @@ fn test_binary_response_parsing() {
     description: None,
     schema_type: Some(TypeRef::new("Vec<u8>")),
     content_category: ContentCategory::Binary,
+    links: None,
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
   assert!(
-    code.contains("req . bytes () . await ? . to_vec ()"),
+    code.contains("response . bytes () . await ? . to_vec ()"),
     "missing bytes conversion for binary content"
   );
 }

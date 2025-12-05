@@ -1,0 +1,622 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Burger Shop",
+    "description": "The best burger API at quobix. You can find the testiest burgers on the world\n",
+    "termsOfService": "https://quobix.com",
+    "contact": {
+      "name": "quobix"
+    },
+    "license": {
+      "name": "Quobix"
+    },
+    "version": "1.2"
+  },
+  "servers": [
+    {
+      "url": "https://quobix.com/api"
+    },
+    {
+      "url": "https://pb33f.com/api"
+    }
+  ],
+  "paths": {
+    "/burgers": {
+      "servers": [
+        {
+          "url": "https://somwhere.quobix.com/api"
+        },
+        {
+          "url": "https://pb33f.io/api"
+        }
+      ],
+      "post": {
+        "operationId": "createBurger",
+        "summary": "Create a new burger",
+        "description": "A new burger for our menu, yummy yum yum.",
+        "requestBody": {
+          "description": "Give us the new burger!",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Burger"
+              },
+              "examples": {
+                "pbjBurger": {
+                  "summary": "A horrible, nutty, sticky mess.",
+                  "value": {
+                    "name": "Peanut And Jelly",
+                    "numPatties": 3
+                  }
+                },
+                "cakeBurger": {
+                  "summary": "A sickly, sweet, atrocity",
+                  "value": {
+                    "name": "Chocolate Cake Burger",
+                    "numPatties": 5
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A tasty burger for you to eat.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Burger"
+                },
+                "examples": {
+                  "quarterPounder": {
+                    "summary": "A juicy two handler sammich",
+                    "value": {
+                      "name": "Quarter Pounder with Cheese",
+                      "numPatties": 1
+                    }
+                  },
+                  "filetOFish": {
+                    "summary": "A tasty treat from the sea",
+                    "value": {
+                      "name": "Filet-O-Fish",
+                      "numPatties": 1
+                    }
+                  }
+                }
+              }
+            },
+            "links": {
+              "LocateBurger": {
+                "operationId": "locateBurger",
+                "parameters": {
+                  "burgerId": "$response.body#/id"
+                },
+                "description": "Go and get a tasty burger"
+              },
+              "AnotherLocateBurger": {
+                "operationId": "locateBurger",
+                "parameters": {
+                  "burgerId": "$response.body#/id"
+                },
+                "description": "Go and get a another really tasty burger"
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "unexpectedError": {
+                    "summary": "invalid request",
+                    "value": {
+                      "message": "unable to accept this request, looks bad, missing something."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error creating a new burger. Sorry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "unexpectedError": {
+                    "summary": "oh my goodness",
+                    "value": {
+                      "message": "something went terribly wrong my friend, no new burger for you."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Meat"
+        ]
+      }
+    },
+    "/burgers/{burgerId}": {
+      "get": {
+        "operationId": "locateBurger",
+        "summary": "Search a burger by ID - returns the burger with that identifier",
+        "description": "Look up a tasty burger take it and enjoy it",
+        "parameters": [
+          {
+            "name": "burgerId",
+            "in": "path",
+            "description": "the name of the burger. use this to order your food",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "big-mac"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A tasty burger for you to eat. Wide variety of products to choose from",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Burger"
+                },
+                "examples": {
+                  "quarterPounder": {
+                    "summary": "A juicy two handler sammich",
+                    "value": {
+                      "name": "Quarter Pounder with Cheese",
+                      "numPatties": 1
+                    }
+                  },
+                  "filetOFish": {
+                    "summary": "A tasty treat from the sea",
+                    "value": {
+                      "name": "Filet-O-Fish",
+                      "numPatties": 1
+                    }
+                  }
+                }
+              }
+            },
+            "links": {
+              "ListBurgerDressings": {
+                "operationId": "listBurgerDressings",
+                "parameters": {
+                  "burgerId": "$response.body#/id"
+                },
+                "description": "Try the ketchup!"
+              }
+            }
+          },
+          "404": {
+            "description": "Cannot find your burger. Sorry. We may have sold out of this type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "notFound": {
+                    "$ref": "#/components/examples/notFound"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error. Sorry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "unexpectedError": {
+                    "summary": "oh my stars",
+                    "value": {
+                      "message": "something went terribly wrong my friend, burger location crashed!"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://nowhere.quobix.com/api"
+          },
+          {
+            "url": "https://pb33f.net/api"
+          }
+        ],
+        "tags": [
+          "Meat"
+        ]
+      }
+    },
+    "/burgers/{burgerId}/dressings": {
+      "get": {
+        "operationId": "listBurgerDressings",
+        "summary": "Get a list of all dressings available",
+        "description": "Same as the summary, look up a tasty burger, by its ID - the burger identifier",
+        "parameters": [
+          {
+            "name": "burgerId",
+            "in": "path",
+            "description": "the name of the our fantastic burger. You can pick a name from our menu",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "big-mac"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "an array of",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Dressing"
+                  }
+                }
+              }
+            },
+            "links": {
+              "getBurger": {
+                "$ref": "#/components/links/getBurger"
+              }
+            }
+          },
+          "404": {
+            "description": "Cannot find your burger in which to list dressings. Sorry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error listing dressings for burger. Sorry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "callbacks": {
+          "myCallback": {
+            "$ref": "#/components/callbacks/myCallback"
+          }
+        },
+        "tags": [
+          "Dressing"
+        ]
+      }
+    },
+    "/dressings/{dressingId}": {
+      "get": {
+        "operationId": "getDressing",
+        "summary": "Get a specific dressing - you can choose the dressing from our menu",
+        "description": "Same as the summary, get a dressing, by its ID",
+        "parameters": [
+          {
+            "name": "dressingId",
+            "in": "path",
+            "description": "This is the unique identifier for the dressing items.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cheese"
+          }
+        ],
+        "responses": {
+          "404": {
+            "description": "Cannot find your dressing, sorry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error getting a dressing. Sorry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dressing"
+        ]
+      }
+    },
+    "/dressings": {
+      "get": {
+        "operationId": "getAllDressings",
+        "summary": "Get all dressings available in our store",
+        "description": "Get all dressings and choose from them",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/dressingResponse"
+          },
+          "500": {
+            "description": "Unexpected error. Sorry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dressing"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "description": "Error defining what went wrong when providing a specification. The message should help indicate the issue clearly.",
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "returns the error message if something wrong happens",
+            "type": "string",
+            "examples": [
+              "No such burger as 'Big-Whopper'"
+            ]
+          }
+        }
+      },
+      "Burger": {
+        "description": "The tastiest food on the planet you would love to eat everyday",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Unique burger identifier",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of your tasty burger - burger names are listed in our menus",
+            "type": "string",
+            "examples": [
+              "Big Mac"
+            ]
+          },
+          "numPatties": {
+            "description": "The number of burger patties used",
+            "type": "integer",
+            "examples": [
+              2
+            ]
+          },
+          "numTomatoes": {
+            "description": "how many slices of orange goodness would you like?",
+            "type": "integer",
+            "examples": [
+              1
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "numPatties"
+        ]
+      },
+      "Fries": {
+        "description": "golden slices of happy fun joy",
+        "type": "object",
+        "properties": {
+          "seasoning": {
+            "description": "herbs and spices for your golden joy",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "type of herb or spice used to liven up the yummy",
+              "examples": [
+                "salt"
+              ]
+            }
+          },
+          "potatoShape": {
+            "description": "what type of potato shape? wedges? shoestring?",
+            "type": "string",
+            "examples": [
+              "Crispy Shoestring"
+            ]
+          },
+          "favoriteDressings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dressing"
+            }
+          },
+          "favoriteBurger": {
+            "$ref": "#/components/schemas/Burger"
+          },
+          "favoriteDrink": {
+            "$ref": "#/components/schemas/Drink"
+          }
+        },
+        "required": [
+          "potatoShape",
+          "favoriteDressings",
+          "favoriteDrink"
+        ]
+      },
+      "Dressing": {
+        "description": "This is the object that contains the information about the content of the dressing",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of your dressing you can pick up from the menu",
+            "type": "string",
+            "examples": [
+              "Cheese"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Drink": {
+        "description": "a frosty cold beverage can be coke or sprite",
+        "type": "object",
+        "properties": {
+          "ice": {
+            "type": "boolean"
+          },
+          "drinkType": {
+            "description": "select from coke or sprite",
+            "enum": [
+              "coke",
+              "sprite"
+            ]
+          },
+          "size": {
+            "description": "what size man? S/M/L",
+            "type": "string",
+            "examples": [
+              "M"
+            ]
+          }
+        },
+        "required": [
+          "size",
+          "drinkType"
+        ]
+      }
+    },
+    "callbacks": {
+      "myCallback": {
+        "{$request.query.queryUrl}": {
+          "post": {
+            "requestBody": {
+              "description": "Callback payload",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Fries"
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "callback successfully processed"
+              }
+            }
+          }
+        }
+      }
+    },
+    "examples": {
+      "notFound": {
+        "summary": "burger missing",
+        "value": {
+          "message": "can't find a burger with that ID, we may have sold out my friend."
+        }
+      }
+    },
+    "headers": {
+      "MyHeader": {
+        "description": "a header"
+      }
+    },
+    "links": {
+      "getBurger": {
+        "operationId": "locateBurger",
+        "parameters": {
+          "burgerId": "$response.body#/name"
+        },
+        "description": "Get the burger details"
+      }
+    },
+    "responses": {
+      "dressingResponse": {
+        "description": "an array of dressings",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Dressing"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "pizza",
+      "description": "pizza!",
+      "externalDocs": {
+        "description": "Find out more",
+        "url": "https://quobix.com/"
+      }
+    },
+    {
+      "name": "Dressing",
+      "description": "Variety of dressings: cheese, veggie, oil and a lot more",
+      "externalDocs": {
+        "description": "Find out more information about our products)",
+        "url": "https://quobix.com/"
+      }
+    }
+  ],
+  "externalDocs": {
+    "description": "Find out more",
+    "url": "https://quobix.com/"
+  },
+  "jsonSchemaDialect": "https://pb33f.io/api\"",
+  "security": [
+    {
+      "api_key": []
+    }
+  ],
+  "webhooks": {
+    "bHook": {
+      "get": {
+        "description": "coffee in the morning"
+      }
+    },
+    "aHook": {
+      "get": {
+        "description": "jazz in the evening"
+      }
+    }
+  },
+  "x-hack": "code"
+}

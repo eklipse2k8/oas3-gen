@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::ParameterStyle;
 use proc_macro2::TokenStream;
@@ -12,10 +12,15 @@ use super::{
   },
   coercion,
 };
-use crate::generator::ast::{
-  ContentCategory, DerivesProvider, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive,
-  StatusCodeToken, StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
-  tokens::{ConstToken, EnumToken, EnumVariantToken, MethodNameToken},
+use crate::generator::{
+  ast::{
+    ContentCategory, DerivesProvider, FieldDef, PathSegment, QueryParameter, RegexKey, ResolvedLink, ResponseVariant,
+    ResponseVariantLinks, RuntimeExpression, RustPrimitive, StatusCodeToken, StructDef, StructMethod, StructMethodKind,
+    StructToken, TypeRef, ValidationAttribute,
+    tokens::{ConstToken, EnumToken, EnumVariantToken, MethodNameToken},
+  },
+  converter::runtime_expression,
+  naming::identifiers::to_rust_field_name,
 };
 
 const QUERY_PREFIX_UNSET: char = '\0';
@@ -32,6 +37,38 @@ impl<'a> StructGenerator<'a> {
     Self {
       regex_lookup,
       visibility,
+    }
+  }
+
+  pub(crate) fn generate_links_struct(&self, links: &ResponseVariantLinks) -> TokenStream {
+    let name = format_ident!("{}", links.links_struct_name);
+    let vis = self.visibility.to_tokens();
+
+    let fields: Vec<TokenStream> = links
+      .resolved_links
+      .iter()
+      .map(|link| {
+        let field_name = format_ident!("{}", to_rust_field_name(&link.link_def.name));
+        let target_type = &link.target_request_type;
+        let doc = link
+          .link_def
+          .description
+          .as_ref()
+          .map(|d| quote! { #[doc = #d] })
+          .unwrap_or_default();
+
+        quote! {
+          #doc
+          #vis #field_name: Option<#target_type>
+        }
+      })
+      .collect();
+
+    quote! {
+      #[derive(Debug, Clone, Default)]
+      #vis struct #name {
+        #(#fields),*
+      }
     }
   }
 
@@ -187,6 +224,7 @@ impl<'a> StructGenerator<'a> {
           variant_token,
           variant.schema_type.as_ref(),
           variant.content_category,
+          variant.links.as_ref(),
           true,
         );
         quote! {
@@ -199,7 +237,7 @@ impl<'a> StructGenerator<'a> {
 
     let has_status_checks = !status_matches.is_empty();
     let status_decl = if has_status_checks {
-      quote! { let status = req.status(); }
+      quote! { let status = response.status(); }
     } else {
       quote! {}
     };
@@ -210,12 +248,13 @@ impl<'a> StructGenerator<'a> {
         &default.variant_name,
         default.schema_type.as_ref(),
         default.content_category,
+        default.links.as_ref(),
         false,
       )
     } else {
       let unknown_variant = EnumVariantToken::from("Unknown");
       quote! {
-        let _ = req.bytes().await?;
+        let _ = response.bytes().await?;
         Ok(#response_enum::#unknown_variant)
       }
     };
@@ -223,7 +262,7 @@ impl<'a> StructGenerator<'a> {
     quote! {
       #docs
       #attrs
-      #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
+      #vis async fn #method_name(self, response: reqwest::Response) -> anyhow::Result<#response_enum> {
         #status_decl
         #(#status_matches)*
         #fallback
@@ -404,12 +443,15 @@ impl<'a> StructGenerator<'a> {
     variant_token: &EnumVariantToken,
     schema: Option<&TypeRef>,
     content_category: ContentCategory,
+    links: Option<&ResponseVariantLinks>,
     is_specific_variant: bool,
   ) -> TokenStream {
-    let variant_expr = if schema.is_some() {
-      quote! { #enum_token::#variant_token(data) }
-    } else {
-      quote! { #enum_token::#variant_token }
+    let has_links = links.is_some();
+    let variant_expr = match (schema.is_some(), has_links) {
+      (true, true) => quote! { #enum_token::#variant_token(data, links) },
+      (true, false) => quote! { #enum_token::#variant_token(data) },
+      (false, true) => quote! { #enum_token::#variant_token(links) },
+      (false, false) => quote! { #enum_token::#variant_token },
     };
 
     let result_statement = if is_specific_variant {
@@ -418,15 +460,28 @@ impl<'a> StructGenerator<'a> {
       quote! { Ok(#variant_expr) }
     };
 
+    let links_construction = if let Some(links_info) = links {
+      Self::generate_links_construction(links_info)
+    } else {
+      quote! {}
+    };
+
     if let Some(schema_type) = schema {
       let extraction = Self::generate_data_expression(schema_type, content_category);
       quote! {
         let data = #extraction;
+        #links_construction
+        #result_statement
+      }
+    } else if has_links {
+      quote! {
+        let _ = response.bytes().await?;
+        #links_construction
         #result_statement
       }
     } else {
       quote! {
-        let _ = req.bytes().await?;
+        let _ = response.bytes().await?;
         #result_statement
       }
     }
@@ -438,23 +493,182 @@ impl<'a> StructGenerator<'a> {
     match content_category {
       ContentCategory::Text => {
         if schema_type.is_string_like() {
-          quote! { req.text().await? }
+          quote! { response.text().await? }
         } else if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
-          quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
+          quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(response).await? }
         } else {
-          quote! { req.text().await?.parse::<#type_token>()? }
+          quote! { response.text().await?.parse::<#type_token>()? }
         }
       }
       ContentCategory::Binary => {
         if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
-          quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
+          quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(response).await? }
         } else {
-          quote! { req.bytes().await?.to_vec() }
+          quote! { response.bytes().await?.to_vec() }
         }
       }
       ContentCategory::Json | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
-        quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
+        quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(response).await? }
       }
     }
+  }
+
+  fn generate_links_construction(links: &ResponseVariantLinks) -> TokenStream {
+    let links_struct_name = &links.links_struct_name;
+    let response_body_fields = &links.response_body_fields;
+
+    let field_assignments: Vec<TokenStream> = links
+      .resolved_links
+      .iter()
+      .map(|link| {
+        let field_name = format_ident!("{}", to_rust_field_name(&link.link_def.name));
+        let target_type = &link.target_request_type;
+
+        let param_assignments = Self::generate_link_param_assignments(link, response_body_fields);
+
+        if param_assignments.is_empty() {
+          quote! { #field_name: None }
+        } else {
+          let (guards, assignments): (Vec<_>, Vec<_>) = param_assignments.into_iter().unzip();
+          let combined_guard = Self::combine_option_guards(&guards);
+
+          quote! {
+            #field_name: #combined_guard.map(|_| #target_type {
+              #(#assignments,)*
+            })
+          }
+        }
+      })
+      .collect();
+
+    quote! {
+      let links = #links_struct_name {
+        #(#field_assignments,)*
+      };
+    }
+  }
+
+  fn generate_link_param_assignments(
+    link: &ResolvedLink,
+    response_body_fields: &BTreeSet<String>,
+  ) -> Vec<(TokenStream, TokenStream)> {
+    link
+      .link_def
+      .parameters
+      .iter()
+      .filter_map(|(param_name, expr)| {
+        let target_field = format_ident!("{}", to_rust_field_name(param_name));
+        Self::generate_param_source(expr, response_body_fields)
+          .map(|(guard, value)| (guard, quote! { #target_field: #value }))
+      })
+      .collect()
+  }
+
+  fn generate_param_source(
+    expr: &RuntimeExpression,
+    response_body_fields: &BTreeSet<String>,
+  ) -> Option<(TokenStream, TokenStream)> {
+    match expr {
+      RuntimeExpression::ResponseBodyPath { json_pointer } => {
+        let field_path = runtime_expression::json_pointer_to_field_path(json_pointer);
+        if field_path.is_empty() {
+          return None;
+        }
+
+        let first_field = &field_path[0];
+        if !response_body_fields.contains(first_field) {
+          return None;
+        }
+
+        let (accessor, has_array_index) = Self::build_json_pointer_accessor(&field_path, quote! { data });
+
+        if has_array_index {
+          Some((accessor.clone(), quote! { #accessor.cloned().unwrap_or_default() }))
+        } else {
+          Some((
+            quote! { #accessor.as_ref() },
+            quote! { #accessor.clone().unwrap_or_default() },
+          ))
+        }
+      }
+      RuntimeExpression::RequestPathParam { name } => {
+        let field = format_ident!("{}", to_rust_field_name(name));
+        Some((quote! { Some(&()) }, quote! { self.#field.clone() }))
+      }
+      RuntimeExpression::RequestQueryParam { name } | RuntimeExpression::RequestHeader { name } => {
+        let field = format_ident!("{}", to_rust_field_name(name));
+        Some((
+          quote! { self.#field.as_ref() },
+          quote! { self.#field.clone().unwrap_or_default() },
+        ))
+      }
+      RuntimeExpression::RequestBody { json_pointer } => {
+        if let Some(pointer) = json_pointer {
+          let field_path = runtime_expression::json_pointer_to_field_path(pointer);
+          if field_path.is_empty() {
+            return Some((
+              quote! { self.body.as_ref() },
+              quote! { self.body.clone().unwrap_or_default() },
+            ));
+          }
+          let field_idents: Vec<_> = field_path
+            .iter()
+            .map(|f| format_ident!("{}", to_rust_field_name(f)))
+            .collect();
+          let first = &field_idents[0];
+
+          let accessor = if field_idents.len() == 1 {
+            quote! { self.body.as_ref().and_then(|b| b.#first.as_ref()) }
+          } else {
+            let rest = &field_idents[1..];
+            quote! { self.body.as_ref().and_then(|b| b.#first #(.#rest)*.as_ref()) }
+          };
+
+          Some((accessor.clone(), quote! { #accessor.cloned().unwrap_or_default() }))
+        } else {
+          Some((
+            quote! { self.body.as_ref() },
+            quote! { self.body.clone().unwrap_or_default() },
+          ))
+        }
+      }
+      RuntimeExpression::Literal { value } => Some((quote! { Some(&()) }, quote! { #value.to_string() })),
+      RuntimeExpression::Unsupported => None,
+    }
+  }
+
+  fn build_json_pointer_accessor(field_path: &[String], base: TokenStream) -> (TokenStream, bool) {
+    let mut accessor = base;
+    let mut has_array_index = false;
+
+    for segment in field_path {
+      if let Ok(index) = segment.parse::<usize>() {
+        has_array_index = true;
+        accessor = quote! { #accessor.get(#index) };
+      } else {
+        let field_ident = format_ident!("{}", to_rust_field_name(segment));
+        if has_array_index {
+          accessor = quote! { #accessor.and_then(|v| Some(&v.#field_ident)) };
+        } else {
+          accessor = quote! { #accessor.#field_ident };
+        }
+      }
+    }
+
+    (accessor, has_array_index)
+  }
+
+  fn combine_option_guards(guards: &[TokenStream]) -> TokenStream {
+    if guards.is_empty() {
+      return quote! { None::<()> };
+    }
+    if guards.len() == 1 {
+      let guard = &guards[0];
+      return quote! { #guard };
+    }
+
+    let first = &guards[0];
+    let rest = &guards[1..];
+    quote! { #first #(.and_then(|_| #rest))* }
   }
 }
