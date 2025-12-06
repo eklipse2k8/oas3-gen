@@ -118,6 +118,11 @@ pub(crate) trait SchemaExt {
 
   /// Returns true if the schema is a discriminated base type with a non-empty mapping.
   fn is_discriminated_base_type(&self) -> bool;
+
+  /// Returns true if the schema has no type constraints (no properties, no type info).
+  /// An empty schema `{}` or one with only `additionalProperties: {}` both return true,
+  /// as neither constrains the shape of the data.
+  fn is_empty_object(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -229,5 +234,14 @@ impl SchemaExt for ObjectSchema {
       .and_then(|d| d.mapping.as_ref().map(|m| !m.is_empty()))
       .unwrap_or(false)
       && !self.properties.is_empty()
+  }
+
+  fn is_empty_object(&self) -> bool {
+    self.properties.is_empty()
+      && self.one_of.is_empty()
+      && self.any_of.is_empty()
+      && self.all_of.is_empty()
+      && self.enum_values.is_empty()
+      && self.schema_type.is_none()
   }
 }

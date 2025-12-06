@@ -806,3 +806,266 @@ fn test_array_union_naming_with_common_suffix() {
     panic!("Expected enum type");
   }
 }
+
+#[test]
+fn test_additional_properties_map_only_boolean() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
+        ..Default::default()
+      },
+    )))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "std::collections::HashMap<String, bool>",
+    "map-only object with additionalProperties: {{type: boolean}} should resolve to HashMap<String, bool>"
+  );
+}
+
+#[test]
+fn test_additional_properties_map_only_string() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      },
+    )))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "std::collections::HashMap<String, String>",
+    "map-only object with additionalProperties: {{type: string}} should resolve to HashMap<String, String>"
+  );
+}
+
+#[test]
+fn test_additional_properties_map_only_integer() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+        ..Default::default()
+      },
+    )))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "std::collections::HashMap<String, i64>",
+    "map-only object with additionalProperties: {{type: integer}} should resolve to HashMap<String, i64>"
+  );
+}
+
+#[test]
+fn test_additional_properties_map_only_ref() {
+  let custom_schema = make_object_schema_with_property("field", make_string_schema());
+  let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/CustomType".to_string(),
+      summary: None,
+      description: None,
+    }))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "std::collections::HashMap<String, CustomType>",
+    "map-only object with additionalProperties: {{$ref: CustomType}} should resolve to HashMap<String, CustomType>"
+  );
+}
+
+#[test]
+fn test_additional_properties_map_only_empty_schema() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema::default(),
+    )))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "std::collections::HashMap<String, serde_json::Value>",
+    "map-only object with additionalProperties: {{}} should resolve to HashMap<String, serde_json::Value>"
+  );
+}
+
+#[test]
+fn test_additional_properties_boolean_true() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "std::collections::HashMap<String, serde_json::Value>",
+    "map-only object with additionalProperties: true should resolve to HashMap<String, serde_json::Value>"
+  );
+}
+
+#[test]
+fn test_object_with_properties_not_resolved_as_map() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([("name".to_string(), ObjectOrReference::Object(make_string_schema()))]),
+    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
+        ..Default::default()
+      },
+    )))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "serde_json::Value",
+    "object with properties should NOT be resolved as map type (it's a struct)"
+  );
+}
+
+#[test]
+fn test_resolve_additional_properties_type_ref() {
+  let custom_schema = make_object_schema_with_property("field", make_string_schema());
+  let graph = create_test_graph(BTreeMap::from([("AgentConfig".to_string(), custom_schema)]));
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Ref {
+    ref_path: "#/components/schemas/AgentConfig".to_string(),
+    summary: None,
+    description: None,
+  }));
+
+  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "AgentConfig",
+    "additionalProperties with $ref should resolve to the referenced type name"
+  );
+}
+
+#[test]
+fn test_resolve_additional_properties_type_boolean() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
+    ..Default::default()
+  })));
+
+  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "bool",
+    "additionalProperties with type: boolean should resolve to bool"
+  );
+}
+
+#[test]
+fn test_resolve_additional_properties_type_empty() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema::default())));
+
+  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "serde_json::Value",
+    "additionalProperties with empty schema should resolve to serde_json::Value"
+  );
+}
+
+#[test]
+fn test_resolve_additional_properties_type_boolean_schema_true() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let additional = oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true));
+
+  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "serde_json::Value",
+    "additionalProperties: true should resolve to serde_json::Value"
+  );
+}
+
+#[test]
+fn test_resolve_additional_properties_type_boolean_schema_false() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let additional = oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(false));
+
+  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "serde_json::Value",
+    "additionalProperties: false should resolve to serde_json::Value (though it typically means deny unknown fields)"
+  );
+}
+
+#[test]
+fn test_additional_properties_false_not_resolved_as_map() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolver::new(&graph, default_config());
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(false))),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "serde_json::Value",
+    "object with additionalProperties: false should NOT resolve to HashMap (it means no additional properties allowed)"
+  );
+}
