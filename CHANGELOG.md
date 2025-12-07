@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2025-12-07
+
+### Added
+- Resolve map-only objects to HashMap types ([#35](https://github.com/eklipse2k8/oas3-gen/pull/35)) ([84f16fc](https://github.com/eklipse2k8/oas3-gen/commit/84f16fca9b87d0f6f05ef1b9ee5110f966ce2d24))
+
+
 ## [0.16.0] - 2025-11-15
 
 ### Added
