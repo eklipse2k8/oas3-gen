@@ -1,4 +1,5 @@
 mod derives;
+mod links;
 pub mod lints;
 pub(super) mod serde_attrs;
 mod status_codes;
@@ -12,6 +13,7 @@ mod tests;
 use derive_builder::Builder;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 use http::Method;
+pub use links::{LinkDef, ResolvedLink, ResponseVariantLinks, RuntimeExpression};
 pub use lints::LintConfig;
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
@@ -69,6 +71,7 @@ pub struct ResponseVariant {
   pub description: Option<String>,
   pub schema_type: Option<TypeRef>,
   pub content_category: ContentCategory,
+  pub links: Option<ResponseVariantLinks>,
 }
 
 impl ResponseVariant {

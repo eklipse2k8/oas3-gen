@@ -77,3 +77,6 @@ thiserror = { version = "2.0" }
 tokio = { version = "1.48", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
 uuid = { version = "1.19", features = ["serde"] }
 validator = { version = "0.20" }
+
+[patch.crates-io]
+oas3 = { git = "https://github.com/eklipse2k8/oas3-rs.git", branch = "fix/callback-references" }

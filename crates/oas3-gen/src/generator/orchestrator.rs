@@ -44,6 +44,7 @@ pub struct GenerationStats {
   pub orphaned_schemas_count: usize,
   pub client_methods_generated: Option<usize>,
   pub client_headers_generated: Option<usize>,
+  pub links_generated: usize,
 }
 
 struct GenerationArtifacts {
@@ -204,6 +205,7 @@ impl Orchestrator {
     let mut enums_generated = 0;
     let mut enums_with_helpers_generated = 0;
     let mut type_aliases_generated = 0;
+    let mut links_generated = 0;
 
     for rust_type in &rust_types {
       match rust_type {
@@ -214,7 +216,15 @@ impl Orchestrator {
             enums_with_helpers_generated += 1;
           }
         }
-        RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => enums_generated += 1,
+        RustType::DiscriminatedEnum(_) => enums_generated += 1,
+        RustType::ResponseEnum(def) => {
+          enums_generated += 1;
+          for variant in &def.variants {
+            if let Some(links) = &variant.links {
+              links_generated += links.resolved_links.len();
+            }
+          }
+        }
         RustType::TypeAlias(_) => type_aliases_generated += 1,
       }
     }
@@ -234,6 +244,7 @@ impl Orchestrator {
       orphaned_schemas_count,
       client_methods_generated: None,
       client_headers_generated: None,
+      links_generated,
     };
 
     GenerationArtifacts {

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -7,8 +9,12 @@ use super::{
     generate_deprecated_attr, generate_derives_from_slice, generate_docs, generate_outer_attrs, generate_serde_attrs,
   },
 };
-use crate::generator::ast::{
-  DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeMode,
+use crate::generator::{
+  ast::{
+    DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, ResponseVariantLinks, SerdeMode,
+    StructToken, TypeRef,
+  },
+  naming::identifiers::to_rust_field_name,
 };
 
 /// Generates standard Rust enums that use serde's derive macros for serialization.
@@ -524,9 +530,23 @@ impl<'a> ResponseEnumGenerator<'a> {
       .map(|v| {
         let variant_name = &v.variant_name;
         let doc_line = v.doc_line();
-        let content = v.schema_type.as_ref().map(|schema| {
-          quote! { (#schema) }
-        });
+
+        let content = match (&v.schema_type, &v.links) {
+          (Some(schema), Some(links)) => {
+            let links_type = &links.links_struct_name;
+            quote! { (#schema, #links_type) }
+          }
+          (Some(schema), None) => {
+            quote! { (#schema) }
+          }
+          (None, Some(links)) => {
+            let links_type = &links.links_struct_name;
+            quote! { (#links_type) }
+          }
+          (None, None) => {
+            quote! {}
+          }
+        };
 
         quote! {
           #[doc = #doc_line]
@@ -544,6 +564,113 @@ impl<'a> ResponseEnumGenerator<'a> {
         #(#variants),*
       }
     }
+  }
+
+  pub fn generate_links_code(&self) -> TokenStream {
+    let mut all_tokens = vec![];
+
+    for variant in &self.def.variants {
+      if let Some(links) = &variant.links
+        && !links.resolved_links.is_empty()
+      {
+        let (accessor_methods, try_from_impls) = self.generate_links_impls(variant.schema_type.as_ref(), links);
+        all_tokens.push(accessor_methods);
+        all_tokens.push(try_from_impls);
+      }
+    }
+
+    quote! {
+      #(#all_tokens)*
+    }
+  }
+
+  fn generate_links_impls(
+    &self,
+    success_body_type: Option<&TypeRef>,
+    links: &ResponseVariantLinks,
+  ) -> (TokenStream, TokenStream) {
+    let enum_name = &self.def.name;
+    let vis = self.visibility.to_tokens();
+
+    let mut methods = vec![];
+    let mut impls = vec![];
+    let mut seen_target_types: HashSet<&StructToken> = HashSet::new();
+
+    if let Some(body_type) = success_body_type {
+      methods.push(quote! {
+        #vis fn body(&self) -> Option<&#body_type> {
+          match self {
+            Self::Ok(body, _) => Some(body),
+            _ => None,
+          }
+        }
+      });
+      methods.push(quote! {
+        #vis fn into_body(self) -> Option<#body_type> {
+          match self {
+            Self::Ok(body, _) => Some(body),
+            _ => None,
+          }
+        }
+      });
+      impls.push(quote! {
+        impl TryFrom<#enum_name> for #body_type {
+          type Error = #enum_name;
+
+          fn try_from(response: #enum_name) -> Result<Self, Self::Error> {
+            match response {
+              #enum_name::Ok(body, _) => Ok(body),
+              other => Err(other),
+            }
+          }
+        }
+      });
+    }
+
+    for link in &links.resolved_links {
+      let rust_field_name = to_rust_field_name(&link.link_def.name);
+      let field_name = format_ident!("{rust_field_name}");
+      let method_name = format_ident!("to_{rust_field_name}");
+      let target_type = &link.target_request_type;
+
+      methods.push(quote! {
+        #vis fn #method_name(&self) -> Option<#target_type> {
+          match self {
+            Self::Ok(_, links) => links.#field_name.clone(),
+            _ => None,
+          }
+        }
+      });
+
+      if seen_target_types.insert(target_type) {
+        impls.push(quote! {
+          impl TryFrom<#enum_name> for #target_type {
+            type Error = #enum_name;
+
+            fn try_from(response: #enum_name) -> Result<Self, Self::Error> {
+              match response {
+                #enum_name::Ok(_, links) => links.#field_name.ok_or(#enum_name::Unknown),
+                other => Err(other),
+              }
+            }
+          }
+        });
+      }
+    }
+
+    let accessor_tokens = if methods.is_empty() {
+      quote! {}
+    } else {
+      quote! {
+        impl #enum_name {
+          #(#methods)*
+        }
+      }
+    };
+
+    let try_from_tokens = quote! { #(#impls)* };
+
+    (accessor_tokens, try_from_tokens)
   }
 }
 

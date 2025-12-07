@@ -455,6 +455,7 @@ fn test_response_enum_does_not_propagate_to_request_type() {
       description: None,
       schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
       content_category: ContentCategory::Json,
+      links: None,
     }],
   });
 
@@ -522,6 +523,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
         description: None,
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
         content_category: ContentCategory::Json,
+        links: None,
       },
       ResponseVariant {
         status_code: StatusCodeToken::BadRequest400,
@@ -529,6 +531,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
         description: None,
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
         content_category: ContentCategory::Json,
+        links: None,
       },
     ],
   });
@@ -634,6 +637,7 @@ fn test_request_body_chain_with_response_enum() {
         "CreateChatCompletionResponse".into(),
       ))),
       content_category: ContentCategory::Json,
+      links: None,
     }],
   });
 
@@ -733,6 +737,7 @@ fn test_response_enum_dependency_extraction() {
         description: None,
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
         content_category: ContentCategory::Json,
+        links: None,
       },
       ResponseVariant {
         status_code: StatusCodeToken::BadRequest400,
@@ -740,6 +745,7 @@ fn test_response_enum_dependency_extraction() {
         description: None,
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
         content_category: ContentCategory::Json,
+        links: None,
       },
     ],
   });

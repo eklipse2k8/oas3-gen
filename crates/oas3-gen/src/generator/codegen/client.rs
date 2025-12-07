@@ -10,7 +10,7 @@ use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, ParameterLocation,
     RustPrimitive, RustType, StructDef, StructToken, TypeRef,
-    tokens::{ConstToken, HeaderToken},
+    tokens::{ConstToken, HeaderToken, LinkServerToken},
   },
   codegen::{constants, parse_type},
   naming::identifiers::to_rust_type_name,
@@ -56,6 +56,11 @@ impl<'a> ClientGenerator<'a> {
     constants::generate_header_constants(&headers)
   }
 
+  fn link_server_consts(&self) -> TokenStream {
+    let servers: Vec<LinkServerToken> = extract_link_server_urls(self.rust_types).into_iter().collect();
+    constants::generate_link_server_constants(&servers)
+  }
+
   fn method_tokens(&self) -> anyhow::Result<Vec<TokenStream>> {
     self
       .operations
@@ -73,6 +78,7 @@ impl ToTokens for ClientGenerator<'_> {
     let client_ident = self.client_ident();
     let base_url_lit = self.base_url_lit();
     let header_consts = self.header_consts();
+    let link_server_consts = self.link_server_consts();
     let vis = self.visibility.to_tokens();
 
     let Ok(method_tokens) = self.method_tokens() else {
@@ -91,6 +97,8 @@ impl ToTokens for ClientGenerator<'_> {
       #vis const BASE_URL: &str = #base_url_lit;
 
       #header_consts
+
+      #link_server_consts
 
       #[derive(Debug, Clone)]
       #vis struct #client_ident {
@@ -135,6 +143,26 @@ fn extract_header_names(operations: &[OperationInfo]) -> BTreeSet<HeaderToken> {
     .flat_map(|op| &op.parameters)
     .filter(|param| matches!(param.location, ParameterLocation::Header))
     .map(|param| HeaderToken::from(param.original_name.as_str()))
+    .collect()
+}
+
+fn extract_link_server_urls(rust_types: &[RustType]) -> BTreeSet<LinkServerToken> {
+  rust_types
+    .iter()
+    .filter_map(|rt| match rt {
+      RustType::ResponseEnum(def) => Some(def),
+      _ => None,
+    })
+    .flat_map(|def| &def.variants)
+    .filter_map(|variant| variant.links.as_ref())
+    .flat_map(|links| &links.resolved_links)
+    .filter_map(|link| {
+      link
+        .link_def
+        .server_url
+        .as_ref()
+        .map(|url| LinkServerToken::new(&link.link_def.name, url))
+    })
     .collect()
 }
 
@@ -467,7 +495,7 @@ impl ClientOperationMethod {
   }
 
   fn build_response_handling(
-    request_ident: &syn::Ident,
+    _request_ident: &syn::Ident,
     response_enum: Option<&EnumToken>,
     response_type: Option<&syn::Type>,
     response_content_category: ContentCategory,
@@ -481,7 +509,7 @@ impl ClientOperationMethod {
       return ResponseHandling {
         success_type: quote! { #response_enum },
         parse_body: quote! {
-          let parsed = #request_ident::parse_response(response).await?;
+          let parsed = request.parse_response(response).await?;
           Ok(parsed)
         },
       };

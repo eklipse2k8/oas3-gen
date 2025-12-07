@@ -643,6 +643,7 @@ fn test_response_enum_generation() {
         description: Some("User found".to_string()),
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
         content_category: ContentCategory::Json,
+        links: None,
       },
       ResponseVariant {
         status_code: StatusCodeToken::NotFound404,
@@ -650,6 +651,7 @@ fn test_response_enum_generation() {
         description: Some("User not found".to_string()),
         schema_type: None,
         content_category: ContentCategory::Json,
+        links: None,
       },
       ResponseVariant {
         status_code: StatusCodeToken::InternalServerError500,
@@ -657,6 +659,7 @@ fn test_response_enum_generation() {
         description: None,
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into()))),
         content_category: ContentCategory::Json,
+        links: None,
       },
     ],
     request_type: Some(StructToken::new("GetUserRequest")),

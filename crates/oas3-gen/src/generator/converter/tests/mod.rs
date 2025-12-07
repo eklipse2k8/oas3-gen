@@ -2,6 +2,7 @@ mod cache;
 mod enums;
 mod implicit_dependencies;
 mod inline_objects;
+mod links;
 pub mod metadata_tests;
 mod operations;
 mod structs;

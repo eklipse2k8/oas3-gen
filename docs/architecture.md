@@ -76,6 +76,7 @@ crates/
 │           │   ├── tokens.rs      # Token stream utilities
 │           │   ├── derives.rs     # Derive macro selection
 │           │   ├── lints.rs       # Clippy lint attributes
+│           │   ├── links.rs       # Link Object AST types
 │           │   ├── serde_attrs.rs # Serde attribute builders
 │           │   ├── status_codes.rs # HTTP status code handling
 │           │   ├── validation_attrs.rs # Validation attribute builders
@@ -91,10 +92,12 @@ crates/
 │           │   ├── enums.rs       # oneOf/anyOf/allOf conversion
 │           │   ├── field_optionality.rs # Field requirement logic
 │           │   ├── hashing.rs     # Schema fingerprinting
+│           │   ├── links.rs       # Link Object extraction
 │           │   ├── metadata.rs    # Schema metadata extraction
 │           │   ├── operations.rs  # Request/response type generation
 │           │   ├── path_renderer.rs # URL path template rendering
 │           │   ├── responses.rs   # Response type generation
+│           │   ├── runtime_expression.rs # Runtime expression parsing
 │           │   ├── string_enum_optimizer.rs # String enum optimization
 │           │   ├── structs.rs     # Object schema conversion
 │           │   ├── type_resolver.rs # Type mapping and nullable patterns
@@ -105,6 +108,7 @@ crates/
 │           │       ├── enums.rs
 │           │       ├── implicit_dependencies.rs
 │           │       ├── inline_objects.rs
+│           │       ├── links.rs
 │           │       ├── metadata_tests.rs
 │           │       ├── operations.rs
 │           │       ├── structs.rs
@@ -118,6 +122,7 @@ crates/
 │               ├── constants.rs   # Constant generation
 │               ├── enums.rs       # Enum code generation
 │               ├── error_impls.rs # Error trait implementations
+│               ├── links.rs       # Link struct and accessor generation
 │               ├── metadata.rs    # Metadata comment generation
 │               ├── structs.rs     # Struct code generation
 │               ├── type_aliases.rs # Type alias generation
@@ -150,6 +155,26 @@ crates/
 - [identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
 - [cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching for performance
 - [type_usage.rs](../crates/oas3-gen/src/generator/analyzer/type_usage.rs): Type usage tracking and analysis
+
+## Link Object Support
+
+The generator supports [OpenAPI Link Objects](https://spec.openapis.org/oas/v3.1.1.html#link-object) to generate type-safe methods for constructing follow-up requests.
+
+**Generated patterns:**
+
+- Response enums use tuple variants when links are present: `Ok(Body, Links)`
+- Links struct with `Option<TargetRequest>` fields for each link
+- Accessor methods: `body()`, `into_body()`, `to_{operation_id}_request()`
+- `TryFrom` implementations for ergonomic conversion
+
+**Key link files:**
+
+- [ast/links.rs](../crates/oas3-gen/src/generator/ast/links.rs): Link AST types (`LinkDef`, `RuntimeExpression`, `ResolvedLink`)
+- [converter/links.rs](../crates/oas3-gen/src/generator/converter/links.rs): Link extraction from OpenAPI responses
+- [converter/runtime_expression.rs](../crates/oas3-gen/src/generator/converter/runtime_expression.rs): Runtime expression parser
+- [codegen/links.rs](../crates/oas3-gen/src/generator/codegen/links.rs): Links struct and accessor code generation
+
+**Breaking change:** `parse_response` is now an instance method (`request.parse_response(response)`) to enable merging original request data with response data for link construction.
 
 ## Key Dependencies
 
