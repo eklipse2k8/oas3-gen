@@ -492,12 +492,8 @@ impl FieldProcessor {
         Schema::Boolean(b) if !b.0 => {
           serde_attrs.push(SerdeAttribute::DenyUnknownFields);
         }
-        Schema::Object(schema_ref) => {
-          let additional_schema = schema_ref
-            .resolve(self.type_resolver.graph().spec())
-            .with_context(|| "Schema resolution failed for additionalProperties")?;
-
-          let value_type = self.type_resolver.resolve_type(&additional_schema)?;
+        Schema::Object(_) => {
+          let value_type = self.type_resolver.resolve_additional_properties_type(additional)?;
           let map_type = TypeRef::new(format!(
             "std::collections::HashMap<String, {}>",
             value_type.to_rust_type()

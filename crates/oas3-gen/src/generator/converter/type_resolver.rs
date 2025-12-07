@@ -589,7 +589,12 @@ impl TypeResolver {
           .unwrap_or(default)
       }
       SchemaType::Boolean => RustPrimitive::Bool,
-      SchemaType::Object => RustPrimitive::Value,
+      SchemaType::Object => {
+        if let Some(map_type) = self.try_resolve_map_type(schema)? {
+          return Ok(map_type);
+        }
+        RustPrimitive::Value
+      }
       SchemaType::Null => RustPrimitive::Unit,
       SchemaType::Array => {
         let item_type = self.resolve_array_items(schema)?;
@@ -607,6 +612,50 @@ impl TypeResolver {
       type_ref = type_ref.with_option();
     }
     Ok(type_ref)
+  }
+
+  fn try_resolve_map_type(&self, schema: &ObjectSchema) -> anyhow::Result<Option<TypeRef>> {
+    let Some(ref additional) = schema.additional_properties else {
+      return Ok(None);
+    };
+
+    if matches!(additional, Schema::Boolean(b) if !b.0) {
+      return Ok(None);
+    }
+
+    if !schema.properties.is_empty() {
+      return Ok(None);
+    }
+
+    let value_type = self.resolve_additional_properties_type(additional)?;
+    let map_type = TypeRef::new(format!(
+      "std::collections::HashMap<String, {}>",
+      value_type.to_rust_type()
+    ));
+    Ok(Some(map_type))
+  }
+
+  pub(crate) fn resolve_additional_properties_type(&self, additional: &Schema) -> anyhow::Result<TypeRef> {
+    match additional {
+      Schema::Boolean(_) => Ok(TypeRef::new(RustPrimitive::Value)),
+      Schema::Object(schema_ref) => {
+        if let ObjectOrReference::Ref { ref_path, .. } = &**schema_ref {
+          let reference_name = SchemaRegistry::extract_ref_name(ref_path)
+            .ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
+          return Ok(self.create_type_reference(&reference_name));
+        }
+
+        let additional_schema = schema_ref
+          .resolve(self.graph.spec())
+          .context("Schema resolution failed for additionalProperties")?;
+
+        if additional_schema.is_empty_object() {
+          return Ok(TypeRef::new(RustPrimitive::Value));
+        }
+
+        self.resolve_type(&additional_schema)
+      }
+    }
   }
 
   fn resolve_array_items(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
