@@ -1,6 +1,6 @@
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, Operation, Response},
+  spec::{ObjectOrReference, ObjectSchema, Operation, Response},
 };
 
 use super::{SchemaConverter, cache::SharedSchemaCache};
@@ -51,19 +51,9 @@ pub(crate) fn build_response_enum(
     });
   }
 
+  let variants = normalize_response_variants(variants);
   if variants.is_empty() {
     return None;
-  }
-
-  let has_default = variants.iter().any(|v| v.status_code.is_default());
-  if !has_default {
-    variants.push(ResponseVariant {
-      status_code: StatusCodeToken::Default,
-      variant_name: EnumVariantToken::new(DEFAULT_RESPONSE_VARIANT),
-      description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
-      schema_type: None,
-      content_category: ContentCategory::Json,
-    });
   }
 
   Some(ResponseEnumDef {
@@ -99,38 +89,79 @@ fn extract_response_schema_info(
       SchemaRegistry::extract_ref_name(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name)))
     }
     ObjectOrReference::Object(inline_schema) => {
-      if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() {
-        return Ok((None, content_category));
-      }
-
-      if inline_schema.properties.is_empty()
-        && let Ok(primitive_ref) = schema_converter.resolve_type(inline_schema)
-        && !matches!(primitive_ref.base_type, RustPrimitive::Custom(_))
-      {
-        return Ok((Some(primitive_ref), content_category));
-      }
-
-      let type_name = if let Some(cached) = schema_cache.get_type_name(inline_schema)? {
-        cached
-      } else {
-        let base_name = naming::infer_name_from_context(inline_schema, path, status_code.as_str());
-        let unique_name = schema_cache.make_unique_name(&base_name);
-
-        let result = schema_converter.convert_struct(
-          &unique_name,
-          inline_schema,
-          Some(StructKind::Schema),
-          Some(schema_cache),
-        )?;
-
-        schema_cache.register_type(inline_schema, &unique_name, result.inline_types, result.result)?
-      };
-
-      Some(TypeRef::new(type_name))
+      resolve_inline_response_schema(schema_converter, inline_schema, path, status_code, schema_cache)?
     }
   };
 
   Ok((type_ref, content_category))
+}
+
+fn resolve_inline_response_schema(
+  schema_converter: &SchemaConverter,
+  inline_schema: &ObjectSchema,
+  path: &str,
+  status_code: StatusCodeToken,
+  schema_cache: &mut SharedSchemaCache,
+) -> anyhow::Result<Option<TypeRef>> {
+  if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() {
+    return Ok(None);
+  }
+
+  if inline_schema.properties.is_empty()
+    && let Ok(primitive_ref) = schema_converter.resolve_type(inline_schema)
+    && !matches!(primitive_ref.base_type, RustPrimitive::Custom(_))
+  {
+    return Ok(Some(primitive_ref));
+  }
+
+  let type_name =
+    resolve_response_inline_struct_name(schema_converter, inline_schema, path, status_code, schema_cache)?;
+
+  Ok(Some(TypeRef::new(type_name)))
+}
+
+fn resolve_response_inline_struct_name(
+  schema_converter: &SchemaConverter,
+  inline_schema: &ObjectSchema,
+  path: &str,
+  status_code: StatusCodeToken,
+  schema_cache: &mut SharedSchemaCache,
+) -> anyhow::Result<String> {
+  if let Some(cached) = schema_cache.get_type_name(inline_schema)? {
+    return Ok(cached);
+  }
+
+  let base_name = naming::infer_name_from_context(inline_schema, path, status_code.as_str());
+  let unique_name = schema_cache.make_unique_name(&base_name);
+
+  let result = schema_converter.convert_struct(
+    &unique_name,
+    inline_schema,
+    Some(StructKind::Schema),
+    Some(schema_cache),
+  )?;
+
+  schema_cache.register_type(inline_schema, &unique_name, result.inline_types, result.result)?;
+  Ok(unique_name)
+}
+
+fn normalize_response_variants(mut variants: Vec<ResponseVariant>) -> Vec<ResponseVariant> {
+  if variants.is_empty() {
+    return variants;
+  }
+
+  let has_default = variants.iter().any(|v| v.status_code.is_default());
+  if !has_default {
+    variants.push(ResponseVariant {
+      status_code: StatusCodeToken::Default,
+      variant_name: EnumVariantToken::new(DEFAULT_RESPONSE_VARIANT),
+      description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
+      schema_type: None,
+      content_category: ContentCategory::Json,
+    });
+  }
+
+  variants
 }
 
 pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {

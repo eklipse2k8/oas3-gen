@@ -1,13 +1,12 @@
 pub(crate) mod cache;
 mod common;
+pub(crate) mod discriminator;
 mod enums;
-mod field_optionality;
 pub(crate) mod hashing;
 pub(crate) mod metadata;
 pub(crate) mod operations;
 pub(crate) mod path_renderer;
 pub(crate) mod responses;
-mod string_enum_optimizer;
 pub(crate) mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
@@ -18,7 +17,6 @@ use std::{
 };
 
 pub(crate) use common::{ConversionOutput, SchemaExt};
-pub(crate) use field_optionality::FieldOptionalityPolicy;
 use oas3::spec::ObjectSchema;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
@@ -27,13 +25,14 @@ use super::{
   ast::{RustType, StructKind, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
 };
-use crate::generator::naming::identifiers::to_rust_type_name;
+use crate::generator::{converter::type_resolver::TypeResolverBuilder, naming::identifiers::to_rust_type_name};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CodegenConfig {
   pub preserve_case_variants: bool,
   pub case_insensitive_enums: bool,
   pub no_helpers: bool,
+  pub odata_support: bool,
 }
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.
@@ -48,36 +47,35 @@ pub(crate) struct SchemaConverter {
 }
 
 impl SchemaConverter {
-  /// Creates a new `SchemaConverter` with standard configuration.
-  pub(crate) fn new(
-    graph: &Arc<SchemaRegistry>,
-    optionality_policy: FieldOptionalityPolicy,
-    config: CodegenConfig,
-  ) -> Self {
-    let type_resolver = TypeResolver::new(graph, config);
+  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: CodegenConfig) -> Self {
+    let type_resolver = TypeResolverBuilder::default()
+      .graph(graph.clone())
+      .config(config)
+      .build()
+      .expect("TypeResolver");
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(graph, config, None, optionality_policy),
+      struct_converter: StructConverter::new(graph, config, None),
       enum_converter: EnumConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
   }
 
-  /// Creates a `SchemaConverter` that filters generated types to a reachable set.
-  ///
-  /// Useful for generating only a subset of the API surface (e.g., specific tags).
   pub(crate) fn new_with_filter(
     graph: &Arc<SchemaRegistry>,
     reachable_schemas: BTreeSet<String>,
-    optionality_policy: FieldOptionalityPolicy,
     config: CodegenConfig,
   ) -> Self {
-    let type_resolver = TypeResolver::new(graph, config);
+    let type_resolver = TypeResolverBuilder::default()
+      .graph(graph.clone())
+      .config(config)
+      .build()
+      .expect("TypeResolver");
     let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
-      struct_converter: StructConverter::new(graph, config, Some(Arc::new(reachable_schemas)), optionality_policy),
+      struct_converter: StructConverter::new(graph, config, Some(Arc::new(reachable_schemas))),
       enum_converter: EnumConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
@@ -103,14 +101,14 @@ impl SchemaConverter {
       let cache_reborrow = cache.as_deref_mut();
       return self
         .enum_converter
-        .convert_union_enum(name, schema, enums::UnionKind::OneOf, cache_reborrow);
+        .convert_union(name, schema, enums::UnionKind::OneOf, cache_reborrow);
     }
 
     if !schema.any_of.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
       return self
         .enum_converter
-        .convert_union_enum(name, schema, enums::UnionKind::AnyOf, cache_reborrow);
+        .convert_union(name, schema, enums::UnionKind::AnyOf, cache_reborrow);
     }
 
     if !schema.enum_values.is_empty() {
@@ -118,7 +116,7 @@ impl SchemaConverter {
       return Ok(
         self
           .enum_converter
-          .convert_simple_enum(name, schema, cache_reborrow)
+          .convert_value_enum(name, schema, cache_reborrow)
           .into_iter()
           .collect(),
       );
@@ -197,7 +195,10 @@ impl SchemaConverter {
       return Ok(None);
     }
 
-    if let Some(output) = self.type_resolver.resolve_nullable_array_union(name, schema, cache)? {
+    if let Some(output) = self
+      .type_resolver
+      .resolve_array_with_inline_items(name, name, schema, cache)?
+    {
       let type_ref = if schema.is_nullable_array() {
         output.result.with_option()
       } else {

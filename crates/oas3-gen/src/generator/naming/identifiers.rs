@@ -77,6 +77,19 @@ pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
   words
 }
 
+pub(crate) fn strip_parent_prefix(parent_name: &str, prop_pascal: &str) -> String {
+  let parent_words = split_pascal_case(parent_name);
+  let prop_words = split_pascal_case(prop_pascal);
+  let common = parent_words.iter().zip(&prop_words).take_while(|(p, c)| p == c).count();
+  if common > 0 && common < prop_words.len() {
+    prop_words[common..].join("")
+  } else if common == prop_words.len() && common > 0 {
+    "Item".to_string()
+  } else {
+    prop_pascal.to_string()
+  }
+}
+
 /// Ensures a name is unique within a set of used names, appending a numeric suffix if needed.
 pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
   if !used_names.contains(base_name) {

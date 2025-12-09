@@ -35,7 +35,8 @@ crates/
 │       │   └── text.rs            # Text processing utilities
 │       ├── tests/                 # Integration test utilities
 │       │   ├── mod.rs
-│       │   └── common.rs          # Common test helpers
+│       │   ├── common.rs          # Common test helpers
+│       │   └── union_serde.rs     # Union serialization tests
 │       └── generator/             # Core generation pipeline
 │           ├── mod.rs
 │           ├── orchestrator.rs    # Main pipeline coordinator
@@ -88,6 +89,7 @@ crates/
 │           │   ├── mod.rs
 │           │   ├── cache.rs       # Schema conversion caching
 │           │   ├── common.rs      # Common conversion utilities
+│           │   ├── discriminator.rs # Discriminator handling
 │           │   ├── enums.rs       # oneOf/anyOf/allOf conversion
 │           │   ├── field_optionality.rs # Field requirement logic
 │           │   ├── hashing.rs     # Schema fingerprinting
@@ -95,7 +97,6 @@ crates/
 │           │   ├── operations.rs  # Request/response type generation
 │           │   ├── path_renderer.rs # URL path template rendering
 │           │   ├── responses.rs   # Response type generation
-│           │   ├── string_enum_optimizer.rs # String enum optimization
 │           │   ├── structs.rs     # Object schema conversion
 │           │   ├── type_resolver.rs # Type mapping and nullable patterns
 │           │   ├── type_usage_recorder.rs # Type usage recording
@@ -103,10 +104,12 @@ crates/
 │           │       ├── mod.rs
 │           │       ├── cache.rs
 │           │       ├── enums.rs
+│           │       ├── field_optionality.rs
 │           │       ├── implicit_dependencies.rs
 │           │       ├── inline_objects.rs
 │           │       ├── metadata_tests.rs
 │           │       ├── operations.rs
+│           │       ├── path_renderer.rs
 │           │       ├── structs.rs
 │           │       ├── type_aliases.rs
 │           │       └── type_resolution.rs

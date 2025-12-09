@@ -1,4 +1,4 @@
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
 
 use crate::generator::{
   ast::{RustType, TypeRef},
@@ -112,9 +112,9 @@ pub(crate) trait SchemaExt {
   /// Returns the non-null type from a two-type nullable set (e.g., `[string, null]` -> `string`).
   fn non_null_type(&self) -> Option<SchemaType>;
 
-  /// Returns true if the schema should be treated as an inline struct definition.
-  /// This excludes refs, enums, unions, arrays, and primitives.
-  fn is_inline_struct(&self, prop_schema_ref: &ObjectOrReference<ObjectSchema>) -> bool;
+  /// Returns true if the schema represents an inline object definition.
+  /// This excludes enums, unions, arrays, and schemas without properties.
+  fn is_inline_object(&self) -> bool;
 
   /// Returns true if the schema is a discriminated base type with a non-empty mapping.
   fn is_discriminated_base_type(&self) -> bool;
@@ -123,6 +123,13 @@ pub(crate) trait SchemaExt {
   /// An empty schema `{}` or one with only `additionalProperties: {}` both return true,
   /// as neither constrains the shape of the data.
   fn is_empty_object(&self) -> bool;
+
+  /// Returns true if the schema has inline oneOf or anyOf variants.
+  fn has_inline_union(&self) -> bool;
+
+  /// Extracts the inline array items schema if present and not a reference.
+  /// Returns None if: no items, items is a boolean schema, or items is a $ref.
+  fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema>;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -203,11 +210,7 @@ impl SchemaExt for ObjectSchema {
     }
   }
 
-  fn is_inline_struct(&self, prop_schema_ref: &ObjectOrReference<ObjectSchema>) -> bool {
-    if matches!(prop_schema_ref, ObjectOrReference::Ref { .. }) {
-      return false;
-    }
-
+  fn is_inline_object(&self) -> bool {
     if !self.enum_values.is_empty() {
       return false;
     }
@@ -220,11 +223,8 @@ impl SchemaExt for ObjectSchema {
       return false;
     }
 
-    if self.is_primitive() {
-      return false;
-    }
-
-    !self.properties.is_empty()
+    let is_object_type = self.single_type() == Some(SchemaType::Object) || self.schema_type.is_none();
+    is_object_type && !self.properties.is_empty()
   }
 
   fn is_discriminated_base_type(&self) -> bool {
@@ -243,5 +243,23 @@ impl SchemaExt for ObjectSchema {
       && self.all_of.is_empty()
       && self.enum_values.is_empty()
       && self.schema_type.is_none()
+  }
+
+  fn has_inline_union(&self) -> bool {
+    !self.one_of.is_empty() || !self.any_of.is_empty()
+  }
+
+  fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema> {
+    let items_box = self.items.as_ref()?;
+    let items_schema_ref = match items_box.as_ref() {
+      Schema::Object(o) => o,
+      Schema::Boolean(_) => return None,
+    };
+
+    if matches!(&**items_schema_ref, ObjectOrReference::Ref { .. }) {
+      return None;
+    }
+
+    items_schema_ref.resolve(spec).ok()
   }
 }

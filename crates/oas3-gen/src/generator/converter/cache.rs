@@ -91,6 +91,15 @@ impl SharedSchemaCache {
     self.used_names.insert(name);
   }
 
+  /// Pre-registers a top-level schema so inline schemas with identical structure reuse it.
+  pub(crate) fn register_top_level_schema(&mut self, schema: &ObjectSchema, name: &str) -> anyhow::Result<()> {
+    let schema_hash = hashing::hash_schema(schema)?;
+    let rust_name = to_rust_type_name(name);
+    self.schema_to_type.insert(schema_hash, rust_name.clone());
+    self.used_names.insert(rust_name);
+    Ok(())
+  }
+
   /// Gets a preferred name for a schema, using precomputed names or generating a unique one.
   pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> anyhow::Result<String> {
     let schema_hash = hashing::hash_schema(schema)?;

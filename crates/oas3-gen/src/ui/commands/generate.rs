@@ -8,7 +8,6 @@ use oas3::OpenApiV3Spec;
 use crate::{
   generator::{
     codegen::Visibility,
-    converter::FieldOptionalityPolicy,
     orchestrator::{GenerationStats, Orchestrator},
   },
   ui::{Colors, EnumCaseMode, GenerateMode},
@@ -84,19 +83,13 @@ impl GenerateConfig {
   }
 
   fn create_orchestrator(&self, spec: oas3::Spec) -> Orchestrator {
-    let optionality_policy = if self.odata_support {
-      FieldOptionalityPolicy::with_odata_support()
-    } else {
-      FieldOptionalityPolicy::standard()
-    };
-
     Orchestrator::new(
       spec,
       self.visibility,
       self.all_schemas,
       self.only_operations.as_ref(),
       self.excluded_operations.as_ref(),
-      optionality_policy,
+      self.odata_support,
       self.preserve_case_variants,
       self.case_insensitive_enums,
       self.no_helpers,

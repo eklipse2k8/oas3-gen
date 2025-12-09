@@ -34,6 +34,7 @@ pub(crate) fn default_config() -> CodegenConfig {
     preserve_case_variants: false,
     case_insensitive_enums: false,
     no_helpers: false,
+    odata_support: false,
   }
 }
 
@@ -42,6 +43,7 @@ pub(crate) fn config_with_preserve_case() -> CodegenConfig {
     preserve_case_variants: true,
     case_insensitive_enums: false,
     no_helpers: false,
+    odata_support: false,
   }
 }
 
@@ -50,5 +52,6 @@ pub(crate) fn config_with_no_helpers() -> CodegenConfig {
     preserve_case_variants: false,
     case_insensitive_enums: false,
     no_helpers: true,
+    odata_support: false,
   }
 }
