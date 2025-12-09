@@ -15,8 +15,7 @@ use crate::{
     },
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
-      enums::{CollisionStrategy, EnumConverter},
-      string_enum_optimizer::StringEnumOptimizer,
+      enums::{CollisionStrategy, EnumConverter, UnionKind},
       type_resolver::TypeResolver,
     },
     naming::inference::VariantNameNormalizer,
@@ -583,7 +582,7 @@ fn test_preserve_strategy_with_multiple_collisions() {
     ..Default::default()
   };
 
-  let result = converter.convert_simple_enum("Status", &schema, None);
+  let result = converter.convert_value_enum("Status", &schema, None);
 
   if let Some(RustType::Enum(enum_def)) = result {
     assert_eq!(enum_def.variants.len(), 3);
@@ -596,7 +595,7 @@ fn test_preserve_strategy_with_multiple_collisions() {
 }
 
 #[test]
-fn test_string_enum_optimizer_detects_freeform_pattern() {
+fn test_relaxed_enum_detects_freeform_pattern() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
     info: oas3::spec::Info {
@@ -621,7 +620,8 @@ fn test_string_enum_optimizer_detects_freeform_pattern() {
 
   let (graph, _) = SchemaRegistry::new(spec);
   let graph = Arc::new(graph);
-  let optimizer = StringEnumOptimizer::new(&graph, false);
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -643,8 +643,8 @@ fn test_string_enum_optimizer_detects_freeform_pattern() {
     ..Default::default()
   };
 
-  let result = optimizer.try_convert("TestEnum", &schema, None);
-  assert!(result.is_some());
+  let result = enum_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
+  assert!(result.is_ok());
 
   let types = result.unwrap();
   assert_eq!(types.len(), 2);
@@ -663,7 +663,7 @@ fn test_string_enum_optimizer_detects_freeform_pattern() {
 }
 
 #[test]
-fn test_string_enum_optimizer_rejects_no_freeform() {
+fn test_relaxed_enum_rejects_no_freeform() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
     info: oas3::spec::Info {
@@ -688,7 +688,8 @@ fn test_string_enum_optimizer_rejects_no_freeform() {
 
   let (graph, _) = SchemaRegistry::new(spec);
   let graph = Arc::new(graph);
-  let optimizer = StringEnumOptimizer::new(&graph, false);
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -706,8 +707,15 @@ fn test_string_enum_optimizer_rejects_no_freeform() {
     ..Default::default()
   };
 
-  let result = optimizer.try_convert("TestEnum", &schema, None);
-  assert!(result.is_none());
+  let result = enum_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
+  assert!(result.is_ok());
+  let types = result.unwrap();
+  assert!(
+    !types
+      .iter()
+      .any(|t| matches!(t, RustType::Enum(e) if e.name == EnumToken::new("TestEnumKnown"))),
+    "Should not generate relaxed enum without freeform string variant"
+  );
 }
 
 #[test]

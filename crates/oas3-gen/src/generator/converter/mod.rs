@@ -8,7 +8,6 @@ pub(crate) mod metadata;
 pub(crate) mod operations;
 pub(crate) mod path_renderer;
 pub(crate) mod responses;
-mod string_enum_optimizer;
 pub(crate) mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
@@ -104,14 +103,14 @@ impl SchemaConverter {
       let cache_reborrow = cache.as_deref_mut();
       return self
         .enum_converter
-        .convert_union_enum(name, schema, enums::UnionKind::OneOf, cache_reborrow);
+        .convert_union(name, schema, enums::UnionKind::OneOf, cache_reborrow);
     }
 
     if !schema.any_of.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
       return self
         .enum_converter
-        .convert_union_enum(name, schema, enums::UnionKind::AnyOf, cache_reborrow);
+        .convert_union(name, schema, enums::UnionKind::AnyOf, cache_reborrow);
     }
 
     if !schema.enum_values.is_empty() {
@@ -119,7 +118,7 @@ impl SchemaConverter {
       return Ok(
         self
           .enum_converter
-          .convert_simple_enum(name, schema, cache_reborrow)
+          .convert_value_enum(name, schema, cache_reborrow)
           .into_iter()
           .collect(),
       );

@@ -5,7 +5,9 @@ use serde_json::json;
 
 use crate::{
   generator::{
+    ast::RustType,
     converter::{SchemaExt, type_resolver::TypeResolver},
+    naming::inference::extract_common_variant_prefix,
     schema_registry::SchemaRegistry,
   },
   tests::common::{create_test_graph, default_config},
@@ -443,7 +445,7 @@ fn test_array_with_union_items_inline_generation() {
 
   let inline_type = &oneof_result.inline_types[0];
   match inline_type {
-    crate::generator::ast::RustType::Enum(enum_def) => {
+    RustType::Enum(enum_def) => {
       assert_eq!(enum_def.name.as_str(), "ToolKind");
       assert_eq!(enum_def.variants.len(), 2);
       let variant_names: Vec<_> = enum_def.variants.iter().map(|v| v.name.as_str()).collect();
@@ -555,8 +557,6 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
 
 #[test]
 fn test_extract_common_variant_prefix() {
-  use crate::generator::naming::inference::extract_common_variant_prefix;
-
   struct Case {
     variants: Vec<&'static str>,
     expected: Option<&'static str>,
@@ -695,7 +695,7 @@ fn test_union_naming_with_common_suffix() {
 
   assert_eq!(result.result.to_rust_type(), "BetaCitationKind");
   assert_eq!(result.inline_types.len(), 1);
-  if let crate::generator::ast::RustType::Enum(enum_def) = &result.inline_types[0] {
+  if let RustType::Enum(enum_def) = &result.inline_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaCitationKind");
   } else {
     panic!("Expected enum type");
@@ -741,7 +741,7 @@ fn test_union_naming_without_common_suffix() {
 
   assert_eq!(result.result.to_rust_type(), "BetaToolKind");
   assert_eq!(result.inline_types.len(), 1);
-  if let crate::generator::ast::RustType::Enum(enum_def) = &result.inline_types[0] {
+  if let RustType::Enum(enum_def) = &result.inline_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaToolKind");
   } else {
     panic!("Expected enum type");
@@ -800,7 +800,7 @@ fn test_array_union_naming_with_common_suffix() {
 
   assert_eq!(result.result.to_rust_type(), "Vec<BetaEventKind>");
   assert_eq!(result.inline_types.len(), 1);
-  if let crate::generator::ast::RustType::Enum(enum_def) = &result.inline_types[0] {
+  if let RustType::Enum(enum_def) = &result.inline_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaEventKind");
   } else {
     panic!("Expected enum type");

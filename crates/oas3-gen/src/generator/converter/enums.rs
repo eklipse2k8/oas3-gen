@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet},
+  collections::{BTreeMap, BTreeSet, HashSet},
   sync::Arc,
 };
 
@@ -8,7 +8,7 @@ use oas3::spec::ObjectSchema;
 
 use super::{
   CodegenConfig, cache::SharedSchemaCache, common::SchemaExt, field_optionality::FieldOptionalityPolicy, metadata,
-  string_enum_optimizer::StringEnumOptimizer, structs::StructConverter, type_resolver::TypeResolver,
+  structs::StructConverter, type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
@@ -62,8 +62,8 @@ impl EnumConverter {
     }
   }
 
-  /// Converts a simple enum (list of values) into a Rust Enum.
-  pub(crate) fn convert_simple_enum(
+  /// Converts a value-based enum (list of string/number/bool values) into a Rust Enum.
+  pub(crate) fn convert_value_enum(
     &self,
     name: &str,
     schema: &ObjectSchema,
@@ -86,7 +86,7 @@ impl EnumConverter {
       CollisionStrategy::Deduplicate
     };
 
-    let enum_def = self.build_simple_enum(name, schema, strategy);
+    let enum_def = self.build_value_enum(name, schema, strategy);
 
     if let (Some(c), RustType::Enum(e)) = (cache, &enum_def) {
       c.register_enum(enum_values, e.name.to_string());
@@ -97,21 +97,20 @@ impl EnumConverter {
   }
 
   /// Converts a union (oneOf/anyOf) into a Rust Enum.
-  pub(crate) fn convert_union_enum(
+  pub(crate) fn convert_union(
     &self,
     name: &str,
     schema: &ObjectSchema,
     kind: UnionKind,
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
-    if kind == UnionKind::AnyOf {
-      let optimizer = StringEnumOptimizer::new(&self.graph, self.case_insensitive_enums);
-      if let Some(result) = optimizer.try_convert(name, schema, cache.as_deref_mut()) {
-        return Ok(result);
-      }
+    if kind == UnionKind::AnyOf
+      && let Some(result) = self.try_build_relaxed_enum(name, schema, cache.as_deref_mut())
+    {
+      return Ok(result);
     }
 
-    let result = self.process_union(name, schema, kind, cache.as_deref_mut())?;
+    let result = self.collect_union_variants(name, schema, kind, cache.as_deref_mut())?;
 
     if let Some(c) = cache
       && let Some(values) = extract_enum_values(schema)
@@ -123,7 +122,7 @@ impl EnumConverter {
     Ok(result)
   }
 
-  fn build_simple_enum(&self, name: &str, schema: &ObjectSchema, strategy: CollisionStrategy) -> RustType {
+  fn build_value_enum(&self, name: &str, schema: &ObjectSchema, strategy: CollisionStrategy) -> RustType {
     let mut variants: Vec<VariantDef> = vec![];
     let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -142,12 +141,12 @@ impl EnumConverter {
           let unique_name = format!("{}{i}", normalized.name);
           let idx = variants.len();
           seen_names.insert(unique_name.clone(), idx);
-          Self::push_variant(&mut variants, unique_name, &normalized.rename_value);
+          variants.push(VariantDef::unit(unique_name, &normalized.rename_value));
         }
         None => {
           let idx = variants.len();
           seen_names.insert(normalized.name.clone(), idx);
-          Self::push_variant(&mut variants, normalized.name, &normalized.rename_value);
+          variants.push(VariantDef::unit(normalized.name, &normalized.rename_value));
         }
       }
     }
@@ -161,17 +160,7 @@ impl EnumConverter {
     })
   }
 
-  fn push_variant(variants: &mut Vec<VariantDef>, name: impl Into<EnumVariantToken>, rename: &str) {
-    variants.push(VariantDef {
-      name: name.into(),
-      content: VariantContent::Unit,
-      serde_attrs: vec![SerdeAttribute::Rename(rename.to_string())],
-      deprecated: false,
-      ..Default::default()
-    });
-  }
-
-  fn process_union(
+  fn collect_union_variants(
     &self,
     name: &str,
     schema: &ObjectSchema,
@@ -205,9 +194,9 @@ impl EnumConverter {
       });
 
       let (variant, mut generated) = if let Some(schema_name) = ref_name_opt {
-        self.create_ref_variant(&schema_name, &resolved, &mut seen_names)
+        self.build_ref_variant(&schema_name, &resolved, &mut seen_names)
       } else {
-        self.create_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
+        self.build_inline_variant(i, &resolved, name, &mut seen_names, cache.as_deref_mut())?
       };
 
       variants.push(variant);
@@ -219,17 +208,16 @@ impl EnumConverter {
     let methods = if self.no_helpers {
       vec![]
     } else {
-      self.generate_methods(&variants, &inline_types, name, cache)
+      self.build_constructors(&variants, &inline_types, name, cache)
     };
 
-    let main_enum = Self::build_union_enum_def(name, schema, kind, variants, methods);
+    let main_enum = Self::build_union_def(name, schema, kind, variants, methods);
     inline_types.push(main_enum);
 
     Ok(inline_types)
   }
 
-  /// Generates helper methods for creating enum variants with default or single-parameter constructors.
-  fn generate_methods(
+  fn build_constructors(
     &self,
     variants: &[VariantDef],
     inline_types: &[RustType],
@@ -249,7 +237,7 @@ impl EnumConverter {
       .iter()
       .filter_map(|v| {
         let type_ref = v.single_wrapped_type()?;
-        let method_kind = self.get_method_kind_for_type(type_ref, &v.name, &struct_map, cache.as_deref_mut())?;
+        let method_kind = self.constructor_kind_for(type_ref, &v.name, &struct_map, cache.as_deref_mut())?;
         Some((v.name.clone(), method_kind))
       })
       .collect();
@@ -273,7 +261,7 @@ impl EnumConverter {
       .collect()
   }
 
-  fn get_method_kind_for_type(
+  fn constructor_kind_for(
     &self,
     type_ref: &TypeRef,
     variant_name: &EnumVariantToken,
@@ -284,7 +272,7 @@ impl EnumConverter {
     let struct_def = if let Some(&s) = struct_map.get(&base_name) {
       Some(s.clone())
     } else {
-      self.lookup_struct_def(type_ref, cache)
+      self.resolve_struct_def(type_ref, cache)
     };
 
     let s = struct_def.as_ref()?;
@@ -308,7 +296,7 @@ impl EnumConverter {
     }
   }
 
-  fn lookup_struct_def(&self, type_ref: &TypeRef, cache: Option<&mut SharedSchemaCache>) -> Option<StructDef> {
+  fn resolve_struct_def(&self, type_ref: &TypeRef, cache: Option<&mut SharedSchemaCache>) -> Option<StructDef> {
     let schema_name = type_ref.unboxed_base_type_name();
     let schema = self.graph.get_schema(&schema_name)?;
 
@@ -326,7 +314,7 @@ impl EnumConverter {
     }
   }
 
-  fn create_ref_variant(
+  fn build_ref_variant(
     &self,
     schema_name: &str,
     resolved_schema: &ObjectSchema,
@@ -352,7 +340,7 @@ impl EnumConverter {
     (variant, vec![])
   }
 
-  fn create_inline_variant(
+  fn build_inline_variant(
     &self,
     index: usize,
     resolved_schema: &ObjectSchema,
@@ -443,7 +431,7 @@ impl EnumConverter {
     Ok((variant, generated_types))
   }
 
-  fn build_union_enum_def(
+  fn build_union_def(
     name: &str,
     schema: &ObjectSchema,
     _kind: UnionKind,
@@ -516,5 +504,178 @@ impl EnumConverter {
     variants
       .iter()
       .find(|v| v.unboxed_type_name().is_some_and(|name| name == type_name))
+  }
+
+  fn try_build_relaxed_enum(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> Option<Vec<RustType>> {
+    if !self.has_freeform_string(schema) {
+      return None;
+    }
+
+    let known_values = self.collect_known_values(schema);
+    if known_values.is_empty() {
+      return None;
+    }
+
+    Some(self.build_relaxed_enum_types(name, schema, &known_values, cache))
+  }
+
+  fn has_freeform_string(&self, schema: &ObjectSchema) -> bool {
+    schema.any_of.iter().any(|s| {
+      s.resolve(self.graph.spec()).ok().is_some_and(|resolved| {
+        resolved.const_value.is_none() && resolved.enum_values.is_empty() && resolved.is_string()
+      })
+    })
+  }
+
+  fn collect_known_values(&self, schema: &ObjectSchema) -> Vec<(String, Option<String>, bool)> {
+    let mut seen_values = HashSet::new();
+    let mut known_values = vec![];
+
+    for variant in &schema.any_of {
+      let Ok(resolved) = variant.resolve(self.graph.spec()) else {
+        continue;
+      };
+
+      if let Some(const_val) = resolved.const_value.as_ref().and_then(|v| v.as_str()) {
+        if seen_values.insert(const_val.to_string()) {
+          known_values.push((
+            const_val.to_string(),
+            resolved.description.clone(),
+            resolved.deprecated.unwrap_or(false),
+          ));
+        }
+        continue;
+      }
+
+      if resolved.is_string() {
+        for enum_value in &resolved.enum_values {
+          if let Some(str_val) = enum_value.as_str()
+            && seen_values.insert(str_val.to_string())
+          {
+            known_values.push((
+              str_val.to_string(),
+              resolved.description.clone(),
+              resolved.deprecated.unwrap_or(false),
+            ));
+          }
+        }
+      }
+    }
+    known_values
+  }
+
+  fn build_relaxed_enum_types(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    known_values: &[(String, Option<String>, bool)],
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> Vec<RustType> {
+    let base_name = to_rust_type_name(name);
+
+    let mut cache_key_values: Vec<String> = known_values.iter().map(|(v, _, _)| v.clone()).collect();
+    cache_key_values.sort();
+
+    let (known_enum_name, inner_enum_type) =
+      self.resolve_cached_known_enum(&base_name, known_values, cache_key_values, cache);
+
+    let outer_enum = Self::build_relaxed_wrapper_enum(&base_name, &known_enum_name, schema);
+
+    let mut types = vec![];
+    if let Some(ie) = inner_enum_type {
+      types.push(ie);
+    }
+    types.push(outer_enum);
+    types
+  }
+
+  fn resolve_cached_known_enum(
+    &self,
+    base_name: &str,
+    known_values: &[(String, Option<String>, bool)],
+    cache_key: Vec<String>,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> (String, Option<RustType>) {
+    if let Some(c) = cache {
+      if let Some(existing) = c.get_enum_name(&cache_key) {
+        let name = existing.clone();
+        if c.is_enum_generated(&cache_key) {
+          (name, None)
+        } else {
+          let def = self.build_known_values_enum(&name, known_values);
+          c.register_enum(cache_key, name.clone());
+          c.mark_name_used(name.clone());
+          (name, Some(def))
+        }
+      } else {
+        let name = format!("{base_name}Known");
+        let def = self.build_known_values_enum(&name, known_values);
+        c.register_enum(cache_key, name.clone());
+        c.mark_name_used(name.clone());
+        (name, Some(def))
+      }
+    } else {
+      let name = format!("{base_name}Known");
+      (name.clone(), Some(self.build_known_values_enum(&name, known_values)))
+    }
+  }
+
+  fn build_known_values_enum(&self, name: &str, values: &[(String, Option<String>, bool)]) -> RustType {
+    let mut seen_names = BTreeSet::new();
+    let mut variants = vec![];
+
+    for (value, description, deprecated) in values {
+      let base_name = to_rust_type_name(value);
+      let variant_name = ensure_unique(&base_name, &seen_names);
+      seen_names.insert(variant_name.clone());
+
+      variants.push(VariantDef::unit_with_docs(
+        variant_name,
+        value,
+        metadata::extract_docs(description.as_ref()),
+        *deprecated,
+      ));
+    }
+
+    RustType::Enum(EnumDef {
+      name: EnumToken::new(name),
+      docs: vec!["Known values for the string enum.".to_string()],
+      variants,
+      case_insensitive: self.case_insensitive_enums,
+      ..Default::default()
+    })
+  }
+
+  fn build_relaxed_wrapper_enum(name: &str, known_type_name: &str, schema: &ObjectSchema) -> RustType {
+    let variants = vec![
+      VariantDef {
+        name: EnumVariantToken::new("Known"),
+        docs: vec!["A known value.".to_string()],
+        content: VariantContent::Tuple(vec![TypeRef::new(known_type_name)]),
+        serde_attrs: vec![],
+        deprecated: false,
+      },
+      VariantDef {
+        name: EnumVariantToken::new("Other"),
+        docs: vec!["An unknown value.".to_string()],
+        content: VariantContent::Tuple(vec![TypeRef::new("String")]),
+        serde_attrs: vec![],
+        deprecated: false,
+      },
+    ];
+
+    RustType::Enum(EnumDef {
+      name: EnumToken::new(name),
+      docs: metadata::extract_docs(schema.description.as_ref()),
+      variants,
+      serde_attrs: vec![SerdeAttribute::Untagged],
+      case_insensitive: false,
+      ..Default::default()
+    })
   }
 }

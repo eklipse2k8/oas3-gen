@@ -7,8 +7,11 @@ use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
     converter::{
-      FieldOptionalityPolicy, SchemaConverter, cache::SharedSchemaCache, enums::EnumConverter, hashing,
-      string_enum_optimizer::StringEnumOptimizer, type_resolver::TypeResolver,
+      FieldOptionalityPolicy, SchemaConverter,
+      cache::SharedSchemaCache,
+      enums::{EnumConverter, UnionKind},
+      hashing,
+      type_resolver::TypeResolver,
     },
     schema_registry::SchemaRegistry,
   },
@@ -62,7 +65,7 @@ fn test_hash_schema_behavior() {
 }
 
 #[test]
-fn test_convert_simple_enum_with_cache() {
+fn test_convert_value_enum_with_cache() {
   let schema = make_string_enum_schema(&["value1", "value2", "value3"]);
 
   let graph = create_test_graph(BTreeMap::new());
@@ -70,7 +73,7 @@ fn test_convert_simple_enum_with_cache() {
   let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
   let mut cache = SharedSchemaCache::new();
 
-  let result1 = enum_converter.convert_simple_enum("TestEnum", &schema, Some(&mut cache));
+  let result1 = enum_converter.convert_value_enum("TestEnum", &schema, Some(&mut cache));
   assert!(result1.is_some(), "Should generate enum on first call");
 
   let enum_values = vec!["value1".to_string(), "value2".to_string(), "value3".to_string()];
@@ -84,7 +87,7 @@ fn test_convert_simple_enum_with_cache() {
     "Cache should map enum values to the generated name"
   );
 
-  let result2 = enum_converter.convert_simple_enum("DuplicateEnum", &schema, Some(&mut cache));
+  let result2 = enum_converter.convert_value_enum("DuplicateEnum", &schema, Some(&mut cache));
   assert!(
     result2.is_none(),
     "Second enum with same values should not be generated"
@@ -92,7 +95,7 @@ fn test_convert_simple_enum_with_cache() {
 }
 
 #[test]
-fn test_string_enum_optimizer_reuses_cached_enum() {
+fn test_relaxed_enum_reuses_cached_enum() {
   let enum_schema = make_string_enum_schema(&["alpha", "beta", "gamma"]);
 
   let anyof_schema = ObjectSchema {
@@ -119,17 +122,19 @@ fn test_string_enum_optimizer_reuses_cached_enum() {
     .expect("Should convert simple enum");
   assert_eq!(simple_result.len(), 1, "Simple enum should generate one type");
 
-  let optimizer = StringEnumOptimizer::new(&graph, false);
-  let optimized_result = optimizer.try_convert("OptimizedEnum", &anyof_schema, Some(&mut cache));
+  let type_resolver = TypeResolver::new(&graph, default_config());
+  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
+  let optimized_result = enum_converter
+    .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))
+    .expect("Should convert anyOf union");
 
-  assert!(
-    optimized_result.is_some(),
-    "StringEnumOptimizer should handle anyOf pattern"
+  assert_eq!(
+    optimized_result.len(),
+    1,
+    "Should only generate outer enum, reusing inner"
   );
-  let types = optimized_result.unwrap();
-  assert_eq!(types.len(), 1, "Should only generate outer enum, reusing inner");
 
-  let outer_enum = &types[0];
+  let outer_enum = &optimized_result[0];
   if let RustType::Enum(e) = outer_enum {
     let known_variant = e.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
     assert!(known_variant.is_some(), "Should have Known variant");

@@ -195,8 +195,8 @@ impl TypeResolver {
       |name, _| {
         let converter = EnumConverter::new(&self.graph, self.clone(), self.config());
         let inline_enum = converter
-          .convert_simple_enum(name, property_schema, None)
-          .expect("convert_simple_enum should return Some when cache is None");
+          .convert_value_enum(name, property_schema, None)
+          .expect("convert_value_enum should return Some when cache is None");
 
         Ok(ConversionOutput::new(inline_enum))
       },
@@ -469,7 +469,7 @@ impl TypeResolver {
       UnionKind::AnyOf
     };
 
-    let generated_types = converter.convert_union_enum(name, schema, kind, cache)?;
+    let generated_types = converter.convert_union(name, schema, kind, cache)?;
 
     let expected_name = EnumToken::from_raw(name);
     let (main_type, nested) = Self::extract_primary_type(generated_types, &expected_name)?;
