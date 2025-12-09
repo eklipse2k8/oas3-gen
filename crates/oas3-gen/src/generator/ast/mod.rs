@@ -420,32 +420,6 @@ impl VariantDef {
   pub fn unboxed_type_name(&self) -> Option<String> {
     self.content.single_type().map(TypeRef::unboxed_base_type_name)
   }
-
-  #[must_use]
-  pub fn unit(name: impl Into<EnumVariantToken>, serde_rename: &str) -> Self {
-    Self {
-      name: name.into(),
-      content: VariantContent::Unit,
-      serde_attrs: vec![SerdeAttribute::Rename(serde_rename.to_string())],
-      ..Default::default()
-    }
-  }
-
-  #[must_use]
-  pub fn unit_with_docs(
-    name: impl Into<EnumVariantToken>,
-    serde_rename: &str,
-    docs: Vec<String>,
-    deprecated: bool,
-  ) -> Self {
-    Self {
-      name: name.into(),
-      docs,
-      content: VariantContent::Unit,
-      serde_attrs: vec![SerdeAttribute::Rename(serde_rename.to_string())],
-      deprecated,
-    }
-  }
 }
 
 /// Enum variant content (Unit, Tuple, or Struct)

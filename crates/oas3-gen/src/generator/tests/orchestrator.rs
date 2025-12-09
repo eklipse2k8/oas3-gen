@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use crate::generator::{
   codegen::{Visibility, metadata::CodeMetadata},
-  converter::FieldOptionalityPolicy,
   orchestrator::Orchestrator,
 };
 
@@ -13,7 +12,7 @@ fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
     all_schemas,
     None,
     None,
-    FieldOptionalityPolicy::standard(),
+    false,
     false,
     false,
     false,
@@ -32,7 +31,7 @@ fn make_orchestrator_with_ops(
     all_schemas,
     only,
     exclude,
-    FieldOptionalityPolicy::standard(),
+    false,
     false,
     false,
     false,

@@ -7,11 +7,11 @@ use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
     converter::{
-      FieldOptionalityPolicy, SchemaConverter,
+      SchemaConverter,
       cache::SharedSchemaCache,
       enums::{EnumConverter, UnionKind},
       hashing,
-      type_resolver::TypeResolver,
+      type_resolver::TypeResolverBuilder,
     },
     schema_registry::SchemaRegistry,
   },
@@ -27,7 +27,7 @@ fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
 }
 
 fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
-  SchemaConverter::new(graph, FieldOptionalityPolicy::standard(), default_config())
+  SchemaConverter::new(graph, default_config())
 }
 
 #[test]
@@ -69,7 +69,11 @@ fn test_convert_value_enum_with_cache() {
   let schema = make_string_enum_schema(&["value1", "value2", "value3"]);
 
   let graph = create_test_graph(BTreeMap::new());
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
   let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
   let mut cache = SharedSchemaCache::new();
 
@@ -122,7 +126,11 @@ fn test_relaxed_enum_reuses_cached_enum() {
     .expect("Should convert simple enum");
   assert_eq!(simple_result.len(), 1, "Simple enum should generate one type");
 
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
   let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
   let optimized_result = enum_converter
     .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))

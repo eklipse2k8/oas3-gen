@@ -8,9 +8,7 @@ use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
   ast::{LintConfig, OperationInfo, RustType},
   codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata},
-  converter::{
-    CodegenConfig, FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
-  },
+  converter::{CodegenConfig, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
   naming::inference::InlineTypeScanner,
   operation_registry::OperationRegistry,
   schema_registry::SchemaRegistry,
@@ -24,7 +22,7 @@ pub struct Orchestrator {
   visibility: Visibility,
   include_unused_schemas: bool,
   operation_registry: OperationRegistry,
-  optionality_policy: FieldOptionalityPolicy,
+  odata_support: bool,
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   no_helpers: bool,
@@ -77,7 +75,7 @@ impl Orchestrator {
     include_unused_schemas: bool,
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
-    optionality_policy: FieldOptionalityPolicy,
+    odata_support: bool,
     preserve_case_variants: bool,
     case_insensitive_enums: bool,
     no_helpers: bool,
@@ -88,7 +86,7 @@ impl Orchestrator {
       visibility,
       include_unused_schemas,
       operation_registry,
-      optionality_policy,
+      odata_support,
       preserve_case_variants,
       case_insensitive_enums,
       no_helpers,
@@ -171,14 +169,15 @@ impl Orchestrator {
       preserve_case_variants: self.preserve_case_variants,
       case_insensitive_enums: self.case_insensitive_enums,
       no_helpers: self.no_helpers,
+      odata_support: self.odata_support,
     };
 
     let graph = Arc::new(graph);
 
     let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), self.optionality_policy, config)
+      SchemaConverter::new_with_filter(&graph, reachable.clone(), config)
     } else {
-      SchemaConverter::new(&graph, self.optionality_policy, config)
+      SchemaConverter::new(&graph, config)
     };
 
     let scanner = InlineTypeScanner::new(&graph);

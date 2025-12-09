@@ -1,6 +1,5 @@
 mod cache;
 mod enums;
-mod field_optionality;
 mod implicit_dependencies;
 mod inline_objects;
 pub mod metadata_tests;

@@ -9,8 +9,7 @@ use oas3::spec::{ObjectSchema, Schema};
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
-  discriminator::{apply_discriminator_attributes, get_discriminator_info},
-  field_optionality::{FieldContext, FieldOptionalityPolicy},
+  discriminator::{DiscriminatorInfo, apply_discriminator_attributes, get_discriminator_info},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
 };
@@ -19,6 +18,7 @@ use crate::generator::{
     FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
     tokens::FieldNameToken,
   },
+  converter::type_resolver::TypeResolverBuilder,
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
     identifiers::{to_rust_field_name, to_rust_type_name},
@@ -48,10 +48,14 @@ impl StructConverter {
     graph: &Arc<SchemaRegistry>,
     config: CodegenConfig,
     reachable_schemas: Option<Arc<BTreeSet<String>>>,
-    optionality_policy: FieldOptionalityPolicy,
   ) -> Self {
-    let type_resolver = TypeResolver::new_with_filter(graph, config, reachable_schemas, optionality_policy);
-    let field_processor = FieldProcessor::new(optionality_policy, type_resolver.clone());
+    let type_resolver = TypeResolverBuilder::default()
+      .config(config)
+      .graph(graph.clone())
+      .reachable_schemas(reachable_schemas)
+      .build()
+      .expect("TypeResolver");
+    let field_processor = FieldProcessor::new(config, type_resolver.clone());
     Self {
       type_resolver,
       field_processor,
@@ -296,14 +300,14 @@ impl StructConverter {
 
 #[derive(Clone)]
 pub(crate) struct FieldProcessor {
-  optionality_policy: FieldOptionalityPolicy,
+  odata_support: bool,
   type_resolver: TypeResolver,
 }
 
 impl FieldProcessor {
-  fn new(optionality_policy: FieldOptionalityPolicy, type_resolver: TypeResolver) -> Self {
+  fn new(config: CodegenConfig, type_resolver: TypeResolver) -> Self {
     Self {
-      optionality_policy,
+      odata_support: config.odata_support,
       type_resolver,
     }
   }
@@ -318,16 +322,7 @@ impl FieldProcessor {
   ) -> anyhow::Result<FieldDef> {
     let discriminator_info = get_discriminator_info(ctx.prop_name, ctx.schema, prop_schema, discriminator_mapping);
 
-    let should_be_optional = self.optionality_policy.is_optional(
-      ctx.prop_name,
-      ctx.schema,
-      FieldContext {
-        is_required,
-        has_default: prop_schema.default.is_some(),
-        is_discriminator_field: discriminator_info.is_some(),
-        discriminator_has_enum: discriminator_info.as_ref().is_some_and(|i| i.has_enum),
-      },
-    );
+    let should_be_optional = self.is_field_optional(ctx, prop_schema, discriminator_info.as_ref(), is_required);
     let final_type = if should_be_optional && !resolved_type.nullable {
       resolved_type.with_option()
     } else {
@@ -357,6 +352,33 @@ impl FieldProcessor {
       .build()?;
 
     Ok(field)
+  }
+
+  fn is_field_optional(
+    &self,
+    ctx: &FieldProcessingContext,
+    prop_schema: &ObjectSchema,
+    discriminator_info: Option<&DiscriminatorInfo>,
+    is_required: bool,
+  ) -> bool {
+    let has_default = prop_schema.default.is_some();
+    let is_discriminator_field = discriminator_info.is_some();
+    let discriminator_has_enum = discriminator_info.is_some_and(|i| i.has_enum);
+
+    if !is_required || has_default {
+      return true;
+    }
+    if is_discriminator_field && !discriminator_has_enum {
+      return true;
+    }
+    if self.odata_support
+      && ctx.prop_name.starts_with("@odata.")
+      && ctx.schema.discriminator.is_none()
+      && ctx.schema.all_of.is_empty()
+    {
+      return true;
+    }
+    false
   }
 
   fn prepare_additional_properties(&self, schema: &ObjectSchema) -> anyhow::Result<AdditionalPropertiesResult> {

@@ -11,10 +11,7 @@ use crate::{
     ast::{
       ContentCategory, FieldNameToken, PathSegment, RustPrimitive, RustType, StructDef, StructMethodKind, StructToken,
     },
-    converter::{
-      FieldOptionalityPolicy, SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache,
-      operations::OperationConverter,
-    },
+    converter::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, operations::OperationConverter},
   },
   tests::common::{create_test_graph, default_config},
 };
@@ -24,11 +21,7 @@ fn setup_converter(
 ) -> (OperationConverter<'static>, TypeUsageRecorder, SharedSchemaCache) {
   let graph = create_test_graph(schemas);
   let spec = Box::leak(Box::new(graph.spec().clone()));
-  let schema_converter = Box::leak(Box::new(SchemaConverter::new(
-    &graph,
-    FieldOptionalityPolicy::standard(),
-    default_config(),
-  )));
+  let schema_converter = Box::leak(Box::new(SchemaConverter::new(&graph, default_config())));
   let converter = OperationConverter::new(schema_converter, spec);
   let usage = TypeUsageRecorder::new();
   let cache = SharedSchemaCache::new();

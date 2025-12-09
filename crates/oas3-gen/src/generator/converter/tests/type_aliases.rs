@@ -3,10 +3,7 @@ use std::collections::BTreeMap;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use crate::{
-  generator::{
-    ast::RustType,
-    converter::{FieldOptionalityPolicy, SchemaConverter},
-  },
+  generator::{ast::RustType, converter::SchemaConverter},
   tests::common::{create_test_graph, default_config},
 };
 
@@ -49,7 +46,7 @@ fn test_primitive_type_aliases() -> anyhow::Result<()> {
 
   for (name, schema, expected_type) in cases {
     let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
-    let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+    let converter = SchemaConverter::new(&graph, default_config());
     let result = converter.convert_schema(name, graph.get_schema(name).unwrap(), None)?;
 
     assert_eq!(result.len(), 1, "expected single type for {name}");
@@ -91,7 +88,7 @@ fn test_array_type_aliases() -> anyhow::Result<()> {
 
   for (name, schema, expected_type) in cases {
     let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
-    let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+    let converter = SchemaConverter::new(&graph, default_config());
     let result = converter.convert_schema(name, graph.get_schema(name).unwrap(), None)?;
 
     assert_eq!(result.len(), 1, "expected single type for {name}");
@@ -132,7 +129,7 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
     ("Pets".to_string(), pets_schema_array),
   ]));
 
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let converter = SchemaConverter::new(&graph, default_config());
   let result = converter.convert_schema("Pets", graph.get_schema("Pets").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
@@ -207,7 +204,7 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
     ("EventList".to_string(), event_list_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let converter = SchemaConverter::new(&graph, default_config());
   let result = converter.convert_schema("EventList", graph.get_schema("EventList").unwrap(), None)?;
 
   assert_eq!(result.len(), 2, "expected type alias + inline enum");
@@ -295,7 +292,7 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
     ("NullableEventList".to_string(), nullable_event_list_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let converter = SchemaConverter::new(&graph, default_config());
   let result = converter.convert_schema(
     "NullableEventList",
     graph.get_schema("NullableEventList").unwrap(),

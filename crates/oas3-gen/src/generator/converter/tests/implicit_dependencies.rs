@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::generator::{codegen::Visibility, converter::FieldOptionalityPolicy, orchestrator::Orchestrator};
+use crate::generator::{codegen::Visibility, orchestrator::Orchestrator};
 
 #[test]
 fn test_implicit_dependency_via_union_fingerprint() {
@@ -13,10 +13,10 @@ fn test_implicit_dependency_via_union_fingerprint() {
   let orchestrator = Orchestrator::new(
     spec,
     Visibility::default(),
-    false, // include_unused_schemas = false (IMPORTANT)
+    false,
     Some(&only_ops),
     None,
-    FieldOptionalityPolicy::standard(),
+    false,
     false,
     false,
     false,

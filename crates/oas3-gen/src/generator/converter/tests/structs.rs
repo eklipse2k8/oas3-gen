@@ -7,12 +7,11 @@ use crate::{
   generator::{
     ast::{FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute, tokens::FieldNameToken},
     converter::{
-      FieldOptionalityPolicy, SchemaConverter,
+      SchemaConverter,
       discriminator::{DiscriminatorInfo, apply_discriminator_attributes},
-      field_optionality::FieldContext,
       metadata::FieldMetadata,
       structs::StructConverter,
-      type_resolver::TypeResolver,
+      type_resolver::TypeResolverBuilder,
     },
   },
   tests::common::{create_test_graph, default_config},
@@ -48,7 +47,7 @@ fn test_discriminated_base_struct_renamed() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let converter = SchemaConverter::new(&graph, default_config());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
 
   let struct_def = result
@@ -96,7 +95,7 @@ fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let converter = SchemaConverter::new(&graph, default_config());
   let result = converter.convert_schema("Message", graph.get_schema("Message").unwrap(), None)?;
 
   let struct_def = result
@@ -164,7 +163,7 @@ fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let converter = SchemaConverter::new(&graph, default_config());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
 
   let struct_def = result
@@ -224,7 +223,11 @@ fn test_schema_merger_merge_child_with_parent() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
   let merged_schema = type_resolver.merge_child_schema_with_parent(&child, &parent).unwrap();
 
   assert!(merged_schema.properties.contains_key("parent_prop"));
@@ -262,7 +265,11 @@ fn test_schema_merger_conflict_resolution() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
   let merged_schema = type_resolver.merge_child_schema_with_parent(&child, &parent).unwrap();
 
   // Child should override parent
@@ -304,33 +311,17 @@ fn test_discriminator_handler_detect_parent() {
   graph_map.insert("Child".to_string(), child_schema.clone());
 
   let graph = create_test_graph(graph_map);
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
 
   let mut cache = HashMap::new();
   let result = type_resolver.detect_discriminated_parent(&child_schema, &mut cache);
 
   assert!(result.is_some());
   assert!(result.unwrap().discriminator.is_some());
-}
-
-#[test]
-fn test_field_optionality_policy() {
-  let schema = ObjectSchema::default();
-  let policy = FieldOptionalityPolicy::standard();
-
-  let ctx_required = FieldContext {
-    is_required: true,
-    ..Default::default()
-  };
-  let is_optional_when_required = policy.is_optional("required_field", &schema, ctx_required);
-  assert!(!is_optional_when_required);
-
-  let ctx_not_required = FieldContext {
-    is_required: false,
-    ..Default::default()
-  };
-  let is_optional_when_not_required = policy.is_optional("other_field", &schema, ctx_not_required);
-  assert!(is_optional_when_not_required);
 }
 
 fn make_field(name: &str, deprecated: bool) -> FieldDef {
@@ -605,7 +596,7 @@ fn test_discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<
     ("Child".to_string(), child_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, FieldOptionalityPolicy::standard(), default_config());
+  let converter = SchemaConverter::new(&graph, default_config());
   let result = converter.convert_schema("Child", graph.get_schema("Child").unwrap(), None)?;
 
   let struct_def = result
@@ -670,7 +661,11 @@ fn test_schema_merger_merge_all_of() {
     ("Composite".to_string(), composite_schema.clone()),
   ]));
 
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
   let merged_schema = type_resolver.merge_all_of_schema(&composite_schema).unwrap();
 
   assert!(merged_schema.properties.contains_key("base_prop"));
@@ -709,7 +704,11 @@ fn test_schema_merger_preserves_discriminator() {
     ("Child".to_string(), child_schema.clone()),
   ]));
 
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
   let merged_schema = type_resolver
     .merge_child_schema_with_parent(&child_schema, &parent_schema)
     .unwrap();
@@ -722,8 +721,11 @@ fn test_schema_merger_preserves_discriminator() {
 fn test_discriminator_handler_no_parent_returns_none() {
   let schema = ObjectSchema::default();
   let graph = create_test_graph(BTreeMap::new());
-  let type_resolver = TypeResolver::new(&graph, default_config());
-
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
   let mut cache = HashMap::new();
   let result = type_resolver.detect_discriminated_parent(&schema, &mut cache);
 
@@ -739,7 +741,11 @@ fn test_discriminator_handler_inline_all_of_returns_none() {
   }));
 
   let graph = create_test_graph(BTreeMap::new());
-  let type_resolver = TypeResolver::new(&graph, default_config());
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
 
   let mut cache = HashMap::new();
   let result = type_resolver.detect_discriminated_parent(&schema, &mut cache);

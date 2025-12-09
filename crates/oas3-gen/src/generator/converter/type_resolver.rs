@@ -4,11 +4,12 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use derive_builder::Builder;
 use inflections::Inflect;
 use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use super::{
-  CodegenConfig, ConversionOutput, FieldOptionalityPolicy, SchemaExt,
+  CodegenConfig, ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
   discriminator::DiscriminatorHandler,
   enums::{EnumConverter, UnionKind},
@@ -25,52 +26,18 @@ use crate::generator::{
 };
 
 /// Resolves OpenAPI schemas into Rust Type References (`TypeRef`).
-///
-/// Handles primitives, references, inlining enums, union types, schema merging,
-/// and discriminator detection/generation.
-#[derive(Clone)]
+#[derive(Clone, Debug, Builder)]
+#[builder(setter(into))]
 pub(crate) struct TypeResolver {
   graph: Arc<SchemaRegistry>,
+  #[builder(default)]
   reachable_schemas: Option<Arc<BTreeSet<String>>>,
-  optionality_policy: FieldOptionalityPolicy,
-  preserve_case_variants: bool,
-  case_insensitive_enums: bool,
-  pub(crate) no_helpers: bool,
+  config: CodegenConfig,
 }
 
 impl TypeResolver {
-  /// Creates a new `TypeResolver` with a filter for reachable schemas.
-  pub(crate) fn new_with_filter(
-    graph: &Arc<SchemaRegistry>,
-    config: CodegenConfig,
-    reachable_schemas: Option<Arc<BTreeSet<String>>>,
-    optionality_policy: FieldOptionalityPolicy,
-  ) -> Self {
-    Self {
-      graph: graph.clone(),
-      reachable_schemas,
-      optionality_policy,
-      preserve_case_variants: config.preserve_case_variants,
-      case_insensitive_enums: config.case_insensitive_enums,
-      no_helpers: config.no_helpers,
-    }
-  }
-
-  /// Creates a new `TypeResolver` with standard optionality policy.
-  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: CodegenConfig) -> Self {
-    Self::new_with_filter(graph, config, None, FieldOptionalityPolicy::standard())
-  }
-
   pub(crate) fn graph(&self) -> &Arc<SchemaRegistry> {
     &self.graph
-  }
-
-  fn config(&self) -> CodegenConfig {
-    CodegenConfig {
-      preserve_case_variants: self.preserve_case_variants,
-      case_insensitive_enums: self.case_insensitive_enums,
-      no_helpers: self.no_helpers,
-    }
   }
 
   fn create_type_reference(&self, schema_name: &str) -> TypeRef {
@@ -193,7 +160,7 @@ impl TypeResolver {
         }
       },
       |name, _| {
-        let converter = EnumConverter::new(&self.graph, self.clone(), self.config());
+        let converter = EnumConverter::new(&self.graph, self.clone(), self.config);
         let inline_enum = converter
           .convert_value_enum(name, property_schema, None)
           .expect("convert_value_enum should return Some when cache is None");
@@ -228,12 +195,7 @@ impl TypeResolver {
       cache,
       |_| None,
       |name, cache| {
-        let converter = StructConverter::new(
-          &self.graph,
-          self.config(),
-          self.reachable_schemas.clone(),
-          self.optionality_policy,
-        );
+        let converter = StructConverter::new(&self.graph, self.config, self.reachable_schemas.clone());
         converter.convert_struct(name, schema, None, cache)
       },
     )
@@ -462,7 +424,7 @@ impl TypeResolver {
     uses_one_of: bool,
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<RustType>> {
-    let converter = EnumConverter::new(&self.graph, self.clone(), self.config());
+    let converter = EnumConverter::new(&self.graph, self.clone(), self.config);
     let kind = if uses_one_of {
       UnionKind::OneOf
     } else {
