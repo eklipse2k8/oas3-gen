@@ -392,10 +392,12 @@ impl EnumConverter {
     let (content, generated_types) = if resolved_schema.properties.is_empty() {
       let mut array_conversion = None;
       if resolved_schema.is_array() {
-        array_conversion =
-          self
-            .type_resolver
-            .resolve_nullable_array_union(&variant_name, resolved_schema, cache.as_deref_mut())?;
+        array_conversion = self.type_resolver.resolve_array_with_inline_items(
+          enum_name,
+          &variant_name,
+          resolved_schema,
+          cache.as_deref_mut(),
+        )?;
       }
 
       if let Some(conversion) = array_conversion {

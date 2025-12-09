@@ -8,9 +8,10 @@ use crate::{
     ast::{FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute, tokens::FieldNameToken},
     converter::{
       FieldOptionalityPolicy, SchemaConverter,
+      discriminator::{DiscriminatorInfo, apply_discriminator_attributes},
       field_optionality::FieldContext,
       metadata::FieldMetadata,
-      structs::{DiscriminatorInfo, FieldProcessor, StructConverter},
+      structs::StructConverter,
       type_resolver::TypeResolver,
     },
   },
@@ -449,7 +450,7 @@ fn test_apply_discriminator_attributes_none_returns_unchanged() {
   let serde_attrs = vec![SerdeAttribute::Rename("original".to_string())];
   let type_ref = make_string_type_ref();
 
-  let result = FieldProcessor::apply_discriminator_attributes(metadata.clone(), serde_attrs.clone(), &type_ref, None);
+  let result = apply_discriminator_attributes(metadata.clone(), serde_attrs.clone(), &type_ref, None);
 
   assert_eq!(result.metadata.docs, metadata.docs);
   assert_eq!(result.metadata.validation_attrs.len(), 1);
@@ -469,7 +470,7 @@ fn test_apply_discriminator_attributes_child_discriminator_hides_and_sets_value(
     has_enum: false,
   };
 
-  let result = FieldProcessor::apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
+  let result = apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
 
   assert!(result.metadata.docs.is_empty(), "docs should be cleared");
   assert!(
@@ -497,7 +498,7 @@ fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
     has_enum: false,
   };
 
-  let result = FieldProcessor::apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
+  let result = apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
 
   assert!(result.metadata.docs.is_empty(), "docs should be cleared");
   assert!(
@@ -529,7 +530,7 @@ fn test_apply_discriminator_attributes_base_without_enum_non_string_no_default()
     has_enum: false,
   };
 
-  let result = FieldProcessor::apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
+  let result = apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
 
   assert!(
     result.metadata.default_value.is_none(),
@@ -550,8 +551,7 @@ fn test_apply_discriminator_attributes_base_with_enum_remains_visible() {
     has_enum: true,
   };
 
-  let result =
-    FieldProcessor::apply_discriminator_attributes(metadata.clone(), serde_attrs.clone(), &type_ref, Some(&disc_info));
+  let result = apply_discriminator_attributes(metadata.clone(), serde_attrs.clone(), &type_ref, Some(&disc_info));
 
   assert_eq!(result.metadata.docs, metadata.docs, "docs should be preserved");
   assert_eq!(

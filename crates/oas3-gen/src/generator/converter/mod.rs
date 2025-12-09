@@ -1,5 +1,6 @@
 pub(crate) mod cache;
 mod common;
+pub(crate) mod discriminator;
 mod enums;
 mod field_optionality;
 pub(crate) mod hashing;
@@ -197,7 +198,10 @@ impl SchemaConverter {
       return Ok(None);
     }
 
-    if let Some(output) = self.type_resolver.resolve_nullable_array_union(name, schema, cache)? {
+    if let Some(output) = self
+      .type_resolver
+      .resolve_array_with_inline_items(name, name, schema, cache)?
+    {
       let type_ref = if schema.is_nullable_array() {
         output.result.with_option()
       } else {

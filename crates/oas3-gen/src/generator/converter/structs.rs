@@ -4,13 +4,12 @@ use std::{
 };
 
 use anyhow::Context as _;
-use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema};
-use string_cache::DefaultAtom;
+use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
+  discriminator::{apply_discriminator_attributes, get_discriminator_info},
   field_optionality::{FieldContext, FieldOptionalityPolicy},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
@@ -27,14 +26,6 @@ use crate::generator::{
   schema_registry::SchemaRegistry,
 };
 
-const HIDDEN: &str = "#[doc(hidden)]";
-
-pub(crate) struct DiscriminatorAttributesResult {
-  pub metadata: FieldMetadata,
-  pub serde_attrs: Vec<SerdeAttribute>,
-  pub extra_attrs: Vec<String>,
-}
-
 struct AdditionalPropertiesResult {
   serde_attrs: Vec<SerdeAttribute>,
   additional_field: Option<FieldDef>,
@@ -43,12 +34,6 @@ struct AdditionalPropertiesResult {
 struct FieldProcessingContext<'a> {
   prop_name: &'a str,
   schema: &'a ObjectSchema,
-}
-
-pub(crate) struct DiscriminatorInfo {
-  pub value: Option<DefaultAtom>,
-  pub is_base: bool,
-  pub has_enum: bool,
 }
 
 /// Converter for OpenAPI object schemas into Rust Structs.
@@ -65,7 +50,7 @@ impl StructConverter {
     reachable_schemas: Option<Arc<BTreeSet<String>>>,
     optionality_policy: FieldOptionalityPolicy,
   ) -> Self {
-    let type_resolver = TypeResolver::new_with_filter(graph, config, reachable_schemas);
+    let type_resolver = TypeResolver::new_with_filter(graph, config, reachable_schemas, optionality_policy);
     let field_processor = FieldProcessor::new(optionality_policy, type_resolver.clone());
     Self {
       type_resolver,
@@ -82,7 +67,7 @@ impl StructConverter {
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
     let num_properties = schema.properties.len();
-    let required_set: std::collections::HashSet<&String> = schema.required.iter().collect();
+    let required_set: HashSet<&String> = schema.required.iter().collect();
 
     let discriminator_mapping = schema_name.and_then(|name| self.type_resolver.graph().get_discriminator_mapping(name));
 
@@ -101,7 +86,13 @@ impl StructConverter {
         .with_context(|| format!("Schema resolution failed for property '{prop_name}'"))?;
 
       let cache_borrow = cache.as_deref_mut();
-      let resolved = self.resolve_field_type(parent_name, prop_name, &prop_schema, prop_schema_ref, cache_borrow)?;
+      let resolved = self.type_resolver.resolve_property_type(
+        parent_name,
+        prop_name,
+        &prop_schema,
+        prop_schema_ref,
+        cache_borrow,
+      )?;
 
       let ctx = FieldProcessingContext { prop_name, schema };
 
@@ -142,42 +133,6 @@ impl StructConverter {
     let result = self.convert_struct(name, &merged_schema, None, cache)?;
 
     self.finalize_struct_types(name, &merged_schema, result.result, result.inline_types)
-  }
-
-  fn resolve_field_type(
-    &self,
-    parent_name: &str,
-    prop_name: &str,
-    prop_schema: &ObjectSchema,
-    prop_schema_ref: &ObjectOrReference<ObjectSchema>,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    if prop_schema.is_inline_struct(prop_schema_ref) {
-      return self.generate_inline_struct(parent_name, prop_name, prop_schema, cache);
-    }
-
-    self
-      .type_resolver
-      .resolve_property_type(parent_name, prop_name, prop_schema, prop_schema_ref, cache)
-  }
-
-  fn generate_inline_struct(
-    &self,
-    parent_name: &str,
-    prop_name: &str,
-    schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    let base_name = format!("{}{}", parent_name, prop_name.to_pascal_case());
-
-    super::common::handle_inline_creation(
-      schema,
-      &base_name,
-      None,
-      cache,
-      |_| None,
-      |name, cache| self.convert_struct(name, schema, None, cache),
-    )
   }
 
   /// Converts a standard object schema into a Rust Struct.
@@ -361,7 +316,7 @@ impl FieldProcessor {
     is_required: bool,
     discriminator_mapping: Option<&(String, String)>,
   ) -> anyhow::Result<FieldDef> {
-    let discriminator_info = Self::get_discriminator_info(ctx, discriminator_mapping, prop_schema);
+    let discriminator_info = get_discriminator_info(ctx.prop_name, ctx.schema, prop_schema, discriminator_mapping);
 
     let should_be_optional = self.optionality_policy.is_optional(
       ctx.prop_name,
@@ -387,8 +342,7 @@ impl FieldProcessor {
       vec![SerdeAttribute::Rename(ctx.prop_name.to_string())]
     };
 
-    let disc_attrs =
-      Self::apply_discriminator_attributes(metadata, serde_attrs, &final_type, discriminator_info.as_ref());
+    let disc_attrs = apply_discriminator_attributes(metadata, serde_attrs, &final_type, discriminator_info.as_ref());
 
     let field = FieldDefBuilder::default()
       .name(to_rust_field_name(ctx.prop_name))
@@ -403,84 +357,6 @@ impl FieldProcessor {
       .build()?;
 
     Ok(field)
-  }
-
-  fn get_discriminator_info(
-    ctx: &FieldProcessingContext,
-    discriminator_mapping: Option<&(String, String)>,
-    prop_schema: &ObjectSchema,
-  ) -> Option<DiscriminatorInfo> {
-    let is_child_discriminator = discriminator_mapping
-      .as_ref()
-      .is_some_and(|(prop, _)| prop == ctx.prop_name);
-
-    let is_base_discriminator = ctx
-      .schema
-      .discriminator
-      .as_ref()
-      .is_some_and(|d| d.property_name == ctx.prop_name);
-
-    let has_enum = !prop_schema.enum_values.is_empty();
-
-    if is_child_discriminator {
-      let (_, value) = discriminator_mapping?;
-      Some(DiscriminatorInfo {
-        value: Some(DefaultAtom::from(value.as_str())),
-        is_base: false,
-        has_enum,
-      })
-    } else if is_base_discriminator {
-      Some(DiscriminatorInfo {
-        value: None,
-        is_base: true,
-        has_enum,
-      })
-    } else {
-      None
-    }
-  }
-
-  pub(crate) fn apply_discriminator_attributes(
-    mut metadata: FieldMetadata,
-    mut serde_attrs: Vec<SerdeAttribute>,
-    final_type: &TypeRef,
-    discriminator_info: Option<&DiscriminatorInfo>,
-  ) -> DiscriminatorAttributesResult {
-    let should_hide = discriminator_info
-      .as_ref()
-      .is_some_and(|d| d.value.is_some() || (d.is_base && !d.has_enum));
-
-    if !should_hide {
-      return DiscriminatorAttributesResult {
-        metadata,
-        serde_attrs,
-        extra_attrs: vec![],
-      };
-    }
-
-    let disc_info = discriminator_info.expect("checked above");
-
-    metadata.docs.clear();
-    metadata.validation_attrs.clear();
-    let extra_attrs = vec![HIDDEN.to_string()];
-
-    if let Some(ref disc_value) = disc_info.value {
-      metadata.default_value = Some(serde_json::Value::String(disc_value.to_string()));
-      serde_attrs.push(SerdeAttribute::SkipDeserializing);
-      serde_attrs.push(SerdeAttribute::Default);
-    } else {
-      serde_attrs.clear();
-      serde_attrs.push(SerdeAttribute::Skip);
-      if final_type.is_string_like() {
-        metadata.default_value = Some(serde_json::Value::String(String::new()));
-      }
-    }
-
-    DiscriminatorAttributesResult {
-      metadata,
-      serde_attrs,
-      extra_attrs,
-    }
   }
 
   fn prepare_additional_properties(&self, schema: &ObjectSchema) -> anyhow::Result<AdditionalPropertiesResult> {

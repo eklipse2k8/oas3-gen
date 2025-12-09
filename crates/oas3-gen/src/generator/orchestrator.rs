@@ -277,6 +277,15 @@ impl Orchestrator {
         .is_none_or(|schema| schema.enum_values.is_empty())
     });
 
+    for schema_name in &schema_names {
+      if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
+        continue;
+      }
+      if let Some(schema) = graph.get_schema(schema_name) {
+        let _ = cache.register_top_level_schema(schema, schema_name);
+      }
+    }
+
     for schema_name in schema_names {
       if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
         continue;
