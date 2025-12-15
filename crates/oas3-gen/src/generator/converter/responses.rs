@@ -35,7 +35,9 @@ pub(crate) fn build_response_enum(
       continue;
     };
 
-    let status_code = StatusCodeToken::from_openapi(status_code_str);
+    let status_code = status_code_str
+      .parse::<StatusCodeToken>()
+      .unwrap_or(StatusCodeToken::Default);
     let variant_name = status_code_to_variant_name(status_code, &response);
     let (schema_type, content_category) =
       extract_response_schema_info(schema_converter, &response, path, status_code, schema_cache)
