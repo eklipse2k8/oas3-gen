@@ -1,39 +1,39 @@
 {
-  "openapi": "3.0.0",
-  "info": {
-    "title": "Enum Deduplication Test",
-    "version": "1.0.0"
-  },
-  "paths": {},
-  "components": {
-    "schemas": {
-      "StructA": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": ["active", "inactive"]
-          }
-        }
-      },
-      "StructB": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": ["active", "inactive"]
-          }
-        }
-      },
-      "StructC": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": ["inactive", "active"]
-          }
-        }
-      }
-    }
-  }
+	"openapi": "3.1.0",
+	"info": {
+		"title": "Enum Deduplication Test",
+		"version": "1.0.0"
+	},
+	"paths": {},
+	"components": {
+		"schemas": {
+			"StructA": {
+				"type": "object",
+				"properties": {
+					"status": {
+						"type": "string",
+						"enum": ["active", "inactive"]
+					}
+				}
+			},
+			"StructB": {
+				"type": "object",
+				"properties": {
+					"status": {
+						"type": "string",
+						"enum": ["active", "inactive"]
+					}
+				}
+			},
+			"StructC": {
+				"type": "object",
+				"properties": {
+					"status": {
+						"type": "string",
+						"enum": ["inactive", "active"]
+					}
+				}
+			}
+		}
+	}
 }

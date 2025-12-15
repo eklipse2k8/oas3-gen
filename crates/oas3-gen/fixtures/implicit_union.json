@@ -1,51 +1,65 @@
 {
-  "openapi": "3.0.0",
-  "info": {
-    "title": "Implicit Dependency Test",
-    "version": "1.0.0"
-  },
-  "paths": {
-    "/test": {
-      "post": {
-        "operationId": "test_operation",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  { "$ref": "#/components/schemas/ComponentA" },
-                  { "$ref": "#/components/schemas/ComponentB" }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "OK" }
-        }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "ImplicitlyRequiredUnion": {
-        "anyOf": [
-          { "$ref": "#/components/schemas/ComponentA" },
-          { "$ref": "#/components/schemas/ComponentB" }
-        ]
-      },
-      "ComponentA": {
-        "type": "object",
-        "properties": {
-          "a": { "type": "string" }
-        }
-      },
-      "ComponentB": {
-        "type": "object",
-        "properties": {
-          "b": { "type": "integer" }
-        }
-      }
-    }
-  }
+	"openapi": "3.1.0",
+	"info": {
+		"title": "Implicit Dependency Test",
+		"version": "1.0.0"
+	},
+	"paths": {
+		"/test": {
+			"post": {
+				"operationId": "test_operation",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"anyOf": [
+									{
+										"$ref": "#/components/schemas/ComponentA"
+									},
+									{
+										"$ref": "#/components/schemas/ComponentB"
+									}
+								]
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "OK"
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"ImplicitlyRequiredUnion": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/ComponentA"
+					},
+					{
+						"$ref": "#/components/schemas/ComponentB"
+					}
+				]
+			},
+			"ComponentA": {
+				"type": "object",
+				"properties": {
+					"a": {
+						"type": "string"
+					}
+				}
+			},
+			"ComponentB": {
+				"type": "object",
+				"properties": {
+					"b": {
+						"type": "integer"
+					}
+				}
+			}
+		}
+	}
 }

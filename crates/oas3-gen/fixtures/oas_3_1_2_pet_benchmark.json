@@ -1,699 +1,656 @@
 {
-  "openapi": "3.1.2",
-  "info": {
-    "title": "OAS 3.1.2 Benchmark API",
-    "summary": "A maximally spec-complete fixture for testing parser coverage.",
-    "description": "This spec exercises **CommonMark** in descriptions.\n\nIt covers all OpenAPI 3.1.2 features including:\n- JSON Schema 2020-12\n- Webhooks\n- Callbacks\n- Complex Parameter Serialization\n- Multipart Encoding",
-    "termsOfService": "https://example.com/terms",
-    "contact": {
-      "name": "API Support",
-      "url": "https://www.example.com/support",
-      "email": "support@example.com"
-    },
-    "license": {
-      "name": "Apache 2.0",
-      "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
-      "identifier": "Apache-2.0"
-    },
-    "version": "1.0.0"
-  },
-  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.1/dialect/base",
-  "servers": [
-    {
-      "url": "https://{username}.gigantic-server.com:{port}/{basePath}",
-      "description": "The production API server",
-      "variables": {
-        "username": {
-          "default": "demo",
-          "description": "this value is assigned by the service provider"
-        },
-        "port": {
-          "enum": ["8443", "443"],
-          "default": "8443"
-        },
-        "basePath": {
-          "default": "v2"
-        }
-      }
-    }
-  ],
-  "security": [
-    {
-      "petstore_auth": [
-        "write:pets",
-        "read:pets"
-      ],
-      "api_key": []
-    }
-  ],
-  "tags": [
-    {
-      "name": "pets",
-      "description": "Everything about your Pets",
-      "externalDocs": {
-        "description": "Find out more",
-        "url": "http://swagger.io"
-      }
-    }
-  ],
-  "externalDocs": {
-    "description": "Find out more about Swagger",
-    "url": "http://swagger.io"
-  },
-  "paths": {
-    "/pets": {
-      "$ref": "#/components/pathItems/PetsPath"
-    },
-    "/pets/{petId}": {
-      "get": {
-        "tags": [
-          "pets"
-        ],
-        "summary": "Find pet by ID",
-        "description": "Returns a single pet",
-        "operationId": "getPetById",
-        "parameters": [
-          {
-            "name": "petId",
-            "in": "path",
-            "description": "ID of pet to return",
-            "required": true,
-            "style": "label",
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/sessionIdHeader"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Pet"
-                }
-              },
-              "application/xml": {
-                "schema": {
-                  "$ref": "#/components/schemas/Pet"
-                }
-              }
-            },
-            "links": {
-              "UserRepositories": {
-                "operationId": "searchPets",
-                "parameters": {
-                  "q": "$response.body#/name"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid ID supplied",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Pet not found"
-          },
-          "4XX": {
-            "description": "Wildcard range response"
-          },
-          "default": {
-            "description": "General error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "api_key": []
-          }
-        ]
-      }
-    },
-    "/pets/search": {
-      "get": {
-        "tags": [
-          "pets"
-        ],
-        "summary": "Search pets with complex serialization",
-        "operationId": "searchPets",
-        "parameters": [
-          {
-            "name": "tags",
-            "in": "query",
-            "style": "spaceDelimited",
-            "explode": true,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "style": "pipeDelimited",
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          {
-            "name": "filter",
-            "in": "query",
-            "style": "deepObject",
-            "explode": true,
-            "schema": {
-              "type": "object",
-              "properties": {
-                "min_age": {
-                  "type": "integer"
-                },
-                "breed": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          {
-            "name": "debug",
-            "in": "cookie",
-            "style": "form",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Found pets",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Pet"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/pets/upload-image": {
-      "post": {
-        "tags": [
-          "pets"
-        ],
-        "summary": "Uploads an image",
-        "operationId": "uploadFile",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "orderId": {
-                    "type": "integer"
-                  },
-                  "file": {
-                    "type": "string",
-                    "contentMediaType": "application/octet-stream"
-                  },
-                  "fileName": {
-                    "type": "string"
-                  }
-                }
-              },
-              "encoding": {
-                "file": {
-                  "contentType": "image/png, image/jpeg",
-                  "headers": {
-                    "X-Image-Signature": {
-                      "schema": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/callback-test": {
-      "post": {
-        "summary": "Test callbacks",
-        "operationId": "subscribe",
-        "parameters": [
-          {
-            "name": "callbackUrl",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "uri"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Subscription created"
-          }
-        },
-        "callbacks": {
-          "onEvent": {
-            "{$request.query.callbackUrl}": {
-              "post": {
-                "requestBody": {
-                  "content": {
-                    "application/json": {
-                      "schema": {
-                        "type": "object",
-                        "properties": {
-                          "message": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "responses": {
-                  "200": {
-                    "description": "Callback received"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
-  "webhooks": {
-    "newPet": {
-      "post": {
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Pet"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Webhook processed"
-          }
-        }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "Pet": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/Cat"
-          },
-          {
-            "$ref": "#/components/schemas/Dog"
-          },
-          {
-            "$ref": "Lizard.json#/components/schemas/Lizard"
-          }
-        ],
-        "discriminator": {
-          "propertyName": "petType",
-          "mapping": {
-            "cat": "#/components/schemas/Cat",
-            "dog": "#/components/schemas/Dog"
-          }
-        }
-      },
-      "PetBase": {
-        "type": "object",
-        "required": [
-          "name",
-          "petType"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "example": "doggie"
-          },
-          "petType": {
-            "type": "string"
-          },
-          "exhaustive": {
-            "$ref": "#/components/schemas/ExhaustiveObject"
-          }
-        },
-        "externalDocs": {
-          "url": "http://petstore.swagger.io/docs"
-        },
-        "xml": {
-          "name": "Pet"
-        }
-      },
-      "Cat": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/PetBase"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "huntingSkill": {
-                "type": "string",
-                "enum": [
-                  "clueless",
-                  "lazy",
-                  "adventurous",
-                  "aggressive"
-                ]
-              }
-            }
-          }
-        ]
-      },
-      "Dog": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/PetBase"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "packSize": {
-                "type": "integer",
-                "format": "int32"
-              }
-            }
-          }
-        ]
-      },
-      "ExhaustiveObject": {
-        "description": "A schema designed to exercise all JSON Schema 2020-12 keywords",
-        "type": "object",
-        "properties": {
-          "prop_deprecated": {
-            "type": "string",
-            "deprecated": true
-          },
-          "prop_readonly": {
-            "type": "string",
-            "readOnly": true
-          },
-          "prop_writeonly": {
-            "type": "string",
-            "writeOnly": true
-          },
-          "prop_nullable": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "prop_array_prefix": {
-            "type": "array",
-            "prefixItems": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "integer"
-              }
-            ],
-            "items": {
-              "type": "boolean"
-            },
-            "minContains": 1,
-            "maxContains": 5,
-            "uniqueItems": true
-          },
-          "prop_num_range": {
-            "type": "number",
-            "minimum": 0,
-            "exclusiveMaximum": 100,
-            "multipleOf": 10
-          },
-          "prop_string_formats": {
-            "type": "object",
-            "properties": {
-              "uuid": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "date": {
-                "type": "string",
-                "format": "date"
-              },
-              "ipv4": {
-                "type": "string",
-                "format": "ipv4"
-              }
-            }
-          },
-          "prop_binary": {
-            "type": "string",
-            "contentEncoding": "base64",
-            "contentMediaType": "image/png"
-          },
-          "prop_conditional": {
-            "if": {
-              "required": [
-                "a"
-              ]
-            },
-            "then": {
-              "required": [
-                "b"
-              ]
-            },
-            "else": {
-              "required": [
-                "c"
-              ]
-            }
-          },
-          "prop_not": {
-            "not": {
-              "type": "integer"
-            }
-          },
-          "prop_pattern": {
-            "type": "object",
-            "patternProperties": {
-              "^S_": {
-                "type": "string"
-              }
-            }
-          },
-          "prop_advanced": {
-            "$ref": "#/components/schemas/ExhaustiveObject/$defs/internalDef"
-          }
-        },
-        "dependentRequired": {
-          "prop_deprecated": [
-            "prop_readonly"
-          ]
-        },
-        "dependentSchemas": {
-          "prop_writeonly": {
-            "required": [
-              "prop_nullable"
-            ]
-          }
-        },
-        "unevaluatedProperties": false,
-        "$defs": {
-          "internalDef": {
-            "type": "string",
-            "enum": [
-              "inner"
-            ]
-          }
-        }
-      },
-      "ApiResponse": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "type": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "Error": {
-        "type": "object",
-        "required": [
-          "code",
-          "message"
-        ],
-        "properties": {
-          "code": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "message": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "parameters": {
-      "sessionIdHeader": {
-        "name": "X-Session-ID",
-        "in": "header",
-        "schema": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "required": true
-      }
-    },
-    "responses": {
-      "NotFound": {
-        "description": "Entity not found",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
-    "securitySchemes": {
-      "api_key": {
-        "type": "apiKey",
-        "name": "api_key",
-        "in": "header"
-      },
-      "petstore_auth": {
-        "type": "oauth2",
-        "flows": {
-          "implicit": {
-            "authorizationUrl": "http://petstore.swagger.io/oauth/dialog",
-            "scopes": {
-              "write:pets": "modify pets in your account",
-              "read:pets": "read your pets"
-            }
-          }
-        }
-      },
-      "http_basic": {
-        "type": "http",
-        "scheme": "basic"
-      },
-      "http_bearer": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT"
-      }
-    },
-    "pathItems": {
-      "PetsPath": {
-        "description": "Top-level pets resource",
-        "get": {
-          "tags": [
-            "pets"
-          ],
-          "summary": "List all pets",
-          "operationId": "listPets",
-          "responses": {
-            "200": {
-              "description": "List of pets",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/Pet"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "post": {
-          "tags": [
-            "pets"
-          ],
-          "summary": "Create a pet",
-          "operationId": "createPet",
-          "requestBody": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Pet"
-                }
-              },
-              "application/x-www-form-urlencoded": {
-                "schema": {
-                  "$ref": "#/components/schemas/Pet"
-                },
-                "encoding": {
-                  "name": {
-                    "allowReserved": true
-                  }
-                }
-              }
-            }
-          },
-          "responses": {
-            "201": {
-              "description": "Created"
-            }
-          }
-        }
-      }
-    }
-  },
-  "x-benchmark-metadata": {
-    "generated-by": "claude",
-    "intent": "max-coverage"
-  }
+	"openapi": "3.1.2",
+	"info": {
+		"title": "OAS 3.1.2 Benchmark API",
+		"summary": "A maximally spec-complete fixture for testing parser coverage.",
+		"description": "This spec exercises **CommonMark** in descriptions.\n\nIt covers all OpenAPI 3.1.2 features including:\n- JSON Schema 2020-12\n- Webhooks\n- Callbacks\n- Complex Parameter Serialization\n- Multipart Encoding",
+		"termsOfService": "https://example.com/terms",
+		"contact": {
+			"name": "API Support",
+			"url": "https://www.example.com/support",
+			"email": "support@example.com"
+		},
+		"license": {
+			"name": "Apache 2.0",
+			"url": "https://www.apache.org/licenses/LICENSE-2.0.html",
+			"identifier": "Apache-2.0"
+		},
+		"version": "1.0.0"
+	},
+	"jsonSchemaDialect": "https://spec.openapis.org/oas/3.1/dialect/base",
+	"servers": [
+		{
+			"url": "https://{username}.gigantic-server.com:{port}/{basePath}",
+			"description": "The production API server",
+			"variables": {
+				"username": {
+					"default": "demo",
+					"description": "this value is assigned by the service provider"
+				},
+				"port": {
+					"enum": ["8443", "443"],
+					"default": "8443"
+				},
+				"basePath": {
+					"default": "v2"
+				}
+			}
+		}
+	],
+	"security": [
+		{
+			"petstore_auth": ["write:pets", "read:pets"],
+			"api_key": []
+		}
+	],
+	"tags": [
+		{
+			"name": "pets",
+			"description": "Everything about your Pets",
+			"externalDocs": {
+				"description": "Find out more",
+				"url": "http://swagger.io"
+			}
+		}
+	],
+	"externalDocs": {
+		"description": "Find out more about Swagger",
+		"url": "http://swagger.io"
+	},
+	"paths": {
+		"/pets": {
+			"$ref": "#/components/pathItems/PetsPath"
+		},
+		"/pets/{petId}": {
+			"get": {
+				"tags": ["pets"],
+				"summary": "Find pet by ID",
+				"description": "Returns a single pet",
+				"operationId": "getPetById",
+				"parameters": [
+					{
+						"name": "petId",
+						"in": "path",
+						"description": "ID of pet to return",
+						"required": true,
+						"style": "label",
+						"schema": {
+							"type": "integer",
+							"format": "int64"
+						}
+					},
+					{
+						"$ref": "#/components/parameters/sessionIdHeader"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Pet"
+								}
+							},
+							"application/xml": {
+								"schema": {
+									"$ref": "#/components/schemas/Pet"
+								}
+							}
+						},
+						"links": {
+							"UserRepositories": {
+								"operationId": "searchPets",
+								"parameters": {
+									"q": "$response.body#/name"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Invalid ID supplied",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Pet not found"
+					},
+					"4XX": {
+						"description": "Wildcard range response"
+					},
+					"default": {
+						"description": "General error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				},
+				"security": [
+					{
+						"api_key": []
+					}
+				]
+			}
+		},
+		"/pets/search": {
+			"get": {
+				"tags": ["pets"],
+				"summary": "Search pets with complex serialization",
+				"operationId": "searchPets",
+				"parameters": [
+					{
+						"name": "tags",
+						"in": "query",
+						"style": "spaceDelimited",
+						"explode": true,
+						"schema": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					},
+					{
+						"name": "status",
+						"in": "query",
+						"style": "pipeDelimited",
+						"schema": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					},
+					{
+						"name": "filter",
+						"in": "query",
+						"style": "deepObject",
+						"explode": true,
+						"schema": {
+							"type": "object",
+							"properties": {
+								"min_age": {
+									"type": "integer"
+								},
+								"breed": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					{
+						"name": "debug",
+						"in": "cookie",
+						"style": "form",
+						"schema": {
+							"type": "boolean"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Found pets",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "array",
+									"items": {
+										"$ref": "#/components/schemas/Pet"
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/pets/upload-image": {
+			"post": {
+				"tags": ["pets"],
+				"summary": "Uploads an image",
+				"operationId": "uploadFile",
+				"requestBody": {
+					"content": {
+						"multipart/form-data": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"orderId": {
+										"type": "integer"
+									},
+									"file": {
+										"type": "string",
+										"contentMediaType": "application/octet-stream"
+									},
+									"fileName": {
+										"type": "string"
+									}
+								}
+							},
+							"encoding": {
+								"file": {
+									"contentType": "image/png, image/jpeg",
+									"headers": {
+										"X-Image-Signature": {
+											"schema": {
+												"type": "string"
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "successful operation",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/callback-test": {
+			"post": {
+				"summary": "Test callbacks",
+				"operationId": "subscribe",
+				"parameters": [
+					{
+						"name": "callbackUrl",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"format": "uri"
+						}
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Subscription created"
+					}
+				},
+				"callbacks": {
+					"onEvent": {
+						"{$request.query.callbackUrl}": {
+							"post": {
+								"requestBody": {
+									"content": {
+										"application/json": {
+											"schema": {
+												"type": "object",
+												"properties": {
+													"message": {
+														"type": "string"
+													}
+												}
+											}
+										}
+									}
+								},
+								"responses": {
+									"200": {
+										"description": "Callback received"
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"webhooks": {
+		"newPet": {
+			"post": {
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/Pet"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Webhook processed"
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"Pet": {
+				"oneOf": [
+					{
+						"$ref": "#/components/schemas/Cat"
+					},
+					{
+						"$ref": "#/components/schemas/Dog"
+					},
+					{
+						"$ref": "Lizard.json#/components/schemas/Lizard"
+					}
+				],
+				"discriminator": {
+					"propertyName": "petType",
+					"mapping": {
+						"cat": "#/components/schemas/Cat",
+						"dog": "#/components/schemas/Dog"
+					}
+				}
+			},
+			"PetBase": {
+				"type": "object",
+				"required": ["name", "petType"],
+				"properties": {
+					"name": {
+						"type": "string",
+						"example": "doggie"
+					},
+					"petType": {
+						"type": "string"
+					},
+					"exhaustive": {
+						"$ref": "#/components/schemas/ExhaustiveObject"
+					}
+				},
+				"externalDocs": {
+					"url": "http://petstore.swagger.io/docs"
+				},
+				"xml": {
+					"name": "Pet"
+				}
+			},
+			"Cat": {
+				"allOf": [
+					{
+						"$ref": "#/components/schemas/PetBase"
+					},
+					{
+						"type": "object",
+						"properties": {
+							"huntingSkill": {
+								"type": "string",
+								"enum": ["clueless", "lazy", "adventurous", "aggressive"]
+							}
+						}
+					}
+				]
+			},
+			"Dog": {
+				"allOf": [
+					{
+						"$ref": "#/components/schemas/PetBase"
+					},
+					{
+						"type": "object",
+						"properties": {
+							"packSize": {
+								"type": "integer",
+								"format": "int32"
+							}
+						}
+					}
+				]
+			},
+			"ExhaustiveObject": {
+				"description": "A schema designed to exercise all JSON Schema 2020-12 keywords",
+				"type": "object",
+				"properties": {
+					"prop_deprecated": {
+						"type": "string",
+						"deprecated": true
+					},
+					"prop_readonly": {
+						"type": "string",
+						"readOnly": true
+					},
+					"prop_writeonly": {
+						"type": "string",
+						"writeOnly": true
+					},
+					"prop_nullable": {
+						"type": ["string", "null"]
+					},
+					"prop_array_prefix": {
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "integer"
+							}
+						],
+						"items": {
+							"type": "boolean"
+						},
+						"minContains": 1,
+						"maxContains": 5,
+						"uniqueItems": true
+					},
+					"prop_num_range": {
+						"type": "number",
+						"minimum": 0,
+						"exclusiveMaximum": 100,
+						"multipleOf": 10
+					},
+					"prop_string_formats": {
+						"type": "object",
+						"properties": {
+							"uuid": {
+								"type": "string",
+								"format": "uuid"
+							},
+							"date": {
+								"type": "string",
+								"format": "date"
+							},
+							"ipv4": {
+								"type": "string",
+								"format": "ipv4"
+							}
+						}
+					},
+					"prop_binary": {
+						"type": "string",
+						"contentEncoding": "base64",
+						"contentMediaType": "image/png"
+					},
+					"prop_conditional": {
+						"if": {
+							"required": ["a"]
+						},
+						"then": {
+							"required": ["b"]
+						},
+						"else": {
+							"required": ["c"]
+						}
+					},
+					"prop_not": {
+						"not": {
+							"type": "integer"
+						}
+					},
+					"prop_pattern": {
+						"type": "object",
+						"patternProperties": {
+							"^S_": {
+								"type": "string"
+							}
+						}
+					},
+					"prop_advanced": {
+						"$ref": "#/components/schemas/ExhaustiveObject/$defs/internalDef"
+					}
+				},
+				"dependentRequired": {
+					"prop_deprecated": ["prop_readonly"]
+				},
+				"dependentSchemas": {
+					"prop_writeonly": {
+						"required": ["prop_nullable"]
+					}
+				},
+				"unevaluatedProperties": false,
+				"$defs": {
+					"internalDef": {
+						"type": "string",
+						"enum": ["inner"]
+					}
+				}
+			},
+			"ApiResponse": {
+				"type": "object",
+				"properties": {
+					"code": {
+						"type": "integer",
+						"format": "int32"
+					},
+					"type": {
+						"type": "string"
+					},
+					"message": {
+						"type": "string"
+					}
+				}
+			},
+			"Error": {
+				"type": "object",
+				"required": ["code", "message"],
+				"properties": {
+					"code": {
+						"type": "integer",
+						"format": "int32"
+					},
+					"message": {
+						"type": "string"
+					}
+				}
+			}
+		},
+		"parameters": {
+			"sessionIdHeader": {
+				"name": "X-Session-ID",
+				"in": "header",
+				"schema": {
+					"type": "string",
+					"format": "uuid"
+				},
+				"required": true
+			}
+		},
+		"responses": {
+			"NotFound": {
+				"description": "Entity not found",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/Error"
+						}
+					}
+				}
+			}
+		},
+		"securitySchemes": {
+			"api_key": {
+				"type": "apiKey",
+				"name": "api_key",
+				"in": "header"
+			},
+			"petstore_auth": {
+				"type": "oauth2",
+				"flows": {
+					"implicit": {
+						"authorizationUrl": "http://petstore.swagger.io/oauth/dialog",
+						"scopes": {
+							"write:pets": "modify pets in your account",
+							"read:pets": "read your pets"
+						}
+					}
+				}
+			},
+			"http_basic": {
+				"type": "http",
+				"scheme": "basic"
+			},
+			"http_bearer": {
+				"type": "http",
+				"scheme": "bearer",
+				"bearerFormat": "JWT"
+			}
+		},
+		"pathItems": {
+			"PetsPath": {
+				"description": "Top-level pets resource",
+				"get": {
+					"tags": ["pets"],
+					"summary": "List all pets",
+					"operationId": "listPets",
+					"responses": {
+						"200": {
+							"description": "List of pets",
+							"content": {
+								"application/json": {
+									"schema": {
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/Pet"
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"post": {
+					"tags": ["pets"],
+					"summary": "Create a pet",
+					"operationId": "createPet",
+					"requestBody": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Pet"
+								}
+							},
+							"application/x-www-form-urlencoded": {
+								"schema": {
+									"$ref": "#/components/schemas/Pet"
+								},
+								"encoding": {
+									"name": {
+										"allowReserved": true
+									}
+								}
+							}
+						}
+					},
+					"responses": {
+						"201": {
+							"description": "Created"
+						}
+					}
+				}
+			}
+		}
+	}
 }

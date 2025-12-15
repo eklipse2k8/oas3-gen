@@ -1,599 +1,607 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "Union Serialization Test API",
-    "version": "1.0.0",
-    "description": "Comprehensive test fixture for union serialization/deserialization"
-  },
-  "paths": {
-    "/content": {
-      "post": {
-        "operationId": "sendContent",
-        "summary": "Send content blocks",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ContentRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContentResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/events": {
-      "get": {
-        "operationId": "getEvents",
-        "summary": "Get events with discriminated union",
-        "responses": {
-          "200": {
-            "description": "Event stream",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventList"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "ContentRequest": {
-        "type": "object",
-        "required": ["blocks"],
-        "properties": {
-          "blocks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ContentBlock"
-            }
-          },
-          "metadata": {
-            "$ref": "#/components/schemas/Metadata"
-          }
-        }
-      },
-      "ContentResponse": {
-        "type": "object",
-        "required": ["id", "content"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "content": {
-            "$ref": "#/components/schemas/ContentBlock"
-          },
-          "usage": {
-            "$ref": "#/components/schemas/Usage"
-          }
-        }
-      },
-      "ContentBlock": {
-        "description": "A union of content block types with discriminator",
-        "oneOf": [
-          { "$ref": "#/components/schemas/TextBlock" },
-          { "$ref": "#/components/schemas/ImageBlock" },
-          { "$ref": "#/components/schemas/CodeBlock" },
-          { "$ref": "#/components/schemas/ToolUseBlock" },
-          { "$ref": "#/components/schemas/ToolResultBlock" }
-        ],
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "text": "#/components/schemas/TextBlock",
-            "image": "#/components/schemas/ImageBlock",
-            "code": "#/components/schemas/CodeBlock",
-            "tool_use": "#/components/schemas/ToolUseBlock",
-            "tool_result": "#/components/schemas/ToolResultBlock"
-          }
-        }
-      },
-      "TextBlock": {
-        "type": "object",
-        "required": ["type", "text"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "text"
-          },
-          "text": {
-            "type": "string"
-          },
-          "annotations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Annotation"
-            }
-          }
-        }
-      },
-      "ImageBlock": {
-        "type": "object",
-        "required": ["type", "source"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "image"
-          },
-          "source": {
-            "$ref": "#/components/schemas/ImageSource"
-          },
-          "alt_text": {
-            "type": "string"
-          }
-        }
-      },
-      "CodeBlock": {
-        "type": "object",
-        "required": ["type", "code"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "code"
-          },
-          "code": {
-            "type": "string"
-          },
-          "language": {
-            "type": "string"
-          }
-        }
-      },
-      "ToolUseBlock": {
-        "type": "object",
-        "required": ["type", "id", "name", "input"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "tool_use"
-          },
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "input": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        }
-      },
-      "ToolResultBlock": {
-        "type": "object",
-        "required": ["type", "tool_use_id", "content"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "tool_result"
-          },
-          "tool_use_id": {
-            "type": "string"
-          },
-          "content": {
-            "$ref": "#/components/schemas/ToolResultContent"
-          },
-          "is_error": {
-            "type": "boolean"
-          }
-        }
-      },
-      "ToolResultContent": {
-        "description": "Tool result can be text or array of content blocks",
-        "oneOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ToolResultContentBlock"
-            }
-          }
-        ]
-      },
-      "ToolResultContentBlock": {
-        "oneOf": [
-          { "$ref": "#/components/schemas/TextBlock" },
-          { "$ref": "#/components/schemas/ImageBlock" }
-        ],
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "text": "#/components/schemas/TextBlock",
-            "image": "#/components/schemas/ImageBlock"
-          }
-        }
-      },
-      "ImageSource": {
-        "description": "Image source can be base64 or URL",
-        "oneOf": [
-          { "$ref": "#/components/schemas/Base64ImageSource" },
-          { "$ref": "#/components/schemas/UrlImageSource" }
-        ],
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "base64": "#/components/schemas/Base64ImageSource",
-            "url": "#/components/schemas/UrlImageSource"
-          }
-        }
-      },
-      "Base64ImageSource": {
-        "type": "object",
-        "required": ["type", "media_type", "data"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "base64"
-          },
-          "media_type": {
-            "$ref": "#/components/schemas/MediaType"
-          },
-          "data": {
-            "type": "string",
-            "format": "byte"
-          }
-        }
-      },
-      "UrlImageSource": {
-        "type": "object",
-        "required": ["type", "url"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "url"
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          }
-        }
-      },
-      "MediaType": {
-        "type": "string",
-        "enum": ["image/jpeg", "image/png", "image/gif", "image/webp"]
-      },
-      "Annotation": {
-        "description": "Text annotation with different types",
-        "oneOf": [
-          { "$ref": "#/components/schemas/CitationAnnotation" },
-          { "$ref": "#/components/schemas/LinkAnnotation" }
-        ],
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "citation": "#/components/schemas/CitationAnnotation",
-            "link": "#/components/schemas/LinkAnnotation"
-          }
-        }
-      },
-      "CitationAnnotation": {
-        "type": "object",
-        "required": ["type", "start", "end", "source"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "citation"
-          },
-          "start": {
-            "type": "integer"
-          },
-          "end": {
-            "type": "integer"
-          },
-          "source": {
-            "type": "string"
-          }
-        }
-      },
-      "LinkAnnotation": {
-        "type": "object",
-        "required": ["type", "start", "end", "url"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "link"
-          },
-          "start": {
-            "type": "integer"
-          },
-          "end": {
-            "type": "integer"
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          }
-        }
-      },
-      "EventList": {
-        "type": "object",
-        "required": ["events"],
-        "properties": {
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Event"
-            }
-          }
-        }
-      },
-      "Event": {
-        "description": "Streaming event with different types",
-        "oneOf": [
-          { "$ref": "#/components/schemas/MessageStartEvent" },
-          { "$ref": "#/components/schemas/ContentBlockStartEvent" },
-          { "$ref": "#/components/schemas/ContentBlockDeltaEvent" },
-          { "$ref": "#/components/schemas/ContentBlockStopEvent" },
-          { "$ref": "#/components/schemas/MessageStopEvent" },
-          { "$ref": "#/components/schemas/PingEvent" }
-        ],
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "message_start": "#/components/schemas/MessageStartEvent",
-            "content_block_start": "#/components/schemas/ContentBlockStartEvent",
-            "content_block_delta": "#/components/schemas/ContentBlockDeltaEvent",
-            "content_block_stop": "#/components/schemas/ContentBlockStopEvent",
-            "message_stop": "#/components/schemas/MessageStopEvent",
-            "ping": "#/components/schemas/PingEvent"
-          }
-        }
-      },
-      "MessageStartEvent": {
-        "type": "object",
-        "required": ["type", "message"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "message_start"
-          },
-          "message": {
-            "$ref": "#/components/schemas/Message"
-          }
-        }
-      },
-      "ContentBlockStartEvent": {
-        "type": "object",
-        "required": ["type", "index", "content_block"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "content_block_start"
-          },
-          "index": {
-            "type": "integer"
-          },
-          "content_block": {
-            "$ref": "#/components/schemas/ContentBlock"
-          }
-        }
-      },
-      "ContentBlockDeltaEvent": {
-        "type": "object",
-        "required": ["type", "index", "delta"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "content_block_delta"
-          },
-          "index": {
-            "type": "integer"
-          },
-          "delta": {
-            "$ref": "#/components/schemas/Delta"
-          }
-        }
-      },
-      "ContentBlockStopEvent": {
-        "type": "object",
-        "required": ["type", "index"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "content_block_stop"
-          },
-          "index": {
-            "type": "integer"
-          }
-        }
-      },
-      "MessageStopEvent": {
-        "type": "object",
-        "required": ["type"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "message_stop"
-          }
-        }
-      },
-      "PingEvent": {
-        "type": "object",
-        "required": ["type"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "ping"
-          }
-        }
-      },
-      "Delta": {
-        "description": "Delta content for streaming",
-        "oneOf": [
-          { "$ref": "#/components/schemas/TextDelta" },
-          { "$ref": "#/components/schemas/InputJsonDelta" }
-        ],
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "text_delta": "#/components/schemas/TextDelta",
-            "input_json_delta": "#/components/schemas/InputJsonDelta"
-          }
-        }
-      },
-      "TextDelta": {
-        "type": "object",
-        "required": ["type", "text"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "text_delta"
-          },
-          "text": {
-            "type": "string"
-          }
-        }
-      },
-      "InputJsonDelta": {
-        "type": "object",
-        "required": ["type", "partial_json"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "input_json_delta"
-          },
-          "partial_json": {
-            "type": "string"
-          }
-        }
-      },
-      "Message": {
-        "type": "object",
-        "required": ["id", "role", "content", "model"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "role": {
-            "$ref": "#/components/schemas/Role"
-          },
-          "content": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ContentBlock"
-            }
-          },
-          "model": {
-            "type": "string"
-          },
-          "stop_reason": {
-            "$ref": "#/components/schemas/StopReason"
-          },
-          "usage": {
-            "$ref": "#/components/schemas/Usage"
-          }
-        }
-      },
-      "Role": {
-        "type": "string",
-        "enum": ["user", "assistant"]
-      },
-      "StopReason": {
-        "type": "string",
-        "enum": ["end_turn", "max_tokens", "stop_sequence", "tool_use"]
-      },
-      "Usage": {
-        "type": "object",
-        "required": ["input_tokens", "output_tokens"],
-        "properties": {
-          "input_tokens": {
-            "type": "integer"
-          },
-          "output_tokens": {
-            "type": "integer"
-          }
-        }
-      },
-      "Metadata": {
-        "description": "Flexible metadata that can be string or object",
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "object",
-            "additionalProperties": true
-          }
-        ]
-      },
-      "ErrorResponse": {
-        "type": "object",
-        "required": ["type", "error"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "error"
-          },
-          "error": {
-            "$ref": "#/components/schemas/ErrorDetails"
-          }
-        }
-      },
-      "ErrorDetails": {
-        "type": "object",
-        "required": ["type", "message"],
-        "properties": {
-          "type": {
-            "$ref": "#/components/schemas/ErrorType"
-          },
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "ErrorType": {
-        "type": "string",
-        "enum": ["invalid_request_error", "authentication_error", "permission_error", "not_found_error", "rate_limit_error", "api_error", "overloaded_error"]
-      },
-      "NullableStringOrNumber": {
-        "description": "Test nullable union with primitives",
-        "oneOf": [
-          { "type": "null" },
-          { "type": "string" },
-          { "type": "number" }
-        ]
-      },
-      "ArrayOrSingle": {
-        "description": "Test union that can be single item or array",
-        "oneOf": [
-          { "$ref": "#/components/schemas/TextBlock" },
-          {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TextBlock"
-            }
-          }
-        ]
-      }
-    }
-  }
+	"openapi": "3.1.0",
+	"info": {
+		"title": "Union Serialization Test API",
+		"version": "1.0.0",
+		"description": "Comprehensive test fixture for union serialization/deserialization"
+	},
+	"paths": {
+		"/content": {
+			"post": {
+				"operationId": "sendContent",
+				"summary": "Send content blocks",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ContentRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ContentResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad request",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorResponse"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/events": {
+			"get": {
+				"operationId": "getEvents",
+				"summary": "Get events with discriminated union",
+				"responses": {
+					"200": {
+						"description": "Event stream",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/EventList"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"ContentRequest": {
+				"type": "object",
+				"required": ["blocks"],
+				"properties": {
+					"blocks": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/ContentBlock"
+						}
+					},
+					"metadata": {
+						"$ref": "#/components/schemas/Metadata"
+					}
+				}
+			},
+			"ContentResponse": {
+				"type": "object",
+				"required": ["id", "content"],
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"content": {
+						"$ref": "#/components/schemas/ContentBlock"
+					},
+					"usage": {
+						"$ref": "#/components/schemas/Usage"
+					}
+				}
+			},
+			"ContentBlock": {
+				"description": "A union of content block types with discriminator",
+				"oneOf": [
+					{ "$ref": "#/components/schemas/TextBlock" },
+					{ "$ref": "#/components/schemas/ImageBlock" },
+					{ "$ref": "#/components/schemas/CodeBlock" },
+					{ "$ref": "#/components/schemas/ToolUseBlock" },
+					{ "$ref": "#/components/schemas/ToolResultBlock" }
+				],
+				"discriminator": {
+					"propertyName": "type",
+					"mapping": {
+						"text": "#/components/schemas/TextBlock",
+						"image": "#/components/schemas/ImageBlock",
+						"code": "#/components/schemas/CodeBlock",
+						"tool_use": "#/components/schemas/ToolUseBlock",
+						"tool_result": "#/components/schemas/ToolResultBlock"
+					}
+				}
+			},
+			"TextBlock": {
+				"type": "object",
+				"required": ["type", "text"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "text"
+					},
+					"text": {
+						"type": "string"
+					},
+					"annotations": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Annotation"
+						}
+					}
+				}
+			},
+			"ImageBlock": {
+				"type": "object",
+				"required": ["type", "source"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "image"
+					},
+					"source": {
+						"$ref": "#/components/schemas/ImageSource"
+					},
+					"alt_text": {
+						"type": "string"
+					}
+				}
+			},
+			"CodeBlock": {
+				"type": "object",
+				"required": ["type", "code"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "code"
+					},
+					"code": {
+						"type": "string"
+					},
+					"language": {
+						"type": "string"
+					}
+				}
+			},
+			"ToolUseBlock": {
+				"type": "object",
+				"required": ["type", "id", "name", "input"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "tool_use"
+					},
+					"id": {
+						"type": "string"
+					},
+					"name": {
+						"type": "string"
+					},
+					"input": {
+						"type": "object",
+						"additionalProperties": true
+					}
+				}
+			},
+			"ToolResultBlock": {
+				"type": "object",
+				"required": ["type", "tool_use_id", "content"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "tool_result"
+					},
+					"tool_use_id": {
+						"type": "string"
+					},
+					"content": {
+						"$ref": "#/components/schemas/ToolResultContent"
+					},
+					"is_error": {
+						"type": "boolean"
+					}
+				}
+			},
+			"ToolResultContent": {
+				"description": "Tool result can be text or array of content blocks",
+				"oneOf": [
+					{
+						"type": "string"
+					},
+					{
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/ToolResultContentBlock"
+						}
+					}
+				]
+			},
+			"ToolResultContentBlock": {
+				"oneOf": [
+					{ "$ref": "#/components/schemas/TextBlock" },
+					{ "$ref": "#/components/schemas/ImageBlock" }
+				],
+				"discriminator": {
+					"propertyName": "type",
+					"mapping": {
+						"text": "#/components/schemas/TextBlock",
+						"image": "#/components/schemas/ImageBlock"
+					}
+				}
+			},
+			"ImageSource": {
+				"description": "Image source can be base64 or URL",
+				"oneOf": [
+					{ "$ref": "#/components/schemas/Base64ImageSource" },
+					{ "$ref": "#/components/schemas/UrlImageSource" }
+				],
+				"discriminator": {
+					"propertyName": "type",
+					"mapping": {
+						"base64": "#/components/schemas/Base64ImageSource",
+						"url": "#/components/schemas/UrlImageSource"
+					}
+				}
+			},
+			"Base64ImageSource": {
+				"type": "object",
+				"required": ["type", "media_type", "data"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "base64"
+					},
+					"media_type": {
+						"$ref": "#/components/schemas/MediaType"
+					},
+					"data": {
+						"type": "string",
+						"format": "byte"
+					}
+				}
+			},
+			"UrlImageSource": {
+				"type": "object",
+				"required": ["type", "url"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "url"
+					},
+					"url": {
+						"type": "string",
+						"format": "uri"
+					}
+				}
+			},
+			"MediaType": {
+				"type": "string",
+				"enum": ["image/jpeg", "image/png", "image/gif", "image/webp"]
+			},
+			"Annotation": {
+				"description": "Text annotation with different types",
+				"oneOf": [
+					{ "$ref": "#/components/schemas/CitationAnnotation" },
+					{ "$ref": "#/components/schemas/LinkAnnotation" }
+				],
+				"discriminator": {
+					"propertyName": "type",
+					"mapping": {
+						"citation": "#/components/schemas/CitationAnnotation",
+						"link": "#/components/schemas/LinkAnnotation"
+					}
+				}
+			},
+			"CitationAnnotation": {
+				"type": "object",
+				"required": ["type", "start", "end", "source"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "citation"
+					},
+					"start": {
+						"type": "integer"
+					},
+					"end": {
+						"type": "integer"
+					},
+					"source": {
+						"type": "string"
+					}
+				}
+			},
+			"LinkAnnotation": {
+				"type": "object",
+				"required": ["type", "start", "end", "url"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "link"
+					},
+					"start": {
+						"type": "integer"
+					},
+					"end": {
+						"type": "integer"
+					},
+					"url": {
+						"type": "string",
+						"format": "uri"
+					}
+				}
+			},
+			"EventList": {
+				"type": "object",
+				"required": ["events"],
+				"properties": {
+					"events": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Event"
+						}
+					}
+				}
+			},
+			"Event": {
+				"description": "Streaming event with different types",
+				"oneOf": [
+					{ "$ref": "#/components/schemas/MessageStartEvent" },
+					{ "$ref": "#/components/schemas/ContentBlockStartEvent" },
+					{ "$ref": "#/components/schemas/ContentBlockDeltaEvent" },
+					{ "$ref": "#/components/schemas/ContentBlockStopEvent" },
+					{ "$ref": "#/components/schemas/MessageStopEvent" },
+					{ "$ref": "#/components/schemas/PingEvent" }
+				],
+				"discriminator": {
+					"propertyName": "type",
+					"mapping": {
+						"message_start": "#/components/schemas/MessageStartEvent",
+						"content_block_start": "#/components/schemas/ContentBlockStartEvent",
+						"content_block_delta": "#/components/schemas/ContentBlockDeltaEvent",
+						"content_block_stop": "#/components/schemas/ContentBlockStopEvent",
+						"message_stop": "#/components/schemas/MessageStopEvent",
+						"ping": "#/components/schemas/PingEvent"
+					}
+				}
+			},
+			"MessageStartEvent": {
+				"type": "object",
+				"required": ["type", "message"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "message_start"
+					},
+					"message": {
+						"$ref": "#/components/schemas/Message"
+					}
+				}
+			},
+			"ContentBlockStartEvent": {
+				"type": "object",
+				"required": ["type", "index", "content_block"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "content_block_start"
+					},
+					"index": {
+						"type": "integer"
+					},
+					"content_block": {
+						"$ref": "#/components/schemas/ContentBlock"
+					}
+				}
+			},
+			"ContentBlockDeltaEvent": {
+				"type": "object",
+				"required": ["type", "index", "delta"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "content_block_delta"
+					},
+					"index": {
+						"type": "integer"
+					},
+					"delta": {
+						"$ref": "#/components/schemas/Delta"
+					}
+				}
+			},
+			"ContentBlockStopEvent": {
+				"type": "object",
+				"required": ["type", "index"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "content_block_stop"
+					},
+					"index": {
+						"type": "integer"
+					}
+				}
+			},
+			"MessageStopEvent": {
+				"type": "object",
+				"required": ["type"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "message_stop"
+					}
+				}
+			},
+			"PingEvent": {
+				"type": "object",
+				"required": ["type"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "ping"
+					}
+				}
+			},
+			"Delta": {
+				"description": "Delta content for streaming",
+				"oneOf": [
+					{ "$ref": "#/components/schemas/TextDelta" },
+					{ "$ref": "#/components/schemas/InputJsonDelta" }
+				],
+				"discriminator": {
+					"propertyName": "type",
+					"mapping": {
+						"text_delta": "#/components/schemas/TextDelta",
+						"input_json_delta": "#/components/schemas/InputJsonDelta"
+					}
+				}
+			},
+			"TextDelta": {
+				"type": "object",
+				"required": ["type", "text"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "text_delta"
+					},
+					"text": {
+						"type": "string"
+					}
+				}
+			},
+			"InputJsonDelta": {
+				"type": "object",
+				"required": ["type", "partial_json"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "input_json_delta"
+					},
+					"partial_json": {
+						"type": "string"
+					}
+				}
+			},
+			"Message": {
+				"type": "object",
+				"required": ["id", "role", "content", "model"],
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"role": {
+						"$ref": "#/components/schemas/Role"
+					},
+					"content": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/ContentBlock"
+						}
+					},
+					"model": {
+						"type": "string"
+					},
+					"stop_reason": {
+						"$ref": "#/components/schemas/StopReason"
+					},
+					"usage": {
+						"$ref": "#/components/schemas/Usage"
+					}
+				}
+			},
+			"Role": {
+				"type": "string",
+				"enum": ["user", "assistant"]
+			},
+			"StopReason": {
+				"type": "string",
+				"enum": ["end_turn", "max_tokens", "stop_sequence", "tool_use"]
+			},
+			"Usage": {
+				"type": "object",
+				"required": ["input_tokens", "output_tokens"],
+				"properties": {
+					"input_tokens": {
+						"type": "integer"
+					},
+					"output_tokens": {
+						"type": "integer"
+					}
+				}
+			},
+			"Metadata": {
+				"description": "Flexible metadata that can be string or object",
+				"anyOf": [
+					{
+						"type": "string"
+					},
+					{
+						"type": "object",
+						"additionalProperties": true
+					}
+				]
+			},
+			"ErrorResponse": {
+				"type": "object",
+				"required": ["type", "error"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "error"
+					},
+					"error": {
+						"$ref": "#/components/schemas/ErrorDetails"
+					}
+				}
+			},
+			"ErrorDetails": {
+				"type": "object",
+				"required": ["type", "message"],
+				"properties": {
+					"type": {
+						"$ref": "#/components/schemas/ErrorType"
+					},
+					"message": {
+						"type": "string"
+					}
+				}
+			},
+			"ErrorType": {
+				"type": "string",
+				"enum": [
+					"invalid_request_error",
+					"authentication_error",
+					"permission_error",
+					"not_found_error",
+					"rate_limit_error",
+					"api_error",
+					"overloaded_error"
+				]
+			},
+			"NullableStringOrNumber": {
+				"description": "Test nullable union with primitives",
+				"oneOf": [
+					{ "type": "null" },
+					{ "type": "string" },
+					{ "type": "number" }
+				]
+			},
+			"ArrayOrSingle": {
+				"description": "Test union that can be single item or array",
+				"oneOf": [
+					{ "$ref": "#/components/schemas/TextBlock" },
+					{
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/TextBlock"
+						}
+					}
+				]
+			}
+		}
+	}
 }

@@ -1,26 +1,26 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "Lizard schema",
-    "version": "1.0.0"
-  },
-  "paths": {},
-  "components": {
-    "schemas": {
-      "Lizard": {
-        "type": "object",
-        "required": ["scaleColor"],
-        "properties": {
-          "scaleColor": {
-            "type": "string",
-            "description": "The color of the lizard's scales"
-          },
-          "lovesRocks": {
-            "type": "boolean",
-            "default": true
-          }
-        }
-      }
-    }
-  }
+	"openapi": "3.1.0",
+	"info": {
+		"title": "Lizard schema",
+		"version": "1.0.0"
+	},
+	"paths": {},
+	"components": {
+		"schemas": {
+			"Lizard": {
+				"type": "object",
+				"required": ["scaleColor"],
+				"properties": {
+					"scaleColor": {
+						"type": "string",
+						"description": "The color of the lizard's scales"
+					},
+					"lovesRocks": {
+						"type": "boolean",
+						"default": true
+					}
+				}
+			}
+		}
+	}
 }
