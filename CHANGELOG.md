@@ -5,11 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Improve type safety and attribute handling in code generation ([#42](https://github.com/eklipse2k8/oas3-gen/pull/42))
+
+## [0.22.3] - 2025-12-15
+
+### Added
+
+- Support for parsing and generating webhooks ([#41](https://github.com/eklipse2k8/oas3-gen/pull/41))
+- Add remaining HTTP status codes ([#40](https://github.com/eklipse2k8/oas3-gen/pull/40))
+
+## [0.22.2] - 2025-12-09
+
+### Changed
+
+- Changed representation of union object fields in generated fixtures to `HashMap<String, serde_json::Value>` ([#39](https://github.com/eklipse2k8/oas3-gen/pull/39))
+- Updated dependencies
+
 ## [0.22.1] - 2025-12-07
 
 ### Added
-- Resolve map-only objects to HashMap types ([#35](https://github.com/eklipse2k8/oas3-gen/pull/35)) ([84f16fc](https://github.com/eklipse2k8/oas3-gen/commit/84f16fca9b87d0f6f05ef1b9ee5110f966ce2d24))
 
+- Resolve map-only objects to HashMap types ([#35](https://github.com/eklipse2k8/oas3-gen/pull/35))
+
+## [0.22.0] - 2025-12-03
+
+### Changed
+
+- Enhance type resolution and error handling ([#34](https://github.com/eklipse2k8/oas3-gen/pull/34))
+- Only use Bytes type for successful binary responses
+
+## [0.21.1] - 2025-11-27
+
+### Fixed
+
+- Add support for binary response types in response schema extraction
+
+## [0.21.0] - 2025-11-24
+
+### Added
+
+- Use tokens to manage symbols instead of strings ([#31](https://github.com/eklipse2k8/oas3-gen/pull/31))
+
+### Changed
+
+- Update dependencies, refactor validation handling, and improve metadata extraction ([#29](https://github.com/eklipse2k8/oas3-gen/pull/29))
+- Refactor converter for improved clarity and error handling ([#30](https://github.com/eklipse2k8/oas3-gen/pull/30))
+
+## [0.20.0] - 2025-11-22
+
+### Added
+
+- Add intelligent enum deduplication and inline type naming ([#26](https://github.com/eklipse2k8/oas3-gen/pull/26))
+- Add support for integer path parameters
+- Add eventsource support
+
+### Changed
+
+- Update documentation, dependencies, and enhance code structure ([#25](https://github.com/eklipse2k8/oas3-gen/pull/25))
+- Refactor cache structures to use BTreeMap and BTreeSet
+- Optimize file I/O performance and improve error handling
+
+## [0.17.0] - 2025-11-15
+
+### Changed
+
+- Update OpenAPI generator and enhance error handling ([#24](https://github.com/eklipse2k8/oas3-gen/pull/24))
 
 ## [0.16.0] - 2025-11-15
 
@@ -220,6 +284,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discriminated enum generation with custom macro
 - Request and response type generation from operations
 
+[0.22.3]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.22.2...release/0.22.3
+[0.22.2]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.22.0...release/0.22.2
+[0.22.0]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.20.0...release/0.22.0
+[0.20.0]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.17.0...release/0.20.0
+[0.17.0]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.16.0...release/0.17.0
 [0.16.0]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.14.0...release/0.16.0
 [0.14.0]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.12.0...release/0.14.0
 [0.12.0]: https://github.com/eklipse2k8/oas3-gen/compare/release/0.11.0...release/0.12.0
