@@ -12,7 +12,7 @@ categories = [
 ]
 description = "A rust type generator for OpenAPI v3.1.x specification."
 edition = "2024"
-keywords = ["oas3", "json", "openapi", "rust", "generator"]
+keywords = ["oas3", "json", "yaml", "openapi", "generator"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/eklipse2k8/oas3-gen"
@@ -57,7 +57,7 @@ indexmap = { version = "2.12", features = ["serde"] }
 inflections = { version = "1.1" }
 json-canon = { version = "0.1" }
 num-format = { version = "0.4" }
-oas3 = { version = "0.20" }
+oas3 = { version = "0.20", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }

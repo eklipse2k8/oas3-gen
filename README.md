@@ -21,11 +21,12 @@ cargo install oas3-gen
 
 ### 2. Generation
 
-Provide a path to an OpenAPI specification and specify an output file for the generated Rust code.
+Provide a path to an OpenAPI specification (JSON or YAML) and specify an output file for the generated Rust code. The format is auto-detected based on file extension.
 
 ```zsh
 # generate types (structs and enums)
 oas3-gen generate -i path/to/openapi.json -o path/to/types.rs
+oas3-gen generate -i path/to/openapi.yaml -o path/to/types.rs
 
 # generate client operations
 oas3-gen generate client -i path/to/openapi.json -o path/to/client.rs
@@ -79,6 +80,7 @@ pub struct Pet {
 | Doc Comments | Schema descriptions become rustdoc |
 | Enum Helpers | Ergonomic is_/as_ methods |
 | Enum Modes | Merge, preserve, or relaxed |
+| JSON/YAML Support | Auto-detects format from file extension |
 | OData Support | Optional @odata.* field handling |
 | OpenAPI 3.1 | Full spec parsing support |
 | Operation Filtering | Include/exclude specific operations |
@@ -120,7 +122,7 @@ Arguments:
   [MODE]  Sets the generation mode [default: types] [possible values: types, client]
 
 Required:
-  -i, --input <FILE>   Path to the OpenAPI specification file
+  -i, --input <FILE>   Path to the OpenAPI specification file (JSON or YAML, auto-detected)
   -o, --output <FILE>  Path for the generated rust output file
 
 Code Generation:
@@ -153,8 +155,9 @@ Options:
 ### Examples
 
 ```zsh
-# Basic usage to generate types
+# Basic usage to generate types (JSON or YAML auto-detected)
 oas3-gen generate types -i openapi.json -o types.rs
+oas3-gen generate types -i openapi.yaml -o types.rs
 
 # Basic usage to generate companion client
 oas3-gen generate client -i openapi.json -o client.rs
