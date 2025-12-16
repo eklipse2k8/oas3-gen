@@ -55,6 +55,8 @@ Parse OpenAPI -> Analyze (dependency graph) -> Convert (AST) -> Generate (Rust)
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs) - Pipeline coordinator
 - [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs) - OpenAPI to Rust type mapping
 - [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization
+- [operation_registry.rs](crates/oas3-gen/src/generator/operation_registry.rs) - HTTP operations and webhooks
+- [converter/mod.rs](crates/oas3-gen/src/generator/converter/mod.rs) - CodegenConfig and policy enums
 
 ## Collection Types (Critical)
 

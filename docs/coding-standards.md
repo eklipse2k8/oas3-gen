@@ -129,6 +129,24 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - The underlying error is automatically chained; don't manually interpolate it into the message
 - Import `use anyhow::Context;` to access the `with_context()` method on `Result` types
 
+### Type-Safe Enums for Configuration
+
+- Use typed enums instead of boolean flags for configuration options
+- Makes intent explicit at call sites and enables exhaustive pattern matching
+- Good: `enum EnumCasePolicy { Preserve, Deduplicate }` with `config.enum_case == EnumCasePolicy::Preserve`
+- Bad: `preserve_case: bool` with `config.preserve_case`
+- Example: `CodegenConfig` uses `EnumCasePolicy`, `EnumHelperPolicy`, `EnumDeserializePolicy`, `ODataPolicy`
+- Prevents invalid combinations and makes code more self-documenting
+
+### Attribute Types with ToTokens
+
+- Use typed enums for code generation attributes instead of stringly-typed approaches
+- Implement `ToTokens` for direct code generation integration
+- Good: `enum OuterAttr { SkipSerializingNone, NonExhaustive }` implementing `ToTokens`
+- Bad: `extra_attrs: Vec<String>` with manual string construction
+- Consolidate multiple attributes of the same type into single combined attributes during codegen
+- Examples: `OuterAttr`, `SerdeAttribute`, `ValidationAttribute` in `ast/` module
+
 ## Design Principles
 
 ### SOLID Principles

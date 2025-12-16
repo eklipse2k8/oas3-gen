@@ -20,20 +20,23 @@ cargo build
 The application uses a CLI interface powered by `clap` with subcommands:
 
 ```bash
-# Generate Rust types from OpenAPI spec
-cargo run -- generate -i spec.json -o generated.rs
+# Generate Rust types from OpenAPI spec (default mode)
+cargo run -- generate types -i spec.json -o generated.rs
+
+# Generate HTTP client from OpenAPI spec
+cargo run -- generate client -i spec.json -o client.rs
 
 # With verbose output (shows cycles, operations count, etc.)
-cargo run -- generate -i spec.json -o output.rs --verbose
+cargo run -- generate types -i spec.json -o output.rs --verbose
 
 # Quiet mode (errors only)
-cargo run -- generate -i spec.json -o output.rs --quiet
+cargo run -- generate types -i spec.json -o output.rs --quiet
 
 # Generate all schemas (default: only operation-referenced schemas)
-cargo run -- generate -i spec.json -o output.rs --all-schemas
+cargo run -- generate types -i spec.json -o output.rs --all-schemas
 
 # Output to nested directory (creates parent directories automatically)
-cargo run -- generate -i spec.json -o output/types/generated.rs
+cargo run -- generate types -i spec.json -o output/types/generated.rs
 
 # List all operations in the spec
 cargo run -- list operations -i spec.json
@@ -48,12 +51,13 @@ cargo run -- list --help
 
 **generate**: Generate Rust code from OpenAPI specification
 
-| Option | Description |
-|--------|-------------|
+| Argument/Option | Description |
+|-----------------|-------------|
+| `[MODE]` | Generation mode: `types` (default) or `client` |
 | `--input` / `-i` | (Required) Path to OpenAPI JSON specification file |
 | `--output` / `-o` | (Required) Path where generated Rust code will be written |
 | `--visibility` / `-C` | Visibility level for generated types (public, crate, or file; default: public) |
-| `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional) |
+| `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |
 | `--no-helpers` | Disable generation of ergonomic helper methods for enum variants |
 | `--only` | Include only the specified comma-separated operation IDs |

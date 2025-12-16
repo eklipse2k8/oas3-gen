@@ -40,7 +40,7 @@ crates/
 │       └── generator/             # Core generation pipeline
 │           ├── mod.rs
 │           ├── orchestrator.rs    # Main pipeline coordinator
-│           ├── operation_registry.rs # Operation collection management
+│           ├── operation_registry.rs # Operation and webhook collection management
 │           ├── schema_registry.rs # Dependency tracking and cycle detection
 │           ├── tests/             # Generator tests
 │           │   ├── mod.rs
@@ -77,34 +77,33 @@ crates/
 │           │   ├── tokens.rs      # Token stream utilities
 │           │   ├── derives.rs     # Derive macro selection
 │           │   ├── lints.rs       # Clippy lint attributes
-│           │   ├── serde_attrs.rs # Serde attribute builders
-│           │   ├── status_codes.rs # HTTP status code handling
-│           │   ├── validation_attrs.rs # Validation attribute builders
+│           │   ├── outer_attrs.rs # Type-safe outer attributes (skip_serializing_none, non_exhaustive)
+│           │   ├── serde_attrs.rs # Serde attribute builders with ToTokens
+│           │   ├── status_codes.rs # HTTP status code handling (full RFC coverage)
+│           │   ├── validation_attrs.rs # Validation attribute builders with ToTokens
 │           │   └── tests/         # AST tests
 │           │       ├── mod.rs
 │           │       ├── status_codes.rs
 │           │       ├── types.rs
 │           │       └── validation_attrs.rs
 │           ├── converter/         # OpenAPI -> AST conversion
-│           │   ├── mod.rs
-│           │   ├── cache.rs       # Schema conversion caching
+│           │   ├── mod.rs         # CodegenConfig and policy enums
+│           │   ├── cache.rs       # Schema conversion caching with StructSummary
 │           │   ├── common.rs      # Common conversion utilities
 │           │   ├── discriminator.rs # Discriminator handling
-│           │   ├── enums.rs       # oneOf/anyOf/allOf conversion
-│           │   ├── field_optionality.rs # Field requirement logic
+│           │   ├── enums.rs       # oneOf/anyOf/allOf conversion (includes string enum optimization)
 │           │   ├── hashing.rs     # Schema fingerprinting
 │           │   ├── metadata.rs    # Schema metadata extraction
 │           │   ├── operations.rs  # Request/response type generation
 │           │   ├── path_renderer.rs # URL path template rendering
 │           │   ├── responses.rs   # Response type generation
-│           │   ├── structs.rs     # Object schema conversion
-│           │   ├── type_resolver.rs # Type mapping and nullable patterns
+│           │   ├── structs.rs     # Object schema conversion (includes field optionality)
+│           │   ├── type_resolver.rs # Type mapping with TypeResolverBuilder
 │           │   ├── type_usage_recorder.rs # Type usage recording
 │           │   └── tests/         # Converter tests
 │           │       ├── mod.rs
 │           │       ├── cache.rs
 │           │       ├── enums.rs
-│           │       ├── field_optionality.rs
 │           │       ├── implicit_dependencies.rs
 │           │       ├── inline_objects.rs
 │           │       ├── metadata_tests.rs
@@ -149,10 +148,12 @@ crates/
 
 - [orchestrator.rs](../crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator
 - [schema_registry.rs](../crates/oas3-gen/src/generator/schema_registry.rs): Dependency and cycle management
-- [type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
+- [operation_registry.rs](../crates/oas3-gen/src/generator/operation_registry.rs): HTTP operations and webhooks management
+- [type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping with TypeResolverBuilder
 - [identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
-- [cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching for performance
+- [cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching with StructSummary
 - [type_usage.rs](../crates/oas3-gen/src/generator/analyzer/type_usage.rs): Type usage tracking and analysis
+- [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): CodegenConfig and typed policy enums
 
 ## Key Dependencies
 
