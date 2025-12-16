@@ -8,13 +8,17 @@ use oas3::spec::{ObjectOrReference, ObjectSchema};
 use serde_json::Value;
 
 use super::{
-  CodegenConfig, cache::SharedSchemaCache, common::SchemaExt, metadata, structs::StructConverter,
+  CodegenConfig,
+  cache::{SharedSchemaCache, StructSummary},
+  common::SchemaExt,
+  metadata,
+  structs::StructConverter,
   type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
-    RustType, SerdeAttribute, StructDef, TypeRef, VariantContent, VariantDef,
+    RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -68,9 +72,9 @@ impl EnumConverter {
       graph: graph.clone(),
       type_resolver,
       struct_converter,
-      preserve_case_variants: config.preserve_case_variants,
-      case_insensitive_enums: config.case_insensitive_enums,
-      no_helpers: config.no_helpers,
+      preserve_case_variants: config.preserve_case_variants(),
+      case_insensitive_enums: config.case_insensitive_enums(),
+      no_helpers: config.no_helpers(),
     }
   }
 
@@ -178,7 +182,7 @@ impl EnumConverter {
     let methods = if self.no_helpers {
       vec![]
     } else {
-      self.build_constructors(&variants, &inline_types, name, cache)
+      self.build_constructors(&variants, &inline_types, name, cache.as_deref())
     };
 
     let main_enum = Self::build_union_def(name, schema, kind, variants, methods);
@@ -309,13 +313,24 @@ impl EnumConverter {
     variants: &[VariantDef],
     inline_types: &[RustType],
     enum_name: &str,
-    mut cache: Option<&mut SharedSchemaCache>,
+    cache: Option<&SharedSchemaCache>,
   ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
-    let mut struct_cache: BTreeMap<String, StructDef> = inline_types
+
+    // Build a map of struct summaries from inline types
+    let mut summary_cache: BTreeMap<String, StructSummary> = inline_types
       .iter()
       .filter_map(|t| match t {
-        RustType::Struct(s) => Some((s.name.to_string(), s.clone())),
+        RustType::Struct(s) => {
+          let summary = StructSummary {
+            has_default: s.has_default(),
+            required_fields: s
+              .required_fields()
+              .map(|f| (f.name.clone(), f.rust_type.clone()))
+              .collect(),
+          };
+          Some((s.name.to_string(), summary))
+        }
         _ => None,
       })
       .collect();
@@ -327,12 +342,11 @@ impl EnumConverter {
         continue;
       };
 
-      let Some(struct_def) = self.resolve_struct_for_constructor(type_ref, cache.as_deref_mut(), &mut struct_cache)
-      else {
+      let Some(summary) = self.resolve_struct_summary(type_ref, cache, &mut summary_cache) else {
         continue;
       };
 
-      if let Some(method_kind) = Self::constructor_kind_for(type_ref, &variant.name, &struct_def) {
+      if let Some(method_kind) = Self::constructor_kind_for(type_ref, &variant.name, &summary) {
         eligible.push((variant.name.clone(), method_kind));
       }
     }
@@ -359,60 +373,79 @@ impl EnumConverter {
   fn constructor_kind_for(
     type_ref: &TypeRef,
     variant_name: &EnumVariantToken,
-    struct_def: &StructDef,
+    summary: &StructSummary,
   ) -> Option<EnumMethodKind> {
-    if !struct_def.has_default() || type_ref.is_array {
+    if !summary.has_default || type_ref.is_array {
       return None;
     }
 
-    let required: Vec<_> = struct_def.required_fields().collect();
-    match required.len() {
+    match summary.required_fields.len() {
       0 => Some(EnumMethodKind::SimpleConstructor {
         variant_name: variant_name.clone(),
         wrapped_type: type_ref.clone(),
       }),
-      1 => Some(EnumMethodKind::ParameterizedConstructor {
-        variant_name: variant_name.clone(),
-        wrapped_type: type_ref.clone(),
-        param_name: required[0].name.to_string(),
-        param_type: required[0].rust_type.clone(),
-      }),
+      1 => {
+        let (ref name, ref rust_type) = summary.required_fields[0];
+        Some(EnumMethodKind::ParameterizedConstructor {
+          variant_name: variant_name.clone(),
+          wrapped_type: type_ref.clone(),
+          param_name: name.to_string(),
+          param_type: rust_type.clone(),
+        })
+      }
       _ => None,
     }
   }
 
-  fn resolve_struct_for_constructor(
+  /// Resolves a struct summary for constructor eligibility.
+  ///
+  /// First checks the inline types cache, then the shared schema cache,
+  /// and finally falls back to converting the schema if needed.
+  fn resolve_struct_summary(
     &self,
     type_ref: &TypeRef,
-    cache: Option<&mut SharedSchemaCache>,
-    struct_cache: &mut BTreeMap<String, StructDef>,
-  ) -> Option<StructDef> {
+    cache: Option<&SharedSchemaCache>,
+    summary_cache: &mut BTreeMap<String, StructSummary>,
+  ) -> Option<StructSummary> {
     let base_name = type_ref.unboxed_base_type_name();
 
-    match struct_cache.entry(base_name) {
-      std::collections::btree_map::Entry::Occupied(e) => Some(e.get().clone()),
-      std::collections::btree_map::Entry::Vacant(e) => {
-        let struct_def = self.resolve_struct_def(type_ref, cache)?;
-        Some(e.insert(struct_def).clone())
-      }
+    // Check local cache first
+    if let Some(summary) = summary_cache.get(&base_name) {
+      return Some(summary.clone());
     }
-  }
 
-  fn resolve_struct_def(&self, type_ref: &TypeRef, cache: Option<&mut SharedSchemaCache>) -> Option<StructDef> {
-    let schema_name = type_ref.unboxed_base_type_name();
-    let schema = self.graph.get_schema(&schema_name)?;
+    // Check shared schema cache
+    if let Some(c) = cache
+      && let Some(summary) = c.get_struct_summary(&base_name)
+    {
+      let summary = summary.clone();
+      summary_cache.insert(base_name, summary.clone());
+      return Some(summary);
+    }
 
+    // Fall back to conversion if schema exists
+    let schema = self.graph.get_schema(&base_name)?;
     if !schema.is_object() && schema.properties.is_empty() {
       return None;
     }
 
     let struct_result = self
       .struct_converter
-      .convert_struct(&schema_name, schema, None, cache)
+      .convert_struct(&base_name, schema, None, None)
       .ok()?;
-    match struct_result.result {
-      RustType::Struct(s) => Some(s),
-      _ => None,
+
+    if let RustType::Struct(s) = struct_result.result {
+      let summary = StructSummary {
+        has_default: s.has_default(),
+        required_fields: s
+          .required_fields()
+          .map(|f| (f.name.clone(), f.rust_type.clone()))
+          .collect(),
+      };
+      summary_cache.insert(base_name, summary.clone());
+      Some(summary)
+    } else {
+      None
     }
   }
 

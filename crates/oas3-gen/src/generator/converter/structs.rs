@@ -8,7 +8,7 @@ use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
-  cache::SharedSchemaCache,
+  cache::{SharedSchemaCache, StructSummary},
   discriminator::{DiscriminatorInfo, apply_discriminator_attributes, get_discriminator_info},
   metadata::{self, FieldMetadata},
   type_resolver::TypeResolver,
@@ -29,11 +29,6 @@ use crate::generator::{
 struct AdditionalPropertiesResult {
   serde_attrs: Vec<SerdeAttribute>,
   additional_field: Option<FieldDef>,
-}
-
-struct FieldProcessingContext<'a> {
-  prop_name: &'a str,
-  schema: &'a ObjectSchema,
 }
 
 /// Converter for OpenAPI object schemas into Rust Structs.
@@ -98,10 +93,9 @@ impl StructConverter {
         cache_borrow,
       )?;
 
-      let ctx = FieldProcessingContext { prop_name, schema };
-
       let field = self.field_processor.process_single_field(
-        &ctx,
+        prop_name,
+        schema,
         &prop_schema,
         resolved.result,
         is_required,
@@ -145,7 +139,7 @@ impl StructConverter {
     name: &str,
     schema: &ObjectSchema,
     kind: Option<StructKind>,
-    cache: Option<&mut SharedSchemaCache>,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<RustType>> {
     let is_discriminated = schema.is_discriminated_base_type();
     let struct_name = if is_discriminated {
@@ -154,7 +148,8 @@ impl StructConverter {
       StructToken::from_raw(name)
     };
 
-    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name), cache)?;
+    let cache_for_fields = cache.as_deref_mut();
+    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name), cache_for_fields)?;
     let additional_props = self.field_processor.prepare_additional_properties(schema)?;
 
     let mut fields = field_result.result;
@@ -164,11 +159,12 @@ impl StructConverter {
       fields.push(field);
     }
 
-    if fields.iter().any(|f| f.default_value.is_some()) {
+    let has_defaults = fields.iter().any(|f| f.default_value.is_some());
+    if has_defaults {
       serde_attrs.push(SerdeAttribute::Default);
     }
 
-    let struct_type = RustType::Struct(StructDef {
+    let struct_def = StructDef {
       name: struct_name,
       docs: metadata::extract_docs(schema.description.as_ref()),
       fields,
@@ -177,10 +173,22 @@ impl StructConverter {
       methods: vec![],
       kind: kind.unwrap_or(StructKind::Schema),
       ..Default::default()
-    });
+    };
+
+    // Register struct summary for enum helper generation
+    if let Some(ref mut c) = cache {
+      let summary = StructSummary {
+        has_default: struct_def.has_default(),
+        required_fields: struct_def
+          .required_fields()
+          .map(|f| (f.name.clone(), f.rust_type.clone()))
+          .collect(),
+      };
+      c.register_struct_summary(struct_def.name.as_str(), summary);
+    }
 
     Ok(ConversionOutput::with_inline_types(
-      struct_type,
+      RustType::Struct(struct_def),
       field_result.inline_types,
     ))
   }
@@ -307,44 +315,51 @@ pub(crate) struct FieldProcessor {
 impl FieldProcessor {
   fn new(config: CodegenConfig, type_resolver: TypeResolver) -> Self {
     Self {
-      odata_support: config.odata_support,
+      odata_support: config.odata_support(),
       type_resolver,
     }
   }
 
   fn process_single_field(
     &self,
-    ctx: &FieldProcessingContext,
+    prop_name: &str,
+    parent_schema: &ObjectSchema,
     prop_schema: &ObjectSchema,
     resolved_type: TypeRef,
     is_required: bool,
     discriminator_mapping: Option<&(String, String)>,
   ) -> anyhow::Result<FieldDef> {
-    let discriminator_info = get_discriminator_info(ctx.prop_name, ctx.schema, prop_schema, discriminator_mapping);
+    let discriminator_info = get_discriminator_info(prop_name, parent_schema, prop_schema, discriminator_mapping);
 
-    let should_be_optional = self.is_field_optional(ctx, prop_schema, discriminator_info.as_ref(), is_required);
+    let should_be_optional = self.is_field_optional(
+      prop_name,
+      parent_schema,
+      prop_schema,
+      discriminator_info.as_ref(),
+      is_required,
+    );
     let final_type = if should_be_optional && !resolved_type.nullable {
       resolved_type.with_option()
     } else {
       resolved_type
     };
 
-    let metadata = FieldMetadata::from_schema(ctx.prop_name, is_required, prop_schema, &final_type);
-    let rust_field_name = to_rust_field_name(ctx.prop_name);
-    let serde_attrs = if rust_field_name == ctx.prop_name {
+    let metadata = FieldMetadata::from_schema(prop_name, is_required, prop_schema, &final_type);
+    let rust_field_name = to_rust_field_name(prop_name);
+    let serde_attrs = if rust_field_name == prop_name {
       vec![]
     } else {
-      vec![SerdeAttribute::Rename(ctx.prop_name.to_string())]
+      vec![SerdeAttribute::Rename(prop_name.to_string())]
     };
 
     let disc_attrs = apply_discriminator_attributes(metadata, serde_attrs, &final_type, discriminator_info.as_ref());
 
     let field = FieldDefBuilder::default()
-      .name(to_rust_field_name(ctx.prop_name))
+      .name(to_rust_field_name(prop_name))
       .rust_type(final_type)
       .docs(disc_attrs.metadata.docs)
       .serde_attrs(disc_attrs.serde_attrs)
-      .extra_attrs(disc_attrs.extra_attrs)
+      .doc_hidden(disc_attrs.doc_hidden)
       .validation_attrs(disc_attrs.metadata.validation_attrs)
       .default_value(disc_attrs.metadata.default_value)
       .deprecated(disc_attrs.metadata.deprecated)
@@ -356,7 +371,8 @@ impl FieldProcessor {
 
   fn is_field_optional(
     &self,
-    ctx: &FieldProcessingContext,
+    prop_name: &str,
+    parent_schema: &ObjectSchema,
     prop_schema: &ObjectSchema,
     discriminator_info: Option<&DiscriminatorInfo>,
     is_required: bool,
@@ -372,9 +388,9 @@ impl FieldProcessor {
       return true;
     }
     if self.odata_support
-      && ctx.prop_name.starts_with("@odata.")
-      && ctx.schema.discriminator.is_none()
-      && ctx.schema.all_of.is_empty()
+      && prop_name.starts_with("@odata.")
+      && parent_schema.discriminator.is_none()
+      && parent_schema.all_of.is_empty()
     {
       return true;
     }

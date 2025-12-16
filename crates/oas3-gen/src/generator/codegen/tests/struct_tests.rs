@@ -17,7 +17,6 @@ fn base_struct(kind: StructKind) -> StructDef {
       name: FieldNameToken::new("field"),
       rust_type: TypeRef::new("String"),
       serde_attrs: vec![],
-      extra_attrs: vec![],
       validation_attrs: vec![ValidationAttribute::Length {
         min: Some(1),
         max: None,
@@ -42,7 +41,6 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
       response_enum: EnumToken::new("ResponseEnum"),
       variants: vec![variant],
     },
-    attrs: vec![],
   });
   def
 }
@@ -53,7 +51,6 @@ fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> St
     name: FieldNameToken::new(field_name),
     rust_type: TypeRef::new(rust_type),
     serde_attrs: vec![],
-    extra_attrs: vec![],
     validation_attrs: vec![],
     default_value: None,
     ..Default::default()
@@ -70,7 +67,6 @@ fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> St
       ],
       query_params: vec![],
     },
-    attrs: vec![],
   });
   def
 }
@@ -126,7 +122,6 @@ fn renders_struct_methods() {
         style: None,
       }],
     },
-    attrs: vec![],
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
@@ -258,7 +253,6 @@ fn renders_path_with_mixed_parameters() {
       name: FieldNameToken::new("user_id"),
       rust_type: TypeRef::new("i64"),
       serde_attrs: vec![],
-      extra_attrs: vec![],
       validation_attrs: vec![],
       default_value: None,
       ..Default::default()
@@ -267,7 +261,6 @@ fn renders_path_with_mixed_parameters() {
       name: FieldNameToken::new("post_slug"),
       rust_type: TypeRef::new("String"),
       serde_attrs: vec![],
-      extra_attrs: vec![],
       validation_attrs: vec![],
       default_value: None,
       ..Default::default()
@@ -289,7 +282,6 @@ fn renders_path_with_mixed_parameters() {
       ],
       query_params: vec![],
     },
-    attrs: vec![],
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();

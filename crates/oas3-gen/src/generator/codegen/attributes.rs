@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::{DeriveTrait, FieldDef, ParameterLocation, SerdeAttribute, ValidationAttribute};
+use crate::generator::ast::{DeriveTrait, FieldDef, OuterAttr, ParameterLocation, SerdeAttribute, ValidationAttribute};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -54,48 +54,36 @@ pub(crate) fn generate_derives_from_slice(derives: &BTreeSet<DeriveTrait>) -> To
   quote! { #[derive(#(#derive_idents),*)] }
 }
 
-pub(crate) fn generate_outer_attrs(attrs: &[String]) -> TokenStream {
+pub(crate) fn generate_outer_attrs(attrs: &[OuterAttr]) -> TokenStream {
   if attrs.is_empty() {
     return quote! {};
   }
-  let attr_tokens: Vec<TokenStream> = attrs
-    .iter()
-    .filter_map(|attr| {
-      let trimmed = attr.trim();
-      if trimmed.is_empty() {
-        return None;
-      }
-      let source = if trimmed.starts_with("#[") {
-        trimmed.to_string()
-      } else {
-        format!("#[{trimmed}]")
-      };
-      source.parse::<TokenStream>().ok()
-    })
-    .collect();
+  let attr_tokens: Vec<TokenStream> = attrs.iter().map(quote::ToTokens::to_token_stream).collect();
   quote! { #(#attr_tokens)* }
 }
 
+/// Generates a single combined `#[serde(...)]` attribute for the given serde attributes.
+///
+/// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
+/// `#[serde(attr1, attr2, ...)]` attribute to reduce output noise.
 pub(crate) fn generate_serde_attrs(attrs: &[SerdeAttribute]) -> TokenStream {
   if attrs.is_empty() {
     return quote! {};
   }
-  let attr_tokens: Vec<TokenStream> = attrs
-    .iter()
-    .filter_map(|attr| {
-      let tokens: TokenStream = attr.to_string().parse().ok()?;
-      Some(quote! { #[serde(#tokens)] })
-    })
-    .collect();
-  quote! { #(#attr_tokens)* }
+  let attr_tokens: Vec<_> = attrs.iter().map(quote::ToTokens::to_token_stream).collect();
+  quote! { #[serde(#(#attr_tokens),*)] }
 }
 
+/// Generates a single combined `#[validate(...)]` attribute for the given validation attributes.
+///
+/// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
+/// `#[validate(attr1, attr2, ...)]` attribute.
 pub(crate) fn generate_validation_attrs(attrs: &[ValidationAttribute]) -> TokenStream {
   if attrs.is_empty() {
     return quote! {};
   }
 
-  let attr_tokens: Vec<TokenStream> = attrs.iter().filter_map(|attr| attr.to_string().parse().ok()).collect();
+  let attr_tokens: Vec<_> = attrs.iter().map(quote::ToTokens::to_token_stream).collect();
 
   quote! { #[validate(#(#attr_tokens),*)] }
 }

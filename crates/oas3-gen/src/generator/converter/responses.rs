@@ -174,6 +174,5 @@ pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &
       response_enum: response_enum.clone(),
       variants: variants.to_vec(),
     },
-    attrs: vec![],
   }
 }

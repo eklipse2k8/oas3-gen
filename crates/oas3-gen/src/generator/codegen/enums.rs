@@ -8,7 +8,7 @@ use super::{
   },
 };
 use crate::generator::ast::{
-  DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeMode,
+  DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute, SerdeMode,
 };
 
 /// Generates standard Rust enums that use serde's derive macros for serialization.
@@ -193,25 +193,16 @@ impl<'a> EnumGenerator<'a> {
   }
 
   fn generate_serde_attrs(&self) -> TokenStream {
-    let mut attrs = vec![];
+    // Combine discriminator tag with other serde attrs into a single list
+    let mut all_attrs: Vec<SerdeAttribute> = Vec::with_capacity(self.def.serde_attrs.len() + 1);
 
     if let Some(ref discriminator) = self.def.discriminator {
-      attrs.push(quote! { tag = #discriminator });
+      all_attrs.push(SerdeAttribute::Tag(discriminator.clone()));
     }
 
-    for attr in &self.def.serde_attrs {
-      if let Ok(tokens) = attr.to_string().parse::<TokenStream>() {
-        attrs.push(tokens);
-      }
-    }
+    all_attrs.extend(self.def.serde_attrs.iter().cloned());
 
-    if attrs.is_empty() {
-      return quote! {};
-    }
-
-    quote! {
-      #[serde(#(#attrs),*)]
-    }
+    generate_serde_attrs(&all_attrs)
   }
 
   fn generate_case_insensitive_deserialize(&self) -> TokenStream {

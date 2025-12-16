@@ -1,5 +1,6 @@
 mod derives;
 pub mod lints;
+mod outer_attrs;
 pub(super) mod serde_attrs;
 mod status_codes;
 pub mod tokens;
@@ -13,6 +14,7 @@ use derive_builder::Builder;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 use http::Method;
 pub use lints::LintConfig;
+pub use outer_attrs::OuterAttr;
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
 pub use tokens::{
@@ -244,7 +246,7 @@ pub struct StructDef {
   pub docs: Vec<String>,
   pub fields: Vec<FieldDef>,
   pub serde_attrs: Vec<SerdeAttribute>,
-  pub outer_attrs: Vec<String>,
+  pub outer_attrs: Vec<OuterAttr>,
   pub methods: Vec<StructMethod>,
   pub kind: StructKind,
   pub serde_mode: SerdeMode,
@@ -267,7 +269,6 @@ pub struct StructMethod {
   pub name: MethodNameToken,
   pub docs: Vec<String>,
   pub kind: StructMethodKind,
-  pub attrs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -357,7 +358,8 @@ pub struct FieldDef {
   pub docs: Vec<String>,
   pub rust_type: TypeRef,
   pub serde_attrs: Vec<SerdeAttribute>,
-  pub extra_attrs: Vec<String>,
+  /// Whether to emit `#[doc(hidden)]` for this field (used for discriminator fields)
+  pub doc_hidden: bool,
   pub validation_attrs: Vec<ValidationAttribute>,
   pub default_value: Option<serde_json::Value>,
   pub example_value: Option<serde_json::Value>,
@@ -381,7 +383,7 @@ pub struct EnumDef {
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
   pub serde_attrs: Vec<SerdeAttribute>,
-  pub outer_attrs: Vec<String>,
+  pub outer_attrs: Vec<OuterAttr>,
   pub case_insensitive: bool,
   pub methods: Vec<EnumMethod>,
   pub serde_mode: SerdeMode,

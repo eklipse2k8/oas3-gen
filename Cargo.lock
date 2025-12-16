@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen"
-version = "0.22.3"
+version = "0.22.4"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen-support"
-version = "0.22.3"
+version = "0.22.4"
 dependencies = [
  "anyhow",
  "better_default",
@@ -1330,9 +1330,9 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "reqwest"
-version = "0.12.25"
+version = "0.12.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6eff9328d40131d43bd911d42d79eb6a47312002a4daefc9e37f17e74a7701a"
+checksum = "3b4c14b2d9afca6a60277086b0cc6a6ae0b568f6f7916c943a8cdc79f8be240f"
 dependencies = [
  "base64",
  "bytes",

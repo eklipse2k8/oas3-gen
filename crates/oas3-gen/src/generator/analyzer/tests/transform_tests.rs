@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use crate::generator::{
   analyzer::{TypeUsage, update_derives_from_usage},
   ast::{
-    DeriveTrait, DerivesProvider, EnumDef, EnumToken, EnumVariantToken, FieldDef, RustType, StructDef, StructKind,
-    StructToken, TypeRef, ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
+    DeriveTrait, DerivesProvider, EnumDef, EnumToken, EnumVariantToken, FieldDef, OuterAttr, RustType, StructDef,
+    StructKind, StructToken, TypeRef, ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
@@ -78,8 +78,6 @@ fn process_enum_helper(def: EnumDef, usage: TypeUsage) -> EnumDef {
   }
 }
 
-const ATTR_SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
-
 // --- Tests ---
 
 #[test]
@@ -93,7 +91,7 @@ fn test_schema_request_only() {
   assert!(def.derives().contains(&DeriveTrait::Debug));
 
   // Check Attributes (Request needs skip_serializing_none if nullable)
-  assert!(def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+  assert!(def.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
 
   // Check Validation (Should remain)
   assert!(!def.fields[0].validation_attrs.is_empty());
@@ -109,7 +107,7 @@ fn test_schema_response_only() {
   assert!(!def.derives().contains(&DeriveTrait::Validate));
 
   // Check Attributes (Response does NOT need skip_serializing_none)
-  assert!(!def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+  assert!(!def.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
 
   // Check Validation (Should be stripped)
   assert!(def.fields[0].validation_attrs.is_empty());
@@ -125,7 +123,7 @@ fn test_schema_bidirectional() {
   assert!(def.derives().contains(&DeriveTrait::Validate));
 
   // Should have skip attribute
-  assert!(def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+  assert!(def.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
 }
 
 #[test]
@@ -140,7 +138,7 @@ fn test_operation_request_special_handling() {
   assert!(!def.derives().contains(&DeriveTrait::Serialize));
 
   // OpRequest explicitly excludes skip_serializing_none
-  assert!(!def.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+  assert!(!def.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
 }
 
 #[test]
@@ -174,5 +172,5 @@ fn test_skip_serializing_none_logic() {
   // Case 2: Nullable + Request -> Attribute
   let def2 = create_struct("Loose", StructKind::Schema, true);
   let def2 = process_struct_helper(def2, TypeUsage::RequestOnly);
-  assert!(def2.outer_attrs.contains(&ATTR_SKIP_SERIALIZING_NONE.to_string()));
+  assert!(def2.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
 }

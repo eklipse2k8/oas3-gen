@@ -27,12 +27,82 @@ use super::{
 };
 use crate::generator::{converter::type_resolver::TypeResolverBuilder, naming::identifiers::to_rust_type_name};
 
-#[derive(Debug, Clone, Copy)]
+/// Policy for handling enum variant name collisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnumCasePolicy {
+  /// Append index suffix to colliding variants (e.g., `Value`, `Value1`).
+  Preserve,
+  /// Merge colliding variants and add serde aliases.
+  #[default]
+  Deduplicate,
+}
+
+/// Policy for generating enum helper constructors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnumHelperPolicy {
+  /// Generate helper methods for creating enum variants.
+  #[default]
+  Generate,
+  /// Disable helper method generation.
+  Disable,
+}
+
+/// Policy for enum deserialization case sensitivity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnumDeserializePolicy {
+  /// Use standard case-sensitive deserialization.
+  #[default]
+  CaseSensitive,
+  /// Generate custom case-insensitive deserializer.
+  CaseInsensitive,
+}
+
+/// Policy for OData-specific schema support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ODataPolicy {
+  /// Disable OData-specific handling.
+  #[default]
+  Disabled,
+  /// Enable OData support (makes `@odata.*` fields optional).
+  Enabled,
+}
+
+/// Configuration for code generation.
+///
+/// Uses typed enums instead of booleans to make intent explicit at call sites
+/// and prevent invalid combinations.
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct CodegenConfig {
-  pub preserve_case_variants: bool,
-  pub case_insensitive_enums: bool,
-  pub no_helpers: bool,
-  pub odata_support: bool,
+  pub enum_case: EnumCasePolicy,
+  pub enum_helpers: EnumHelperPolicy,
+  pub enum_deserialize: EnumDeserializePolicy,
+  pub odata: ODataPolicy,
+}
+
+impl CodegenConfig {
+  /// Returns whether enum variant collisions should preserve original names with suffixes.
+  #[must_use]
+  pub fn preserve_case_variants(self) -> bool {
+    self.enum_case == EnumCasePolicy::Preserve
+  }
+
+  /// Returns whether enums should use case-insensitive deserialization.
+  #[must_use]
+  pub fn case_insensitive_enums(self) -> bool {
+    self.enum_deserialize == EnumDeserializePolicy::CaseInsensitive
+  }
+
+  /// Returns whether helper constructors should be disabled.
+  #[must_use]
+  pub fn no_helpers(self) -> bool {
+    self.enum_helpers == EnumHelperPolicy::Disable
+  }
+
+  /// Returns whether OData support is enabled.
+  #[must_use]
+  pub fn odata_support(self) -> bool {
+    self.odata == ODataPolicy::Enabled
+  }
 }
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.

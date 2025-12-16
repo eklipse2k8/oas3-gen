@@ -115,7 +115,7 @@ fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
     .expect("role field should exist");
 
   assert!(
-    !role_field.extra_attrs.iter().any(|a| a.contains("doc(hidden)")),
+    !role_field.doc_hidden,
     "role field should not be hidden when discriminator has enum values"
   );
   assert!(
@@ -180,10 +180,7 @@ fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
     .find(|f| f.name == "odata_type")
     .expect("odata_type field should exist");
 
-  assert!(
-    odata_field.extra_attrs.iter().any(|a| a.contains("doc(hidden)")),
-    "odata_type field should be hidden"
-  );
+  assert!(odata_field.doc_hidden, "odata_type field should be hidden");
   assert!(
     odata_field.serde_attrs.contains(&SerdeAttribute::Skip),
     "odata_type field should be skipped"
@@ -446,7 +443,7 @@ fn test_apply_discriminator_attributes_none_returns_unchanged() {
   assert_eq!(result.metadata.docs, metadata.docs);
   assert_eq!(result.metadata.validation_attrs.len(), 1);
   assert_eq!(result.serde_attrs, serde_attrs);
-  assert!(result.extra_attrs.is_empty());
+  assert!(!result.doc_hidden);
 }
 
 #[test]
@@ -474,7 +471,7 @@ fn test_apply_discriminator_attributes_child_discriminator_hides_and_sets_value(
   );
   assert!(result.serde_attrs.contains(&SerdeAttribute::SkipDeserializing));
   assert!(result.serde_attrs.contains(&SerdeAttribute::Default));
-  assert!(result.extra_attrs.iter().any(|a| a.contains("doc(hidden)")));
+  assert!(result.doc_hidden);
 }
 
 #[test]
@@ -506,7 +503,7 @@ fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
     vec![SerdeAttribute::Skip],
     "only Skip should remain"
   );
-  assert!(result.extra_attrs.iter().any(|a| a.contains("doc(hidden)")));
+  assert!(result.doc_hidden);
 }
 
 #[test]
@@ -551,7 +548,7 @@ fn test_apply_discriminator_attributes_base_with_enum_remains_visible() {
     "validation attrs should be preserved"
   );
   assert_eq!(result.serde_attrs, serde_attrs, "serde attrs should be unchanged");
-  assert!(result.extra_attrs.is_empty(), "should not be hidden");
+  assert!(!result.doc_hidden, "should not be hidden");
 }
 
 #[test]

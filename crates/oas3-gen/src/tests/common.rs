@@ -3,7 +3,10 @@ use std::{collections::BTreeMap, sync::Arc};
 use oas3::spec::{ObjectSchema, Spec};
 use serde_json::json;
 
-use crate::generator::{converter::CodegenConfig, schema_registry::SchemaRegistry};
+use crate::generator::{
+  converter::{CodegenConfig, EnumCasePolicy, EnumHelperPolicy},
+  schema_registry::SchemaRegistry,
+};
 
 pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec {
   let mut spec_json = json!({
@@ -30,28 +33,19 @@ pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<
 }
 
 pub(crate) fn default_config() -> CodegenConfig {
-  CodegenConfig {
-    preserve_case_variants: false,
-    case_insensitive_enums: false,
-    no_helpers: false,
-    odata_support: false,
-  }
+  CodegenConfig::default()
 }
 
 pub(crate) fn config_with_preserve_case() -> CodegenConfig {
   CodegenConfig {
-    preserve_case_variants: true,
-    case_insensitive_enums: false,
-    no_helpers: false,
-    odata_support: false,
+    enum_case: EnumCasePolicy::Preserve,
+    ..Default::default()
   }
 }
 
 pub(crate) fn config_with_no_helpers() -> CodegenConfig {
   CodegenConfig {
-    preserve_case_variants: false,
-    case_insensitive_enums: false,
-    no_helpers: true,
-    odata_support: false,
+    enum_helpers: EnumHelperPolicy::Disable,
+    ..Default::default()
   }
 }

@@ -2,11 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::type_usage::TypeUsage;
 use crate::generator::ast::{
-  ContentCategory, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OperationInfo, RustType, SerdeMode,
+  ContentCategory, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OperationInfo, OuterAttr, RustType, SerdeMode,
   StatusCodeToken, StructDef, StructKind, StructMethodKind, TypeRef,
 };
-
-const SKIP_SERIALIZING_NONE: &str = "oas3_gen_support::skip_serializing_none";
 
 pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage: &BTreeMap<EnumToken, TypeUsage>) {
   for rust_type in rust_types {
@@ -62,16 +60,11 @@ fn strip_validation_attrs(fields: &mut [FieldDef]) {
 }
 
 fn adjust_skip_serializing_none(def: &mut StructDef, needs_serialization: bool) {
-  def.outer_attrs.retain(|attr| !matches_skip_serializing_none(attr));
+  def.outer_attrs.retain(|attr| *attr != OuterAttr::SkipSerializingNone);
 
   if needs_serialization && has_nullable_fields(&def.fields) && def.kind != StructKind::OperationRequest {
-    def.outer_attrs.push(SKIP_SERIALIZING_NONE.to_string());
+    def.outer_attrs.push(OuterAttr::SkipSerializingNone);
   }
-}
-
-fn matches_skip_serializing_none(attr: &str) -> bool {
-  let trimmed = attr.trim();
-  trimmed == SKIP_SERIALIZING_NONE || trimmed == format!("#[{SKIP_SERIALIZING_NONE}]")
 }
 
 fn has_nullable_fields(fields: &[FieldDef]) -> bool {
