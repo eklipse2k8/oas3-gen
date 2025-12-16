@@ -8,9 +8,9 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationParameter,
-    ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken,
-    TypeRef, ValidationAttribute,
+    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
+    OperationParameter, ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef,
+    TypeAliasToken, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
@@ -83,6 +83,7 @@ impl<'a> OperationConverter<'a> {
     operation_id: &str,
     method: &Method,
     path: &str,
+    kind: OperationKind,
     operation: &Operation,
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
@@ -180,6 +181,7 @@ impl<'a> OperationConverter<'a> {
       operation_id: final_operation_id,
       method: method.clone(),
       path: path.to_string(),
+      kind,
       summary: operation.summary.clone(),
       description: operation.description.clone(),
       request_type: request_type_name,

@@ -4,12 +4,17 @@ use http::Method;
 use indexmap::IndexMap;
 use oas3::Spec;
 
-use crate::generator::naming::identifiers::to_rust_field_name;
+use crate::generator::{ast::OperationKind, naming::identifiers::to_rust_field_name};
 
 #[derive(Debug, Clone)]
 pub struct OperationLocation {
   pub method: Method,
+  /// The display path for this operation.
+  /// For HTTP operations, this is the URL path (e.g., `/pets/{petId}`).
+  /// For webhooks, this uses the format `webhooks/{name}` where `name` is the webhook key from the OpenAPI spec.
   pub path: String,
+  pub lookup_path: String,
+  pub kind: OperationKind,
 }
 
 #[derive(Debug)]
@@ -30,6 +35,56 @@ impl OperationRegistry {
   ) -> Self {
     let mut id_to_location = IndexMap::new();
 
+    Self::ingest_http_operations(spec, only_operations, excluded_operations, &mut id_to_location);
+    Self::ingest_webhooks(spec, only_operations, excluded_operations, &mut id_to_location);
+
+    Self {
+      id_to_location,
+      spec: spec.clone(),
+    }
+  }
+
+  pub fn operations(&self) -> impl Iterator<Item = (&str, &OperationLocation)> {
+    self.id_to_location.iter().map(|(id, loc)| (id.as_str(), loc))
+  }
+
+  pub fn operations_with_details(
+    &self,
+  ) -> impl Iterator<Item = (&str, &Method, &str, &oas3::spec::Operation, OperationKind)> + '_ {
+    self.id_to_location.iter().filter_map(|(stable_id, location)| {
+      let path_item = match location.kind {
+        OperationKind::Http => self.spec.paths.as_ref()?.get(&location.lookup_path),
+        OperationKind::Webhook => self.spec.webhooks.get(&location.lookup_path),
+      }?;
+
+      let operation = match location.method {
+        Method::GET => path_item.get.as_ref(),
+        Method::POST => path_item.post.as_ref(),
+        Method::PUT => path_item.put.as_ref(),
+        Method::DELETE => path_item.delete.as_ref(),
+        Method::PATCH => path_item.patch.as_ref(),
+        Method::OPTIONS => path_item.options.as_ref(),
+        Method::HEAD => path_item.head.as_ref(),
+        Method::TRACE => path_item.trace.as_ref(),
+        _ => None,
+      }?;
+
+      Some((
+        stable_id.as_str(),
+        &location.method,
+        location.path.as_str(),
+        operation,
+        location.kind,
+      ))
+    })
+  }
+
+  fn ingest_http_operations(
+    spec: &Spec,
+    only_operations: Option<&HashSet<String>>,
+    excluded_operations: Option<&HashSet<String>>,
+    id_to_location: &mut IndexMap<String, OperationLocation>,
+  ) {
     for (path, method, operation) in spec.operations() {
       let stable_id = compute_stable_id(method.as_str(), &path, operation);
 
@@ -47,40 +102,47 @@ impl OperationRegistry {
 
       let location = OperationLocation {
         method: method.clone(),
-        path,
+        path: path.clone(),
+        lookup_path: path,
+        kind: OperationKind::Http,
       };
       id_to_location.insert(stable_id, location);
     }
+  }
 
-    Self {
-      id_to_location,
-      spec: spec.clone(),
+  fn ingest_webhooks(
+    spec: &Spec,
+    only_operations: Option<&HashSet<String>>,
+    excluded_operations: Option<&HashSet<String>>,
+    id_to_location: &mut IndexMap<String, OperationLocation>,
+  ) {
+    for (name, path_item) in &spec.webhooks {
+      for (method, operation) in path_item.methods() {
+        let display_path = format!("webhooks/{name}");
+        let stable_id = compute_stable_id(method.as_str(), &display_path, operation);
+
+        if let Some(included) = only_operations
+          && !included.contains(&stable_id)
+        {
+          continue;
+        }
+
+        if let Some(excluded) = excluded_operations
+          && excluded.contains(&stable_id)
+        {
+          continue;
+        }
+
+        let location = OperationLocation {
+          method: method.clone(),
+          path: display_path,
+          lookup_path: name.clone(),
+          kind: OperationKind::Webhook,
+        };
+
+        id_to_location.insert(stable_id, location);
+      }
     }
-  }
-
-  pub fn operations(&self) -> impl Iterator<Item = (&str, &OperationLocation)> {
-    self.id_to_location.iter().map(|(id, loc)| (id.as_str(), loc))
-  }
-
-  pub fn operations_with_details(&self) -> impl Iterator<Item = (&str, &Method, &str, &oas3::spec::Operation)> + '_ {
-    self.id_to_location.iter().filter_map(|(stable_id, location)| {
-      let paths = self.spec.paths.as_ref()?;
-      let path_item = paths.get(&location.path)?;
-
-      let operation = match location.method {
-        Method::GET => path_item.get.as_ref(),
-        Method::POST => path_item.post.as_ref(),
-        Method::PUT => path_item.put.as_ref(),
-        Method::DELETE => path_item.delete.as_ref(),
-        Method::PATCH => path_item.patch.as_ref(),
-        Method::OPTIONS => path_item.options.as_ref(),
-        Method::HEAD => path_item.head.as_ref(),
-        Method::TRACE => path_item.trace.as_ref(),
-        _ => None,
-      }?;
-
-      Some((stable_id.as_str(), &location.method, location.path.as_str(), operation))
-    })
   }
 
   #[cfg(test)]

@@ -409,7 +409,7 @@ impl SchemaRegistry {
   pub(crate) fn get_operation_reachable_schemas(&self, operation_registry: &OperationRegistry) -> BTreeSet<String> {
     let mut reachable = BTreeSet::new();
 
-    for (_, _, _, operation) in operation_registry.operations_with_details() {
+    for (_, _, _, operation, _) in operation_registry.operations_with_details() {
       Self::collect_refs_from_operation(operation, &self.spec, &mut reachable, &self.union_fingerprints);
     }
 

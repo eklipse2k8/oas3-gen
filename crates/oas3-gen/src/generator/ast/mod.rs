@@ -135,12 +135,19 @@ impl RustType {
 }
 
 /// Metadata about an API operation (for tracking, not direct code generation)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationKind {
+  Http,
+  Webhook,
+}
+
 #[derive(Debug, Clone)]
 pub struct OperationInfo {
   pub stable_id: String,
   pub operation_id: String,
   pub method: Method,
   pub path: String,
+  pub kind: OperationKind,
   pub summary: Option<String>,
   pub description: Option<String>,
   pub request_type: Option<StructToken>,

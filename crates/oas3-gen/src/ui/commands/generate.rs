@@ -179,6 +179,9 @@ impl<'a> GenerateLogger<'a> {
     }
     self.stat("", format!("{} type aliases", stats.type_aliases_generated));
     self.stat("Operations converted:", stats.operations_converted.to_string());
+    if stats.webhooks_converted > 0 {
+      self.stat("", format!("{} webhooks", stats.webhooks_converted));
+    }
   }
 
   fn print_client_stats(&self, stats: &GenerationStats) {

@@ -1,8 +1,12 @@
 use std::collections::HashSet;
 
+use http::Method;
 use oas3::{Spec, spec::Operation};
 
-use crate::generator::operation_registry::{OperationRegistry, compute_stable_id, generate_operation_id};
+use crate::generator::{
+  ast::OperationKind,
+  operation_registry::{OperationRegistry, compute_stable_id, generate_operation_id},
+};
 
 fn create_test_spec(operations: Vec<(&str, &str, Option<&str>)>) -> Spec {
   use std::{collections::HashMap, fmt::Write};
@@ -209,5 +213,39 @@ fn test_operation_registry() {
     assert!(!ids.contains(&"list_users"), "list_users should be excluded");
     assert!(ids.contains(&"get_users_by_id"), "get_users_by_id should be included");
     assert!(ids.contains(&"create_post"), "create_post should be included");
+  }
+
+  // Webhook operations
+  {
+    let spec_json = r#"{
+      "openapi": "3.1.0",
+      "info": {"title": "Webhook API", "version": "1.0.0"},
+      "paths": {},
+      "webhooks": {
+        "petAdded": {
+          "post": {
+            "operationId": "petAddedHook",
+            "responses": {"200": {"description": "ok"}}
+          }
+        }
+      }
+    }"#;
+
+    let spec: Spec = oas3::from_json(spec_json).unwrap();
+    let registry = OperationRegistry::from_spec(&spec);
+
+    assert_eq!(registry.len(), 1);
+
+    let (id, location) = registry.operations().next().unwrap();
+    assert_eq!(id, "pet_added_hook");
+    assert_eq!(location.path, "webhooks/petAdded");
+    assert_eq!(location.lookup_path, "petAdded");
+    assert_eq!(location.kind, OperationKind::Webhook);
+
+    let mut details = registry.operations_with_details();
+    let (_, method, path, _, kind) = details.next().unwrap();
+    assert_eq!(method, &Method::POST);
+    assert_eq!(path, "webhooks/petAdded");
+    assert_eq!(kind, OperationKind::Webhook);
   }
 }
