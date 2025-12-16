@@ -1,11 +1,16 @@
 use http::Method;
+use quote::ToTokens;
 
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, RustPrimitive, RustType,
-    StructDef, StructKind, StructToken, TypeRef,
+    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
+    RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
   },
-  codegen::{Visibility, client::ClientOperationMethod},
+  codegen::{
+    Visibility,
+    client::{ClientGenerator, ClientOperationMethod},
+    metadata::CodeMetadata,
+  },
 };
 
 #[derive(Default)]
@@ -23,6 +28,7 @@ impl TestOperation<'_> {
       operation_id: "testOperation".to_string(),
       method: Method::GET,
       path: "/test".to_string(),
+      kind: OperationKind::Http,
       summary: self.summary.map(String::from),
       description: self.description.map(String::from),
       request_type: Some(StructToken::new("TestRequest")),
@@ -264,25 +270,22 @@ fn test_multipart_generation() {
   };
 
   let make_operation = |request_type: &str| OperationInfo {
-    stable_id: "upload".to_string(),
-    operation_id: "upload".to_string(),
-    method: Method::POST,
-    path: "/upload".to_string(),
+    stable_id: format!("{request_type}_operation"),
+    operation_id: format!("{request_type}Operation"),
+    method: Method::GET,
+    path: "/test".to_string(),
+    kind: OperationKind::Http,
     summary: None,
     description: None,
     request_type: Some(StructToken::new(request_type)),
-    response_type: None,
+    response_type: Some("TestResponse".to_string()),
     response_enum: None,
     response_content_category: ContentCategory::Json,
     success_response_types: vec![],
     error_response_types: vec![],
     warnings: vec![],
     parameters: vec![],
-    body: Some(OperationBody {
-      field_name: FieldNameToken::new("body"),
-      optional: false,
-      content_category: ContentCategory::Multipart,
-    }),
+    body: None,
   };
 
   let field_ident = FieldNameToken::new("body");
@@ -325,5 +328,107 @@ fn test_multipart_generation() {
   assert!(
     !fallback_code.contains("Part :: bytes"),
     "fallback: should NOT use Part::bytes"
+  );
+}
+
+#[test]
+fn test_client_filters_webhook_operations() {
+  use crate::generator::ast::OperationParameter;
+
+  let http_operation = OperationInfo {
+    stable_id: "list_pets".to_string(),
+    operation_id: "listPets".to_string(),
+    method: Method::GET,
+    path: "/pets".to_string(),
+    kind: OperationKind::Http,
+    summary: Some("List all pets".to_string()),
+    description: None,
+    request_type: Some(StructToken::new("ListPetsRequest")),
+    response_type: Some("Vec<Pet>".to_string()),
+    response_enum: None,
+    response_content_category: ContentCategory::Json,
+    success_response_types: vec![],
+    error_response_types: vec![],
+    warnings: vec![],
+    parameters: vec![OperationParameter {
+      original_name: "X-Custom-Header".to_string(),
+      rust_field: FieldNameToken::new("x_custom_header"),
+      location: ParameterLocation::Header,
+      required: false,
+      rust_type: TypeRef {
+        base_type: RustPrimitive::String,
+        is_array: false,
+        nullable: true,
+        boxed: false,
+        unique_items: false,
+      },
+    }],
+    body: None,
+  };
+
+  let webhook_operation = OperationInfo {
+    stable_id: "pet_added_hook".to_string(),
+    operation_id: "petAddedHook".to_string(),
+    method: Method::POST,
+    path: "webhooks/petAdded".to_string(),
+    kind: OperationKind::Webhook,
+    summary: Some("Pet added webhook".to_string()),
+    description: None,
+    request_type: Some(StructToken::new("PetAddedHookRequest")),
+    response_type: Some("WebhookResponse".to_string()),
+    response_enum: None,
+    response_content_category: ContentCategory::Json,
+    success_response_types: vec![],
+    error_response_types: vec![],
+    warnings: vec![],
+    parameters: vec![OperationParameter {
+      original_name: "X-Webhook-Secret".to_string(),
+      rust_field: FieldNameToken::new("x_webhook_secret"),
+      location: ParameterLocation::Header,
+      required: true,
+      rust_type: TypeRef {
+        base_type: RustPrimitive::String,
+        is_array: false,
+        nullable: false,
+        boxed: false,
+        unique_items: false,
+      },
+    }],
+    body: None,
+  };
+
+  let operations = vec![http_operation, webhook_operation];
+  let metadata = CodeMetadata {
+    title: "PetStore".to_string(),
+    base_url: "https://api.example.com".to_string(),
+    version: "1.0.0".to_string(),
+    description: None,
+  };
+
+  let generator = ClientGenerator::new(&metadata, &operations, &[], Visibility::Public);
+  let output = generator.to_token_stream().to_string();
+
+  // HTTP operation should generate a client method
+  assert!(
+    output.contains("list_pets"),
+    "HTTP operation method should be generated"
+  );
+
+  // Webhook operation should NOT generate a client method
+  assert!(
+    !output.contains("pet_added_hook"),
+    "Webhook operation method should NOT be generated"
+  );
+
+  // HTTP header constants should be generated
+  assert!(
+    output.contains("X_CUSTOM_HEADER") || output.contains("X-Custom-Header"),
+    "HTTP header constant should be generated"
+  );
+
+  // Webhook header constants should NOT be generated
+  assert!(
+    !output.contains("X_WEBHOOK_SECRET") && !output.contains("X-Webhook-Secret"),
+    "Webhook header constant should NOT be generated"
   );
 }

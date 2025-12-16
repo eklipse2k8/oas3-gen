@@ -3,8 +3,8 @@ use http::Method;
 use crate::generator::{
   analyzer::ErrorAnalyzer,
   ast::{
-    ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, RustPrimitive, RustType, StructDef, StructKind,
-    StructToken, TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
+    ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, OperationKind, RustPrimitive, RustType, StructDef,
+    StructKind, StructToken, TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
   },
 };
 
@@ -64,6 +64,7 @@ fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<
     operation_id: id.to_string(),
     method: Method::GET,
     path: "/test".to_string(),
+    kind: OperationKind::Http,
     summary: None,
     description: None,
     request_type: None,

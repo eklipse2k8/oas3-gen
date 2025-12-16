@@ -6,7 +6,7 @@ use strum::Display;
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
-  ast::{LintConfig, OperationInfo, RustType},
+  ast::{LintConfig, OperationInfo, OperationKind, RustType},
   codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata},
   converter::{CodegenConfig, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
   naming::inference::InlineTypeScanner,
@@ -36,6 +36,7 @@ pub struct GenerationStats {
   pub enums_with_helpers_generated: usize,
   pub type_aliases_generated: usize,
   pub operations_converted: usize,
+  pub webhooks_converted: usize,
   pub cycles_detected: usize,
   pub cycle_details: Vec<Vec<String>>,
   pub warnings: Vec<GenerationWarning>,
@@ -220,6 +221,11 @@ impl Orchestrator {
 
     let types_generated = structs_generated + enums_generated + type_aliases_generated;
 
+    let webhooks_converted = operations_info
+      .iter()
+      .filter(|op| matches!(op.kind, OperationKind::Webhook))
+      .count();
+
     let stats = GenerationStats {
       types_generated,
       structs_generated,
@@ -227,6 +233,7 @@ impl Orchestrator {
       enums_with_helpers_generated,
       type_aliases_generated,
       operations_converted: operations_info.len(),
+      webhooks_converted,
       cycles_detected: cycle_details.len(),
       cycle_details,
       warnings,
@@ -323,7 +330,7 @@ impl Orchestrator {
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
-    for (stable_id, method, path, operation) in self.operation_registry.operations_with_details() {
+    for (stable_id, method, path, operation, kind) in self.operation_registry.operations_with_details() {
       let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
 
       match operation_converter.convert(
@@ -331,6 +338,7 @@ impl Orchestrator {
         operation_id,
         method,
         path,
+        kind,
         operation,
         &mut usage_recorder,
         cache,

@@ -8,8 +8,8 @@ use syn::LitStr;
 use super::{Visibility, attributes::generate_docs, metadata::CodeMetadata};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, ParameterLocation,
-    RustPrimitive, RustType, StructDef, StructToken, TypeRef,
+    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
+    ParameterLocation, RustPrimitive, RustType, StructDef, StructToken, TypeRef,
     tokens::{ConstToken, HeaderToken},
   },
   codegen::{constants, parse_type},
@@ -52,7 +52,9 @@ impl<'a> ClientGenerator<'a> {
   }
 
   fn header_consts(&self) -> TokenStream {
-    let headers: Vec<HeaderToken> = extract_header_names(self.operations).into_iter().collect();
+    let headers: Vec<HeaderToken> = extract_header_names(self.operations, OperationKind::Http)
+      .into_iter()
+      .collect();
     constants::generate_header_constants(&headers)
   }
 
@@ -60,6 +62,7 @@ impl<'a> ClientGenerator<'a> {
     self
       .operations
       .iter()
+      .filter(|op| op.kind == OperationKind::Http)
       .map(|op| {
         ClientOperationMethod::try_from_operation(op, self.rust_types, self.visibility)
           .map(quote::ToTokens::into_token_stream)
@@ -129,9 +132,10 @@ impl ToTokens for ClientGenerator<'_> {
   }
 }
 
-fn extract_header_names(operations: &[OperationInfo]) -> BTreeSet<HeaderToken> {
+fn extract_header_names(operations: &[OperationInfo], filter_kind: OperationKind) -> BTreeSet<HeaderToken> {
   operations
     .iter()
+    .filter(|op| op.kind == filter_kind)
     .flat_map(|op| &op.parameters)
     .filter(|param| matches!(param.location, ParameterLocation::Header))
     .map(|param| HeaderToken::from(param.original_name.as_str()))
