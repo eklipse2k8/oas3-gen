@@ -1,8 +1,8 @@
 use crate::generator::{
   ast::{
     ContentCategory, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
-    EnumVariantToken, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken,
-    StructToken, TypeRef, VariantContent, VariantDef,
+    EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
+    StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -183,7 +183,7 @@ fn test_enum_variant_attributes() {
     variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
     discriminator: None,
     serde_attrs: vec![],
-    outer_attrs: vec!["#[non_exhaustive]".to_string()],
+    outer_attrs: vec![OuterAttr::NonExhaustive],
     case_insensitive: false,
     methods: vec![],
     ..Default::default()

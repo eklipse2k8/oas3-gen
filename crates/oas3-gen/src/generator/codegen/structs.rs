@@ -80,11 +80,11 @@ impl<'a> StructGenerator<'a> {
         let name = format_ident!("{}", field.name);
         let docs = generate_docs_for_field(field);
         let serde_attrs = generate_serde_attrs(&field.serde_attrs);
-        let extra_attrs: Vec<TokenStream> = field
-          .extra_attrs
-          .iter()
-          .filter_map(|attr| attr.parse::<TokenStream>().ok())
-          .collect();
+        let doc_hidden_attr = if field.doc_hidden {
+          quote! { #[doc(hidden)] }
+        } else {
+          quote! {}
+        };
 
         let validation_attrs: Vec<ValidationAttribute> = field
           .validation_attrs
@@ -115,7 +115,7 @@ impl<'a> StructGenerator<'a> {
         let type_tokens = &field.rust_type;
 
         quote! {
-          #(#extra_attrs)*
+          #doc_hidden_attr
           #docs
           #deprecated_attr
           #serde_attrs
@@ -134,8 +134,7 @@ impl<'a> StructGenerator<'a> {
         variants,
       } => {
         let docs = generate_docs(&method.docs);
-        let attrs = generate_outer_attrs(&method.attrs);
-        self.generate_parse_response_method(&method.name, response_enum, variants, &docs, &attrs)
+        self.generate_parse_response_method(&method.name, response_enum, variants, &docs)
       }
       StructMethodKind::RenderPath { segments, query_params } => {
         self.generate_render_path_method(method, segments, query_params)
@@ -151,13 +150,11 @@ impl<'a> StructGenerator<'a> {
   ) -> TokenStream {
     let name = &method.name;
     let docs = generate_docs(&method.docs);
-    let attrs = generate_outer_attrs(&method.attrs);
     let vis = self.visibility.to_tokens();
     let body = Self::build_render_path_body(segments, query_params);
 
     quote! {
       #docs
-      #attrs
       #vis fn #name(&self) -> anyhow::Result<String> {
         #body
       }
@@ -170,7 +167,6 @@ impl<'a> StructGenerator<'a> {
     response_enum: &EnumToken,
     variants: &[ResponseVariant],
     docs: &TokenStream,
-    attrs: &TokenStream,
   ) -> TokenStream {
     let vis = self.visibility.to_tokens();
 
@@ -222,7 +218,6 @@ impl<'a> StructGenerator<'a> {
 
     quote! {
       #docs
-      #attrs
       #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
         #status_decl
         #(#status_matches)*

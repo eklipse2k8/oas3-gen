@@ -15,8 +15,6 @@ use crate::generator::{
   schema_registry::{ReferenceExtractor, SchemaRegistry},
 };
 
-const HIDDEN: &str = "#[doc(hidden)]";
-
 pub(crate) struct DiscriminatorInfo {
   pub value: Option<DefaultAtom>,
   pub is_base: bool,
@@ -26,7 +24,7 @@ pub(crate) struct DiscriminatorInfo {
 pub(crate) struct DiscriminatorAttributesResult {
   pub metadata: FieldMetadata,
   pub serde_attrs: Vec<SerdeAttribute>,
-  pub extra_attrs: Vec<String>,
+  pub doc_hidden: bool,
 }
 
 pub(crate) fn get_discriminator_info(
@@ -78,7 +76,7 @@ pub(crate) fn apply_discriminator_attributes(
     return DiscriminatorAttributesResult {
       metadata,
       serde_attrs,
-      extra_attrs: vec![],
+      doc_hidden: false,
     };
   }
 
@@ -86,7 +84,6 @@ pub(crate) fn apply_discriminator_attributes(
 
   metadata.docs.clear();
   metadata.validation_attrs.clear();
-  let extra_attrs = vec![HIDDEN.to_string()];
 
   if let Some(ref disc_value) = disc_info.value {
     metadata.default_value = Some(serde_json::Value::String(disc_value.to_string()));
@@ -103,7 +100,7 @@ pub(crate) fn apply_discriminator_attributes(
   DiscriminatorAttributesResult {
     metadata,
     serde_attrs,
-    extra_attrs,
+    doc_hidden: true,
   }
 }
 

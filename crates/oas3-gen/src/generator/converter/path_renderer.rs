@@ -49,7 +49,6 @@ pub(crate) fn build_render_path_method(
       segments: parse_path_segments(path, path_params),
       query_params: query_parameters,
     },
-    attrs: vec![],
   }
 }
 

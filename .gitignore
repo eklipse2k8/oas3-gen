@@ -15,3 +15,6 @@
 .idea/
 .vscode/
 .zed/
+
+.env
+.env.*

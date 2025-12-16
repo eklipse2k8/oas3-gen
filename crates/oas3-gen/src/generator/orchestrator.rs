@@ -8,7 +8,10 @@ use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
   ast::{LintConfig, OperationInfo, OperationKind, RustType},
   codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata},
-  converter::{CodegenConfig, SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
+  converter::{
+    CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
+    TypeUsageRecorder, operations::OperationConverter,
+  },
   naming::inference::InlineTypeScanner,
   operation_registry::OperationRegistry,
   schema_registry::SchemaRegistry,
@@ -167,10 +170,26 @@ impl Orchestrator {
     };
 
     let config = CodegenConfig {
-      preserve_case_variants: self.preserve_case_variants,
-      case_insensitive_enums: self.case_insensitive_enums,
-      no_helpers: self.no_helpers,
-      odata_support: self.odata_support,
+      enum_case: if self.preserve_case_variants {
+        EnumCasePolicy::Preserve
+      } else {
+        EnumCasePolicy::Deduplicate
+      },
+      enum_helpers: if self.no_helpers {
+        EnumHelperPolicy::Disable
+      } else {
+        EnumHelperPolicy::Generate
+      },
+      enum_deserialize: if self.case_insensitive_enums {
+        EnumDeserializePolicy::CaseInsensitive
+      } else {
+        EnumDeserializePolicy::CaseSensitive
+      },
+      odata: if self.odata_support {
+        ODataPolicy::Enabled
+      } else {
+        ODataPolicy::Disabled
+      },
     };
 
     let graph = Arc::new(graph);

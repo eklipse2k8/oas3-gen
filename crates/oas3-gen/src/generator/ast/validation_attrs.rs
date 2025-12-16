@@ -1,5 +1,7 @@
 use std::fmt;
 
+use proc_macro2::TokenStream;
+use quote::{ToTokens, quote};
 use serde_json::Number;
 
 use crate::generator::ast::{RustPrimitive, StructToken, types::render_unsigned_integer};
@@ -104,6 +106,59 @@ fn compare_numbers(n1: Option<&Number>, n2: Option<&Number>) -> bool {
       }
     }
     _ => false,
+  }
+}
+
+impl ToTokens for ValidationAttribute {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let attr = match self {
+      ValidationAttribute::Email => quote! { email },
+      ValidationAttribute::Url => quote! { url },
+      ValidationAttribute::Regex(path) => quote! { regex(path = #path) },
+      ValidationAttribute::Length { min, max } => {
+        let min_part = min.map(|m| {
+          let lit: TokenStream = render_unsigned_integer(&RustPrimitive::U64, m).parse().unwrap();
+          quote! { min = #lit }
+        });
+        let max_part = max.map(|m| {
+          let lit: TokenStream = render_unsigned_integer(&RustPrimitive::U64, m).parse().unwrap();
+          quote! { max = #lit }
+        });
+        match (min_part, max_part) {
+          (Some(min), Some(max)) => quote! { length(#min, #max) },
+          (Some(min), None) => quote! { length(#min) },
+          (None, Some(max)) => quote! { length(#max) },
+          (None, None) => quote! { length() },
+        }
+      }
+      ValidationAttribute::Range {
+        primitive,
+        min,
+        max,
+        exclusive_min,
+        exclusive_max,
+      } => {
+        let mut parts = vec![];
+        if let Some(m) = min {
+          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          parts.push(quote! { min = #lit });
+        }
+        if let Some(m) = max {
+          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          parts.push(quote! { max = #lit });
+        }
+        if let Some(m) = exclusive_min {
+          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          parts.push(quote! { exclusive_min = #lit });
+        }
+        if let Some(m) = exclusive_max {
+          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          parts.push(quote! { exclusive_max = #lit });
+        }
+        quote! { range(#(#parts),*) }
+      }
+    };
+    tokens.extend(attr);
   }
 }
 

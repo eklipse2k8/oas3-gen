@@ -4,12 +4,24 @@ use oas3::spec::ObjectSchema;
 
 use super::hashing;
 use crate::generator::{
-  ast::{EnumToken, RustType, StructToken},
+  ast::{EnumToken, FieldNameToken, RustType, StructToken, TypeRef},
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::{extract_enum_values, is_relaxed_enum_pattern},
   },
 };
+
+/// Lightweight summary of struct characteristics for enum helper generation.
+///
+/// This avoids re-converting entire schemas when determining if a struct
+/// is eligible for helper constructor generation.
+#[derive(Debug, Clone)]
+pub(crate) struct StructSummary {
+  /// Whether the struct can derive Default.
+  pub has_default: bool,
+  /// Required fields (name and type) that must be provided in constructors.
+  pub required_fields: Vec<(FieldNameToken, TypeRef)>,
+}
 
 /// Cache for sharing generated Rust types across the schema graph.
 ///
@@ -22,6 +34,8 @@ pub(crate) struct SharedSchemaCache {
   used_names: BTreeSet<String>,
   precomputed_names: BTreeMap<String, String>,
   precomputed_enum_names: BTreeMap<Vec<String>, String>,
+  /// Cached struct summaries for enum helper generation.
+  struct_summaries: BTreeMap<String, StructSummary>,
 }
 
 impl SharedSchemaCache {
@@ -35,6 +49,7 @@ impl SharedSchemaCache {
       used_names: BTreeSet::new(),
       precomputed_names: BTreeMap::new(),
       precomputed_enum_names: BTreeMap::new(),
+      struct_summaries: BTreeMap::new(),
     }
   }
 
@@ -181,5 +196,15 @@ impl SharedSchemaCache {
   /// Consumes the cache and returns all generated Rust types.
   pub(crate) fn into_types(self) -> Vec<RustType> {
     self.generated_types
+  }
+
+  /// Stores a struct summary for enum helper generation.
+  pub(crate) fn register_struct_summary(&mut self, type_name: &str, summary: StructSummary) {
+    self.struct_summaries.insert(type_name.to_string(), summary);
+  }
+
+  /// Retrieves a cached struct summary by type name.
+  pub(crate) fn get_struct_summary(&self, type_name: &str) -> Option<&StructSummary> {
+    self.struct_summaries.get(type_name)
   }
 }
