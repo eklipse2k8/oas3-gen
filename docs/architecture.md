@@ -7,7 +7,7 @@ Cargo workspace with two crates following a three-stage pipeline: **Parse OpenAP
 ```text
 crates/
 ├── oas3-gen/                      # CLI tool (binary)
-│   ├── fixtures/                  # Test fixtures
+│   ├── fixtures/                  # Test fixtures (JSON and YAML)
 │   │   ├── basic_api.json         # Basic API test fixture
 │   │   ├── content_types.json     # Content type handling tests
 │   │   ├── enum_deduplication.json # Enum deduplication tests
@@ -16,6 +16,7 @@ crates/
 │   │   ├── operation_filtering.json # Operation filtering tests
 │   │   ├── petstore.json          # Petstore API specification
 │   │   ├── relaxed_enum_deduplication.json # Relaxed enum deduplication tests
+│   │   ├── schema.yaml            # YAML format test fixture
 │   │   └── petstore/              # Petstore generated output fixtures
 │   │       ├── mod.rs
 │   │       ├── client.rs
@@ -139,7 +140,7 @@ crates/
 
 ## Generation Pipeline
 
-1. **Parse**: Load OpenAPI spec via `oas3` crate
+1. **Parse**: Load OpenAPI spec via `oas3` crate (JSON or YAML, auto-detected from file extension)
 2. **Analyze**: Build schema dependency graph, detect cycles
 3. **Convert**: Transform schemas to AST (`converter/`)
 4. **Generate**: Produce formatted Rust code (`codegen/`)
@@ -161,7 +162,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Code Generation
 
-- **oas3** (0.20): OpenAPI 3.1 spec parser
+- **oas3** (0.20): OpenAPI 3.1 spec parser with JSON and YAML support
 - **quote** (1.0): Token stream generation
 - **proc-macro2** (1.0): Token manipulation
 - **syn** (2.0): Rust syntax parser with full parsing support

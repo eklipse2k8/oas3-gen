@@ -20,8 +20,9 @@ cargo build
 The application uses a CLI interface powered by `clap` with subcommands:
 
 ```bash
-# Generate Rust types from OpenAPI spec (default mode)
+# Generate Rust types from OpenAPI spec (default mode, JSON or YAML auto-detected)
 cargo run -- generate types -i spec.json -o generated.rs
+cargo run -- generate types -i spec.yaml -o generated.rs
 
 # Generate HTTP client from OpenAPI spec
 cargo run -- generate client -i spec.json -o client.rs
@@ -54,7 +55,7 @@ cargo run -- list --help
 | Argument/Option | Description |
 |-----------------|-------------|
 | `[MODE]` | Generation mode: `types` (default) or `client` |
-| `--input` / `-i` | (Required) Path to OpenAPI JSON specification file |
+| `--input` / `-i` | (Required) Path to OpenAPI specification file (JSON or YAML, auto-detected) |
 | `--output` / `-o` | (Required) Path where generated Rust code will be written |
 | `--visibility` / `-C` | Visibility level for generated types (public, crate, or file; default: public) |
 | `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |

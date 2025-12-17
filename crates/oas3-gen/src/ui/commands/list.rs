@@ -1,15 +1,15 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Row, Table};
 
 use crate::{
   generator::operation_registry::OperationRegistry,
   ui::{Colors, colors::IntoComfyColor, term_width},
+  utils::spec::SpecLoader,
 };
 
-pub async fn list_operations(input: &PathBuf, colors: &Colors) -> anyhow::Result<()> {
-  let file_content = tokio::fs::read_to_string(input).await?;
-  let spec: oas3::Spec = oas3::from_json(file_content)?;
+pub async fn list_operations(input: &Path, colors: &Colors) -> anyhow::Result<()> {
+  let spec = SpecLoader::open(input).await?.parse()?;
 
   let registry = OperationRegistry::from_spec(&spec);
 
