@@ -24,35 +24,8 @@ async fn main() -> anyhow::Result<()> {
     Commands::List { list_command } => match list_command {
       ListCommands::Operations { input } => ui::commands::list_operations(&input, &colors).await?,
     },
-    Commands::Generate {
-      mode,
-      input,
-      output,
-      visibility,
-      odata_support,
-      enum_mode,
-      no_helpers,
-      verbose,
-      quiet,
-      all_schemas,
-      only,
-      exclude,
-    } => {
-      let config = ui::commands::GenerateConfig::new(
-        mode,
-        input,
-        output,
-        visibility,
-        verbose,
-        quiet,
-        all_schemas,
-        odata_support,
-        &enum_mode,
-        no_helpers,
-        only,
-        exclude,
-      );
-      ui::commands::generate_code(config, &colors).await?;
+    Commands::Generate(command) => {
+      ui::commands::generate_code(command.into(), &colors).await?;
     }
   }
 
