@@ -8,7 +8,7 @@ use crate::{
     codegen::Visibility,
     orchestrator::{GenerationStats, Orchestrator},
   },
-  ui::{Colors, EnumCaseMode, GenerateMode},
+  ui::{Colors, EnumCaseMode, GenerateCommand, GenerateMode},
   utils::spec::SpecLoader,
 };
 
@@ -17,6 +17,8 @@ fn format_timestamp() -> String {
   format!("[{:02}:{:02}:{:02}]", now.hour(), now.minute(), now.second())
 }
 
+#[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GenerateConfig {
   pub mode: GenerateMode,
   pub input: PathBuf,
@@ -33,48 +35,13 @@ pub struct GenerateConfig {
   pub no_helpers: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct EnumPolicies {
+  preserve_case_variants: bool,
+  case_insensitive_enums: bool,
+}
+
 impl GenerateConfig {
-  #[allow(clippy::too_many_arguments)]
-  pub fn new(
-    mode: GenerateMode,
-    input: PathBuf,
-    output: PathBuf,
-    visibility: Visibility,
-    verbose: bool,
-    quiet: bool,
-    all_schemas: bool,
-    odata_support: bool,
-    enum_mode: &EnumCaseMode,
-    no_helpers: bool,
-    only_operations: Option<Vec<String>>,
-    excluded_operations: Option<Vec<String>>,
-  ) -> Self {
-    let only_operations = only_operations.map(|ops| ops.into_iter().collect());
-    let excluded_operations = excluded_operations.map(|ops| ops.into_iter().collect());
-
-    let (preserve_case_variants, case_insensitive_enums) = match enum_mode {
-      EnumCaseMode::Merge => (false, false),
-      EnumCaseMode::Preserve => (true, false),
-      EnumCaseMode::Relaxed => (false, true),
-    };
-
-    Self {
-      mode,
-      input,
-      output,
-      visibility,
-      verbose,
-      quiet,
-      all_schemas,
-      odata_support,
-      preserve_case_variants,
-      case_insensitive_enums,
-      only_operations,
-      excluded_operations,
-      no_helpers,
-    }
-  }
-
   async fn load_spec(&self) -> anyhow::Result<oas3::Spec> {
     SpecLoader::open(&self.input).await?.parse()
   }
@@ -99,6 +66,62 @@ impl GenerateConfig {
     }
     tokio::fs::write(&self.output, code).await?;
     Ok(())
+  }
+}
+
+impl From<GenerateCommand> for GenerateConfig {
+  fn from(command: GenerateCommand) -> Self {
+    let GenerateCommand {
+      mode,
+      input,
+      output,
+      visibility,
+      odata_support,
+      enum_mode,
+      no_helpers,
+      all_schemas,
+      only,
+      exclude,
+      verbose,
+      quiet,
+    } = command;
+
+    let enum_policies = EnumPolicies::from(enum_mode);
+
+    Self {
+      mode,
+      input,
+      output,
+      visibility,
+      verbose,
+      quiet,
+      all_schemas,
+      odata_support,
+      preserve_case_variants: enum_policies.preserve_case_variants,
+      case_insensitive_enums: enum_policies.case_insensitive_enums,
+      only_operations: only.map(|ops| ops.into_iter().collect()),
+      excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
+      no_helpers,
+    }
+  }
+}
+
+impl From<EnumCaseMode> for EnumPolicies {
+  fn from(enum_mode: EnumCaseMode) -> Self {
+    match enum_mode {
+      EnumCaseMode::Merge => Self {
+        preserve_case_variants: false,
+        case_insensitive_enums: false,
+      },
+      EnumCaseMode::Preserve => Self {
+        preserve_case_variants: true,
+        case_insensitive_enums: false,
+      },
+      EnumCaseMode::Relaxed => Self {
+        preserve_case_variants: false,
+        case_insensitive_enums: true,
+      },
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum, ValueHint, builder::Styles};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum, ValueHint, builder::Styles};
 
 use super::colors::{ColorMode, ThemeMode};
 use crate::{generator::codegen::Visibility, ui::Colors};
@@ -49,116 +49,120 @@ pub enum Commands {
     list_command: ListCommands,
   },
   /// Generates idiomatic, type-safe Rust code from an OpenAPI v3.1 (OAS31) specification.
-  Generate {
-    /// Sets the generation mode
-    #[arg(value_enum, default_value = "types")]
-    mode: GenerateMode,
+  Generate(GenerateCommand),
+}
 
-    /// Path to the OpenAPI specification file
-    #[arg(
-      short,
-      long,
-      value_name = "FILE",
-      value_hint = ValueHint::AnyPath,
-      display_order = 0,
-      help_heading = "Required"
-    )]
-    input: PathBuf,
+#[derive(Args, Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct GenerateCommand {
+  /// Sets the generation mode
+  #[arg(value_enum, default_value = "types")]
+  pub mode: GenerateMode,
 
-    /// Path for the generated rust output file
-    #[arg(
-      short,
-      long,
-      value_name = "FILE",
-      value_hint = ValueHint::AnyPath,
-      display_order = 0,
-      help_heading = "Required"
-    )]
-    output: PathBuf,
+  /// Path to the OpenAPI specification file
+  #[arg(
+    short,
+    long,
+    value_name = "FILE",
+    value_hint = ValueHint::AnyPath,
+    display_order = 0,
+    help_heading = "Required"
+  )]
+  pub input: PathBuf,
 
-    /// Module visibility for generated items
-    #[arg(
-      short = 'C',
-      long,
-      value_name = "PUB",
-      default_value = "public",
-      display_order = 10,
-      help_heading = "Code Generation"
-    )]
-    visibility: Visibility,
+  /// Path for the generated rust output file
+  #[arg(
+    short,
+    long,
+    value_name = "FILE",
+    value_hint = ValueHint::AnyPath,
+    display_order = 0,
+    help_heading = "Required"
+  )]
+  pub output: PathBuf,
 
-    /// Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types)
-    #[arg(long, default_value_t = false, display_order = 11, help_heading = "Code Generation")]
-    odata_support: bool,
+  /// Module visibility for generated items
+  #[arg(
+    short = 'C',
+    long,
+    value_name = "PUB",
+    default_value = "public",
+    display_order = 10,
+    help_heading = "Code Generation"
+  )]
+  pub visibility: Visibility,
 
-    /// Specifies how to handle enum case sensitivity and duplicates
-    #[arg(
-      long,
-      value_enum,
-      default_value_t,
-      display_order = 12,
-      help_heading = "Code Generation"
-    )]
-    enum_mode: EnumCaseMode,
+  /// Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types)
+  #[arg(long, default_value_t = false, display_order = 11, help_heading = "Code Generation")]
+  pub odata_support: bool,
 
-    /// Disable generation of ergonomic helper methods for enum variants
-    #[arg(long, default_value_t = false, display_order = 13, help_heading = "Code Generation")]
-    no_helpers: bool,
+  /// Specifies how to handle enum case sensitivity and duplicates
+  #[arg(
+    long,
+    value_enum,
+    default_value_t,
+    display_order = 12,
+    help_heading = "Code Generation"
+  )]
+  pub enum_mode: EnumCaseMode,
 
-    /// Generate all schemas, even those unreferenced by selected operations
-    #[arg(
-      group = "filter",
-      long,
-      default_value_t = false,
-      display_order = 22,
-      help_heading = "Operation Filtering"
-    )]
-    all_schemas: bool,
+  /// Disable generation of ergonomic helper methods for enum variants
+  #[arg(long, default_value_t = false, display_order = 13, help_heading = "Code Generation")]
+  pub no_helpers: bool,
 
-    /// Include only the specified comma-separated operation IDs
-    #[arg(
-      group = "filter",
-      long, action = ArgAction::Append,
-      value_name = "id_1,id_2,...",
-      value_delimiter = ',',
-      display_order = 20,
-      help_heading = "Operation Filtering"
-    )]
-    only: Option<Vec<String>>,
+  /// Generate all schemas, even those unreferenced by selected operations
+  #[arg(
+    group = "filter",
+    long,
+    default_value_t = false,
+    display_order = 22,
+    help_heading = "Operation Filtering"
+  )]
+  pub all_schemas: bool,
 
-    /// Exclude the specified comma-separated operation IDs
-    #[arg(
-      group = "filter",
-      long, action = ArgAction::Append,
-      value_name = "id_1,id_2,...",
-      value_delimiter = ',',
-      display_order = 21,
-      help_heading = "Operation Filtering"
-    )]
-    exclude: Option<Vec<String>>,
+  /// Include only the specified comma-separated operation IDs
+  #[arg(
+    group = "filter",
+    long, action = ArgAction::Append,
+    value_name = "id_1,id_2,...",
+    value_delimiter = ',',
+    display_order = 20,
+    help_heading = "Operation Filtering"
+  )]
+  pub only: Option<Vec<String>>,
 
-    /// Enable verbose output with detailed progress information
-    #[arg(
-      short,
-      long,
-      default_value_t = false,
-      global = true,
-      display_order = 100,
-      help_heading = "Terminal Output"
-    )]
-    verbose: bool,
+  /// Exclude the specified comma-separated operation IDs
+  #[arg(
+    group = "filter",
+    long, action = ArgAction::Append,
+    value_name = "id_1,id_2,...",
+    value_delimiter = ',',
+    display_order = 21,
+    help_heading = "Operation Filtering"
+  )]
+  pub exclude: Option<Vec<String>>,
 
-    /// Suppress non-essential output (errors only)
-    #[arg(
-      short,
-      long,
-      default_value_t = false,
-      global = true,
-      display_order = 101,
-      help_heading = "Terminal Output"
-    )]
-    quiet: bool,
-  },
+  /// Enable verbose output with detailed progress information
+  #[arg(
+    short,
+    long,
+    default_value_t = false,
+    global = true,
+    display_order = 100,
+    help_heading = "Terminal Output"
+  )]
+  pub verbose: bool,
+
+  /// Suppress non-essential output (errors only)
+  #[arg(
+    short,
+    long,
+    default_value_t = false,
+    global = true,
+    display_order = 101,
+    help_heading = "Terminal Output"
+  )]
+  pub quiet: bool,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
