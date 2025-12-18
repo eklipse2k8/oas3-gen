@@ -63,6 +63,7 @@ fn make_path_struct(field_name: &str, rust_type: &str, path_literal: &str) -> St
         PathSegment::Literal(path_literal.to_string()),
         PathSegment::Parameter {
           field: FieldNameToken::new(field_name),
+          is_value: false,
         },
       ],
       query_params: vec![],
@@ -111,6 +112,7 @@ fn renders_struct_methods() {
         PathSegment::Literal("/users/".to_string()),
         PathSegment::Parameter {
           field: FieldNameToken::new("field"),
+          is_value: false,
         },
       ],
       query_params: vec![QueryParameter {
@@ -119,6 +121,7 @@ fn renders_struct_methods() {
         explode: false,
         optional: false,
         is_array: false,
+        is_value: false,
         style: None,
       }],
     },
@@ -274,10 +277,12 @@ fn renders_path_with_mixed_parameters() {
         PathSegment::Literal("/users/".to_string()),
         PathSegment::Parameter {
           field: FieldNameToken::new("user_id"),
+          is_value: false,
         },
         PathSegment::Literal("/posts/".to_string()),
         PathSegment::Parameter {
           field: FieldNameToken::new("post_slug"),
+          is_value: false,
         },
       ],
       query_params: vec![],

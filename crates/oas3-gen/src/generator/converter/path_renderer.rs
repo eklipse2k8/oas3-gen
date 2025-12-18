@@ -13,6 +13,7 @@ const QUERY_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').
 pub(crate) struct PathParamMapping {
   pub rust_field: String,
   pub original_name: String,
+  pub is_value: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub(crate) struct QueryParamMapping {
   pub style: Option<ParameterStyle>,
   pub optional: bool,
   pub is_array: bool,
+  pub is_value: bool,
 }
 
 pub(crate) fn build_render_path_method(
@@ -39,6 +41,7 @@ pub(crate) fn build_render_path_method(
       optional: m.optional,
       is_array: m.is_array,
       style: m.style,
+      is_value: m.is_value,
     })
     .collect();
 
@@ -58,7 +61,7 @@ pub(crate) fn parse_path_segments(path: &str, path_params: &[PathParamMapping]) 
   }
   let param_map: HashMap<_, _> = path_params
     .iter()
-    .map(|p| (&*p.original_name, &*p.rust_field))
+    .map(|p| (&*p.original_name, (FieldNameToken::new(&p.rust_field), p.is_value)))
     .collect();
   let mut segments = vec![];
   let mut current_pos = 0;
@@ -70,9 +73,10 @@ pub(crate) fn parse_path_segments(path: &str, path_params: &[PathParamMapping]) 
       .find('}')
       .map_or(path.len(), |offset| brace_start + offset);
     let param_name = &path[brace_start + 1..brace_end];
-    if let Some(rust_field) = param_map.get(param_name) {
+    if let Some((field, is_value)) = param_map.get(param_name) {
       segments.push(PathSegment::Parameter {
-        field: FieldNameToken::new(*rust_field),
+        field: field.clone(),
+        is_value: *is_value,
       });
     } else {
       segments.push(PathSegment::Literal(path[brace_start..=brace_end].to_string()));
