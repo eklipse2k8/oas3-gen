@@ -146,6 +146,25 @@ pub fn percent_encode_query_component(component: &str) -> String {
   utf8_percent_encode(component, QUERY_ENCODE_SET).to_string()
 }
 
+/// Serializes a `serde_json::Value` to a string for use in URL query parameters.
+///
+/// Handles `serde_json::Value` specifically:
+/// - Strings are returned as-is (unquoted)
+/// - Objects and Arrays are serialized to JSON strings
+/// - Numbers, Booleans, and Null are serialized to their JSON representation
+///
+/// # Errors
+///
+/// Returns an error when the value cannot be converted to a JSON string.
+#[inline]
+pub fn serialize_any_query_param(value: &serde_json::Value) -> Result<String, serde_json::Error> {
+  if let serde_json::Value::String(s) = value {
+    Ok(s.clone())
+  } else {
+    serde_json::to_string(value)
+  }
+}
+
 /// Serializes a Rust value to a plain string representation for use in URL query parameters.
 ///
 /// This function converts Rust values (primitives, enums, Option types) into their string

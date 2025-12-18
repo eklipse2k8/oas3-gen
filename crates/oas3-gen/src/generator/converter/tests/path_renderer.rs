@@ -26,11 +26,12 @@ fn test_parse_path_with_single_parameter() {
   let mappings = vec![PathParamMapping {
     rust_field: "user_id".to_string(),
     original_name: "userId".to_string(),
+    is_value: false,
   }];
   let result = parse_path_segments("/users/{userId}", &mappings);
   assert_eq!(result.len(), 2);
   assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
+  assert!(matches!(&result[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("user_id")));
 }
 
 #[test]
@@ -39,18 +40,20 @@ fn test_parse_path_with_multiple_parameters() {
     PathParamMapping {
       rust_field: "user_id".to_string(),
       original_name: "userId".to_string(),
+      is_value: false,
     },
     PathParamMapping {
       rust_field: "post_id".to_string(),
       original_name: "postId".to_string(),
+      is_value: false,
     },
   ];
   let result = parse_path_segments("/users/{userId}/posts/{postId}", &mappings);
   assert_eq!(result.len(), 4);
   assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
+  assert!(matches!(&result[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("user_id")));
   assert!(matches!(&result[2], PathSegment::Literal(s) if s == "/posts/"));
-  assert!(matches!(&result[3], PathSegment::Parameter { field } if field == &FieldNameToken::new("post_id")));
+  assert!(matches!(&result[3], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("post_id")));
 }
 
 #[test]
@@ -58,11 +61,12 @@ fn test_parse_path_ending_with_parameter() {
   let mappings = vec![PathParamMapping {
     rust_field: "id".to_string(),
     original_name: "id".to_string(),
+    is_value: false,
   }];
   let result = parse_path_segments("/items/{id}", &mappings);
   assert_eq!(result.len(), 2);
   assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/items/"));
-  assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("id")));
+  assert!(matches!(&result[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("id")));
 }
 
 #[test]
@@ -71,18 +75,20 @@ fn test_parse_path_with_consecutive_parameters() {
     PathParamMapping {
       rust_field: "org".to_string(),
       original_name: "org".to_string(),
+      is_value: false,
     },
     PathParamMapping {
       rust_field: "repo".to_string(),
       original_name: "repo".to_string(),
+      is_value: false,
     },
   ];
   let result = parse_path_segments("/{org}/{repo}", &mappings);
   assert_eq!(result.len(), 4);
   assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/"));
-  assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("org")));
+  assert!(matches!(&result[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("org")));
   assert!(matches!(&result[2], PathSegment::Literal(s) if s == "/"));
-  assert!(matches!(&result[3], PathSegment::Parameter { field } if field == &FieldNameToken::new("repo")));
+  assert!(matches!(&result[3], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("repo")));
 }
 
 #[test]
@@ -90,11 +96,12 @@ fn test_parse_path_with_unmapped_parameter() {
   let mappings = vec![PathParamMapping {
     rust_field: "id".to_string(),
     original_name: "id".to_string(),
+    is_value: false,
   }];
   let result = parse_path_segments("/items/{id}/tags/{tagId}", &mappings);
   assert_eq!(result.len(), 4);
   assert!(matches!(&result[0], PathSegment::Literal(s) if s == "/items/"));
-  assert!(matches!(&result[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("id")));
+  assert!(matches!(&result[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("id")));
   assert!(matches!(&result[2], PathSegment::Literal(s) if s == "/tags/"));
   assert!(matches!(&result[3], PathSegment::Literal(s) if s == "{tagId}"));
 }

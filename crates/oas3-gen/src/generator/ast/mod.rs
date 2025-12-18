@@ -278,6 +278,7 @@ pub struct QueryParameter {
   pub explode: bool,
   pub optional: bool,
   pub is_array: bool,
+  pub is_value: bool,
   pub style: Option<oas3::spec::ParameterStyle>,
 }
 
@@ -305,7 +306,7 @@ impl Default for StructMethodKind {
 #[derive(Debug, Clone)]
 pub enum PathSegment {
   Literal(String),
-  Parameter { field: FieldNameToken },
+  Parameter { field: FieldNameToken, is_value: bool },
 }
 
 /// Associated method definition for an enum

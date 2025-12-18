@@ -491,6 +491,7 @@ impl<'a> OperationConverter<'a> {
       ParameterIn::Path => mappings.path.push(path_renderer::PathParamMapping {
         rust_field: field.name.to_string(),
         original_name: param.name.clone(),
+        is_value: field.rust_type.base_type == crate::generator::ast::RustPrimitive::Value,
       }),
       ParameterIn::Query => mappings.query.push(path_renderer::QueryParamMapping {
         rust_field: field.name.to_string(),
@@ -499,6 +500,7 @@ impl<'a> OperationConverter<'a> {
         style: param.style,
         optional: field.rust_type.nullable,
         is_array: field.rust_type.is_array,
+        is_value: field.rust_type.base_type == crate::generator::ast::RustPrimitive::Value,
       }),
       _ => {}
     }

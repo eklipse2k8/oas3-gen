@@ -136,7 +136,7 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
   };
   assert_eq!(segments.len(), 2);
   assert!(matches!(&segments[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
+  assert!(matches!(&segments[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("user_id")));
   Ok(())
 }
 
@@ -383,9 +383,9 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
   };
   assert_eq!(segments.len(), 4);
   assert!(matches!(&segments[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&segments[1], PathSegment::Parameter { field } if field == &FieldNameToken::new("user_id")));
+  assert!(matches!(&segments[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("user_id")));
   assert!(matches!(&segments[2], PathSegment::Literal(s) if s == "/posts/"));
-  assert!(matches!(&segments[3], PathSegment::Parameter { field } if field == &FieldNameToken::new("post_id")));
+  assert!(matches!(&segments[3], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("post_id")));
   Ok(())
 }
 

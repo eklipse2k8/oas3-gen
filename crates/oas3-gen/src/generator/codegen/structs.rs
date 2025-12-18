@@ -249,12 +249,17 @@ impl<'a> StructGenerator<'a> {
           format_string.push_str(&escaped);
           fallback_string.push_str(lit_str);
         }
-        PathSegment::Parameter { field } => {
+        PathSegment::Parameter { field, is_value } => {
           format_string.push_str("{}");
           fallback_string.push_str("{}");
           let ident = field;
+          let serialize_fn = if *is_value {
+            quote! { oas3_gen_support::serialize_any_query_param }
+          } else {
+            quote! { oas3_gen_support::serialize_query_param }
+          };
           args.push(quote! {
-            oas3_gen_support::percent_encode_path_segment(&oas3_gen_support::serialize_query_param(&self.#ident)?)
+            oas3_gen_support::percent_encode_path_segment(&#serialize_fn(&self.#ident)?)
           });
         }
       }
@@ -285,17 +290,34 @@ impl<'a> StructGenerator<'a> {
     }
   }
 
-  fn write_single_query_value(format_str: &str, value_expr: &TokenStream) -> TokenStream {
+  fn write_single_query_value(format_str: &str, value_expr: &TokenStream, is_value: bool) -> TokenStream {
     let format_lit: TokenStream = format_str.parse().unwrap();
+    let serialize_fn = if is_value {
+      quote! { oas3_gen_support::serialize_any_query_param }
+    } else {
+      quote! { oas3_gen_support::serialize_query_param }
+    };
+
     quote! {
-      write!(&mut path, #format_lit, oas3_gen_support::percent_encode_query_component(&oas3_gen_support::serialize_query_param(#value_expr)?)).unwrap();
+      write!(&mut path, #format_lit, oas3_gen_support::percent_encode_query_component(&#serialize_fn(#value_expr)?)).unwrap();
     }
   }
 
-  fn write_joined_query_values(format_str: &str, values_expr: &TokenStream, delimiter: &str) -> TokenStream {
+  fn write_joined_query_values(
+    format_str: &str,
+    values_expr: &TokenStream,
+    delimiter: &str,
+    is_value: bool,
+  ) -> TokenStream {
     let format_lit: TokenStream = format_str.parse().unwrap();
+    let serialize_fn = if is_value {
+      quote! { oas3_gen_support::serialize_any_query_param }
+    } else {
+      quote! { oas3_gen_support::serialize_query_param }
+    };
+
     quote! {
-      let values = #values_expr.iter().map(|v| oas3_gen_support::serialize_query_param(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
+      let values = #values_expr.iter().map(|v| #serialize_fn(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
       let values = values.join(#delimiter);
       write!(&mut path, #format_lit, values).unwrap();
     }
@@ -311,11 +333,12 @@ impl<'a> StructGenerator<'a> {
       _ => ",",
     };
     let advance_prefix = Self::advance_query_prefix();
+    let is_value = param.is_value;
 
     match (param.optional, param.is_array, param.explode) {
       (true, true, true) => {
         let value_expr = quote! { value };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr);
+        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
         quote! {
           if let Some(values) = &self.#ident {
             for value in values {
@@ -327,7 +350,7 @@ impl<'a> StructGenerator<'a> {
       }
       (true, true, false) => {
         let values_expr = quote! { values };
-        let write_joined = Self::write_joined_query_values(&format_str, &values_expr, delimiter);
+        let write_joined = Self::write_joined_query_values(&format_str, &values_expr, delimiter, is_value);
         quote! {
           if let Some(values) = &self.#ident && !values.is_empty() {
             #advance_prefix
@@ -337,7 +360,7 @@ impl<'a> StructGenerator<'a> {
       }
       (true, false, _) => {
         let value_expr = quote! { value };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr);
+        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
         quote! {
           if let Some(value) = &self.#ident {
             #advance_prefix
@@ -347,7 +370,7 @@ impl<'a> StructGenerator<'a> {
       }
       (false, true, true) => {
         let value_expr = quote! { value };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr);
+        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
         quote! {
           for value in &self.#ident {
             #advance_prefix
@@ -357,7 +380,7 @@ impl<'a> StructGenerator<'a> {
       }
       (false, true, false) => {
         let values_expr = quote! { &self.#ident };
-        let write_joined = Self::write_joined_query_values(&format_str, &values_expr, delimiter);
+        let write_joined = Self::write_joined_query_values(&format_str, &values_expr, delimiter, is_value);
         quote! {
           if !self.#ident.is_empty() {
             #advance_prefix
@@ -367,7 +390,7 @@ impl<'a> StructGenerator<'a> {
       }
       (false, false, _) => {
         let value_expr = quote! { &self.#ident };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr);
+        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
         quote! {
           #advance_prefix
           #write_value
