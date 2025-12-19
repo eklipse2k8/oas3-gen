@@ -343,6 +343,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
     let default_impl = self.generate_default_impl();
     let serialize_impl = self.generate_serialize_impl();
     let deserialize_impl = self.generate_deserialize_impl();
+    let methods_impl = self.generate_methods();
 
     quote! {
       #enum_def
@@ -350,6 +351,70 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       #default_impl
       #serialize_impl
       #deserialize_impl
+      #methods_impl
+    }
+  }
+
+  fn generate_methods(&self) -> TokenStream {
+    if self.def.methods.is_empty() {
+      return quote! {};
+    }
+
+    let name = &self.def.name;
+    let vis = self.visibility.to_tokens();
+
+    let methods = self.def.methods.iter().map(|m| {
+      let method_name = format_ident!("{}", m.name);
+      let docs = generate_docs(&m.docs);
+
+      match &m.kind {
+        EnumMethodKind::SimpleConstructor {
+          variant_name,
+          wrapped_type,
+        } => {
+          let inner_type = &wrapped_type.base_type;
+          let constructor = box_if_needed(wrapped_type.boxed, quote! { #inner_type::default() });
+
+          quote! {
+            #docs
+            #vis fn #method_name() -> Self {
+              Self::#variant_name(#constructor)
+            }
+          }
+        }
+        EnumMethodKind::ParameterizedConstructor {
+          variant_name,
+          wrapped_type,
+          param_name,
+          param_type,
+        } => {
+          let inner_type = &wrapped_type.base_type;
+          let param_ident = format_ident!("{param_name}");
+
+          let constructor = box_if_needed(
+            wrapped_type.boxed,
+            quote! {
+              #inner_type {
+                #param_ident,
+                ..Default::default()
+              }
+            },
+          );
+
+          quote! {
+            #docs
+            #vis fn #method_name(#param_ident: #param_type) -> Self {
+              Self::#variant_name(#constructor)
+            }
+          }
+        }
+      }
+    });
+
+    quote! {
+      impl #name {
+        #(#methods)*
+      }
     }
   }
 

@@ -50,6 +50,7 @@ pub struct DiscriminatedEnumDef {
   pub variants: Vec<DiscriminatedVariant>,
   pub fallback: Option<DiscriminatedVariant>,
   pub serde_mode: SerdeMode,
+  pub methods: Vec<EnumMethod>,
 }
 
 impl DiscriminatedEnumDef {

@@ -499,6 +499,7 @@ fn test_discriminated_enum() {
     ],
     fallback: None,
     serde_mode: SerdeMode::Both,
+    methods: vec![],
   };
 
   let code_without = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
@@ -550,6 +551,7 @@ fn test_discriminated_enum() {
       type_name: TypeRef::new("serde_json::Value"),
     }),
     serde_mode: SerdeMode::Both,
+    methods: vec![],
   };
 
   let code_with = DiscriminatedEnumGenerator::new(&with_fallback, Visibility::Public)
@@ -588,6 +590,7 @@ fn test_discriminated_enum_serialize_only() {
     }],
     fallback: None,
     serde_mode: SerdeMode::SerializeOnly,
+    methods: vec![],
   };
 
   let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
@@ -616,6 +619,7 @@ fn test_discriminated_enum_deserialize_only() {
     }],
     fallback: None,
     serde_mode: SerdeMode::DeserializeOnly,
+    methods: vec![],
   };
 
   let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)

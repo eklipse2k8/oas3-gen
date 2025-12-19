@@ -614,7 +614,7 @@ impl EnumConverter {
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> RustType {
-    if let Some(discriminated) = Self::build_discriminated_union(name, schema, &variants) {
+    if let Some(discriminated) = Self::build_discriminated_union(name, schema, &variants, methods.clone()) {
       return discriminated;
     }
 
@@ -629,7 +629,12 @@ impl EnumConverter {
     })
   }
 
-  fn build_discriminated_union(name: &str, schema: &ObjectSchema, variants: &[VariantDef]) -> Option<RustType> {
+  fn build_discriminated_union(
+    name: &str,
+    schema: &ObjectSchema,
+    variants: &[VariantDef],
+    methods: Vec<EnumMethod>,
+  ) -> Option<RustType> {
     let discriminator = schema.discriminator.as_ref()?;
     let mapping = discriminator.mapping.as_ref()?;
 
@@ -643,6 +648,7 @@ impl EnumConverter {
       docs: metadata::extract_docs(schema.description.as_ref()),
       discriminator_field: discriminator.property_name.clone(),
       variants: disc_variants,
+      methods,
       ..Default::default()
     }))
   }
