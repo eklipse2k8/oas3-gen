@@ -415,14 +415,14 @@ fn test_enum_constructor_methods() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
-    methods: vec![EnumMethod {
-      name: "json".into(),
-      docs: vec!["Creates an empty JSON body.".to_string()],
-      kind: EnumMethodKind::SimpleConstructor {
+    methods: vec![EnumMethod::new(
+      "json",
+      EnumMethodKind::SimpleConstructor {
         variant_name: "Json".into(),
         wrapped_type: TypeRef::new("JsonPayload"),
       },
-    }],
+      vec!["Creates an empty JSON body.".to_string()],
+    )],
     ..Default::default()
   };
 
@@ -453,16 +453,16 @@ fn test_enum_constructor_methods() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
-    methods: vec![EnumMethod {
-      name: "with_name".into(),
-      docs: vec!["Creates a request with the given name.".to_string()],
-      kind: EnumMethodKind::ParameterizedConstructor {
+    methods: vec![EnumMethod::new(
+      "with_name",
+      EnumMethodKind::ParameterizedConstructor {
         variant_name: "Create".into(),
         wrapped_type: TypeRef::new("CreateParams"),
         param_name: "name".to_string(),
         param_type: TypeRef::new("String"),
       },
-    }],
+      vec!["Creates a request with the given name.".to_string()],
+    )],
     ..Default::default()
   };
 
@@ -476,6 +476,45 @@ fn test_enum_constructor_methods() {
   assert!(
     param_code.contains("Self :: Create (CreateParams { name , .. Default :: default () })"),
     "should construct with parameter"
+  );
+}
+
+#[test]
+fn test_enum_constructor_methods_without_docs() {
+  let def = EnumDef {
+    name: EnumToken::new("RequestBody"),
+    docs: vec![],
+    variants: vec![VariantDef {
+      name: EnumVariantToken::new("Json"),
+      docs: vec![],
+      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("JsonPayload".into()))]),
+      serde_attrs: vec![],
+      deprecated: false,
+    }],
+    discriminator: None,
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![EnumMethod::new(
+      "json",
+      EnumMethodKind::SimpleConstructor {
+        variant_name: "Json".into(),
+        wrapped_type: TypeRef::new("JsonPayload"),
+      },
+      vec![],
+    )],
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  assert!(code.contains("pub fn json () -> Self"), "should have json constructor");
+  assert!(
+    !code.contains("Creates a `"),
+    "should not emit generalized constructor docs"
+  );
+  assert!(
+    !code.contains("Convenience helper"),
+    "should not emit generalized helper docs"
   );
 }
 
