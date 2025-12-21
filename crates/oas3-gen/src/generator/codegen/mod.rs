@@ -184,6 +184,9 @@ fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<EnumTok
       error_impls::generate_error_impl(rust_type)
     }
     RustType::Enum(def) if error_schemas.contains(&def.name) => error_impls::generate_error_impl(rust_type),
+    RustType::DiscriminatedEnum(def) if error_schemas.contains(&def.name) => {
+      error_impls::generate_error_impl(rust_type)
+    }
     _ => None,
   }
 }

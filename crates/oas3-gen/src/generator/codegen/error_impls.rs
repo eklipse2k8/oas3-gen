@@ -1,7 +1,9 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::generator::ast::{EnumDef, FieldDef, RustPrimitive, RustType, StructDef, VariantContent};
+use crate::generator::ast::{
+  DiscriminatedEnumDef, EnumDef, FieldDef, RustPrimitive, RustType, StructDef, VariantContent,
+};
 
 const FALLBACK_ERROR_MESSAGE: &str = "Error";
 const MESSAGE_FIELD_NAMES: &[&str] = &["message", "detail", "title"];
@@ -10,6 +12,7 @@ pub(crate) fn generate_error_impl(rust_type: &RustType) -> Option<TokenStream> {
   match rust_type {
     RustType::Struct(def) => generate_for_struct(def),
     RustType::Enum(def) => generate_for_enum(def),
+    RustType::DiscriminatedEnum(def) => generate_for_discriminated_enum(def),
     _ => None,
   }
 }
@@ -221,5 +224,41 @@ fn find_message_field(fields: &[FieldDef]) -> Option<&FieldDef> {
     fields
       .iter()
       .find(|f| f.name == candidate && matches!(f.rust_type.base_type, RustPrimitive::String))
+  })
+}
+
+fn generate_for_discriminated_enum(def: &DiscriminatedEnumDef) -> Option<TokenStream> {
+  if def.variants.is_empty() && def.fallback.is_none() {
+    return None;
+  }
+
+  let type_ident = &def.name;
+  let (display_arms, source_arms): (Vec<_>, Vec<_>) = def
+    .all_variants()
+    .map(|variant| {
+      let variant_ident = format_ident!("{}", &variant.variant_name);
+      (
+        quote! { Self::#variant_ident(err) => write!(f, "{err}"), },
+        quote! { Self::#variant_ident(err) => Some(err as &(dyn std::error::Error + 'static)), },
+      )
+    })
+    .unzip();
+
+  Some(quote! {
+    impl std::fmt::Display for #type_ident {
+      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+          #(#display_arms)*
+        }
+      }
+    }
+
+    impl std::error::Error for #type_ident {
+      fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+          #(#source_arms)*
+        }
+      }
+    }
   })
 }

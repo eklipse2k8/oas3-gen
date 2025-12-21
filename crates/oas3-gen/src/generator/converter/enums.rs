@@ -182,7 +182,7 @@ impl EnumConverter {
     let methods = if self.no_helpers {
       vec![]
     } else {
-      self.build_constructors(&variants, &inline_types, name, cache.as_deref())
+      self.build_constructors(&variants, &inline_types, name, cache)
     };
 
     let main_enum = Self::build_union_def(name, schema, kind, variants, methods);
@@ -313,7 +313,7 @@ impl EnumConverter {
     variants: &[VariantDef],
     inline_types: &[RustType],
     enum_name: &str,
-    cache: Option<&SharedSchemaCache>,
+    mut cache: Option<&mut SharedSchemaCache>,
   ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
 
@@ -342,7 +342,9 @@ impl EnumConverter {
         continue;
       };
 
-      let Some(summary) = self.resolve_struct_summary(type_ref, cache, &mut summary_cache) else {
+      // We need to reborrow cache for each iteration
+      let cache_reborrow = cache.as_deref_mut();
+      let Some(summary) = self.resolve_struct_summary(type_ref, cache_reborrow, &mut summary_cache) else {
         continue;
       };
 
@@ -365,7 +367,13 @@ impl EnumConverter {
       .map(|((variant_name, kind), base_name)| {
         let method_name = ensure_unique(&base_name, &seen);
         seen.insert(method_name.clone());
-        EnumMethod::new(method_name, &variant_name, kind)
+        let docs = variants
+          .iter()
+          .find(|v| v.name == variant_name)
+          .map(|v| v.docs.clone())
+          .unwrap_or_default();
+
+        EnumMethod::new(method_name, kind, docs)
       })
       .collect()
   }
@@ -404,7 +412,7 @@ impl EnumConverter {
   fn resolve_struct_summary(
     &self,
     type_ref: &TypeRef,
-    cache: Option<&SharedSchemaCache>,
+    cache: Option<&mut SharedSchemaCache>,
     summary_cache: &mut BTreeMap<String, StructSummary>,
   ) -> Option<StructSummary> {
     let base_name = type_ref.unboxed_base_type_name();
@@ -415,10 +423,15 @@ impl EnumConverter {
     }
 
     // Check shared schema cache
-    if let Some(c) = cache
-      && let Some(summary) = c.get_struct_summary(&base_name)
-    {
-      let summary = summary.clone();
+    // We can't use `if let` easily here because we need to borrow cache mutably later
+    // So we just check existence first
+    let has_summary = cache
+      .as_ref()
+      .is_some_and(|c| c.get_struct_summary(&base_name).is_some());
+
+    if has_summary {
+      // Safe to unwrap because we checked above
+      let summary = cache.as_ref().unwrap().get_struct_summary(&base_name).unwrap().clone();
       summary_cache.insert(base_name, summary.clone());
       return Some(summary);
     }
@@ -431,7 +444,7 @@ impl EnumConverter {
 
     let struct_result = self
       .struct_converter
-      .convert_struct(&base_name, schema, None, None)
+      .convert_struct(&base_name, schema, None, cache)
       .ok()?;
 
     if let RustType::Struct(s) = struct_result.result {
@@ -614,7 +627,7 @@ impl EnumConverter {
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> RustType {
-    if let Some(discriminated) = Self::build_discriminated_union(name, schema, &variants) {
+    if let Some(discriminated) = Self::build_discriminated_union(name, schema, &variants, methods.clone()) {
       return discriminated;
     }
 
@@ -629,7 +642,12 @@ impl EnumConverter {
     })
   }
 
-  fn build_discriminated_union(name: &str, schema: &ObjectSchema, variants: &[VariantDef]) -> Option<RustType> {
+  fn build_discriminated_union(
+    name: &str,
+    schema: &ObjectSchema,
+    variants: &[VariantDef],
+    methods: Vec<EnumMethod>,
+  ) -> Option<RustType> {
     let discriminator = schema.discriminator.as_ref()?;
     let mapping = discriminator.mapping.as_ref()?;
 
@@ -643,6 +661,7 @@ impl EnumConverter {
       docs: metadata::extract_docs(schema.description.as_ref()),
       discriminator_field: discriminator.property_name.clone(),
       variants: disc_variants,
+      methods,
       ..Default::default()
     }))
   }

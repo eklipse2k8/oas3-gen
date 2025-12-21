@@ -50,6 +50,7 @@ pub struct DiscriminatedEnumDef {
   pub variants: Vec<DiscriminatedVariant>,
   pub fallback: Option<DiscriminatedVariant>,
   pub serde_mode: SerdeMode,
+  pub methods: Vec<EnumMethod>,
 }
 
 impl DiscriminatedEnumDef {
@@ -318,17 +319,7 @@ pub struct EnumMethod {
 }
 
 impl EnumMethod {
-  pub fn new(name: impl Into<MethodNameToken>, variant_name: &EnumVariantToken, kind: EnumMethodKind) -> Self {
-    let docs = match &kind {
-      EnumMethodKind::SimpleConstructor { .. } => {
-        vec![format!("Creates a `{variant_name}` variant with default values.")]
-      }
-      EnumMethodKind::ParameterizedConstructor { param_name, .. } => {
-        vec![format!(
-          "Creates a `{variant_name}` variant with the specified `{param_name}`."
-        )]
-      }
-    };
+  pub fn new(name: impl Into<MethodNameToken>, kind: EnumMethodKind, docs: Vec<String>) -> Self {
     Self {
       name: name.into(),
       docs,
