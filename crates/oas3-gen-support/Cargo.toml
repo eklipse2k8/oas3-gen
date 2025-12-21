@@ -21,7 +21,6 @@ chrono.workspace = true
 http.workspace = true
 indexmap.workspace = true
 oas3.workspace = true
-percent-encoding.workspace = true
 prettyplease.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true
@@ -29,7 +28,6 @@ regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde_json.workspace = true
 serde_path_to_error.workspace = true
-serde_plain.workspace = true
 serde_with.workspace = true
 serde.workspace = true
 syn.workspace = true

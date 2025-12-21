@@ -183,7 +183,7 @@ fn test_enum_variant_attributes() {
     variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
     discriminator: None,
     serde_attrs: vec![],
-    outer_attrs: vec![OuterAttr::NonExhaustive],
+    outer_attrs: vec![OuterAttr::SkipSerializingNone],
     case_insensitive: false,
     methods: vec![],
     ..Default::default()
@@ -193,8 +193,8 @@ fn test_enum_variant_attributes() {
     .generate()
     .to_string();
   assert!(
-    outer_attrs_code.contains("# [non_exhaustive]"),
-    "should have non_exhaustive attribute"
+    outer_attrs_code.contains("# [oas3_gen_support :: skip_serializing_none]"),
+    "should have skip_serializing_none attribute"
   );
 }
 

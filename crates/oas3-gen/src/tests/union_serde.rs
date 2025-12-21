@@ -684,9 +684,7 @@ mod tests {
 
   #[test]
   fn test_request_types() {
-    let get_events = GetEventsRequest {};
-    let path = get_events.render_path().unwrap();
-    assert_eq!(path, "events", "GetEventsRequest path mismatch");
+    let _ = GetEventsRequest {};
 
     let send_content = SendContentRequest {
       body: ContentRequest {
@@ -694,8 +692,6 @@ mod tests {
         metadata: None,
       },
     };
-    let path = send_content.render_path().unwrap();
-    assert_eq!(path, "content", "SendContentRequest path mismatch");
     assert_eq!(send_content.body.blocks.len(), 1, "body blocks count mismatch");
 
     let _body: SendContentRequestBody = ContentRequest {

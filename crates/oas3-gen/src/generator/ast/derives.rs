@@ -45,10 +45,25 @@ impl DerivesProvider for StructDef {
         derives.insert(DeriveTrait::PartialEq);
         if self.is_serializable() == SerdeImpl::Derive {
           derives.insert(DeriveTrait::Serialize);
-          derives.insert(DeriveTrait::Validate);
+          if self.has_validation_attrs() {
+            derives.insert(DeriveTrait::Validate);
+          }
         }
         if self.is_deserializable() == SerdeImpl::Derive {
           derives.insert(DeriveTrait::Deserialize);
+        }
+      }
+      StructKind::PathParams | StructKind::HeaderParams => {
+        derives.insert(DeriveTrait::PartialEq);
+        if self.has_validation_attrs() {
+          derives.insert(DeriveTrait::Validate);
+        }
+      }
+      StructKind::QueryParams => {
+        derives.insert(DeriveTrait::PartialEq);
+        derives.insert(DeriveTrait::Serialize);
+        if self.has_validation_attrs() {
+          derives.insert(DeriveTrait::Validate);
         }
       }
     }
@@ -58,7 +73,8 @@ impl DerivesProvider for StructDef {
 
   fn is_serializable(&self) -> SerdeImpl {
     match self.kind {
-      StructKind::OperationRequest => SerdeImpl::None,
+      StructKind::OperationRequest | StructKind::PathParams | StructKind::HeaderParams => SerdeImpl::None,
+      StructKind::QueryParams => SerdeImpl::Derive,
       StructKind::Schema | StructKind::RequestBody => match self.serde_mode {
         SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
         SerdeMode::DeserializeOnly => SerdeImpl::None,
@@ -68,7 +84,9 @@ impl DerivesProvider for StructDef {
 
   fn is_deserializable(&self) -> SerdeImpl {
     match self.kind {
-      StructKind::OperationRequest => SerdeImpl::None,
+      StructKind::OperationRequest | StructKind::PathParams | StructKind::HeaderParams | StructKind::QueryParams => {
+        SerdeImpl::None
+      }
       StructKind::Schema | StructKind::RequestBody => match self.serde_mode {
         SerdeMode::DeserializeOnly | SerdeMode::Both => SerdeImpl::Derive,
         SerdeMode::SerializeOnly => SerdeImpl::None,

@@ -5,6 +5,7 @@
 #![allow(clippy::result_large_err)]
 #![allow(clippy::unnecessary_wraps)]
 #![allow(clippy::unused_self)]
+#![allow(dead_code)]
 //!
 //! AUTO-GENERATED CODE - DO NOT EDIT!
 //!
@@ -79,7 +80,7 @@ impl ArrayOrSingle {
   }
 }
 #[oas3_gen_support::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct Base64ImageSource {
   pub data: Vec<u8>,
@@ -227,7 +228,7 @@ pub struct ContentBlockStopEvent {
   pub r#type: Option<String>,
 }
 #[oas3_gen_support::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 pub struct ContentRequest {
   pub blocks: Vec<ContentBlock>,
   ///Flexible metadata that can be string or object
@@ -416,10 +417,6 @@ pub struct EventList {
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetEventsRequest {}
 impl GetEventsRequest {
-  ///Render the request path with parameters.
-  pub fn render_path(&self) -> anyhow::Result<String> {
-    Ok("events".to_string())
-  }
   ///Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<GetEventsResponse> {
     let status = req.status();
@@ -440,7 +437,7 @@ pub enum GetEventsResponse {
   Unknown,
 }
 #[oas3_gen_support::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct ImageBlock {
   pub alt_text: Option<String>,
@@ -603,10 +600,6 @@ pub struct SendContentRequest {
   pub body: SendContentRequestBody,
 }
 impl SendContentRequest {
-  ///Render the request path with parameters.
-  pub fn render_path(&self) -> anyhow::Result<String> {
-    Ok("content".to_string())
-  }
   ///Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<SendContentResponse> {
     let status = req.status();

@@ -145,9 +145,8 @@ pub(crate) fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operati
   for rt in rust_types.iter_mut() {
     if let RustType::Struct(def) = rt {
       for method in &mut def.methods {
-        if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
-          && let Some(new_name) = replacements.get(&response_enum.to_string())
-        {
+        let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind;
+        if let Some(new_name) = replacements.get(&response_enum.to_string()) {
           *response_enum = EnumToken::new(new_name);
         }
       }

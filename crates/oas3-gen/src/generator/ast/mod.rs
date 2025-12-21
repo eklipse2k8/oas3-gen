@@ -14,7 +14,7 @@ use derive_builder::Builder;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 use http::Method;
 pub use lints::LintConfig;
-pub use outer_attrs::OuterAttr;
+pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
 pub use tokens::{
@@ -149,7 +149,8 @@ pub struct OperationInfo {
   pub stable_id: String,
   pub operation_id: String,
   pub method: Method,
-  pub path: String,
+  pub path: ParsedPath,
+  pub path_template: String,
   pub kind: OperationKind,
   pub summary: Option<String>,
   pub description: Option<String>,
@@ -228,6 +229,93 @@ pub struct OperationBody {
   pub content_category: ContentCategory,
 }
 
+#[derive(Debug, Clone)]
+pub enum PathSegment {
+  Literal(String),
+  Param(FieldNameToken),
+  Mixed {
+    format: String,
+    params: Vec<FieldNameToken>,
+  },
+}
+
+impl PathSegment {
+  fn parse(segment: &str, params: &std::collections::HashMap<&str, &FieldNameToken>) -> Self {
+    if !segment.contains('{') {
+      return Self::Literal(segment.to_string());
+    }
+
+    if let Some(name) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}'))
+      && let Some(field) = params.get(name)
+    {
+      return Self::Param((*field).clone());
+    }
+
+    let mut format_str = String::new();
+    let mut field_params = Vec::new();
+    let mut rest = segment;
+
+    while let Some(start) = rest.find('{') {
+      format_str.push_str(&rest[..start]);
+
+      let end = rest[start..].find('}').map_or(rest.len(), |i| start + i);
+      let name = &rest[start + 1..end];
+
+      if let Some(field) = params.get(name) {
+        format_str.push_str("{}");
+        field_params.push((*field).clone());
+      } else {
+        format_str.push_str(&rest[start..=end]);
+      }
+
+      rest = &rest[end + 1..];
+    }
+    format_str.push_str(rest);
+
+    Self::Mixed {
+      format: format_str,
+      params: field_params,
+    }
+  }
+}
+
+impl quote::ToTokens for PathSegment {
+  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    use quote::quote;
+    let segment_tokens = match self {
+      PathSegment::Literal(lit) => quote! { .push(#lit) },
+      PathSegment::Param(field) => quote! { .push(&request.path.#field.to_string()) },
+      PathSegment::Mixed { format, params } => {
+        let args = params.iter().map(|f| quote! { request.path.#f });
+        quote! { .push(&format!(#format, #(#args),*)) }
+      }
+    };
+    quote::ToTokens::to_tokens(&segment_tokens, tokens);
+  }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParsedPath(pub Vec<PathSegment>);
+
+impl ParsedPath {
+  pub fn new(path: &str, parameters: &[OperationParameter]) -> Self {
+    let param_map: std::collections::HashMap<&str, &FieldNameToken> = parameters
+      .iter()
+      .filter(|p| matches!(p.location, ParameterLocation::Path))
+      .map(|p| (p.original_name.as_str(), &p.rust_field))
+      .collect();
+
+    let segments = path
+      .trim_start_matches('/')
+      .split('/')
+      .filter(|s| !s.is_empty())
+      .map(|segment| PathSegment::parse(segment, &param_map))
+      .collect();
+
+    Self(segments)
+  }
+}
+
 /// Semantic kind of a struct to determine code generation behavior
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StructKind {
@@ -238,6 +326,12 @@ pub enum StructKind {
   OperationRequest,
   /// Inline request body struct for an operation
   RequestBody,
+  /// Nested struct for path parameters (no serde, just storage)
+  PathParams,
+  /// Nested struct for query parameters (implements Serialize for reqwest's .query())
+  QueryParams,
+  /// Nested struct for header parameters (no serde, just storage)
+  HeaderParams,
 }
 
 /// Rust struct definition
@@ -259,55 +353,30 @@ impl StructDef {
     self.derives().contains(&DeriveTrait::Default)
   }
 
+  #[must_use]
+  pub fn has_validation_attrs(&self) -> bool {
+    self.fields.iter().any(|f| !f.validation_attrs.is_empty())
+  }
+
   pub fn required_fields(&self) -> impl Iterator<Item = &FieldDef> {
     self.fields.iter().filter(|f| f.is_required())
   }
 }
 
 /// Associated method definition for a struct
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct StructMethod {
   pub name: MethodNameToken,
   pub docs: Vec<String>,
   pub kind: StructMethodKind,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct QueryParameter {
-  pub field: FieldNameToken,
-  pub encoded_name: String,
-  pub explode: bool,
-  pub optional: bool,
-  pub is_array: bool,
-  pub is_value: bool,
-  pub style: Option<oas3::spec::ParameterStyle>,
-}
-
 #[derive(Debug, Clone)]
 pub enum StructMethodKind {
-  RenderPath {
-    segments: Vec<PathSegment>,
-    query_params: Vec<QueryParameter>,
-  },
   ParseResponse {
     response_enum: EnumToken,
     variants: Vec<ResponseVariant>,
   },
-}
-
-impl Default for StructMethodKind {
-  fn default() -> Self {
-    Self::RenderPath {
-      segments: vec![],
-      query_params: vec![],
-    }
-  }
-}
-
-#[derive(Debug, Clone)]
-pub enum PathSegment {
-  Literal(String),
-  Parameter { field: FieldNameToken, is_value: bool },
 }
 
 /// Associated method definition for an enum
@@ -350,6 +419,7 @@ pub struct FieldDef {
   pub docs: Vec<String>,
   pub rust_type: TypeRef,
   pub serde_attrs: Vec<SerdeAttribute>,
+  pub serde_as_attr: Option<SerdeAsFieldAttr>,
   /// Whether to emit `#[doc(hidden)]` for this field (used for discriminator fields)
   pub doc_hidden: bool,
   pub validation_attrs: Vec<ValidationAttribute>,

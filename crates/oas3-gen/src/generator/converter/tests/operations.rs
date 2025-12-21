@@ -8,10 +8,7 @@ use oas3::spec::{
 
 use crate::{
   generator::{
-    ast::{
-      ContentCategory, FieldNameToken, OperationKind, PathSegment, RustPrimitive, RustType, StructDef,
-      StructMethodKind, StructToken,
-    },
+    ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StructDef, StructToken},
     converter::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, operations::OperationConverter},
   },
   tests::common::{create_test_graph, default_config},
@@ -114,7 +111,7 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  assert_eq!(types.len(), 1, "Should generate one request struct");
+  assert_eq!(types.len(), 2, "Should generate request struct and nested path struct");
   let request_type_name = info
     .request_type
     .as_ref()
@@ -123,20 +120,16 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
   assert_eq!(request_type_name, "GetUserRequest");
 
   let request_struct = extract_request_struct(&types, request_type_name);
-  assert_eq!(request_struct.fields.len(), 1);
-  assert_eq!(request_struct.fields[0].name, "user_id");
+  assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
+  assert_eq!(
+    request_struct.fields[0].name, "path",
+    "Main struct should have path field"
+  );
 
-  let render_method = request_struct
-    .methods
-    .iter()
-    .find(|m| m.name == "render_path")
-    .expect("render_path method not found");
-  let StructMethodKind::RenderPath { segments, .. } = &render_method.kind else {
-    panic!("Expected RenderPath method kind");
-  };
-  assert_eq!(segments.len(), 2);
-  assert!(matches!(&segments[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&segments[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("user_id")));
+  let path_struct = extract_request_struct(&types, "GetUserRequestPath");
+  assert_eq!(path_struct.fields.len(), 1);
+  assert_eq!(path_struct.fields[0].name, "user_id");
+
   Ok(())
 }
 
@@ -314,7 +307,11 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
       &mut cache,
     )?;
 
-    assert_eq!(types.len(), 1, "Should generate one request struct for {op_id}");
+    assert_eq!(
+      types.len(),
+      2,
+      "Should generate request struct and path struct for {op_id}"
+    );
     let request_type_name = info
       .request_type
       .as_ref()
@@ -325,10 +322,15 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
       "Request struct name mismatch for {op_id}"
     );
 
-    let request_struct = extract_request_struct(&types, request_type_name);
-    assert_eq!(request_struct.fields.len(), 1, "Should have one field for {op_id}");
+    let path_struct_name = format!("{expected_struct}Path");
+    let path_struct = extract_request_struct(&types, &path_struct_name);
     assert_eq!(
-      request_struct.fields[0].rust_type.to_rust_type(),
+      path_struct.fields.len(),
+      1,
+      "Path struct should have one field for {op_id}"
+    );
+    assert_eq!(
+      path_struct.fields[0].rust_type.to_rust_type(),
       *expected_type,
       "Type mismatch for {op_id}"
     );
@@ -367,25 +369,19 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
   )?;
 
   let request_struct = extract_request_struct(&types, "GetUserPostRequest");
-  assert_eq!(request_struct.fields.len(), 2);
-  assert_eq!(request_struct.fields[0].name, "user_id");
-  assert_eq!(request_struct.fields[0].rust_type.to_rust_type(), "i64");
-  assert_eq!(request_struct.fields[1].name, "post_id");
-  assert_eq!(request_struct.fields[1].rust_type.to_rust_type(), "String");
+  assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
+  assert_eq!(
+    request_struct.fields[0].name, "path",
+    "Main struct should have path field"
+  );
 
-  let render_method = request_struct
-    .methods
-    .iter()
-    .find(|m| m.name == "render_path")
-    .expect("render_path method not found");
-  let StructMethodKind::RenderPath { segments, .. } = &render_method.kind else {
-    panic!("Expected RenderPath method kind");
-  };
-  assert_eq!(segments.len(), 4);
-  assert!(matches!(&segments[0], PathSegment::Literal(s) if s == "/users/"));
-  assert!(matches!(&segments[1], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("user_id")));
-  assert!(matches!(&segments[2], PathSegment::Literal(s) if s == "/posts/"));
-  assert!(matches!(&segments[3], PathSegment::Parameter { field, .. } if field == &FieldNameToken::new("post_id")));
+  let path_struct = extract_request_struct(&types, "GetUserPostRequestPath");
+  assert_eq!(path_struct.fields.len(), 2);
+  assert_eq!(path_struct.fields[0].name, "user_id");
+  assert_eq!(path_struct.fields[0].rust_type.to_rust_type(), "i64");
+  assert_eq!(path_struct.fields[1].name, "post_id");
+  assert_eq!(path_struct.fields[1].rust_type.to_rust_type(), "String");
+
   Ok(())
 }
 

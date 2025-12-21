@@ -1,26 +1,21 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::ParameterStyle;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::{
   Visibility,
   attributes::{
-    generate_deprecated_attr, generate_docs, generate_docs_for_field, generate_outer_attrs, generate_serde_attrs,
-    generate_validation_attrs,
+    generate_deprecated_attr, generate_docs, generate_docs_for_field, generate_outer_attrs, generate_serde_as_attr,
+    generate_serde_attrs, generate_validation_attrs,
   },
   coercion,
 };
 use crate::generator::ast::{
-  ContentCategory, DerivesProvider, FieldDef, PathSegment, QueryParameter, RegexKey, ResponseVariant, RustPrimitive,
-  StatusCodeToken, StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+  ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseVariant, RustPrimitive, StatusCodeToken, StructDef,
+  StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   tokens::{ConstToken, EnumToken, EnumVariantToken, MethodNameToken},
 };
-
-const QUERY_PREFIX_UNSET: char = '\0';
-const QUERY_PREFIX_FIRST: char = '?';
-const QUERY_PREFIX_SUBSEQUENT: char = '&';
 
 pub(crate) struct StructGenerator<'a> {
   regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
@@ -79,6 +74,7 @@ impl<'a> StructGenerator<'a> {
       .map(|field| {
         let name = format_ident!("{}", field.name);
         let docs = generate_docs_for_field(field);
+        let serde_as_attr = generate_serde_as_attr(field.serde_as_attr.as_ref());
         let serde_attrs = generate_serde_attrs(&field.serde_attrs);
         let doc_hidden_attr = if field.doc_hidden {
           quote! { #[doc(hidden)] }
@@ -118,6 +114,7 @@ impl<'a> StructGenerator<'a> {
           #doc_hidden_attr
           #docs
           #deprecated_attr
+          #serde_as_attr
           #serde_attrs
           #validation_attrs
           #default_attr
@@ -128,37 +125,12 @@ impl<'a> StructGenerator<'a> {
   }
 
   fn generate_method(&self, method: &StructMethod) -> TokenStream {
-    match &method.kind {
-      StructMethodKind::ParseResponse {
-        response_enum,
-        variants,
-      } => {
-        let docs = generate_docs(&method.docs);
-        self.generate_parse_response_method(&method.name, response_enum, variants, &docs)
-      }
-      StructMethodKind::RenderPath { segments, query_params } => {
-        self.generate_render_path_method(method, segments, query_params)
-      }
-    }
-  }
-
-  fn generate_render_path_method(
-    &self,
-    method: &StructMethod,
-    segments: &[PathSegment],
-    query_params: &[QueryParameter],
-  ) -> TokenStream {
-    let name = &method.name;
+    let StructMethodKind::ParseResponse {
+      response_enum,
+      variants,
+    } = &method.kind;
     let docs = generate_docs(&method.docs);
-    let vis = self.visibility.to_tokens();
-    let body = Self::build_render_path_body(segments, query_params);
-
-    quote! {
-      #docs
-      #vis fn #name(&self) -> anyhow::Result<String> {
-        #body
-      }
-    }
+    self.generate_parse_response_method(&method.name, response_enum, variants, &docs)
   }
 
   fn generate_parse_response_method(
@@ -222,179 +194,6 @@ impl<'a> StructGenerator<'a> {
         #status_decl
         #(#status_matches)*
         #fallback
-      }
-    }
-  }
-
-  fn build_render_path_body(segments: &[PathSegment], query_params: &[QueryParameter]) -> TokenStream {
-    let path_expr = Self::build_path_expression(segments);
-    if query_params.is_empty() {
-      quote! { Ok(#path_expr) }
-    } else {
-      Self::append_query_params(&path_expr, query_params)
-    }
-  }
-
-  fn build_path_expression(segments: &[PathSegment]) -> TokenStream {
-    let mut format_string = String::new();
-    let mut fallback_string = String::new();
-    let mut args = vec![];
-
-    for (i, segment) in segments.iter().enumerate() {
-      match segment {
-        PathSegment::Literal(lit) => {
-          // path will be joined with base URL, so skip leading slash for first segment
-          let lit_str = if i == 0 && lit.starts_with('/') { &lit[1..] } else { lit };
-          let escaped = lit_str.replace('{', "{{").replace('}', "}}");
-          format_string.push_str(&escaped);
-          fallback_string.push_str(lit_str);
-        }
-        PathSegment::Parameter { field, is_value } => {
-          format_string.push_str("{}");
-          fallback_string.push_str("{}");
-          let ident = field;
-          let serialize_fn = if *is_value {
-            quote! { oas3_gen_support::serialize_any_query_param }
-          } else {
-            quote! { oas3_gen_support::serialize_query_param }
-          };
-          args.push(quote! {
-            oas3_gen_support::percent_encode_path_segment(&#serialize_fn(&self.#ident)?)
-          });
-        }
-      }
-    }
-
-    if args.is_empty() {
-      quote! { #fallback_string.to_string() }
-    } else {
-      quote! { format!(#format_string, #(#args),*) }
-    }
-  }
-
-  fn append_query_params(path_expr: &TokenStream, query_params: &[QueryParameter]) -> TokenStream {
-    let query_statements: Vec<TokenStream> = query_params.iter().map(Self::generate_query_param_statement).collect();
-
-    quote! {
-      use std::fmt::Write as _;
-      let mut path = #path_expr;
-      let mut prefix = #QUERY_PREFIX_UNSET;
-      #(#query_statements)*
-      Ok(path)
-    }
-  }
-
-  fn advance_query_prefix() -> TokenStream {
-    quote! {
-      prefix = if prefix == #QUERY_PREFIX_UNSET { #QUERY_PREFIX_FIRST } else { #QUERY_PREFIX_SUBSEQUENT };
-    }
-  }
-
-  fn write_single_query_value(format_str: &str, value_expr: &TokenStream, is_value: bool) -> TokenStream {
-    let format_lit: TokenStream = format_str.parse().unwrap();
-    let serialize_fn = if is_value {
-      quote! { oas3_gen_support::serialize_any_query_param }
-    } else {
-      quote! { oas3_gen_support::serialize_query_param }
-    };
-
-    quote! {
-      write!(&mut path, #format_lit, oas3_gen_support::percent_encode_query_component(&#serialize_fn(#value_expr)?)).unwrap();
-    }
-  }
-
-  fn write_joined_query_values(
-    format_str: &str,
-    values_expr: &TokenStream,
-    delimiter: &str,
-    is_value: bool,
-  ) -> TokenStream {
-    let format_lit: TokenStream = format_str.parse().unwrap();
-    let serialize_fn = if is_value {
-      quote! { oas3_gen_support::serialize_any_query_param }
-    } else {
-      quote! { oas3_gen_support::serialize_query_param }
-    };
-
-    quote! {
-      let values = #values_expr.iter().map(|v| #serialize_fn(v).map(|s| oas3_gen_support::percent_encode_query_component(&s))).collect::<Result<Vec<_>, _>>()?;
-      let values = values.join(#delimiter);
-      write!(&mut path, #format_lit, values).unwrap();
-    }
-  }
-
-  fn generate_query_param_statement(param: &QueryParameter) -> TokenStream {
-    let ident = &param.field;
-    let format_str = format!("\"{{prefix}}{}={{}}\"", param.encoded_name);
-    let style = param.style.unwrap_or(ParameterStyle::Form);
-    let delimiter = match style {
-      ParameterStyle::SpaceDelimited => "%20",
-      ParameterStyle::PipeDelimited => "|",
-      _ => ",",
-    };
-    let advance_prefix = Self::advance_query_prefix();
-    let is_value = param.is_value;
-
-    match (param.optional, param.is_array, param.explode) {
-      (true, true, true) => {
-        let value_expr = quote! { value };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
-        quote! {
-          if let Some(values) = &self.#ident {
-            for value in values {
-              #advance_prefix
-              #write_value
-            }
-          }
-        }
-      }
-      (true, true, false) => {
-        let values_expr = quote! { values };
-        let write_joined = Self::write_joined_query_values(&format_str, &values_expr, delimiter, is_value);
-        quote! {
-          if let Some(values) = &self.#ident && !values.is_empty() {
-            #advance_prefix
-            #write_joined
-          }
-        }
-      }
-      (true, false, _) => {
-        let value_expr = quote! { value };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
-        quote! {
-          if let Some(value) = &self.#ident {
-            #advance_prefix
-            #write_value
-          }
-        }
-      }
-      (false, true, true) => {
-        let value_expr = quote! { value };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
-        quote! {
-          for value in &self.#ident {
-            #advance_prefix
-            #write_value
-          }
-        }
-      }
-      (false, true, false) => {
-        let values_expr = quote! { &self.#ident };
-        let write_joined = Self::write_joined_query_values(&format_str, &values_expr, delimiter, is_value);
-        quote! {
-          if !self.#ident.is_empty() {
-            #advance_prefix
-            #write_joined
-          }
-        }
-      }
-      (false, false, _) => {
-        let value_expr = quote! { &self.#ident };
-        let write_value = Self::write_single_query_value(&format_str, &value_expr, is_value);
-        quote! {
-          #advance_prefix
-          #write_value
-        }
       }
     }
   }

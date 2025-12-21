@@ -14,6 +14,7 @@ impl Default for LintConfig {
         "clippy::result_large_err".to_string(),
         "clippy::unnecessary_wraps".to_string(),
         "clippy::unused_self".to_string(),
+        "dead_code".to_string(),
       ],
     }
   }

@@ -142,7 +142,7 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 
 - Use typed enums for code generation attributes instead of stringly-typed approaches
 - Implement `ToTokens` for direct code generation integration
-- Good: `enum OuterAttr { SkipSerializingNone, NonExhaustive }` implementing `ToTokens`
+- Good: `enum OuterAttr { SkipSerializingNone, SerdeAs }` implementing `ToTokens`
 - Bad: `extra_attrs: Vec<String>` with manual string construction
 - Consolidate multiple attributes of the same type into single combined attributes during codegen
 - Examples: `OuterAttr`, `SerdeAttribute`, `ValidationAttribute` in `ast/` module
