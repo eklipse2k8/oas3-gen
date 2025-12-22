@@ -1,9 +1,11 @@
 use std::collections::BTreeSet;
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 
-use crate::generator::ast::{DeriveTrait, FieldDef, OuterAttr, ParameterLocation, SerdeAttribute, ValidationAttribute};
+use crate::generator::ast::{
+  DeriveTrait, FieldDef, OuterAttr, ParameterLocation, SerdeAsFieldAttr, SerdeAttribute, ValidationAttribute,
+};
 
 pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
   if docs.is_empty() {
@@ -93,5 +95,12 @@ pub(crate) fn generate_deprecated_attr(deprecated: bool) -> TokenStream {
     quote! { #[deprecated] }
   } else {
     quote! {}
+  }
+}
+
+pub(crate) fn generate_serde_as_attr(attr: Option<&SerdeAsFieldAttr>) -> TokenStream {
+  match attr {
+    Some(a) => a.to_token_stream(),
+    None => quote! {},
   }
 }

@@ -1134,3 +1134,80 @@ fn test_enum_helper_skips_without_default_trait() {
     assert!(e.methods.is_empty());
   }
 }
+
+#[test]
+fn test_discriminator_deduplicates_same_type_mappings() -> anyhow::Result<()> {
+  let interaction_event = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([
+      (
+        "type".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          ..Default::default()
+        }),
+      ),
+      (
+        "data".to_string(),
+        ObjectOrReference::Object(ObjectSchema {
+          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+          ..Default::default()
+        }),
+      ),
+    ]),
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    one_of: vec![ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/InteractionEvent".to_string(),
+      summary: None,
+      description: None,
+    }],
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: Some(BTreeMap::from([
+        (
+          "InteractionEvent".to_string(),
+          "#/components/schemas/InteractionEvent".to_string(),
+        ),
+        (
+          "interaction_event".to_string(),
+          "#/components/schemas/InteractionEvent".to_string(),
+        ),
+      ])),
+    }),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("InteractionSseEvent".to_string(), union_schema),
+    ("InteractionEvent".to_string(), interaction_event),
+  ]));
+
+  let converter = SchemaConverter::new(&graph, default_config());
+  let result = converter.convert_schema(
+    "InteractionSseEvent",
+    graph.get_schema("InteractionSseEvent").unwrap(),
+    None,
+  )?;
+
+  let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
+    panic!("Expected DiscriminatedEnum as last type")
+  };
+
+  assert_eq!(enum_def.name.to_string(), "InteractionSseEvent");
+  assert_eq!(enum_def.discriminator_field, "type");
+
+  assert_eq!(
+    enum_def.variants.len(),
+    1,
+    "Expected 1 variant but got {}: {:?}",
+    enum_def.variants.len(),
+    enum_def.variants.iter().map(|v| &v.variant_name).collect::<Vec<_>>()
+  );
+
+  assert_eq!(enum_def.variants[0].type_name.base_type.to_string(), "InteractionEvent");
+
+  Ok(())
+}

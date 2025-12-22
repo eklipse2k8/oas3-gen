@@ -22,7 +22,6 @@ fn test_untyped_parameter_generation() {
 
   let result = orchestrator.generate_with_header("test.json");
 
-  // This is expected to fail currently
   assert!(
     result.is_ok(),
     "Generation failed for untyped parameter: {:?}",
@@ -31,15 +30,18 @@ fn test_untyped_parameter_generation() {
 
   let (code, _) = result.unwrap();
 
-  // Check if serde_json::Value is used
   assert!(
     code.contains("Option<serde_json::Value>"),
-    "Should use Option<serde_json::Value>"
+    "Should use Option<serde_json::Value> for untyped query param"
   );
 
-  // Check if serialize_any_query_param is used for the Value type
   assert!(
-    code.contains("oas3_gen_support::serialize_any_query_param(value)"),
-    "Should use serialize_any_query_param"
+    code.contains("GetItemsRequestQuery"),
+    "Should generate nested query struct"
+  );
+
+  assert!(
+    code.contains("pub query: GetItemsRequestQuery"),
+    "Main request should have query field"
   );
 }

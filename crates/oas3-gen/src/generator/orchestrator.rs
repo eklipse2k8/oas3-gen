@@ -136,6 +136,7 @@ impl Orchestrator {
     analyzer::deduplicate_response_enums(&mut rust_types, &mut operations_info);
     let seed_map = usage_recorder.into_usage_map();
     let type_usage = analyzer::build_type_usage_map(seed_map, &rust_types);
+    analyzer::add_nested_validation_attrs(&mut rust_types);
     analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
     let error_schemas = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
 

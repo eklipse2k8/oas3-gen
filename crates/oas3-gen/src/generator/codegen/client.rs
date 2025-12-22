@@ -151,7 +151,9 @@ pub(crate) struct ClientOperationMethod {
   pub(crate) method_name: syn::Ident,
   pub(crate) request_ident: syn::Ident,
   pub(crate) doc_attrs: TokenStream,
+  pub(crate) url_construction: TokenStream,
   pub(crate) builder_init: TokenStream,
+  pub(crate) query_statement: TokenStream,
   pub(crate) header_statements: Vec<TokenStream>,
   pub(crate) body_statement: TokenStream,
   pub(crate) response_handling: ResponseHandling,
@@ -184,7 +186,9 @@ impl ClientOperationMethod {
       method_name: format_ident!("{}", operation.stable_id),
       request_ident,
       doc_attrs: Self::build_doc_attributes(operation),
+      url_construction: Self::build_url_construction(operation),
       builder_init: Self::build_http_method_init(&operation.method),
+      query_statement: Self::build_query_statement(operation),
       header_statements: Self::build_header_statements(operation),
       body_statement: Self::build_body_statement(operation, rust_types),
       response_handling,
@@ -217,7 +221,7 @@ impl ClientOperationMethod {
       docs.push(String::new());
     }
 
-    docs.push(format!("{} {}", operation.method.as_str(), operation.path));
+    docs.push(format!("{} {}", operation.method.as_str(), operation.path_template));
 
     generate_docs(&docs)
   }
@@ -236,6 +240,33 @@ impl ClientOperationMethod {
           self.client.request(#method, url)
         }
       }
+    }
+  }
+
+  fn build_url_construction(operation: &OperationInfo) -> TokenStream {
+    let segments = &operation.path.0;
+
+    quote! {
+      let mut url = self.base_url.clone();
+      url
+        .path_segments_mut()
+        .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+        #(#segments)*;
+    }
+  }
+
+  fn build_query_statement(operation: &OperationInfo) -> TokenStream {
+    let has_query_params = operation
+      .parameters
+      .iter()
+      .any(|param| matches!(param.location, ParameterLocation::Query));
+
+    if has_query_params {
+      quote! {
+        req_builder = req_builder.query(&request.query);
+      }
+    } else {
+      quote! {}
     }
   }
 
@@ -259,7 +290,7 @@ impl ClientOperationMethod {
           }
         } else {
           quote! {
-            if let Some(value) = request.#field_ident.as_ref() {
+            if let Some(value) = request.header.#field_ident.as_ref() {
               #value_conversion
               req_builder = req_builder.header(#const_token, header_value);
             }
@@ -271,7 +302,7 @@ impl ClientOperationMethod {
 
   fn build_header_value_conversion(rust_type: &TypeRef, field_ident: &FieldNameToken, required: bool) -> TokenStream {
     let value_expr = if required {
-      quote! { request.#field_ident }
+      quote! { request.header.#field_ident }
     } else {
       quote! { value }
     };
@@ -522,7 +553,9 @@ impl ToTokens for ClientOperationMethod {
     let method_name = &self.method_name;
     let request_ident = &self.request_ident;
     let doc_attrs = &self.doc_attrs;
+    let url_construction = &self.url_construction;
     let builder_init = &self.builder_init;
+    let query_statement = &self.query_statement;
     let header_statements = &self.header_statements;
     let body_statement = &self.body_statement;
     let success_type = &self.response_handling.success_type;
@@ -533,11 +566,9 @@ impl ToTokens for ClientOperationMethod {
       #doc_attrs
       #vis async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#success_type> {
         request.validate().context("parameter validation")?;
-        let url = self
-          .base_url
-          .join(&request.render_path()?)
-          .context("constructing request url")?;
+        #url_construction
         let mut req_builder = #builder_init;
+        #query_statement
         #(#header_statements)*
         #body_statement
         let response = req_builder.send().await?;

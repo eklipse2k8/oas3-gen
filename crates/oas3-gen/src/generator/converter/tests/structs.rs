@@ -752,3 +752,72 @@ fn test_discriminator_handler_inline_all_of_returns_none() {
     "Inline schemas should not be considered discriminated parents"
   );
 }
+
+#[test]
+fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Result<()> {
+  let base_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: Some(BTreeMap::from([
+        ("child_event".to_string(), "#/components/schemas/ChildEvent".to_string()),
+        ("ChildEvent".to_string(), "#/components/schemas/ChildEvent".to_string()),
+      ])),
+    }),
+    ..Default::default()
+  };
+
+  let child_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "data".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("BaseEvent".to_string(), base_schema.clone()),
+    ("ChildEvent".to_string(), child_schema),
+  ]));
+
+  let type_resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
+
+  let result = type_resolver.create_discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
+
+  let RustType::DiscriminatedEnum(enum_def) = result else {
+    panic!("Expected DiscriminatedEnum");
+  };
+
+  assert_eq!(
+    enum_def.variants.len(),
+    1,
+    "Expected 1 variant but got {}: {:?}",
+    enum_def.variants.len(),
+    enum_def.variants.iter().map(|v| &v.variant_name).collect::<Vec<_>>()
+  );
+
+  assert_eq!(enum_def.variants[0].type_name.base_type.to_string(), "ChildEvent");
+
+  assert!(enum_def.fallback.is_some());
+  assert_eq!(
+    enum_def.fallback.as_ref().unwrap().type_name.base_type.to_string(),
+    "BaseEventBase"
+  );
+
+  Ok(())
+}

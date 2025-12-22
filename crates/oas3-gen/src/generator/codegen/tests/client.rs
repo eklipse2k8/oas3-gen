@@ -3,8 +3,8 @@ use quote::ToTokens;
 
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
-    RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
+    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, OperationParameter,
+    ParameterLocation, ParsedPath, PathSegment, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
   },
   codegen::{
     Visibility,
@@ -27,7 +27,8 @@ impl TestOperation<'_> {
       stable_id: "test_operation".to_string(),
       operation_id: "testOperation".to_string(),
       method: Method::GET,
-      path: "/test".to_string(),
+      path: ParsedPath(vec![PathSegment::Literal("test".to_string())]),
+      path_template: "/test".to_string(),
       kind: OperationKind::Http,
       summary: self.summary.map(String::from),
       description: self.description.map(String::from),
@@ -273,7 +274,8 @@ fn test_multipart_generation() {
     stable_id: format!("{request_type}_operation"),
     operation_id: format!("{request_type}Operation"),
     method: Method::GET,
-    path: "/test".to_string(),
+    path: ParsedPath(vec![PathSegment::Literal("test".to_string())]),
+    path_template: "/test".to_string(),
     kind: OperationKind::Http,
     summary: None,
     description: None,
@@ -333,13 +335,12 @@ fn test_multipart_generation() {
 
 #[test]
 fn test_client_filters_webhook_operations() {
-  use crate::generator::ast::OperationParameter;
-
   let http_operation = OperationInfo {
     stable_id: "list_pets".to_string(),
     operation_id: "listPets".to_string(),
     method: Method::GET,
-    path: "/pets".to_string(),
+    path: ParsedPath(vec![PathSegment::Literal("pets".to_string())]),
+    path_template: "/pets".to_string(),
     kind: OperationKind::Http,
     summary: Some("List all pets".to_string()),
     description: None,
@@ -370,7 +371,11 @@ fn test_client_filters_webhook_operations() {
     stable_id: "pet_added_hook".to_string(),
     operation_id: "petAddedHook".to_string(),
     method: Method::POST,
-    path: "webhooks/petAdded".to_string(),
+    path: ParsedPath(vec![
+      PathSegment::Literal("webhooks".to_string()),
+      PathSegment::Literal("petAdded".to_string()),
+    ]),
+    path_template: "webhooks/petAdded".to_string(),
     kind: OperationKind::Webhook,
     summary: Some("Pet added webhook".to_string()),
     description: None,
@@ -431,4 +436,137 @@ fn test_client_filters_webhook_operations() {
     !output.contains("X_WEBHOOK_SECRET") && !output.contains("X-Webhook-Secret"),
     "Webhook header constant should NOT be generated"
   );
+}
+
+#[test]
+fn test_path_segments_static_path() {
+  let segments = ParsedPath(vec![PathSegment::Literal("pets".to_string())]);
+  let output = segments
+    .0
+    .iter()
+    .map(|s| s.to_token_stream().to_string())
+    .collect::<String>();
+
+  assert!(
+    output.contains("push") && output.contains("pets"),
+    "should push 'pets' segment: {output}"
+  );
+  assert_eq!(segments.0.len(), 1, "should have exactly one segment");
+}
+
+#[test]
+fn test_path_segments_single_param() {
+  let segments = ParsedPath(vec![
+    PathSegment::Literal("pets".to_string()),
+    PathSegment::Param(FieldNameToken::new("pet_id")),
+  ]);
+  let output = segments
+    .0
+    .iter()
+    .map(|s| s.to_token_stream().to_string())
+    .collect::<String>();
+
+  assert!(output.contains("pets"), "should push 'pets' literal: {output}");
+  assert!(output.contains("pet_id"), "should reference path param: {output}");
+  assert_eq!(segments.0.len(), 2, "should have two segments");
+}
+
+#[test]
+fn test_path_segments_multiple_params() {
+  let segments = ParsedPath(vec![
+    PathSegment::Literal("users".to_string()),
+    PathSegment::Param(FieldNameToken::new("user_id")),
+    PathSegment::Literal("posts".to_string()),
+    PathSegment::Param(FieldNameToken::new("post_id")),
+  ]);
+  let output = segments
+    .0
+    .iter()
+    .map(|s| s.to_token_stream().to_string())
+    .collect::<String>();
+
+  assert!(output.contains("users"), "should push 'users': {output}");
+  assert!(output.contains("posts"), "should push 'posts': {output}");
+  assert!(output.contains("user_id"), "should reference user_id: {output}");
+  assert!(output.contains("post_id"), "should reference post_id: {output}");
+  assert_eq!(segments.0.len(), 4, "should have four segments");
+}
+
+#[test]
+fn test_path_segments_mixed_segment() {
+  let segments = ParsedPath(vec![
+    PathSegment::Literal("api".to_string()),
+    PathSegment::Mixed {
+      format: "v{}.json".to_string(),
+      params: vec![FieldNameToken::new("version")],
+    },
+  ]);
+  let output = segments
+    .0
+    .iter()
+    .map(|s| s.to_token_stream().to_string())
+    .collect::<String>();
+
+  assert!(output.contains("api"), "should push 'api': {output}");
+  assert!(
+    output.contains("format"),
+    "should use format! for mixed segment: {output}"
+  );
+  assert!(
+    output.contains("v{}.json"),
+    "should have correct format string: {output}"
+  );
+  assert_eq!(segments.0.len(), 2, "should have two segments");
+}
+
+#[test]
+fn test_url_path_segments_encoding() {
+  use reqwest::Url;
+
+  let mut url = Url::parse("http://example.com").unwrap();
+
+  url
+    .path_segments_mut()
+    .expect("valid URL")
+    .clear()
+    .push("pets")
+    .push("cat/dog");
+
+  assert_eq!(url.path(), "/pets/cat%2Fdog", "slash should be encoded as %2F");
+
+  url
+    .path_segments_mut()
+    .expect("valid URL")
+    .clear()
+    .push("pets")
+    .push("hello world");
+
+  assert_eq!(url.path(), "/pets/hello%20world", "space should be encoded as %20");
+
+  url
+    .path_segments_mut()
+    .expect("valid URL")
+    .clear()
+    .push("pets")
+    .push("100%");
+
+  assert_eq!(url.path(), "/pets/100%25", "percent should be encoded as %25");
+
+  url
+    .path_segments_mut()
+    .expect("valid URL")
+    .clear()
+    .push("pets")
+    .push("a?b#c");
+
+  assert_eq!(url.path(), "/pets/a%3Fb%23c", "query/fragment chars should be encoded");
+
+  url
+    .path_segments_mut()
+    .expect("valid URL")
+    .clear()
+    .push("pets")
+    .push("café");
+
+  assert_eq!(url.path(), "/pets/caf%C3%A9", "unicode should be percent-encoded");
 }

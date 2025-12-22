@@ -1,7 +1,7 @@
 use http::Method;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, Operation, Parameter, ParameterIn},
+  spec::{ObjectOrReference, Operation, Parameter, ParameterIn, ParameterStyle},
 };
 use serde_json::Value;
 
@@ -9,11 +9,15 @@ use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metada
 use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
-    OperationParameter, ParameterLocation, ResponseEnumDef, RustType, StructDef, StructKind, StructToken, TypeAliasDef,
-    TypeAliasToken, TypeRef, ValidationAttribute,
+    OperationParameter, OuterAttr, ParameterLocation, ParsedPath, ResponseEnumDef, RustType, SerdeAsFieldAttr,
+    SerdeAsSeparator, SerdeAttribute, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
+    ValidationAttribute,
   },
   naming::{
-    constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
+    constants::{
+      BODY_FIELD_NAME, HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX,
+      QUERY_PARAMS_FIELD, QUERY_PARAMS_SUFFIX, REQUEST_BODY_SUFFIX,
+    },
     identifiers::{to_rust_field_name, to_rust_type_name},
     inference as naming,
     operations::{generate_unique_request_name, generate_unique_response_name},
@@ -46,10 +50,45 @@ impl RequestBodyInfo {
   }
 }
 
-#[derive(Default)]
-struct ParameterMappings {
-  path: Vec<path_renderer::PathParamMapping>,
-  query: Vec<path_renderer::QueryParamMapping>,
+struct ParametersByLocation {
+  path: Vec<(FieldDef, OperationParameter, ParameterMeta)>,
+  query: Vec<(FieldDef, OperationParameter, ParameterMeta)>,
+  header: Vec<(FieldDef, OperationParameter, ParameterMeta)>,
+}
+
+struct ParameterMeta {
+  original_name: String,
+  explode: bool,
+  style: Option<ParameterStyle>,
+}
+
+impl ParametersByLocation {
+  fn new() -> Self {
+    Self {
+      path: vec![],
+      query: vec![],
+      header: vec![],
+    }
+  }
+
+  fn has_path_params(&self) -> bool {
+    !self.path.is_empty()
+  }
+
+  fn has_query_params(&self) -> bool {
+    !self.query.is_empty()
+  }
+
+  fn has_header_params(&self) -> bool {
+    !self.header.is_empty()
+  }
+}
+
+struct GeneratedRequestStructs {
+  main_struct: StructDef,
+  nested_structs: Vec<StructDef>,
+  parameter_info: Vec<OperationParameter>,
+  warnings: Vec<String>,
 }
 
 struct ProcessingContext<'a> {
@@ -114,7 +153,7 @@ impl<'a> OperationConverter<'a> {
     };
 
     let request_name = generate_unique_request_name(&base_name, |name| self.schema_converter.is_schema_name(name));
-    let (request_struct, request_warnings, parameter_metadata) = self.build_request_struct(
+    let generated_structs = self.build_request_struct(
       &request_name,
       path,
       operation,
@@ -122,15 +161,21 @@ impl<'a> OperationConverter<'a> {
       response_enum_info.as_ref(),
     )?;
 
-    warnings.extend(request_warnings);
-    let has_fields = !request_struct.fields.is_empty();
+    warnings.extend(generated_structs.warnings);
+    let parameter_metadata = generated_structs.parameter_info;
+
+    let has_fields = !generated_structs.main_struct.fields.is_empty();
     let should_generate_request_struct = has_fields || response_enum_info.is_some();
 
     let mut request_type_name: Option<StructToken> = None;
     if should_generate_request_struct {
-      let rust_request_name = request_struct.name.clone();
+      for nested_struct in generated_structs.nested_structs {
+        types.push(RustType::Struct(nested_struct));
+      }
+
+      let rust_request_name = generated_structs.main_struct.name.clone();
       usage.mark_request(rust_request_name.clone());
-      types.push(RustType::Struct(request_struct));
+      types.push(RustType::Struct(generated_structs.main_struct));
       request_type_name = Some(rust_request_name);
     }
 
@@ -175,12 +220,14 @@ impl<'a> OperationConverter<'a> {
     });
 
     let final_operation_id = operation.operation_id.clone().unwrap_or(base_name);
+    let parsed_path = ParsedPath::new(path, &parameter_metadata);
 
     let op_info = OperationInfo {
       stable_id,
       operation_id: final_operation_id,
       method: method.clone(),
-      path: path.to_string(),
+      path: parsed_path,
+      path_template: path.to_string(),
       kind,
       summary: operation.summary.clone(),
       description: operation.description.clone(),
@@ -205,23 +252,112 @@ impl<'a> OperationConverter<'a> {
     operation: &Operation,
     body_type: Option<TypeRef>,
     response_enum_info: Option<&(EnumToken, ResponseEnumDef)>,
-  ) -> anyhow::Result<(StructDef, Vec<String>, Vec<OperationParameter>)> {
+  ) -> anyhow::Result<GeneratedRequestStructs> {
     let mut warnings = vec![];
-    let mut fields = vec![];
-    let mut param_mappings = ParameterMappings::default();
-    let mut parameter_info = vec![];
+    let mut params_by_location = ParametersByLocation::new();
+    let mut all_parameter_info = vec![];
 
     for param in self.collect_parameters(path, operation) {
-      let (field, meta) = self.convert_parameter(&param, &mut warnings)?;
-      Self::map_parameter(&param, &field, &mut param_mappings);
-      fields.push(field);
-      parameter_info.push(meta);
+      let (field, meta, param_meta) = self.convert_parameter_with_meta(&param, &mut warnings)?;
+      all_parameter_info.push(meta.clone());
+
+      match param.location {
+        ParameterIn::Path => params_by_location.path.push((field, meta, param_meta)),
+        ParameterIn::Query => params_by_location.query.push((field, meta, param_meta)),
+        ParameterIn::Header => params_by_location.header.push((field, meta, param_meta)),
+        ParameterIn::Cookie => {}
+      }
+    }
+
+    let mut nested_structs = vec![];
+    let mut main_fields = vec![];
+
+    let path_struct = if params_by_location.has_path_params() {
+      let struct_name = format!("{name}{PATH_PARAMS_SUFFIX}");
+      let fields: Vec<FieldDef> = params_by_location.path.iter().map(|(f, _, _)| f.clone()).collect();
+      let struct_def = StructDef {
+        name: StructToken::from_raw(&struct_name),
+        docs: vec![],
+        fields,
+        kind: StructKind::PathParams,
+        ..Default::default()
+      };
+      Some(struct_def)
+    } else {
+      None
+    };
+
+    if let Some(ref path_struct) = path_struct {
+      main_fields.push(FieldDef {
+        name: FieldNameToken::new(PATH_PARAMS_FIELD),
+        rust_type: TypeRef::new(path_struct.name.to_string()),
+        ..Default::default()
+      });
+      nested_structs.push(path_struct.clone());
+    }
+
+    let query_struct = if params_by_location.has_query_params() {
+      let struct_name = format!("{name}{QUERY_PARAMS_SUFFIX}");
+      let fields: Vec<FieldDef> = params_by_location
+        .query
+        .iter()
+        .map(|(f, _, meta)| Self::apply_query_serde_attributes(f.clone(), meta))
+        .collect();
+
+      let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
+
+      let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
+
+      let struct_def = StructDef {
+        name: StructToken::from_raw(&struct_name),
+        docs: vec![],
+        fields,
+        outer_attrs,
+        kind: StructKind::QueryParams,
+        ..Default::default()
+      };
+      Some(struct_def)
+    } else {
+      None
+    };
+
+    if let Some(ref query_struct) = query_struct {
+      main_fields.push(FieldDef {
+        name: FieldNameToken::new(QUERY_PARAMS_FIELD),
+        rust_type: TypeRef::new(query_struct.name.to_string()),
+        ..Default::default()
+      });
+      nested_structs.push(query_struct.clone());
+    }
+
+    let header_struct = if params_by_location.has_header_params() {
+      let struct_name = format!("{name}{HEADER_PARAMS_SUFFIX}");
+      let fields: Vec<FieldDef> = params_by_location.header.iter().map(|(f, _, _)| f.clone()).collect();
+      let struct_def = StructDef {
+        name: StructToken::from_raw(&struct_name),
+        docs: vec![],
+        fields,
+        kind: StructKind::HeaderParams,
+        ..Default::default()
+      };
+      Some(struct_def)
+    } else {
+      None
+    };
+
+    if let Some(ref header_struct) = header_struct {
+      main_fields.push(FieldDef {
+        name: FieldNameToken::new(HEADER_PARAMS_FIELD),
+        rust_type: TypeRef::new(header_struct.name.to_string()),
+        ..Default::default()
+      });
+      nested_structs.push(header_struct.clone());
     }
 
     if let Some(body_type_ref) = body_type
       && let Some(body_field) = self.create_body_field(operation, body_type_ref)
     {
-      fields.push(body_field);
+      main_fields.push(body_field);
     }
 
     let docs = operation
@@ -230,11 +366,7 @@ impl<'a> OperationConverter<'a> {
       .or(operation.summary.as_ref())
       .map_or_else(Vec::new, |d| metadata::extract_docs(Some(d)));
 
-    let mut methods = vec![path_renderer::build_render_path_method(
-      path,
-      &param_mappings.path,
-      &param_mappings.query,
-    )];
+    let mut methods = vec![];
 
     if let Some((response_enum, response_enum_def)) = response_enum_info {
       methods.push(responses::build_parse_response_method(
@@ -243,10 +375,10 @@ impl<'a> OperationConverter<'a> {
       ));
     }
 
-    let struct_def = StructDef {
+    let main_struct = StructDef {
       name: StructToken::from_raw(name),
       docs,
-      fields,
+      fields: main_fields,
       serde_attrs: vec![],
       outer_attrs: vec![],
       methods,
@@ -254,7 +386,34 @@ impl<'a> OperationConverter<'a> {
       ..Default::default()
     };
 
-    Ok((struct_def, warnings, parameter_info))
+    Ok(GeneratedRequestStructs {
+      main_struct,
+      nested_structs,
+      parameter_info: all_parameter_info,
+      warnings,
+    })
+  }
+
+  fn apply_query_serde_attributes(mut field: FieldDef, meta: &ParameterMeta) -> FieldDef {
+    if field.name.as_str() != meta.original_name {
+      field
+        .serde_attrs
+        .push(SerdeAttribute::Rename(meta.original_name.clone()));
+    }
+
+    if field.rust_type.is_array && !meta.explode {
+      let separator = match meta.style {
+        Some(ParameterStyle::SpaceDelimited) => SerdeAsSeparator::Space,
+        Some(ParameterStyle::PipeDelimited) => SerdeAsSeparator::Pipe,
+        _ => SerdeAsSeparator::Comma,
+      };
+      field.serde_as_attr = Some(SerdeAsFieldAttr::SeparatedList {
+        separator,
+        optional: field.rust_type.nullable,
+      });
+    }
+
+    field
   }
 
   fn prepare_request_body(
@@ -463,6 +622,22 @@ impl<'a> OperationConverter<'a> {
     Ok((field, metadata))
   }
 
+  fn convert_parameter_with_meta(
+    &self,
+    param: &Parameter,
+    warnings: &mut Vec<String>,
+  ) -> anyhow::Result<(FieldDef, OperationParameter, ParameterMeta)> {
+    let (field, meta) = self.convert_parameter(param, warnings)?;
+
+    let param_meta = ParameterMeta {
+      original_name: param.name.clone(),
+      explode: path_renderer::query_param_explode(param),
+      style: param.style,
+    };
+
+    Ok((field, meta, param_meta))
+  }
+
   fn extract_parameter_type_and_validation(
     &self,
     param: &Parameter,
@@ -484,25 +659,5 @@ impl<'a> OperationConverter<'a> {
     let default = extractor.extract_default_value();
 
     Ok((type_ref, validation, default))
-  }
-
-  fn map_parameter(param: &Parameter, field: &FieldDef, mappings: &mut ParameterMappings) {
-    match param.location {
-      ParameterIn::Path => mappings.path.push(path_renderer::PathParamMapping {
-        rust_field: field.name.to_string(),
-        original_name: param.name.clone(),
-        is_value: field.rust_type.base_type == crate::generator::ast::RustPrimitive::Value,
-      }),
-      ParameterIn::Query => mappings.query.push(path_renderer::QueryParamMapping {
-        rust_field: field.name.to_string(),
-        original_name: param.name.clone(),
-        explode: path_renderer::query_param_explode(param),
-        style: param.style,
-        optional: field.rust_type.nullable,
-        is_array: field.rust_type.is_array,
-        is_value: field.rust_type.base_type == crate::generator::ast::RustPrimitive::Value,
-      }),
-      _ => {}
-    }
   }
 }

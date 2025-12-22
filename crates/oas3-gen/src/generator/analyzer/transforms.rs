@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::type_usage::TypeUsage;
 use crate::generator::ast::{
-  ContentCategory, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OperationInfo, OuterAttr, RustType, SerdeMode,
-  StatusCodeToken, StructDef, StructKind, StructMethodKind, TypeRef,
+  ContentCategory, DefaultAtom, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OperationInfo,
+  OuterAttr, RustPrimitive, RustType, SerdeImpl, SerdeMode, StatusCodeToken, StructDef, StructKind, StructMethodKind,
+  TypeRef, ValidationAttribute,
 };
 
 pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage: &BTreeMap<EnumToken, TypeUsage>) {
@@ -17,6 +18,59 @@ pub(crate) fn update_derives_from_usage(rust_types: &mut [RustType], type_usage:
   }
 }
 
+pub(crate) fn add_nested_validation_attrs(rust_types: &mut [RustType]) {
+  let mut validated_structs: BTreeSet<DefaultAtom> = rust_types
+    .iter()
+    .filter_map(|rt| match rt {
+      RustType::Struct(def) if def.has_validation_attrs() => Some(def.name.to_atom()),
+      _ => None,
+    })
+    .collect();
+
+  let mut changed = true;
+  while changed {
+    changed = false;
+
+    for rust_type in rust_types.iter_mut() {
+      let RustType::Struct(def) = rust_type else {
+        continue;
+      };
+
+      let mut updated_struct = false;
+      for field in &mut def.fields {
+        let Some(referenced) = referenced_custom_atom(&field.rust_type) else {
+          continue;
+        };
+
+        if !validated_structs.contains(&referenced) {
+          continue;
+        }
+
+        if field.validation_attrs.contains(&ValidationAttribute::Nested) {
+          continue;
+        }
+
+        field.validation_attrs.push(ValidationAttribute::Nested);
+        updated_struct = true;
+      }
+
+      if updated_struct {
+        let inserted = validated_structs.insert(def.name.to_atom());
+        if inserted {
+          changed = true;
+        }
+      }
+    }
+  }
+}
+
+fn referenced_custom_atom(type_ref: &TypeRef) -> Option<DefaultAtom> {
+  match &type_ref.base_type {
+    RustPrimitive::Custom(atom) => Some(atom.clone()),
+    _ => None,
+  }
+}
+
 fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) {
   let key: EnumToken = def.name.as_str().into();
   let usage = get_usage(&key, type_usage);
@@ -27,8 +81,7 @@ fn process_struct(def: &mut StructDef, type_usage: &BTreeMap<EnumToken, TypeUsag
     strip_validation_attrs(&mut def.fields);
   }
 
-  let needs_serialization = matches!(usage, TypeUsage::RequestOnly | TypeUsage::Bidirectional);
-  adjust_skip_serializing_none(def, needs_serialization);
+  adjust_skip_serializing_none(def);
 }
 
 fn process_enum(def: &mut EnumDef, type_usage: &BTreeMap<EnumToken, TypeUsage>) {
@@ -59,10 +112,11 @@ fn strip_validation_attrs(fields: &mut [FieldDef]) {
   }
 }
 
-fn adjust_skip_serializing_none(def: &mut StructDef, needs_serialization: bool) {
+fn adjust_skip_serializing_none(def: &mut StructDef) {
   def.outer_attrs.retain(|attr| *attr != OuterAttr::SkipSerializingNone);
 
-  if needs_serialization && has_nullable_fields(&def.fields) && def.kind != StructKind::OperationRequest {
+  let derives_serialize = def.is_serializable() == SerdeImpl::Derive;
+  if derives_serialize && has_nullable_fields(&def.fields) && def.kind != StructKind::OperationRequest {
     def.outer_attrs.push(OuterAttr::SkipSerializingNone);
   }
 }
@@ -145,9 +199,8 @@ pub(crate) fn deduplicate_response_enums(rust_types: &mut Vec<RustType>, operati
   for rt in rust_types.iter_mut() {
     if let RustType::Struct(def) = rt {
       for method in &mut def.methods {
-        if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
-          && let Some(new_name) = replacements.get(&response_enum.to_string())
-        {
+        let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind;
+        if let Some(new_name) = replacements.get(&response_enum.to_string()) {
           *response_enum = EnumToken::new(new_name);
         }
       }

@@ -53,3 +53,9 @@ fn test_validation_attribute_range_display() {
   };
   assert_eq!(attr_float.to_string(), "range(min = 0.5, max = 1.0)");
 }
+
+#[test]
+fn test_validation_attribute_nested_display() {
+  let attr = ValidationAttribute::Nested;
+  assert_eq!(attr.to_string(), "nested");
+}
