@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::generator::{
-  analyzer::{TypeUsage, update_derives_from_usage},
+  analyzer::{TypeUsage, add_nested_validation_attrs, update_derives_from_usage},
   ast::{
     DeriveTrait, DerivesProvider, EnumDef, EnumToken, EnumVariantToken, FieldDef, OuterAttr, RustType, StructDef,
     StructKind, StructToken, TypeRef, ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
@@ -173,4 +173,95 @@ fn test_skip_serializing_none_logic() {
   let def2 = create_struct("Loose", StructKind::Schema, true);
   let def2 = process_struct_helper(def2, TypeUsage::RequestOnly);
   assert!(def2.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
+}
+
+#[test]
+fn test_adds_nested_validation_attrs_transitively() {
+  let validated_inner = create_struct("Inner", StructKind::Schema, false);
+
+  let middle = StructDef {
+    name: StructToken::new("Middle"),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: FieldNameToken::new("inner"),
+      rust_type: TypeRef::new("Inner"),
+      ..Default::default()
+    }],
+    kind: StructKind::Schema,
+    ..Default::default()
+  };
+
+  let outer = StructDef {
+    name: StructToken::new("Outer"),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: FieldNameToken::new("middle"),
+      rust_type: TypeRef::new("Middle"),
+      ..Default::default()
+    }],
+    kind: StructKind::Schema,
+    ..Default::default()
+  };
+
+  let mut rust_types = vec![
+    RustType::Struct(validated_inner),
+    RustType::Struct(middle),
+    RustType::Struct(outer),
+  ];
+
+  add_nested_validation_attrs(&mut rust_types);
+
+  let RustType::Struct(middle) = &rust_types[1] else {
+    panic!("expected struct");
+  };
+  assert!(
+    middle.fields[0].validation_attrs.contains(&ValidationAttribute::Nested),
+    "missing nested validation on middle.inner"
+  );
+
+  let RustType::Struct(outer) = &rust_types[2] else {
+    panic!("expected struct");
+  };
+  assert!(
+    outer.fields[0].validation_attrs.contains(&ValidationAttribute::Nested),
+    "missing nested validation on outer.middle"
+  );
+}
+
+#[test]
+fn test_does_not_add_nested_validation_for_unvalidated_structs() {
+  let unvalidated = StructDef {
+    name: StructToken::new("Plain"),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: FieldNameToken::new("field"),
+      rust_type: TypeRef::new("String"),
+      ..Default::default()
+    }],
+    kind: StructKind::Schema,
+    ..Default::default()
+  };
+
+  let outer = StructDef {
+    name: StructToken::new("Outer"),
+    docs: vec![],
+    fields: vec![FieldDef {
+      name: FieldNameToken::new("plain"),
+      rust_type: TypeRef::new("Plain"),
+      ..Default::default()
+    }],
+    kind: StructKind::Schema,
+    ..Default::default()
+  };
+
+  let mut rust_types = vec![RustType::Struct(unvalidated), RustType::Struct(outer)];
+  add_nested_validation_attrs(&mut rust_types);
+
+  let RustType::Struct(outer) = &rust_types[1] else {
+    panic!("expected struct");
+  };
+  assert!(
+    outer.fields[0].validation_attrs.is_empty(),
+    "unexpected nested validation for Outer.plain"
+  );
 }

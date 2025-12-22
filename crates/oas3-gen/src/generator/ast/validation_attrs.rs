@@ -39,6 +39,7 @@ impl RegexKey {
 pub enum ValidationAttribute {
   Email,
   Url,
+  Nested,
   Length {
     min: Option<u64>,
     max: Option<u64>,
@@ -57,7 +58,8 @@ impl PartialEq for ValidationAttribute {
   fn eq(&self, other: &Self) -> bool {
     match (self, other) {
       (ValidationAttribute::Email, ValidationAttribute::Email)
-      | (ValidationAttribute::Url, ValidationAttribute::Url) => true,
+      | (ValidationAttribute::Url, ValidationAttribute::Url)
+      | (ValidationAttribute::Nested, ValidationAttribute::Nested) => true,
       (ValidationAttribute::Length { min: min1, max: max1 }, ValidationAttribute::Length { min: min2, max: max2 }) => {
         min1 == min2 && max1 == max2
       }
@@ -114,6 +116,7 @@ impl ToTokens for ValidationAttribute {
     let attr = match self {
       ValidationAttribute::Email => quote! { email },
       ValidationAttribute::Url => quote! { url },
+      ValidationAttribute::Nested => quote! { nested },
       ValidationAttribute::Regex(path) => quote! { regex(path = #path) },
       ValidationAttribute::Length { min, max } => {
         let min_part = min.map(|m| {
@@ -167,6 +170,7 @@ impl fmt::Display for ValidationAttribute {
     match self {
       ValidationAttribute::Email => write!(f, "email"),
       ValidationAttribute::Url => write!(f, "url"),
+      ValidationAttribute::Nested => write!(f, "nested"),
       ValidationAttribute::Regex(path) => write!(f, "regex(path = \"{path}\")"),
       ValidationAttribute::Length { min, max } => {
         let mut parts = vec![];

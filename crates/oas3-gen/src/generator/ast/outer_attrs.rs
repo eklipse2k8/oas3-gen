@@ -8,18 +8,18 @@ use quote::{ToTokens, quote};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OuterAttr {
   /// Skips serializing fields that are `None`.
-  /// Renders as `#[oas3_gen_support::skip_serializing_none]`
+  /// Renders as `#[serde_with::skip_serializing_none]`
   SkipSerializingNone,
   /// Enables `serde_as` transformations on fields.
-  /// Renders as `#[oas3_gen_support::serde_as]`
+  /// Renders as `#[serde_with::serde_as]`
   SerdeAs,
 }
 
 impl ToTokens for OuterAttr {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let attr = match self {
-      OuterAttr::SkipSerializingNone => quote! { #[oas3_gen_support::skip_serializing_none] },
-      OuterAttr::SerdeAs => quote! { #[oas3_gen_support::serde_as] },
+      OuterAttr::SkipSerializingNone => quote! { #[serde_with::skip_serializing_none] },
+      OuterAttr::SerdeAs => quote! { #[serde_with::serde_as] },
     };
     tokens.extend(attr);
   }

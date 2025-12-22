@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::ast::{self, EnumToken, RustType, SerdeImpl};
+use super::ast::{self, EnumToken, RustType, SerdeImpl, ValidationAttribute};
 
 pub mod attributes;
 pub mod client;
@@ -100,11 +100,13 @@ pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, v
 
   let mut needs_serialize = false;
   let mut needs_deserialize = false;
+  let mut needs_validate = false;
   let mut type_tokens = vec![];
 
   for ty in &ordered {
     needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
     needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
+    needs_validate |= matches!(ty, RustType::Struct(def) if def.fields.iter().any(|f| f.validation_attrs.contains(&ValidationAttribute::Nested)));
     type_tokens.push(generate_type(ty, &regex_lookup, error_schemas, visibility));
   }
 
@@ -116,8 +118,15 @@ pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, v
     (false, false) => quote! {},
   };
 
+  let validator_use = if needs_validate {
+    quote! { use validator::Validate; }
+  } else {
+    quote! {}
+  };
+
   quote! {
     #serde_use
+    #validator_use
 
     #regex_consts
 

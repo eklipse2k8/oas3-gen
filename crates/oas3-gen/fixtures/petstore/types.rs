@@ -17,6 +17,7 @@
 //! No description provided
 
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 ///Create a pet
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct CreatePetsRequest {}
@@ -48,6 +49,7 @@ pub struct Error {
 ///List all pets
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct ListPetsRequest {
+  #[validate(nested)]
   pub query: ListPetsRequestQuery,
 }
 impl ListPetsRequest {
@@ -62,7 +64,7 @@ impl ListPetsRequest {
     Ok(ListPetsResponse::Unknown(data))
   }
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
 pub struct ListPetsRequestQuery {
   ///How many items to return at one time (max 100)
@@ -88,6 +90,7 @@ pub type Pets = Vec<Pet>;
 ///Info for a specific pet
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct ShowPetByIdRequest {
+  #[validate(nested)]
   pub path: ShowPetByIdRequestPath,
 }
 impl ShowPetByIdRequest {

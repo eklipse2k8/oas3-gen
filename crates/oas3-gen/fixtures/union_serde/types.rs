@@ -79,7 +79,7 @@ impl ArrayOrSingle {
     })
   }
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct Base64ImageSource {
@@ -90,7 +90,7 @@ pub struct Base64ImageSource {
   #[default(Some("base64".to_string()))]
   pub r#type: Option<String>,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct CitationAnnotation {
@@ -103,7 +103,7 @@ pub struct CitationAnnotation {
   #[default(Some("citation".to_string()))]
   pub r#type: Option<String>,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct CodeBlock {
@@ -227,7 +227,7 @@ pub struct ContentBlockStopEvent {
   #[default(Some("content_block_stop".to_string()))]
   pub r#type: Option<String>,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 pub struct ContentRequest {
   pub blocks: Vec<ContentBlock>,
@@ -436,7 +436,7 @@ pub enum GetEventsResponse {
   ///default: Unknown response
   Unknown,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct ImageBlock {
@@ -511,7 +511,7 @@ pub struct InputJsonDelta {
   #[default(Some("input_json_delta".to_string()))]
   pub r#type: Option<String>,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct LinkAnnotation {
@@ -638,7 +638,7 @@ pub enum StopReason {
   #[serde(rename = "tool_use")]
   ToolUse,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct TextBlock {
@@ -659,7 +659,7 @@ pub struct TextDelta {
   #[default(Some("text_delta".to_string()))]
   pub r#type: Option<String>,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct ToolResultBlock {
@@ -740,7 +740,7 @@ impl ToolResultContentBlock {
     })
   }
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct ToolUseBlock {
@@ -754,7 +754,7 @@ pub struct ToolUseBlock {
   #[default(Some("tool_use".to_string()))]
   pub r#type: Option<String>,
 }
-#[oas3_gen_support::skip_serializing_none]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct UrlImageSource {

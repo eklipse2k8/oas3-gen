@@ -306,10 +306,7 @@ impl<'a> OperationConverter<'a> {
 
       let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
 
-      let mut outer_attrs = vec![OuterAttr::SkipSerializingNone];
-      if has_serde_as {
-        outer_attrs.insert(0, OuterAttr::SerdeAs);
-      }
+      let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
 
       let struct_def = StructDef {
         name: StructToken::from_raw(&struct_name),

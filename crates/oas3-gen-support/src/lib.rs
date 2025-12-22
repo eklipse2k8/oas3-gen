@@ -6,8 +6,6 @@ use serde_with::{
   StringWithSeparator,
   formats::{CommaSeparator, Separator, SpaceSeparator},
 };
-/// Re-exported from `serde_with` to enable `#[skip_serializing_none]` on generated types.
-pub use serde_with::{serde_as, skip_serializing_none};
 
 /// Pipe separator for `OpenAPI` pipeDelimited style
 pub struct PipeSeparator;

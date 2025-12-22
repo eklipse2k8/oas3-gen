@@ -193,7 +193,7 @@ fn test_enum_variant_attributes() {
     .generate()
     .to_string();
   assert!(
-    outer_attrs_code.contains("# [oas3_gen_support :: skip_serializing_none]"),
+    outer_attrs_code.contains("# [serde_with :: skip_serializing_none]"),
     "should have skip_serializing_none attribute"
   );
 }
