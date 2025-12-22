@@ -158,27 +158,29 @@ impl<'a> DiscriminatorHandler<'a> {
     let children = self.extract_discriminator_children(schema);
     let enum_name = to_rust_type_name(base_name);
 
-    let mut variants = vec![];
-    for (disc_value, child_schema_name) in children {
-      let child_type_name = to_rust_type_name(&child_schema_name);
-      let variant_name = child_type_name
-        .strip_prefix(&enum_name)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-          let mut chars = s.chars();
-          match chars.next() {
-            None => String::new(),
-            Some(first) => first.to_uppercase().chain(chars).collect(),
-          }
-        })
-        .unwrap_or(child_type_name.clone());
+    let variants: Vec<_> = children
+      .into_iter()
+      .map(|(disc_value, child_schema_name)| {
+        let child_type_name = to_rust_type_name(&child_schema_name);
+        let variant_name = child_type_name
+          .strip_prefix(&enum_name)
+          .filter(|s| !s.is_empty())
+          .map(|s| {
+            let mut chars = s.chars();
+            match chars.next() {
+              None => String::new(),
+              Some(first) => first.to_uppercase().chain(chars).collect(),
+            }
+          })
+          .unwrap_or(child_type_name.clone());
 
-      variants.push(DiscriminatedVariant {
-        discriminator_value: disc_value,
-        variant_name,
-        type_name: TypeRef::new(child_type_name).with_boxed(),
-      });
-    }
+        DiscriminatedVariant {
+          discriminator_value: disc_value,
+          variant_name,
+          type_name: TypeRef::new(child_type_name).with_boxed(),
+        }
+      })
+      .collect();
 
     let base_variant_name = to_rust_type_name(base_name.split('.').next_back().unwrap_or(base_name));
     let fallback = Some(DiscriminatedVariant {
@@ -198,11 +200,18 @@ impl<'a> DiscriminatorHandler<'a> {
     ))
   }
 
+  /// Extracts child schemas from a discriminator mapping.
+  ///
+  /// Returns `(discriminator_value, schema_name)` pairs, deduplicated by schema name.
+  /// When multiple discriminator values map to the same schema, only the first
+  /// (by sorted order) is kept. Results are sorted by inheritance depth (deepest first).
   pub(crate) fn extract_discriminator_children(&self, schema: &ObjectSchema) -> Vec<(String, String)> {
     let Some(mapping) = schema.discriminator.as_ref().and_then(|d| d.mapping.as_ref()) else {
       return vec![];
     };
 
+    // Deduplicate by schema name - multiple discriminator values may map to the same schema
+    let mut seen_schemas = BTreeSet::new();
     let mut children: Vec<_> = mapping
       .iter()
       .filter_map(|(val, ref_path)| SchemaRegistry::extract_ref_name(ref_path).map(|name| (val.clone(), name)))
@@ -213,6 +222,7 @@ impl<'a> DiscriminatorHandler<'a> {
           true
         }
       })
+      .filter(|(_, name)| seen_schemas.insert(name.clone()))
       .collect();
 
     let mut depth_memo = HashMap::new();
