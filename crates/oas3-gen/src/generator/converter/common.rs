@@ -127,6 +127,9 @@ pub(crate) trait SchemaExt {
   /// Returns true if the schema has inline oneOf or anyOf variants.
   fn has_inline_union(&self) -> bool;
 
+  /// Returns true if this is an array with inline union items (oneOf/anyOf in items).
+  fn has_inline_union_array_items(&self, spec: &Spec) -> bool;
+
   /// Extracts the inline array items schema if present and not a reference.
   /// Returns None if: no items, items is a boolean schema, or items is a $ref.
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema>;
@@ -247,6 +250,15 @@ impl SchemaExt for ObjectSchema {
 
   fn has_inline_union(&self) -> bool {
     !self.one_of.is_empty() || !self.any_of.is_empty()
+  }
+
+  fn has_inline_union_array_items(&self, spec: &Spec) -> bool {
+    if !self.is_array() {
+      return false;
+    }
+    self
+      .inline_array_items(spec)
+      .is_some_and(|items| items.has_inline_union())
   }
 
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema> {

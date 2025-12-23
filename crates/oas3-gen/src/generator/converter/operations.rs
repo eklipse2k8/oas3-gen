@@ -1,7 +1,11 @@
+use std::collections::HashSet;
+
 use http::Method;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, ParameterStyle, SchemaType, SchemaTypeSet},
+  spec::{
+    ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, ParameterStyle, SchemaType, SchemaTypeSet,
+  },
 };
 use serde_json::Value;
 
@@ -527,14 +531,14 @@ impl<'a> OperationConverter<'a> {
       }
     }
 
-    self.synthesize_missing_path_params(path, &mut params);
+    Self::synthesize_missing_path_params(path, &mut params);
 
     params
   }
 
   /// Adds synthesized parameters for any path template variables not declared in the spec.
-  fn synthesize_missing_path_params(&self, path: &str, params: &mut Vec<Parameter>) {
-    let declared: std::collections::HashSet<&str> = params
+  fn synthesize_missing_path_params(path: &str, params: &mut Vec<Parameter>) {
+    let declared: HashSet<&str> = params
       .iter()
       .filter(|p| p.location == ParameterIn::Path)
       .map(|p| p.name.as_str())

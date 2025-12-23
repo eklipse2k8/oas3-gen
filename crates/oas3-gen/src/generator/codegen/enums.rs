@@ -103,9 +103,11 @@ impl<'a> EnumGenerator<'a> {
   }
 
   fn generate_variants(&self) -> Vec<TokenStream> {
-    let has_serde_derive = self.def.derives().iter().any(|d| {
-      matches!(d, DeriveTrait::Serialize | DeriveTrait::Deserialize)
-    });
+    let has_serde_derive = self
+      .def
+      .derives()
+      .iter()
+      .any(|d| matches!(d, DeriveTrait::Serialize | DeriveTrait::Deserialize));
 
     self
       .def

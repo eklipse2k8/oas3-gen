@@ -1155,3 +1155,126 @@ fn test_additional_properties_false_not_resolved_as_map() {
     "object with additionalProperties: false should NOT resolve to HashMap (it means no additional properties allowed)"
   );
 }
+
+#[allow(clippy::approx_constant)]
+#[test]
+fn test_const_value_type_inference() {
+  let graph = create_empty_test_graph();
+  let resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
+
+  let string_const = ObjectSchema {
+    const_value: Some(json!("thought")),
+    ..Default::default()
+  };
+  let result = resolver.resolve_type(&string_const).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "String",
+    "const: \"thought\" should infer String type"
+  );
+
+  let integer_const = ObjectSchema {
+    const_value: Some(json!(42)),
+    ..Default::default()
+  };
+  let result = resolver.resolve_type(&integer_const).unwrap();
+  assert_eq!(result.to_rust_type(), "i64", "const: 42 should infer i64 type");
+
+  let float_const = ObjectSchema {
+    const_value: Some(json!(3.14)),
+    ..Default::default()
+  };
+  let result = resolver.resolve_type(&float_const).unwrap();
+  assert_eq!(result.to_rust_type(), "f64", "const: 3.14 should infer f64 type");
+
+  let bool_const = ObjectSchema {
+    const_value: Some(json!(true)),
+    ..Default::default()
+  };
+  let result = resolver.resolve_type(&bool_const).unwrap();
+  assert_eq!(result.to_rust_type(), "bool", "const: true should infer bool type");
+
+  let object_const = ObjectSchema {
+    const_value: Some(json!({"key": "value"})),
+    ..Default::default()
+  };
+  let result = resolver.resolve_type(&object_const).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "serde_json::Value",
+    "const with object value should fall back to serde_json::Value"
+  );
+}
+
+#[test]
+fn test_array_with_union_items_not_treated_as_primitive() {
+  let text_content = make_object_schema_with_property("text", make_string_schema());
+  let image_content = make_object_schema_with_property("data", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TextContent".to_string(), text_content),
+    ("ImageContent".to_string(), image_content),
+    (
+      "ThoughtSummary".to_string(),
+      ObjectSchema {
+        description: Some("A summary of the thought.".to_string()),
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+        items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+          ObjectOrReference::Object(ObjectSchema {
+            one_of: vec![
+              ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/TextContent".to_string(),
+                summary: None,
+                description: None,
+              },
+              ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/ImageContent".to_string(),
+                summary: None,
+                description: None,
+              },
+            ],
+            ..Default::default()
+          }),
+        )))),
+        ..Default::default()
+      },
+    ),
+  ]));
+
+  let resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
+
+  let thought_summary_ref = ObjectOrReference::Ref {
+    ref_path: "#/components/schemas/ThoughtSummary".to_string(),
+    summary: None,
+    description: None,
+  };
+  let thought_summary_schema = graph.get_schema("ThoughtSummary").unwrap();
+
+  let result = resolver
+    .resolve_property_type(
+      "ThoughtContent",
+      "summary",
+      thought_summary_schema,
+      &thought_summary_ref,
+      None,
+    )
+    .unwrap();
+
+  assert_eq!(
+    result.result.to_rust_type(),
+    "ThoughtSummary",
+    "reference to array with union items should use the named type, not inline Vec<serde_json::Value>"
+  );
+  assert!(
+    result.inline_types.is_empty(),
+    "should not generate inline types for named schema reference"
+  );
+}

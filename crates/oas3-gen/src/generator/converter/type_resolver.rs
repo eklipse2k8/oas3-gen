@@ -70,8 +70,21 @@ impl TypeResolver {
     if let Some(non_null) = schema.non_null_type() {
       return Ok(self.resolve_primitive(non_null, schema)?.with_option());
     }
+    if let Some(ref const_value) = schema.const_value {
+      return Ok(Self::infer_type_from_const(const_value));
+    }
 
     Ok(TypeRef::new(RustPrimitive::Value))
+  }
+
+  fn infer_type_from_const(const_value: &serde_json::Value) -> TypeRef {
+    match const_value {
+      serde_json::Value::String(_) => TypeRef::new(RustPrimitive::String),
+      serde_json::Value::Number(n) if n.is_i64() => TypeRef::new(RustPrimitive::I64),
+      serde_json::Value::Number(_) => TypeRef::new(RustPrimitive::F64),
+      serde_json::Value::Bool(_) => TypeRef::new(RustPrimitive::Bool),
+      _ => TypeRef::new(RustPrimitive::Value),
+    }
   }
 
   /// Resolves a property type, handling inline structs/enums/unions by generating them.
@@ -122,7 +135,9 @@ impl TypeResolver {
     let reference_name = SchemaRegistry::extract_ref_name(reference_path)
       .ok_or_else(|| anyhow::anyhow!("Invalid reference path: {reference_path}"))?;
 
-    if resolved_schema.is_primitive() {
+    let is_complex_array = resolved_schema.has_inline_union_array_items(self.graph.spec());
+
+    if resolved_schema.is_primitive() && !is_complex_array {
       Ok(ConversionOutput::new(self.resolve_type(resolved_schema)?))
     } else {
       Ok(ConversionOutput::new(self.create_type_reference(&reference_name)))
