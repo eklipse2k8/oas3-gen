@@ -7,7 +7,7 @@ use super::{SchemaConverter, cache::SharedSchemaCache};
 use crate::generator::{
   ast::{
     ContentCategory, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant, RustPrimitive,
-    StatusCodeToken, StructKind, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
+    StatusCodeToken, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
   },
   naming::{
     constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
@@ -116,35 +116,12 @@ fn resolve_inline_response_schema(
     return Ok(Some(primitive_ref));
   }
 
-  let type_name =
-    resolve_response_inline_struct_name(schema_converter, inline_schema, path, status_code, schema_cache)?;
-
-  Ok(Some(TypeRef::new(type_name)))
-}
-
-fn resolve_response_inline_struct_name(
-  schema_converter: &SchemaConverter,
-  inline_schema: &ObjectSchema,
-  path: &str,
-  status_code: StatusCodeToken,
-  schema_cache: &mut SharedSchemaCache,
-) -> anyhow::Result<String> {
-  if let Some(cached) = schema_cache.get_type_name(inline_schema)? {
-    return Ok(cached);
-  }
-
   let base_name = naming::infer_name_from_context(inline_schema, path, status_code.as_str());
-  let unique_name = schema_cache.make_unique_name(&base_name);
+  let Some(output) = schema_converter.convert_inline_schema(inline_schema, &base_name, schema_cache)? else {
+    return Ok(None);
+  };
 
-  let result = schema_converter.convert_struct(
-    &unique_name,
-    inline_schema,
-    Some(StructKind::Schema),
-    Some(schema_cache),
-  )?;
-
-  schema_cache.register_type(inline_schema, &unique_name, result.inline_types, result.result)?;
-  Ok(unique_name)
+  Ok(Some(TypeRef::new(output.type_name)))
 }
 
 fn normalize_response_variants(mut variants: Vec<ResponseVariant>) -> Vec<ResponseVariant> {

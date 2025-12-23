@@ -694,7 +694,7 @@ mod tests {
     };
     assert_eq!(send_content.body.blocks.len(), 1, "body blocks count mismatch");
 
-    let _body: SendContentRequestBody = ContentRequest {
+    let _body: ContentRequest = ContentRequest {
       blocks: vec![],
       metadata: None,
     };

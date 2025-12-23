@@ -73,7 +73,7 @@ fn test_propagation_request_to_nested() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
-    kind: StructKind::RequestBody,
+    kind: StructKind::Schema,
     ..Default::default()
   });
 
@@ -157,7 +157,7 @@ fn test_propagation_bidirectional() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
-    kind: StructKind::RequestBody,
+    kind: StructKind::Schema,
     ..Default::default()
   });
 

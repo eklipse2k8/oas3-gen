@@ -245,7 +245,7 @@ fn test_multipart_generation() {
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
-    kind: StructKind::RequestBody,
+    kind: StructKind::Schema,
     ..Default::default()
   };
 
