@@ -1,6 +1,7 @@
 mod derives;
 pub mod lints;
 mod outer_attrs;
+mod parsed_path;
 pub(super) mod serde_attrs;
 mod status_codes;
 pub mod tokens;
@@ -15,6 +16,9 @@ pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 use http::Method;
 pub use lints::LintConfig;
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
+pub use parsed_path::ParsedPath;
+#[cfg(test)]
+pub use parsed_path::{PathParseError, PathSegment};
 pub use serde_attrs::SerdeAttribute;
 pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
 pub use tokens::{
@@ -227,100 +231,6 @@ pub struct OperationBody {
   pub field_name: FieldNameToken,
   pub optional: bool,
   pub content_category: ContentCategory,
-}
-
-#[derive(Debug, Clone)]
-pub enum PathSegment {
-  Literal(String),
-  Param(FieldNameToken),
-  Mixed {
-    format: String,
-    params: Vec<FieldNameToken>,
-  },
-}
-
-impl PathSegment {
-  fn parse(segment: &str, params: &std::collections::HashMap<&str, &FieldNameToken>) -> Self {
-    if !segment.contains('{') {
-      return Self::Literal(segment.to_string());
-    }
-
-    if let Some(name) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}'))
-      && let Some(field) = params.get(name)
-    {
-      return Self::Param((*field).clone());
-    }
-
-    let mut format_str = String::new();
-    let mut field_params = Vec::new();
-    let mut rest = segment;
-
-    while let Some(start) = rest.find('{') {
-      format_str.push_str(&rest[..start]);
-
-      let end = rest[start..].find('}').map_or(rest.len(), |i| start + i);
-      let name = &rest[start + 1..end];
-
-      if let Some(field) = params.get(name) {
-        format_str.push_str("{}");
-        field_params.push((*field).clone());
-      } else {
-        format_str.push_str(&rest[start..=end]);
-      }
-
-      rest = &rest[end + 1..];
-    }
-    format_str.push_str(rest);
-
-    Self::Mixed {
-      format: format_str,
-      params: field_params,
-    }
-  }
-}
-
-impl quote::ToTokens for PathSegment {
-  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-    use quote::quote;
-    let segment_tokens = match self {
-      PathSegment::Literal(lit) => quote! { .push(#lit) },
-      PathSegment::Param(field) => quote! { .push(&request.path.#field.to_string()) },
-      PathSegment::Mixed { format, params } => {
-        let args = params.iter().map(|f| quote! { request.path.#f });
-        quote! { .push(&format!(#format, #(#args),*)) }
-      }
-    };
-    quote::ToTokens::to_tokens(&segment_tokens, tokens);
-  }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ParsedPath(pub Vec<PathSegment>);
-
-impl ParsedPath {
-  pub fn new(path: &str, parameters: &[OperationParameter]) -> Self {
-    let param_map: std::collections::HashMap<&str, &FieldNameToken> = parameters
-      .iter()
-      .filter(|p| matches!(p.location, ParameterLocation::Path))
-      .map(|p| (p.original_name.as_str(), &p.rust_field))
-      .collect();
-
-    let segments = path
-      .trim_start_matches('/')
-      .split('/')
-      .filter(|s| !s.is_empty())
-      .map(|segment| PathSegment::parse(segment, &param_map))
-      .collect();
-
-    Self(segments)
-  }
-
-  /// Extracts parameter names from a URL path template.
-  ///
-  /// For example, `/projects/{projectKey}/repos/{repositorySlug}` yields `["projectKey", "repositorySlug"]`.
-  pub fn extract_template_params(path: &str) -> impl Iterator<Item = &str> {
-    path.split('{').skip(1).filter_map(|s| s.split('}').next())
-  }
 }
 
 /// Semantic kind of a struct to determine code generation behavior

@@ -77,6 +77,15 @@ pub enum GenerationWarning {
   OperationSpecific { operation_id: String, message: String },
 }
 
+impl GenerationWarning {
+  pub fn is_skipped_item(&self) -> bool {
+    matches!(
+      self,
+      Self::SchemaConversionFailed { .. } | Self::OperationConversionFailed { .. }
+    )
+  }
+}
+
 impl Orchestrator {
   #[allow(clippy::too_many_arguments)]
   #[allow(clippy::fn_params_excessive_bools)]

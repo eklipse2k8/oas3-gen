@@ -222,7 +222,7 @@ impl<'a> OperationConverter<'a> {
     });
 
     let final_operation_id = operation.operation_id.clone().unwrap_or(base_name);
-    let parsed_path = ParsedPath::new(path, &parameter_metadata);
+    let parsed_path = ParsedPath::parse(path, &parameter_metadata)?;
 
     let op_info = OperationInfo {
       stable_id,

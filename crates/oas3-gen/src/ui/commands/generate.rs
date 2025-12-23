@@ -262,17 +262,35 @@ impl<'a> GenerateLogger<'a> {
   }
 
   fn print_warnings(&self, stats: &GenerationStats) {
-    if stats.warnings.is_empty() || !self.config.verbose || self.config.quiet {
+    if stats.warnings.is_empty() || self.config.quiet {
       return;
     }
 
-    println!();
+    let mut printed_header = false;
     for warning in &stats.warnings {
-      eprintln!(
-        "{} {}",
-        "Warning:".with(self.colors.accent()),
-        format!("{warning}").with(self.colors.primary())
-      );
+      let should_print = warning.is_skipped_item() || self.config.verbose;
+      if !should_print {
+        continue;
+      }
+
+      if !printed_header {
+        println!();
+        printed_header = true;
+      }
+
+      if warning.is_skipped_item() {
+        eprintln!(
+          "{} {}",
+          "Skipped:".with(self.colors.accent()),
+          format!("{warning}").with(self.colors.primary())
+        );
+      } else {
+        eprintln!(
+          "{} {}",
+          "Warning:".with(self.colors.accent()),
+          format!("{warning}").with(self.colors.primary())
+        );
+      }
     }
   }
 
