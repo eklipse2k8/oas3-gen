@@ -16,9 +16,10 @@ OpenAPI-to-Rust code generator that parses OpenAPI 3.1 specifications and genera
 ```bash
 cargo build                    # Build
 cargo test                     # Test
-cargo run -- generate types -i spec.json -o types.rs   # Generate types (JSON)
-cargo run -- generate types -i spec.yaml -o types.rs   # Generate types (YAML)
-cargo run -- generate client -i spec.json -o client.rs # Generate client
+cargo run -- generate types -i spec.json -o types.rs        # Generate types (JSON)
+cargo run -- generate types -i spec.yaml -o types.rs        # Generate types (YAML)
+cargo run -- generate client -i spec.json -o client.rs      # Generate client
+cargo run -- generate client-mod -i spec.json -o output/    # Generate modular output (types.rs, client.rs, mod.rs)
 ```
 
 ## Essential Rules

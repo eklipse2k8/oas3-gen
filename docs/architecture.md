@@ -13,11 +13,20 @@ crates/
 │   │   ├── enum_deduplication.json # Enum deduplication tests
 │   │   ├── implicit_union.json    # Implicit union tests
 │   │   ├── integer_path_param.json # Integer path parameter tests
+│   │   ├── Lizard.json            # Discriminator/inheritance tests
+│   │   ├── oas_3_1_2_pet_benchmark.json # Benchmark specification
 │   │   ├── operation_filtering.json # Operation filtering tests
 │   │   ├── petstore.json          # Petstore API specification
 │   │   ├── relaxed_enum_deduplication.json # Relaxed enum deduplication tests
 │   │   ├── schema.yaml            # YAML format test fixture
-│   │   └── petstore/              # Petstore generated output fixtures
+│   │   ├── undeclared_path_params.json # Undeclared path parameter tests
+│   │   ├── union_serde.json       # Union serialization tests
+│   │   ├── untyped_parameter.json # Untyped parameter tests
+│   │   ├── petstore/              # Petstore generated output fixtures
+│   │   │   ├── mod.rs
+│   │   │   ├── client.rs
+│   │   │   └── types.rs
+│   │   └── union_serde/           # Union serde generated output fixtures
 │   │       ├── mod.rs
 │   │       ├── client.rs
 │   │       └── types.rs
@@ -33,10 +42,12 @@ crates/
 │       │       └── list.rs
 │       ├── utils/                 # Cross-cutting utilities
 │       │   ├── mod.rs
+│       │   ├── spec.rs            # Spec loading utilities
 │       │   └── text.rs            # Text processing utilities
 │       ├── tests/                 # Integration test utilities
 │       │   ├── mod.rs
 │       │   ├── common.rs          # Common test helpers
+│       │   ├── petstore.rs        # Petstore integration tests
 │       │   └── union_serde.rs     # Union serialization tests
 │       └── generator/             # Core generation pipeline
 │           ├── mod.rs
@@ -47,7 +58,9 @@ crates/
 │           │   ├── mod.rs
 │           │   ├── orchestrator.rs
 │           │   ├── operation_registry.rs
-│           │   └── schema_graph.rs
+│           │   ├── schema_graph.rs
+│           │   ├── undeclared_path_params.rs
+│           │   └── untyped_params.rs
 │           ├── analyzer/          # Schema analysis and validation
 │           │   ├── mod.rs
 │           │   ├── errors.rs      # Error type definitions
@@ -105,6 +118,7 @@ crates/
 │           │       ├── mod.rs
 │           │       ├── cache.rs
 │           │       ├── enums.rs
+│           │       ├── helper_tests.rs
 │           │       ├── implicit_dependencies.rs
 │           │       ├── inline_objects.rs
 │           │       ├── metadata_tests.rs
@@ -122,6 +136,7 @@ crates/
 │               ├── enums.rs       # Enum code generation
 │               ├── error_impls.rs # Error trait implementations
 │               ├── metadata.rs    # Metadata comment generation
+│               ├── mod_file.rs    # Module file generation (mod.rs)
 │               ├── structs.rs     # Struct code generation
 │               ├── type_aliases.rs # Type alias generation
 │               └── tests/         # Codegen tests
@@ -167,6 +182,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **proc-macro2** (1.0): Token manipulation
 - **syn** (2.0): Rust syntax parser with full parsing support
 - **prettyplease** (0.2): Code formatter
+- **derive_builder** (0.20): Builder pattern derive macros
 
 ### CLI & Terminal
 
@@ -197,9 +213,9 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 - **better_default** (1.0): Enhanced `#[default(value)]` attribute
 - **chrono** (>=0.4.42): Date/time types with serde support
-- **uuid** (1.18): UUID type support with serde
+- **uuid** (1.19): UUID type support with serde
 - **indexmap** (2.12): Insertion-ordered maps with serde
-- **http** (1.3): HTTP primitives and status codes
+- **http** (1.4): HTTP primitives and status codes
 
 ### String & Identifier Processing
 
@@ -221,7 +237,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Runtime Support
 
-- **oas3-gen-support** (0.21.0): Workspace runtime library with macros and utilities
+- **oas3-gen-support** (0.23.4): Workspace runtime library with macros and utilities
 
 ### Development & Testing
 

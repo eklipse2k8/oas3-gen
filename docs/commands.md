@@ -27,6 +27,9 @@ cargo run -- generate types -i spec.yaml -o generated.rs
 # Generate HTTP client from OpenAPI spec
 cargo run -- generate client -i spec.json -o client.rs
 
+# Generate modular client output (types.rs, client.rs, mod.rs in directory)
+cargo run -- generate client-mod -i spec.json -o output/
+
 # With verbose output (shows cycles, operations count, etc.)
 cargo run -- generate types -i spec.json -o output.rs --verbose
 
@@ -54,9 +57,9 @@ cargo run -- list --help
 
 | Argument/Option | Description |
 |-----------------|-------------|
-| `[MODE]` | Generation mode: `types` (default) or `client` |
+| `[MODE]` | Generation mode: `types` (default), `client`, or `client-mod` |
 | `--input` / `-i` | (Required) Path to OpenAPI specification file (JSON or YAML, auto-detected) |
-| `--output` / `-o` | (Required) Path where generated Rust code will be written |
+| `--output` / `-o` | (Required) Path for output (file for types/client, directory for client-mod) |
 | `--visibility` / `-C` | Visibility level for generated types (public, crate, or file; default: public) |
 | `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |
