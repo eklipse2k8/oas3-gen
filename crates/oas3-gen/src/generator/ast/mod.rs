@@ -314,6 +314,13 @@ impl ParsedPath {
 
     Self(segments)
   }
+
+  /// Extracts parameter names from a URL path template.
+  ///
+  /// For example, `/projects/{projectKey}/repos/{repositorySlug}` yields `["projectKey", "repositorySlug"]`.
+  pub fn extract_template_params(path: &str) -> impl Iterator<Item = &str> {
+    path.split('{').skip(1).filter_map(|s| s.split('}').next())
+  }
 }
 
 /// Semantic kind of a struct to determine code generation behavior

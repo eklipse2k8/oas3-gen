@@ -1,7 +1,7 @@
 use http::Method;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, ParameterStyle},
+  spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, ParameterStyle, SchemaType, SchemaTypeSet},
 };
 use serde_json::Value;
 
@@ -527,7 +527,48 @@ impl<'a> OperationConverter<'a> {
       }
     }
 
+    self.synthesize_missing_path_params(path, &mut params);
+
     params
+  }
+
+  /// Adds synthesized parameters for any path template variables not declared in the spec.
+  fn synthesize_missing_path_params(&self, path: &str, params: &mut Vec<Parameter>) {
+    let declared: std::collections::HashSet<&str> = params
+      .iter()
+      .filter(|p| p.location == ParameterIn::Path)
+      .map(|p| p.name.as_str())
+      .collect();
+
+    let missing: Vec<_> = ParsedPath::extract_template_params(path)
+      .filter(|name| !declared.contains(name))
+      .map(Self::synthesize_string_path_param)
+      .collect();
+
+    params.extend(missing);
+  }
+
+  /// Creates a path parameter with String type for undeclared template variables.
+  fn synthesize_string_path_param(name: &str) -> Parameter {
+    Parameter {
+      name: name.to_string(),
+      location: ParameterIn::Path,
+      description: None,
+      required: Some(true),
+      deprecated: None,
+      allow_empty_value: None,
+      style: None,
+      explode: None,
+      allow_reserved: None,
+      schema: Some(ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      })),
+      example: None,
+      examples: std::collections::BTreeMap::new(),
+      content: None,
+      extensions: std::collections::BTreeMap::new(),
+    }
   }
 
   fn convert_parameter(

@@ -1,0 +1,33 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Undeclared path parameters reproduction",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/projects/{projectKey}/repos/{repositorySlug}/status": {
+      "get": {
+        "operationId": "getRepoStatus",
+        "summary": "Get repository status",
+        "description": "Get the status of a repository - note: path parameters are NOT declared in this operation",
+        "responses": {
+          "200": {
+            "description": "Repository status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
