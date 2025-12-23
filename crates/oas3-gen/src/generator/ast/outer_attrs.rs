@@ -18,8 +18,8 @@ pub enum OuterAttr {
 impl ToTokens for OuterAttr {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let attr = match self {
-      OuterAttr::SkipSerializingNone => quote! { #[serde_with::skip_serializing_none] },
-      OuterAttr::SerdeAs => quote! { #[serde_with::serde_as] },
+      Self::SkipSerializingNone => quote! { #[serde_with::skip_serializing_none] },
+      Self::SerdeAs => quote! { #[serde_with::serde_as] },
     };
     tokens.extend(attr);
   }
@@ -30,30 +30,17 @@ impl ToTokens for OuterAttr {
 /// Maps OpenAPI style/explode combinations to `serde_with` separator types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SerdeAsSeparator {
-  /// Comma-separated values (OpenAPI form style with explode=false)
   Comma,
-  /// Space-separated values (OpenAPI spaceDelimited style)
   Space,
-  /// Pipe-separated values (OpenAPI pipeDelimited style)
   Pipe,
-}
-
-impl SerdeAsSeparator {
-  fn type_path(self) -> &'static str {
-    match self {
-      SerdeAsSeparator::Comma => "oas3_gen_support::StringWithCommaSeparator",
-      SerdeAsSeparator::Space => "oas3_gen_support::StringWithSpaceSeparator",
-      SerdeAsSeparator::Pipe => "oas3_gen_support::StringWithPipeSeparator",
-    }
-  }
 }
 
 impl ToTokens for SerdeAsSeparator {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let separator_type = match self {
-      SerdeAsSeparator::Comma => quote! { oas3_gen_support::StringWithCommaSeparator },
-      SerdeAsSeparator::Space => quote! { oas3_gen_support::StringWithSpaceSeparator },
-      SerdeAsSeparator::Pipe => quote! { oas3_gen_support::StringWithPipeSeparator },
+      Self::Comma => quote! { oas3_gen_support::StringWithCommaSeparator },
+      Self::Space => quote! { oas3_gen_support::StringWithSpaceSeparator },
+      Self::Pipe => quote! { oas3_gen_support::StringWithPipeSeparator },
     };
     tokens.extend(separator_type);
   }
@@ -73,15 +60,11 @@ pub enum SerdeAsFieldAttr {
 
 impl ToTokens for SerdeAsFieldAttr {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let attr = match self {
-      SerdeAsFieldAttr::SeparatedList { separator, optional } => {
-        let type_str = if *optional {
-          format!("Option<{}>", separator.type_path())
-        } else {
-          separator.type_path().to_string()
-        };
-        quote! { #[serde_as(as = #type_str)] }
-      }
+    let Self::SeparatedList { separator, optional } = self;
+    let attr = if *optional {
+      quote! { #[serde_as(as = Option<#separator>)] }
+    } else {
+      quote! { #[serde_as(as = #separator)] }
     };
     tokens.extend(attr);
   }

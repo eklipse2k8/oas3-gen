@@ -131,7 +131,10 @@ fn test_build_error_schema_set_excludes_success_types() {
 
   let result = analyze_errors(types, operations);
 
-  assert!(result.error_schemas.is_empty(), "Types used in success responses should be excluded");
+  assert!(
+    result.error_schemas.is_empty(),
+    "Types used in success responses should be excluded"
+  );
 }
 
 #[test]

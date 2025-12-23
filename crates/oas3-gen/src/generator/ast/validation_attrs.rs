@@ -1,5 +1,3 @@
-use std::fmt;
-
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use serde_json::Number;
@@ -57,21 +55,17 @@ pub enum ValidationAttribute {
 impl PartialEq for ValidationAttribute {
   fn eq(&self, other: &Self) -> bool {
     match (self, other) {
-      (ValidationAttribute::Email, ValidationAttribute::Email)
-      | (ValidationAttribute::Url, ValidationAttribute::Url)
-      | (ValidationAttribute::Nested, ValidationAttribute::Nested) => true,
-      (ValidationAttribute::Length { min: min1, max: max1 }, ValidationAttribute::Length { min: min2, max: max2 }) => {
-        min1 == min2 && max1 == max2
-      }
+      (Self::Email, Self::Email) | (Self::Url, Self::Url) | (Self::Nested, Self::Nested) => true,
+      (Self::Length { min: min1, max: max1 }, Self::Length { min: min2, max: max2 }) => min1 == min2 && max1 == max2,
       (
-        ValidationAttribute::Range {
+        Self::Range {
           primitive: p1,
           min: min1,
           max: max1,
           exclusive_min: emin1,
           exclusive_max: emax1,
         },
-        ValidationAttribute::Range {
+        Self::Range {
           primitive: p2,
           min: min2,
           max: max2,
@@ -85,7 +79,7 @@ impl PartialEq for ValidationAttribute {
           && compare_numbers(emin1.as_ref(), emin2.as_ref())
           && compare_numbers(emax1.as_ref(), emax2.as_ref())
       }
-      (ValidationAttribute::Regex(s1), ValidationAttribute::Regex(s2)) => s1 == s2,
+      (Self::Regex(s1), Self::Regex(s2)) => s1 == s2,
       _ => false,
     }
   }
@@ -114,11 +108,11 @@ fn compare_numbers(n1: Option<&Number>, n2: Option<&Number>) -> bool {
 impl ToTokens for ValidationAttribute {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let attr = match self {
-      ValidationAttribute::Email => quote! { email },
-      ValidationAttribute::Url => quote! { url },
-      ValidationAttribute::Nested => quote! { nested },
-      ValidationAttribute::Regex(path) => quote! { regex(path = #path) },
-      ValidationAttribute::Length { min, max } => {
+      Self::Email => quote! { email },
+      Self::Url => quote! { url },
+      Self::Nested => quote! { nested },
+      Self::Regex(path) => quote! { regex(path = #path) },
+      Self::Length { min, max } => {
         let min_part = min.map(|m| {
           let lit: TokenStream = render_unsigned_integer(&RustPrimitive::U64, m).parse().unwrap();
           quote! { min = #lit }
@@ -134,7 +128,7 @@ impl ToTokens for ValidationAttribute {
           (None, None) => quote! { length() },
         }
       }
-      ValidationAttribute::Range {
+      Self::Range {
         primitive,
         min,
         max,
@@ -162,48 +156,5 @@ impl ToTokens for ValidationAttribute {
       }
     };
     tokens.extend(attr);
-  }
-}
-
-impl fmt::Display for ValidationAttribute {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      ValidationAttribute::Email => write!(f, "email"),
-      ValidationAttribute::Url => write!(f, "url"),
-      ValidationAttribute::Nested => write!(f, "nested"),
-      ValidationAttribute::Regex(path) => write!(f, "regex(path = \"{path}\")"),
-      ValidationAttribute::Length { min, max } => {
-        let mut parts = vec![];
-        if let Some(m) = min {
-          parts.push(format!("min = {}", render_unsigned_integer(&RustPrimitive::U64, *m)));
-        }
-        if let Some(m) = max {
-          parts.push(format!("max = {}", render_unsigned_integer(&RustPrimitive::U64, *m)));
-        }
-        write!(f, "length({})", parts.join(", "))
-      }
-      ValidationAttribute::Range {
-        primitive,
-        min,
-        max,
-        exclusive_min,
-        exclusive_max,
-      } => {
-        let mut parts = vec![];
-        if let Some(m) = min {
-          parts.push(format!("min = {}", primitive.format_number(m)));
-        }
-        if let Some(m) = max {
-          parts.push(format!("max = {}", primitive.format_number(m)));
-        }
-        if let Some(m) = exclusive_min {
-          parts.push(format!("exclusive_min = {}", primitive.format_number(m)));
-        }
-        if let Some(m) = exclusive_max {
-          parts.push(format!("exclusive_max = {}", primitive.format_number(m)));
-        }
-        write!(f, "range({})", parts.join(", "))
-      }
-    }
   }
 }

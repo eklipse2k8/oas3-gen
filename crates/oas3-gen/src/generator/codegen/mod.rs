@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::Context as _;
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 
-use super::ast::{self, EnumToken, RustType, SerdeImpl, ValidationAttribute};
+use super::ast::{EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, ValidationAttribute, tokens::ConstToken};
 
 pub mod attributes;
 pub mod client;
@@ -49,7 +49,7 @@ pub fn generate_file(
   error_schemas: &HashSet<EnumToken>,
   visibility: Visibility,
   metadata: &metadata::CodeMetadata,
-  lint_config: &super::ast::LintConfig,
+  lint_config: &LintConfig,
   source_path: &str,
   gen_version: &str,
 ) -> anyhow::Result<String> {
@@ -60,7 +60,7 @@ pub fn generate_file(
 pub fn generate_source(
   code: &TokenStream,
   metadata: &metadata::CodeMetadata,
-  lint_config: Option<&super::ast::LintConfig>,
+  lint_config: Option<&LintConfig>,
   source_path: &str,
   gen_version: &str,
 ) -> anyhow::Result<String> {
@@ -72,13 +72,7 @@ pub fn generate_source(
   );
 
   let lint_directives = lint_config.map_or_else(String::new, |cfg| {
-    cfg
-      .clippy_allows
-      .iter()
-      .map(|allow| format!("#![allow({allow})]"))
-      .collect::<Vec<_>>()
-      .join("\n")
-      + "\n"
+    format(&cfg.to_token_stream()).unwrap_or_default() + "\n"
   });
 
   let header = format!(
@@ -168,7 +162,7 @@ fn type_priority(rust_type: &RustType) -> u8 {
 
 fn generate_type(
   rust_type: &RustType,
-  regex_lookup: &BTreeMap<ast::RegexKey, ast::tokens::ConstToken>,
+  regex_lookup: &BTreeMap<RegexKey, ConstToken>,
   error_schemas: &HashSet<EnumToken>,
   visibility: Visibility,
 ) -> TokenStream {

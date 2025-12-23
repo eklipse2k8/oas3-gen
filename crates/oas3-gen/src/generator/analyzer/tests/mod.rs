@@ -5,9 +5,7 @@ mod type_usage_tests;
 use std::collections::BTreeMap;
 
 use super::{DependencyGraph, TypeAnalyzer, TypeUsage};
-use crate::generator::ast::{
-  DerivesProvider, EnumToken, OuterAttr, RustType, SerdeImpl, StructKind,
-};
+use crate::generator::ast::{DerivesProvider, EnumToken, OuterAttr, RustType, SerdeImpl, StructKind};
 
 pub(super) fn build_type_usage_map(
   seed_usage: BTreeMap<EnumToken, (bool, bool)>,

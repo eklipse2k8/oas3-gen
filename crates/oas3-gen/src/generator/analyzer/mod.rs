@@ -3,10 +3,9 @@ mod dependency_graph;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use self::dependency_graph::DependencyGraph;
-
 use crate::generator::ast::{
-  ContentCategory, DefaultAtom, DerivesProvider, EnumToken, OperationInfo, OuterAttr, RustPrimitive, RustType, SerdeImpl,
-  SerdeMode, StatusCodeToken, StructKind, StructMethodKind, TypeRef, ValidationAttribute,
+  ContentCategory, DefaultAtom, DerivesProvider, EnumToken, OperationInfo, OuterAttr, RustPrimitive, RustType,
+  SerdeImpl, SerdeMode, StatusCodeToken, StructKind, StructMethodKind, TypeRef, ValidationAttribute,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -299,11 +298,19 @@ impl<'a> TypeAnalyzer<'a> {
           }
         }
         RustType::Enum(def) => {
-          let usage = self.usage_map.get(&def.name).copied().unwrap_or(TypeUsage::Bidirectional);
+          let usage = self
+            .usage_map
+            .get(&def.name)
+            .copied()
+            .unwrap_or(TypeUsage::Bidirectional);
           def.serde_mode = usage.to_serde_mode();
         }
         RustType::DiscriminatedEnum(def) => {
-          let usage = self.usage_map.get(&def.name).copied().unwrap_or(TypeUsage::Bidirectional);
+          let usage = self
+            .usage_map
+            .get(&def.name)
+            .copied()
+            .unwrap_or(TypeUsage::Bidirectional);
           def.serde_mode = usage.to_serde_mode();
         }
         _ => {}
@@ -328,11 +335,7 @@ impl<'a> TypeAnalyzer<'a> {
     self.expand_error_types(&root_errors, &success_schemas)
   }
 
-  fn expand_error_types(
-    &self,
-    roots: &HashSet<String>,
-    success_schemas: &HashSet<String>,
-  ) -> HashSet<EnumToken> {
+  fn expand_error_types(&self, roots: &HashSet<String>, success_schemas: &HashSet<String>) -> HashSet<EnumToken> {
     let mut result: HashSet<EnumToken> = roots.iter().map(EnumToken::new).collect();
     let mut queue: Vec<String> = roots.iter().cloned().collect();
     let mut visited: HashSet<String> = HashSet::new();

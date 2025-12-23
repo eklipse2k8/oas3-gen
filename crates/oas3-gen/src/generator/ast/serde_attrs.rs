@@ -7,30 +7,29 @@ use quote::{ToTokens, quote};
 /// Each variant maps directly to a serde attribute that will be rendered in the output.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SerdeAttribute {
-  Rename(String),
   Alias(String),
   Default,
+  DenyUnknownFields,
   Flatten,
+  Rename(String),
   Skip,
   SkipDeserializing,
-  DenyUnknownFields,
-  Untagged,
-  /// Internal enum tagging: `#[serde(tag = "...")]`
   Tag(String),
+  Untagged,
 }
 
 impl ToTokens for SerdeAttribute {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let attr = match self {
-      SerdeAttribute::Rename(name) => quote! { rename = #name },
-      SerdeAttribute::Alias(name) => quote! { alias = #name },
-      SerdeAttribute::Default => quote! { default },
-      SerdeAttribute::Flatten => quote! { flatten },
-      SerdeAttribute::Skip => quote! { skip },
-      SerdeAttribute::SkipDeserializing => quote! { skip_deserializing },
-      SerdeAttribute::DenyUnknownFields => quote! { deny_unknown_fields },
-      SerdeAttribute::Untagged => quote! { untagged },
-      SerdeAttribute::Tag(field) => quote! { tag = #field },
+      Self::Alias(name) => quote! { alias = #name },
+      Self::Default => quote! { default },
+      Self::DenyUnknownFields => quote! { deny_unknown_fields },
+      Self::Flatten => quote! { flatten },
+      Self::Rename(name) => quote! { rename = #name },
+      Self::Skip => quote! { skip },
+      Self::SkipDeserializing => quote! { skip_deserializing },
+      Self::Tag(field) => quote! { tag = #field },
+      Self::Untagged => quote! { untagged },
     };
     tokens.extend(attr);
   }
