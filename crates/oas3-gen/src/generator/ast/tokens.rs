@@ -103,7 +103,11 @@ macro_rules! define_ident_token {
 
     impl ToTokens for $name {
       fn to_tokens(&self, tokens: &mut TokenStream) {
-        let token = Ident::new(&self.0, Span::call_site());
+        let token = if let Some(raw_ident) = self.0.strip_prefix("r#") {
+          Ident::new_raw(raw_ident, Span::call_site())
+        } else {
+          Ident::new(&self.0, Span::call_site())
+        };
         token.to_tokens(tokens);
       }
     }
