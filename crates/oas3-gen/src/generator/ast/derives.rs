@@ -41,7 +41,7 @@ impl DerivesProvider for StructDef {
       StructKind::OperationRequest => {
         derives.insert(DeriveTrait::Validate);
       }
-      StructKind::Schema | StructKind::RequestBody => {
+      StructKind::Schema => {
         derives.insert(DeriveTrait::PartialEq);
         if self.is_serializable() == SerdeImpl::Derive {
           derives.insert(DeriveTrait::Serialize);
@@ -75,7 +75,7 @@ impl DerivesProvider for StructDef {
     match self.kind {
       StructKind::OperationRequest | StructKind::PathParams | StructKind::HeaderParams => SerdeImpl::None,
       StructKind::QueryParams => SerdeImpl::Derive,
-      StructKind::Schema | StructKind::RequestBody => match self.serde_mode {
+      StructKind::Schema => match self.serde_mode {
         SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
         SerdeMode::DeserializeOnly => SerdeImpl::None,
       },
@@ -87,7 +87,7 @@ impl DerivesProvider for StructDef {
       StructKind::OperationRequest | StructKind::PathParams | StructKind::HeaderParams | StructKind::QueryParams => {
         SerdeImpl::None
       }
-      StructKind::Schema | StructKind::RequestBody => match self.serde_mode {
+      StructKind::Schema => match self.serde_mode {
         SerdeMode::DeserializeOnly | SerdeMode::Both => SerdeImpl::Derive,
         SerdeMode::SerializeOnly => SerdeImpl::None,
       },

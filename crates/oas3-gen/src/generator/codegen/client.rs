@@ -21,6 +21,7 @@ pub struct ClientGenerator<'a> {
   operations: &'a [OperationInfo],
   rust_types: &'a [RustType],
   visibility: Visibility,
+  use_types_import: bool,
 }
 
 impl<'a> ClientGenerator<'a> {
@@ -35,10 +36,16 @@ impl<'a> ClientGenerator<'a> {
       operations,
       rust_types,
       visibility,
+      use_types_import: false,
     }
   }
 
-  fn client_ident(&self) -> syn::Ident {
+  pub fn with_types_import(mut self) -> Self {
+    self.use_types_import = true;
+    self
+  }
+
+  pub fn client_ident(&self) -> syn::Ident {
     let client_name = if self.metadata.title.is_empty() {
       "Api".to_string()
     } else {
@@ -82,6 +89,12 @@ impl ToTokens for ClientGenerator<'_> {
       return;
     };
 
+    let types_import = if self.use_types_import {
+      quote! { use super::types::*; }
+    } else {
+      quote! {}
+    };
+
     quote! {
       use anyhow::Context;
       use reqwest::{Client, Url};
@@ -90,6 +103,8 @@ impl ToTokens for ClientGenerator<'_> {
       #[allow(unused_imports)]
       use reqwest::header::HeaderValue;
       use validator::Validate;
+
+      #types_import
 
       #vis const BASE_URL: &str = #base_url_lit;
 

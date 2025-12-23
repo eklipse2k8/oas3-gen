@@ -22,7 +22,7 @@ pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
 use super::{
-  ast::{RustType, StructKind, TypeAliasDef, TypeAliasToken, TypeRef},
+  ast::{RustType, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
 };
 use crate::generator::{converter::type_resolver::TypeResolverBuilder, naming::identifiers::to_rust_type_name};
@@ -103,6 +103,12 @@ impl CodegenConfig {
   pub fn odata_support(self) -> bool {
     self.odata == ODataPolicy::Enabled
   }
+}
+
+/// Output from converting an inline schema.
+pub(crate) struct InlineSchemaOutput {
+  pub type_name: String,
+  pub generated_types: Vec<RustType>,
 }
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.
@@ -223,20 +229,48 @@ impl SchemaConverter {
     Ok(vec![alias])
   }
 
-  /// Helper to convert a struct schema specifically.
-  pub(crate) fn convert_struct(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    kind: Option<StructKind>,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<ConversionOutput<RustType>> {
-    self.struct_converter.convert_struct(name, schema, kind, cache)
-  }
-
   /// Resolves a schema to a Rust type reference (e.g. `String`, `Vec<i32>`, `MyStruct`).
   pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
     self.type_resolver.resolve_type(schema)
+  }
+
+  /// Converts an inline schema with caching and deduplication.
+  ///
+  /// This handles the common pattern for inline schemas in request bodies and responses:
+  /// 1. Check if schema was already converted (cache lookup by hash)
+  /// 2. If not, convert the schema and register in cache
+  ///
+  /// Returns the type name and any generated types, or None if the schema is empty.
+  pub(crate) fn convert_inline_schema(
+    &self,
+    schema: &ObjectSchema,
+    base_name: &str,
+    cache: &mut SharedSchemaCache,
+  ) -> anyhow::Result<Option<InlineSchemaOutput>> {
+    if schema.is_empty_object() {
+      return Ok(None);
+    }
+
+    if let Some(cached_name) = cache.get_type_name(schema)? {
+      return Ok(Some(InlineSchemaOutput {
+        type_name: cached_name,
+        generated_types: vec![],
+      }));
+    }
+
+    let unique_name = cache.make_unique_name(base_name);
+    let generated = self.convert_schema(&unique_name, schema, Some(cache))?;
+
+    let Some(main_type) = generated.last().cloned() else {
+      return Ok(None);
+    };
+
+    let final_name = cache.register_type(schema, &unique_name, vec![], main_type)?;
+
+    Ok(Some(InlineSchemaOutput {
+      type_name: final_name,
+      generated_types: generated,
+    }))
   }
 
   fn build_schema_name_cache(graph: &SchemaRegistry) -> HashSet<String> {

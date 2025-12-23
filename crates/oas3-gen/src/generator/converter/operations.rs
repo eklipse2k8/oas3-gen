@@ -1,7 +1,7 @@
 use http::Method;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, Operation, Parameter, ParameterIn, ParameterStyle},
+  spec::{ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, ParameterStyle},
 };
 use serde_json::Value;
 
@@ -10,8 +10,7 @@ use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
     OperationParameter, OuterAttr, ParameterLocation, ParsedPath, ResponseEnumDef, RustType, SerdeAsFieldAttr,
-    SerdeAsSeparator, SerdeAttribute, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
-    ValidationAttribute,
+    SerdeAsSeparator, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{
@@ -91,11 +90,10 @@ struct GeneratedRequestStructs {
   warnings: Vec<String>,
 }
 
-struct ProcessingContext<'a> {
-  type_usage: &'a mut Vec<String>,
-  generated_types: &'a mut Vec<RustType>,
-  usage: &'a mut TypeUsageRecorder,
-  schema_cache: &'a mut SharedSchemaCache,
+struct RequestBodyOutput {
+  body_type: TypeRef,
+  generated_types: Vec<RustType>,
+  type_usage: Vec<String>,
 }
 
 /// Converter for OpenAPI Operations into Rust request/response types.
@@ -133,7 +131,7 @@ impl<'a> OperationConverter<'a> {
     let mut warnings = vec![];
     let mut types = vec![];
 
-    let body_info = self.prepare_request_body(&base_name, operation, path, usage, schema_cache)?;
+    let body_info = self.prepare_request_body(operation, path, usage, schema_cache)?;
     types.extend(body_info.generated_types);
     usage.mark_request_iter(&body_info.type_usage);
 
@@ -418,15 +416,11 @@ impl<'a> OperationConverter<'a> {
 
   fn prepare_request_body(
     &self,
-    base_name: &str,
     operation: &Operation,
     path: &str,
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
   ) -> anyhow::Result<RequestBodyInfo> {
-    let mut generated_types = vec![];
-    let mut type_usage = vec![];
-
     let Some(body_ref) = operation.request_body.as_ref() else {
       return Ok(RequestBodyInfo::empty(true));
     };
@@ -434,7 +428,7 @@ impl<'a> OperationConverter<'a> {
     let body = body_ref.resolve(self.spec)?;
     let is_required = body.required.unwrap_or(false);
 
-    let Some((_, media_type)) = body.content.iter().next() else {
+    let Some((content_type_key, media_type)) = body.content.iter().next() else {
       return Ok(RequestBodyInfo::empty(!is_required));
     };
 
@@ -442,90 +436,52 @@ impl<'a> OperationConverter<'a> {
       return Ok(RequestBodyInfo::empty(!is_required));
     };
 
-    let raw_body_type_name = format!("{base_name}{REQUEST_BODY_SUFFIX}");
-    let mut ctx = ProcessingContext {
-      type_usage: &mut type_usage,
-      generated_types: &mut generated_types,
-      usage,
-      schema_cache,
-    };
-    let body_type = self.process_request_body_schema(
-      schema_ref,
-      &raw_body_type_name,
-      path,
-      body.description.as_ref(),
-      &mut ctx,
-    )?;
+    let output = self.resolve_request_body_type(schema_ref, path, schema_cache)?;
 
-    let content_type = body.content.keys().next().cloned();
-    let field_name = body_type.as_ref().map(|_| FieldNameToken::new(BODY_FIELD_NAME));
+    let Some(output) = output else {
+      return Ok(RequestBodyInfo::empty(!is_required));
+    };
+
+    usage.mark_request_iter(&output.type_usage);
 
     Ok(RequestBodyInfo {
-      body_type,
-      generated_types,
-      type_usage,
-      field_name,
+      body_type: Some(output.body_type),
+      generated_types: output.generated_types,
+      type_usage: output.type_usage,
+      field_name: Some(FieldNameToken::new(BODY_FIELD_NAME)),
       optional: !is_required,
-      content_type,
+      content_type: Some(content_type_key.clone()),
     })
   }
 
-  fn process_request_body_schema(
+  fn resolve_request_body_type(
     &self,
-    schema_ref: &ObjectOrReference<oas3::spec::ObjectSchema>,
-    type_name: &str,
+    schema_ref: &ObjectOrReference<ObjectSchema>,
     path: &str,
-    description: Option<&String>,
-    ctx: &mut ProcessingContext,
-  ) -> anyhow::Result<Option<TypeRef>> {
-    let rust_type_name = to_rust_type_name(type_name);
-
+    cache: &mut SharedSchemaCache,
+  ) -> anyhow::Result<Option<RequestBodyOutput>> {
     match schema_ref {
-      ObjectOrReference::Object(inline_schema) => {
-        if inline_schema.properties.is_empty() {
-          return Ok(None);
-        }
-
-        let cached_type_name = ctx.schema_cache.get_type_name(inline_schema)?;
-
-        let final_type_name = if let Some(name) = cached_type_name {
-          name
-        } else {
-          let base_name = naming::infer_name_from_context(inline_schema, path, "RequestBody");
-          let unique_name = ctx.schema_cache.make_unique_name(&base_name);
-
-          let result = self.schema_converter.convert_struct(
-            &unique_name,
-            inline_schema,
-            Some(StructKind::RequestBody),
-            Some(ctx.schema_cache),
-          )?;
-
-          ctx
-            .schema_cache
-            .register_type(inline_schema, &unique_name, result.inline_types, result.result)?
-        };
-
-        ctx.type_usage.push(final_type_name.clone());
-        ctx.usage.mark_request(&final_type_name);
-        Ok(Some(TypeRef::new(final_type_name)))
-      }
       ObjectOrReference::Ref { ref_path, .. } => {
         let Some(target_name) = SchemaRegistry::extract_ref_name(ref_path) else {
           return Ok(None);
         };
-        let target_rust_name = to_rust_type_name(&target_name);
-        let alias = TypeAliasDef {
-          name: TypeAliasToken::new(rust_type_name.clone()),
-          docs: metadata::extract_docs(description),
-          target: TypeRef::new(target_rust_name.clone()),
+        let rust_name = to_rust_type_name(&target_name);
+        Ok(Some(RequestBodyOutput {
+          body_type: TypeRef::new(rust_name.clone()),
+          generated_types: vec![],
+          type_usage: vec![rust_name],
+        }))
+      }
+      ObjectOrReference::Object(schema) => {
+        let base_name = naming::infer_name_from_context(schema, path, REQUEST_BODY_SUFFIX);
+        let Some(output) = self.schema_converter.convert_inline_schema(schema, &base_name, cache)? else {
+          return Ok(None);
         };
-        ctx.generated_types.push(RustType::TypeAlias(alias));
-        ctx.type_usage.push(target_rust_name.clone());
-        ctx.type_usage.push(rust_type_name.clone());
-        ctx.usage.mark_request(&target_rust_name);
-        ctx.usage.mark_request(&rust_type_name);
-        Ok(Some(TypeRef::new(rust_type_name)))
+        Ok(Some(RequestBodyOutput {
+          body_type: TypeRef::new(output.type_name.clone()),
+          generated_types: output.generated_types,
+          type_usage: vec![output.type_name],
+        }))
       }
     }
   }

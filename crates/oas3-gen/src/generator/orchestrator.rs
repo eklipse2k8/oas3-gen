@@ -7,7 +7,7 @@ use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::{self, ErrorAnalyzer},
   ast::{LintConfig, OperationInfo, OperationKind, RustType},
-  codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata},
+  codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata, mod_file::ModFileGenerator},
   converter::{
     CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
     TypeUsageRecorder, operations::OperationConverter,
@@ -53,6 +53,14 @@ struct GenerationArtifacts {
   operations_info: Vec<OperationInfo>,
   usage_recorder: TypeUsageRecorder,
   stats: GenerationStats,
+}
+
+#[derive(Debug)]
+pub struct ClientModOutput {
+  pub types_code: String,
+  pub client_code: String,
+  pub mod_code: String,
+  pub stats: GenerationStats,
 }
 
 #[derive(Debug, Display)]
@@ -117,7 +125,13 @@ impl Orchestrator {
     let client_tokens = client_generator.into_token_stream();
     let lint_config = LintConfig::default();
 
-    let final_code = codegen::generate_source(&client_tokens, &metadata, &lint_config, source_path, OAS3_GEN_VERSION)?;
+    let final_code = codegen::generate_source(
+      &client_tokens,
+      &metadata,
+      Some(&lint_config),
+      source_path,
+      OAS3_GEN_VERSION,
+    )?;
     Ok((final_code, stats))
   }
 
@@ -150,6 +164,48 @@ impl Orchestrator {
       OAS3_GEN_VERSION,
     )?;
     Ok((final_code, stats))
+  }
+
+  pub fn generate_client_mod(&self, source_path: &str) -> anyhow::Result<ClientModOutput> {
+    let artifacts = self.collect_generation_artifacts();
+    let GenerationArtifacts {
+      mut rust_types,
+      mut operations_info,
+      usage_recorder,
+      mut stats,
+    } = artifacts;
+
+    let metadata = CodeMetadata::from_spec(&self.spec);
+
+    analyzer::deduplicate_response_enums(&mut rust_types, &mut operations_info);
+    let seed_map = usage_recorder.into_usage_map();
+    let type_usage = analyzer::build_type_usage_map(seed_map, &rust_types);
+    analyzer::add_nested_validation_attrs(&mut rust_types);
+    analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
+    let error_schemas = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+
+    let types_tokens = codegen::generate(&rust_types, &error_schemas, self.visibility);
+    let types_code = codegen::generate_source(&types_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
+
+    let header_count = analyzer::count_unique_headers(&operations_info);
+    stats.client_methods_generated = Some(operations_info.len());
+    stats.client_headers_generated = Some(header_count);
+
+    let client_generator =
+      ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility).with_types_import();
+    let client_ident = client_generator.client_ident();
+    let client_tokens = client_generator.into_token_stream();
+    let client_code = codegen::generate_source(&client_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
+
+    let mod_generator = ModFileGenerator::new(&metadata, &client_ident, self.visibility);
+    let mod_code = mod_generator.generate(source_path, OAS3_GEN_VERSION)?;
+
+    Ok(ClientModOutput {
+      types_code,
+      client_code,
+      mod_code,
+      stats,
+    })
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {

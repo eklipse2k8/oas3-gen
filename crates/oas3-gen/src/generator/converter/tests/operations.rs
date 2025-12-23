@@ -159,7 +159,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
+  let (types, info) = converter.convert(
     "create_user",
     "createUser",
     &Method::POST,
@@ -170,17 +170,34 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  assert_eq!(types.len(), 2, "Should generate Request struct and RequestBody alias");
-  assert!(
-    types
-      .iter()
-      .any(|t| matches!(t, RustType::TypeAlias(a) if a.name == "CreateUserRequestBody"))
-  );
+  assert_eq!(types.len(), 1, "Should generate only the Request struct");
   assert!(
     types
       .iter()
       .any(|t| matches!(t, RustType::Struct(s) if s.name == "CreateUserRequest"))
   );
+
+  let request_struct = types
+    .iter()
+    .find_map(|t| match t {
+      RustType::Struct(s) if s.name == "CreateUserRequest" => Some(s),
+      _ => None,
+    })
+    .expect("Request struct not found");
+
+  let body_field = request_struct
+    .fields
+    .iter()
+    .find(|f| f.name == "body")
+    .expect("Body field not found");
+
+  assert_eq!(
+    body_field.rust_type.to_rust_type(),
+    "Option<User>",
+    "Body field should reference User directly"
+  );
+
+  assert!(info.body.is_some(), "Should have body metadata");
   Ok(())
 }
 
@@ -754,5 +771,125 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
     no_content_variant.schema_type.is_none(),
     "No content response should have no schema type"
   );
+  Ok(())
+}
+
+#[test]
+fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
+  // Define two schema types that will be used in the oneOf
+  let model_params_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "model".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+  let agent_params_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "agent".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([
+    ("CreateModelParams".to_string(), model_params_schema),
+    ("CreateAgentParams".to_string(), agent_params_schema),
+  ]));
+
+  // Create an operation with a oneOf request body
+  let operation = Operation {
+    request_body: Some(ObjectOrReference::Object(RequestBody {
+      required: Some(true),
+      content: BTreeMap::from([(
+        "application/json".to_string(),
+        MediaType {
+          schema: Some(ObjectOrReference::Object(ObjectSchema {
+            one_of: vec![
+              ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/CreateModelParams".to_string(),
+                summary: None,
+                description: None,
+              },
+              ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/CreateAgentParams".to_string(),
+                summary: None,
+                description: None,
+              },
+            ],
+            ..Default::default()
+          })),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    })),
+    ..Default::default()
+  };
+
+  let (types, info) = converter.convert(
+    "create_interaction",
+    "createInteraction",
+    &Method::POST,
+    "/interactions",
+    OperationKind::Http,
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
+
+  // Should have a request type
+  assert!(info.request_type.is_some(), "Should have a request type");
+  let request_type_name = info.request_type.as_ref().unwrap().as_str();
+  assert_eq!(request_type_name, "CreateInteractionRequest");
+
+  // Should have body metadata
+  assert!(info.body.is_some(), "Should have body metadata");
+  let body_meta = info.body.as_ref().unwrap();
+  assert_eq!(body_meta.field_name.as_str(), "body");
+  assert!(!body_meta.optional, "Body should be required");
+
+  // Find the request struct and check it has a body field
+  let request_struct = types
+    .iter()
+    .find_map(|t| match t {
+      RustType::Struct(s) if s.name == "CreateInteractionRequest" => Some(s),
+      _ => None,
+    })
+    .expect("Request struct not found");
+
+  let body_field = request_struct
+    .fields
+    .iter()
+    .find(|f| f.name == "body")
+    .expect("Body field not found");
+
+  // The body field should reference a union type (enum) for the oneOf
+  assert!(!body_field.rust_type.nullable, "Required body should not be nullable");
+
+  // Check that a union enum was generated for the request body
+  let union_enum = types.iter().find(|t| matches!(t, RustType::Enum(e) if e.name.as_str().contains("InteractionRequestBody") || e.name.as_str().contains("RequestBody")));
+  assert!(
+    union_enum.is_some(),
+    "Should generate a union enum for oneOf request body. Generated types: {:?}",
+    types
+      .iter()
+      .map(|t| match t {
+        RustType::Struct(s) => format!("Struct({})", s.name),
+        RustType::Enum(e) => format!("Enum({})", e.name),
+        RustType::TypeAlias(a) => format!("Alias({})", a.name),
+        _ => "Other".to_string(),
+      })
+      .collect::<Vec<_>>()
+  );
+
   Ok(())
 }

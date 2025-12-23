@@ -319,13 +319,11 @@ impl ParsedPath {
 /// Semantic kind of a struct to determine code generation behavior
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StructKind {
-  /// Regular OpenAPI schema struct from components.schemas
+  /// Regular OpenAPI schema struct from components.schemas (includes inline request/response bodies)
   #[default]
   Schema,
   /// Operation request struct combining parameters and body (has `render_path` method)
   OperationRequest,
-  /// Inline request body struct for an operation
-  RequestBody,
   /// Nested struct for path parameters (no serde, just storage)
   PathParams,
   /// Nested struct for query parameters (implements Serialize for reqwest's .query())

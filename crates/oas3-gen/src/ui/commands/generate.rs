@@ -6,7 +6,7 @@ use crossterm::style::Stylize;
 use crate::{
   generator::{
     codegen::Visibility,
-    orchestrator::{GenerationStats, Orchestrator},
+    orchestrator::{ClientModOutput, GenerationStats, Orchestrator},
   },
   ui::{Colors, EnumCaseMode, GenerateCommand, GenerateMode},
   utils::spec::SpecLoader,
@@ -67,10 +67,18 @@ impl GenerateConfig {
     tokio::fs::write(&self.output, code).await?;
     Ok(())
   }
+
+  async fn write_module_output(&self, output: ClientModOutput) -> anyhow::Result<()> {
+    tokio::fs::create_dir_all(&self.output).await?;
+    tokio::fs::write(self.output.join("types.rs"), output.types_code).await?;
+    tokio::fs::write(self.output.join("client.rs"), output.client_code).await?;
+    tokio::fs::write(self.output.join("mod.rs"), output.mod_code).await?;
+    Ok(())
+  }
 }
 
-impl From<GenerateCommand> for GenerateConfig {
-  fn from(command: GenerateCommand) -> Self {
+impl GenerateConfig {
+  pub fn from_command(command: GenerateCommand) -> anyhow::Result<Self> {
     let GenerateCommand {
       mode,
       input,
@@ -86,9 +94,14 @@ impl From<GenerateCommand> for GenerateConfig {
       quiet,
     } = command;
 
+    let output = match (&mode, output) {
+      (GenerateMode::ClientMod, None) => PathBuf::from("."),
+      (_, None) => anyhow::bail!("Output path (-o) is required for types and client modes"),
+      (_, Some(path)) => path,
+    };
     let enum_policies = EnumPolicies::from(enum_mode);
 
-    Self {
+    Ok(Self {
       mode,
       input,
       output,
@@ -102,7 +115,7 @@ impl From<GenerateCommand> for GenerateConfig {
       only_operations: only.map(|ops| ops.into_iter().collect()),
       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
       no_helpers,
-    }
+    })
   }
 }
 
@@ -163,6 +176,7 @@ impl<'a> GenerateLogger<'a> {
     let message = match self.config.mode {
       GenerateMode::Types => "Generating Rust types...",
       GenerateMode::Client => "Generating Rust client...",
+      GenerateMode::ClientMod => "Generating Rust client module...",
     };
     self.info(&message.with(self.colors.primary()).to_string());
   }
@@ -175,6 +189,10 @@ impl<'a> GenerateLogger<'a> {
     match self.config.mode {
       GenerateMode::Types => self.print_type_stats(stats),
       GenerateMode::Client => self.print_client_stats(stats),
+      GenerateMode::ClientMod => {
+        self.print_type_stats(stats);
+        self.print_client_stats(stats);
+      }
     }
 
     self.print_common_stats(stats);
@@ -271,6 +289,7 @@ impl<'a> GenerateLogger<'a> {
       let message = match self.config.mode {
         GenerateMode::Types => "Successfully generated Rust types",
         GenerateMode::Client => "Successfully generated Rust client",
+        GenerateMode::ClientMod => "Successfully generated Rust client module",
       };
       println!();
       println!(
@@ -291,17 +310,28 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
   logger.log_generating();
   let orchestrator = config.create_orchestrator(spec);
   let source_path = config.input.display().to_string();
-  let (code, stats) = match config.mode {
-    GenerateMode::Types => orchestrator.generate_with_header(&source_path)?,
-    GenerateMode::Client => orchestrator.generate_client_with_header(&source_path)?,
-  };
 
-  logger.print_statistics(&stats);
-
-  logger.log_writing();
-  config.write_output(code).await?;
+  match config.mode {
+    GenerateMode::Types => {
+      let (code, stats) = orchestrator.generate_with_header(&source_path)?;
+      logger.print_statistics(&stats);
+      logger.log_writing();
+      config.write_output(code).await?;
+    }
+    GenerateMode::Client => {
+      let (code, stats) = orchestrator.generate_client_with_header(&source_path)?;
+      logger.print_statistics(&stats);
+      logger.log_writing();
+      config.write_output(code).await?;
+    }
+    GenerateMode::ClientMod => {
+      let output = orchestrator.generate_client_mod(&source_path)?;
+      logger.print_statistics(&output.stats);
+      logger.log_writing();
+      config.write_module_output(output).await?;
+    }
+  }
 
   logger.log_success();
-
   Ok(())
 }

@@ -2,7 +2,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.23.0/status.svg)](https://deps.rs/crate/oas3-gen/0.23.0)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.23.1/status.svg)](https://deps.rs/crate/oas3-gen/0.23.1)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.2?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.2.md)
 <!-- prettier-ignore-end -->
@@ -119,17 +119,17 @@ Generates idiomatic, type-safe Rust code from an OpenAPI v3.1 (OAS31) specificat
 Usage: oas3-gen generate [OPTIONS] --input <FILE> --output <FILE> [MODE]
 
 Arguments:
-  [MODE]  Sets the generation mode [default: types] [possible values: types, client]
+  [MODE]  Sets the generation mode [default: types] [possible values: types, client, client-mod]
 
 Required:
-  -i, --input <FILE>   Path to the OpenAPI specification file (JSON or YAML, auto-detected)
-  -o, --output <FILE>  Path for the generated rust output file
+  -i, --input <FILE>   Path to the OpenAPI specification file
+  -o, --output <PATH>  Path for generated output (file for types/client, directory for client-mod)
 
 Code Generation:
-  -C, --visibility <PUB>  Module visibility for generated items [default: public] [possible values: public, crate, file]
-      --odata-support     Enable OData-specific field optionality rules (makes @odata.* fields optional)
-      --enum-mode <MODE>  How to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
-      --no-helpers        Disable generation of ergonomic helper methods for enum variants
+  -C, --visibility <PUB>       Module visibility for generated items [default: public] [possible values: public, crate, file]
+      --odata-support          Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types)
+      --enum-mode <ENUM_MODE>  Specifies how to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
+      --no-helpers             Disable generation of ergonomic helper methods for enum variants
 
 Operation Filtering:
       --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
@@ -155,15 +155,14 @@ Options:
 ### Examples
 
 ```zsh
-# Basic usage to generate types (JSON or YAML auto-detected)
-oas3-gen generate types -i openapi.json -o types.rs
-oas3-gen generate types -i openapi.yaml -o types.rs
+# Basic usage to generate a client module from a json schema file
+oas3-gen generate client-mod -i openapi.json -o generated
 
-# Basic usage to generate companion client
-oas3-gen generate client -i openapi.json -o client.rs
+# Or generate types and client code individually ...
 
 # Generate types with crate-level visibility
-oas3-gen generate -i openapi.json -o types.rs -C crate
+oas3-gen generate types -i openapi.json -o types.rs -C crate
+oas3-gen generate client -i openapi.json -o client.rs -C crate
 
 # Generate all schemas types including unused ones
 oas3-gen generate -i openapi.json -o types.rs --all-schemas
