@@ -117,7 +117,7 @@ fn test_enum_helper_with_const_discriminator() -> anyhow::Result<()> {
       assert_eq!(param_name, "bark");
       assert_eq!(param_type.to_rust_type(), "String");
     }
-    EnumMethodKind::SimpleConstructor { .. } => panic!("Expected ParameterizedConstructor, got {:?}", method.kind),
+    _ => panic!("Expected ParameterizedConstructor, got {:?}", method.kind),
   }
 
   Ok(())

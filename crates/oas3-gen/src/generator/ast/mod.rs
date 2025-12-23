@@ -403,6 +403,7 @@ impl EnumMethod {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::enum_variant_names)]
 pub enum EnumMethodKind {
   SimpleConstructor {
     variant_name: EnumVariantToken,
@@ -413,6 +414,10 @@ pub enum EnumMethodKind {
     wrapped_type: TypeRef,
     param_name: String,
     param_type: TypeRef,
+  },
+  KnownValueConstructor {
+    known_type: EnumToken,
+    known_variant: EnumVariantToken,
   },
 }
 

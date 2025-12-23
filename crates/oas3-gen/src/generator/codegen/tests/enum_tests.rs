@@ -576,6 +576,68 @@ fn test_enum_constructor_methods_without_docs() {
 }
 
 #[test]
+fn test_known_value_constructor_methods() {
+  let def = EnumDef {
+    name: EnumToken::new("ModelOption"),
+    docs: vec![],
+    variants: vec![
+      VariantDef {
+        name: EnumVariantToken::new("Known"),
+        docs: vec![],
+        content: VariantContent::Tuple(vec![TypeRef::new("ModelOptionKnown")]),
+        serde_attrs: vec![],
+        deprecated: false,
+      },
+      VariantDef {
+        name: EnumVariantToken::new("Other"),
+        docs: vec![],
+        content: VariantContent::Tuple(vec![TypeRef::new("String")]),
+        serde_attrs: vec![],
+        deprecated: false,
+      },
+    ],
+    discriminator: None,
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![
+      EnumMethod::new(
+        "gemini_25_pro",
+        EnumMethodKind::KnownValueConstructor {
+          known_type: EnumToken::new("ModelOptionKnown"),
+          known_variant: EnumVariantToken::new("Gemini25Pro"),
+        },
+        vec!["Our best model.".to_string()],
+      ),
+      EnumMethod::new(
+        "gemini_25_flash",
+        EnumMethodKind::KnownValueConstructor {
+          known_type: EnumToken::new("ModelOptionKnown"),
+          known_variant: EnumVariantToken::new("Gemini25Flash"),
+        },
+        vec![],
+      ),
+    ],
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  assert!(
+    code.contains("pub fn gemini_25_pro () -> Self"),
+    "should have gemini_25_pro constructor"
+  );
+  assert!(
+    code.contains("Self :: Known (ModelOptionKnown :: Gemini25Pro)"),
+    "should construct Known variant with inner enum value"
+  );
+  assert!(
+    code.contains("pub fn gemini_25_flash () -> Self"),
+    "should have gemini_25_flash constructor"
+  );
+  assert!(code.contains("Our best model"), "should include docs on method");
+}
+
+#[test]
 fn test_discriminated_enum() {
   let without_fallback = DiscriminatedEnumDef {
     name: EnumToken::new("Pet"),

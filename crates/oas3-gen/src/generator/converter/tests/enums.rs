@@ -661,13 +661,24 @@ fn test_relaxed_enum_detects_freeform_pattern() {
     RustType::Enum(e) => e.name == EnumToken::new("TestEnumKnown"),
     _ => false,
   });
-  let has_outer_enum = types.iter().any(|t| match t {
-    RustType::Enum(e) => e.name == EnumToken::new("TestEnum"),
-    _ => false,
+  let outer_enum = types.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == EnumToken::new("TestEnum") => Some(e),
+    _ => None,
   });
 
   assert!(has_known_enum);
-  assert!(has_outer_enum);
+  assert!(outer_enum.is_some(), "should have outer wrapper enum");
+
+  let outer_enum = outer_enum.unwrap();
+  assert_eq!(outer_enum.methods.len(), 2, "wrapper enum should have 2 helper methods");
+  assert!(
+    outer_enum.methods.iter().any(|m| m.name.as_str() == "known1"),
+    "should have known1 method"
+  );
+  assert!(
+    outer_enum.methods.iter().any(|m| m.name.as_str() == "known2"),
+    "should have known2 method"
+  );
 }
 
 #[test]
@@ -966,7 +977,7 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       assert_eq!(variant_name, &EnumVariantToken::from("Simple"));
       assert_eq!(wrapped_type.to_rust_type(), "TestUnionSimple");
     }
-    EnumMethodKind::ParameterizedConstructor { .. } => panic!("Expected SimpleConstructor"),
+    _ => panic!("Expected SimpleConstructor"),
   }
 
   // Check Parameterized Constructor
@@ -987,7 +998,7 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
       assert_eq!(param_name, "req_field");
       assert_eq!(param_type.to_rust_type(), "String");
     }
-    EnumMethodKind::SimpleConstructor { .. } => panic!("Expected ParameterizedConstructor"),
+    _ => panic!("Expected ParameterizedConstructor"),
   }
 
   Ok(())

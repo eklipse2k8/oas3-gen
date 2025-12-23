@@ -193,6 +193,17 @@ impl<'a> EnumGenerator<'a> {
             }
           }
         }
+        EnumMethodKind::KnownValueConstructor {
+          known_type,
+          known_variant,
+        } => {
+          quote! {
+            #docs
+            #vis fn #method_name() -> Self {
+              Self::Known(#known_type::#known_variant)
+            }
+          }
+        }
       }
     });
 
@@ -418,6 +429,9 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
               Self::#variant_name(#constructor)
             }
           }
+        }
+        EnumMethodKind::KnownValueConstructor { .. } => {
+          unreachable!("KnownValueConstructor is only used for relaxed enums, not discriminated enums")
         }
       }
     });

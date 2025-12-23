@@ -788,7 +788,13 @@ impl EnumConverter {
     let (known_enum_name, inner_enum_type) =
       self.resolve_cached_known_enum(&base_name, known_values, cache_key_values, cache);
 
-    let outer_enum = Self::build_relaxed_wrapper_enum(&base_name, &known_enum_name, schema);
+    let methods = if self.no_helpers {
+      vec![]
+    } else {
+      Self::build_known_value_constructors(&base_name, &known_enum_name, known_values)
+    };
+
+    let outer_enum = Self::build_relaxed_wrapper_enum(&base_name, &known_enum_name, schema, methods);
 
     let mut types = vec![];
     if let Some(ie) = inner_enum_type {
@@ -848,7 +854,50 @@ impl EnumConverter {
     )
   }
 
-  fn build_relaxed_wrapper_enum(name: &str, known_type_name: &str, schema: &ObjectSchema) -> RustType {
+  fn build_known_value_constructors(
+    wrapper_enum_name: &str,
+    known_type_name: &str,
+    values: &[(String, Option<String>, bool)],
+  ) -> Vec<EnumMethod> {
+    let known_type = EnumToken::new(known_type_name);
+
+    let variant_names: Vec<EnumVariantToken> = values
+      .iter()
+      .filter_map(|(value, _, _)| {
+        VariantNameNormalizer::normalize(&Value::String(value.clone())).map(|n| EnumVariantToken::new(n.name))
+      })
+      .collect();
+
+    let variant_name_strings: Vec<String> = variant_names.iter().map(std::string::ToString::to_string).collect();
+    let method_names = derive_method_names(wrapper_enum_name, &variant_name_strings);
+
+    let mut seen = BTreeSet::new();
+    variant_names
+      .into_iter()
+      .zip(method_names)
+      .zip(values.iter())
+      .map(|((variant, base_name), (_, description, _))| {
+        let method_name = ensure_unique(&base_name, &seen);
+        seen.insert(method_name.clone());
+        let docs = metadata::extract_docs(description.as_ref());
+        EnumMethod::new(
+          method_name,
+          EnumMethodKind::KnownValueConstructor {
+            known_type: known_type.clone(),
+            known_variant: variant,
+          },
+          docs,
+        )
+      })
+      .collect()
+  }
+
+  fn build_relaxed_wrapper_enum(
+    name: &str,
+    known_type_name: &str,
+    schema: &ObjectSchema,
+    methods: Vec<EnumMethod>,
+  ) -> RustType {
     let variants = vec![
       VariantDef {
         name: EnumVariantToken::new("Known"),
@@ -872,6 +921,7 @@ impl EnumConverter {
       variants,
       serde_attrs: vec![SerdeAttribute::Untagged],
       case_insensitive: false,
+      methods,
       ..Default::default()
     })
   }
