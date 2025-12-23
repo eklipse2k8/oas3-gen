@@ -14,14 +14,14 @@ Note: Use `cargo test` without `--lib` to test the entire workspace. Using `carg
 All code changes that affect code generation output require rebuilding the fixture files. Run these commands after making changes:
 
 ```bash
-# Rebuild petstore types fixture
-cargo run -- generate types -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore/types.rs --all-schemas
+# Rebuild petstore fixture (types.rs, client.rs, mod.rs)
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore --all-schemas
 
-# Rebuild petstore client fixture
-cargo run -- generate client -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore/client.rs --all-schemas
+# Rebuild union_serde fixture (types.rs, client.rs, mod.rs)
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --all-schemas
 
-# Rebuild union_serde types fixture
-cargo run -- generate types -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde/types.rs --all-schemas
+# Rebuild oas_3_1_2_pet_benchmark fixture (types.rs, client.rs, mod.rs)
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/oas_3_1_2_pet_benchmark.json -o crates/oas3-gen/fixtures/oas_3_1_2_pet_benchmark --all-schemas
 ```
 
 ## Code Coverage

@@ -1,14 +1,3 @@
-#![allow(clippy::default_trait_access)]
-#![allow(clippy::doc_markdown)]
-#![allow(clippy::enum_variant_names)]
-#![allow(clippy::large_enum_variant)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::result_large_err)]
-#![allow(clippy::struct_field_names)]
-#![allow(clippy::too_many_lines)]
-#![allow(clippy::unnecessary_wraps)]
-#![allow(clippy::unused_self)]
-#![allow(dead_code)]
 //!
 //! AUTO-GENERATED CODE - DO NOT EDIT!
 //!

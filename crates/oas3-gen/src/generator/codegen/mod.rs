@@ -14,6 +14,7 @@ pub mod constants;
 pub mod enums;
 pub mod error_impls;
 pub mod metadata;
+pub mod mod_file;
 pub mod structs;
 pub mod type_aliases;
 
@@ -53,13 +54,13 @@ pub fn generate_file(
   gen_version: &str,
 ) -> anyhow::Result<String> {
   let code_tokens = generate(types, error_schemas, visibility);
-  generate_source(&code_tokens, metadata, lint_config, source_path, gen_version)
+  generate_source(&code_tokens, metadata, Some(lint_config), source_path, gen_version)
 }
 
 pub fn generate_source(
   code: &TokenStream,
   metadata: &metadata::CodeMetadata,
-  lint_config: &super::ast::LintConfig,
+  lint_config: Option<&super::ast::LintConfig>,
   source_path: &str,
   gen_version: &str,
 ) -> anyhow::Result<String> {
@@ -70,16 +71,18 @@ pub fn generate_source(
     |d| d.replace('\n', "\n//! "),
   );
 
-  let clippy_directives = lint_config
-    .clippy_allows
-    .iter()
-    .map(|allow| format!("#![allow({allow})]"))
-    .collect::<Vec<_>>()
-    .join("\n");
+  let lint_directives = lint_config.map_or_else(String::new, |cfg| {
+    cfg
+      .clippy_allows
+      .iter()
+      .map(|allow| format!("#![allow({allow})]"))
+      .collect::<Vec<_>>()
+      .join("\n")
+      + "\n"
+  });
 
   let header = format!(
-    r"{clippy_directives}
-//!
+    r"{lint_directives}//!
 //! AUTO-GENERATED CODE - DO NOT EDIT!
 //!
 //! {}

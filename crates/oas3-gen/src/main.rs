@@ -25,7 +25,8 @@ async fn main() -> anyhow::Result<()> {
       ListCommands::Operations { input } => ui::commands::list_operations(&input, &colors).await?,
     },
     Commands::Generate(command) => {
-      ui::commands::generate_code(command.into(), &colors).await?;
+      let config = ui::commands::GenerateConfig::from_command(command)?;
+      ui::commands::generate_code(config, &colors).await?;
     }
   }
 

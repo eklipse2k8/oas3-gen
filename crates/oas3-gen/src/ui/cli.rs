@@ -70,16 +70,16 @@ pub struct GenerateCommand {
   )]
   pub input: PathBuf,
 
-  /// Path for the generated rust output file
+  /// Path for generated output (file for types/client, directory for client-mod)
   #[arg(
     short,
     long,
-    value_name = "FILE",
+    value_name = "PATH",
     value_hint = ValueHint::AnyPath,
     display_order = 0,
     help_heading = "Required"
   )]
-  pub output: PathBuf,
+  pub output: Option<PathBuf>,
 
   /// Module visibility for generated items
   #[arg(
@@ -165,10 +165,12 @@ pub struct GenerateCommand {
   pub quiet: bool,
 }
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
 pub enum GenerateMode {
   Types,
   Client,
+  #[value(name = "client-mod")]
+  ClientMod,
 }
 
 #[derive(ValueEnum, Clone, Debug, Default)]
