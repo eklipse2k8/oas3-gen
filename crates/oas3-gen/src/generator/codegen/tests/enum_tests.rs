@@ -359,6 +359,63 @@ fn test_case_insensitive_enum() {
 }
 
 #[test]
+fn test_case_insensitive_enum_deserialize_only() {
+  let def = EnumDef {
+    name: EnumToken::new("Status"),
+    docs: vec![],
+    variants: vec![
+      VariantDef {
+        name: EnumVariantToken::new("Active"),
+        docs: vec![],
+        content: VariantContent::Unit,
+        serde_attrs: vec![SerdeAttribute::Rename("active".to_string())],
+        deprecated: false,
+      },
+      VariantDef {
+        name: EnumVariantToken::new("Inactive"),
+        docs: vec![],
+        content: VariantContent::Unit,
+        serde_attrs: vec![SerdeAttribute::Rename("inactive".to_string())],
+        deprecated: false,
+      },
+    ],
+    discriminator: None,
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: true,
+    methods: vec![],
+    serde_mode: SerdeMode::DeserializeOnly,
+  };
+
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+
+  let parts: Vec<&str> = code.split("pub enum Status").collect();
+  assert_eq!(parts.len(), 2, "should split into derives and enum parts");
+  let derive_part = parts[0];
+
+  assert!(
+    !derive_part.contains("Serialize"),
+    "should NOT derive Serialize when DeserializeOnly"
+  );
+  assert!(
+    !derive_part.contains("Deserialize"),
+    "should NOT derive Deserialize (custom impl used for case-insensitive)"
+  );
+  assert!(
+    !code.contains("# [serde (rename"),
+    "should NOT have serde rename attrs when no serde derives"
+  );
+  assert!(
+    code.contains("impl < 'de > serde :: Deserialize < 'de > for Status"),
+    "should have custom Deserialize impl"
+  );
+  assert!(
+    code.contains("\"active\" => Ok (Status :: Active)"),
+    "custom deserialize should match 'active'"
+  );
+}
+
+#[test]
 fn test_enum_visibility() {
   let cases = [
     (

@@ -8,7 +8,8 @@ use super::{
   },
 };
 use crate::generator::ast::{
-  DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute, SerdeMode,
+  DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute,
+  SerdeMode,
 };
 
 /// Generates standard Rust enums that use serde's derive macros for serialization.
@@ -102,6 +103,10 @@ impl<'a> EnumGenerator<'a> {
   }
 
   fn generate_variants(&self) -> Vec<TokenStream> {
+    let has_serde_derive = self.def.derives().iter().any(|d| {
+      matches!(d, DeriveTrait::Serialize | DeriveTrait::Deserialize)
+    });
+
     self
       .def
       .variants
@@ -110,7 +115,11 @@ impl<'a> EnumGenerator<'a> {
       .map(|(idx, v)| {
         let variant_name = format_ident!("{}", v.name);
         let variant_docs = generate_docs(&v.docs);
-        let variant_serde_attrs = generate_serde_attrs(&v.serde_attrs);
+        let variant_serde_attrs = if has_serde_derive {
+          generate_serde_attrs(&v.serde_attrs)
+        } else {
+          quote! {}
+        };
         let deprecated_attr = generate_deprecated_attr(v.deprecated);
         let default_attr = (idx == 0).then(|| quote! { #[default] });
         let content = v.content.tuple_types().map(|types| {
