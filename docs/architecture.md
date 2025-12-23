@@ -62,12 +62,8 @@ crates/
 │           │   ├── undeclared_path_params.rs
 │           │   └── untyped_params.rs
 │           ├── analyzer/          # Schema analysis and validation
-│           │   ├── mod.rs
-│           │   ├── errors.rs      # Error type definitions
-│           │   ├── stats.rs       # Schema statistics
-│           │   ├── transforms.rs  # Schema transformations
-│           │   ├── type_graph.rs  # Type dependency graph
-│           │   ├── type_usage.rs  # Type usage tracking
+│           │   ├── mod.rs         # TypeAnalyzer, TypeUsage, response deduplication, serde modes
+│           │   ├── dependency_graph.rs  # Type dependency graph
 │           │   └── tests/         # Analyzer tests
 │           │       ├── mod.rs
 │           │       ├── error_tests.rs
@@ -168,7 +164,7 @@ crates/
 - [type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping with TypeResolverBuilder
 - [identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
 - [cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching with StructSummary
-- [type_usage.rs](../crates/oas3-gen/src/generator/analyzer/type_usage.rs): Type usage tracking and analysis
+- [analyzer/mod.rs](../crates/oas3-gen/src/generator/analyzer/mod.rs): TypeAnalyzer and type usage tracking
 - [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): CodegenConfig and typed policy enums
 
 ## Key Dependencies

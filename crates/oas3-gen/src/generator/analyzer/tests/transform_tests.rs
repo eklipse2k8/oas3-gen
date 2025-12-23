@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
+use super::{add_nested_validation_attrs, update_derives_from_usage};
 use crate::generator::{
-  analyzer::{TypeUsage, add_nested_validation_attrs, update_derives_from_usage},
+  analyzer::TypeUsage,
   ast::{
     DeriveTrait, DerivesProvider, EnumDef, EnumToken, EnumVariantToken, FieldDef, OuterAttr, RustType, StructDef,
     StructKind, StructToken, TypeRef, ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,

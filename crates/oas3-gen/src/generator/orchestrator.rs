@@ -5,8 +5,8 @@ use strum::Display;
 
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
-  analyzer::{self, ErrorAnalyzer},
-  ast::{LintConfig, OperationInfo, OperationKind, RustType},
+  analyzer::TypeAnalyzer,
+  ast::{LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType},
   codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata, mod_file::ModFileGenerator},
   converter::{
     CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
@@ -120,14 +120,15 @@ impl Orchestrator {
       mut rust_types,
       mut operations_info,
       mut stats,
-      ..
+      usage_recorder,
     } = artifacts;
 
-    analyzer::deduplicate_response_enums(&mut rust_types, &mut operations_info);
+    let seed_map = usage_recorder.into_usage_map();
+    let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
+    let _ = analyzer.analyze();
 
-    let header_count = analyzer::count_unique_headers(&operations_info);
     stats.client_methods_generated = Some(operations_info.len());
-    stats.client_headers_generated = Some(header_count);
+    stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
     let metadata = CodeMetadata::from_spec(&self.spec);
     let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility);
@@ -156,16 +157,13 @@ impl Orchestrator {
     let lint_config = LintConfig::default();
     let metadata = CodeMetadata::from_spec(&self.spec);
 
-    analyzer::deduplicate_response_enums(&mut rust_types, &mut operations_info);
     let seed_map = usage_recorder.into_usage_map();
-    let type_usage = analyzer::build_type_usage_map(seed_map, &rust_types);
-    analyzer::add_nested_validation_attrs(&mut rust_types);
-    analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
-    let error_schemas = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+    let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
+    let analysis = analyzer.analyze();
 
     let final_code = codegen::generate_file(
       &rust_types,
-      &error_schemas,
+      &analysis.error_schemas,
       self.visibility,
       &metadata,
       &lint_config,
@@ -186,19 +184,15 @@ impl Orchestrator {
 
     let metadata = CodeMetadata::from_spec(&self.spec);
 
-    analyzer::deduplicate_response_enums(&mut rust_types, &mut operations_info);
     let seed_map = usage_recorder.into_usage_map();
-    let type_usage = analyzer::build_type_usage_map(seed_map, &rust_types);
-    analyzer::add_nested_validation_attrs(&mut rust_types);
-    analyzer::update_derives_from_usage(&mut rust_types, &type_usage);
-    let error_schemas = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+    let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
+    let analysis = analyzer.analyze();
 
-    let types_tokens = codegen::generate(&rust_types, &error_schemas, self.visibility);
+    let types_tokens = codegen::generate(&rust_types, &analysis.error_schemas, self.visibility);
     let types_code = codegen::generate_source(&types_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
 
-    let header_count = analyzer::count_unique_headers(&operations_info);
     stats.client_methods_generated = Some(operations_info.len());
-    stats.client_headers_generated = Some(header_count);
+    stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
     let client_generator =
       ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility).with_types_import();
@@ -395,6 +389,16 @@ impl Orchestrator {
       }
     }
     (rust_types, warnings)
+  }
+
+  fn count_unique_headers(operations: &[OperationInfo]) -> usize {
+    operations
+      .iter()
+      .flat_map(|op| &op.parameters)
+      .filter(|param| matches!(param.location, ParameterLocation::Header))
+      .map(|param| param.original_name.to_ascii_lowercase())
+      .collect::<std::collections::BTreeSet<_>>()
+      .len()
   }
 
   fn convert_all_operations(

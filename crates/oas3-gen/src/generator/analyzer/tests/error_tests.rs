@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use http::Method;
 
 use crate::generator::{
-  analyzer::ErrorAnalyzer,
+  analyzer::{AnalysisResult, TypeAnalyzer},
   ast::{
     ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, OperationKind, ParsedPath, PathSegment,
     RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef, VariantContent, VariantDef,
@@ -81,62 +83,61 @@ fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<
   }
 }
 
+fn analyze_errors(mut types: Vec<RustType>, mut operations: Vec<OperationInfo>) -> AnalysisResult {
+  let analyzer = TypeAnalyzer::new(&mut types, &mut operations, BTreeMap::new());
+  analyzer.analyze()
+}
+
 #[test]
 fn test_build_error_schema_set_empty_operations() {
-  let operations_info = vec![];
-  let rust_types = vec![];
-
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
-
-  assert!(result.is_empty());
+  let result = analyze_errors(vec![], vec![]);
+  assert!(result.error_schemas.is_empty());
 }
 
 #[test]
 fn test_build_error_schema_set_empty_types() {
-  let operations_info = vec![create_operation_info("test", vec![], vec!["ErrorType".to_string()])];
-  let rust_types = vec![];
+  let operations = vec![create_operation_info("test", vec![], vec!["ErrorType".to_string()])];
+  let result = analyze_errors(vec![], operations);
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
-
-  assert_eq!(result.len(), 1);
-  assert!(result.contains(&EnumToken::new("ErrorType")));
+  assert_eq!(result.error_schemas.len(), 1);
+  assert!(result.error_schemas.contains(&EnumToken::new("ErrorType")));
 }
 
 #[test]
 fn test_build_error_schema_set_only_error_types() {
-  let operations_info = vec![
+  let operations = vec![
     create_operation_info("op1", vec![], vec!["Error1".to_string()]),
     create_operation_info("op2", vec![], vec!["Error2".to_string()]),
   ];
-  let rust_types = vec![
+  let types = vec![
     create_test_struct("Error1", RustPrimitive::String),
     create_test_struct("Error2", RustPrimitive::String),
   ];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 2);
-  assert!(result.contains(&EnumToken::new("Error1")));
-  assert!(result.contains(&EnumToken::new("Error2")));
+  assert_eq!(result.error_schemas.len(), 2);
+  assert!(result.error_schemas.contains(&EnumToken::new("Error1")));
+  assert!(result.error_schemas.contains(&EnumToken::new("Error2")));
 }
 
 #[test]
 fn test_build_error_schema_set_excludes_success_types() {
-  let operations_info = vec![
+  let operations = vec![
     create_operation_info("op1", vec!["SharedType".to_string()], vec![]),
     create_operation_info("op2", vec![], vec!["SharedType".to_string()]),
   ];
-  let rust_types = vec![create_test_struct("SharedType", RustPrimitive::String)];
+  let types = vec![create_test_struct("SharedType", RustPrimitive::String)];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert!(result.is_empty(), "Types used in success responses should be excluded");
+  assert!(result.error_schemas.is_empty(), "Types used in success responses should be excluded");
 }
 
 #[test]
 fn test_build_error_schema_set_expands_nested_struct_fields() {
-  let operations_info = vec![create_operation_info("op1", vec![], vec!["RootError".to_string()])];
-  let rust_types = vec![
+  let operations = vec![create_operation_info("op1", vec![], vec!["RootError".to_string()])];
+  let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("RootError"),
       docs: vec![],
@@ -155,17 +156,17 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
     create_test_struct("NestedError", RustPrimitive::String),
   ];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 2);
-  assert!(result.contains(&EnumToken::new("RootError")));
-  assert!(result.contains(&EnumToken::new("NestedError")));
+  assert_eq!(result.error_schemas.len(), 2);
+  assert!(result.error_schemas.contains(&EnumToken::new("RootError")));
+  assert!(result.error_schemas.contains(&EnumToken::new("NestedError")));
 }
 
 #[test]
 fn test_build_error_schema_set_expands_enum_tuple_variants() {
-  let operations_info = vec![create_operation_info("op1", vec![], vec!["ErrorEnum".to_string()])];
-  let rust_types = vec![
+  let operations = vec![create_operation_info("op1", vec![], vec!["ErrorEnum".to_string()])];
+  let types = vec![
     RustType::Enum(EnumDef {
       name: "ErrorEnum".into(),
       docs: vec![],
@@ -186,28 +187,28 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
     create_test_struct("InnerError", RustPrimitive::String),
   ];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 2);
-  assert!(result.contains(&EnumToken::new("ErrorEnum")));
-  assert!(result.contains(&EnumToken::new("InnerError")));
+  assert_eq!(result.error_schemas.len(), 2);
+  assert!(result.error_schemas.contains(&EnumToken::new("ErrorEnum")));
+  assert!(result.error_schemas.contains(&EnumToken::new("InnerError")));
 }
 
 #[test]
 fn test_build_error_schema_set_skips_unit_enum_variants() {
-  let operations_info = vec![create_operation_info("op1", vec![], vec!["ErrorEnum".to_string()])];
-  let rust_types = vec![create_test_enum("ErrorEnum", false)];
+  let operations = vec![create_operation_info("op1", vec![], vec!["ErrorEnum".to_string()])];
+  let types = vec![create_test_enum("ErrorEnum", false)];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 1);
-  assert!(result.contains(&EnumToken::new("ErrorEnum")));
+  assert_eq!(result.error_schemas.len(), 1);
+  assert!(result.error_schemas.contains(&EnumToken::new("ErrorEnum")));
 }
 
 #[test]
 fn test_build_error_schema_set_handles_deep_nesting() {
-  let operations_info = vec![create_operation_info("op1", vec![], vec!["Level1".to_string()])];
-  let rust_types = vec![
+  let operations = vec![create_operation_info("op1", vec![], vec!["Level1".to_string()])];
+  let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("Level1"),
       docs: vec![],
@@ -241,21 +242,21 @@ fn test_build_error_schema_set_handles_deep_nesting() {
     create_test_struct("Level3", RustPrimitive::String),
   ];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 3);
-  assert!(result.contains(&EnumToken::new("Level1")));
-  assert!(result.contains(&EnumToken::new("Level2")));
-  assert!(result.contains(&EnumToken::new("Level3")));
+  assert_eq!(result.error_schemas.len(), 3);
+  assert!(result.error_schemas.contains(&EnumToken::new("Level1")));
+  assert!(result.error_schemas.contains(&EnumToken::new("Level2")));
+  assert!(result.error_schemas.contains(&EnumToken::new("Level3")));
 }
 
 #[test]
 fn test_build_error_schema_set_stops_at_success_types() {
-  let operations_info = vec![
+  let operations = vec![
     create_operation_info("op1", vec!["SuccessType".to_string()], vec![]),
     create_operation_info("op2", vec![], vec!["ErrorType".to_string()]),
   ];
-  let rust_types = vec![
+  let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("ErrorType"),
       docs: vec![],
@@ -274,31 +275,29 @@ fn test_build_error_schema_set_stops_at_success_types() {
     create_test_struct("SuccessType", RustPrimitive::String),
   ];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 1);
-  assert!(result.contains(&EnumToken::new("ErrorType")));
+  assert_eq!(result.error_schemas.len(), 1);
+  assert!(result.error_schemas.contains(&EnumToken::new("ErrorType")));
   assert!(
-    !result.contains(&EnumToken::new("SuccessType")),
+    !result.error_schemas.contains(&EnumToken::new("SuccessType")),
     "Should not expand into success types"
   );
 }
 
 #[test]
 fn test_build_error_schema_set_handles_missing_types() {
-  let operations_info = vec![create_operation_info("op1", vec![], vec!["MissingType".to_string()])];
-  let rust_types = vec![];
+  let operations = vec![create_operation_info("op1", vec![], vec!["MissingType".to_string()])];
+  let result = analyze_errors(vec![], operations);
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
-
-  assert_eq!(result.len(), 1);
-  assert!(result.contains(&EnumToken::new("MissingType")));
+  assert_eq!(result.error_schemas.len(), 1);
+  assert!(result.error_schemas.contains(&EnumToken::new("MissingType")));
 }
 
 #[test]
 fn test_build_error_schema_set_handles_circular_references() {
-  let operations_info = vec![create_operation_info("op1", vec![], vec!["CircularA".to_string()])];
-  let rust_types = vec![
+  let operations = vec![create_operation_info("op1", vec![], vec!["CircularA".to_string()])];
+  let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("CircularA"),
       docs: vec![],
@@ -331,21 +330,21 @@ fn test_build_error_schema_set_handles_circular_references() {
     }),
   ];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 2);
-  assert!(result.contains(&EnumToken::new("CircularA")));
-  assert!(result.contains(&EnumToken::new("CircularB")));
+  assert_eq!(result.error_schemas.len(), 2);
+  assert!(result.error_schemas.contains(&EnumToken::new("CircularA")));
+  assert!(result.error_schemas.contains(&EnumToken::new("CircularB")));
 }
 
 #[test]
 fn test_build_error_schema_set_ignores_primitive_fields() {
-  let operations_info = vec![create_operation_info(
+  let operations = vec![create_operation_info(
     "op1",
     vec![],
     vec!["ErrorWithPrimitives".to_string()],
   )];
-  let rust_types = vec![RustType::Struct(StructDef {
+  let types = vec![RustType::Struct(StructDef {
     name: StructToken::new("ErrorWithPrimitives"),
     docs: vec![],
     fields: vec![
@@ -369,23 +368,23 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
     ..Default::default()
   })];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 1);
-  assert!(result.contains(&EnumToken::new("ErrorWithPrimitives")));
+  assert_eq!(result.error_schemas.len(), 1);
+  assert!(result.error_schemas.contains(&EnumToken::new("ErrorWithPrimitives")));
 }
 
 #[test]
 fn test_build_error_schema_set_multiple_operations_same_error() {
-  let operations_info = vec![
+  let operations = vec![
     create_operation_info("op1", vec![], vec!["CommonError".to_string()]),
     create_operation_info("op2", vec![], vec!["CommonError".to_string()]),
     create_operation_info("op3", vec![], vec!["CommonError".to_string()]),
   ];
-  let rust_types = vec![create_test_struct("CommonError", RustPrimitive::String)];
+  let types = vec![create_test_struct("CommonError", RustPrimitive::String)];
 
-  let result = ErrorAnalyzer::build_error_schema_set(&operations_info, &rust_types);
+  let result = analyze_errors(types, operations);
 
-  assert_eq!(result.len(), 1, "Should deduplicate common errors");
-  assert!(result.contains(&EnumToken::new("CommonError")));
+  assert_eq!(result.error_schemas.len(), 1, "Should deduplicate common errors");
+  assert!(result.error_schemas.contains(&EnumToken::new("CommonError")));
 }
