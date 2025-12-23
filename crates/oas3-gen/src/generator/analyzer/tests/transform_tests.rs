@@ -12,7 +12,6 @@ use crate::generator::{
 fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
   StructDef {
     name: StructToken::new(name),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("field"),
       rust_type: if nullable {
@@ -29,9 +28,6 @@ fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
       ],
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind,
     ..Default::default()
   }
@@ -40,19 +36,11 @@ fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
 fn create_enum(name: &str) -> EnumDef {
   EnumDef {
     name: EnumToken::new(name),
-    docs: vec![],
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Variant"),
-      docs: vec![],
       content: VariantContent::Unit,
-      serde_attrs: vec![],
-      deprecated: false,
+      ..Default::default()
     }],
-    discriminator: None,
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    case_insensitive: false,
-    methods: vec![],
     ..Default::default()
   }
 }
@@ -182,7 +170,6 @@ fn test_adds_nested_validation_attrs_transitively() {
 
   let middle = StructDef {
     name: StructToken::new("Middle"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("inner"),
       rust_type: TypeRef::new("Inner"),
@@ -194,7 +181,6 @@ fn test_adds_nested_validation_attrs_transitively() {
 
   let outer = StructDef {
     name: StructToken::new("Outer"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("middle"),
       rust_type: TypeRef::new("Middle"),
@@ -233,7 +219,6 @@ fn test_adds_nested_validation_attrs_transitively() {
 fn test_does_not_add_nested_validation_for_unvalidated_structs() {
   let unvalidated = StructDef {
     name: StructToken::new("Plain"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("field"),
       rust_type: TypeRef::new("String"),
@@ -245,7 +230,6 @@ fn test_does_not_add_nested_validation_for_unvalidated_structs() {
 
   let outer = StructDef {
     name: StructToken::new("Outer"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("plain"),
       rust_type: TypeRef::new("Plain"),

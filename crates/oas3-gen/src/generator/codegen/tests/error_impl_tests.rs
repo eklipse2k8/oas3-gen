@@ -12,7 +12,6 @@ use crate::generator::{
 fn test_generate_error_struct_impl_with_error_field() {
   let struct_def = StructDef {
     name: StructToken::new("MyError"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("error"),
       rust_type: TypeRef::new(RustPrimitive::Custom("InnerError".into())),
@@ -38,7 +37,6 @@ fn test_generate_error_struct_impl_with_error_field() {
 fn test_generate_error_struct_impl_with_message_field() {
   let struct_def = StructDef {
     name: StructToken::new("MyError"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("message"),
       rust_type: TypeRef::new(RustPrimitive::String),
@@ -64,7 +62,6 @@ fn test_generate_error_struct_impl_with_message_field() {
 fn test_generate_error_struct_impl_without_error_fields() {
   let struct_def = StructDef {
     name: StructToken::new("MyError"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("code"),
       rust_type: TypeRef::new(RustPrimitive::I32),
@@ -85,13 +82,12 @@ fn test_generate_error_struct_impl_without_error_fields() {
 fn test_generate_error_enum_impl_with_tuple_variants() {
   let enum_def = EnumDef {
     name: EnumToken::new("MyError"),
-    docs: vec![],
     variants: vec![VariantDef {
       name: EnumVariantToken::new("BadRequest"),
-      docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],
       deprecated: false,
+      ..Default::default()
     }],
     serde_attrs: vec![],
     outer_attrs: vec![],
@@ -114,13 +110,12 @@ fn test_generate_error_enum_impl_with_tuple_variants() {
 fn test_generate_error_enum_impl_with_unit_variants() {
   let enum_def = EnumDef {
     name: EnumToken::new("MyError"),
-    docs: vec![],
     variants: vec![VariantDef {
       name: EnumVariantToken::new("NotFound"),
-      docs: vec![],
       content: VariantContent::Unit,
       serde_attrs: vec![],
       deprecated: false,
+      ..Default::default()
     }],
     serde_attrs: vec![],
     outer_attrs: vec![],
@@ -138,7 +133,6 @@ fn test_generate_error_enum_impl_with_unit_variants() {
 fn test_try_generate_error_impl_for_error_struct() {
   let struct_def = StructDef {
     name: StructToken::new("ApiError"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("message"),
       rust_type: TypeRef::new(RustPrimitive::String),
@@ -163,13 +157,12 @@ fn test_try_generate_error_impl_for_error_struct() {
 fn test_try_generate_error_impl_for_error_enum() {
   let enum_def = EnumDef {
     name: EnumToken::new("ApiError"),
-    docs: vec![],
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Error"),
-      docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
       serde_attrs: vec![],
       deprecated: false,
+      ..Default::default()
     }],
     serde_attrs: vec![],
     outer_attrs: vec![],

@@ -379,10 +379,10 @@ fn test_infer_variant_name_special_cases() {
 fn make_variant(name: &str) -> VariantDef {
   VariantDef {
     name: EnumVariantToken::from(name),
-    docs: vec![],
     content: VariantContent::Unit,
     serde_attrs: vec![],
     deprecated: false,
+    ..Default::default()
   }
 }
 
@@ -442,10 +442,10 @@ fn test_strip_common_affixes_preserves_variant_content() {
   let mut variants = vec![
     VariantDef {
       name: EnumVariantToken::from("CreateResponse"),
-      docs: vec![],
       content: VariantContent::Tuple(vec![tuple_type]),
       serde_attrs: vec![],
       deprecated: false,
+      ..Default::default()
     },
     make_variant("UpdateResponse"),
   ];

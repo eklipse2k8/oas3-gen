@@ -1125,13 +1125,12 @@ fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
 fn test_enum_helper_skips_without_default_trait() {
   let enum_def = RustType::Enum(EnumDef {
     name: EnumToken::new("TestEnum"),
-    docs: vec![],
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Variant"),
-      docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("TestVariant".into()))]),
       serde_attrs: vec![],
       deprecated: false,
+      ..Default::default()
     }],
     discriminator: None,
     serde_attrs: vec![],

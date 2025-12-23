@@ -17,8 +17,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
-    RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+    DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
+    EnumVariantToken, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -45,7 +45,7 @@ pub(crate) enum CollisionStrategy {
 
 struct EnumValueEntry {
   value: Value,
-  docs: Vec<String>,
+  docs: Documentation,
   deprecated: bool,
 }
 
@@ -108,7 +108,7 @@ impl EnumConverter {
       .cloned()
       .map(|value| EnumValueEntry {
         value,
-        docs: vec![],
+        docs: Documentation::default(),
         deprecated: false,
       })
       .collect();
@@ -256,7 +256,7 @@ impl EnumConverter {
     name: &str,
     entries: &[EnumValueEntry],
     strategy: CollisionStrategy,
-    docs: Vec<String>,
+    docs: Documentation,
     case_insensitive: bool,
   ) -> RustType {
     let mut variants: Vec<VariantDef> = vec![];
@@ -849,7 +849,7 @@ impl EnumConverter {
       name,
       &entries,
       CollisionStrategy::Preserve,
-      vec!["Known values for the string enum.".to_string()],
+      Documentation::from_lines(["Known values for the string enum."]),
       self.case_insensitive_enums,
     )
   }
@@ -901,14 +901,14 @@ impl EnumConverter {
     let variants = vec![
       VariantDef {
         name: EnumVariantToken::new("Known"),
-        docs: vec!["A known value.".to_string()],
+        docs: Documentation::from_lines(["A known value."]),
         content: VariantContent::Tuple(vec![TypeRef::new(known_type_name)]),
         serde_attrs: vec![],
         deprecated: false,
       },
       VariantDef {
         name: EnumVariantToken::new("Other"),
-        docs: vec!["An unknown value.".to_string()],
+        docs: Documentation::from_lines(["An unknown value."]),
         content: VariantContent::Tuple(vec![TypeRef::new("String")]),
         serde_attrs: vec![],
         deprecated: false,

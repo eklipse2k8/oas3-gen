@@ -15,7 +15,7 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
+    Documentation, FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
     tokens::FieldNameToken,
   },
   converter::type_resolver::TypeResolverBuilder,
@@ -414,7 +414,7 @@ impl FieldProcessor {
           ));
           additional_field = Some(FieldDef {
             name: FieldNameToken::new("additional_properties"),
-            docs: vec!["Additional properties not defined in the schema.".to_string()],
+            docs: Documentation::from_lines(["Additional properties not defined in the schema."]),
             rust_type: map_type,
             serde_attrs: vec![SerdeAttribute::Flatten],
             ..Default::default()

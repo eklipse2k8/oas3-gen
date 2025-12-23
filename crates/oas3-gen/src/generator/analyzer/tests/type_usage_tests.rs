@@ -21,30 +21,22 @@ fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<EnumToken, (bool, bool)> 
 fn test_dependency_graph_simple_struct() {
   let user_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("address"),
       rust_type: TypeRef::new(RustPrimitive::Custom("Address".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let address_struct = RustType::Struct(StructDef {
     name: StructToken::new("Address"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("street"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -65,30 +57,22 @@ fn test_dependency_graph_simple_struct() {
 fn test_propagation_request_to_nested() {
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("CreateUserRequest"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let user_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -107,30 +91,22 @@ fn test_propagation_request_to_nested() {
 fn test_propagation_response_to_nested() {
   let response_struct = RustType::Struct(StructDef {
     name: StructToken::new("UserResponse"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let user_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -149,45 +125,33 @@ fn test_propagation_response_to_nested() {
 fn test_propagation_bidirectional() {
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("UpdateUserRequest"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let response_struct = RustType::Struct(StructDef {
     name: StructToken::new("UserResponse"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("user"),
       rust_type: TypeRef::new(RustPrimitive::Custom("User".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let user_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -213,22 +177,17 @@ fn test_propagation_bidirectional() {
 fn test_transitive_dependency_chain() {
   let a_struct = RustType::Struct(StructDef {
     name: StructToken::new("A"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("b"),
       rust_type: TypeRef::new(RustPrimitive::Custom("B".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let b_struct = RustType::Struct(StructDef {
     name: StructToken::new("B"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("c"),
       rust_type: TypeRef::new(RustPrimitive::Custom("C".into())),
@@ -243,7 +202,6 @@ fn test_transitive_dependency_chain() {
 
   let c_struct = RustType::Struct(StructDef {
     name: StructToken::new("C"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("value"),
       rust_type: TypeRef::new(RustPrimitive::String),
@@ -268,33 +226,23 @@ fn test_transitive_dependency_chain() {
 fn test_enum_with_tuple_variant() {
   let enum_def = RustType::Enum(EnumDef {
     name: EnumToken::new("Result"),
-    docs: vec![],
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Success"),
-      docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("User".into()))]),
       serde_attrs: vec![],
       deprecated: false,
+      ..Default::default()
     }],
-    discriminator: None,
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    case_insensitive: false,
-    methods: vec![],
     ..Default::default()
   });
 
   let user_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -310,21 +258,17 @@ fn test_enum_with_tuple_variant() {
 fn test_type_alias_dependency() {
   let alias = RustType::TypeAlias(TypeAliasDef {
     name: TypeAliasToken::new("UserId"),
-    docs: vec![],
     target: TypeRef::new(RustPrimitive::Custom("User".into())),
+    ..Default::default()
   });
 
   let user_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("id"),
       rust_type: TypeRef::new(RustPrimitive::I64),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -340,26 +284,17 @@ fn test_type_alias_dependency() {
 fn test_no_propagation_without_operations() {
   let user_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("address"),
       rust_type: TypeRef::new(RustPrimitive::Custom("Address".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let address_struct = RustType::Struct(StructDef {
     name: StructToken::new("Address"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -379,30 +314,22 @@ fn test_no_propagation_without_operations() {
 fn test_cyclic_dependency_handling() {
   let a_struct = RustType::Struct(StructDef {
     name: StructToken::new("A"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("b"),
       rust_type: TypeRef::new(RustPrimitive::Custom("B".into())).with_boxed(),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let b_struct = RustType::Struct(StructDef {
     name: StructToken::new("B"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("a"),
       rust_type: TypeRef::new(RustPrimitive::Custom("A".into())).with_boxed(),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -418,37 +345,28 @@ fn test_cyclic_dependency_handling() {
 fn test_response_enum_does_not_propagate_to_request_type() {
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("CreateUserRequestParams"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("name"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::OperationRequest,
     ..Default::default()
   });
 
   let response_struct = RustType::Struct(StructDef {
     name: StructToken::new("User"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("id"),
       rust_type: TypeRef::new(RustPrimitive::String),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
     name: EnumToken::new("CreateUserResponseEnum"),
-    docs: vec![],
     request_type: Some(StructToken::new("CreateUserRequestParams")),
     variants: vec![ResponseVariant {
       status_code: StatusCodeToken::Ok200,
@@ -457,6 +375,7 @@ fn test_response_enum_does_not_propagate_to_request_type() {
       schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
       content_category: ContentCategory::Json,
     }],
+    ..Default::default()
   });
 
   let types = vec![request_struct, response_struct, response_enum];
@@ -481,40 +400,24 @@ fn test_response_enum_does_not_propagate_to_request_type() {
 fn test_response_enum_propagates_to_variant_types_only() {
   let response_a = RustType::Struct(StructDef {
     name: StructToken::new("ResponseA"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let response_b = RustType::Struct(StructDef {
     name: StructToken::new("ResponseB"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("RequestParams"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::OperationRequest,
     ..Default::default()
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
     name: EnumToken::new("MyResponseEnum"),
-    docs: vec![],
     request_type: Some(StructToken::new("RequestParams")),
     variants: vec![
       ResponseVariant {
@@ -532,6 +435,7 @@ fn test_response_enum_propagates_to_variant_types_only() {
         content_category: ContentCategory::Json,
       },
     ],
+    ..Default::default()
   });
 
   let types = vec![response_a, response_b, request_struct, response_enum];
@@ -560,72 +464,51 @@ fn test_response_enum_propagates_to_variant_types_only() {
 fn test_request_body_chain_with_response_enum() {
   let request_body_struct = RustType::Struct(StructDef {
     name: StructToken::new("CreateChatCompletionRequest"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("model"),
       rust_type: TypeRef::new(RustPrimitive::Custom("ModelIds".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let model_enum = RustType::Enum(EnumDef {
     name: EnumToken::new("ModelIds"),
-    docs: vec![],
     variants: vec![VariantDef {
       name: EnumVariantToken::new("Gpt4"),
-      docs: vec![],
       content: VariantContent::Unit,
-      serde_attrs: vec![],
       deprecated: false,
+      ..Default::default()
     }],
-    discriminator: None,
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    case_insensitive: false,
-    methods: vec![],
     ..Default::default()
   });
 
   let request_body_alias = RustType::TypeAlias(TypeAliasDef {
     name: TypeAliasToken::new("CreateChatCompletionRequestBody"),
-    docs: vec![],
     target: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequest".into())),
+    ..Default::default()
   });
 
   let request_params = RustType::Struct(StructDef {
     name: StructToken::new("CreateChatCompletionRequestParams"),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("body"),
       rust_type: TypeRef::new(RustPrimitive::Custom("CreateChatCompletionRequestBody".into())),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::OperationRequest,
     ..Default::default()
   });
 
   let response_struct = RustType::Struct(StructDef {
     name: StructToken::new("CreateChatCompletionResponse"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
     name: EnumToken::new("CreateChatCompletionResponseEnum"),
-    docs: vec![],
     request_type: Some(StructToken::new("CreateChatCompletionRequestParams")),
     variants: vec![ResponseVariant {
       status_code: StatusCodeToken::Ok200,
@@ -636,6 +519,7 @@ fn test_request_body_chain_with_response_enum() {
       ))),
       content_category: ContentCategory::Json,
     }],
+    ..Default::default()
   });
 
   let types = vec![
@@ -692,40 +576,24 @@ fn test_request_body_chain_with_response_enum() {
 fn test_response_enum_dependency_extraction() {
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("RequestParams"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::OperationRequest,
     ..Default::default()
   });
 
   let response_a = RustType::Struct(StructDef {
     name: StructToken::new("ResponseA"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let response_b = RustType::Struct(StructDef {
     name: StructToken::new("ResponseB"),
-    docs: vec![],
-    fields: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   });
 
   let response_enum = RustType::ResponseEnum(ResponseEnumDef {
     name: EnumToken::new("MyResponseEnum"),
-    docs: vec![],
     request_type: Some(StructToken::new("RequestParams")),
     variants: vec![
       ResponseVariant {
@@ -743,6 +611,7 @@ fn test_response_enum_dependency_extraction() {
         content_category: ContentCategory::Json,
       },
     ],
+    ..Default::default()
   });
 
   let types = vec![request_struct, response_a, response_b, response_enum];

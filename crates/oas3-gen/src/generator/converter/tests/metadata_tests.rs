@@ -78,7 +78,7 @@ fn test_extract_docs() {
   let schema = ObjectSchema::default();
   let type_ref = TypeRef::default();
   let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_docs(), Vec::<String>::new());
+  assert!(extractor.extract_docs().is_empty());
 
   let schema = ObjectSchema {
     description: Some("Test description\nSecond line".to_string()),
@@ -86,9 +86,9 @@ fn test_extract_docs() {
   };
   let extractor = make_extractor("test", false, &schema, &type_ref);
   let docs = extractor.extract_docs();
-  assert_eq!(docs.len(), 2);
-  assert_eq!(docs[0], "Test description");
-  assert_eq!(docs[1], "Second line");
+  assert_eq!(docs.lines().len(), 2);
+  assert_eq!(docs.lines()[0], "Test description");
+  assert_eq!(docs.lines()[1], "Second line");
 }
 
 #[test]

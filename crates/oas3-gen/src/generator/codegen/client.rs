@@ -5,10 +5,10 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::LitStr;
 
-use super::{Visibility, attributes::generate_docs, metadata::CodeMetadata};
+use super::{Visibility, metadata::CodeMetadata};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
+    ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
     ParameterLocation, RustPrimitive, RustType, StructDef, StructToken, TypeRef,
     tokens::{ConstToken, HeaderToken},
   },
@@ -165,7 +165,7 @@ pub(crate) struct ResponseHandling {
 pub(crate) struct ClientOperationMethod {
   pub(crate) method_name: syn::Ident,
   pub(crate) request_ident: syn::Ident,
-  pub(crate) doc_attrs: TokenStream,
+  pub(crate) doc_attrs: Documentation,
   pub(crate) url_construction: TokenStream,
   pub(crate) builder_init: TokenStream,
   pub(crate) query_statement: TokenStream,
@@ -211,8 +211,8 @@ impl ClientOperationMethod {
     })
   }
 
-  pub(crate) fn build_doc_attributes(operation: &OperationInfo) -> TokenStream {
-    let mut docs: Vec<String> = vec![];
+  pub(crate) fn build_doc_attributes(operation: &OperationInfo) -> Documentation {
+    let mut docs = Documentation::default();
 
     if let Some(summary) = &operation.summary {
       for line in summary.lines() {
@@ -238,7 +238,7 @@ impl ClientOperationMethod {
 
     docs.push(format!("{} {}", operation.method.as_str(), operation.path_template));
 
-    generate_docs(&docs)
+    docs
   }
 
   fn build_http_method_init(method: &Method) -> TokenStream {

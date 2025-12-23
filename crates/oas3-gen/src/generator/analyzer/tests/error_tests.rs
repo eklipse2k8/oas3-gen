@@ -14,16 +14,11 @@ use crate::generator::{
 fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
   RustType::Struct(StructDef {
     name: StructToken::new(name),
-    docs: vec![],
     fields: vec![FieldDef {
       name: FieldNameToken::new("field"),
-      docs: vec![],
       rust_type: TypeRef::new(field_type),
       ..Default::default()
     }],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   })
@@ -33,30 +28,20 @@ fn create_test_enum(name: &str, has_tuple_variant: bool) -> RustType {
   let variants = if has_tuple_variant {
     vec![VariantDef {
       name: "Error".into(),
-      docs: vec![],
       content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
-      serde_attrs: vec![],
-      deprecated: false,
+      ..Default::default()
     }]
   } else {
     vec![VariantDef {
       name: "Unit".into(),
-      docs: vec![],
       content: VariantContent::Unit,
-      serde_attrs: vec![],
-      deprecated: false,
+      ..Default::default()
     }]
   };
 
   RustType::Enum(EnumDef {
     name: EnumToken::new(name),
-    docs: vec![],
     variants,
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    discriminator: None,
-    case_insensitive: false,
-    methods: vec![],
     ..Default::default()
   })
 }
@@ -143,16 +128,11 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("RootError"),
-      docs: vec![],
       fields: vec![FieldDef {
         name: FieldNameToken::new("nested"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".into())),
         ..Default::default()
       }],
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-      methods: vec![],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -172,19 +152,11 @@ fn test_build_error_schema_set_expands_enum_tuple_variants() {
   let types = vec![
     RustType::Enum(EnumDef {
       name: "ErrorEnum".into(),
-      docs: vec![],
       variants: vec![VariantDef {
         name: "Variant".into(),
-        docs: vec![],
         content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("InnerError".into()))]),
-        serde_attrs: vec![],
-        deprecated: false,
+        ..Default::default()
       }],
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-      discriminator: None,
-      case_insensitive: false,
-      methods: vec![],
       ..Default::default()
     }),
     create_test_struct("InnerError", RustPrimitive::String),
@@ -214,31 +186,21 @@ fn test_build_error_schema_set_handles_deep_nesting() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("Level1"),
-      docs: vec![],
       fields: vec![FieldDef {
         name: FieldNameToken::new("nested"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("Level2".into())),
         ..Default::default()
       }],
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-      methods: vec![],
       kind: StructKind::Schema,
       ..Default::default()
     }),
     RustType::Struct(StructDef {
       name: StructToken::new("Level2"),
-      docs: vec![],
       fields: vec![FieldDef {
         name: FieldNameToken::new("nested"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("Level3".into())),
         ..Default::default()
       }],
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-      methods: vec![],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -262,16 +224,11 @@ fn test_build_error_schema_set_stops_at_success_types() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("ErrorType"),
-      docs: vec![],
       fields: vec![FieldDef {
         name: FieldNameToken::new("nested"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".into())),
         ..Default::default()
       }],
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-      methods: vec![],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -303,31 +260,21 @@ fn test_build_error_schema_set_handles_circular_references() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("CircularA"),
-      docs: vec![],
       fields: vec![FieldDef {
         name: FieldNameToken::new("b"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".into())),
         ..Default::default()
       }],
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-      methods: vec![],
       kind: StructKind::Schema,
       ..Default::default()
     }),
     RustType::Struct(StructDef {
       name: StructToken::new("CircularB"),
-      docs: vec![],
       fields: vec![FieldDef {
         name: FieldNameToken::new("a"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".into())),
         ..Default::default()
       }],
-      serde_attrs: vec![],
-      outer_attrs: vec![],
-      methods: vec![],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -349,24 +296,18 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
   )];
   let types = vec![RustType::Struct(StructDef {
     name: StructToken::new("ErrorWithPrimitives"),
-    docs: vec![],
     fields: vec![
       FieldDef {
         name: FieldNameToken::new("string_field"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::String),
         ..Default::default()
       },
       FieldDef {
         name: FieldNameToken::new("int_field"),
-        docs: vec![],
         rust_type: TypeRef::new(RustPrimitive::I64),
         ..Default::default()
       },
     ],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   })];

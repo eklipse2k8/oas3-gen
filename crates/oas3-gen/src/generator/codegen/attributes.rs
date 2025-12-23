@@ -4,29 +4,11 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use crate::generator::ast::{
-  DeriveTrait, FieldDef, OuterAttr, ParameterLocation, SerdeAsFieldAttr, SerdeAttribute, ValidationAttribute,
+  DeriveTrait, Documentation, FieldDef, OuterAttr, SerdeAsFieldAttr, SerdeAttribute, ValidationAttribute,
 };
 
-pub(crate) fn generate_docs(docs: &[String]) -> TokenStream {
-  if docs.is_empty() {
-    return quote! {};
-  }
-  let doc_lines: Vec<TokenStream> = docs.iter().map(|line| quote! { #[doc = #line] }).collect();
-  quote! { #(#doc_lines)* }
-}
-
-pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
+pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Documentation {
   let mut docs = field.docs.clone();
-
-  if let Some(ref location) = field.parameter_location {
-    let location_str = match location {
-      ParameterLocation::Path => "`Path`",
-      ParameterLocation::Query => "`Query`",
-      ParameterLocation::Header => "`Header`",
-      ParameterLocation::Cookie => "`Cookie`",
-    };
-    docs.push(format!("- Location: {location_str}"));
-  }
 
   if let Some(ref example) = field.example_value {
     let mut formatted_example = field.rust_type.format_example(example);
@@ -45,7 +27,7 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> TokenStream {
     docs.push(format!("Validation: Must be a multiple of {multiple_of}"));
   }
 
-  generate_docs(&docs)
+  docs
 }
 
 pub(crate) fn generate_derives_from_slice(derives: &BTreeSet<DeriveTrait>) -> TokenStream {

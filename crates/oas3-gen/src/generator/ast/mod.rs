@@ -1,4 +1,5 @@
 mod derives;
+mod documentation;
 pub mod lints;
 mod outer_attrs;
 mod parsed_path;
@@ -13,6 +14,7 @@ mod tests;
 
 use derive_builder::Builder;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
+pub use documentation::Documentation;
 use http::Method;
 pub use lints::LintConfig;
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
@@ -49,7 +51,7 @@ pub enum SerdeMode {
 #[builder(default, setter(into))]
 pub struct DiscriminatedEnumDef {
   pub name: EnumToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub discriminator_field: String,
   pub variants: Vec<DiscriminatedVariant>,
   pub fallback: Option<DiscriminatedVariant>,
@@ -89,10 +91,10 @@ impl ResponseVariant {
 }
 
 /// Response enum definition for operation responses
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ResponseEnumDef {
   pub name: EnumToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub variants: Vec<ResponseVariant>,
   pub request_type: Option<StructToken>,
 }
@@ -253,7 +255,7 @@ pub enum StructKind {
 #[derive(Debug, Clone, Default)]
 pub struct StructDef {
   pub name: StructToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub fields: Vec<FieldDef>,
   pub serde_attrs: Vec<SerdeAttribute>,
   pub outer_attrs: Vec<OuterAttr>,
@@ -282,7 +284,7 @@ impl StructDef {
 #[derive(Debug, Clone)]
 pub struct StructMethod {
   pub name: MethodNameToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub kind: StructMethodKind,
 }
 
@@ -298,15 +300,15 @@ pub enum StructMethodKind {
 #[derive(Debug, Clone)]
 pub struct EnumMethod {
   pub name: MethodNameToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub kind: EnumMethodKind,
 }
 
 impl EnumMethod {
-  pub fn new(name: impl Into<MethodNameToken>, kind: EnumMethodKind, docs: Vec<String>) -> Self {
+  pub fn new(name: impl Into<MethodNameToken>, kind: EnumMethodKind, docs: impl Into<Documentation>) -> Self {
     Self {
       name: name.into(),
-      docs,
+      docs: docs.into(),
       kind,
     }
   }
@@ -336,7 +338,7 @@ pub enum EnumMethodKind {
 #[builder(default, setter(into))]
 pub struct FieldDef {
   pub name: FieldNameToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub rust_type: TypeRef,
   pub serde_attrs: Vec<SerdeAttribute>,
   pub serde_as_attr: Option<SerdeAsFieldAttr>,
@@ -361,7 +363,7 @@ impl FieldDef {
 #[derive(Debug, Clone, Default)]
 pub struct EnumDef {
   pub name: EnumToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
   pub serde_attrs: Vec<SerdeAttribute>,
@@ -383,7 +385,7 @@ impl EnumDef {
 #[derive(Debug, Clone, Default)]
 pub struct VariantDef {
   pub name: EnumVariantToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub content: VariantContent,
   pub serde_attrs: Vec<SerdeAttribute>,
   pub deprecated: bool,
@@ -443,6 +445,6 @@ impl VariantContent {
 #[derive(Debug, Clone, Default)]
 pub struct TypeAliasDef {
   pub name: TypeAliasToken,
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub target: TypeRef,
 }

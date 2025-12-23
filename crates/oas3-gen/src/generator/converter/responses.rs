@@ -6,8 +6,8 @@ use oas3::{
 use super::{SchemaConverter, cache::SharedSchemaCache};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant, RustPrimitive,
-    StatusCodeToken, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant,
+    RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
   },
   naming::{
     constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
@@ -60,7 +60,7 @@ pub(crate) fn build_response_enum(
 
   Some(ResponseEnumDef {
     name: EnumToken::new(&base_name),
-    docs: vec![format!("Response types for {}", operation.operation_id.as_ref()?)],
+    docs: Documentation::from_lines([format!("Response types for {}", operation.operation_id.as_ref()?)]),
     variants,
     request_type: None,
   })
@@ -146,7 +146,7 @@ fn normalize_response_variants(mut variants: Vec<ResponseVariant>) -> Vec<Respon
 pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
   StructMethod {
     name: MethodNameToken::new("parse_response"),
-    docs: vec!["Parse the HTTP response into the response enum.".to_string()],
+    docs: Documentation::from_lines(["Parse the HTTP response into the response enum."]),
     kind: StructMethodKind::ParseResponse {
       response_enum: response_enum.clone(),
       variants: variants.to_vec(),

@@ -12,9 +12,6 @@ mod utils;
 #[cfg(test)]
 mod tests;
 
-#[macro_use(cfg_if)]
-extern crate cfg_if;
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
   let cli = Cli::parse();

@@ -241,10 +241,6 @@ fn test_multipart_generation() {
   let body_struct = StructDef {
     name: StructToken::new("MultipartBody"),
     fields: vec![binary_field, text_field],
-    docs: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::Schema,
     ..Default::default()
   };
@@ -262,10 +258,6 @@ fn test_multipart_generation() {
       },
       ..Default::default()
     }],
-    docs: vec![],
-    serde_attrs: vec![],
-    outer_attrs: vec![],
-    methods: vec![],
     kind: StructKind::OperationRequest,
     ..Default::default()
   };

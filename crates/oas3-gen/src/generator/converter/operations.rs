@@ -279,7 +279,6 @@ impl<'a> OperationConverter<'a> {
       let fields: Vec<FieldDef> = params_by_location.path.iter().map(|(f, _, _)| f.clone()).collect();
       let struct_def = StructDef {
         name: StructToken::from_raw(&struct_name),
-        docs: vec![],
         fields,
         kind: StructKind::PathParams,
         ..Default::default()
@@ -312,7 +311,6 @@ impl<'a> OperationConverter<'a> {
 
       let struct_def = StructDef {
         name: StructToken::from_raw(&struct_name),
-        docs: vec![],
         fields,
         outer_attrs,
         kind: StructKind::QueryParams,
@@ -337,7 +335,6 @@ impl<'a> OperationConverter<'a> {
       let fields: Vec<FieldDef> = params_by_location.header.iter().map(|(f, _, _)| f.clone()).collect();
       let struct_def = StructDef {
         name: StructToken::from_raw(&struct_name),
-        docs: vec![],
         fields,
         kind: StructKind::HeaderParams,
         ..Default::default()
@@ -366,7 +363,8 @@ impl<'a> OperationConverter<'a> {
       .description
       .as_ref()
       .or(operation.summary.as_ref())
-      .map_or_else(Vec::new, |d| metadata::extract_docs(Some(d)));
+      .map(|d| metadata::extract_docs(Some(d)))
+      .unwrap_or_default();
 
     let mut methods = vec![];
 
@@ -498,7 +496,8 @@ impl<'a> OperationConverter<'a> {
     let docs = body
       .description
       .as_ref()
-      .map_or_else(Vec::new, |d| metadata::extract_docs(Some(d)));
+      .map(|d| metadata::extract_docs(Some(d)))
+      .unwrap_or_default();
 
     Some(FieldDef {
       name: FieldNameToken::new(BODY_FIELD_NAME),

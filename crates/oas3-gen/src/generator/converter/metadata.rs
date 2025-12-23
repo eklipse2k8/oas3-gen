@@ -2,15 +2,12 @@ use oas3::spec::ObjectSchema;
 use regex::Regex;
 
 use super::SchemaExt;
-use crate::{
-  generator::ast::{RustPrimitive, TypeRef, ValidationAttribute},
-  utils::text::doc_lines,
-};
+use crate::generator::ast::{Documentation, RustPrimitive, TypeRef, ValidationAttribute};
 
 /// Metadata extracted from a schema for a struct field.
 #[derive(Clone, Default)]
 pub(crate) struct FieldMetadata {
-  pub docs: Vec<String>,
+  pub docs: Documentation,
   pub validation_attrs: Vec<ValidationAttribute>,
   pub default_value: Option<serde_json::Value>,
   pub deprecated: bool,
@@ -24,9 +21,9 @@ impl FieldMetadata {
   }
 }
 
-/// Extracts documentation lines from a schema description.
-pub(crate) fn extract_docs(desc: Option<&String>) -> Vec<String> {
-  desc.map_or_else(Vec::new, |d| doc_lines(d))
+/// Extracts documentation from a schema description.
+pub(crate) fn extract_docs(desc: Option<&String>) -> Documentation {
+  Documentation::from_optional(desc)
 }
 
 pub(crate) struct MetadataExtractor<'a> {
@@ -56,7 +53,7 @@ impl<'a> MetadataExtractor<'a> {
     }
   }
 
-  pub(crate) fn extract_docs(&self) -> Vec<String> {
+  pub(crate) fn extract_docs(&self) -> Documentation {
     extract_docs(self.schema.description.as_ref())
   }
 

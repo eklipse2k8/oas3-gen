@@ -416,7 +416,7 @@ fn test_deduplicate_field_names_multiple_groups() {
 
 fn make_metadata_with_docs() -> FieldMetadata {
   FieldMetadata {
-    docs: vec!["Some docs".to_string()],
+    docs: vec!["Some docs".to_string()].into(),
     validation_attrs: vec![ValidationAttribute::Email],
     default_value: None,
     deprecated: false,

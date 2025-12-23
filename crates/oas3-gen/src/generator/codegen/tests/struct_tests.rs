@@ -11,7 +11,7 @@ use crate::generator::{
 fn base_struct(kind: StructKind) -> StructDef {
   StructDef {
     name: StructToken::new("Sample"),
-    docs: vec!["Sample struct".to_string()],
+    docs: vec!["Sample struct".to_string()].into(),
     fields: vec![FieldDef {
       name: FieldNameToken::new("field"),
       rust_type: TypeRef::new("String"),
@@ -35,7 +35,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
   let mut def = base_struct(StructKind::OperationRequest);
   def.methods.push(StructMethod {
     name: MethodNameToken::new("parse_response"),
-    docs: vec!["Parse response".to_string()],
+    docs: vec!["Parse response".to_string()].into(),
     kind: StructMethodKind::ParseResponse {
       response_enum: EnumToken::new("ResponseEnum"),
       variants: vec![variant],

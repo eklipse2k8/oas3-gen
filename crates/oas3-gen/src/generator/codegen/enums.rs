@@ -3,9 +3,7 @@ use quote::{format_ident, quote};
 
 use super::{
   Visibility,
-  attributes::{
-    generate_deprecated_attr, generate_derives_from_slice, generate_docs, generate_outer_attrs, generate_serde_attrs,
-  },
+  attributes::{generate_deprecated_attr, generate_derives_from_slice, generate_outer_attrs, generate_serde_attrs},
 };
 use crate::generator::ast::{
   DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute,
@@ -70,7 +68,7 @@ impl<'a> EnumGenerator<'a> {
 
   pub fn generate(&self) -> TokenStream {
     let name = &self.def.name;
-    let docs = generate_docs(&self.def.docs);
+    let docs = &self.def.docs;
     let vis = self.visibility.to_tokens();
 
     let derives = generate_derives_from_slice(&self.def.derives());
@@ -116,7 +114,7 @@ impl<'a> EnumGenerator<'a> {
       .enumerate()
       .map(|(idx, v)| {
         let variant_name = format_ident!("{}", v.name);
-        let variant_docs = generate_docs(&v.docs);
+        let variant_docs = &v.docs;
         let variant_serde_attrs = if has_serde_derive {
           generate_serde_attrs(&v.serde_attrs)
         } else {
@@ -150,7 +148,7 @@ impl<'a> EnumGenerator<'a> {
 
     let methods = self.def.methods.iter().map(|m| {
       let method_name = format_ident!("{}", m.name);
-      let docs = generate_docs(&m.docs);
+      let docs = &m.docs;
 
       match &m.kind {
         EnumMethodKind::SimpleConstructor {
@@ -333,7 +331,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
   pub fn generate(&self) -> TokenStream {
     let name = &self.def.name;
     let disc_field = &self.def.discriminator_field;
-    let docs = generate_docs(&self.def.docs);
+    let docs = &self.def.docs;
     let vis = self.visibility.to_tokens();
 
     let variants: Vec<TokenStream> = self
@@ -387,7 +385,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
 
     let methods = self.def.methods.iter().map(|m| {
       let method_name = format_ident!("{}", m.name);
-      let docs = generate_docs(&m.docs);
+      let docs = &m.docs;
 
       match &m.kind {
         EnumMethodKind::SimpleConstructor {
@@ -595,7 +593,7 @@ impl<'a> ResponseEnumGenerator<'a> {
 
   pub fn generate(&self) -> TokenStream {
     let name = &self.def.name;
-    let docs = generate_docs(&self.def.docs);
+    let docs = &self.def.docs;
     let vis = self.visibility.to_tokens();
 
     let variants: Vec<TokenStream> = self

@@ -13,24 +13,24 @@ fn test_basic_type_aliases() {
     (
       TypeAliasDef {
         name: TypeAliasToken::new("Identifier"),
-        docs: vec![],
         target: TypeRef::new(RustPrimitive::String),
+        ..Default::default()
       },
       "type Identifier = String;",
     ),
     (
       TypeAliasDef {
         name: TypeAliasToken::new("Count"),
-        docs: vec![],
         target: TypeRef::new(RustPrimitive::I64),
+        ..Default::default()
       },
       "type Count = i64;",
     ),
     (
       TypeAliasDef {
         name: TypeAliasToken::new("Timestamp"),
-        docs: vec![],
         target: TypeRef::new(RustPrimitive::DateTime),
+        ..Default::default()
       },
       "type Timestamp = chrono::DateTime<chrono::Utc>;",
     ),
@@ -55,7 +55,8 @@ fn test_type_alias_with_docs() {
     docs: vec![
       "Unique identifier for a user.".to_string(),
       "Format: UUID string.".to_string(),
-    ],
+    ]
+    .into(),
     target: TypeRef::new(RustPrimitive::String),
   };
 
@@ -80,8 +81,8 @@ fn test_type_alias_with_docs() {
 fn test_type_alias_visibility_levels() {
   let def = TypeAliasDef {
     name: TypeAliasToken::new("TestAlias"),
-    docs: vec![],
     target: TypeRef::new(RustPrimitive::Bool),
+    ..Default::default()
   };
 
   let cases = [
@@ -130,8 +131,8 @@ fn test_type_alias_with_wrapper_types() {
   for ((target, expected_suffix), name) in cases.into_iter().zip(names) {
     let def = TypeAliasDef {
       name: TypeAliasToken::new(name),
-      docs: vec![],
       target,
+      ..Default::default()
     };
     let tokens = generate_type_alias(&def, Visibility::Public);
     let code = format_tokens(tokens);
@@ -146,7 +147,7 @@ fn test_type_alias_with_wrapper_types() {
 fn test_type_alias_custom_types() {
   let def = TypeAliasDef {
     name: TypeAliasToken::new("PetList"),
-    docs: vec!["List of pets from the API.".to_string()],
+    docs: vec!["List of pets from the API.".to_string()].into(),
     target: TypeRef::new(RustPrimitive::Custom("Vec<Pet>".into())),
   };
 

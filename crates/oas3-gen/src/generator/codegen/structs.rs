@@ -6,14 +6,14 @@ use quote::{format_ident, quote};
 use super::{
   Visibility,
   attributes::{
-    generate_deprecated_attr, generate_docs, generate_docs_for_field, generate_outer_attrs, generate_serde_as_attr,
+    generate_deprecated_attr, generate_docs_for_field, generate_outer_attrs, generate_serde_as_attr,
     generate_serde_attrs, generate_validation_attrs,
   },
   coercion,
 };
 use crate::generator::ast::{
-  ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseVariant, RustPrimitive, StatusCodeToken, StructDef,
-  StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+  ContentCategory, DerivesProvider, Documentation, FieldDef, RegexKey, ResponseVariant, RustPrimitive, StatusCodeToken,
+  StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   tokens::{ConstToken, EnumToken, EnumVariantToken, MethodNameToken},
 };
 
@@ -32,7 +32,7 @@ impl<'a> StructGenerator<'a> {
 
   pub(crate) fn generate(&self, def: &StructDef) -> TokenStream {
     let name = format_ident!("{}", def.name);
-    let docs = generate_docs(&def.docs);
+    let docs = &def.docs;
     let vis = self.visibility.to_tokens();
 
     let derives = super::attributes::generate_derives_from_slice(&def.derives());
@@ -129,8 +129,8 @@ impl<'a> StructGenerator<'a> {
       response_enum,
       variants,
     } = &method.kind;
-    let docs = generate_docs(&method.docs);
-    self.generate_parse_response_method(&method.name, response_enum, variants, &docs)
+    let docs = &method.docs;
+    self.generate_parse_response_method(&method.name, response_enum, variants, docs)
   }
 
   fn generate_parse_response_method(
@@ -138,7 +138,7 @@ impl<'a> StructGenerator<'a> {
     method_name: &MethodNameToken,
     response_enum: &EnumToken,
     variants: &[ResponseVariant],
-    docs: &TokenStream,
+    docs: &Documentation,
   ) -> TokenStream {
     let vis = self.visibility.to_tokens();
 
