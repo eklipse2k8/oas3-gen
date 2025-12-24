@@ -56,6 +56,7 @@ http = { version = "1.4" }
 indexmap = { version = "2.12", features = ["serde"] }
 inflections = { version = "1.1" }
 json-canon = { version = "0.1" }
+mediatype = { version = "0.21", features = ["serde"] }
 num-format = { version = "0.4" }
 oas3 = { version = "0.20", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
@@ -64,6 +65,7 @@ proc-macro2 = { version = "1.0" }
 quote = { version = "1.0" }
 regex = { version = "1.12" }
 reqwest = { version = "0.12", default-features = false }
+reqwest-eventsource = { version = "0.6" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }

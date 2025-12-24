@@ -356,7 +356,7 @@ impl ClientOperationMethod {
       ContentCategory::Json => Self::build_json_body(field_ident, body.optional),
       ContentCategory::FormUrlEncoded => Self::build_form_body(field_ident, body.optional),
       ContentCategory::Multipart => Self::build_multipart_body(field_ident, body.optional, operation, rust_types),
-      ContentCategory::Text => Self::build_text_body(field_ident, body.optional),
+      ContentCategory::Text | ContentCategory::EventStream => Self::build_text_body(field_ident, body.optional),
       ContentCategory::Binary => Self::build_binary_body(field_ident, body.optional),
       ContentCategory::Xml => Self::build_xml_body(field_ident, body.optional),
     }
@@ -556,9 +556,11 @@ impl ClientOperationMethod {
           Ok(text)
         },
       },
-      ContentCategory::Binary | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
-        raw_response()
-      }
+      ContentCategory::Binary
+      | ContentCategory::Xml
+      | ContentCategory::FormUrlEncoded
+      | ContentCategory::Multipart
+      | ContentCategory::EventStream => raw_response(),
     }
   }
 }

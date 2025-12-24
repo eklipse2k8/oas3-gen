@@ -31,6 +31,7 @@ http.workspace = true
 indexmap.workspace = true
 inflections.workspace = true
 json-canon.workspace = true
+mediatype.workspace = true
 num-format.workspace = true
 oas3.workspace = true
 percent-encoding.workspace = true
@@ -48,7 +49,8 @@ tokio.workspace = true
 
 [dev-dependencies]
 oas3-gen-support.workspace = true
-reqwest = { workspace = true, features = ["json", "multipart"] }
+reqwest = { workspace = true, features = ["json", "multipart", "native-tls-alpn", "stream"] }
+reqwest-eventsource.workspace = true
 serde_with.workspace = true
 tempfile.workspace = true
 uuid.workspace = true

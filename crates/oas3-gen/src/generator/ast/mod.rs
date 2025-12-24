@@ -17,6 +17,7 @@ pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
 pub use lints::LintConfig;
+use mediatype::MediaType;
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
@@ -198,32 +199,25 @@ pub enum ContentCategory {
   Text,
   Binary,
   Xml,
+  EventStream,
 }
 
 impl ContentCategory {
   #[must_use]
   pub fn from_content_type(content_type: &str) -> Self {
-    let ct = content_type.to_ascii_lowercase();
-    if ct.contains("json") {
-      Self::Json
-    } else if ct.contains("x-www-form-urlencoded") {
-      Self::FormUrlEncoded
-    } else if ct.contains("multipart") {
-      Self::Multipart
-    } else if ct.contains("text/plain") || ct.contains("text/html") {
-      Self::Text
-    } else if ct.contains("xml") {
-      Self::Xml
-    } else if ct.contains("octet-stream")
-      || ct.starts_with("image/")
-      || ct.starts_with("video/")
-      || ct.starts_with("audio/")
-      || ct.starts_with("application/pdf")
-      || (ct.starts_with("application/") && !ct.contains("json"))
-    {
-      Self::Binary
-    } else {
-      Self::Json
+    let Some(media) = MediaType::parse(content_type).ok() else {
+      return Self::Json;
+    };
+
+    match (media.ty.as_str(), media.subty.as_str()) {
+      ("multipart", _) => Self::Multipart,
+      ("text", "event-stream") => Self::EventStream,
+      ("text", "xml") => Self::Xml,
+      ("application", "x-www-form-urlencoded") => Self::FormUrlEncoded,
+      ("application", "json") => Self::Json,
+      ("image" | "audio" | "video", _) | ("application", "pdf" | "octet-stream") => Self::Binary,
+      ("application" | "text", _) => Self::Text,
+      _ => Self::Json,
     }
   }
 }

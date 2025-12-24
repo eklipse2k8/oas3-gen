@@ -269,7 +269,11 @@ impl<'a> StructGenerator<'a> {
           quote! { req.bytes().await?.to_vec() }
         }
       }
-      ContentCategory::Json | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
+      ContentCategory::Json
+      | ContentCategory::Xml
+      | ContentCategory::FormUrlEncoded
+      | ContentCategory::Multipart
+      | ContentCategory::EventStream => {
         quote! { oas3_gen_support::Diagnostics::<#type_token>::json_with_diagnostics(req).await? }
       }
     }
