@@ -199,22 +199,26 @@ pub(crate) fn is_relaxed_enum_pattern(schema: &ObjectSchema) -> bool {
 /// ```
 ///
 /// # Complexity
-/// O(n) where n = number of variants (two passes).
+/// O(n) where n = number of variants (single pass).
 fn has_mixed_string_variants<'a>(variants: impl Iterator<Item = &'a ObjectOrReference<ObjectSchema>>) -> bool {
-  let variants: Vec<_> = variants.collect();
+  let mut has_freeform = false;
+  let mut has_constrained = false;
 
-  if variants.is_empty() {
-    return false;
+  for v in variants {
+    if let ObjectOrReference::Object(s) = v {
+      if is_freeform_string(s) {
+        has_freeform = true;
+      } else if is_constrained(s) {
+        has_constrained = true;
+      }
+    }
+
+    if has_freeform && has_constrained {
+      return true;
+    }
   }
 
-  let has_freeform = variants
-    .iter()
-    .any(|v| matches!(v, ObjectOrReference::Object(s) if is_freeform_string(s)));
-  let has_constrained = variants
-    .iter()
-    .any(|v| matches!(v, ObjectOrReference::Object(s) if is_constrained(s)));
-
-  has_freeform && has_constrained
+  false
 }
 
 /// Extracts enum values from a schema, handling standard enums, oneOf/anyOf patterns,
@@ -399,7 +403,7 @@ pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
       SchemaType::Integer => "Integer".to_string(),
       SchemaType::Boolean => "Boolean".to_string(),
       SchemaType::Array => "Array".to_string(),
-      SchemaType::Object => "Object".to_string(),
+      SchemaType::Object => infer_object_variant_name(schema),
       SchemaType::Null => "Null".to_string(),
     };
   }
@@ -413,6 +417,59 @@ pub fn infer_variant_name(schema: &ObjectSchema, index: usize) -> String {
   };
 
   extract_common_variant_prefix(variants).map_or_else(|| format!("Variant{index}"), |c| c.name)
+}
+
+fn infer_object_variant_name(schema: &ObjectSchema) -> String {
+  if schema.properties.is_empty() {
+    return "Object".to_string();
+  }
+
+  if let Some(name) = infer_name_from_required_fields(schema) {
+    return name;
+  }
+
+  if let Some(name) = infer_name_from_ref_properties(schema) {
+    return name;
+  }
+
+  if let Some(name) = infer_name_from_single_property(schema) {
+    return name;
+  }
+
+  "Object".to_string()
+}
+
+fn infer_name_from_required_fields(schema: &ObjectSchema) -> Option<String> {
+  if schema.required.len() == 1 {
+    return Some(schema.required[0].to_pascal_case());
+  }
+  None
+}
+
+fn infer_name_from_ref_properties(schema: &ObjectSchema) -> Option<String> {
+  let mut ref_names = schema.properties.values().filter_map(|prop| {
+    if let ObjectOrReference::Ref { ref_path, .. } = prop {
+      SchemaRegistry::extract_ref_name(ref_path)
+    } else {
+      None
+    }
+  });
+
+  // Check for exactly one ref name
+  if let Some(first) = ref_names.next()
+    && ref_names.next().is_none()
+  {
+    return Some(first.to_pascal_case());
+  }
+
+  None
+}
+
+fn infer_name_from_single_property(schema: &ObjectSchema) -> Option<String> {
+  if schema.properties.len() == 1 {
+    return schema.properties.keys().next().map(|name| name.to_pascal_case());
+  }
+  None
 }
 
 /// Strips common PascalCase word segments from variant names to make them concise.

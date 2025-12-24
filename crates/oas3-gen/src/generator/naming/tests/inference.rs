@@ -376,6 +376,65 @@ fn test_infer_variant_name_special_cases() {
   assert_eq!(infer_variant_name(&no_type_schema, 5), "Variant5");
 }
 
+#[test]
+fn test_infer_variant_name_object_variants() {
+  let bare_object = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+  assert_eq!(
+    infer_variant_name(&bare_object, 0),
+    "Object",
+    "bare object without properties should be Object"
+  );
+
+  let object_with_single_property = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [("items".to_string(), ObjectOrReference::Object(ObjectSchema::default()))]
+      .into_iter()
+      .collect(),
+    ..Default::default()
+  };
+  assert_eq!(
+    infer_variant_name(&object_with_single_property, 0),
+    "Items",
+    "object with single property should use property name"
+  );
+
+  let object_with_single_required = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [
+      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+    ]
+    .into_iter()
+    .collect(),
+    required: vec!["id".to_string()],
+    ..Default::default()
+  };
+  assert_eq!(
+    infer_variant_name(&object_with_single_required, 0),
+    "Id",
+    "object with single required field should use required field name"
+  );
+
+  let object_with_multiple_properties = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [
+      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+    ]
+    .into_iter()
+    .collect(),
+    ..Default::default()
+  };
+  assert_eq!(
+    infer_variant_name(&object_with_multiple_properties, 0),
+    "Object",
+    "object with multiple properties and no single required should be Object"
+  );
+}
+
 fn make_variant(name: &str) -> VariantDef {
   VariantDef {
     name: EnumVariantToken::from(name),

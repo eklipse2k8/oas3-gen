@@ -21,6 +21,8 @@ pub(crate) struct StructSummary {
   pub has_default: bool,
   /// Required fields (name and type) that must be provided in constructors.
   pub required_fields: Vec<(FieldNameToken, TypeRef)>,
+  /// User-facing fields (name and type), excluding const/doc_hidden fields.
+  pub user_fields: Vec<(FieldNameToken, TypeRef)>,
 }
 
 /// Cache for sharing generated Rust types across the schema graph.

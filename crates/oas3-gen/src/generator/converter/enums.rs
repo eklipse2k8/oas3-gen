@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::{
   CodegenConfig,
   cache::{SharedSchemaCache, StructSummary},
-  common::SchemaExt,
+  common::{SchemaExt, handle_inline_creation},
   metadata,
   structs::StructConverter,
   type_resolver::TypeResolver,
@@ -328,6 +328,12 @@ impl EnumConverter {
               .required_fields()
               .map(|f| (f.name.clone(), f.rust_type.clone()))
               .collect(),
+            user_fields: s
+              .fields
+              .iter()
+              .filter(|f| !f.doc_hidden)
+              .map(|f| (f.name.clone(), f.rust_type.clone()))
+              .collect(),
           };
           Some((s.name.to_string(), summary))
         }
@@ -388,10 +394,22 @@ impl EnumConverter {
     }
 
     match summary.required_fields.len() {
-      0 => Some(EnumMethodKind::SimpleConstructor {
-        variant_name: variant_name.clone(),
-        wrapped_type: type_ref.clone(),
-      }),
+      0 => {
+        if summary.user_fields.len() == 1 {
+          let (ref name, ref rust_type) = summary.user_fields[0];
+          Some(EnumMethodKind::ParameterizedConstructor {
+            variant_name: variant_name.clone(),
+            wrapped_type: type_ref.clone(),
+            param_name: name.to_string(),
+            param_type: rust_type.clone(),
+          })
+        } else {
+          Some(EnumMethodKind::SimpleConstructor {
+            variant_name: variant_name.clone(),
+            wrapped_type: type_ref.clone(),
+          })
+        }
+      }
       1 => {
         let (ref name, ref rust_type) = summary.required_fields[0];
         Some(EnumMethodKind::ParameterizedConstructor {
@@ -452,6 +470,12 @@ impl EnumConverter {
         has_default: s.has_default(),
         required_fields: s
           .required_fields()
+          .map(|f| (f.name.clone(), f.rust_type.clone()))
+          .collect(),
+        user_fields: s
+          .fields
+          .iter()
+          .filter(|f| !f.doc_hidden)
           .map(|f| (f.name.clone(), f.rust_type.clone()))
           .collect(),
       };
@@ -601,18 +625,17 @@ impl EnumConverter {
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<(VariantContent, Vec<RustType>)> {
     let struct_name_prefix = format!("{enum_name}{variant_label}");
-    let result = self
-      .struct_converter
-      .convert_struct(&struct_name_prefix, resolved_schema, None, cache)?;
-    let (struct_def, mut inline_types) = (result.result, result.inline_types);
 
-    let struct_name = match &struct_def {
-      RustType::Struct(s) => s.name.clone(),
-      _ => unreachable!("convert_struct must return a Struct"),
-    };
+    let result = handle_inline_creation(
+      resolved_schema,
+      &struct_name_prefix,
+      None,
+      cache,
+      |_| None,
+      |name, cache| self.struct_converter.convert_struct(name, resolved_schema, None, cache),
+    )?;
 
-    inline_types.push(struct_def);
-    Ok((VariantContent::Tuple(vec![TypeRef::new(struct_name)]), inline_types))
+    Ok((VariantContent::Tuple(vec![result.result]), result.inline_types))
   }
 
   fn build_primitive_content(&self, resolved_schema: &ObjectSchema) -> anyhow::Result<(VariantContent, Vec<RustType>)> {

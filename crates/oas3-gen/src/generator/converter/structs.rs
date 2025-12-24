@@ -183,6 +183,12 @@ impl StructConverter {
           .required_fields()
           .map(|f| (f.name.clone(), f.rust_type.clone()))
           .collect(),
+        user_fields: struct_def
+          .fields
+          .iter()
+          .filter(|f| !f.doc_hidden)
+          .map(|f| (f.name.clone(), f.rust_type.clone()))
+          .collect(),
       };
       c.register_struct_summary(struct_def.name.as_str(), summary);
     }

@@ -963,24 +963,26 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
 
   assert_eq!(enum_def.methods.len(), 2); // Simple + SingleParam, Complex skipped
 
-  // Check Simple Constructor
   let simple_method = enum_def
     .methods
     .iter()
     .find(|m| m.name == "simple")
     .expect("simple method not found");
   match &simple_method.kind {
-    EnumMethodKind::SimpleConstructor {
+    EnumMethodKind::ParameterizedConstructor {
       variant_name,
       wrapped_type,
+      param_name,
+      param_type,
     } => {
       assert_eq!(variant_name, &EnumVariantToken::from("Simple"));
       assert_eq!(wrapped_type.to_rust_type(), "TestUnionSimple");
+      assert_eq!(param_name, "opt_field");
+      assert_eq!(param_type.to_rust_type(), "Option<String>");
     }
-    _ => panic!("Expected SimpleConstructor"),
+    _ => panic!("Expected ParameterizedConstructor for single optional field"),
   }
 
-  // Check Parameterized Constructor
   let param_method = enum_def
     .methods
     .iter()
