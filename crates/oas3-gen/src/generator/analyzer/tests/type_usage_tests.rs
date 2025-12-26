@@ -4,7 +4,7 @@ use super::build_type_usage_map;
 use crate::generator::{
   analyzer::{DependencyGraph, TypeUsage},
   ast::{
-    ContentCategory, EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive,
+    EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive,
     RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
     VariantContent, VariantDef, tokens::FieldNameToken,
   },
@@ -372,8 +372,11 @@ fn test_response_enum_does_not_propagate_to_request_type() {
       status_code: StatusCodeToken::Ok200,
       variant_name: EnumVariantToken::new("Ok"),
       description: None,
+      media_types: vec![ResponseMediaType::with_schema(
+        "application/json",
+        Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
+      )],
       schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
-      content_category: ContentCategory::Json,
     }],
     ..Default::default()
   });
@@ -424,15 +427,21 @@ fn test_response_enum_propagates_to_variant_types_only() {
         status_code: StatusCodeToken::Ok200,
         variant_name: EnumVariantToken::new("Ok"),
         description: None,
+        media_types: vec![ResponseMediaType::with_schema(
+          "application/json",
+          Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
+        )],
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
-        content_category: ContentCategory::Json,
       },
       ResponseVariant {
         status_code: StatusCodeToken::BadRequest400,
         variant_name: EnumVariantToken::new("BadRequest"),
         description: None,
+        media_types: vec![ResponseMediaType::with_schema(
+          "application/json",
+          Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
+        )],
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
-        content_category: ContentCategory::Json,
       },
     ],
     ..Default::default()
@@ -514,10 +523,15 @@ fn test_request_body_chain_with_response_enum() {
       status_code: StatusCodeToken::Ok200,
       variant_name: EnumVariantToken::new("Ok"),
       description: None,
+      media_types: vec![ResponseMediaType::with_schema(
+        "application/json",
+        Some(TypeRef::new(RustPrimitive::Custom(
+          "CreateChatCompletionResponse".into(),
+        ))),
+      )],
       schema_type: Some(TypeRef::new(RustPrimitive::Custom(
         "CreateChatCompletionResponse".into(),
       ))),
-      content_category: ContentCategory::Json,
     }],
     ..Default::default()
   });
@@ -600,15 +614,21 @@ fn test_response_enum_dependency_extraction() {
         status_code: StatusCodeToken::Ok200,
         variant_name: EnumVariantToken::new("Ok"),
         description: None,
+        media_types: vec![ResponseMediaType::with_schema(
+          "application/json",
+          Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
+        )],
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
-        content_category: ContentCategory::Json,
       },
       ResponseVariant {
         status_code: StatusCodeToken::BadRequest400,
         variant_name: EnumVariantToken::new("BadRequest"),
         description: None,
+        media_types: vec![ResponseMediaType::with_schema(
+          "application/json",
+          Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
+        )],
         schema_type: Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
-        content_category: ContentCategory::Json,
       },
     ],
     ..Default::default()

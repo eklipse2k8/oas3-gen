@@ -189,12 +189,14 @@ impl ClientOperationMethod {
     };
 
     let response_type = operation.response_type.as_ref().map(|t| parse_type(t)).transpose()?;
+    let primary_media_type = operation.response_media_types.first();
+    let content_category = primary_media_type.map_or(ContentCategory::Json, |m| m.category);
 
     let response_handling = Self::build_response_handling(
       &request_ident,
       operation.response_enum.as_ref(),
       response_type.as_ref(),
-      operation.response_content_category,
+      content_category,
     );
 
     Ok(Self {
@@ -556,11 +558,15 @@ impl ClientOperationMethod {
           Ok(text)
         },
       },
-      ContentCategory::Binary
-      | ContentCategory::Xml
-      | ContentCategory::FormUrlEncoded
-      | ContentCategory::Multipart
-      | ContentCategory::EventStream => raw_response(),
+      ContentCategory::EventStream => ResponseHandling {
+        success_type: quote! { oas3_gen_support::EventStream<#response_ty> },
+        parse_body: quote! {
+          Ok(oas3_gen_support::EventStream::from_response(response))
+        },
+      },
+      ContentCategory::Binary | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
+        raw_response()
+      }
     }
   }
 }

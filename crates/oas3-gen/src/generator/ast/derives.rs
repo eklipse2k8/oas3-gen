@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 
 use strum::Display;
 
-use super::{DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeMode, StructDef, StructKind, VariantContent};
+use super::{
+  ContentCategory, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeMode, StructDef, StructKind, VariantContent,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SerdeImpl {
@@ -169,7 +171,18 @@ impl DerivesProvider for DiscriminatedEnumDef {
 
 impl DerivesProvider for ResponseEnumDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
+    let mut derives = BTreeSet::from([DeriveTrait::Debug]);
+
+    let has_event_stream = self
+      .variants
+      .iter()
+      .any(|v| v.media_types.iter().any(|m| m.category == ContentCategory::EventStream));
+
+    if !has_event_stream {
+      derives.insert(DeriveTrait::Clone);
+    }
+
+    derives
   }
 
   fn is_serializable(&self) -> SerdeImpl {

@@ -1,0 +1,115 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Event Stream API",
+    "version": "1.0.0",
+    "description": "API with Server-Sent Events (SSE) endpoint"
+  },
+  "servers": [
+    {
+      "url": "https://api.example.com"
+    }
+  ],
+  "paths": {
+    "/events": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Stream events",
+        "description": "Returns a stream of server-sent events",
+        "responses": {
+          "200": {
+            "description": "A stream of events",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamEvent"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/typed": {
+      "get": {
+        "operationId": "streamTypedEvents",
+        "summary": "Stream typed events",
+        "description": "Returns a stream of typed server-sent events with query parameters",
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A stream of typed events",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/TypedEvent"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "StreamEvent": {
+        "type": "object",
+        "required": ["id", "data"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique event identifier"
+          },
+          "data": {
+            "type": "string",
+            "description": "Event data payload"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Event timestamp"
+          }
+        }
+      },
+      "TypedEvent": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["created", "updated", "deleted"],
+            "description": "Event type"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/EventPayload"
+          }
+        }
+      },
+      "EventPayload": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

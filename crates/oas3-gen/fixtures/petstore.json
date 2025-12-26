@@ -49,6 +49,11 @@
 								"schema": {
 									"$ref": "#/components/schemas/Pets"
 								}
+							},
+							"application/xml": {
+								"schema": {
+									"$ref": "#/components/schemas/Pets"
+								}
 							}
 						}
 					},

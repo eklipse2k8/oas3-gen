@@ -77,8 +77,8 @@ pub struct ResponseVariant {
   pub status_code: StatusCodeToken,
   pub variant_name: EnumVariantToken,
   pub description: Option<String>,
+  pub media_types: Vec<ResponseMediaType>,
   pub schema_type: Option<TypeRef>,
-  pub content_category: ContentCategory,
 }
 
 impl ResponseVariant {
@@ -164,7 +164,7 @@ pub struct OperationInfo {
   pub request_type: Option<StructToken>,
   pub response_type: Option<String>,
   pub response_enum: Option<EnumToken>,
-  pub response_content_category: ContentCategory,
+  pub response_media_types: Vec<ResponseMediaType>,
   pub success_response_types: Vec<String>,
   pub error_response_types: Vec<String>,
   pub warnings: Vec<String>,
@@ -190,7 +190,7 @@ pub struct OperationParameter {
   pub rust_type: TypeRef,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub enum ContentCategory {
   #[default]
   Json,
@@ -212,13 +212,52 @@ impl ContentCategory {
     match (media.ty.as_str(), media.subty.as_str()) {
       ("multipart", _) => Self::Multipart,
       ("text", "event-stream") => Self::EventStream,
-      ("text", "xml") => Self::Xml,
+      ("text" | "application", "xml") => Self::Xml,
       ("application", "x-www-form-urlencoded") => Self::FormUrlEncoded,
       ("application", "json") => Self::Json,
       ("image" | "audio" | "video", _) | ("application", "pdf" | "octet-stream") => Self::Binary,
       ("application" | "text", _) => Self::Text,
       _ => Self::Json,
     }
+  }
+}
+
+/// Media type information for a response variant.
+///
+/// Stores the parsed category (for determining parsing strategy) and the schema
+/// type for this specific media type (since different content types can have
+/// different schemas).
+#[derive(Debug, Clone)]
+pub struct ResponseMediaType {
+  pub category: ContentCategory,
+  pub schema_type: Option<TypeRef>,
+}
+
+impl ResponseMediaType {
+  #[must_use]
+  pub fn new(content_type: &str) -> Self {
+    Self {
+      category: ContentCategory::from_content_type(content_type),
+      schema_type: None,
+    }
+  }
+
+  #[must_use]
+  pub fn with_schema(content_type: &str, schema_type: Option<TypeRef>) -> Self {
+    Self {
+      category: ContentCategory::from_content_type(content_type),
+      schema_type,
+    }
+  }
+
+  #[must_use]
+  pub fn primary_category(media_types: &[Self]) -> ContentCategory {
+    media_types.first().map_or(ContentCategory::Json, |m| m.category)
+  }
+
+  #[must_use]
+  pub fn has_event_stream(media_types: &[Self]) -> bool {
+    media_types.iter().any(|m| m.category == ContentCategory::EventStream)
   }
 }
 

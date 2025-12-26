@@ -13,8 +13,9 @@ use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metada
 use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
-    OperationParameter, OuterAttr, ParameterLocation, ParsedPath, ResponseEnumDef, RustType, SerdeAsFieldAttr,
-    SerdeAsSeparator, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef, ValidationAttribute,
+    OperationParameter, OuterAttr, ParameterLocation, ParsedPath, ResponseEnumDef, ResponseMediaType, RustType,
+    SerdeAsFieldAttr, SerdeAsSeparator, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
+    ValidationAttribute,
   },
   naming::{
     constants::{
@@ -139,7 +140,7 @@ impl<'a> OperationConverter<'a> {
     types.extend(body_info.generated_types);
     usage.mark_request_iter(&body_info.type_usage);
 
-    let mut response_enum_info = if operation.responses.is_some() {
+    let mut response_enum_def = if operation.responses.is_some() {
       let response_name = generate_unique_response_name(&base_name, |name| self.schema_converter.is_schema_name(name));
       responses::build_response_enum(
         self.schema_converter,
@@ -149,10 +150,13 @@ impl<'a> OperationConverter<'a> {
         path,
         schema_cache,
       )
-      .map(|def| (EnumToken::new(&response_name), def))
     } else {
       None
     };
+
+    let response_enum_info = response_enum_def
+      .as_ref()
+      .map(|def| (EnumToken::new(def.name.to_string()), def));
 
     let request_name = generate_unique_request_name(&base_name, |name| self.schema_converter.is_schema_name(name));
     let generated_structs = self.build_request_struct(
@@ -160,14 +164,14 @@ impl<'a> OperationConverter<'a> {
       path,
       operation,
       body_info.body_type.clone(),
-      response_enum_info.as_ref(),
+      response_enum_info.as_ref().map(|(t, d)| (t, *d)),
     )?;
 
     warnings.extend(generated_structs.warnings);
     let parameter_metadata = generated_structs.parameter_info;
 
     let has_fields = !generated_structs.main_struct.fields.is_empty();
-    let should_generate_request_struct = has_fields || response_enum_info.is_some();
+    let should_generate_request_struct = has_fields || response_enum_def.is_some();
 
     let mut request_type_name: Option<StructToken> = None;
     if should_generate_request_struct {
@@ -181,17 +185,18 @@ impl<'a> OperationConverter<'a> {
       request_type_name = Some(rust_request_name);
     }
 
-    if let Some((_, def)) = response_enum_info.as_mut() {
+    if let Some(def) = response_enum_def.as_mut() {
       def.request_type.clone_from(&request_type_name);
     }
 
-    let response_enum = if let Some((enum_token, def)) = response_enum_info {
+    let response_enum = if let Some(def) = response_enum_def {
       usage.mark_response(def.name.clone());
       for variant in &def.variants {
         if let Some(schema_type) = &variant.schema_type {
           usage.mark_response_type_ref(schema_type);
         }
       }
+      let enum_token = EnumToken::new(def.name.to_string());
       types.push(RustType::ResponseEnum(def));
       Some(enum_token)
     } else {
@@ -199,9 +204,15 @@ impl<'a> OperationConverter<'a> {
     };
 
     let response_type_name = naming_responses::extract_response_type_name(self.spec, operation);
-    let response_content_category = naming_responses::extract_response_content_type(self.spec, operation)
-      .as_deref()
-      .map_or(ContentCategory::Json, ContentCategory::from_content_type);
+    let response_media_types = naming_responses::extract_all_response_content_types(self.spec, operation)
+      .into_iter()
+      .map(|ct| ResponseMediaType::new(&ct))
+      .collect::<Vec<_>>();
+    let response_media_types = if response_media_types.is_empty() {
+      vec![ResponseMediaType::new("application/json")]
+    } else {
+      response_media_types
+    };
     let response_types = naming_responses::extract_all_response_types(self.spec, operation);
     if let Some(name) = &response_type_name {
       usage.mark_response(name);
@@ -236,7 +247,7 @@ impl<'a> OperationConverter<'a> {
       request_type: request_type_name,
       response_type: response_type_name,
       response_enum,
-      response_content_category,
+      response_media_types,
       success_response_types: response_types.success,
       error_response_types: response_types.error,
       warnings,
@@ -253,7 +264,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     operation: &Operation,
     body_type: Option<TypeRef>,
-    response_enum_info: Option<&(EnumToken, ResponseEnumDef)>,
+    response_enum_info: Option<(&EnumToken, &ResponseEnumDef)>,
   ) -> anyhow::Result<GeneratedRequestStructs> {
     let mut warnings = vec![];
     let mut params_by_location = ParametersByLocation::new();

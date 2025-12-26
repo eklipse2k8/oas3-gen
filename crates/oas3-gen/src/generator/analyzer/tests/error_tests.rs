@@ -5,7 +5,7 @@ use http::Method;
 use crate::generator::{
   analyzer::{AnalysisResult, TypeAnalyzer},
   ast::{
-    ContentCategory, EnumDef, EnumToken, FieldDef, OperationInfo, OperationKind, ParsedPath, PathSegment,
+    EnumDef, EnumToken, FieldDef, OperationInfo, OperationKind, ParsedPath, PathSegment, ResponseMediaType,
     RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef, VariantContent, VariantDef,
     tokens::FieldNameToken,
   },
@@ -59,7 +59,7 @@ fn create_operation_info(id: &str, success_types: Vec<String>, error_types: Vec<
     request_type: None,
     response_type: None,
     response_enum: None,
-    response_content_category: ContentCategory::Json,
+    response_media_types: vec![ResponseMediaType::new("application/json")],
     success_response_types: success_types,
     error_response_types: error_types,
     warnings: vec![],

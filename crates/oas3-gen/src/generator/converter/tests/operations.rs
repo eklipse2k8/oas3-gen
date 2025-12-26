@@ -481,7 +481,11 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       .unwrap_or_else(|| panic!("Ok variant not found for {content_type}"));
 
     assert_eq!(
-      ok_variant.content_category, expected_category,
+      ok_variant
+        .media_types
+        .first()
+        .map_or(ContentCategory::Json, |m| m.category),
+      expected_category,
       "content_category mismatch for {content_type}"
     );
 
@@ -509,13 +513,16 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       .unwrap_or_else(|| panic!("ClientError variant not found for {content_type}"));
 
     assert_eq!(
-      error_variant.content_category,
+      error_variant
+        .media_types
+        .first()
+        .map_or(ContentCategory::Json, |m| m.category),
       ContentCategory::Json,
       "error response should be Json for {content_type}"
     );
 
     assert!(
-      error_variant.schema_type.is_some(),
+      error_variant.schema_type.as_ref().is_some(),
       "error response should preserve schema type for {content_type}"
     );
   }
@@ -570,7 +577,7 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
 
   assert!(default_variant.is_some(), "Default variant should be added");
   assert!(
-    default_variant.unwrap().schema_type.is_none(),
+    default_variant.unwrap().schema_type.as_ref().is_none(),
     "Default variant should have no schema type"
   );
   Ok(())
@@ -659,7 +666,7 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
 
   assert!(default_variant.is_some(), "Default variant should exist");
   assert!(
-    default_variant.unwrap().schema_type.is_some(),
+    default_variant.unwrap().schema_type.as_ref().is_some(),
     "Default variant should have schema type from spec"
   );
   Ok(())
@@ -716,7 +723,7 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
     .find(|v| v.variant_name == "Ok")
     .expect("Ok variant not found");
 
-  assert!(ok_variant.schema_type.is_some(), "Should have schema type");
+  assert!(ok_variant.schema_type.as_ref().is_some(), "Should have schema type");
   assert_eq!(
     ok_variant.schema_type.as_ref().unwrap().base_type,
     RustPrimitive::I64,
@@ -768,7 +775,7 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
     .expect("NoContent variant not found");
 
   assert!(
-    no_content_variant.schema_type.is_none(),
+    no_content_variant.schema_type.as_ref().is_none(),
     "No content response should have no schema type"
   );
   Ok(())

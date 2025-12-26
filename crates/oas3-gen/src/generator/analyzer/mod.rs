@@ -138,7 +138,9 @@ impl<'a> TypeAnalyzer<'a> {
   }
 
   fn deduplicate_response_enums(&mut self) {
-    type Signature = Vec<(StatusCodeToken, String, String, ContentCategory)>;
+    // Signature includes all media type schemas to properly distinguish response enums
+    // that have different inner types (e.g., EventStream<A> vs EventStream<B>)
+    type Signature = Vec<(StatusCodeToken, String, Vec<(ContentCategory, String)>)>;
 
     struct Candidate {
       index: usize,
@@ -156,14 +158,20 @@ impl<'a> TypeAnalyzer<'a> {
         .variants
         .iter()
         .map(|v| {
-          (
-            v.status_code,
-            v.variant_name.to_string(),
-            v.schema_type
-              .as_ref()
-              .map_or_else(|| "None".to_string(), TypeRef::to_rust_type),
-            v.content_category,
-          )
+          // Include all media types with their schemas in the signature
+          let mut media_type_sigs: Vec<_> = v
+            .media_types
+            .iter()
+            .map(|m| {
+              let schema_repr = m
+                .schema_type
+                .as_ref()
+                .map_or_else(|| "None".to_string(), TypeRef::to_rust_type);
+              (m.category, schema_repr)
+            })
+            .collect();
+          media_type_sigs.sort();
+          (v.status_code, v.variant_name.to_string(), media_type_sigs)
         })
         .collect();
       signature.sort();

@@ -4,7 +4,8 @@ use quote::ToTokens;
 use crate::generator::{
   ast::{
     ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, OperationParameter,
-    ParameterLocation, ParsedPath, PathSegment, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
+    ParameterLocation, ParsedPath, PathSegment, ResponseMediaType, RustPrimitive, RustType, StructDef, StructKind,
+    StructToken, TypeRef,
   },
   codegen::{
     Visibility,
@@ -17,7 +18,7 @@ use crate::generator::{
 struct TestOperation<'a> {
   summary: Option<&'a str>,
   description: Option<&'a str>,
-  response_content_category: Option<ContentCategory>,
+  response_media_types: Option<Vec<ResponseMediaType>>,
   response_enum: Option<&'a str>,
 }
 
@@ -35,7 +36,9 @@ impl TestOperation<'_> {
       request_type: Some(StructToken::new("TestRequest")),
       response_type: Some("TestResponse".to_string()),
       response_enum: self.response_enum.map(EnumToken::new),
-      response_content_category: self.response_content_category.unwrap_or(ContentCategory::Json),
+      response_media_types: self
+        .response_media_types
+        .unwrap_or_else(|| vec![ResponseMediaType::new("application/json")]),
       success_response_types: vec![],
       error_response_types: vec![],
       warnings: vec![],
@@ -166,12 +169,26 @@ fn test_response_handling_content_categories() {
       expected_return_ty: "reqwest :: Response",
       expected_contains: vec!["Ok (response)"],
     },
+    Case {
+      category: ContentCategory::EventStream,
+      expected_return_ty: "oas3_gen_support :: EventStream < TestResponse >",
+      expected_contains: vec!["EventStream :: from_response", "response"],
+    },
   ];
 
   for case in cases {
     let label = format!("category={:?}", case.category);
+    let content_type = match case.category {
+      ContentCategory::Json => "application/json",
+      ContentCategory::Text => "text/plain",
+      ContentCategory::Binary => "application/octet-stream",
+      ContentCategory::EventStream => "text/event-stream",
+      ContentCategory::Xml => "application/xml",
+      ContentCategory::FormUrlEncoded => "application/x-www-form-urlencoded",
+      ContentCategory::Multipart => "multipart/form-data",
+    };
     let operation = TestOperation {
-      response_content_category: Some(case.category),
+      response_media_types: Some(vec![ResponseMediaType::new(content_type)]),
       ..Default::default()
     }
     .build();
@@ -209,6 +226,32 @@ fn test_response_handling_with_response_enum() {
   assert!(
     parse_body_str.contains("parse_response"),
     "parse_body should use parse_response"
+  );
+}
+
+#[test]
+fn test_event_stream_response_handling() {
+  let operation = TestOperation {
+    response_media_types: Some(vec![ResponseMediaType::new("text/event-stream")]),
+    ..Default::default()
+  }
+  .build();
+  let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
+
+  let return_ty_str = method.response_handling.success_type.to_string();
+  assert!(
+    return_ty_str.contains("EventStream"),
+    "return type should contain EventStream: {return_ty_str}"
+  );
+  assert!(
+    return_ty_str.contains("TestResponse"),
+    "return type should contain the response type: {return_ty_str}"
+  );
+
+  let parse_body_str = method.response_handling.parse_body.to_string();
+  assert!(
+    parse_body_str.contains("EventStream :: from_response"),
+    "parse_body should create EventStream from response: {parse_body_str}"
   );
 }
 
@@ -274,7 +317,7 @@ fn test_multipart_generation() {
     request_type: Some(StructToken::new(request_type)),
     response_type: Some("TestResponse".to_string()),
     response_enum: None,
-    response_content_category: ContentCategory::Json,
+    response_media_types: vec![ResponseMediaType::new("application/json")],
     success_response_types: vec![],
     error_response_types: vec![],
     warnings: vec![],
@@ -339,7 +382,7 @@ fn test_client_filters_webhook_operations() {
     request_type: Some(StructToken::new("ListPetsRequest")),
     response_type: Some("Vec<Pet>".to_string()),
     response_enum: None,
-    response_content_category: ContentCategory::Json,
+    response_media_types: vec![ResponseMediaType::new("application/json")],
     success_response_types: vec![],
     error_response_types: vec![],
     warnings: vec![],
@@ -374,7 +417,7 @@ fn test_client_filters_webhook_operations() {
     request_type: Some(StructToken::new("PetAddedHookRequest")),
     response_type: Some("WebhookResponse".to_string()),
     response_enum: None,
-    response_content_category: ContentCategory::Json,
+    response_media_types: vec![ResponseMediaType::new("application/json")],
     success_response_types: vec![],
     error_response_types: vec![],
     warnings: vec![],

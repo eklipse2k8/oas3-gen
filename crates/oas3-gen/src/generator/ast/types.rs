@@ -20,7 +20,7 @@ pub(crate) fn format_number_with_underscores<T: ToFormattedString>(value: &T) ->
 }
 
 /// Type reference with wrapper support (Box, Option, Vec)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct TypeRef {
   pub base_type: RustPrimitive,

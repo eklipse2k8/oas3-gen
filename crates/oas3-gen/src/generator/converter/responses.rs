@@ -1,13 +1,14 @@
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Operation, Response},
+  spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response},
 };
 
 use super::{SchemaConverter, cache::SharedSchemaCache};
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseVariant,
-    RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
+    ResponseVariant, RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef,
+    status_code_to_variant_name,
   },
   naming::{
     constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
@@ -39,18 +40,16 @@ pub(crate) fn build_response_enum(
       .parse::<StatusCodeToken>()
       .unwrap_or(StatusCodeToken::Default);
     let variant_name = status_code_to_variant_name(status_code, &response);
-    let (schema_type, content_category) =
-      extract_response_schema_info(schema_converter, &response, path, status_code, schema_cache)
-        .ok()
-        .unwrap_or((None, ContentCategory::Json));
+    let mut media_types =
+      extract_all_media_type_schemas(schema_converter, &response, path, status_code, schema_cache).unwrap_or_default();
 
-    variants.push(ResponseVariant {
-      status_code,
-      variant_name,
-      description: response.description.clone(),
-      schema_type,
-      content_category,
-    });
+    if media_types.is_empty() {
+      media_types.push(ResponseMediaType::new("application/json"));
+    }
+
+    let split_variants =
+      split_mixed_content_variants(status_code, &variant_name, response.description.as_ref(), &media_types);
+    variants.extend(split_variants);
   }
 
   let variants = normalize_response_variants(variants);
@@ -66,36 +65,142 @@ pub(crate) fn build_response_enum(
   })
 }
 
-fn extract_response_schema_info(
+fn split_mixed_content_variants(
+  status_code: StatusCodeToken,
+  variant_name: &EnumVariantToken,
+  description: Option<&String>,
+  media_types: &[ResponseMediaType],
+) -> Vec<ResponseVariant> {
+  let typed_media: Vec<_> = media_types.iter().filter(|m| m.schema_type.is_some()).collect();
+
+  if typed_media.is_empty() {
+    return vec![ResponseVariant {
+      status_code,
+      variant_name: variant_name.clone(),
+      description: description.cloned(),
+      media_types: media_types.to_vec(),
+      schema_type: None,
+    }];
+  }
+
+  let event_stream_media = typed_media.iter().find(|m| m.category == ContentCategory::EventStream);
+  let non_stream_media: Vec<_> = typed_media
+    .iter()
+    .filter(|m| m.category != ContentCategory::EventStream)
+    .collect();
+
+  let has_both = event_stream_media.is_some() && !non_stream_media.is_empty();
+
+  if has_both {
+    let json_schema = non_stream_media.first().and_then(|m| m.schema_type.clone());
+    let non_stream_media_types: Vec<_> = media_types
+      .iter()
+      .filter(|m| m.category != ContentCategory::EventStream)
+      .cloned()
+      .collect();
+
+    let stream_media = event_stream_media.unwrap();
+    let inner_type = stream_media.schema_type.as_ref().unwrap();
+    let stream_schema = TypeRef::new(format!("oas3_gen_support::EventStream<{}>", inner_type.to_rust_type()));
+    let stream_media_types: Vec<_> = media_types
+      .iter()
+      .filter(|m| m.category == ContentCategory::EventStream)
+      .cloned()
+      .collect();
+
+    let stream_variant_name = EnumVariantToken::new(format!("{variant_name}EventStream"));
+
+    vec![
+      ResponseVariant {
+        status_code,
+        variant_name: variant_name.clone(),
+        description: description.cloned(),
+        media_types: non_stream_media_types,
+        schema_type: json_schema,
+      },
+      ResponseVariant {
+        status_code,
+        variant_name: stream_variant_name,
+        description: description.cloned(),
+        media_types: stream_media_types,
+        schema_type: Some(stream_schema),
+      },
+    ]
+  } else if let Some(stream_media) = event_stream_media {
+    let inner_type = stream_media.schema_type.as_ref().unwrap();
+    let stream_schema = TypeRef::new(format!("oas3_gen_support::EventStream<{}>", inner_type.to_rust_type()));
+
+    vec![ResponseVariant {
+      status_code,
+      variant_name: variant_name.clone(),
+      description: description.cloned(),
+      media_types: media_types.to_vec(),
+      schema_type: Some(stream_schema),
+    }]
+  } else {
+    let schema_type = non_stream_media.first().and_then(|m| m.schema_type.clone());
+
+    vec![ResponseVariant {
+      status_code,
+      variant_name: variant_name.clone(),
+      description: description.cloned(),
+      media_types: media_types.to_vec(),
+      schema_type,
+    }]
+  }
+}
+
+fn extract_all_media_type_schemas(
   schema_converter: &SchemaConverter,
   response: &Response,
   path: &str,
   status_code: StatusCodeToken,
   schema_cache: &mut SharedSchemaCache,
-) -> anyhow::Result<(Option<TypeRef>, ContentCategory)> {
-  let Some((content_type, media_type)) = response.content.iter().next() else {
-    return Ok((None, ContentCategory::Json));
-  };
-  let content_category = ContentCategory::from_content_type(content_type);
+) -> anyhow::Result<Vec<ResponseMediaType>> {
+  let mut result = vec![];
 
-  if content_category == ContentCategory::Binary && status_code.is_success() {
-    return Ok((Some(TypeRef::new(RustPrimitive::Bytes)), content_category));
+  for (content_type, media_type) in &response.content {
+    let schema_type = extract_single_media_type_schema(
+      schema_converter,
+      content_type,
+      media_type,
+      path,
+      status_code,
+      schema_cache,
+    )?;
+
+    result.push(ResponseMediaType::with_schema(content_type, schema_type));
+  }
+
+  Ok(result)
+}
+
+fn extract_single_media_type_schema(
+  schema_converter: &SchemaConverter,
+  content_type: &str,
+  media_type: &MediaType,
+  path: &str,
+  status_code: StatusCodeToken,
+  schema_cache: &mut SharedSchemaCache,
+) -> anyhow::Result<Option<TypeRef>> {
+  let category = ContentCategory::from_content_type(content_type);
+
+  if category == ContentCategory::Binary && status_code.is_success() {
+    return Ok(Some(TypeRef::new(RustPrimitive::Bytes)));
   }
 
   let Some(schema_ref) = media_type.schema.as_ref() else {
-    return Ok((None, content_category));
+    return Ok(None);
   };
 
-  let type_ref = match schema_ref {
+  match schema_ref {
     ObjectOrReference::Ref { ref_path, .. } => {
-      SchemaRegistry::extract_ref_name(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name)))
+      Ok(SchemaRegistry::extract_ref_name(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
     }
     ObjectOrReference::Object(inline_schema) => {
-      resolve_inline_response_schema(schema_converter, inline_schema, path, status_code, schema_cache)?
+      resolve_inline_response_schema(schema_converter, inline_schema, path, status_code, schema_cache)
     }
-  };
-
-  Ok((type_ref, content_category))
+  }
 }
 
 fn resolve_inline_response_schema(
@@ -135,8 +240,8 @@ fn normalize_response_variants(mut variants: Vec<ResponseVariant>) -> Vec<Respon
       status_code: StatusCodeToken::Default,
       variant_name: EnumVariantToken::new(DEFAULT_RESPONSE_VARIANT),
       description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
+      media_types: vec![ResponseMediaType::new("application/json")],
       schema_type: None,
-      content_category: ContentCategory::Json,
     });
   }
 

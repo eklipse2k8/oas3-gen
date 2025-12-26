@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, ResponseVariant, RustType,
-    StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+    EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, ResponseMediaType, ResponseVariant,
+    RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef,
+    ValidationAttribute,
   },
   codegen::{self, Visibility, structs},
 };
@@ -79,8 +80,8 @@ fn renders_response_parser_method() {
     status_code: StatusCodeToken::Ok200,
     variant_name: EnumVariantToken::new("Ok"),
     description: None,
+    media_types: vec![ResponseMediaType::new("application/json")],
     schema_type: None,
-    content_category: ContentCategory::Json,
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
@@ -102,13 +103,13 @@ fn test_text_response_parsing() {
       "text/plain i32 response with parsing",
     ),
   ];
-  for (schema_type, expected_code, desc) in cases {
+  for (st, expected_code, desc) in cases {
     let def = make_response_parser_struct(ResponseVariant {
       status_code: StatusCodeToken::Ok200,
       variant_name: EnumVariantToken::new("Ok"),
       description: None,
-      schema_type: Some(schema_type),
-      content_category: ContentCategory::Text,
+      media_types: vec![ResponseMediaType::with_schema("text/plain", Some(st.clone()))],
+      schema_type: Some(st),
     });
     let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
     let code = tokens.to_string();
@@ -126,8 +127,11 @@ fn renders_json_parser_for_custom_struct() {
     status_code: StatusCodeToken::Ok200,
     variant_name: EnumVariantToken::new("Ok"),
     description: None,
+    media_types: vec![ResponseMediaType::with_schema(
+      "application/json",
+      Some(TypeRef::new("MyStruct")),
+    )],
     schema_type: Some(TypeRef::new("MyStruct")),
-    content_category: ContentCategory::Json,
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
@@ -144,14 +148,37 @@ fn test_binary_response_parsing() {
     status_code: StatusCodeToken::Ok200,
     variant_name: EnumVariantToken::new("Ok"),
     description: None,
+    media_types: vec![ResponseMediaType::with_schema(
+      "application/octet-stream",
+      Some(TypeRef::new("Vec<u8>")),
+    )],
     schema_type: Some(TypeRef::new("Vec<u8>")),
-    content_category: ContentCategory::Binary,
   });
   let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
   let code = tokens.to_string();
   assert!(
     code.contains("req . bytes () . await ? . to_vec ()"),
     "missing bytes conversion for binary content"
+  );
+}
+
+#[test]
+fn test_event_stream_response_generates_from_response() {
+  let def = make_response_parser_struct(ResponseVariant {
+    status_code: StatusCodeToken::Ok200,
+    variant_name: EnumVariantToken::new("Ok"),
+    description: None,
+    media_types: vec![ResponseMediaType::with_schema(
+      "text/event-stream",
+      Some(TypeRef::new("StreamEvent")),
+    )],
+    schema_type: Some(TypeRef::new("oas3_gen_support::EventStream<StreamEvent>")),
+  });
+  let tokens = structs::StructGenerator::new(&BTreeMap::new(), Visibility::Public).generate(&def);
+  let code = tokens.to_string();
+  assert!(
+    code.contains("from_response"),
+    "EventStream response should call from_response: {code}"
   );
 }
 
