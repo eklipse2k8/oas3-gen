@@ -57,8 +57,7 @@ impl SwaggerPetstoreClient {
     let mut req_builder = self.client.get(url);
     req_builder = req_builder.query(&request.query);
     let response = req_builder.send().await?;
-    let parsed = ListPetsRequest::parse_response(response).await?;
-    Ok(parsed)
+    ListPetsRequest::parse_response(response).await
   }
   ///Create a pet
   ///
@@ -72,8 +71,7 @@ impl SwaggerPetstoreClient {
       .push("pets");
     let req_builder = self.client.post(url);
     let response = req_builder.send().await?;
-    let parsed = CreatePetsRequest::parse_response(response).await?;
-    Ok(parsed)
+    CreatePetsRequest::parse_response(response).await
   }
   ///Info for a specific pet
   ///
@@ -88,7 +86,6 @@ impl SwaggerPetstoreClient {
       .push(&request.path.pet_id.clone());
     let req_builder = self.client.get(url);
     let response = req_builder.send().await?;
-    let parsed = ShowPetByIdRequest::parse_response(response).await?;
-    Ok(parsed)
+    ShowPetByIdRequest::parse_response(response).await
   }
 }

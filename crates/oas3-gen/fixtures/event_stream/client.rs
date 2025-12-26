@@ -58,8 +58,7 @@ impl EventStreamApiClient {
       .push("events");
     let mut req_builder = self.client.get(url);
     let response = req_builder.send().await?;
-    let parsed = StreamEventsRequest::parse_response(response).await?;
-    Ok(parsed)
+    StreamEventsRequest::parse_response(response).await
   }
   ///Stream typed events
   ///
@@ -80,7 +79,6 @@ impl EventStreamApiClient {
     let mut req_builder = self.client.get(url);
     req_builder = req_builder.query(&request.query);
     let response = req_builder.send().await?;
-    let parsed = StreamTypedEventsRequest::parse_response(response).await?;
-    Ok(parsed)
+    StreamTypedEventsRequest::parse_response(response).await
   }
 }

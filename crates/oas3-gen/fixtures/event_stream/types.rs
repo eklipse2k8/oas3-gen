@@ -32,7 +32,7 @@ impl StreamEventsRequest {
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<StreamEventsResponse> {
     let status = req.status();
     if status.is_success() {
-      let data = oas3_gen_support::EventStream::from_response(req);
+      let data = <oas3_gen_support::EventStream<StreamEvent>>::from_response(req);
       return Ok(StreamEventsResponse::Ok(data));
     }
     let _ = req.bytes().await?;
@@ -57,7 +57,7 @@ impl StreamTypedEventsRequest {
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<StreamTypedEventsResponse> {
     let status = req.status();
     if status.is_success() {
-      let data = oas3_gen_support::EventStream::from_response(req);
+      let data = <oas3_gen_support::EventStream<TypedEvent>>::from_response(req);
       return Ok(StreamTypedEventsResponse::Ok(data));
     }
     let _ = req.bytes().await?;

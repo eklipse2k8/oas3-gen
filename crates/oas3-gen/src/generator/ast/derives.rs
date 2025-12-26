@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use strum::Display;
 
 use super::{
-  ContentCategory, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeMode, StructDef, StructKind, VariantContent,
+  DiscriminatedEnumDef, EnumDef, ResponseEnumDef, ResponseMediaType, SerdeMode, StructDef, StructKind, VariantContent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -176,7 +176,7 @@ impl DerivesProvider for ResponseEnumDef {
     let has_event_stream = self
       .variants
       .iter()
-      .any(|v| v.media_types.iter().any(|m| m.category == ContentCategory::EventStream));
+      .any(|v| ResponseMediaType::has_event_stream(&v.media_types));
 
     if !has_event_stream {
       derives.insert(DeriveTrait::Clone);

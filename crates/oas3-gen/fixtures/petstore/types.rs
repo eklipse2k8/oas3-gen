@@ -57,12 +57,11 @@ impl ListPetsRequest {
       if content_type_str.contains("json") {
         let data = oas3_gen_support::Diagnostics::<Pets>::json_with_diagnostics(req).await?;
         return Ok(ListPetsResponse::Ok(data));
-      } else if content_type_str.contains("xml") {
+      }
+      if content_type_str.contains("xml") {
         let data = oas3_gen_support::Diagnostics::<Pets>::xml_with_diagnostics(req).await?;
         return Ok(ListPetsResponse::Ok(data));
       }
-      let data = oas3_gen_support::Diagnostics::<Pets>::json_with_diagnostics(req).await?;
-      return Ok(ListPetsResponse::Ok(data));
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
     Ok(ListPetsResponse::Unknown(data))

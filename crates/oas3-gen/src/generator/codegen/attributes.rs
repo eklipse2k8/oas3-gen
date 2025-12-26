@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
+use super::coercion;
 use crate::generator::ast::{
   DeriveTrait, Documentation, FieldDef, OuterAttr, SerdeAsFieldAttr, SerdeAttribute, ValidationAttribute,
 };
@@ -85,4 +86,22 @@ pub(crate) fn generate_serde_as_attr(attr: Option<&SerdeAsFieldAttr>) -> TokenSt
     Some(a) => a.to_token_stream(),
     None => quote! {},
   }
+}
+
+pub(crate) fn generate_doc_hidden_attr(hidden: bool) -> TokenStream {
+  if hidden {
+    quote! { #[doc(hidden)] }
+  } else {
+    quote! {}
+  }
+}
+
+pub(crate) fn generate_field_default_attr(field: &FieldDef) -> TokenStream {
+  field.default_value.as_ref().map_or_else(
+    || quote! {},
+    |default_value| {
+      let default_expr = coercion::json_to_rust_literal(default_value, &field.rust_type);
+      quote! { #[default(#default_expr)] }
+    },
+  )
 }

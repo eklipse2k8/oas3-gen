@@ -8,14 +8,15 @@ use syn::LitStr;
 use super::{Visibility, metadata::CodeMetadata};
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
-    ParameterLocation, RustPrimitive, RustType, StructDef, StructToken, TypeRef,
+    ContentCategory, Documentation, FieldNameToken, OperationInfo, OperationKind, ParameterLocation, RustPrimitive,
+    RustType, StructDef, StructToken, TypeRef,
     tokens::{ConstToken, HeaderToken},
   },
   codegen::{constants, parse_type},
   naming::identifiers::to_rust_type_name,
 };
 
+/// Generates the API Client struct and its methods.
 pub struct ClientGenerator<'a> {
   metadata: &'a CodeMetadata,
   operations: &'a [OperationInfo],
@@ -54,46 +55,67 @@ impl<'a> ClientGenerator<'a> {
     format_ident!("{client_name}Client")
   }
 
-  fn base_url_lit(&self) -> LitStr {
-    LitStr::new(&self.metadata.base_url, Span::call_site())
+  fn generate_client_struct(&self, client_ident: &syn::Ident) -> TokenStream {
+    let vis = self.visibility.to_tokens();
+    quote! {
+      #[derive(Debug, Clone)]
+      #vis struct #client_ident {
+        #vis client: Client,
+        #vis base_url: Url,
+      }
+    }
   }
 
-  fn header_consts(&self) -> TokenStream {
-    let headers: Vec<HeaderToken> = extract_header_names(self.operations, OperationKind::Http)
-      .into_iter()
-      .collect();
-    constants::generate_header_constants(&headers)
-  }
+  fn generate_constructors(&self) -> TokenStream {
+    let vis = self.visibility.to_tokens();
+    quote! {
+      /// Create a client using the OpenAPI `servers[0]` URL.
+      #[must_use]
+      #vis fn new() -> Self {
+        Self {
+          client: Client::builder().build().expect("client"),
+          base_url: Url::parse(BASE_URL).expect("valid base url"),
+        }
+      }
 
-  fn method_tokens(&self) -> anyhow::Result<Vec<TokenStream>> {
-    self
-      .operations
-      .iter()
-      .filter(|op| op.kind == OperationKind::Http)
-      .map(|op| {
-        ClientOperationMethod::try_from_operation(op, self.rust_types, self.visibility)
-          .map(quote::ToTokens::into_token_stream)
-      })
-      .collect()
+      /// Create a client with a custom base URL.
+      #vis fn with_base_url(base_url: impl AsRef<str>) -> anyhow::Result<Self> {
+        Ok(Self {
+          client: Client::builder().build().context("building reqwest client")?,
+          base_url: Url::parse(base_url.as_ref()).context("parsing base url")?,
+        })
+      }
+
+      /// Create a client from an existing `reqwest::Client`.
+      #vis fn with_client(base_url: impl AsRef<str>, client: Client) -> anyhow::Result<Self> {
+        let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
+        Ok(Self { client, base_url: url })
+      }
+    }
   }
 }
 
 impl ToTokens for ClientGenerator<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let client_ident = self.client_ident();
-    let base_url_lit = self.base_url_lit();
-    let header_consts = self.header_consts();
     let vis = self.visibility.to_tokens();
+    let base_url = LitStr::new(&self.metadata.base_url, Span::call_site());
 
-    let Ok(method_tokens) = self.method_tokens() else {
-      return;
-    };
+    let header_consts = generate_header_constants(self.operations);
+    let methods = self
+      .operations
+      .iter()
+      .filter(|op| op.kind == OperationKind::Http)
+      .filter_map(|op| ClientOperationMethod::generate(op, self.rust_types, self.visibility).ok());
 
     let types_import = if self.use_types_import {
       quote! { use super::types::*; }
     } else {
       quote! {}
     };
+
+    let client_struct = self.generate_client_struct(&client_ident);
+    let constructors = self.generate_constructors();
 
     quote! {
       use anyhow::Context;
@@ -106,55 +128,339 @@ impl ToTokens for ClientGenerator<'_> {
 
       #types_import
 
-      #vis const BASE_URL: &str = #base_url_lit;
+      #vis const BASE_URL: &str = #base_url;
 
       #header_consts
 
-      #[derive(Debug, Clone)]
-      #vis struct #client_ident {
-        #vis client: Client,
-        #vis base_url: Url,
-      }
+      #client_struct
 
       impl #client_ident {
-        /// Create a client using the OpenAPI `servers[0]` URL.
-        #[must_use]
-        #vis fn new() -> Self {
-          Self {
-            client: Client::builder().build().expect("client"),
-            base_url: Url::parse(BASE_URL).expect("valid base url"),
-          }
-        }
-
-        /// Create a client with a custom base URL.
-        #vis fn with_base_url(base_url: impl AsRef<str>) -> anyhow::Result<Self> {
-          Ok(Self {
-            client: Client::builder().build().context("building reqwest client")?,
-            base_url: Url::parse(base_url.as_ref()).context("parsing base url")?,
-          })
-        }
-
-        /// Create a client from an existing `reqwest::Client`.
-        #vis fn with_client(base_url: impl AsRef<str>, client: Client) -> anyhow::Result<Self> {
-          let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
-          Ok(Self { client, base_url: url })
-        }
-
-        #(#method_tokens)*
+        #constructors
+        #(#methods)*
       }
     }
     .to_tokens(tokens);
   }
 }
 
-fn extract_header_names(operations: &[OperationInfo], filter_kind: OperationKind) -> BTreeSet<HeaderToken> {
-  operations
+fn generate_header_constants(operations: &[OperationInfo]) -> TokenStream {
+  let headers: Vec<HeaderToken> = operations
     .iter()
-    .filter(|op| op.kind == filter_kind)
+    .filter(|op| op.kind == OperationKind::Http)
     .flat_map(|op| &op.parameters)
     .filter(|param| matches!(param.location, ParameterLocation::Header))
     .map(|param| HeaderToken::from(param.original_name.as_str()))
-    .collect()
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .collect();
+
+  constants::generate_header_constants(&headers)
+}
+
+pub(crate) struct ClientOperationMethod;
+
+impl ClientOperationMethod {
+  pub(crate) fn generate(
+    op: &OperationInfo,
+    rust_types: &[RustType],
+    visibility: Visibility,
+  ) -> anyhow::Result<TokenStream> {
+    let Some(request_ident) = op.request_type.as_ref().map(|r| format_ident!("{r}")) else {
+      anyhow::bail!("operation `{}` is missing request type", op.operation_id);
+    };
+
+    let method_name = format_ident!("{}", op.stable_id);
+    let doc_attrs = build_doc_attributes(op);
+    let builder_init = build_http_method_init(&op.method);
+    let url_construction = build_url_construction(op);
+
+    // Body and Parameter Logic
+    let query_params = build_query_params(op);
+    let header_params = build_header_params(op);
+    let body_logic = build_body_statement(op, rust_types);
+
+    let param_logic = quote! {
+      #query_params
+      #header_params
+      #body_logic
+    };
+
+    // Response Handling
+    let response_logic = build_response_handling(op);
+
+    let vis = visibility.to_tokens();
+
+    // Determine return type from response logic
+    let return_type = &response_logic.success_type;
+    let parse_block = &response_logic.parse_body;
+
+    Ok(quote! {
+      #doc_attrs
+      #vis async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#return_type> {
+        request.validate().context("parameter validation")?;
+        #url_construction
+        let mut req_builder = #builder_init;
+        #param_logic
+        let response = req_builder.send().await?;
+        #parse_block
+      }
+    })
+  }
+}
+
+pub(crate) fn build_doc_attributes(op: &OperationInfo) -> Documentation {
+  let mut docs = Documentation::default();
+
+  if let Some(summary) = &op.summary {
+    for line in summary.lines().filter(|l| !l.trim().is_empty()) {
+      docs.push(line.trim().to_string());
+    }
+  }
+
+  if let Some(desc) = &op.description {
+    if op.summary.is_some() {
+      docs.push(String::new());
+    }
+    for line in desc.lines() {
+      docs.push(line.trim().to_string());
+    }
+  }
+
+  if op.summary.is_some() || op.description.is_some() {
+    docs.push(String::new());
+  }
+
+  docs.push(format!("{} {}", op.method.as_str(), op.path_template));
+  docs
+}
+
+fn build_http_method_init(method: &Method) -> TokenStream {
+  match *method {
+    Method::GET => quote! { self.client.get(url) },
+    Method::POST => quote! { self.client.post(url) },
+    Method::PUT => quote! { self.client.put(url) },
+    Method::DELETE => quote! { self.client.delete(url) },
+    Method::PATCH => quote! { self.client.patch(url) },
+    Method::HEAD => quote! { self.client.head(url) },
+    _ => {
+      let m = format_ident!("reqwest::Method::{}", method.as_str());
+      quote! { self.client.request(#m, url) }
+    }
+  }
+}
+
+fn build_url_construction(op: &OperationInfo) -> TokenStream {
+  let segments = &op.path.0;
+  quote! {
+    let mut url = self.base_url.clone();
+    url.path_segments_mut()
+       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+       #(#segments)*;
+  }
+}
+
+fn build_query_params(op: &OperationInfo) -> TokenStream {
+  if op
+    .parameters
+    .iter()
+    .any(|p| matches!(p.location, ParameterLocation::Query))
+  {
+    quote! { req_builder = req_builder.query(&request.query); }
+  } else {
+    quote! {}
+  }
+}
+
+fn build_header_params(op: &OperationInfo) -> TokenStream {
+  let statements = op
+    .parameters
+    .iter()
+    .filter(|p| matches!(p.location, ParameterLocation::Header))
+    .map(|p| {
+      let header_name = ConstToken::from_raw(p.original_name.as_str());
+      let field = &p.rust_field;
+
+      let conversion = build_header_value_conversion(&p.rust_type, field, p.required);
+
+      if p.required {
+        quote! {
+          {
+            #conversion
+            req_builder = req_builder.header(#header_name, header_value);
+          }
+        }
+      } else {
+        quote! {
+          if let Some(value) = request.header.#field.as_ref() {
+            #conversion
+            req_builder = req_builder.header(#header_name, header_value);
+          }
+        }
+      }
+    });
+
+  quote! { #(#statements)* }
+}
+
+fn build_header_value_conversion(ty: &TypeRef, field: &FieldNameToken, required: bool) -> TokenStream {
+  let val = if required {
+    quote! { request.header.#field }
+  } else {
+    quote! { value }
+  };
+
+  if ty.is_string_like() {
+    quote! { let header_value = HeaderValue::from_str(#val.as_str())?; }
+  } else if ty.is_primitive_type() {
+    quote! { let header_value = HeaderValue::from_str(&(#val).to_string())?; }
+  } else {
+    quote! { let header_value = HeaderValue::from_str(&serde_plain::to_string(&#val)?)?; }
+  }
+}
+
+fn build_body_statement(op: &OperationInfo, rust_types: &[RustType]) -> TokenStream {
+  let Some(body) = &op.body else {
+    return quote! {};
+  };
+  let field = &body.field_name;
+
+  match body.content_category {
+    ContentCategory::Json => wrap_body(field, body.optional, |e| quote! { req_builder = req_builder.json(#e); }),
+    ContentCategory::FormUrlEncoded => {
+      wrap_body(field, body.optional, |e| quote! { req_builder = req_builder.form(#e); })
+    }
+    ContentCategory::Text | ContentCategory::EventStream => wrap_body(
+      field,
+      body.optional,
+      |e| quote! { req_builder = req_builder.body((#e).to_string()); },
+    ),
+    ContentCategory::Binary => wrap_body(
+      field,
+      body.optional,
+      |e| quote! { req_builder = req_builder.body((#e).clone()); },
+    ),
+    ContentCategory::Xml => wrap_body(field, body.optional, |e| {
+      quote! {
+        let xml_string = (#e).to_string();
+        req_builder = req_builder.header("Content-Type", "application/xml").body(xml_string);
+      }
+    }),
+    ContentCategory::Multipart => build_multipart_body(field, body.optional, op, rust_types),
+  }
+}
+
+fn wrap_body<F>(field: &FieldNameToken, optional: bool, f: F) -> TokenStream
+where
+  F: FnOnce(TokenStream) -> TokenStream,
+{
+  if optional {
+    let stmt = f(quote! { body });
+    quote! {
+      if let Some(body) = request.#field.as_ref() {
+        #stmt
+      }
+    }
+  } else {
+    f(quote! { &request.#field })
+  }
+}
+
+// --- Multipart ---
+
+pub(crate) fn build_multipart_body(
+  field: &FieldNameToken,
+  optional: bool,
+  op: &OperationInfo,
+  rust_types: &[RustType],
+) -> TokenStream {
+  let logic =
+    resolve_multipart_struct(op, rust_types, field).map_or_else(generate_fallback_multipart, generate_strict_multipart);
+
+  if optional {
+    quote! {
+      if let Some(body) = request.#field.as_ref() {
+        #logic
+      }
+    }
+  } else {
+    quote! {
+      let body = &request.#field;
+      #logic
+    }
+  }
+}
+
+fn resolve_multipart_struct<'a>(
+  op: &OperationInfo,
+  types: &'a [RustType],
+  field: &FieldNameToken,
+) -> Option<&'a StructDef> {
+  let req_type = op.request_type.as_ref()?;
+  let req_struct = find_struct(req_type, types)?;
+  let field_def = req_struct.fields.iter().find(|f| *field == f.name.as_str())?;
+
+  if let RustPrimitive::Custom(name) = &field_def.rust_type.base_type {
+    find_struct(&StructToken::from(name.clone()), types)
+  } else {
+    None
+  }
+}
+
+fn find_struct<'a>(name: &StructToken, types: &'a [RustType]) -> Option<&'a StructDef> {
+  types.iter().find_map(|t| match t {
+    RustType::Struct(s) if &s.name == name => Some(s),
+    _ => None,
+  })
+}
+
+fn generate_strict_multipart(def: &StructDef) -> TokenStream {
+  let parts = def.fields.iter().map(|f| {
+    let ident = format_ident!("{}", f.name);
+    let name = f.name.as_str();
+    let is_bytes = matches!(f.rust_type.base_type, RustPrimitive::Bytes);
+
+    let to_part = |v: TokenStream| {
+      if is_bytes {
+        quote! { Part::bytes(std::borrow::Cow::from(#v.clone())) }
+      } else {
+        quote! { Part::text(#v.to_string()) }
+      }
+    };
+
+    if f.rust_type.nullable {
+      let part = to_part(quote! { val });
+      quote! { if let Some(val) = &body.#ident { form = form.part(#name, #part); } }
+    } else {
+      let part = to_part(quote! { body.#ident });
+      quote! { form = form.part(#name, #part); }
+    }
+  });
+
+  quote! {
+    let mut form = reqwest::multipart::Form::new();
+    #(#parts)*
+    req_builder = req_builder.multipart(form);
+  }
+}
+
+fn generate_fallback_multipart() -> TokenStream {
+  quote! {
+    let json_value = serde_json::to_value(body)?;
+    let mut form = reqwest::multipart::Form::new();
+    if let serde_json::Value::Object(map) = json_value {
+      for (key, value) in map {
+        let text_value = match value {
+          serde_json::Value::String(s) => s,
+          serde_json::Value::Number(n) => n.to_string(),
+          serde_json::Value::Bool(b) => b.to_string(),
+          serde_json::Value::Null => continue,
+          other => serde_json::to_string(&other)?,
+        };
+        form = form.text(key, text_value);
+      }
+    }
+    req_builder = req_builder.multipart(form);
+  }
 }
 
 pub(crate) struct ResponseHandling {
@@ -162,442 +468,48 @@ pub(crate) struct ResponseHandling {
   pub(crate) parse_body: TokenStream,
 }
 
-pub(crate) struct ClientOperationMethod {
-  pub(crate) method_name: syn::Ident,
-  pub(crate) request_ident: syn::Ident,
-  pub(crate) doc_attrs: Documentation,
-  pub(crate) url_construction: TokenStream,
-  pub(crate) builder_init: TokenStream,
-  pub(crate) query_statement: TokenStream,
-  pub(crate) header_statements: Vec<TokenStream>,
-  pub(crate) body_statement: TokenStream,
-  pub(crate) response_handling: ResponseHandling,
-  pub(crate) visibility: Visibility,
-}
-
-impl ClientOperationMethod {
-  pub(crate) fn try_from_operation(
-    operation: &OperationInfo,
-    rust_types: &[RustType],
-    visibility: Visibility,
-  ) -> anyhow::Result<Self> {
-    let Some(request_ident) = operation.request_type.as_ref().map(|r| format_ident!("{r}")) else {
-      anyhow::bail!(
-        "operation `{}` is missing request type information",
-        operation.operation_id
-      );
+fn build_response_handling(op: &OperationInfo) -> ResponseHandling {
+  if let Some(enum_token) = &op.response_enum {
+    let req_ident = format_ident!("{}", op.request_type.as_ref().unwrap());
+    return ResponseHandling {
+      success_type: quote! { #enum_token },
+      parse_body: quote! { Ok(#req_ident::parse_response(response).await?) },
     };
-
-    let response_type = operation.response_type.as_ref().map(|t| parse_type(t)).transpose()?;
-    let primary_media_type = operation.response_media_types.first();
-    let content_category = primary_media_type.map_or(ContentCategory::Json, |m| m.category);
-
-    let response_handling = Self::build_response_handling(
-      &request_ident,
-      operation.response_enum.as_ref(),
-      response_type.as_ref(),
-      content_category,
-    );
-
-    Ok(Self {
-      method_name: format_ident!("{}", operation.stable_id),
-      request_ident,
-      doc_attrs: Self::build_doc_attributes(operation),
-      url_construction: Self::build_url_construction(operation),
-      builder_init: Self::build_http_method_init(&operation.method),
-      query_statement: Self::build_query_statement(operation),
-      header_statements: Self::build_header_statements(operation),
-      body_statement: Self::build_body_statement(operation, rust_types),
-      response_handling,
-      visibility,
-    })
   }
 
-  pub(crate) fn build_doc_attributes(operation: &OperationInfo) -> Documentation {
-    let mut docs = Documentation::default();
+  let Some(resp_type_str) = &op.response_type else {
+    return raw_response();
+  };
 
-    if let Some(summary) = &operation.summary {
-      for line in summary.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-          docs.push(trimmed.to_string());
-        }
-      }
-    }
+  let Ok(resp_ty) = parse_type(resp_type_str) else {
+    return raw_response();
+  };
 
-    if let Some(description) = &operation.description {
-      if operation.summary.is_some() {
-        docs.push(String::new());
-      }
-      for line in description.lines() {
-        docs.push(line.trim().to_string());
-      }
-    }
+  let category = op
+    .response_media_types
+    .first()
+    .map_or(ContentCategory::Json, |m| m.category);
 
-    if operation.summary.is_some() || operation.description.is_some() {
-      docs.push(String::new());
-    }
-
-    docs.push(format!("{} {}", operation.method.as_str(), operation.path_template));
-
-    docs
-  }
-
-  fn build_http_method_init(method: &Method) -> TokenStream {
-    match *method {
-      Method::GET => quote! { self.client.get(url) },
-      Method::POST => quote! { self.client.post(url) },
-      Method::PUT => quote! { self.client.put(url) },
-      Method::DELETE => quote! { self.client.delete(url) },
-      Method::PATCH => quote! { self.client.patch(url) },
-      Method::HEAD => quote! { self.client.head(url) },
-      _ => {
-        let method = format_ident!("reqwest::Method::{}", method.as_str());
-        quote! {
-          self.client.request(#method, url)
-        }
-      }
-    }
-  }
-
-  fn build_url_construction(operation: &OperationInfo) -> TokenStream {
-    let segments = &operation.path.0;
-
-    quote! {
-      let mut url = self.base_url.clone();
-      url
-        .path_segments_mut()
-        .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-        #(#segments)*;
-    }
-  }
-
-  fn build_query_statement(operation: &OperationInfo) -> TokenStream {
-    let has_query_params = operation
-      .parameters
-      .iter()
-      .any(|param| matches!(param.location, ParameterLocation::Query));
-
-    if has_query_params {
-      quote! {
-        req_builder = req_builder.query(&request.query);
-      }
-    } else {
-      quote! {}
-    }
-  }
-
-  fn build_header_statements(operation: &OperationInfo) -> Vec<TokenStream> {
-    operation
-      .parameters
-      .iter()
-      .filter(|param| matches!(param.location, ParameterLocation::Header))
-      .map(|param| {
-        let const_token = ConstToken::from_raw(param.original_name.as_str());
-        let field_ident = &param.rust_field;
-
-        let value_conversion = Self::build_header_value_conversion(&param.rust_type, field_ident, param.required);
-
-        if param.required {
-          quote! {
-            {
-              #value_conversion
-              req_builder = req_builder.header(#const_token, header_value);
-            }
-          }
-        } else {
-          quote! {
-            if let Some(value) = request.header.#field_ident.as_ref() {
-              #value_conversion
-              req_builder = req_builder.header(#const_token, header_value);
-            }
-          }
-        }
-      })
-      .collect()
-  }
-
-  fn build_header_value_conversion(rust_type: &TypeRef, field_ident: &FieldNameToken, required: bool) -> TokenStream {
-    let value_expr = if required {
-      quote! { request.header.#field_ident }
-    } else {
-      quote! { value }
-    };
-
-    if rust_type.is_string_like() {
-      quote! {
-        let header_value = HeaderValue::from_str(#value_expr.as_str())?;
-      }
-    } else if rust_type.is_primitive_type() {
-      quote! {
-        let header_value = HeaderValue::from_str(&(#value_expr).to_string())?;
-      }
-    } else {
-      quote! {
-        let header_value = HeaderValue::from_str(&serde_plain::to_string(&#value_expr)?)?;
-      }
-    }
-  }
-
-  fn build_body_statement(operation: &OperationInfo, rust_types: &[RustType]) -> TokenStream {
-    operation
-      .body
-      .as_ref()
-      .map(|body| Self::build_body_for_content_type(body, operation, rust_types))
-      .unwrap_or_default()
-  }
-
-  fn build_body_for_content_type(
-    body: &OperationBody,
-    operation: &OperationInfo,
-    rust_types: &[RustType],
-  ) -> TokenStream {
-    let field_ident = &body.field_name;
-
-    match body.content_category {
-      ContentCategory::Json => Self::build_json_body(field_ident, body.optional),
-      ContentCategory::FormUrlEncoded => Self::build_form_body(field_ident, body.optional),
-      ContentCategory::Multipart => Self::build_multipart_body(field_ident, body.optional, operation, rust_types),
-      ContentCategory::Text | ContentCategory::EventStream => Self::build_text_body(field_ident, body.optional),
-      ContentCategory::Binary => Self::build_binary_body(field_ident, body.optional),
-      ContentCategory::Xml => Self::build_xml_body(field_ident, body.optional),
-    }
-  }
-
-  fn wrap_optional_body<F>(field_ident: &FieldNameToken, optional: bool, make_statement: F) -> TokenStream
-  where
-    F: FnOnce(TokenStream) -> TokenStream,
-  {
-    if optional {
-      let body_expr = quote! { body };
-      let statement = make_statement(body_expr);
-      quote! {
-        if let Some(body) = request.#field_ident.as_ref() {
-          #statement
-        }
-      }
-    } else {
-      let body_expr = quote! { &request.#field_ident };
-      make_statement(body_expr)
-    }
-  }
-
-  fn build_json_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
-    Self::wrap_optional_body(field_ident, optional, |body_expr| {
-      quote! { req_builder = req_builder.json(#body_expr); }
-    })
-  }
-
-  fn build_form_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
-    Self::wrap_optional_body(field_ident, optional, |body_expr| {
-      quote! { req_builder = req_builder.form(#body_expr); }
-    })
-  }
-
-  pub(crate) fn build_multipart_body(
-    field_ident: &FieldNameToken,
-    optional: bool,
-    operation: &OperationInfo,
-    rust_types: &[RustType],
-  ) -> TokenStream {
-    let multipart_logic = Self::resolve_multipart_struct(operation, rust_types, field_ident)
-      .map_or_else(Self::generate_fallback_multipart, Self::generate_strict_multipart);
-
-    if optional {
-      quote! {
-        if let Some(body) = request.#field_ident.as_ref() {
-          #multipart_logic
-        }
-      }
-    } else {
-      quote! {
-        let body = &request.#field_ident;
-        #multipart_logic
-      }
-    }
-  }
-
-  fn resolve_multipart_struct<'a>(
-    operation: &OperationInfo,
-    rust_types: &'a [RustType],
-    field_ident: &FieldNameToken,
-  ) -> Option<&'a StructDef> {
-    let req_type = operation.request_type.as_ref()?;
-    let req_struct = Self::find_struct_by_name(req_type, rust_types)?;
-    let field_def = req_struct.fields.iter().find(|f| *field_ident == f.name.as_str())?;
-    if let RustPrimitive::Custom(name) = &field_def.rust_type.base_type {
-      let field_token = StructToken::from(name.clone());
-      Self::find_struct_by_name(&field_token, rust_types)
-    } else {
-      None
-    }
-  }
-
-  fn find_struct_by_name<'a>(name: &StructToken, types: &'a [RustType]) -> Option<&'a StructDef> {
-    types.iter().find_map(|t| match t {
-      RustType::Struct(s) if &s.name == name => Some(s),
-      _ => None,
-    })
-  }
-
-  fn generate_strict_multipart(body_struct: &StructDef) -> TokenStream {
-    let parts = body_struct.fields.iter().map(Self::generate_multipart_part);
-    quote! {
-      let mut form = reqwest::multipart::Form::new();
-      #(#parts)*
-      req_builder = req_builder.multipart(form);
-    }
-  }
-
-  fn generate_multipart_part(field: &FieldDef) -> TokenStream {
-    let ident = format_ident!("{}", field.name);
-    let name = field.name.as_str();
-    let is_bytes = matches!(field.rust_type.base_type, RustPrimitive::Bytes);
-
-    let value_to_part = |val: TokenStream| {
-      if is_bytes {
-        quote! { Part::bytes(std::borrow::Cow::from(#val.clone())) }
-      } else {
-        quote! { Part::text(#val.to_string()) }
-      }
-    };
-
-    if field.rust_type.nullable {
-      let part = value_to_part(quote! { val });
-      quote! {
-        if let Some(val) = &body.#ident {
-          form = form.part(#name, #part);
-        }
-      }
-    } else {
-      let part = value_to_part(quote! { body.#ident });
-      quote! { form = form.part(#name, #part); }
-    }
-  }
-
-  fn generate_fallback_multipart() -> TokenStream {
-    quote! {
-      let json_value = serde_json::to_value(body)?;
-      let mut form = reqwest::multipart::Form::new();
-      if let serde_json::Value::Object(map) = json_value {
-        for (key, value) in map {
-          let text_value = match value {
-            serde_json::Value::String(s) => s,
-            serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::Bool(b) => b.to_string(),
-            serde_json::Value::Null => continue,
-            other => serde_json::to_string(&other)?,
-          };
-          form = form.text(key, text_value);
-        }
-      }
-      req_builder = req_builder.multipart(form);
-    }
-  }
-
-  fn build_text_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
-    Self::wrap_optional_body(field_ident, optional, |body_expr| {
-      quote! { req_builder = req_builder.body((#body_expr).to_string()); }
-    })
-  }
-
-  fn build_binary_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
-    Self::wrap_optional_body(field_ident, optional, |body_expr| {
-      quote! { req_builder = req_builder.body((#body_expr).clone()); }
-    })
-  }
-
-  fn build_xml_body(field_ident: &FieldNameToken, optional: bool) -> TokenStream {
-    Self::wrap_optional_body(field_ident, optional, |body_expr| {
-      quote! {
-        let xml_string = (#body_expr).to_string();
-        req_builder = req_builder
-          .header("Content-Type", "application/xml")
-          .body(xml_string);
-      }
-    })
-  }
-
-  fn build_response_handling(
-    request_ident: &syn::Ident,
-    response_enum: Option<&EnumToken>,
-    response_type: Option<&syn::Type>,
-    response_content_category: ContentCategory,
-  ) -> ResponseHandling {
-    let raw_response = || ResponseHandling {
-      success_type: quote! { reqwest::Response },
-      parse_body: quote! { Ok(response) },
-    };
-
-    if let Some(response_enum) = response_enum {
-      return ResponseHandling {
-        success_type: quote! { #response_enum },
-        parse_body: quote! {
-          let parsed = #request_ident::parse_response(response).await?;
-          Ok(parsed)
-        },
-      };
-    }
-
-    let Some(response_ty) = response_type else {
-      return raw_response();
-    };
-
-    match response_content_category {
-      ContentCategory::Json => ResponseHandling {
-        success_type: quote! { #response_ty },
-        parse_body: quote! {
-          let parsed = response.json::<#response_ty>().await?;
-          Ok(parsed)
-        },
-      },
-      ContentCategory::Text => ResponseHandling {
-        success_type: quote! { String },
-        parse_body: quote! {
-          let text = response.text().await?;
-          Ok(text)
-        },
-      },
-      ContentCategory::EventStream => ResponseHandling {
-        success_type: quote! { oas3_gen_support::EventStream<#response_ty> },
-        parse_body: quote! {
-          Ok(oas3_gen_support::EventStream::from_response(response))
-        },
-      },
-      ContentCategory::Binary | ContentCategory::Xml | ContentCategory::FormUrlEncoded | ContentCategory::Multipart => {
-        raw_response()
-      }
-    }
+  match category {
+    ContentCategory::Json => ResponseHandling {
+      success_type: quote! { #resp_ty },
+      parse_body: quote! { Ok(response.json::<#resp_ty>().await?) },
+    },
+    ContentCategory::Text => ResponseHandling {
+      success_type: quote! { String },
+      parse_body: quote! { Ok(response.text().await?) },
+    },
+    ContentCategory::EventStream => ResponseHandling {
+      success_type: quote! { oas3_gen_support::EventStream<#resp_ty> },
+      parse_body: quote! { Ok(oas3_gen_support::EventStream::from_response(response)) },
+    },
+    _ => raw_response(),
   }
 }
 
-impl ToTokens for ClientOperationMethod {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let method_name = &self.method_name;
-    let request_ident = &self.request_ident;
-    let doc_attrs = &self.doc_attrs;
-    let url_construction = &self.url_construction;
-    let builder_init = &self.builder_init;
-    let query_statement = &self.query_statement;
-    let header_statements = &self.header_statements;
-    let body_statement = &self.body_statement;
-    let success_type = &self.response_handling.success_type;
-    let parse_body = &self.response_handling.parse_body;
-    let vis = self.visibility.to_tokens();
-
-    quote! {
-      #doc_attrs
-      #vis async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#success_type> {
-        request.validate().context("parameter validation")?;
-        #url_construction
-        let mut req_builder = #builder_init;
-        #query_statement
-        #(#header_statements)*
-        #body_statement
-        let response = req_builder.send().await?;
-        #parse_body
-      }
-    }
-    .to_tokens(tokens);
+fn raw_response() -> ResponseHandling {
+  ResponseHandling {
+    success_type: quote! { reqwest::Response },
+    parse_body: quote! { Ok(response) },
   }
 }

@@ -9,7 +9,7 @@ use crate::generator::{
   },
   codegen::{
     Visibility,
-    client::{ClientGenerator, ClientOperationMethod},
+    client::{self, ClientGenerator, ClientOperationMethod},
     metadata::CodeMetadata,
   },
 };
@@ -98,7 +98,7 @@ fn test_build_doc_attributes() {
       ..Default::default()
     }
     .build();
-    let doc_attrs = ClientOperationMethod::build_doc_attributes(&operation);
+    let doc_attrs = client::build_doc_attributes(&operation);
     let output = doc_attrs.to_string();
 
     for expected in case.expected_contains {
@@ -118,7 +118,7 @@ fn test_build_doc_attributes() {
     ..Default::default()
   }
   .build();
-  let doc_attrs = ClientOperationMethod::build_doc_attributes(&operation);
+  let doc_attrs = client::build_doc_attributes(&operation);
   let output = doc_attrs.to_string();
   let summary_pos = output.find("Test summary").unwrap();
   let description_pos = output.find("Test description").unwrap();
@@ -192,15 +192,21 @@ fn test_response_handling_content_categories() {
       ..Default::default()
     }
     .build();
-    let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
+    let method = ClientOperationMethod::generate(&operation, &[], Visibility::Public)
+      .unwrap()
+      .to_string();
 
-    let return_ty_str = method.response_handling.success_type.to_string();
-    let response_str = method.response_handling.parse_body.to_string();
+    let expected_return = format!("-> anyhow :: Result < {} >", case.expected_return_ty);
 
-    assert_eq!(return_ty_str, case.expected_return_ty, "{label}: return type mismatch");
+    // Normalize spaces for comparison if needed, or just check substring
+    assert!(
+      method.contains(&expected_return),
+      "{label}: return type mismatch. Got code: {method}"
+    );
+
     for expected in case.expected_contains {
       assert!(
-        response_str.contains(expected),
+        method.contains(expected),
         "{label}: expected response to contain '{expected}'"
       );
     }
@@ -214,17 +220,16 @@ fn test_response_handling_with_response_enum() {
     ..Default::default()
   }
   .build();
-  let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
-
-  let success_type_str = method.response_handling.success_type.to_string();
-  let parse_body_str = method.response_handling.parse_body.to_string();
+  let method = ClientOperationMethod::generate(&operation, &[], Visibility::Public)
+    .unwrap()
+    .to_string();
 
   assert!(
-    success_type_str.contains("TestResponseEnum"),
+    method.contains("-> anyhow :: Result < TestResponseEnum >"),
     "success type should contain TestResponseEnum"
   );
   assert!(
-    parse_body_str.contains("parse_response"),
+    method.contains("parse_response"),
     "parse_body should use parse_response"
   );
 }
@@ -236,22 +241,18 @@ fn test_event_stream_response_handling() {
     ..Default::default()
   }
   .build();
-  let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
+  let method = ClientOperationMethod::generate(&operation, &[], Visibility::Public)
+    .unwrap()
+    .to_string();
 
-  let return_ty_str = method.response_handling.success_type.to_string();
+  assert!(method.contains("EventStream"), "return type should contain EventStream");
   assert!(
-    return_ty_str.contains("EventStream"),
-    "return type should contain EventStream: {return_ty_str}"
+    method.contains("TestResponse"),
+    "return type should contain the response type"
   );
   assert!(
-    return_ty_str.contains("TestResponse"),
-    "return type should contain the response type: {return_ty_str}"
-  );
-
-  let parse_body_str = method.response_handling.parse_body.to_string();
-  assert!(
-    parse_body_str.contains("EventStream :: from_response"),
-    "parse_body should create EventStream from response: {parse_body_str}"
+    method.contains("EventStream :: from_response"),
+    "parse_body should create EventStream from response"
   );
 }
 
@@ -329,8 +330,7 @@ fn test_multipart_generation() {
 
   let rust_types = vec![RustType::Struct(request_struct), RustType::Struct(body_struct)];
   let strict_operation = make_operation("UploadRequest");
-  let strict_code =
-    ClientOperationMethod::build_multipart_body(&field_ident, false, &strict_operation, &rust_types).to_string();
+  let strict_code = client::build_multipart_body(&field_ident, false, &strict_operation, &rust_types).to_string();
 
   assert!(
     strict_code.contains("Part :: bytes"),
@@ -354,8 +354,7 @@ fn test_multipart_generation() {
   );
 
   let fallback_operation = make_operation("UnknownRequest");
-  let fallback_code =
-    ClientOperationMethod::build_multipart_body(&field_ident, false, &fallback_operation, &[]).to_string();
+  let fallback_code = client::build_multipart_body(&field_ident, false, &fallback_operation, &[]).to_string();
 
   assert!(
     fallback_code.contains("serde_json :: to_value"),

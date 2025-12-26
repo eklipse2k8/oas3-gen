@@ -57,8 +57,7 @@ impl UnionSerializationTestApiClient {
     let mut req_builder = self.client.post(url);
     req_builder = req_builder.json(&request.body);
     let response = req_builder.send().await?;
-    let parsed = SendContentRequest::parse_response(response).await?;
-    Ok(parsed)
+    SendContentRequest::parse_response(response).await
   }
   ///Get events with discriminated union
   ///
@@ -72,7 +71,6 @@ impl UnionSerializationTestApiClient {
       .push("events");
     let req_builder = self.client.get(url);
     let response = req_builder.send().await?;
-    let parsed = GetEventsRequest::parse_response(response).await?;
-    Ok(parsed)
+    GetEventsRequest::parse_response(response).await
   }
 }
