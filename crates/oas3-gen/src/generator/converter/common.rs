@@ -141,7 +141,8 @@ impl SchemaExt for ObjectSchema {
       && self.one_of.is_empty()
       && self.any_of.is_empty()
       && self.all_of.is_empty()
-      && (self.schema_type.is_some() || self.enum_values.len() <= 1)
+      && self.enum_values.len() <= 1
+      && (self.schema_type.is_some() || self.enum_values.is_empty())
   }
 
   fn is_null(&self) -> bool {

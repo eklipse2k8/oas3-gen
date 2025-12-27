@@ -312,6 +312,26 @@ fn test_schema_ext_methods() {
     !nullable_with_props.is_nullable_object(),
     "object|null with properties should not be nullable"
   );
+
+  let string_enum_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("auto"), json!("none")],
+    ..ObjectSchema::default()
+  };
+  assert!(
+    !string_enum_schema.is_primitive(),
+    "string enum with 2+ values should NOT be primitive"
+  );
+
+  let single_enum_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("only_value")],
+    ..ObjectSchema::default()
+  };
+  assert!(
+    single_enum_schema.is_primitive(),
+    "string enum with 1 value should be primitive (const-like)"
+  );
 }
 
 #[test]
@@ -1276,5 +1296,43 @@ fn test_array_with_union_items_not_treated_as_primitive() {
   assert!(
     result.inline_types.is_empty(),
     "should not generate inline types for named schema reference"
+  );
+}
+
+#[test]
+fn test_string_enum_reference_preserves_named_type() {
+  let pet_status_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("available"), json!("pending"), json!("sold")],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("PetStatus".to_string(), pet_status_schema)]));
+
+  let resolver = TypeResolverBuilder::default()
+    .config(default_config())
+    .graph(graph.clone())
+    .build()
+    .unwrap();
+
+  let pet_status_ref = ObjectOrReference::Ref {
+    ref_path: "#/components/schemas/PetStatus".to_string(),
+    summary: None,
+    description: None,
+  };
+  let pet_status_schema = graph.get_schema("PetStatus").unwrap();
+
+  let result = resolver
+    .resolve_property_type("Pet", "status", pet_status_schema, &pet_status_ref, None)
+    .unwrap();
+
+  assert_eq!(
+    result.result.to_rust_type(),
+    "PetStatus",
+    "reference to string enum should preserve the named type, not collapse to String"
+  );
+  assert!(
+    result.inline_types.is_empty(),
+    "should not generate inline types for named enum reference"
   );
 }
