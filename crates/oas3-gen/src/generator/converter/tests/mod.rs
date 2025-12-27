@@ -1,4 +1,5 @@
 mod cache;
+mod common_tests;
 mod enums;
 mod helper_tests;
 mod implicit_dependencies;

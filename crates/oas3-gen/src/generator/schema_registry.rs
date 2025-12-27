@@ -5,15 +5,21 @@ use std::{
 
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Schema},
+  spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaTypeSet},
 };
 
 use super::orchestrator::GenerationWarning;
-use crate::generator::operation_registry::OperationRegistry;
+use crate::generator::{converter::SchemaExt, operation_registry::OperationRegistry};
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
 type UnionFingerprints = HashMap<BTreeSet<String>, String>;
+
+#[derive(Debug, Clone)]
+pub(crate) struct MergedSchema {
+  pub schema: ObjectSchema,
+  pub discriminator_parent: Option<String>,
+}
 
 #[derive(Debug)]
 pub(crate) struct ReferenceExtractor;
@@ -122,6 +128,8 @@ impl ReferenceExtractor {
 #[derive(Debug)]
 pub(crate) struct SchemaRegistry {
   schemas: BTreeMap<String, ObjectSchema>,
+  merged_schemas: BTreeMap<String, MergedSchema>,
+  discriminator_parents: BTreeMap<String, (String, String, String)>,
   dependencies: BTreeMap<String, BTreeSet<String>>,
   cyclic_schemas: BTreeSet<String>,
   discriminator_cache: BTreeMap<String, (String, String)>,
@@ -166,6 +174,8 @@ impl SchemaRegistry {
     (
       Self {
         schemas,
+        merged_schemas: BTreeMap::new(),
+        discriminator_parents: BTreeMap::new(),
         dependencies: BTreeMap::new(),
         cyclic_schemas: BTreeSet::new(),
         discriminator_cache,
@@ -288,6 +298,8 @@ impl SchemaRegistry {
     }
 
     self.compute_all_inheritance_depths();
+    self.build_merged_schemas();
+    self.build_discriminator_parents();
   }
 
   fn compute_all_inheritance_depths(&mut self) {
@@ -327,6 +339,164 @@ impl SchemaRegistry {
 
     self.inheritance_depths.insert(schema_name.to_string(), depth);
     depth
+  }
+
+  fn build_merged_schemas(&mut self) {
+    let mut sorted_names: Vec<_> = self.schemas.keys().cloned().collect();
+    sorted_names.sort_by_key(|name| self.get_inheritance_depth(name));
+
+    for schema_name in sorted_names {
+      let Some(schema) = self.schemas.get(&schema_name).cloned() else {
+        continue;
+      };
+
+      let merged = self.merge_schema(&schema);
+      self.merged_schemas.insert(schema_name, merged);
+    }
+  }
+
+  fn build_discriminator_parents(&mut self) {
+    let mut map = BTreeMap::new();
+
+    for (child_name, merged) in &self.merged_schemas {
+      if let Some(parent_name) = &merged.discriminator_parent
+        && let Some((field, value)) = self.discriminator_cache.get(child_name)
+      {
+        map.insert(child_name.clone(), (parent_name.clone(), field.clone(), value.clone()));
+      }
+    }
+
+    self.discriminator_parents = map;
+  }
+
+  fn merge_schema(&self, schema: &ObjectSchema) -> MergedSchema {
+    if schema.all_of.is_empty() {
+      return MergedSchema {
+        schema: schema.clone(),
+        discriminator_parent: None,
+      };
+    }
+
+    let (merged_schema, parent_name) = self.do_merge_all_of(schema);
+
+    MergedSchema {
+      schema: merged_schema,
+      discriminator_parent: parent_name,
+    }
+  }
+
+  fn do_merge_all_of(&self, schema: &ObjectSchema) -> (ObjectSchema, Option<String>) {
+    let mut merged_properties = BTreeMap::new();
+    let mut merged_required = BTreeSet::new();
+    let mut merged_discriminator: Option<Discriminator> = None;
+    let mut merged_schema_type: Option<SchemaTypeSet> = None;
+    let mut discriminator_parent = None;
+
+    for all_of_ref in &schema.all_of {
+      match all_of_ref {
+        ObjectOrReference::Ref { ref_path, .. } => {
+          if let Some(parent_name) = Self::extract_ref_name(ref_path) {
+            let parent_schema = self
+              .merged_schemas
+              .get(&parent_name)
+              .map(|m| &m.schema)
+              .or_else(|| self.schemas.get(&parent_name));
+
+            if let Some(parent) = parent_schema {
+              if parent.discriminator.is_some() && parent.is_discriminated_base_type() {
+                discriminator_parent = Some(parent_name.clone());
+              }
+
+              Self::merge_properties_from(
+                parent,
+                &mut merged_properties,
+                &mut merged_required,
+                &mut merged_discriminator,
+                &mut merged_schema_type,
+              );
+            }
+          }
+        }
+        ObjectOrReference::Object(inline_schema) => {
+          Self::merge_properties_from(
+            inline_schema,
+            &mut merged_properties,
+            &mut merged_required,
+            &mut merged_discriminator,
+            &mut merged_schema_type,
+          );
+        }
+      }
+    }
+
+    Self::merge_properties_from(
+      schema,
+      &mut merged_properties,
+      &mut merged_required,
+      &mut merged_discriminator,
+      &mut merged_schema_type,
+    );
+
+    let mut merged = schema.clone();
+    merged.properties = merged_properties;
+    merged.required = merged_required.into_iter().collect();
+    merged.discriminator = merged_discriminator;
+    if merged_schema_type.is_some() {
+      merged.schema_type = merged_schema_type;
+    }
+    merged.all_of.clear();
+
+    if merged.additional_properties.is_none() {
+      for all_of_ref in &schema.all_of {
+        if let Ok(parent) = all_of_ref.resolve(&self.spec)
+          && parent.additional_properties.is_some()
+        {
+          merged.additional_properties.clone_from(&parent.additional_properties);
+          break;
+        }
+      }
+    }
+
+    (merged, discriminator_parent)
+  }
+
+  fn merge_properties_from(
+    source: &ObjectSchema,
+    properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
+    required: &mut BTreeSet<String>,
+    discriminator: &mut Option<Discriminator>,
+    schema_type: &mut Option<SchemaTypeSet>,
+  ) {
+    for (name, prop) in &source.properties {
+      properties.insert(name.clone(), prop.clone());
+    }
+    required.extend(source.required.iter().cloned());
+    if source.discriminator.is_some() {
+      discriminator.clone_from(&source.discriminator);
+    }
+    if source.schema_type.is_some() {
+      schema_type.clone_from(&source.schema_type);
+    }
+  }
+
+  pub(crate) fn get_merged_schema(&self, name: &str) -> Option<&MergedSchema> {
+    self.merged_schemas.get(name)
+  }
+
+  pub(crate) fn get_effective_schema(&self, name: &str) -> Option<&ObjectSchema> {
+    self
+      .merged_schemas
+      .get(name)
+      .map(|m| &m.schema)
+      .or_else(|| self.schemas.get(name))
+  }
+
+  pub(crate) fn get_discriminator_parent(&self, name: &str) -> Option<&(String, String, String)> {
+    self.discriminator_parents.get(name)
+  }
+
+  pub(crate) fn merged_schemas_ref(&self) -> &BTreeMap<String, MergedSchema> {
+    &self.merged_schemas
   }
 
   /// Detects cycles in the schema dependency graph using depth-first search.

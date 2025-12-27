@@ -10,6 +10,16 @@
 
 use serde::{Deserialize, Serialize};
 use validator::Validate;
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+pub struct Cat {
+  #[serde(rename = "favoriteToy")]
+  pub favorite_toy: Option<String>,
+  pub id: i64,
+  pub lives: i32,
+  pub name: String,
+  pub tag: Option<String>,
+}
+pub type Cats = Vec<Cat>;
 ///Create a pet
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct CreatePetsRequest {}
@@ -37,6 +47,29 @@ pub enum CreatePetsResponse {
 pub struct Error {
   pub code: i32,
   pub message: String,
+}
+///List all cats
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct ListCatsRequest {}
+impl ListCatsRequest {
+  ///Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ListCatsResponse> {
+    let status = req.status();
+    if status.is_success() {
+      let data = oas3_gen_support::Diagnostics::<Cats>::json_with_diagnostics(req).await?;
+      return Ok(ListCatsResponse::Ok(data));
+    }
+    let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+    Ok(ListCatsResponse::Unknown(data))
+  }
+}
+///Response types for listCats
+#[derive(Debug, Clone)]
+pub enum ListCatsResponse {
+  ///200: A paged array of cats
+  Ok(Cats),
+  ///default: unexpected error
+  Unknown(Error),
 }
 ///List all pets
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]

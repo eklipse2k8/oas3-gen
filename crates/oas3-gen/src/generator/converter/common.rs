@@ -1,11 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
+use anyhow::Context;
+use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
 
 use crate::generator::{
   ast::{RustType, TypeRef},
   converter::cache::SharedSchemaCache,
-  schema_registry::ReferenceExtractor,
+  schema_registry::{MergedSchema, ReferenceExtractor, SchemaRegistry},
 };
 
 /// Wraps a conversion result with any inline types generated during conversion.
@@ -142,6 +143,9 @@ pub(crate) trait SchemaExt {
 
   /// Returns true if the schema has allOf composition.
   fn has_all_of(&self) -> bool;
+
+  /// Returns true if the schema has a const value defined.
+  fn has_const_value(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -292,6 +296,10 @@ impl SchemaExt for ObjectSchema {
   fn has_all_of(&self) -> bool {
     !self.all_of.is_empty()
   }
+
+  fn has_const_value(&self) -> bool {
+    self.const_value.is_some()
+  }
 }
 
 pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
@@ -299,4 +307,117 @@ pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSch
     .iter()
     .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
     .collect()
+}
+
+pub(crate) struct InlineSchemaMerger<'a> {
+  spec: &'a Spec,
+  merged_schemas: &'a BTreeMap<String, MergedSchema>,
+}
+
+impl<'a> InlineSchemaMerger<'a> {
+  pub fn new(spec: &'a Spec, merged_schemas: &'a BTreeMap<String, MergedSchema>) -> Self {
+    Self { spec, merged_schemas }
+  }
+
+  pub fn merge_inline(&self, schema: &ObjectSchema) -> anyhow::Result<ObjectSchema> {
+    if schema.all_of.is_empty() {
+      return Ok(schema.clone());
+    }
+
+    let mut merged_properties = BTreeMap::new();
+    let mut merged_required = BTreeSet::new();
+    let mut merged_discriminator: Option<Discriminator> = None;
+    let mut merged_schema_type: Option<SchemaTypeSet> = None;
+    let mut merged_additional = None;
+
+    for all_of_ref in &schema.all_of {
+      match all_of_ref {
+        ObjectOrReference::Ref { ref_path, .. } => {
+          if let Some(name) = SchemaRegistry::extract_ref_name(ref_path)
+            && let Some(merged) = self.merged_schemas.get(&name)
+          {
+            Self::collect_from(
+              &merged.schema,
+              &mut merged_properties,
+              &mut merged_required,
+              &mut merged_discriminator,
+              &mut merged_schema_type,
+              &mut merged_additional,
+            );
+            continue;
+          }
+
+          let resolved = all_of_ref
+            .resolve(self.spec)
+            .context("Schema resolution failed for inline allOf reference")?;
+          Self::collect_from(
+            &resolved,
+            &mut merged_properties,
+            &mut merged_required,
+            &mut merged_discriminator,
+            &mut merged_schema_type,
+            &mut merged_additional,
+          );
+        }
+        ObjectOrReference::Object(inline) => {
+          let inner_merged = self.merge_inline(inline)?;
+          Self::collect_from(
+            &inner_merged,
+            &mut merged_properties,
+            &mut merged_required,
+            &mut merged_discriminator,
+            &mut merged_schema_type,
+            &mut merged_additional,
+          );
+        }
+      }
+    }
+
+    Self::collect_from(
+      schema,
+      &mut merged_properties,
+      &mut merged_required,
+      &mut merged_discriminator,
+      &mut merged_schema_type,
+      &mut merged_additional,
+    );
+
+    let mut result = schema.clone();
+    result.properties = merged_properties;
+    result.required = merged_required.into_iter().collect();
+    result.discriminator = merged_discriminator;
+    if merged_schema_type.is_some() {
+      result.schema_type = merged_schema_type;
+    }
+    result.all_of.clear();
+
+    if result.additional_properties.is_none() {
+      result.additional_properties = merged_additional;
+    }
+
+    Ok(result)
+  }
+
+  fn collect_from(
+    source: &ObjectSchema,
+    properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
+    required: &mut BTreeSet<String>,
+    discriminator: &mut Option<Discriminator>,
+    schema_type: &mut Option<SchemaTypeSet>,
+    additional_properties: &mut Option<Schema>,
+  ) {
+    for (name, prop) in &source.properties {
+      properties.insert(name.clone(), prop.clone());
+    }
+    required.extend(source.required.iter().cloned());
+    if source.discriminator.is_some() {
+      discriminator.clone_from(&source.discriminator);
+    }
+    if source.schema_type.is_some() {
+      schema_type.clone_from(&source.schema_type);
+    }
+    if additional_properties.is_none() {
+      additional_properties.clone_from(&source.additional_properties);
+    }
+  }
 }

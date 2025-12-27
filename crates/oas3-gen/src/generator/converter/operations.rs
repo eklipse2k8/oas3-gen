@@ -9,10 +9,12 @@ use oas3::{
 };
 use serde_json::Value;
 
-use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, metadata, path_renderer, responses};
+use super::{
+  SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, fields::FieldConverter, path_renderer, responses,
+};
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
+    ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
     OperationParameter, OuterAttr, ParameterLocation, ParsedPath, ResponseEnumDef, ResponseMediaType, RustType,
     SerdeAsFieldAttr, SerdeAsSeparator, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
     ValidationAttribute,
@@ -356,12 +358,7 @@ impl<'a> OperationConverter<'a> {
       main_fields.push(body_field);
     }
 
-    let docs = operation
-      .description
-      .as_ref()
-      .or(operation.summary.as_ref())
-      .map(|d| metadata::extract_docs(Some(d)))
-      .unwrap_or_default();
+    let docs = Documentation::from_optional(operation.description.as_ref().or(operation.summary.as_ref()));
 
     let methods = response_enum_info
       .map(|(enum_token, def)| vec![responses::build_parse_response_method(enum_token, &def.variants)])
@@ -619,11 +616,7 @@ impl<'a> OperationConverter<'a> {
     let body = body_ref.resolve(self.spec).ok()?;
     let is_required = body.required.unwrap_or(false);
 
-    let docs = body
-      .description
-      .as_ref()
-      .map(|d| metadata::extract_docs(Some(d)))
-      .unwrap_or_default();
+    let docs = Documentation::from_optional(body.description.as_ref());
 
     let rust_type = if is_required {
       body_type
@@ -710,7 +703,7 @@ impl<'a> OperationConverter<'a> {
     let resolved = self.resolve_parameter_type(param, parent_struct_name, cache, warnings)?;
 
     let is_required = param.required.unwrap_or(false);
-    let docs = metadata::extract_docs(param.description.as_ref());
+    let docs = Documentation::from_optional(param.description.as_ref());
 
     let final_rust_type = if is_required {
       resolved.type_ref.clone()
@@ -797,9 +790,8 @@ impl<'a> OperationConverter<'a> {
     };
 
     let is_required = param.required.unwrap_or(false);
-    let extractor = metadata::MetadataExtractor::new(&param.name, is_required, &schema, &type_ref);
-    let validation_attrs = extractor.extract_all_validation();
-    let default_value = extractor.extract_default_value();
+    let (validation_attrs, default_value) =
+      FieldConverter::extract_parameter_metadata(&param.name, is_required, &schema, &type_ref);
 
     Ok(ResolvedParameterType {
       type_ref,

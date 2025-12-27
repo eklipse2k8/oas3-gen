@@ -545,6 +545,124 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
+  let event_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "message".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    required: vec!["message".to_string()],
+    ..Default::default()
+  };
+
+  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("EventPayload".to_string(), event_schema)]));
+
+  let operation = Operation {
+    operation_id: Some("getEvents".to_string()),
+    responses: Some(ResponseMap::from([(
+      "200".to_string(),
+      ObjectOrReference::Object(Response {
+        content: BTreeMap::from([
+          (
+            "application/json".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/EventPayload".to_string(),
+                summary: None,
+                description: None,
+              }),
+              ..Default::default()
+            },
+          ),
+          (
+            "text/event-stream".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/EventPayload".to_string(),
+                summary: None,
+                description: None,
+              }),
+              ..Default::default()
+            },
+          ),
+        ]),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
+
+  let result = converter.convert(
+    "get_events",
+    "getEvents",
+    &Method::GET,
+    "/events",
+    OperationKind::Http,
+    &operation,
+    &mut usage,
+    &mut cache,
+  )?;
+
+  let response_enum = result
+    .types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "GetEventsResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let ok_variant = response_enum
+    .variants
+    .iter()
+    .find(|v| v.variant_name == "Ok")
+    .expect("Ok variant not found");
+
+  let stream_variant = response_enum
+    .variants
+    .iter()
+    .find(|v| v.variant_name == "OkEventStream")
+    .expect("Event stream variant not found");
+
+  assert_eq!(
+    ok_variant
+      .schema_type
+      .as_ref()
+      .expect("Ok variant should have schema")
+      .to_rust_type(),
+    "EventPayload",
+  );
+  assert!(
+    ok_variant
+      .media_types
+      .iter()
+      .all(|m| m.category != ContentCategory::EventStream),
+    "Ok variant should exclude event streams",
+  );
+
+  assert_eq!(
+    stream_variant
+      .schema_type
+      .as_ref()
+      .expect("Event stream variant should have schema")
+      .to_rust_type(),
+    "oas3_gen_support::EventStream<EventPayload>",
+  );
+  assert!(
+    stream_variant
+      .media_types
+      .iter()
+      .all(|m| m.category == ContentCategory::EventStream),
+    "Event stream variant should only contain event stream media types",
+  );
+  Ok(())
+}
+
+#[test]
 fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
   let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
 

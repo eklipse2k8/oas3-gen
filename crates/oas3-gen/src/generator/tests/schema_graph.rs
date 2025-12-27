@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{Components, ObjectOrReference, ObjectSchema, Spec};
+use oas3::spec::{Components, Discriminator, ObjectOrReference, ObjectSchema, Spec};
 
 use crate::generator::schema_registry::{ReferenceExtractor, SchemaRegistry};
 
@@ -247,4 +247,107 @@ fn test_schema_graph_integration() {
 
   assert!(cycles.is_empty(), "integration: should have no cycles");
   assert!(!graph.is_cyclic("User"), "integration: User should not be cyclic");
+}
+
+#[test]
+fn test_schema_registry_merges_all_of_properties_and_required() {
+  let mut parent = make_simple_schema();
+  parent.schema_type = Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object));
+  parent.required.push("id".to_string());
+  parent.properties.insert(
+    "id".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Integer)),
+      ..Default::default()
+    }),
+  );
+  parent.additional_properties = Some(oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true)));
+
+  let mut child = make_simple_schema();
+  child.schema_type = Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object));
+  child.required.push("name".to_string());
+  child.properties.insert(
+    "name".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+  child.all_of.push(make_ref("Parent"));
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Parent".to_string(), ObjectOrReference::Object(parent.clone())),
+    ("Child".to_string(), ObjectOrReference::Object(child.clone())),
+  ]));
+
+  let (mut graph, _) = SchemaRegistry::new(spec);
+  graph.build_dependencies();
+  graph.detect_cycles();
+
+  let merged = graph
+    .get_merged_schema("Child")
+    .expect("merged schema should exist for Child");
+
+  assert!(merged.schema.properties.contains_key("id"));
+  assert!(merged.schema.properties.contains_key("name"));
+  assert!(merged.schema.required.contains(&"id".to_string()));
+  assert!(merged.schema.required.contains(&"name".to_string()));
+  assert!(merged.schema.additional_properties.is_some());
+}
+
+#[test]
+fn test_schema_registry_merges_and_tracks_discriminator_parents() {
+  let mut parent_schema = make_simple_schema();
+  parent_schema.properties.insert(
+    "kind".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+  parent_schema.discriminator = Some(Discriminator {
+    property_name: "kind".to_string(),
+    mapping: Some(BTreeMap::from([(
+      "child".to_string(),
+      format!("{SCHEMA_REF_PREFIX}Child"),
+    )])),
+  });
+
+  let mut child_schema = make_simple_schema();
+  child_schema.properties.insert(
+    "child_prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Integer)),
+      ..Default::default()
+    }),
+  );
+  child_schema.all_of.push(make_ref("Parent"));
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Parent".to_string(), ObjectOrReference::Object(parent_schema.clone())),
+    ("Child".to_string(), ObjectOrReference::Object(child_schema.clone())),
+  ]));
+
+  let (mut graph, _) = SchemaRegistry::new(spec);
+  graph.build_dependencies();
+  graph.detect_cycles();
+
+  let merged_child = graph
+    .get_merged_schema("Child")
+    .expect("merged schema should exist for Child");
+
+  assert_eq!(merged_child.discriminator_parent.as_deref(), Some("Parent"));
+  assert!(merged_child.schema.properties.contains_key("kind"));
+  assert!(merged_child.schema.properties.contains_key("child_prop"));
+
+  let discriminator = graph
+    .get_discriminator_parent("Child")
+    .expect("discriminator parent should be tracked");
+
+  assert_eq!(discriminator.0, "Parent");
+  assert_eq!(discriminator.1, "kind");
+  assert_eq!(discriminator.2, "child");
+
+  let effective = graph.get_effective_schema("Child").unwrap();
+  assert_eq!(effective.properties.len(), merged_child.schema.properties.len());
 }

@@ -44,6 +44,20 @@ impl SwaggerPetstoreClient {
     let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
     Ok(Self { client, base_url: url })
   }
+  ///List all cats
+  ///
+  ///GET /cats
+  pub async fn list_cats(&self, request: ListCatsRequest) -> anyhow::Result<ListCatsResponse> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("cats");
+    let req_builder = self.client.get(url);
+    let response = req_builder.send().await?;
+    ListCatsRequest::parse_response(response).await
+  }
   ///List all pets
   ///
   ///GET /pets

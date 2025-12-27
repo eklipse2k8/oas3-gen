@@ -2,9 +2,8 @@ pub(crate) mod cache;
 mod common;
 pub(crate) mod discriminator;
 mod enums;
-mod field_processor;
+pub(crate) mod fields;
 pub(crate) mod hashing;
-pub(crate) mod metadata;
 pub(crate) mod operations;
 pub(crate) mod path_renderer;
 pub(crate) mod responses;
@@ -23,7 +22,7 @@ pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
 use super::{
-  ast::{RustType, TypeAliasDef, TypeAliasToken, TypeRef},
+  ast::{Documentation, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
 };
 use crate::generator::{converter::type_resolver::TypeResolverBuilder, naming::identifiers::to_rust_type_name};
@@ -169,9 +168,7 @@ impl SchemaConverter {
   ) -> anyhow::Result<Vec<RustType>> {
     if !schema.all_of.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
-      return self
-        .struct_converter
-        .convert_all_of_schema(name, schema, cache_reborrow);
+      return self.struct_converter.convert_all_of_schema(name, cache_reborrow);
     }
 
     if !schema.one_of.is_empty() {
@@ -212,7 +209,7 @@ impl SchemaConverter {
     if let Some(output) = self.try_convert_array_type_alias_with_union_items(name, schema, cache)? {
       let alias = RustType::TypeAlias(TypeAliasDef {
         name: TypeAliasToken::from_raw(name),
-        docs: metadata::extract_docs(schema.description.as_ref()),
+        docs: Documentation::from_optional(schema.description.as_ref()),
         target: output.result,
       });
       let mut result = vec![alias];
@@ -223,7 +220,7 @@ impl SchemaConverter {
     let type_ref = self.type_resolver.resolve_type(schema)?;
     let alias = RustType::TypeAlias(TypeAliasDef {
       name: TypeAliasToken::from_raw(name),
-      docs: metadata::extract_docs(schema.description.as_ref()),
+      docs: Documentation::from_optional(schema.description.as_ref()),
       target: type_ref,
     });
 

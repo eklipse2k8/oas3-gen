@@ -1,4 +1,5 @@
 use std::{
+  borrow::Cow,
   collections::{BTreeMap, BTreeSet, HashSet},
   sync::Arc,
 };
@@ -10,9 +11,8 @@ use serde_json::Value;
 use super::{
   CodegenConfig,
   cache::{SharedSchemaCache, StructSummary},
-  common::{SchemaExt, handle_inline_creation},
+  common::{InlineSchemaMerger, SchemaExt, handle_inline_creation},
   discriminator::try_build_discriminated_enum_from_variants,
-  metadata,
   structs::StructConverter,
   type_resolver::TypeResolver,
 };
@@ -44,19 +44,21 @@ pub(crate) enum CollisionStrategy {
   Deduplicate,
 }
 
+#[derive(Clone, Debug)]
 struct EnumValueEntry {
   value: Value,
   docs: Documentation,
   deprecated: bool,
 }
 
+#[derive(Clone, Debug)]
 struct UnionVariantSpec {
   variant_name: EnumVariantToken,
   resolved_schema: ObjectSchema,
   ref_name: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct EnumConverter {
   graph: Arc<SchemaRegistry>,
   type_resolver: TypeResolver,
@@ -118,7 +120,7 @@ impl EnumConverter {
       name,
       &entries,
       strategy,
-      metadata::extract_docs(schema.description.as_ref()),
+      Documentation::from_optional(schema.description.as_ref()),
       self.case_insensitive_enums,
     );
 
@@ -474,7 +476,7 @@ impl EnumConverter {
 
     let variant = VariantDef {
       name: variant_name,
-      docs: metadata::extract_docs(resolved_schema.description.as_ref()),
+      docs: Documentation::from_optional(resolved_schema.description.as_ref()),
       content: VariantContent::Tuple(vec![type_ref]),
       deprecated: resolved_schema.deprecated.unwrap_or(false),
       ..Default::default()
@@ -490,11 +492,15 @@ impl EnumConverter {
     variant_name: EnumVariantToken,
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
-    let mut resolved_schema_merged = resolved_schema.clone();
-    if resolved_schema.has_all_of() {
-      resolved_schema_merged = self.type_resolver.merge_all_of_schema(resolved_schema)?;
-    }
-    let resolved_schema = &resolved_schema_merged;
+    let merger = InlineSchemaMerger::new(self.graph.spec(), self.graph.merged_schemas_ref());
+    let resolved_schema_owned: Cow<ObjectSchema>;
+    let resolved_schema = if resolved_schema.has_all_of() {
+      resolved_schema_owned = Cow::Owned(merger.merge_inline(resolved_schema)?);
+      resolved_schema_owned.as_ref()
+    } else {
+      resolved_schema_owned = Cow::Borrowed(resolved_schema);
+      resolved_schema_owned.as_ref()
+    };
 
     if let Some(result) = Self::build_const_variant(resolved_schema, &variant_name)? {
       return Ok(result);
@@ -520,7 +526,7 @@ impl EnumConverter {
 
     let variant = VariantDef {
       name: variant_name,
-      docs: metadata::extract_docs(resolved_schema.description.as_ref()),
+      docs: Documentation::from_optional(resolved_schema.description.as_ref()),
       content,
       serde_attrs: vec![],
       deprecated: resolved_schema.deprecated.unwrap_or(false),
@@ -539,7 +545,7 @@ impl EnumConverter {
 
       let variant = VariantDef {
         name: variant_name.clone(),
-        docs: metadata::extract_docs(resolved_schema.description.as_ref()),
+        docs: Documentation::from_optional(resolved_schema.description.as_ref()),
         content: VariantContent::Unit,
         serde_attrs: vec![SerdeAttribute::Rename(normalized.rename_value)],
         deprecated: resolved_schema.deprecated.unwrap_or(false),
@@ -629,7 +635,7 @@ impl EnumConverter {
 
     RustType::Enum(EnumDef {
       name: EnumToken::from_raw(name),
-      docs: metadata::extract_docs(schema.description.as_ref()),
+      docs: Documentation::from_optional(schema.description.as_ref()),
       variants,
       serde_attrs: vec![SerdeAttribute::Untagged],
       case_insensitive: false,
@@ -662,11 +668,11 @@ impl EnumConverter {
         continue;
       };
 
-      if resolved.const_value.is_none() && !resolved.has_enum_values() && resolved.is_string() {
+      if !resolved.has_const_value() && !resolved.has_enum_values() && resolved.is_string() {
         has_freeform = true;
       }
 
-      let docs = metadata::extract_docs(resolved.description.as_ref());
+      let docs = Documentation::from_optional(resolved.description.as_ref());
       let deprecated = resolved.deprecated.unwrap_or(false);
 
       if let Some(const_val) = resolved.const_value.as_ref().and_then(|v| v.as_str()) {
@@ -830,7 +836,7 @@ impl EnumConverter {
 
     RustType::Enum(EnumDef {
       name: EnumToken::new(name),
-      docs: metadata::extract_docs(schema.description.as_ref()),
+      docs: Documentation::from_optional(schema.description.as_ref()),
       variants,
       serde_attrs: vec![SerdeAttribute::Untagged],
       case_insensitive: false,

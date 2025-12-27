@@ -1,12 +1,9 @@
-use std::{
-  collections::{BTreeMap, BTreeSet, HashMap},
-  sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::{Context, Result};
 use derive_builder::Builder;
 use inflections::Inflect;
-use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType};
 
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
@@ -691,122 +688,6 @@ impl TypeResolver {
       return cache.get_enum_name(&values);
     }
     None
-  }
-
-  pub(crate) fn merge_child_schema_with_parent(
-    &self,
-    child_schema: &ObjectSchema,
-    parent_schema: &ObjectSchema,
-  ) -> anyhow::Result<ObjectSchema> {
-    let mut merged_properties = BTreeMap::new();
-    let mut merged_required = BTreeSet::new();
-    let mut merged_discriminator = parent_schema.discriminator.clone();
-    let mut merged_schema_type = parent_schema.schema_type.clone();
-
-    self.collect_all_of_properties(
-      child_schema,
-      &mut merged_properties,
-      &mut merged_required,
-      &mut merged_discriminator,
-      &mut merged_schema_type,
-    )?;
-
-    let mut merged_schema = child_schema.clone();
-    merged_schema.properties = merged_properties;
-    merged_schema.required = merged_required.into_iter().collect();
-    merged_schema.discriminator = merged_discriminator;
-    merged_schema.schema_type = merged_schema_type;
-    merged_schema.all_of.clear();
-
-    if merged_schema.additional_properties.is_none() {
-      merged_schema
-        .additional_properties
-        .clone_from(&parent_schema.additional_properties);
-    }
-
-    Ok(merged_schema)
-  }
-
-  pub(crate) fn merge_all_of_schema(&self, schema: &ObjectSchema) -> anyhow::Result<ObjectSchema> {
-    let mut merged_properties = BTreeMap::new();
-    let mut merged_required = BTreeSet::new();
-    let mut merged_discriminator = None;
-    let mut merged_schema_type = None;
-
-    self.collect_all_of_properties(
-      schema,
-      &mut merged_properties,
-      &mut merged_required,
-      &mut merged_discriminator,
-      &mut merged_schema_type,
-    )?;
-
-    let mut merged_schema = schema.clone();
-    merged_schema.properties = merged_properties;
-    merged_schema.required = merged_required.into_iter().collect();
-    merged_schema.discriminator = merged_discriminator;
-    if merged_schema_type.is_some() {
-      merged_schema.schema_type = merged_schema_type;
-    }
-    merged_schema.all_of.clear();
-
-    Ok(merged_schema)
-  }
-
-  fn collect_all_of_properties(
-    &self,
-    schema: &ObjectSchema,
-    properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
-    required: &mut BTreeSet<String>,
-    discriminator: &mut Option<Discriminator>,
-    schema_type: &mut Option<SchemaTypeSet>,
-  ) -> anyhow::Result<()> {
-    for all_of_ref in &schema.all_of {
-      let all_of_schema = all_of_ref
-        .resolve(self.graph.spec())
-        .context("Schema resolution failed for allOf item")?;
-      self.collect_all_of_properties(&all_of_schema, properties, required, discriminator, schema_type)?;
-    }
-
-    for (prop_name, prop_ref) in &schema.properties {
-      properties.insert(prop_name.clone(), prop_ref.clone());
-    }
-    required.extend(schema.required.iter().cloned());
-
-    if schema.discriminator.is_some() {
-      discriminator.clone_from(&schema.discriminator);
-    }
-
-    if schema.schema_type.is_some() {
-      schema_type.clone_from(&schema.schema_type);
-    }
-    Ok(())
-  }
-
-  pub(crate) fn get_merged_schema(
-    &self,
-    schema_name: &str,
-    schema: &ObjectSchema,
-    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
-  ) -> anyhow::Result<ObjectSchema> {
-    if let Some(cached) = merged_schema_cache.get(schema_name) {
-      return Ok(cached.clone());
-    }
-
-    let merged = self.merge_all_of_schema(schema)?;
-    merged_schema_cache.insert(schema_name.to_string(), merged.clone());
-    Ok(merged)
-  }
-
-  pub(crate) fn detect_discriminated_parent(
-    &self,
-    schema: &ObjectSchema,
-    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
-  ) -> Option<ObjectSchema> {
-    let handler = DiscriminatorHandler::new(&self.graph, self.reachable_schemas.as_ref());
-    handler.detect_discriminated_parent(schema, merged_schema_cache, |name, s, cache| {
-      self.get_merged_schema(name, s, cache)
-    })
   }
 
   pub(crate) fn create_discriminated_enum(

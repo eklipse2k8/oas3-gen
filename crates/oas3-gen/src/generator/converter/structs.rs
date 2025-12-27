@@ -1,33 +1,39 @@
 use std::{
-  collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+  collections::{BTreeMap, BTreeSet, HashSet},
   sync::Arc,
 };
 
 use anyhow::Context as _;
-use oas3::spec::ObjectSchema;
+use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::{SharedSchemaCache, StructSummary},
-  field_processor::FieldProcessor,
-  metadata,
+  discriminator::DiscriminatorHandler,
+  fields::FieldConverter,
   type_resolver::TypeResolver,
 };
 use crate::generator::{
-  ast::{FieldDef, RustType, SerdeAttribute, StructDef, StructKind, StructToken, tokens::FieldNameToken},
-  converter::type_resolver::TypeResolverBuilder,
-  naming::{
-    constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
-    identifiers::to_rust_type_name,
+  ast::{
+    Documentation, FieldDef, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
+    tokens::FieldNameToken,
   },
+  converter::type_resolver::TypeResolverBuilder,
+  naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
   schema_registry::SchemaRegistry,
 };
 
+#[derive(Clone, Debug)]
+struct AdditionalPropertiesResult {
+  serde_attrs: Vec<SerdeAttribute>,
+  additional_field: Option<FieldDef>,
+}
+
 /// Converter for OpenAPI object schemas into Rust Structs.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct StructConverter {
   type_resolver: TypeResolver,
-  field_processor: FieldProcessor,
+  field_converter: FieldConverter,
 }
 
 impl StructConverter {
@@ -42,10 +48,10 @@ impl StructConverter {
       .reachable_schemas(reachable_schemas)
       .build()
       .expect("TypeResolver");
-    let field_processor = FieldProcessor::new(config, type_resolver.clone());
+    let field_converter = FieldConverter::new(config);
     Self {
       type_resolver,
-      field_processor,
+      field_converter,
     }
   }
 
@@ -85,7 +91,7 @@ impl StructConverter {
         cache_borrow,
       )?;
 
-      let field = self.field_processor.process_single_field(
+      let field = self.field_converter.convert_field(
         prop_name,
         schema,
         &prop_schema,
@@ -107,22 +113,26 @@ impl StructConverter {
   pub(crate) fn convert_all_of_schema(
     &self,
     name: &str,
-    schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
-    let mut merged_schema_cache = HashMap::new();
+    let graph = self.type_resolver.graph();
 
-    if let Some(parent_schema) = self
-      .type_resolver
-      .detect_discriminated_parent(schema, &mut merged_schema_cache)
-    {
-      return self.convert_discriminated_child(name, schema, &parent_schema, &mut merged_schema_cache, cache);
+    let merged_info = graph
+      .get_merged_schema(name)
+      .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
+
+    let handler = DiscriminatorHandler::new(graph, None);
+    if let Some((parent_name, _, _)) = handler.detect_discriminated_parent(name) {
+      let parent_merged = graph
+        .get_merged_schema(&parent_name)
+        .ok_or_else(|| anyhow::anyhow!("Parent schema '{parent_name}' not found"))?;
+      return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema, cache);
     }
 
-    let merged_schema = self.type_resolver.merge_all_of_schema(schema)?;
-    let result = self.convert_struct(name, &merged_schema, None, cache)?;
+    let effective_schema = graph.get_effective_schema(name).unwrap_or(&merged_info.schema);
 
-    self.finalize_struct_types(name, &merged_schema, result.result, result.inline_types)
+    let result = self.convert_struct(name, effective_schema, None, cache)?;
+    self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)
   }
 
   /// Converts a standard object schema into a Rust Struct.
@@ -142,7 +152,7 @@ impl StructConverter {
 
     let cache_for_fields = cache.as_deref_mut();
     let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name), cache_for_fields)?;
-    let additional_props = self.field_processor.prepare_additional_properties(schema)?;
+    let additional_props = self.prepare_additional_properties(schema)?;
 
     let mut fields = field_result.result;
     let mut serde_attrs = additional_props.serde_attrs;
@@ -158,7 +168,7 @@ impl StructConverter {
 
     let struct_def = StructDef {
       name: struct_name,
-      docs: metadata::extract_docs(schema.description.as_ref()),
+      docs: Documentation::from_optional(schema.description.as_ref()),
       fields,
       serde_attrs,
       outer_attrs: vec![],
@@ -180,9 +190,8 @@ impl StructConverter {
   fn convert_discriminated_child(
     &self,
     name: &str,
-    schema: &ObjectSchema,
+    merged_schema: &ObjectSchema,
     parent_schema: &ObjectSchema,
-    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
     if parent_schema.discriminator.is_none() {
@@ -191,19 +200,8 @@ impl StructConverter {
 
     let struct_name = StructToken::from_raw(name);
 
-    let cache_key = format!("{name}{MERGED_SCHEMA_CACHE_SUFFIX}");
-    let merged_schema = if let Some(cached) = merged_schema_cache.get(&cache_key) {
-      cached.clone()
-    } else {
-      let new_merged = self
-        .type_resolver
-        .merge_child_schema_with_parent(schema, parent_schema)?;
-      merged_schema_cache.insert(cache_key, new_merged.clone());
-      new_merged
-    };
-
-    let field_result = self.convert_fields(struct_name.as_str(), &merged_schema, None, Some(name), cache)?;
-    let additional_props = self.field_processor.prepare_additional_properties(&merged_schema)?;
+    let field_result = self.convert_fields(struct_name.as_str(), merged_schema, None, Some(name), cache)?;
+    let additional_props = self.prepare_additional_properties(merged_schema)?;
 
     let mut fields = field_result.result;
     let mut serde_attrs = additional_props.serde_attrs;
@@ -219,7 +217,7 @@ impl StructConverter {
     let mut all_types = Vec::with_capacity(1 + field_result.inline_types.len());
     all_types.push(RustType::Struct(StructDef {
       name: struct_name,
-      docs: metadata::extract_docs(schema.description.as_ref()),
+      docs: Documentation::from_optional(merged_schema.description.as_ref()),
       fields,
       serde_attrs,
       kind: StructKind::Schema,
@@ -256,6 +254,38 @@ impl StructConverter {
     all_types.push(main_type);
     all_types.append(&mut inline_types);
     Ok(all_types)
+  }
+
+  fn prepare_additional_properties(&self, schema: &ObjectSchema) -> anyhow::Result<AdditionalPropertiesResult> {
+    let mut serde_attrs = vec![];
+    let mut additional_field = None;
+
+    if let Some(ref additional) = schema.additional_properties {
+      match additional {
+        Schema::Boolean(b) if !b.0 => {
+          serde_attrs.push(SerdeAttribute::DenyUnknownFields);
+        }
+        Schema::Object(_) => {
+          let value_type = self.type_resolver.resolve_additional_properties_type(additional)?;
+          let map_type = TypeRef::new(format!(
+            "std::collections::HashMap<String, {}>",
+            value_type.to_rust_type()
+          ));
+          additional_field = Some(FieldDef {
+            name: FieldNameToken::new("additional_properties"),
+            docs: Documentation::from_lines(["Additional properties not defined in the schema."]),
+            rust_type: map_type,
+            serde_attrs: vec![SerdeAttribute::Flatten],
+            ..Default::default()
+          });
+        }
+        Schema::Boolean(_) => {}
+      }
+    }
+    Ok(AdditionalPropertiesResult {
+      serde_attrs,
+      additional_field,
+    })
   }
 
   pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {

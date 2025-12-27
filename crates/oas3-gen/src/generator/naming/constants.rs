@@ -2,7 +2,6 @@ pub const BODY_FIELD_NAME: &str = "body";
 pub const DEFAULT_RESPONSE_DESCRIPTION: &str = "Unknown response";
 pub const DEFAULT_RESPONSE_VARIANT: &str = "Unknown";
 pub const DISCRIMINATED_BASE_SUFFIX: &str = "Base";
-pub const MERGED_SCHEMA_CACHE_SUFFIX: &str = "_merged";
 pub const PATH_PARAMS_FIELD: &str = "path";
 pub const PATH_PARAMS_SUFFIX: &str = "Path";
 pub const QUERY_PARAMS_FIELD: &str = "query";
