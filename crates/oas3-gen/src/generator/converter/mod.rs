@@ -2,6 +2,7 @@ pub(crate) mod cache;
 mod common;
 pub(crate) mod discriminator;
 mod enums;
+mod field_processor;
 pub(crate) mod hashing;
 pub(crate) mod metadata;
 pub(crate) mod operations;

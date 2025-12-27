@@ -11,6 +11,7 @@ use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaT
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
+  common::extract_variant_references,
   discriminator::DiscriminatorHandler,
   enums::{EnumConverter, UnionKind},
   structs::StructConverter,
@@ -110,7 +111,7 @@ impl TypeResolver {
       return self.resolve_inline_struct(parent_type_name, property_name, property_schema, cache);
     }
 
-    if !property_schema.enum_values.is_empty() {
+    if property_schema.has_enum_values() {
       return self.resolve_inline_enum(parent_type_name, property_name, property_schema, cache);
     }
 
@@ -236,7 +237,7 @@ impl TypeResolver {
     base_name: &str,
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    let variant_references = Self::extract_variant_references(variants);
+    let variant_references = extract_variant_references(variants);
 
     if let Some(name) = self.lookup_matching_union_schema(&variant_references) {
       return Ok(ConversionOutput::new(self.create_type_reference(&name)));
@@ -497,12 +498,12 @@ impl TypeResolver {
         Schema::Object(o) => o.resolve(self.graph.spec()).ok(),
         Schema::Boolean(_) => None,
       })
-      .is_some_and(|items| !items.one_of.is_empty() || !items.any_of.is_empty())
+      .is_some_and(|items| items.has_inline_union())
   }
 
   /// Tries to convert a union schema into a single `TypeRef` (e.g. `Option<T>`, `Vec<T>`).
   pub(crate) fn resolve_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> anyhow::Result<Option<TypeRef>> {
-    let variant_references = Self::extract_variant_references(variants);
+    let variant_references = extract_variant_references(variants);
 
     if let Some(name) = self.lookup_matching_union_schema(&variant_references) {
       return Ok(Some(self.create_type_reference(&name)));
@@ -551,7 +552,7 @@ impl TypeResolver {
         ));
       }
 
-      if resolved.single_type() == Some(SchemaType::String) {
+      if resolved.is_string() {
         return Ok(Some(TypeRef::new(RustPrimitive::String)));
       }
 
@@ -692,13 +693,6 @@ impl TypeResolver {
     None
   }
 
-  fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
-    variants
-      .iter()
-      .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
-      .collect()
-  }
-
   pub(crate) fn merge_child_schema_with_parent(
     &self,
     child_schema: &ObjectSchema,
@@ -770,7 +764,7 @@ impl TypeResolver {
     for all_of_ref in &schema.all_of {
       let all_of_schema = all_of_ref
         .resolve(self.graph.spec())
-        .with_context(|| "Schema resolution failed for allOf item")?;
+        .context("Schema resolution failed for allOf item")?;
       self.collect_all_of_properties(&all_of_schema, properties, required, discriminator, schema_type)?;
     }
 

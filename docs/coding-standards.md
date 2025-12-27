@@ -122,12 +122,12 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 
 ### Error Context with anyhow
 
-- Use `with_context()` instead of `map_err()` when adding context to errors
-- `with_context()` preserves the error chain and is more idiomatic with anyhow
+- Use `context()` or `with_context()` instead of `map_err()` when adding context to errors
+- `with_context()` can be used when you need a lambda to execute a contextual result. Prefer `context()` for simple strings.
 - Bad: `.map_err(|e| anyhow::anyhow!("Failed for '{}': {e}", name))?`
-- Good: `.with_context(|| format!("Failed for '{}'", name))?`
+- Good: `.context(format!("Failed for '{}'", name))?`
 - The underlying error is automatically chained; don't manually interpolate it into the message
-- Import `use anyhow::Context;` to access the `with_context()` method on `Result` types
+- Import `use anyhow::Context;` to access the `with_context()` or `context()` method on `Result` types
 
 ### Type-Safe Enums for Configuration
 

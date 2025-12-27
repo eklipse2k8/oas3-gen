@@ -125,6 +125,7 @@ pub(crate) struct SchemaRegistry {
   dependencies: BTreeMap<String, BTreeSet<String>>,
   cyclic_schemas: BTreeSet<String>,
   discriminator_cache: BTreeMap<String, (String, String)>,
+  inheritance_depths: HashMap<String, usize>,
   spec: Spec,
   union_fingerprints: UnionFingerprints,
 }
@@ -168,6 +169,7 @@ impl SchemaRegistry {
         dependencies: BTreeMap::new(),
         cyclic_schemas: BTreeSet::new(),
         discriminator_cache,
+        inheritance_depths: HashMap::new(),
         spec,
         union_fingerprints,
       },
@@ -284,6 +286,47 @@ impl SchemaRegistry {
 
       self.dependencies.insert(schema_name.clone(), deps);
     }
+
+    self.compute_all_inheritance_depths();
+  }
+
+  fn compute_all_inheritance_depths(&mut self) {
+    let schema_names: Vec<_> = self.schemas.keys().cloned().collect();
+    for name in schema_names {
+      self.compute_depth_recursive(&name);
+    }
+  }
+
+  fn compute_depth_recursive(&mut self, schema_name: &str) -> usize {
+    if let Some(&depth) = self.inheritance_depths.get(schema_name) {
+      return depth;
+    }
+
+    let parent_names: Vec<String> = self
+      .schemas
+      .get(schema_name)
+      .map(|schema| {
+        schema
+          .all_of
+          .iter()
+          .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
+          .collect()
+      })
+      .unwrap_or_default();
+
+    let depth = if parent_names.is_empty() {
+      0
+    } else {
+      parent_names
+        .into_iter()
+        .map(|parent| self.compute_depth_recursive(&parent))
+        .max()
+        .unwrap_or(0)
+        + 1
+    };
+
+    self.inheritance_depths.insert(schema_name.to_string(), depth);
+    depth
   }
 
   /// Detects cycles in the schema dependency graph using depth-first search.
@@ -373,6 +416,13 @@ impl SchemaRegistry {
   /// Cyclic schemas require special code generation (e.g., Box<T> in Rust).
   pub(crate) fn is_cyclic(&self, schema_name: &str) -> bool {
     self.cyclic_schemas.contains(schema_name)
+  }
+
+  /// Returns the inheritance depth of a schema (0 if no allOf, 1+ for each level).
+  ///
+  /// Depths are precomputed during `build_dependencies()` for O(1) lookup.
+  pub(crate) fn get_inheritance_depth(&self, schema_name: &str) -> usize {
+    self.inheritance_depths.get(schema_name).copied().unwrap_or(0)
   }
 
   /// Retrieves the discriminator metadata for a child schema.

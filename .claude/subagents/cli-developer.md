@@ -72,8 +72,7 @@ anyhow::bail!("Failed to parse OpenAPI spec at line {}: {}", line, error);
 anyhow::bail!("Schema '{}' not found. Did you mean '{}'?", name, suggestion);
 
 // With context
-anyhow::context("Failed to load OpenAPI specification")?;
-with_context(|| format!("Converting schema '{}'", schema_name))?;
+(result).context(format!("Converting schema '{}'", schema_name))?;
 ```
 
 ### Progress Reporting

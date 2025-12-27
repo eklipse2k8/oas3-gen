@@ -1,8 +1,11 @@
+use std::collections::BTreeSet;
+
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
 
 use crate::generator::{
   ast::{RustType, TypeRef},
   converter::cache::SharedSchemaCache,
+  schema_registry::ReferenceExtractor,
 };
 
 /// Wraps a conversion result with any inline types generated during conversion.
@@ -133,6 +136,12 @@ pub(crate) trait SchemaExt {
   /// Extracts the inline array items schema if present and not a reference.
   /// Returns None if: no items, items is a boolean schema, or items is a $ref.
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema>;
+
+  /// Returns true if the schema has enum values defined.
+  fn has_enum_values(&self) -> bool;
+
+  /// Returns true if the schema has allOf composition.
+  fn has_all_of(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -275,4 +284,19 @@ impl SchemaExt for ObjectSchema {
 
     items_schema_ref.resolve(spec).ok()
   }
+
+  fn has_enum_values(&self) -> bool {
+    !self.enum_values.is_empty()
+  }
+
+  fn has_all_of(&self) -> bool {
+    !self.all_of.is_empty()
+  }
+}
+
+pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
+  variants
+    .iter()
+    .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
+    .collect()
 }

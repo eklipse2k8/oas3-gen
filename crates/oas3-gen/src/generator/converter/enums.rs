@@ -11,14 +11,15 @@ use super::{
   CodegenConfig,
   cache::{SharedSchemaCache, StructSummary},
   common::{SchemaExt, handle_inline_creation},
+  discriminator::try_build_discriminated_enum_from_variants,
   metadata,
   structs::StructConverter,
   type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
-    EnumVariantToken, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+    Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, RustType, SerdeAttribute, TypeRef,
+    VariantContent, VariantDef,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -201,7 +202,7 @@ impl EnumConverter {
     for (i, variant_ref) in variants_src.iter().enumerate() {
       let resolved = variant_ref
         .resolve(self.graph.spec())
-        .with_context(|| format!("Schema resolution failed for union variant {i}"))?;
+        .context(format!("Schema resolution failed for union variant {i}"))?;
 
       if resolved.is_null() {
         continue;
@@ -317,26 +318,10 @@ impl EnumConverter {
   ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
 
-    // Build a map of struct summaries from inline types
     let mut summary_cache: BTreeMap<String, StructSummary> = inline_types
       .iter()
       .filter_map(|t| match t {
-        RustType::Struct(s) => {
-          let summary = StructSummary {
-            has_default: s.has_default(),
-            required_fields: s
-              .required_fields()
-              .map(|f| (f.name.clone(), f.rust_type.clone()))
-              .collect(),
-            user_fields: s
-              .fields
-              .iter()
-              .filter(|f| !f.doc_hidden)
-              .map(|f| (f.name.clone(), f.rust_type.clone()))
-              .collect(),
-          };
-          Some((s.name.to_string(), summary))
-        }
+        RustType::Struct(s) => Some((s.name.to_string(), StructSummary::from(s))),
         _ => None,
       })
       .collect();
@@ -466,19 +451,7 @@ impl EnumConverter {
       .ok()?;
 
     if let RustType::Struct(s) = struct_result.result {
-      let summary = StructSummary {
-        has_default: s.has_default(),
-        required_fields: s
-          .required_fields()
-          .map(|f| (f.name.clone(), f.rust_type.clone()))
-          .collect(),
-        user_fields: s
-          .fields
-          .iter()
-          .filter(|f| !f.doc_hidden)
-          .map(|f| (f.name.clone(), f.rust_type.clone()))
-          .collect(),
-      };
+      let summary = StructSummary::from(&s);
       summary_cache.insert(base_name, summary.clone());
       Some(summary)
     } else {
@@ -518,7 +491,7 @@ impl EnumConverter {
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
     let mut resolved_schema_merged = resolved_schema.clone();
-    if !resolved_schema.all_of.is_empty() {
+    if resolved_schema.has_all_of() {
       resolved_schema_merged = self.type_resolver.merge_all_of_schema(resolved_schema)?;
     }
     let resolved_schema = &resolved_schema_merged;
@@ -604,7 +577,7 @@ impl EnumConverter {
     resolved_schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Option<(VariantContent, Vec<RustType>)>> {
-    if resolved_schema.one_of.is_empty() && resolved_schema.any_of.is_empty() {
+    if !resolved_schema.has_inline_union() {
       return Ok(None);
     }
 
@@ -650,7 +623,7 @@ impl EnumConverter {
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> RustType {
-    if let Some(discriminated) = Self::build_discriminated_union(name, schema, &variants, methods.clone()) {
+    if let Some(discriminated) = try_build_discriminated_enum_from_variants(name, schema, &variants, methods.clone()) {
       return discriminated;
     }
 
@@ -663,82 +636,6 @@ impl EnumConverter {
       methods,
       ..Default::default()
     })
-  }
-
-  fn build_discriminated_union(
-    name: &str,
-    schema: &ObjectSchema,
-    variants: &[VariantDef],
-    methods: Vec<EnumMethod>,
-  ) -> Option<RustType> {
-    let discriminator = schema.discriminator.as_ref()?;
-    let mapping = discriminator.mapping.as_ref()?;
-
-    if !Self::all_variants_are_refs(variants, mapping) {
-      return None;
-    }
-
-    let disc_variants = Self::build_discriminated_variants(variants, mapping);
-    Some(RustType::DiscriminatedEnum(DiscriminatedEnumDef {
-      name: EnumToken::from_raw(name),
-      docs: metadata::extract_docs(schema.description.as_ref()),
-      discriminator_field: discriminator.property_name.clone(),
-      variants: disc_variants,
-      methods,
-      ..Default::default()
-    }))
-  }
-
-  fn all_variants_are_refs(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {
-    if variants.is_empty() || mapping.is_empty() {
-      return false;
-    }
-
-    let variant_types: BTreeSet<String> = variants.iter().filter_map(VariantDef::unboxed_type_name).collect();
-
-    mapping
-      .values()
-      .filter_map(|ref_path| Self::ref_path_to_type_name(ref_path))
-      .all(|type_name| variant_types.contains(&type_name))
-  }
-
-  fn build_discriminated_variants(
-    variants: &[VariantDef],
-    mapping: &BTreeMap<String, String>,
-  ) -> Vec<DiscriminatedVariant> {
-    let mut type_to_disc_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (disc_value, ref_path) in mapping {
-      if let Some(expected_type) = Self::ref_path_to_type_name(ref_path) {
-        type_to_disc_values
-          .entry(expected_type)
-          .or_default()
-          .push(disc_value.clone());
-      }
-    }
-
-    type_to_disc_values
-      .into_iter()
-      .filter_map(|(expected_type, disc_values)| {
-        let variant = Self::find_variant_by_type(variants, &expected_type)?;
-        let type_ref = variant.single_wrapped_type()?;
-
-        Some(DiscriminatedVariant {
-          discriminator_values: disc_values,
-          variant_name: variant.name.to_string(),
-          type_name: type_ref.clone(),
-        })
-      })
-      .collect()
-  }
-
-  fn ref_path_to_type_name(ref_path: &str) -> Option<String> {
-    SchemaRegistry::extract_ref_name(ref_path).map(|name| to_rust_type_name(&name))
-  }
-
-  fn find_variant_by_type<'a>(variants: &'a [VariantDef], type_name: &str) -> Option<&'a VariantDef> {
-    variants
-      .iter()
-      .find(|v| v.unboxed_type_name().is_some_and(|name| name == type_name))
   }
 
   fn try_build_relaxed_enum(
@@ -755,7 +652,7 @@ impl EnumConverter {
     Some(self.build_relaxed_enum_types(name, schema, &known_values, cache))
   }
 
-  fn collect_relaxed_known_values(&self, schema: &ObjectSchema) -> Vec<(String, Option<String>, bool)> {
+  fn collect_relaxed_known_values(&self, schema: &ObjectSchema) -> Vec<EnumValueEntry> {
     let mut seen_values = HashSet::new();
     let mut known_values = vec![];
     let mut has_freeform = false;
@@ -765,17 +662,20 @@ impl EnumConverter {
         continue;
       };
 
-      if resolved.const_value.is_none() && resolved.enum_values.is_empty() && resolved.is_string() {
+      if resolved.const_value.is_none() && !resolved.has_enum_values() && resolved.is_string() {
         has_freeform = true;
       }
 
+      let docs = metadata::extract_docs(resolved.description.as_ref());
+      let deprecated = resolved.deprecated.unwrap_or(false);
+
       if let Some(const_val) = resolved.const_value.as_ref().and_then(|v| v.as_str()) {
         if seen_values.insert(const_val.to_string()) {
-          known_values.push((
-            const_val.to_string(),
-            resolved.description.clone(),
-            resolved.deprecated.unwrap_or(false),
-          ));
+          known_values.push(EnumValueEntry {
+            value: Value::String(const_val.to_string()),
+            docs,
+            deprecated,
+          });
         }
         continue;
       }
@@ -785,11 +685,11 @@ impl EnumConverter {
           if let Some(str_val) = enum_value.as_str()
             && seen_values.insert(str_val.to_string())
           {
-            known_values.push((
-              str_val.to_string(),
-              resolved.description.clone(),
-              resolved.deprecated.unwrap_or(false),
-            ));
+            known_values.push(EnumValueEntry {
+              value: Value::String(str_val.to_string()),
+              docs: docs.clone(),
+              deprecated,
+            });
           }
         }
       }
@@ -802,12 +702,15 @@ impl EnumConverter {
     &self,
     name: &str,
     schema: &ObjectSchema,
-    known_values: &[(String, Option<String>, bool)],
+    known_values: &[EnumValueEntry],
     cache: Option<&mut SharedSchemaCache>,
   ) -> Vec<RustType> {
     let base_name = to_rust_type_name(name);
 
-    let mut cache_key_values: Vec<String> = known_values.iter().map(|(v, _, _)| v.clone()).collect();
+    let mut cache_key_values: Vec<String> = known_values
+      .iter()
+      .filter_map(|e| e.value.as_str().map(String::from))
+      .collect();
     cache_key_values.sort();
 
     let (known_enum_name, inner_enum_type) =
@@ -832,47 +735,35 @@ impl EnumConverter {
   fn resolve_cached_known_enum(
     &self,
     base_name: &str,
-    known_values: &[(String, Option<String>, bool)],
+    known_values: &[EnumValueEntry],
     cache_key: Vec<String>,
     cache: Option<&mut SharedSchemaCache>,
   ) -> (String, Option<RustType>) {
-    if let Some(c) = cache {
-      if let Some(existing) = c.get_enum_name(&cache_key) {
-        let name = existing.clone();
-        if c.is_enum_generated(&cache_key) {
-          (name, None)
-        } else {
-          let def = self.build_known_values_enum(&name, known_values);
-          c.register_enum(cache_key, name.clone());
-          c.mark_name_used(name.clone());
-          (name, Some(def))
-        }
-      } else {
-        let name = format!("{base_name}Known");
-        let def = self.build_known_values_enum(&name, known_values);
-        c.register_enum(cache_key, name.clone());
-        c.mark_name_used(name.clone());
-        (name, Some(def))
-      }
-    } else {
-      let name = format!("{base_name}Known");
-      (name.clone(), Some(self.build_known_values_enum(&name, known_values)))
+    let cached_state = cache.as_ref().and_then(|c| {
+      c.get_enum_name(&cache_key)
+        .map(|name| (name.clone(), c.is_enum_generated(&cache_key)))
+    });
+
+    if let Some((name, true)) = cached_state {
+      return (name, None);
     }
+
+    let name = cached_state.map_or_else(|| format!("{base_name}Known"), |(name, _)| name);
+
+    let def = self.build_known_values_enum(&name, known_values);
+
+    if let Some(c) = cache {
+      c.register_enum(cache_key, name.clone());
+      c.mark_name_used(name.clone());
+    }
+
+    (name, Some(def))
   }
 
-  fn build_known_values_enum(&self, name: &str, values: &[(String, Option<String>, bool)]) -> RustType {
-    let entries: Vec<EnumValueEntry> = values
-      .iter()
-      .map(|(value, description, deprecated)| EnumValueEntry {
-        value: Value::String(value.clone()),
-        docs: metadata::extract_docs(description.as_ref()),
-        deprecated: *deprecated,
-      })
-      .collect();
-
+  fn build_known_values_enum(&self, name: &str, entries: &[EnumValueEntry]) -> RustType {
     Self::build_enum_from_values(
       name,
-      &entries,
+      entries,
       CollisionStrategy::Preserve,
       Documentation::from_lines(["Known values for the string enum."]),
       self.case_insensitive_enums,
@@ -882,15 +773,13 @@ impl EnumConverter {
   fn build_known_value_constructors(
     wrapper_enum_name: &str,
     known_type_name: &str,
-    values: &[(String, Option<String>, bool)],
+    entries: &[EnumValueEntry],
   ) -> Vec<EnumMethod> {
     let known_type = EnumToken::new(known_type_name);
 
-    let variant_names: Vec<EnumVariantToken> = values
+    let variant_names: Vec<EnumVariantToken> = entries
       .iter()
-      .filter_map(|(value, _, _)| {
-        VariantNameNormalizer::normalize(&Value::String(value.clone())).map(|n| EnumVariantToken::new(n.name))
-      })
+      .filter_map(|entry| VariantNameNormalizer::normalize(&entry.value).map(|n| EnumVariantToken::new(n.name)))
       .collect();
 
     let variant_name_strings: Vec<String> = variant_names.iter().map(std::string::ToString::to_string).collect();
@@ -900,18 +789,17 @@ impl EnumConverter {
     variant_names
       .into_iter()
       .zip(method_names)
-      .zip(values.iter())
-      .map(|((variant, base_name), (_, description, _))| {
+      .zip(entries.iter())
+      .map(|((variant, base_name), entry)| {
         let method_name = ensure_unique(&base_name, &seen);
         seen.insert(method_name.clone());
-        let docs = metadata::extract_docs(description.as_ref());
         EnumMethod::new(
           method_name,
           EnumMethodKind::KnownValueConstructor {
             known_type: known_type.clone(),
             known_variant: variant,
           },
-          docs,
+          entry.docs.clone(),
         )
       })
       .collect()

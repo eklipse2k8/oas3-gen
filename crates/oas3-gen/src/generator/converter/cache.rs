@@ -4,7 +4,7 @@ use oas3::spec::ObjectSchema;
 
 use super::hashing;
 use crate::generator::{
-  ast::{EnumToken, FieldNameToken, RustType, StructToken, TypeRef},
+  ast::{EnumToken, FieldNameToken, RustType, StructDef, StructToken, TypeRef},
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::{extract_enum_values, is_relaxed_enum_pattern},
@@ -23,6 +23,24 @@ pub(crate) struct StructSummary {
   pub required_fields: Vec<(FieldNameToken, TypeRef)>,
   /// User-facing fields (name and type), excluding const/doc_hidden fields.
   pub user_fields: Vec<(FieldNameToken, TypeRef)>,
+}
+
+impl From<&StructDef> for StructSummary {
+  fn from(s: &StructDef) -> Self {
+    Self {
+      has_default: s.has_default(),
+      required_fields: s
+        .required_fields()
+        .map(|f| (f.name.clone(), f.rust_type.clone()))
+        .collect(),
+      user_fields: s
+        .fields
+        .iter()
+        .filter(|f| !f.doc_hidden)
+        .map(|f| (f.name.clone(), f.rust_type.clone()))
+        .collect(),
+    }
+  }
 }
 
 /// Cache for sharing generated Rust types across the schema graph.

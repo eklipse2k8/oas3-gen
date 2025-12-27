@@ -4,32 +4,24 @@ use std::{
 };
 
 use anyhow::Context as _;
-use oas3::spec::{ObjectSchema, Schema};
+use oas3::spec::ObjectSchema;
 
 use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::{SharedSchemaCache, StructSummary},
-  discriminator::{DiscriminatorInfo, apply_discriminator_attributes, get_discriminator_info},
-  metadata::{self, FieldMetadata},
+  field_processor::FieldProcessor,
+  metadata,
   type_resolver::TypeResolver,
 };
 use crate::generator::{
-  ast::{
-    Documentation, FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
-    tokens::FieldNameToken,
-  },
+  ast::{FieldDef, RustType, SerdeAttribute, StructDef, StructKind, StructToken, tokens::FieldNameToken},
   converter::type_resolver::TypeResolverBuilder,
   naming::{
     constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
-    identifiers::{to_rust_field_name, to_rust_type_name},
+    identifiers::to_rust_type_name,
   },
   schema_registry::SchemaRegistry,
 };
-
-struct AdditionalPropertiesResult {
-  serde_attrs: Vec<SerdeAttribute>,
-  additional_field: Option<FieldDef>,
-}
 
 /// Converter for OpenAPI object schemas into Rust Structs.
 #[derive(Clone)]
@@ -82,7 +74,7 @@ impl StructConverter {
 
       let prop_schema = prop_schema_ref
         .resolve(self.type_resolver.graph().spec())
-        .with_context(|| format!("Schema resolution failed for property '{prop_name}'"))?;
+        .context(format!("Schema resolution failed for property '{prop_name}'"))?;
 
       let cache_borrow = cache.as_deref_mut();
       let resolved = self.type_resolver.resolve_property_type(
@@ -175,22 +167,8 @@ impl StructConverter {
       ..Default::default()
     };
 
-    // Register struct summary for enum helper generation
     if let Some(ref mut c) = cache {
-      let summary = StructSummary {
-        has_default: struct_def.has_default(),
-        required_fields: struct_def
-          .required_fields()
-          .map(|f| (f.name.clone(), f.rust_type.clone()))
-          .collect(),
-        user_fields: struct_def
-          .fields
-          .iter()
-          .filter(|f| !f.doc_hidden)
-          .map(|f| (f.name.clone(), f.rust_type.clone()))
-          .collect(),
-      };
-      c.register_struct_summary(struct_def.name.as_str(), summary);
+      c.register_struct_summary(struct_def.name.as_str(), StructSummary::from(&struct_def));
     }
 
     Ok(ConversionOutput::with_inline_types(
@@ -309,129 +287,5 @@ impl StructConverter {
         keep
       });
     }
-  }
-}
-
-#[derive(Clone)]
-pub(crate) struct FieldProcessor {
-  odata_support: bool,
-  type_resolver: TypeResolver,
-}
-
-impl FieldProcessor {
-  fn new(config: CodegenConfig, type_resolver: TypeResolver) -> Self {
-    Self {
-      odata_support: config.odata_support(),
-      type_resolver,
-    }
-  }
-
-  fn process_single_field(
-    &self,
-    prop_name: &str,
-    parent_schema: &ObjectSchema,
-    prop_schema: &ObjectSchema,
-    resolved_type: TypeRef,
-    is_required: bool,
-    discriminator_mapping: Option<&(String, String)>,
-  ) -> anyhow::Result<FieldDef> {
-    let discriminator_info = get_discriminator_info(prop_name, parent_schema, prop_schema, discriminator_mapping);
-
-    let should_be_optional = self.is_field_optional(
-      prop_name,
-      parent_schema,
-      prop_schema,
-      discriminator_info.as_ref(),
-      is_required,
-    );
-    let final_type = if should_be_optional && !resolved_type.nullable {
-      resolved_type.with_option()
-    } else {
-      resolved_type
-    };
-
-    let metadata = FieldMetadata::from_schema(prop_name, is_required, prop_schema, &final_type);
-    let rust_field_name = to_rust_field_name(prop_name);
-    let serde_attrs = if rust_field_name == prop_name {
-      vec![]
-    } else {
-      vec![SerdeAttribute::Rename(prop_name.to_string())]
-    };
-
-    let disc_attrs = apply_discriminator_attributes(metadata, serde_attrs, &final_type, discriminator_info.as_ref());
-
-    let field = FieldDefBuilder::default()
-      .name(to_rust_field_name(prop_name))
-      .rust_type(final_type)
-      .docs(disc_attrs.metadata.docs)
-      .serde_attrs(disc_attrs.serde_attrs)
-      .doc_hidden(disc_attrs.doc_hidden)
-      .validation_attrs(disc_attrs.metadata.validation_attrs)
-      .default_value(disc_attrs.metadata.default_value)
-      .deprecated(disc_attrs.metadata.deprecated)
-      .multiple_of(disc_attrs.metadata.multiple_of)
-      .build()?;
-
-    Ok(field)
-  }
-
-  fn is_field_optional(
-    &self,
-    prop_name: &str,
-    parent_schema: &ObjectSchema,
-    prop_schema: &ObjectSchema,
-    discriminator_info: Option<&DiscriminatorInfo>,
-    is_required: bool,
-  ) -> bool {
-    let has_default = prop_schema.default.is_some();
-    let is_discriminator_field = discriminator_info.is_some();
-    let discriminator_has_enum = discriminator_info.is_some_and(|i| i.has_enum);
-
-    if !is_required || has_default {
-      return true;
-    }
-    if is_discriminator_field && !discriminator_has_enum {
-      return true;
-    }
-    if self.odata_support
-      && prop_name.starts_with("@odata.")
-      && parent_schema.discriminator.is_none()
-      && parent_schema.all_of.is_empty()
-    {
-      return true;
-    }
-    false
-  }
-
-  fn prepare_additional_properties(&self, schema: &ObjectSchema) -> anyhow::Result<AdditionalPropertiesResult> {
-    let mut serde_attrs = vec![];
-    let mut additional_field = None;
-
-    if let Some(ref additional) = schema.additional_properties {
-      match additional {
-        Schema::Boolean(b) if !b.0 => {
-          serde_attrs.push(SerdeAttribute::DenyUnknownFields);
-        }
-        Schema::Object(_) => {
-          let value_type = self.type_resolver.resolve_additional_properties_type(additional)?;
-          let map_type = TypeRef::new(format!(
-            "std::collections::HashMap<String, {}>",
-            value_type.to_rust_type()
-          ));
-          additional_field = Some(FieldDef {
-            name: FieldNameToken::new("additional_properties"),
-            docs: Documentation::from_lines(["Additional properties not defined in the schema."]),
-            rust_type: map_type,
-            serde_attrs: vec![SerdeAttribute::Flatten],
-            ..Default::default()
-          });
-        }
-        Schema::Boolean(_) => {}
-      }
-    }
-    Ok(AdditionalPropertiesResult {
-      serde_attrs,
-      additional_field,
-    })
   }
 }
