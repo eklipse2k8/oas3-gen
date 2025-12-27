@@ -62,7 +62,7 @@ oas3 = { version = "0.20", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }
-quick-xml = { version = "0.37", features = ["serde", "serialize"] }
+quick-xml = { version = ">=0.38", features = ["serde", "serialize"] }
 quote = { version = "1.0" }
 regex = { version = "1.12" }
 reqwest = { version = "0.12", default-features = false }
