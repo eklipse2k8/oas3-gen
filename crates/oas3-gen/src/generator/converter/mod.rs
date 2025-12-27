@@ -17,7 +17,7 @@ use std::{
 };
 
 pub(crate) use common::{ConversionOutput, SchemaExt};
-use oas3::spec::ObjectSchema;
+use oas3::spec::{ObjectOrReference, ObjectSchema};
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
@@ -232,6 +232,27 @@ impl SchemaConverter {
   /// Resolves a schema to a Rust type reference (e.g. `String`, `Vec<i32>`, `MyStruct`).
   pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
     self.type_resolver.resolve_type(schema)
+  }
+
+  /// Resolves a property-like schema (struct field or parameter) to a Rust type.
+  ///
+  /// Unlike `resolve_type`, this method handles inline enums, structs, and unions,
+  /// generating new types as needed and returning them along with the type reference.
+  pub(crate) fn resolve_property_type(
+    &self,
+    parent_type_name: &str,
+    property_name: &str,
+    property_schema: &ObjectSchema,
+    property_schema_ref: &ObjectOrReference<ObjectSchema>,
+    cache: Option<&mut SharedSchemaCache>,
+  ) -> anyhow::Result<ConversionOutput<TypeRef>> {
+    self.type_resolver.resolve_property_type(
+      parent_type_name,
+      property_name,
+      property_schema,
+      property_schema_ref,
+      cache,
+    )
   }
 
   /// Converts an inline schema with caching and deduplication.

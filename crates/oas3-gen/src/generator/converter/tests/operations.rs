@@ -70,7 +70,7 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
   let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
   let operation = Operation::default();
 
-  let (types, info) = converter.convert(
+  let result = converter.convert(
     "my_op",
     "myOp",
     &Method::GET,
@@ -81,10 +81,16 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  assert!(types.is_empty(), "Should generate no new types");
-  assert_eq!(info.operation_id, "MyOp");
-  assert!(info.request_type.is_none(), "Should have no request type");
-  assert!(info.response_type.is_none(), "Should have no response type");
+  assert!(result.types.is_empty(), "Should generate no new types");
+  assert_eq!(result.operation_info.operation_id, "MyOp");
+  assert!(
+    result.operation_info.request_type.is_none(),
+    "Should have no request type"
+  );
+  assert!(
+    result.operation_info.response_type.is_none(),
+    "Should have no response type"
+  );
   Ok(())
 }
 
@@ -100,7 +106,7 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
     true,
   ));
 
-  let (types, info) = converter.convert(
+  let result = converter.convert(
     "get_user",
     "getUser",
     &Method::GET,
@@ -111,22 +117,27 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  assert_eq!(types.len(), 2, "Should generate request struct and nested path struct");
-  let request_type_name = info
+  assert_eq!(
+    result.types.len(),
+    2,
+    "Should generate request struct and nested path struct"
+  );
+  let request_type_name = result
+    .operation_info
     .request_type
     .as_ref()
     .map(StructToken::as_str)
     .expect("Request type should exist");
   assert_eq!(request_type_name, "GetUserRequest");
 
-  let request_struct = extract_request_struct(&types, request_type_name);
+  let request_struct = extract_request_struct(&result.types, request_type_name);
   assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
   assert_eq!(
     request_struct.fields[0].name, "path",
     "Main struct should have path field"
   );
 
-  let path_struct = extract_request_struct(&types, "GetUserRequestPath");
+  let path_struct = extract_request_struct(&result.types, "GetUserRequestPath");
   assert_eq!(path_struct.fields.len(), 1);
   assert_eq!(path_struct.fields[0].name, "user_id");
 
@@ -159,7 +170,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, info) = converter.convert(
+  let result = converter.convert(
     "create_user",
     "createUser",
     &Method::POST,
@@ -170,14 +181,16 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  assert_eq!(types.len(), 1, "Should generate only the Request struct");
+  assert_eq!(result.types.len(), 1, "Should generate only the Request struct");
   assert!(
-    types
+    result
+      .types
       .iter()
       .any(|t| matches!(t, RustType::Struct(s) if s.name == "CreateUserRequest"))
   );
 
-  let request_struct = types
+  let request_struct = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::Struct(s) if s.name == "CreateUserRequest" => Some(s),
@@ -197,7 +210,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     "Body field should reference User directly"
   );
 
-  assert!(info.body.is_some(), "Should have body metadata");
+  assert!(result.operation_info.body.is_some(), "Should have body metadata");
   Ok(())
 }
 
@@ -230,7 +243,7 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (_, info) = converter.convert(
+  let result = converter.convert(
     "get_user",
     "getUser",
     &Method::GET,
@@ -241,7 +254,7 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  assert_eq!(info.response_type.as_deref(), Some("User"));
+  assert_eq!(result.operation_info.response_type.as_deref(), Some("User"));
   Ok(())
 }
 
@@ -313,7 +326,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     let path = format!("/items/{{{param_name}}}");
     let snake_op_id = inflections::case::to_snake_case(op_id);
 
-    let (types, info) = converter.convert(
+    let result = converter.convert(
       &snake_op_id,
       op_id,
       &Method::GET,
@@ -325,11 +338,12 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     )?;
 
     assert_eq!(
-      types.len(),
+      result.types.len(),
       2,
       "Should generate request struct and path struct for {op_id}"
     );
-    let request_type_name = info
+    let request_type_name = result
+      .operation_info
       .request_type
       .as_ref()
       .map(StructToken::as_str)
@@ -340,7 +354,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     );
 
     let path_struct_name = format!("{expected_struct}Path");
-    let path_struct = extract_request_struct(&types, &path_struct_name);
+    let path_struct = extract_request_struct(&result.types, &path_struct_name);
     assert_eq!(
       path_struct.fields.len(),
       1,
@@ -374,7 +388,7 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
     true,
   ));
 
-  let (types, _) = converter.convert(
+  let result = converter.convert(
     "get_user_post",
     "getUserPost",
     &Method::GET,
@@ -385,14 +399,14 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let request_struct = extract_request_struct(&types, "GetUserPostRequest");
+  let request_struct = extract_request_struct(&result.types, "GetUserPostRequest");
   assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
   assert_eq!(
     request_struct.fields[0].name, "path",
     "Main struct should have path field"
   );
 
-  let path_struct = extract_request_struct(&types, "GetUserPostRequestPath");
+  let path_struct = extract_request_struct(&result.types, "GetUserPostRequestPath");
   assert_eq!(path_struct.fields.len(), 2);
   assert_eq!(path_struct.fields[0].name, "user_id");
   assert_eq!(path_struct.fields[0].rust_type.to_rust_type(), "i64");
@@ -455,7 +469,7 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       ..Default::default()
     };
 
-    let (types, info) = converter.convert(
+    let result = converter.convert(
       "download_file",
       "downloadFile",
       &Method::GET,
@@ -466,7 +480,8 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       &mut cache,
     )?;
 
-    let response_enum = types
+    let response_enum = result
+      .types
       .iter()
       .find_map(|t| match t {
         RustType::ResponseEnum(e) if e.name == "DownloadFileResponse" => Some(e),
@@ -502,7 +517,7 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
     );
 
     assert!(
-      info.response_enum.is_some(),
+      result.operation_info.response_enum.is_some(),
       "response_enum should be set for {content_type}"
     );
 
@@ -554,7 +569,7 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
+  let result = converter.convert(
     "get_item",
     "getItem",
     &Method::GET,
@@ -565,7 +580,8 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
@@ -632,7 +648,7 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
+  let result = converter.convert(
     "get_item",
     "getItem",
     &Method::GET,
@@ -643,7 +659,8 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
@@ -698,7 +715,7 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
+  let result = converter.convert(
     "get_count",
     "getCount",
     &Method::GET,
@@ -709,7 +726,8 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "GetCountResponse" => Some(e),
@@ -749,7 +767,7 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
+  let result = converter.convert(
     "delete_item",
     "deleteItem",
     &Method::DELETE,
@@ -760,7 +778,8 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "DeleteItemResponse" => Some(e),
@@ -842,7 +861,7 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, info) = converter.convert(
+  let result = converter.convert(
     "create_interaction",
     "createInteraction",
     &Method::POST,
@@ -853,19 +872,20 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     &mut cache,
   )?;
 
-  // Should have a request type
-  assert!(info.request_type.is_some(), "Should have a request type");
-  let request_type_name = info.request_type.as_ref().unwrap().as_str();
+  assert!(
+    result.operation_info.request_type.is_some(),
+    "Should have a request type"
+  );
+  let request_type_name = result.operation_info.request_type.as_ref().unwrap().as_str();
   assert_eq!(request_type_name, "CreateInteractionRequest");
 
-  // Should have body metadata
-  assert!(info.body.is_some(), "Should have body metadata");
-  let body_meta = info.body.as_ref().unwrap();
+  assert!(result.operation_info.body.is_some(), "Should have body metadata");
+  let body_meta = result.operation_info.body.as_ref().unwrap();
   assert_eq!(body_meta.field_name.as_str(), "body");
   assert!(!body_meta.optional, "Body should be required");
 
-  // Find the request struct and check it has a body field
-  let request_struct = types
+  let request_struct = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::Struct(s) if s.name == "CreateInteractionRequest" => Some(s),
@@ -879,15 +899,14 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     .find(|f| f.name == "body")
     .expect("Body field not found");
 
-  // The body field should reference a union type (enum) for the oneOf
   assert!(!body_field.rust_type.nullable, "Required body should not be nullable");
 
-  // Check that a union enum was generated for the request body
-  let union_enum = types.iter().find(|t| matches!(t, RustType::Enum(e) if e.name.as_str().contains("InteractionRequestBody") || e.name.as_str().contains("RequestBody")));
+  let union_enum = result.types.iter().find(|t| matches!(t, RustType::Enum(e) if e.name.as_str().contains("InteractionRequestBody") || e.name.as_str().contains("RequestBody")));
   assert!(
     union_enum.is_some(),
     "Should generate a union enum for oneOf request body. Generated types: {:?}",
-    types
+    result
+      .types
       .iter()
       .map(|t| match t {
         RustType::Struct(s) => format!("Struct({})", s.name),

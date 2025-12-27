@@ -432,13 +432,19 @@ impl Orchestrator {
         &mut usage_recorder,
         cache,
       ) {
-        Ok((types, op_info)) => {
-          warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
-            operation_id: op_info.operation_id.clone(),
-            message: w.clone(),
-          }));
-          rust_types.extend(types);
-          operations_info.push(op_info);
+        Ok(result) => {
+          warnings.extend(
+            result
+              .operation_info
+              .warnings
+              .iter()
+              .map(|w| GenerationWarning::OperationSpecific {
+                operation_id: result.operation_info.operation_id.clone(),
+                message: w.clone(),
+              }),
+          );
+          rust_types.extend(result.types);
+          operations_info.push(result.operation_info);
         }
         Err(e) => {
           warnings.push(GenerationWarning::OperationConversionFailed {

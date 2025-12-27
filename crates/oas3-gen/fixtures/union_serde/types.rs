@@ -76,7 +76,7 @@ impl ArrayOrSingle {
 #[serde(default)]
 pub struct Base64ImageSource {
   pub data: Vec<u8>,
-  pub media_type: String,
+  pub media_type: MediaType,
   #[doc(hidden)]
   #[serde(rename = "type", skip_deserializing, default)]
   #[default(Some("base64".to_string()))]
@@ -286,7 +286,7 @@ impl Delta {
 pub struct ErrorDetails {
   pub message: String,
   #[serde(rename = "type")]
-  pub r#type: String,
+  pub r#type: ErrorType,
 }
 impl std::fmt::Display for ErrorDetails {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -312,7 +312,7 @@ impl std::error::Error for ErrorResponse {
     Some(&self.error as &(dyn std::error::Error + 'static))
   }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum ErrorType {
   #[serde(rename = "invalid_request_error")]
   #[default]
@@ -533,8 +533,8 @@ pub struct Message {
   pub content: Vec<ContentBlock>,
   pub id: String,
   pub model: String,
-  pub role: String,
-  pub stop_reason: Option<String>,
+  pub role: Role,
+  pub stop_reason: Option<StopReason>,
   pub usage: Option<Usage>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
@@ -578,7 +578,7 @@ pub struct PingEvent {
   #[default(Some("ping".to_string()))]
   pub r#type: Option<String>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum Role {
   #[serde(rename = "user")]
   #[default]
@@ -617,7 +617,7 @@ pub enum SendContentResponse {
   ///default: Unknown response
   Unknown,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum StopReason {
   #[serde(rename = "end_turn")]
   #[default]

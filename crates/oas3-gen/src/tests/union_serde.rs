@@ -69,7 +69,7 @@ mod tests {
       panic!("Expected ImageBlock with base64, got {block:?}");
     };
     assert!(
-      matches!(&*img.source, ImageSource::Base64(src) if src.media_type == "image/png"),
+      matches!(&*img.source, ImageSource::Base64(src) if src.media_type == MediaType::ImagePng),
       "base64 source mismatch"
     );
 
@@ -184,7 +184,7 @@ mod tests {
       panic!("Expected MessageStartEvent, got {event:?}");
     };
     assert_eq!(e.message.id, "msg_123", "message_start id mismatch");
-    assert_eq!(e.message.role, "assistant", "message_start role mismatch");
+    assert_eq!(e.message.role, Role::Assistant, "message_start role mismatch");
 
     let content_block_start = json!({
       "type": "content_block_start",
@@ -371,7 +371,7 @@ mod tests {
     assert_eq!(a.text, b.text, "content block roundtrip failed");
 
     let base64_source = ImageSource::Base64(Base64ImageSource {
-      media_type: "image/png".to_string(),
+      media_type: MediaType::ImagePng,
       data: vec![1, 2, 3, 4],
       r#type: Some("base64".to_string()),
     });
@@ -549,7 +549,7 @@ mod tests {
         ContentBlock::Text(text_block("Please analyze this image and code:")),
         ContentBlock::Image(ImageBlock {
           source: Box::new(ImageSource::Base64(Base64ImageSource {
-            media_type: "image/png".to_string(),
+            media_type: MediaType::ImagePng,
             data: vec![0x89, 0x50, 0x4E, 0x47],
             r#type: Some("base64".to_string()),
           })),
@@ -660,22 +660,16 @@ mod tests {
   #[test]
   fn test_stop_reason_enum() {
     let cases = [
-      (StopReason::EndTurn, "end_turn"),
-      (StopReason::MaxTokens, "max_tokens"),
-      (StopReason::StopSequence, "stop_sequence"),
-      (StopReason::ToolUse, "tool_use"),
+      ("end_turn", StopReason::EndTurn),
+      ("max_tokens", StopReason::MaxTokens),
+      ("stop_sequence", StopReason::StopSequence),
+      ("tool_use", StopReason::ToolUse),
     ];
-    for (variant, expected) in cases {
-      let json = serde_json::to_value(&variant).unwrap();
+    for (json_str, expected) in cases {
+      let deserialized: StopReason = serde_json::from_value(json!(json_str)).unwrap();
       assert_eq!(
-        json.as_str().unwrap(),
-        expected,
-        "StopReason serialization failed for {variant:?}"
-      );
-      let deserialized: StopReason = serde_json::from_value(json).unwrap();
-      assert_eq!(
-        deserialized, variant,
-        "StopReason deserialization failed for {expected}"
+        deserialized, expected,
+        "StopReason deserialization failed for {json_str}"
       );
     }
 
@@ -770,7 +764,7 @@ mod tests {
     let error_resp = ErrorResponse {
       r#type: "error".to_string(),
       error: ErrorDetails {
-        r#type: "invalid_request_error".to_string(),
+        r#type: ErrorType::InvalidRequestError,
         message: "Bad request".to_string(),
       },
     };
@@ -788,33 +782,28 @@ mod tests {
   }
 
   #[test]
-  fn test_enum_serialization() {
+  fn test_enum_deserialization() {
     let error_cases = [
-      (ErrorType::InvalidRequestError, "invalid_request_error"),
-      (ErrorType::AuthenticationError, "authentication_error"),
-      (ErrorType::PermissionError, "permission_error"),
-      (ErrorType::NotFoundError, "not_found_error"),
-      (ErrorType::RateLimitError, "rate_limit_error"),
-      (ErrorType::ApiError, "api_error"),
-      (ErrorType::OverloadedError, "overloaded_error"),
+      ("invalid_request_error", ErrorType::InvalidRequestError),
+      ("authentication_error", ErrorType::AuthenticationError),
+      ("permission_error", ErrorType::PermissionError),
+      ("not_found_error", ErrorType::NotFoundError),
+      ("rate_limit_error", ErrorType::RateLimitError),
+      ("api_error", ErrorType::ApiError),
+      ("overloaded_error", ErrorType::OverloadedError),
     ];
-    for (variant, expected) in error_cases {
-      let json = serde_json::to_value(&variant).unwrap();
+    for (json_str, expected) in error_cases {
+      let deserialized: ErrorType = serde_json::from_value(json!(json_str)).unwrap();
       assert_eq!(
-        json.as_str().unwrap(),
-        expected,
-        "ErrorType serialization failed for {variant:?}"
+        deserialized, expected,
+        "ErrorType deserialization failed for {json_str}"
       );
-      let deserialized: ErrorType = serde_json::from_value(json).unwrap();
-      assert_eq!(deserialized, variant, "ErrorType deserialization failed for {expected}");
     }
 
-    let role_cases = [(Role::User, "user"), (Role::Assistant, "assistant")];
-    for (variant, expected) in role_cases {
-      let json = serde_json::to_value(&variant).unwrap();
-      assert_eq!(json, expected, "Role serialization failed for {variant:?}");
-      let deserialized: Role = serde_json::from_value(json!(expected)).unwrap();
-      assert_eq!(deserialized, variant, "Role deserialization failed for {expected}");
+    let role_cases = [("user", Role::User), ("assistant", Role::Assistant)];
+    for (json_str, expected) in role_cases {
+      let deserialized: Role = serde_json::from_value(json!(json_str)).unwrap();
+      assert_eq!(deserialized, expected, "Role deserialization failed for {json_str}");
     }
 
     let media_cases = [
