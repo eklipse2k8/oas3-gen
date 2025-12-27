@@ -501,14 +501,15 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       .def
       .variants
       .iter()
-      .map(|v| {
-        let disc_value = &v.discriminator_value;
+      .flat_map(|v| {
         let variant_name = format_ident!("{}", v.variant_name);
-        quote! {
-          Some(#disc_value) => serde_json::from_value(value)
-            .map(Self::#variant_name)
-            .map_err(serde::de::Error::custom)
-        }
+        v.discriminator_values.iter().map(move |disc_value| {
+          quote! {
+            Some(#disc_value) => serde_json::from_value(value)
+              .map(Self::#variant_name)
+              .map_err(serde::de::Error::custom)
+          }
+        })
       })
       .collect();
 

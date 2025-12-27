@@ -706,22 +706,24 @@ impl EnumConverter {
     variants: &[VariantDef],
     mapping: &BTreeMap<String, String>,
   ) -> Vec<DiscriminatedVariant> {
-    let mut seen_types = BTreeSet::new();
-    mapping
-      .iter()
-      .filter_map(|(disc_value, ref_path)| {
-        let expected_type = Self::ref_path_to_type_name(ref_path)?;
+    let mut type_to_disc_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (disc_value, ref_path) in mapping {
+      if let Some(expected_type) = Self::ref_path_to_type_name(ref_path) {
+        type_to_disc_values
+          .entry(expected_type)
+          .or_default()
+          .push(disc_value.clone());
+      }
+    }
 
-        // Deduplicate by type - multiple discriminator values can map to the same schema
-        if !seen_types.insert(expected_type.clone()) {
-          return None;
-        }
-
+    type_to_disc_values
+      .into_iter()
+      .filter_map(|(expected_type, disc_values)| {
         let variant = Self::find_variant_by_type(variants, &expected_type)?;
         let type_ref = variant.single_wrapped_type()?;
 
         Some(DiscriminatedVariant {
-          discriminator_value: disc_value.clone(),
+          discriminator_values: disc_values,
           variant_name: variant.name.to_string(),
           type_name: type_ref.clone(),
         })

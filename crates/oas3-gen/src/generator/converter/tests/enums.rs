@@ -116,7 +116,7 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
   let variant_values: BTreeSet<_> = enum_def
     .variants
     .iter()
-    .map(|v| v.discriminator_value.as_str())
+    .flat_map(|v| v.discriminator_values.iter().map(String::as_str))
     .collect();
   assert!(variant_values.contains("type_a"));
   assert!(variant_values.contains("type_b"));

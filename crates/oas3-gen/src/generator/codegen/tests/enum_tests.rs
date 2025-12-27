@@ -630,12 +630,12 @@ fn test_discriminated_enum() {
     discriminator_field: "petType".to_string(),
     variants: vec![
       DiscriminatedVariant {
-        discriminator_value: "dog".to_string(),
+        discriminator_values: vec!["dog".to_string()],
         variant_name: "Dog".to_string(),
         type_name: TypeRef::new("DogData"),
       },
       DiscriminatedVariant {
-        discriminator_value: "cat".to_string(),
+        discriminator_values: vec!["cat".to_string()],
         variant_name: "Cat".to_string(),
         type_name: TypeRef::new("CatData"),
       },
@@ -683,12 +683,12 @@ fn test_discriminated_enum() {
     name: EnumToken::new("Message"),
     discriminator_field: "type".to_string(),
     variants: vec![DiscriminatedVariant {
-      discriminator_value: "text".to_string(),
+      discriminator_values: vec!["text".to_string()],
       variant_name: "Text".to_string(),
       type_name: TypeRef::new("TextMessage"),
     }],
     fallback: Some(DiscriminatedVariant {
-      discriminator_value: String::new(),
+      discriminator_values: vec![],
       variant_name: "Unknown".to_string(),
       type_name: TypeRef::new("serde_json::Value"),
     }),
@@ -725,7 +725,7 @@ fn test_discriminated_enum_serialize_only() {
     name: EnumToken::new("RequestType"),
     discriminator_field: "kind".to_string(),
     variants: vec![DiscriminatedVariant {
-      discriminator_value: "create".to_string(),
+      discriminator_values: vec!["create".to_string()],
       variant_name: "Create".to_string(),
       type_name: TypeRef::new("CreateRequest"),
     }],
@@ -753,7 +753,7 @@ fn test_discriminated_enum_deserialize_only() {
     name: EnumToken::new("ResponseType"),
     discriminator_field: "kind".to_string(),
     variants: vec![DiscriminatedVariant {
-      discriminator_value: "success".to_string(),
+      discriminator_values: vec!["success".to_string()],
       variant_name: "Success".to_string(),
       type_name: TypeRef::new("SuccessResponse"),
     }],

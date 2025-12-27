@@ -33,7 +33,7 @@ pub use validation_attrs::{RegexKey, ValidationAttribute};
 /// Discriminated enum variant mapping
 #[derive(Debug, Clone)]
 pub struct DiscriminatedVariant {
-  pub discriminator_value: String,
+  pub discriminator_values: Vec<String>,
   pub variant_name: String,
   pub type_name: TypeRef,
 }
