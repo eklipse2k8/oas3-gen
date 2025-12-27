@@ -70,7 +70,7 @@ pub(crate) fn apply_discriminator_attributes(
 ) -> DiscriminatorAttributesResult {
   let should_hide = discriminator_info
     .as_ref()
-    .is_some_and(|d| d.value.is_some() || (d.is_base && !d.has_enum));
+    .is_some_and(|d| !d.has_enum && (d.value.is_some() || d.is_base));
 
   if !should_hide {
     return DiscriminatorAttributesResult {
@@ -85,8 +85,8 @@ pub(crate) fn apply_discriminator_attributes(
   metadata.docs.clear();
   metadata.validation_attrs.clear();
 
-  if let Some(ref disc_value) = disc_info.value {
-    metadata.default_value = Some(serde_json::Value::String(disc_value.to_string()));
+  if disc_info.value.is_some() {
+    metadata.default_value = Some(serde_json::Value::String(disc_info.value.as_ref().unwrap().to_string()));
     serde_attrs.push(SerdeAttribute::SkipDeserializing);
     serde_attrs.push(SerdeAttribute::Default);
   } else {

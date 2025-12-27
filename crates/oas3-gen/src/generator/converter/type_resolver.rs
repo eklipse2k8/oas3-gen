@@ -100,6 +100,12 @@ impl TypeResolver {
       return self.resolve_reference(ref_path, property_schema);
     }
 
+    if property_schema.all_of.len() == 1
+      && let Some(type_ref) = self.resolve_union(&property_schema.all_of)?
+    {
+      return Ok(ConversionOutput::new(type_ref));
+    }
+
     if property_schema.is_inline_object() {
       return self.resolve_inline_struct(parent_type_name, property_name, property_schema, cache);
     }
