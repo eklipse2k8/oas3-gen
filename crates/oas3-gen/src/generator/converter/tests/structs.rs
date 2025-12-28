@@ -840,3 +840,50 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
 
   Ok(())
 }
+
+#[test]
+fn test_extract_discriminator_children_returns_alphabetical_order() {
+  let base_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: Some(BTreeMap::from([
+        ("zebra".to_string(), "#/components/schemas/Zebra".to_string()),
+        ("alpha".to_string(), "#/components/schemas/Alpha".to_string()),
+        ("middle".to_string(), "#/components/schemas/Middle".to_string()),
+        ("beta".to_string(), "#/components/schemas/Beta".to_string()),
+      ])),
+    }),
+    ..Default::default()
+  };
+
+  let empty_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("Base".to_string(), base_schema.clone()),
+    ("Alpha".to_string(), empty_schema.clone()),
+    ("Beta".to_string(), empty_schema.clone()),
+    ("Middle".to_string(), empty_schema.clone()),
+    ("Zebra".to_string(), empty_schema.clone()),
+  ]));
+
+  let handler = DiscriminatorHandler::new(&graph, None);
+  let children = handler.extract_discriminator_children(&base_schema);
+
+  let schema_names: Vec<&str> = children.iter().map(|(_, name)| name.as_str()).collect();
+  assert_eq!(
+    schema_names,
+    vec!["Alpha", "Beta", "Middle", "Zebra"],
+    "Children should be in alphabetical order by schema name"
+  );
+}

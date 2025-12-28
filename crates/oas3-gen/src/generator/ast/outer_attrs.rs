@@ -28,22 +28,14 @@ impl ToTokens for OuterAttr {
 /// Separator type for non-exploded array query parameters.
 ///
 /// Maps OpenAPI style/explode combinations to `serde_with` separator types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr)]
 pub enum SerdeAsSeparator {
+  #[strum(serialize = "oas3_gen_support::StringWithCommaSeparator")]
   Comma,
+  #[strum(serialize = "oas3_gen_support::StringWithSpaceSeparator")]
   Space,
+  #[strum(serialize = "oas3_gen_support::StringWithPipeSeparator")]
   Pipe,
-}
-
-impl ToTokens for SerdeAsSeparator {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let separator_type = match self {
-      Self::Comma => quote! { oas3_gen_support::StringWithCommaSeparator },
-      Self::Space => quote! { oas3_gen_support::StringWithSpaceSeparator },
-      Self::Pipe => quote! { oas3_gen_support::StringWithPipeSeparator },
-    };
-    tokens.extend(separator_type);
-  }
 }
 
 /// Field-level `#[serde_as]` attribute for custom serialization.
@@ -61,11 +53,12 @@ pub enum SerdeAsFieldAttr {
 impl ToTokens for SerdeAsFieldAttr {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let Self::SeparatedList { separator, optional } = self;
-    let attr = if *optional {
-      quote! { #[serde_as(as = Option<#separator>)] }
+    let type_str = if *optional {
+      format!("Option<{}>", separator.as_ref())
     } else {
-      quote! { #[serde_as(as = #separator)] }
+      separator.as_ref().to_string()
     };
+    let attr = quote! { #[serde_as(as = #type_str)] };
     tokens.extend(attr);
   }
 }

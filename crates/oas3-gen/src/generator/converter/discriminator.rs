@@ -1,6 +1,5 @@
 use std::{
-  cmp::Reverse,
-  collections::{BTreeMap, BTreeSet, HashMap},
+  collections::{BTreeMap, BTreeSet},
   sync::Arc,
 };
 
@@ -134,13 +133,13 @@ impl<'a> DiscriminatorHandler<'a> {
   ///
   /// Returns `(discriminator_values, schema_name)` pairs grouped by schema name.
   /// Multiple discriminator values that map to the same schema are collected together.
-  /// Results are sorted by inheritance depth (deepest first).
+  /// Results are in alphabetical order by schema name for deterministic output.
   pub(crate) fn extract_discriminator_children(&self, schema: &ObjectSchema) -> Vec<(Vec<String>, String)> {
     let Some(mapping) = schema.discriminator.as_ref().and_then(|d| d.mapping.as_ref()) else {
       return vec![];
     };
 
-    let mut schema_to_disc_values: HashMap<String, Vec<String>> = HashMap::with_capacity(mapping.len());
+    let mut schema_to_disc_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (disc_value, ref_path) in mapping {
       let Some(schema_name) = SchemaRegistry::extract_ref_name(ref_path) else {
         continue;
@@ -158,13 +157,10 @@ impl<'a> DiscriminatorHandler<'a> {
         .push(disc_value.clone());
     }
 
-    let mut children: Vec<_> = schema_to_disc_values
+    schema_to_disc_values
       .into_iter()
       .map(|(name, values)| (values, name))
-      .collect();
-
-    children.sort_by_cached_key(|(_, name)| Reverse(self.graph.get_inheritance_depth(name)));
-    children
+      .collect()
   }
 }
 
