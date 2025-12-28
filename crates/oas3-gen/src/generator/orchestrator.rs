@@ -10,9 +10,8 @@ use crate::generator::{
   codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata, mod_file::ModFileGenerator},
   converter::{
     CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
-    TypeUsageRecorder, operations::OperationConverter,
+    TypeUsageRecorder, inline_scanner::InlineTypeScanner, operations::OperationConverter,
   },
-  naming::inference::InlineTypeScanner,
   operation_registry::OperationRegistry,
   schema_registry::SchemaRegistry,
 };

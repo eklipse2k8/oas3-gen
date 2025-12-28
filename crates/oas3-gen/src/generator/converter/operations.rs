@@ -9,9 +9,7 @@ use oas3::{
 };
 use serde_json::Value;
 
-use super::{
-  SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, fields::FieldConverter, path_renderer, responses,
-};
+use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, fields::FieldConverter, responses};
 use crate::generator::{
   ast::{
     ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
@@ -741,7 +739,12 @@ impl<'a> OperationConverter<'a> {
 
     let serde_meta = ParameterSerdeMeta {
       original_name: param.name.clone(),
-      explode: path_renderer::query_param_explode(param),
+      explode: {
+        let param: &Parameter = param;
+        param
+          .explode
+          .unwrap_or(matches!(param.style, None | Some(ParameterStyle::Form)))
+      },
       style: param.style,
     };
 

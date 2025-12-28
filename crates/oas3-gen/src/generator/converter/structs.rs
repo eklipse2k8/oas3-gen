@@ -7,11 +7,8 @@ use anyhow::Context as _;
 use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
-  CodegenConfig, ConversionOutput, SchemaExt,
-  cache::{SharedSchemaCache, StructSummary},
-  discriminator::DiscriminatorHandler,
-  fields::FieldConverter,
-  type_resolver::TypeResolver,
+  CodegenConfig, ConversionOutput, SchemaExt, cache::SharedSchemaCache, discriminator::DiscriminatorHandler,
+  fields::FieldConverter, struct_summaries::StructSummary, type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{

@@ -10,9 +10,10 @@ use serde_json::Value;
 
 use super::{
   CodegenConfig,
-  cache::{SharedSchemaCache, StructSummary},
+  cache::SharedSchemaCache,
   common::{InlineSchemaMerger, SchemaExt, handle_inline_creation},
   discriminator::try_build_discriminated_enum_from_variants,
+  struct_summaries::StructSummary,
   structs::StructConverter,
   type_resolver::TypeResolver,
 };
@@ -24,7 +25,7 @@ use crate::generator::{
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::{
-      VariantNameNormalizer, derive_method_names, extract_enum_values, infer_variant_name, strip_common_affixes,
+      VariantNameNormalizer, derive_method_names, extract_enum_values, infer_union_variant_label, strip_common_affixes,
     },
   },
   schema_registry::{ReferenceExtractor, SchemaRegistry},
@@ -218,16 +219,7 @@ impl EnumConverter {
         }
       });
 
-      let base_name = if let Some(const_value) = &resolved.const_value {
-        VariantNameNormalizer::normalize(const_value).map_or_else(|| infer_variant_name(&resolved, i), |n| n.name)
-      } else if let Some(schema_name) = &ref_name {
-        to_rust_type_name(schema_name)
-      } else {
-        resolved
-          .title
-          .as_ref()
-          .map_or_else(|| infer_variant_name(&resolved, i), |t| to_rust_type_name(t))
-      };
+      let base_name = infer_union_variant_label(&resolved, ref_name.as_deref(), i);
 
       let variant_name = ensure_unique(&base_name, &seen_names);
       seen_names.insert(variant_name.clone());

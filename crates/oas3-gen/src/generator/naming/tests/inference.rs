@@ -6,11 +6,11 @@ use serde_json::{Value, json};
 use crate::{
   generator::{
     ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
+    converter::inline_scanner::InlineTypeScanner,
     naming::{
       constants::REQUEST_BODY_SUFFIX,
       inference::{
-        InlineTypeScanner, VariantNameNormalizer, derive_method_names, infer_name_from_context, infer_variant_name,
-        strip_common_affixes,
+        VariantNameNormalizer, derive_method_names, infer_name_from_context, infer_variant_name, strip_common_affixes,
       },
     },
   },

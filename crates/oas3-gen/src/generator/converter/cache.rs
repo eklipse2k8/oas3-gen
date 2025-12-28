@@ -2,44 +2,124 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::ObjectSchema;
 
-use super::hashing;
+use super::{hashing, struct_summaries::StructSummary};
 use crate::generator::{
-  ast::{EnumToken, FieldNameToken, RustType, StructDef, StructToken, TypeRef},
+  ast::{EnumToken, RustType, StructToken},
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::{extract_enum_values, is_relaxed_enum_pattern},
   },
 };
 
-/// Lightweight summary of struct characteristics for enum helper generation.
-///
-/// This avoids re-converting entire schemas when determining if a struct
-/// is eligible for helper constructor generation.
-#[derive(Debug, Clone)]
-pub(crate) struct StructSummary {
-  /// Whether the struct can derive Default.
-  pub has_default: bool,
-  /// Required fields (name and type) that must be provided in constructors.
-  pub required_fields: Vec<(FieldNameToken, TypeRef)>,
-  /// User-facing fields (name and type), excluding const/doc_hidden fields.
-  pub user_fields: Vec<(FieldNameToken, TypeRef)>,
+#[derive(Default)]
+struct TypeIdentityCache {
+  schema_to_type: BTreeMap<String, String>,
+  enum_to_type: BTreeMap<Vec<String>, String>,
+  union_refs_to_type: BTreeMap<(BTreeSet<String>, Option<String>), String>,
+  used_names: BTreeSet<String>,
+  precomputed_names: BTreeMap<String, String>,
+  precomputed_enum_names: BTreeMap<Vec<String>, String>,
 }
 
-impl From<&StructDef> for StructSummary {
-  fn from(s: &StructDef) -> Self {
-    Self {
-      has_default: s.has_default(),
-      required_fields: s
-        .required_fields()
-        .map(|f| (f.name.clone(), f.rust_type.clone()))
-        .collect(),
-      user_fields: s
-        .fields
-        .iter()
-        .filter(|f| !f.doc_hidden)
-        .map(|f| (f.name.clone(), f.rust_type.clone()))
-        .collect(),
-    }
+impl TypeIdentityCache {
+  fn set_precomputed_names(&mut self, names: BTreeMap<String, String>, enum_names: BTreeMap<Vec<String>, String>) {
+    self.precomputed_names = names;
+    self.precomputed_enum_names = enum_names;
+  }
+
+  fn schema_type(&self, schema_hash: &str) -> Option<String> {
+    self.schema_to_type.get(schema_hash).cloned()
+  }
+
+  fn enum_type(&self, values: &[String]) -> Option<String> {
+    self
+      .enum_to_type
+      .get(values)
+      .or_else(|| self.precomputed_enum_names.get(values))
+      .cloned()
+  }
+
+  fn generated_enum_type(&self, values: &[String]) -> Option<String> {
+    self.enum_to_type.get(values).cloned()
+  }
+
+  fn enum_registered(&self, values: &[String]) -> bool {
+    self.enum_to_type.contains_key(values)
+  }
+
+  fn register_enum(&mut self, values: Vec<String>, name: String) {
+    self.enum_to_type.insert(values, name);
+  }
+
+  fn union_type(&self, refs: &BTreeSet<String>, discriminator: Option<&str>) -> Option<String> {
+    self
+      .union_refs_to_type
+      .get(&(refs.clone(), discriminator.map(String::from)))
+      .cloned()
+  }
+
+  fn register_union(&mut self, refs: BTreeSet<String>, discriminator: Option<String>, name: String) {
+    self.union_refs_to_type.insert((refs, discriminator), name);
+  }
+
+  fn mark_used(&mut self, name: String) {
+    self.used_names.insert(name);
+  }
+
+  fn is_used(&self, name: &str) -> bool {
+    self.used_names.contains(name)
+  }
+
+  fn record_schema_name(&mut self, schema_hash: String, name: String) {
+    self.schema_to_type.insert(schema_hash, name);
+  }
+
+  fn has_schema_name(&self, schema_hash: &str, name: &str) -> bool {
+    self.schema_to_type.get(schema_hash).is_some_and(|n| n == name)
+  }
+
+  fn preferred_name(&self, schema_hash: &str, base_name: &str) -> String {
+    self
+      .precomputed_names
+      .get(schema_hash)
+      .cloned()
+      .unwrap_or_else(|| self.make_unique_name(base_name))
+  }
+
+  fn make_unique_name(&self, base: &str) -> String {
+    let rust_name = to_rust_type_name(base);
+    ensure_unique(&rust_name, &self.used_names)
+  }
+}
+
+#[derive(Default)]
+struct GeneratedTypeStore {
+  generated_types: Vec<RustType>,
+}
+
+impl GeneratedTypeStore {
+  fn push(&mut self, mut nested_types: Vec<RustType>, type_def: RustType) {
+    self.generated_types.append(&mut nested_types);
+    self.generated_types.push(type_def);
+  }
+
+  fn into_inner(self) -> Vec<RustType> {
+    self.generated_types
+  }
+}
+
+#[derive(Default)]
+struct StructSummaryIndex {
+  summaries: BTreeMap<String, StructSummary>,
+}
+
+impl StructSummaryIndex {
+  fn register(&mut self, type_name: &str, summary: StructSummary) {
+    self.summaries.insert(type_name.to_string(), summary);
+  }
+
+  fn get(&self, type_name: &str) -> Option<&StructSummary> {
+    self.summaries.get(type_name)
   }
 }
 
@@ -47,29 +127,18 @@ impl From<&StructDef> for StructSummary {
 ///
 /// Prevents duplication of structs and enums by hashing schemas and storing mapping.
 pub(crate) struct SharedSchemaCache {
-  schema_to_type: BTreeMap<String, String>,
-  enum_to_type: BTreeMap<Vec<String>, String>,
-  union_refs_to_type: BTreeMap<(BTreeSet<String>, Option<String>), String>,
-  generated_types: Vec<RustType>,
-  used_names: BTreeSet<String>,
-  precomputed_names: BTreeMap<String, String>,
-  precomputed_enum_names: BTreeMap<Vec<String>, String>,
-  /// Cached struct summaries for enum helper generation.
-  struct_summaries: BTreeMap<String, StructSummary>,
+  identity: TypeIdentityCache,
+  generated: GeneratedTypeStore,
+  summaries: StructSummaryIndex,
 }
 
 impl SharedSchemaCache {
   /// Creates a new empty cache.
   pub(crate) fn new() -> Self {
     Self {
-      schema_to_type: BTreeMap::new(),
-      enum_to_type: BTreeMap::new(),
-      union_refs_to_type: BTreeMap::new(),
-      generated_types: vec![],
-      used_names: BTreeSet::new(),
-      precomputed_names: BTreeMap::new(),
-      precomputed_enum_names: BTreeMap::new(),
-      struct_summaries: BTreeMap::new(),
+      identity: TypeIdentityCache::default(),
+      generated: GeneratedTypeStore::default(),
+      summaries: StructSummaryIndex::default(),
     }
   }
 
@@ -79,69 +148,58 @@ impl SharedSchemaCache {
     names: BTreeMap<String, String>,
     enum_names: BTreeMap<Vec<String>, String>,
   ) {
-    self.precomputed_names = names;
-    self.precomputed_enum_names = enum_names;
+    self.identity.set_precomputed_names(names, enum_names);
   }
 
   /// Retrieves a cached type name for a schema, if it exists.
   pub(crate) fn get_type_name(&self, schema: &ObjectSchema) -> anyhow::Result<Option<String>> {
     let schema_hash = hashing::hash_schema(schema)?;
-    Ok(self.schema_to_type.get(&schema_hash).cloned())
+    Ok(self.identity.schema_type(&schema_hash))
   }
 
   /// Retrieves a cached name for an enum based on its values.
   pub(crate) fn get_enum_name(&self, values: &[String]) -> Option<String> {
-    self
-      .enum_to_type
-      .get(values)
-      .or_else(|| self.precomputed_enum_names.get(values))
-      .cloned()
+    self.identity.enum_type(values)
   }
 
   /// Checks if an enum with the given values has already been generated.
   pub(crate) fn is_enum_generated(&self, values: &[String]) -> bool {
-    self.enum_to_type.contains_key(values)
+    self.identity.enum_registered(values)
   }
 
   /// Registers an enum name for a set of values.
   pub(crate) fn register_enum(&mut self, values: Vec<String>, name: String) {
-    self.enum_to_type.insert(values, name);
+    self.identity.register_enum(values, name);
   }
 
   /// Retrieves a cached name for a union enum based on its variant refs and discriminator.
   pub(crate) fn get_union_name(&self, refs: &BTreeSet<String>, discriminator: Option<&str>) -> Option<String> {
-    self
-      .union_refs_to_type
-      .get(&(refs.clone(), discriminator.map(String::from)))
-      .cloned()
+    self.identity.union_type(refs, discriminator)
   }
 
   /// Registers a union enum name for a set of variant refs and discriminator.
   pub(crate) fn register_union(&mut self, refs: BTreeSet<String>, discriminator: Option<String>, name: String) {
-    self.union_refs_to_type.insert((refs, discriminator), name);
+    self.identity.register_union(refs, discriminator, name);
   }
 
   /// Marks a type name as used to prevent collisions.
   pub(crate) fn mark_name_used(&mut self, name: String) {
-    self.used_names.insert(name);
+    self.identity.mark_used(name);
   }
 
   /// Pre-registers a top-level schema so inline schemas with identical structure reuse it.
   pub(crate) fn register_top_level_schema(&mut self, schema: &ObjectSchema, name: &str) -> anyhow::Result<()> {
     let schema_hash = hashing::hash_schema(schema)?;
     let rust_name = to_rust_type_name(name);
-    self.schema_to_type.insert(schema_hash, rust_name.clone());
-    self.used_names.insert(rust_name);
+    self.identity.record_schema_name(schema_hash, rust_name.clone());
+    self.identity.mark_used(rust_name);
     Ok(())
   }
 
   /// Gets a preferred name for a schema, using precomputed names or generating a unique one.
   pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> anyhow::Result<String> {
     let schema_hash = hashing::hash_schema(schema)?;
-    if let Some(name) = self.precomputed_names.get(&schema_hash) {
-      return Ok(name.clone());
-    }
-    Ok(self.make_unique_name(base_name))
+    Ok(self.identity.preferred_name(&schema_hash, base_name))
   }
 
   /// Registers a new type definition in the cache.
@@ -151,37 +209,35 @@ impl SharedSchemaCache {
     &mut self,
     schema: &ObjectSchema,
     base_name: &str,
-    mut nested_types: Vec<RustType>,
+    nested_types: Vec<RustType>,
     type_def: RustType,
   ) -> anyhow::Result<String> {
     let schema_hash = hashing::hash_schema(schema)?;
 
     if !is_relaxed_enum_pattern(schema)
       && let Some(values) = extract_enum_values(schema)
-      && let Some(existing_name) = self.enum_to_type.get(&values)
+      && let Some(existing_name) = self.identity.generated_enum_type(&values)
     {
-      self.schema_to_type.insert(schema_hash, existing_name.clone());
-      return Ok(existing_name.clone());
+      self.identity.record_schema_name(schema_hash, existing_name.clone());
+      return Ok(existing_name);
     }
 
     let mut name = base_name.to_string();
 
-    if self.used_names.contains(&name) {
-      if let Some(existing_name) = self.schema_to_type.get(&schema_hash) {
-        return Ok(existing_name.clone());
+    if self.identity.is_used(&name) {
+      if let Some(existing_name) = self.identity.schema_type(&schema_hash) {
+        return Ok(existing_name);
       }
-      name = self.make_unique_name(&name);
+      name = self.identity.make_unique_name(&name);
     }
 
-    self.used_names.insert(name.clone());
-    self.schema_to_type.insert(schema_hash, name.clone());
+    self.identity.mark_used(name.clone());
+    self.identity.record_schema_name(schema_hash, name.clone());
 
-    // If this is an enum, register its values too (if not already)
     if let Some(values) = extract_enum_values(schema) {
-      self.enum_to_type.insert(values, name.clone());
+      self.identity.register_enum(values, name.clone());
     }
 
-    // Update the name in the struct/enum definition if we renamed it
     let mut final_type_def = type_def;
     match &mut final_type_def {
       RustType::Struct(s) => s.name = StructToken::from(name.clone()),
@@ -189,42 +245,39 @@ impl SharedSchemaCache {
       _ => {}
     }
 
-    self.generated_types.append(&mut nested_types);
-    self.generated_types.push(final_type_def);
+    self.generated.push(nested_types, final_type_def);
 
     Ok(name)
   }
 
   /// Generates a unique name based on a base name, ensuring no collisions with used names.
   pub(crate) fn make_unique_name(&self, base: &str) -> String {
-    let rust_name = to_rust_type_name(base);
-    ensure_unique(&rust_name, &self.used_names)
+    self.identity.make_unique_name(base)
   }
 
   /// Checks if a name is already used by a different schema.
   ///
   /// Returns true if the name is in use AND the schema hash doesn't match any existing entry.
   pub(crate) fn name_conflicts_with_different_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<bool> {
-    if !self.used_names.contains(name) {
+    if !self.identity.is_used(name) {
       return Ok(false);
     }
     let schema_hash = hashing::hash_schema(schema)?;
-    let same_schema = self.schema_to_type.get(&schema_hash).is_some_and(|n| n == name);
-    Ok(!same_schema)
+    Ok(!self.identity.has_schema_name(&schema_hash, name))
   }
 
   /// Consumes the cache and returns all generated Rust types.
   pub(crate) fn into_types(self) -> Vec<RustType> {
-    self.generated_types
+    self.generated.into_inner()
   }
 
   /// Stores a struct summary for enum helper generation.
   pub(crate) fn register_struct_summary(&mut self, type_name: &str, summary: StructSummary) {
-    self.struct_summaries.insert(type_name.to_string(), summary);
+    self.summaries.register(type_name, summary);
   }
 
   /// Retrieves a cached struct summary by type name.
   pub(crate) fn get_struct_summary(&self, type_name: &str) -> Option<&StructSummary> {
-    self.struct_summaries.get(type_name)
+    self.summaries.get(type_name)
   }
 }
