@@ -9,9 +9,10 @@ use crate::{
     converter::{
       SchemaConverter,
       cache::SharedSchemaCache,
-      enums::{EnumConverter, UnionKind},
+      enums::EnumConverter,
       hashing,
       type_resolver::TypeResolverBuilder,
+      union::{UnionConverter, UnionKind},
     },
     schema_registry::SchemaRegistry,
   },
@@ -68,13 +69,7 @@ fn test_hash_schema_behavior() {
 fn test_convert_value_enum_with_cache() {
   let schema = make_string_enum_schema(&["value1", "value2", "value3"]);
 
-  let graph = create_test_graph(BTreeMap::new());
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
+  let enum_converter = EnumConverter::new(default_config());
   let mut cache = SharedSchemaCache::new();
 
   let result1 = enum_converter.convert_value_enum("TestEnum", &schema, Some(&mut cache));
@@ -131,8 +126,8 @@ fn test_relaxed_enum_reuses_cached_enum() {
     .graph(graph.clone())
     .build()
     .unwrap();
-  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
-  let optimized_result = enum_converter
+  let union_converter = UnionConverter::new(&graph, type_resolver, default_config());
+  let optimized_result = union_converter
     .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))
     .expect("Should convert anyOf union");
 

@@ -10,11 +10,12 @@ use super::{
   cache::SharedSchemaCache,
   common::extract_variant_references,
   discriminator::DiscriminatorHandler,
-  enums::{EnumConverter, UnionKind},
+  enums::EnumConverter,
   structs::StructConverter,
+  union::{UnionConverter, UnionKind},
 };
 use crate::generator::{
-  ast::{EnumToken, RustPrimitive, RustType, TypeRef},
+  ast::{RustPrimitive, RustType, TypeRef},
   converter::common::handle_inline_creation,
   naming::{
     identifiers::{strip_parent_prefix, to_rust_type_name},
@@ -179,7 +180,7 @@ impl TypeResolver {
         }
       },
       |name, _| {
-        let converter = EnumConverter::new(&self.graph, self.clone(), self.config);
+        let converter = EnumConverter::new(self.config);
         let inline_enum = converter
           .convert_value_enum(name, property_schema, None)
           .expect("convert_value_enum should return Some when cache is None");
@@ -257,7 +258,19 @@ impl TypeResolver {
       None,
       cache.as_deref_mut(),
       |cache| Self::lookup_cached_enum_name(schema, cache),
-      |name, cache| self.build_union_enum(name, schema, uses_one_of, cache),
+      |name, cache| {
+        let union_converter = UnionConverter::new(&self.graph, self.clone(), self.config);
+        union_converter.convert_union_output(
+          name,
+          schema,
+          if uses_one_of {
+            UnionKind::OneOf
+          } else {
+            UnionKind::AnyOf
+          },
+          cache,
+        )
+      },
     )?;
 
     if let Some(ref mut c) = cache
@@ -414,47 +427,6 @@ impl TypeResolver {
       }
     }
     Ok((non_null_variant, contains_null))
-  }
-
-  /// Extracts the main type from a list of generated types.
-  ///
-  /// Searches for a type matching the target name. If not found,
-  /// falls back to the last type in the list (which is typically the main enum).
-  fn extract_primary_type(mut types: Vec<RustType>, target_name: &EnumToken) -> Result<(RustType, Vec<RustType>)> {
-    let pos = types
-      .iter()
-      .position(|t| match t {
-        RustType::Enum(e) => e.name == *target_name,
-        _ => false,
-      })
-      .or_else(|| (!types.is_empty()).then_some(types.len() - 1))
-      .ok_or_else(|| anyhow::anyhow!("Failed to locate generated union type"))?;
-
-    Ok((types.remove(pos), types))
-  }
-
-  /// Generates a union enum type from a schema with oneOf/anyOf variants.
-  ///
-  /// Used by both inline union property conversion and array-with-union-items conversion.
-  fn build_union_enum(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    uses_one_of: bool,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<ConversionOutput<RustType>> {
-    let converter = EnumConverter::new(&self.graph, self.clone(), self.config);
-    let kind = if uses_one_of {
-      UnionKind::OneOf
-    } else {
-      UnionKind::AnyOf
-    };
-
-    let generated_types = converter.convert_union(name, schema, kind, cache)?;
-
-    let expected_name = EnumToken::from_raw(name);
-    let (main_type, nested) = Self::extract_primary_type(generated_types, &expected_name)?;
-    Ok(ConversionOutput::with_inline_types(main_type, nested))
   }
 
   fn resolve_nullable_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> anyhow::Result<Option<TypeRef>> {

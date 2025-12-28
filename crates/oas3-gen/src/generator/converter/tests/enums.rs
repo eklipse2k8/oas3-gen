@@ -15,8 +15,9 @@ use crate::{
     },
     converter::{
       SchemaConverter,
-      enums::{CollisionStrategy, EnumConverter, UnionKind},
+      enums::EnumConverter,
       type_resolver::TypeResolverBuilder,
+      union::{CollisionStrategy, UnionConverter, UnionKind},
     },
     naming::inference::VariantNameNormalizer,
     schema_registry::SchemaRegistry,
@@ -550,36 +551,7 @@ fn test_collision_strategy_enum() {
 
 #[test]
 fn test_preserve_strategy_with_multiple_collisions() {
-  let spec = oas3::Spec {
-    openapi: "3.1.0".to_string(),
-    info: oas3::spec::Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
-
-  let (graph, _) = SchemaRegistry::new(spec);
-  let graph = Arc::new(graph);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let converter = EnumConverter::new(&graph, type_resolver, config_with_preserve_case());
+  let converter = EnumConverter::new(config_with_preserve_case());
 
   let schema = ObjectSchema {
     enum_values: vec![json!("active"), json!("Active"), json!("ACTIVE")],
@@ -629,7 +601,7 @@ fn test_relaxed_enum_detects_freeform_pattern() {
     .graph(graph.clone())
     .build()
     .unwrap();
-  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
+  let union_converter = UnionConverter::new(&graph, type_resolver, default_config());
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -651,7 +623,7 @@ fn test_relaxed_enum_detects_freeform_pattern() {
     ..Default::default()
   };
 
-  let result = enum_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
+  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
   assert!(result.is_ok());
 
   let types = result.unwrap();
@@ -712,7 +684,7 @@ fn test_relaxed_enum_rejects_no_freeform() {
     .graph(graph.clone())
     .build()
     .unwrap();
-  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
+  let union_converter = UnionConverter::new(&graph, type_resolver, default_config());
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -730,7 +702,7 @@ fn test_relaxed_enum_rejects_no_freeform() {
     ..Default::default()
   };
 
-  let result = enum_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
+  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
   assert!(result.is_ok());
   let types = result.unwrap();
   assert!(

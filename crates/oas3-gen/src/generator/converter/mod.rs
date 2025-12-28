@@ -11,6 +11,7 @@ mod struct_summaries;
 pub(crate) mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
+pub(crate) mod union;
 
 use std::{
   collections::{BTreeSet, HashSet},
@@ -21,7 +22,13 @@ pub(crate) use common::{ConversionOutput, SchemaExt};
 use oas3::spec::{ObjectOrReference, ObjectSchema};
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
-use self::{cache::SharedSchemaCache, enums::EnumConverter, structs::StructConverter, type_resolver::TypeResolver};
+use self::{
+  cache::SharedSchemaCache,
+  enums::EnumConverter,
+  structs::StructConverter,
+  type_resolver::TypeResolver,
+  union::{UnionConverter, UnionKind},
+};
 use super::{
   ast::{Documentation, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
@@ -120,6 +127,7 @@ pub(crate) struct SchemaConverter {
   type_resolver: TypeResolver,
   struct_converter: StructConverter,
   enum_converter: EnumConverter,
+  union_converter: UnionConverter,
   cached_schema_names: HashSet<String>,
 }
 
@@ -134,7 +142,8 @@ impl SchemaConverter {
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, None),
-      enum_converter: EnumConverter::new(graph, type_resolver, config),
+      enum_converter: EnumConverter::new(config),
+      union_converter: UnionConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
   }
@@ -153,7 +162,8 @@ impl SchemaConverter {
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, Some(Arc::new(reachable_schemas))),
-      enum_converter: EnumConverter::new(graph, type_resolver, config),
+      enum_converter: EnumConverter::new(config),
+      union_converter: UnionConverter::new(graph, type_resolver, config),
       cached_schema_names,
     }
   }
@@ -175,15 +185,15 @@ impl SchemaConverter {
     if !schema.one_of.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
       return self
-        .enum_converter
-        .convert_union(name, schema, enums::UnionKind::OneOf, cache_reborrow);
+        .union_converter
+        .convert_union(name, schema, UnionKind::OneOf, cache_reborrow);
     }
 
     if !schema.any_of.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
       return self
-        .enum_converter
-        .convert_union(name, schema, enums::UnionKind::AnyOf, cache_reborrow);
+        .union_converter
+        .convert_union(name, schema, UnionKind::AnyOf, cache_reborrow);
     }
 
     if !schema.enum_values.is_empty() {

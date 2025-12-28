@@ -7,7 +7,8 @@ use crate::{
     ast::{RustType, TypeAliasDef, TypeAliasToken, TypeRef},
     converter::{
       cache::SharedSchemaCache,
-      common::{ConversionOutput, InlineSchemaMerger, handle_inline_creation},
+      common::{ConversionOutput, handle_inline_creation},
+      inline_scanner::InlineSchemaMerger,
     },
     schema_registry::MergedSchema,
   },
