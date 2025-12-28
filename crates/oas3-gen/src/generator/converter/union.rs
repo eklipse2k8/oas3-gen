@@ -67,7 +67,7 @@ pub(crate) struct UnionConverter {
 }
 
 impl UnionConverter {
-  pub(crate) fn new(graph: &Arc<SchemaRegistry>, type_resolver: TypeResolver, config: CodegenConfig) -> Self {
+  pub(crate) fn new(graph: &Arc<SchemaRegistry>, type_resolver: TypeResolver, config: &CodegenConfig) -> Self {
     let struct_converter = StructConverter::new(graph, config, None);
     Self {
       graph: graph.clone(),

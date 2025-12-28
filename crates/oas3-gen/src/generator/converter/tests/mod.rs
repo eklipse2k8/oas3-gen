@@ -1,6 +1,7 @@
 mod cache;
 mod common_tests;
 mod enums;
+mod fields;
 mod helper_tests;
 mod implicit_dependencies;
 mod inline_objects;

@@ -12,7 +12,7 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    Documentation, FieldDef, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
+    Documentation, FieldDef, OuterAttr, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
     tokens::FieldNameToken,
   },
   converter::type_resolver::TypeResolverBuilder,
@@ -36,11 +36,11 @@ pub(crate) struct StructConverter {
 impl StructConverter {
   pub(crate) fn new(
     graph: &Arc<SchemaRegistry>,
-    config: CodegenConfig,
+    config: &CodegenConfig,
     reachable_schemas: Option<Arc<BTreeSet<String>>>,
   ) -> Self {
     let type_resolver = TypeResolverBuilder::default()
-      .config(config)
+      .config(config.clone())
       .graph(graph.clone())
       .reachable_schemas(reachable_schemas)
       .build()
@@ -163,12 +163,15 @@ impl StructConverter {
       serde_attrs.push(SerdeAttribute::Default);
     }
 
+    let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
+    let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
+
     let struct_def = StructDef {
       name: struct_name,
       docs: Documentation::from_optional(schema.description.as_ref()),
       fields,
       serde_attrs,
-      outer_attrs: vec![],
+      outer_attrs,
       methods: vec![],
       kind: kind.unwrap_or(StructKind::Schema),
       ..Default::default()
@@ -211,12 +214,16 @@ impl StructConverter {
       serde_attrs.push(SerdeAttribute::Default);
     }
 
+    let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
+    let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
+
     let mut all_types = Vec::with_capacity(1 + field_result.inline_types.len());
     all_types.push(RustType::Struct(StructDef {
       name: struct_name,
       docs: Documentation::from_optional(merged_schema.description.as_ref()),
       fields,
       serde_attrs,
+      outer_attrs,
       kind: StructKind::Schema,
       ..Default::default()
     }));

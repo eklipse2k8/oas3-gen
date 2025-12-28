@@ -1,21 +1,28 @@
+use std::collections::HashMap;
+
 use oas3::spec::ObjectSchema;
 use regex::Regex;
 
 use super::{CodegenConfig, SchemaExt, discriminator::DiscriminatorInfo};
 use crate::generator::{
-  ast::{Documentation, FieldDef, FieldDefBuilder, RustPrimitive, SerdeAttribute, TypeRef, ValidationAttribute},
+  ast::{
+    Documentation, FieldDef, FieldDefBuilder, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+    ValidationAttribute,
+  },
   naming::identifiers::to_rust_field_name,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct FieldConverter {
   odata_support: bool,
+  customizations: HashMap<String, String>,
 }
 
 impl FieldConverter {
-  pub(crate) fn new(config: CodegenConfig) -> Self {
+  pub(crate) fn new(config: &CodegenConfig) -> Self {
     Self {
       odata_support: config.odata_support(),
+      customizations: config.customizations.clone(),
     }
   }
 
@@ -65,11 +72,14 @@ impl FieldConverter {
       discriminator_info.as_ref(),
     );
 
+    let serde_as_attr = self.get_customization_for_type(&final_type);
+
     let field = FieldDefBuilder::default()
       .name(to_rust_field_name(prop_name))
       .rust_type(final_type)
       .docs(docs)
       .serde_attrs(serde_attrs)
+      .serde_as_attr(serde_as_attr)
       .doc_hidden(doc_hidden)
       .validation_attrs(validation_attrs)
       .default_value(default_value)
@@ -78,6 +88,28 @@ impl FieldConverter {
       .build()?;
 
     Ok(field)
+  }
+
+  fn get_customization_for_type(&self, type_ref: &TypeRef) -> Option<SerdeAsFieldAttr> {
+    let key = Self::primitive_to_key(&type_ref.base_type)?;
+    let custom_type = self.customizations.get(&key)?;
+    Some(SerdeAsFieldAttr::CustomOverride {
+      custom_type: custom_type.clone(),
+      optional: type_ref.nullable,
+      is_array: type_ref.is_array,
+    })
+  }
+
+  fn primitive_to_key(primitive: &RustPrimitive) -> Option<String> {
+    match primitive {
+      RustPrimitive::DateTime => Some("date_time".to_string()),
+      RustPrimitive::Date => Some("date".to_string()),
+      RustPrimitive::Time => Some("time".to_string()),
+      RustPrimitive::Duration => Some("duration".to_string()),
+      RustPrimitive::Uuid => Some("uuid".to_string()),
+      RustPrimitive::Custom(name) => Some(name.to_string()),
+      _ => None,
+    }
   }
 
   pub(crate) fn extract_parameter_metadata(

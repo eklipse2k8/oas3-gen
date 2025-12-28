@@ -91,7 +91,7 @@ fn test_enum_helper_with_const_discriminator() -> anyhow::Result<()> {
     ("Cat".to_string(), cat_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, default_config());
+  let converter = SchemaConverter::new(&graph, &default_config());
   let result = converter.convert_schema("Pet", graph.get_schema("Pet").unwrap(), None)?;
 
   // Expect DiscriminatedEnum

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::generator::{ast::CodeMetadata, codegen::Visibility, orchestrator::Orchestrator};
 
@@ -13,6 +13,7 @@ fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
     false,
     false,
     false,
+    HashMap::new(),
   )
 }
 
@@ -32,6 +33,7 @@ fn make_orchestrator_with_ops(
     false,
     false,
     false,
+    HashMap::new(),
   )
 }
 
@@ -221,4 +223,174 @@ fn test_enum_deduplication() {
       assert!(!code.contains(pattern), "{context}: '{pattern}' should not appear");
     }
   }
+}
+
+fn make_orchestrator_with_customizations(
+  spec: oas3::Spec,
+  all_schemas: bool,
+  customizations: HashMap<String, String>,
+) -> Orchestrator {
+  Orchestrator::new(
+    spec,
+    Visibility::default(),
+    all_schemas,
+    None,
+    None,
+    false,
+    false,
+    false,
+    false,
+    customizations,
+  )
+}
+
+#[test]
+fn test_customization_generates_serde_as_attributes() {
+  let spec_json = r#"{
+    "openapi": "3.0.0",
+    "info": { "title": "Test API", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Event": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "created_at": { "type": "string", "format": "date-time" },
+            "updated_at": { "type": "string", "format": "date-time" }
+          },
+          "required": ["id", "created_at"]
+        }
+      }
+    }
+  }"#;
+
+  let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+  let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
+  let orchestrator = make_orchestrator_with_customizations(spec, true, customizations);
+  let (code, _) = orchestrator.generate_with_header("test.json").unwrap();
+
+  assert!(
+    code.contains("#[serde_with::serde_as]"),
+    "Struct should have #[serde_with::serde_as] outer attribute"
+  );
+  assert!(
+    code.contains(r#"#[serde_as(as = "crate::MyDateTime")]"#),
+    "Required field should have serde_as attribute with custom type"
+  );
+  assert!(
+    code.contains(r#"#[serde_as(as = "Option<crate::MyDateTime>")]"#),
+    "Optional field should have serde_as attribute wrapped in Option"
+  );
+}
+
+#[test]
+fn test_customization_for_multiple_types() {
+  let spec_json = r#"{
+    "openapi": "3.0.0",
+    "info": { "title": "Test API", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Entity": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "created_at": { "type": "string", "format": "date-time" },
+            "birth_date": { "type": "string", "format": "date" }
+          },
+          "required": ["id", "created_at", "birth_date"]
+        }
+      }
+    }
+  }"#;
+
+  let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+  let customizations = HashMap::from([
+    ("date_time".to_string(), "crate::MyDateTime".to_string()),
+    ("date".to_string(), "crate::MyDate".to_string()),
+    ("uuid".to_string(), "crate::MyUuid".to_string()),
+  ]);
+  let orchestrator = make_orchestrator_with_customizations(spec, true, customizations);
+  let (code, _) = orchestrator.generate_with_header("test.json").unwrap();
+
+  assert!(
+    code.contains(r#"#[serde_as(as = "crate::MyDateTime")]"#),
+    "date-time field should have custom type"
+  );
+  assert!(
+    code.contains(r#"#[serde_as(as = "crate::MyDate")]"#),
+    "date field should have custom type"
+  );
+  assert!(
+    code.contains(r#"#[serde_as(as = "crate::MyUuid")]"#),
+    "uuid field should have custom type"
+  );
+}
+
+#[test]
+fn test_customization_for_array_types() {
+  let spec_json = r#"{
+    "openapi": "3.0.0",
+    "info": { "title": "Test API", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Timeline": {
+          "type": "object",
+          "properties": {
+            "timestamps": {
+              "type": "array",
+              "items": { "type": "string", "format": "date-time" }
+            }
+          },
+          "required": ["timestamps"]
+        }
+      }
+    }
+  }"#;
+
+  let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+  let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
+  let orchestrator = make_orchestrator_with_customizations(spec, true, customizations);
+  let (code, _) = orchestrator.generate_with_header("test.json").unwrap();
+
+  assert!(
+    code.contains(r#"#[serde_as(as = "Vec<crate::MyDateTime>")]"#),
+    "Array field should have serde_as with Vec wrapper"
+  );
+}
+
+#[test]
+fn test_no_customization_no_serde_as() {
+  let spec_json = r#"{
+    "openapi": "3.0.0",
+    "info": { "title": "Test API", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Event": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "created_at": { "type": "string", "format": "date-time" }
+          },
+          "required": ["id", "created_at"]
+        }
+      }
+    }
+  }"#;
+
+  let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
+  let orchestrator = make_orchestrator(spec, true);
+  let (code, _) = orchestrator.generate_with_header("test.json").unwrap();
+
+  assert!(
+    !code.contains("#[serde_as(as ="),
+    "Code should not contain serde_as field attribute without customizations"
+  );
+  assert!(
+    !code.contains("#[serde_with::serde_as]") || !code.contains("Event"),
+    "Event struct should not have serde_as outer attribute without customizations"
+  );
 }

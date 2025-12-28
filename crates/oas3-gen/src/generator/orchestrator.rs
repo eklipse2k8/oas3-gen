@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::Arc,
+};
 
 use quote::ToTokens;
 use strum::Display;
@@ -28,6 +31,7 @@ pub struct Orchestrator {
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   no_helpers: bool,
+  customizations: HashMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -99,6 +103,7 @@ impl Orchestrator {
     preserve_case_variants: bool,
     case_insensitive_enums: bool,
     no_helpers: bool,
+    customizations: HashMap<String, String>,
   ) -> Self {
     let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
     Self {
@@ -110,6 +115,7 @@ impl Orchestrator {
       preserve_case_variants,
       case_insensitive_enums,
       no_helpers,
+      customizations,
     }
   }
 
@@ -248,14 +254,15 @@ impl Orchestrator {
       } else {
         ODataPolicy::Disabled
       },
+      customizations: self.customizations.clone(),
     };
 
     let graph = Arc::new(graph);
 
     let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), config)
+      SchemaConverter::new_with_filter(&graph, reachable.clone(), &config)
     } else {
-      SchemaConverter::new(&graph, config)
+      SchemaConverter::new(&graph, &config)
     };
 
     let scanner = InlineTypeScanner::new(&graph);

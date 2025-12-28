@@ -50,7 +50,7 @@ fn test_discriminated_base_struct_renamed() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, default_config());
+  let converter = SchemaConverter::new(&graph, &default_config());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
 
   let struct_def = result
@@ -98,7 +98,7 @@ fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let converter = SchemaConverter::new(&graph, default_config());
+  let converter = SchemaConverter::new(&graph, &default_config());
   let result = converter.convert_schema("Message", graph.get_schema("Message").unwrap(), None)?;
 
   let struct_def = result
@@ -166,7 +166,7 @@ fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, default_config());
+  let converter = SchemaConverter::new(&graph, &default_config());
   let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
 
   let struct_def = result
@@ -622,7 +622,7 @@ fn test_discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<
     ("Child".to_string(), child_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, default_config());
+  let converter = SchemaConverter::new(&graph, &default_config());
   let result = converter.convert_schema("Child", graph.get_schema("Child").unwrap(), None)?;
 
   let struct_def = result

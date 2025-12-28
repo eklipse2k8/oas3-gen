@@ -14,7 +14,7 @@ pub(crate) struct EnumConverter {
 }
 
 impl EnumConverter {
-  pub(crate) fn new(config: CodegenConfig) -> Self {
+  pub(crate) fn new(config: &CodegenConfig) -> Self {
     Self {
       preserve_case_variants: config.preserve_case_variants(),
       case_insensitive_enums: config.case_insensitive_enums(),

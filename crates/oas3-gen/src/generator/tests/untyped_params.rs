@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::generator::{codegen::Visibility, orchestrator::Orchestrator};
 
 fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
@@ -11,6 +13,7 @@ fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
     false,
     false,
     false,
+    HashMap::new(),
   )
 }
 

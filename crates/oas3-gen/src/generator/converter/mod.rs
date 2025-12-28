@@ -14,7 +14,7 @@ mod type_usage_recorder;
 pub(crate) mod union;
 
 use std::{
-  collections::{BTreeSet, HashSet},
+  collections::{BTreeSet, HashMap, HashSet},
   sync::Arc,
 };
 
@@ -79,36 +79,37 @@ pub enum ODataPolicy {
 ///
 /// Uses typed enums instead of booleans to make intent explicit at call sites
 /// and prevent invalid combinations.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct CodegenConfig {
   pub enum_case: EnumCasePolicy,
   pub enum_helpers: EnumHelperPolicy,
   pub enum_deserialize: EnumDeserializePolicy,
   pub odata: ODataPolicy,
+  pub customizations: HashMap<String, String>,
 }
 
 impl CodegenConfig {
   /// Returns whether enum variant collisions should preserve original names with suffixes.
   #[must_use]
-  pub fn preserve_case_variants(self) -> bool {
+  pub fn preserve_case_variants(&self) -> bool {
     self.enum_case == EnumCasePolicy::Preserve
   }
 
   /// Returns whether enums should use case-insensitive deserialization.
   #[must_use]
-  pub fn case_insensitive_enums(self) -> bool {
+  pub fn case_insensitive_enums(&self) -> bool {
     self.enum_deserialize == EnumDeserializePolicy::CaseInsensitive
   }
 
   /// Returns whether helper constructors should be disabled.
   #[must_use]
-  pub fn no_helpers(self) -> bool {
+  pub fn no_helpers(&self) -> bool {
     self.enum_helpers == EnumHelperPolicy::Disable
   }
 
   /// Returns whether OData support is enabled.
   #[must_use]
-  pub fn odata_support(self) -> bool {
+  pub fn odata_support(&self) -> bool {
     self.odata == ODataPolicy::Enabled
   }
 }
@@ -132,10 +133,10 @@ pub(crate) struct SchemaConverter {
 }
 
 impl SchemaConverter {
-  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: CodegenConfig) -> Self {
+  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: &CodegenConfig) -> Self {
     let type_resolver = TypeResolverBuilder::default()
       .graph(graph.clone())
-      .config(config)
+      .config(config.clone())
       .build()
       .expect("TypeResolver");
     let cached_schema_names = Self::build_schema_name_cache(graph);
@@ -151,11 +152,11 @@ impl SchemaConverter {
   pub(crate) fn new_with_filter(
     graph: &Arc<SchemaRegistry>,
     reachable_schemas: BTreeSet<String>,
-    config: CodegenConfig,
+    config: &CodegenConfig,
   ) -> Self {
     let type_resolver = TypeResolverBuilder::default()
       .graph(graph.clone())
-      .config(config)
+      .config(config.clone())
       .build()
       .expect("TypeResolver");
     let cached_schema_names = Self::build_schema_name_cache(graph);

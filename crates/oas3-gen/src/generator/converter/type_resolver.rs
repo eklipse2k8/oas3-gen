@@ -180,7 +180,7 @@ impl TypeResolver {
         }
       },
       |name, _| {
-        let converter = EnumConverter::new(self.config);
+        let converter = EnumConverter::new(&self.config);
         let inline_enum = converter
           .convert_value_enum(name, property_schema, None)
           .expect("convert_value_enum should return Some when cache is None");
@@ -215,7 +215,7 @@ impl TypeResolver {
       cache,
       |_| None,
       |name, cache| {
-        let converter = StructConverter::new(&self.graph, self.config, self.reachable_schemas.clone());
+        let converter = StructConverter::new(&self.graph, &self.config, self.reachable_schemas.clone());
         converter.convert_struct(name, schema, None, cache)
       },
     )
@@ -259,7 +259,7 @@ impl TypeResolver {
       cache.as_deref_mut(),
       |cache| Self::lookup_cached_enum_name(schema, cache),
       |name, cache| {
-        let union_converter = UnionConverter::new(&self.graph, self.clone(), self.config);
+        let union_converter = UnionConverter::new(&self.graph, self.clone(), &self.config);
         union_converter.convert_union_output(
           name,
           schema,

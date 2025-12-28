@@ -28,7 +28,7 @@ fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
 }
 
 fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
-  SchemaConverter::new(graph, default_config())
+  SchemaConverter::new(graph, &default_config())
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn test_hash_schema_behavior() {
 fn test_convert_value_enum_with_cache() {
   let schema = make_string_enum_schema(&["value1", "value2", "value3"]);
 
-  let enum_converter = EnumConverter::new(default_config());
+  let enum_converter = EnumConverter::new(&default_config());
   let mut cache = SharedSchemaCache::new();
 
   let result1 = enum_converter.convert_value_enum("TestEnum", &schema, Some(&mut cache));
@@ -126,7 +126,7 @@ fn test_relaxed_enum_reuses_cached_enum() {
     .graph(graph.clone())
     .build()
     .unwrap();
-  let union_converter = UnionConverter::new(&graph, type_resolver, default_config());
+  let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
   let optimized_result = union_converter
     .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))
     .expect("Should convert anyOf union");

@@ -41,22 +41,45 @@ pub enum SerdeAsSeparator {
 /// Field-level `#[serde_as]` attribute for custom serialization.
 ///
 /// Used for non-exploded array query parameters that need custom
-/// serialization via separator-based string conversion.
+/// serialization via separator-based string conversion, or for
+/// custom type overrides via the `--customize` CLI flag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SerdeAsFieldAttr {
   SeparatedList {
     separator: SerdeAsSeparator,
     optional: bool,
   },
+  CustomOverride {
+    custom_type: String,
+    optional: bool,
+    is_array: bool,
+  },
 }
 
 impl ToTokens for SerdeAsFieldAttr {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let Self::SeparatedList { separator, optional } = self;
-    let type_str = if *optional {
-      format!("Option<{}>", separator.as_ref())
-    } else {
-      separator.as_ref().to_string()
+    let type_str = match self {
+      Self::SeparatedList { separator, optional } => {
+        if *optional {
+          format!("Option<{}>", separator.as_ref())
+        } else {
+          separator.as_ref().to_string()
+        }
+      }
+      Self::CustomOverride {
+        custom_type,
+        optional,
+        is_array,
+      } => {
+        let mut result = custom_type.clone();
+        if *is_array {
+          result = format!("Vec<{result}>");
+        }
+        if *optional {
+          result = format!("Option<{result}>");
+        }
+        result
+      }
     };
     let attr = quote! { #[serde_as(as = #type_str)] };
     tokens.extend(attr);
