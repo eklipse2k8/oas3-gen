@@ -3,14 +3,13 @@ use quote::ToTokens;
 
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, OperationParameter,
-    ParameterLocation, ParsedPath, PathSegment, ResponseMediaType, RustPrimitive, RustType, StructDef, StructKind,
-    StructToken, TypeRef,
+    CodeMetadata, ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind,
+    OperationParameter, ParameterLocation, ParsedPath, PathSegment, ResponseMediaType, RustPrimitive, RustType,
+    StructDef, StructKind, StructToken, TypeRef,
   },
   codegen::{
     Visibility,
     client::{self, ClientGenerator, ClientOperationMethod},
-    metadata::CodeMetadata,
   },
 };
 

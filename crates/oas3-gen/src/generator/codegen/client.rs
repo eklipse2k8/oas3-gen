@@ -5,11 +5,11 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::LitStr;
 
-use super::{Visibility, metadata::CodeMetadata};
+use super::Visibility;
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, FieldNameToken, OperationInfo, OperationKind, ParameterLocation, RustPrimitive,
-    RustType, StructDef, StructToken, TypeRef,
+    CodeMetadata, ContentCategory, Documentation, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
+    RustPrimitive, RustType, StructDef, StructToken, TypeRef,
     tokens::{ConstToken, HeaderToken},
   },
   codegen::{constants, parse_type},

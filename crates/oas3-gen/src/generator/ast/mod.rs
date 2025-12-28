@@ -1,6 +1,7 @@
 mod derives;
 mod documentation;
 pub mod lints;
+mod metadata;
 mod outer_attrs;
 mod parsed_path;
 pub(super) mod serde_attrs;
@@ -18,6 +19,7 @@ pub use documentation::Documentation;
 use http::Method;
 pub use lints::LintConfig;
 use mediatype::MediaType;
+pub use metadata::CodeMetadata;
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]

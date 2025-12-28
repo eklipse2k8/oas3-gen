@@ -5,7 +5,9 @@ use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::ast::{EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, ValidationAttribute, tokens::ConstToken};
+use super::ast::{
+  CodeMetadata, EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, ValidationAttribute, tokens::ConstToken,
+};
 
 pub mod attributes;
 pub mod client;
@@ -13,7 +15,6 @@ pub mod coercion;
 pub mod constants;
 pub mod enums;
 pub mod error_impls;
-pub mod metadata;
 pub mod mod_file;
 pub mod structs;
 pub mod type_aliases;
@@ -48,7 +49,7 @@ pub fn generate_file(
   types: &[RustType],
   error_schemas: &HashSet<EnumToken>,
   visibility: Visibility,
-  metadata: &metadata::CodeMetadata,
+  metadata: &CodeMetadata,
   lint_config: &LintConfig,
   source_path: &str,
   gen_version: &str,
@@ -59,7 +60,7 @@ pub fn generate_file(
 
 pub fn generate_source(
   code: &TokenStream,
-  metadata: &metadata::CodeMetadata,
+  metadata: &CodeMetadata,
   lint_config: Option<&LintConfig>,
   source_path: &str,
   gen_version: &str,

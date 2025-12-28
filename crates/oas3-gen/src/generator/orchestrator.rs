@@ -6,8 +6,8 @@ use strum::Display;
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::TypeAnalyzer,
-  ast::{LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType},
-  codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata, mod_file::ModFileGenerator},
+  ast::{CodeMetadata, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType},
+  codegen::{self, Visibility, client::ClientGenerator, mod_file::ModFileGenerator},
   converter::{
     CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
     TypeUsageRecorder, inline_scanner::InlineTypeScanner, operations::OperationConverter,
@@ -129,7 +129,7 @@ impl Orchestrator {
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
-    let metadata = CodeMetadata::from_spec(&self.spec);
+    let metadata = CodeMetadata::from(&self.spec);
     let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility);
     let client_tokens = client_generator.into_token_stream();
     let lint_config = LintConfig::default();
@@ -154,7 +154,7 @@ impl Orchestrator {
     } = artifacts;
 
     let lint_config = LintConfig::default();
-    let metadata = CodeMetadata::from_spec(&self.spec);
+    let metadata = CodeMetadata::from(&self.spec);
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
@@ -181,7 +181,7 @@ impl Orchestrator {
       mut stats,
     } = artifacts;
 
-    let metadata = CodeMetadata::from_spec(&self.spec);
+    let metadata = CodeMetadata::from(&self.spec);
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
@@ -195,11 +195,10 @@ impl Orchestrator {
 
     let client_generator =
       ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility).with_types_import();
-    let client_ident = client_generator.client_ident();
     let client_tokens = client_generator.into_token_stream();
     let client_code = codegen::generate_source(&client_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
 
-    let mod_generator = ModFileGenerator::new(&metadata, &client_ident, self.visibility);
+    let mod_generator = ModFileGenerator::new(&metadata, self.visibility);
     let mod_code = mod_generator.generate(source_path, OAS3_GEN_VERSION)?;
 
     Ok(ClientModOutput {

@@ -86,54 +86,59 @@ crates/
 │           │   ├── types.rs       # Core AST types (RustType, StructDef, EnumDef, etc.)
 │           │   ├── tokens.rs      # Token stream utilities
 │           │   ├── derives.rs     # Derive macro selection
+│           │   ├── documentation.rs # Doc comment generation
 │           │   ├── lints.rs       # Clippy lint attributes
+│           │   ├── metadata.rs    # CodeMetadata extracted from OpenAPI spec
 │           │   ├── outer_attrs.rs # Type-safe outer attributes (skip_serializing_none, non_exhaustive)
+│           │   ├── parsed_path.rs # URL path template parsing
 │           │   ├── serde_attrs.rs # Serde attribute builders with ToTokens
 │           │   ├── status_codes.rs # HTTP status code handling (full RFC coverage)
 │           │   ├── validation_attrs.rs # Validation attribute builders with ToTokens
 │           │   └── tests/         # AST tests
 │           │       ├── mod.rs
+│           │       ├── parsed_path.rs
 │           │       ├── status_codes.rs
 │           │       ├── types.rs
 │           │       └── validation_attrs.rs
 │           ├── converter/         # OpenAPI -> AST conversion
-│           │   ├── mod.rs         # CodegenConfig and policy enums
-│           │   ├── cache.rs       # Schema conversion caching with StructSummary
+│           │   ├── mod.rs         # SchemaConverter, CodegenConfig, policy enums
+│           │   ├── cache.rs       # SharedSchemaCache for type deduplication
 │           │   ├── common.rs      # Common conversion utilities
-│           │   ├── discriminator.rs # Discriminator handling
-│           │   ├── enums.rs       # oneOf/anyOf/allOf conversion (includes string enum optimization)
-│           │   ├── hashing.rs     # Schema fingerprinting
-│           │   ├── metadata.rs    # Schema metadata extraction
+│           │   ├── discriminator.rs # Discriminator handling for oneOf
+│           │   ├── enums.rs       # Value enum conversion (string/integer enums)
+│           │   ├── fields.rs      # Struct field conversion
+│           │   ├── hashing.rs     # Schema fingerprinting for deduplication
+│           │   ├── inline_scanner.rs # Pre-scan schemas for deterministic naming
 │           │   ├── operations.rs  # Request/response type generation
-│           │   ├── path_renderer.rs # URL path template rendering
-│           │   ├── responses.rs   # Response type generation
+│           │   ├── responses.rs   # Response enum generation
+│           │   ├── struct_summaries.rs # Struct metadata for enum helpers
 │           │   ├── structs.rs     # Object schema conversion (includes field optionality)
 │           │   ├── type_resolver.rs # Type mapping with TypeResolverBuilder
-│           │   ├── type_usage_recorder.rs # Type usage recording
+│           │   ├── type_usage_recorder.rs # Tracks request/response type usage
+│           │   ├── union.rs       # oneOf/anyOf to discriminated/untagged enums
 │           │   └── tests/         # Converter tests
 │           │       ├── mod.rs
 │           │       ├── cache.rs
+│           │       ├── common_tests.rs
 │           │       ├── enums.rs
 │           │       ├── helper_tests.rs
 │           │       ├── implicit_dependencies.rs
 │           │       ├── inline_objects.rs
 │           │       ├── metadata_tests.rs
 │           │       ├── operations.rs
-│           │       ├── path_renderer.rs
 │           │       ├── structs.rs
 │           │       ├── type_aliases.rs
 │           │       └── type_resolution.rs
 │           └── codegen/           # AST -> Rust source generation
-│               ├── mod.rs
+│               ├── mod.rs         # Entry point, deduplication, type ordering
 │               ├── attributes.rs  # Attribute generation
-│               ├── client.rs      # HTTP client generation
+│               ├── client.rs      # HTTP client generation (ClientGenerator)
 │               ├── coercion.rs    # Type coercion logic
-│               ├── constants.rs   # Constant generation
-│               ├── enums.rs       # Enum code generation
+│               ├── constants.rs   # Regex constant generation
+│               ├── enums.rs       # Enum, DiscriminatedEnum, ResponseEnum generation
 │               ├── error_impls.rs # Error trait implementations
-│               ├── metadata.rs    # Metadata comment generation
 │               ├── mod_file.rs    # Module file generation (mod.rs)
-│               ├── structs.rs     # Struct code generation
+│               ├── structs.rs     # Struct code generation (StructGenerator)
 │               ├── type_aliases.rs # Type alias generation
 │               └── tests/         # Codegen tests
 │                   ├── mod.rs
@@ -149,23 +154,33 @@ crates/
         └── lib.rs                 # Runtime utilities for generated code
 ```
 
-## Generation Pipeline
+## Generation Pipeline (One-Way Data Flow)
 
-1. **Parse**: Load OpenAPI spec via `oas3` crate (JSON or YAML, auto-detected from file extension)
-2. **Analyze**: Build schema dependency graph, detect cycles
-3. **Convert**: Transform schemas to AST (`converter/`)
-4. **Generate**: Produce formatted Rust code (`codegen/`)
+The generator follows a strict one-way data flow where each stage produces immutable outputs consumed by the next:
+
+1. **Parse**: Load OpenAPI spec via `oas3` crate (JSON or YAML, auto-detected)
+2. **Registry Init**: Build `SchemaRegistry` (dependency graph, cycles, merged schemas, discriminators)
+3. **Pre-scan**: `InlineTypeScanner` computes deterministic names for all inline schemas
+4. **Convert Schemas**: `SchemaConverter` transforms schemas to `Vec<RustType>`
+5. **Convert Operations**: `OperationConverter` produces `Vec<OperationInfo>` + types + usage data
+6. **Analyze**: `TypeAnalyzer` propagates usage, updates serde modes, deduplicates response enums
+7. **Generate**: `codegen::generate()` produces formatted Rust source code
+
+Data flows forward only - no stage feeds back to earlier stages.
 
 ## Key Files
 
-- [orchestrator.rs](../crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator
-- [schema_registry.rs](../crates/oas3-gen/src/generator/schema_registry.rs): Dependency and cycle management
-- [operation_registry.rs](../crates/oas3-gen/src/generator/operation_registry.rs): HTTP operations and webhooks management
-- [type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping with TypeResolverBuilder
-- [identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization and keyword handling
-- [cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): Schema conversion caching with StructSummary
-- [analyzer/mod.rs](../crates/oas3-gen/src/generator/analyzer/mod.rs): TypeAnalyzer and type usage tracking
-- [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): CodegenConfig and typed policy enums
+- [orchestrator.rs](../crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator, combines all stages
+- [schema_registry.rs](../crates/oas3-gen/src/generator/schema_registry.rs): Dependency graph, cycle detection, merged schemas
+- [inline_scanner.rs](../crates/oas3-gen/src/generator/converter/inline_scanner.rs): Pre-scans schemas for deterministic naming
+- [cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): SharedSchemaCache for type deduplication
+- [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): SchemaConverter + CodegenConfig policies
+- [type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
+- [union.rs](../crates/oas3-gen/src/generator/converter/union.rs): oneOf/anyOf to discriminated enums
+- [analyzer/mod.rs](../crates/oas3-gen/src/generator/analyzer/mod.rs): TypeAnalyzer, usage propagation, serde modes
+- [ast/metadata.rs](../crates/oas3-gen/src/generator/ast/metadata.rs): CodeMetadata from spec
+- [identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization
+- [operation_registry.rs](../crates/oas3-gen/src/generator/operation_registry.rs): HTTP operations and webhooks
 
 ## Key Dependencies
 

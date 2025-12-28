@@ -39,26 +39,154 @@ cargo run -- generate client-mod -i spec.json -o output/    # Generate modular o
 | [docs/architecture.md](docs/architecture.md) | Pipeline stages, directory structure, dependencies |
 | [docs/subagents.md](docs/subagents.md) | Specialized subagents for performance, review, testing, CLI, docs |
 
-## Pipeline Overview
+## One-Way Data Flow Pipeline
+
+The generator follows a strict one-way data flow where each stage produces immutable outputs consumed by the next:
 
 ```text
-Parse OpenAPI -> Analyze (dependency graph) -> Convert (AST) -> Generate (Rust)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              ORCHESTRATOR                                    │
+│  Entry point: collect_generation_artifacts() -> GenerationArtifacts         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 1: REGISTRY INITIALIZATION                                            │
+│ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
+│ │   SchemaRegistry    │───▶│ • Resolves all $refs from spec             │  │
+│ │  (schema_registry)  │    │ • Builds dependency graph                  │  │
+│ └─────────────────────┘    │ • Detects cycles (marks cyclic schemas)    │  │
+│           │                │ • Computes inheritance depths              │  │
+│           │                │ • Merges allOf schemas                     │  │
+│           │                │ • Builds discriminator cache               │  │
+│           ▼                │ • Creates union fingerprints               │  │
+│ ┌─────────────────────┐    └────────────────────────────────────────────┘  │
+│ │ OperationRegistry   │───▶ Filters operations by --only/--exclude opts    │
+│ └─────────────────────┘                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 2: NAME PRE-COMPUTATION (InlineTypeScanner)                           │
+│ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
+│ │ InlineTypeScanner   │───▶│ • Scans ALL schemas before conversion      │  │
+│ │ (inline_scanner.rs) │    │ • Collects naming candidates per schema    │  │
+│ └─────────────────────┘    │ • Computes longest common suffix           │  │
+│           │                │ • Resolves name conflicts globally         │  │
+│           ▼                │ • Produces: ScanResult { names, enum_names}│  │
+│ ┌─────────────────────┐    └────────────────────────────────────────────┘  │
+│ │ SharedSchemaCache   │───▶ Seeded with precomputed names                  │
+│ │     (cache.rs)      │    (ensures deterministic naming across runs)      │
+│ └─────────────────────┘                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 3: SCHEMA CONVERSION                                                  │
+│ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
+│ │  SchemaConverter    │───▶│ • CodegenConfig controls behavior          │  │
+│ │ (converter/mod.rs)  │    │   (enum case, helpers, serde, odata)       │  │
+│ └─────────────────────┘    └────────────────────────────────────────────┘  │
+│           │                                                                  │
+│           ├──▶ StructConverter  ──▶ StructDef (with fields, methods)       │
+│           ├──▶ EnumConverter    ──▶ EnumDef (value enums)                  │
+│           ├──▶ UnionConverter   ──▶ DiscriminatedEnumDef / EnumDef         │
+│           └──▶ TypeResolver     ──▶ TypeRef (type references)              │
+│                                                                              │
+│ OUTPUT: Vec<RustType> (schemas sorted: enums first, then others)           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 4: OPERATION CONVERSION                                               │
+│ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
+│ │ OperationConverter  │───▶│ • Converts parameters → OperationParameter │  │
+│ │   (operations.rs)   │    │ • Converts request body → StructDef        │  │
+│ └─────────────────────┘    │ • Converts responses → ResponseEnumDef     │  │
+│           │                │ • Records type usage via TypeUsageRecorder │  │
+│           ▼                └────────────────────────────────────────────┘  │
+│ ┌─────────────────────┐                                                     │
+│ │ TypeUsageRecorder   │───▶ Tracks: type → (in_request, in_response)       │
+│ └─────────────────────┘                                                     │
+│                                                                              │
+│ OUTPUT: Vec<OperationInfo> + additional Vec<RustType> + usage_recorder     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 5: TYPE ANALYSIS (TypeAnalyzer)                                       │
+│ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
+│ │    TypeAnalyzer     │───▶│ • Builds DependencyGraph from types        │  │
+│ │  (analyzer/mod.rs)  │    │ • Propagates usage through dependencies    │  │
+│ └─────────────────────┘    │ • Updates SerdeMode per type:              │  │
+│                            │   - RequestOnly → SerializeOnly            │  │
+│                            │   - ResponseOnly → DeserializeOnly         │  │
+│                            │   - Bidirectional → Both                   │  │
+│                            │ • Deduplicates identical ResponseEnums     │  │
+│                            │ • Adds #[validate(nested)] transitively    │  │
+│                            │ • Computes error schemas set               │  │
+│                            └────────────────────────────────────────────┘  │
+│                                                                              │
+│ OUTPUT: Mutated Vec<RustType>, AnalysisResult { error_schemas }            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 6: CODE GENERATION (codegen/)                                         │
+│ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
+│ │ codegen::generate() │───▶│ • deduplicate_and_order_types() by name    │  │
+│ │    (codegen/mod)    │    │   (BTreeMap ensures alphabetical order)    │  │
+│ └─────────────────────┘    │ • generate_regex_constants() extracts      │  │
+│           │                │   patterns for const REGEX_* declarations  │  │
+│           │                │ • Generates imports (serde, validator)     │  │
+│           ▼                └────────────────────────────────────────────┘  │
+│ ┌─────────────────────┐                                                     │
+│ │  Type Generators    │                                                     │
+│ │  StructGenerator    │───▶ Struct with derives, serde attrs, methods      │
+│ │  EnumGenerator      │───▶ Enum with variants, case-insensitive deser     │
+│ │  DiscriminatedEnum  │───▶ Tagged union with macro-based serde            │
+│ │  ResponseEnum       │───▶ HTTP response enum with status variants        │
+│ │  TypeAlias          │───▶ type Foo = Bar;                                │
+│ └─────────────────────┘                                                     │
+│           │                                                                  │
+│           ▼                                                                  │
+│ ┌─────────────────────┐                                                     │
+│ │ generate_source()   │───▶ Add header, format with prettyplease           │
+│ └─────────────────────┘                                                     │
+│                                                                              │
+│ OUTPUT: String (formatted Rust source code)                                │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key modules:**
+**Key Principle:** Data flows forward only. Each stage consumes outputs from previous stages without back-references. The `SharedSchemaCache` enables deduplication within the conversion stage but doesn't feed back to earlier stages.
 
-- `analyzer/` - Schema analysis, validation, type usage tracking
-- `naming/` - Identifier generation, type name inference
-- `converter/` - OpenAPI to AST transformation
-- `codegen/` - AST to Rust source generation
+## Key Modules
+
+| Module                        | Responsibility                                                    |
+| ----------------------------- | ----------------------------------------------------------------- |
+| `orchestrator.rs`             | Pipeline coordinator, creates all stages, combines outputs        |
+| `schema_registry.rs`          | Schema storage, dependency graph, cycle detection, discriminator  |
+| `converter/inline_scanner.rs` | Pre-scans schemas to compute deterministic names                  |
+| `converter/cache.rs`          | Deduplicates types by schema hash during conversion               |
+| `converter/mod.rs`            | `SchemaConverter` + `CodegenConfig` policy enums                  |
+| `converter/type_resolver.rs`  | Maps OpenAPI types to Rust `TypeRef`                              |
+| `converter/union.rs`          | Handles oneOf/anyOf to discriminated or untagged enums            |
+| `analyzer/mod.rs`             | `TypeAnalyzer`: usage propagation, serde modes, error schemas     |
+| `codegen/mod.rs`              | Entry point for Rust code generation                              |
+| `ast/mod.rs`                  | AST types: `RustType`, `StructDef`, `EnumDef`, `TypeRef`, etc.    |
 
 ## Key Files
 
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs) - Pipeline coordinator
+- [schema_registry.rs](crates/oas3-gen/src/generator/schema_registry.rs) - Dependency graph and cycle detection
+- [inline_scanner.rs](crates/oas3-gen/src/generator/converter/inline_scanner.rs) - Pre-scan for deterministic naming
+- [cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication cache
 - [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs) - OpenAPI to Rust type mapping
+- [union.rs](crates/oas3-gen/src/generator/converter/union.rs) - oneOf/anyOf conversion
+- [analyzer/mod.rs](crates/oas3-gen/src/generator/analyzer/mod.rs) - TypeAnalyzer and serde mode computation
+- [ast/metadata.rs](crates/oas3-gen/src/generator/ast/metadata.rs) - CodeMetadata from spec
 - [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization
 - [operation_registry.rs](crates/oas3-gen/src/generator/operation_registry.rs) - HTTP operations and webhooks
-- [converter/mod.rs](crates/oas3-gen/src/generator/converter/mod.rs) - CodegenConfig and policy enums
 
 ## Collection Types (Critical)
 

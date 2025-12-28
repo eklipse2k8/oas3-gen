@@ -8,18 +8,16 @@ pub struct CodeMetadata {
   pub base_url: String,
 }
 
-impl CodeMetadata {
-  pub fn from_spec(spec: &oas3::Spec) -> Self {
-    let base_url = spec
-      .servers
-      .first()
-      .map_or_else(|| DEFAULT_BASE_URL.to_string(), |server| server.url.clone());
-
+impl From<&oas3::Spec> for CodeMetadata {
+  fn from(spec: &oas3::Spec) -> Self {
     Self {
       title: spec.info.title.clone(),
       version: spec.info.version.clone(),
       description: spec.info.description.clone(),
-      base_url,
+      base_url: spec
+        .servers
+        .first()
+        .map_or_else(|| DEFAULT_BASE_URL.to_string(), |server| server.url.clone()),
     }
   }
 }
