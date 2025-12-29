@@ -1,0 +1,38 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Intersection Union Test",
+    "version": "1.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Vehicle": {
+        "description": "Must be a vehicle with an ID, and must be either a Car or a Boat.",
+        "type": "object",
+        "allOf": [
+          {
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" }
+            }
+          }
+        ],
+        "anyOf": [
+          {
+            "required": ["wheels"],
+            "properties": {
+              "wheels": { "type": "integer" }
+            }
+          },
+          {
+            "required": ["sails"],
+            "properties": {
+              "sails": { "type": "integer" }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

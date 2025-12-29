@@ -1,5 +1,5 @@
 use std::{
-  collections::{HashMap, HashSet},
+  collections::{BTreeSet, HashMap, HashSet},
   sync::Arc,
 };
 
@@ -402,7 +402,7 @@ impl Orchestrator {
       .flat_map(|op| &op.parameters)
       .filter(|param| matches!(param.location, ParameterLocation::Header))
       .map(|param| param.original_name.to_ascii_lowercase())
-      .collect::<std::collections::BTreeSet<_>>()
+      .collect::<BTreeSet<_>>()
       .len()
   }
 

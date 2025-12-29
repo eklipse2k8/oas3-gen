@@ -10,6 +10,7 @@ use crate::generator::{
     ResponseVariant, RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef,
     status_code_to_variant_name,
   },
+  converter::SchemaExt as _,
   naming::{
     constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
     identifiers::to_rust_type_name,
@@ -210,18 +211,27 @@ fn resolve_inline_response_schema(
   status_code: StatusCodeToken,
   schema_cache: &mut SharedSchemaCache,
 ) -> anyhow::Result<Option<TypeRef>> {
-  if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() {
+  let has_compound_schema = inline_schema.has_intersection() || inline_schema.has_union();
+
+  if inline_schema.properties.is_empty() && inline_schema.schema_type.is_none() && !has_compound_schema {
     return Ok(None);
   }
 
   if inline_schema.properties.is_empty()
+    && !has_compound_schema
     && let Ok(primitive_ref) = schema_converter.resolve_type(inline_schema)
     && !matches!(primitive_ref.base_type, RustPrimitive::Custom(_))
   {
     return Ok(Some(primitive_ref));
   }
 
-  let base_name = naming::infer_name_from_context(inline_schema, path, status_code.as_str());
+  let effective_for_naming = if has_compound_schema {
+    schema_converter.merge_inline_all_of(inline_schema)
+  } else {
+    inline_schema.clone()
+  };
+
+  let base_name = naming::infer_name_from_context(&effective_for_naming, path, status_code.as_str());
   let Some(output) = schema_converter.convert_inline_schema(inline_schema, &base_name, schema_cache)? else {
     return Ok(None);
   };

@@ -236,7 +236,7 @@ impl UnionConverter {
   ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
     let merger = InlineSchemaMerger::new(self.graph.spec(), self.graph.merged_schemas_ref());
     let resolved_schema_owned: Cow<ObjectSchema>;
-    let resolved_schema = if resolved_schema.has_all_of() {
+    let resolved_schema = if resolved_schema.has_intersection() {
       resolved_schema_owned = Cow::Owned(merger.merge_inline(resolved_schema)?);
       resolved_schema_owned.as_ref()
     } else {
@@ -325,7 +325,7 @@ impl UnionConverter {
     resolved_schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Option<(VariantContent, Vec<RustType>)>> {
-    if !resolved_schema.has_inline_union() {
+    if !resolved_schema.has_union() {
       return Ok(None);
     }
 

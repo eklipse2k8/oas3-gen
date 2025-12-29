@@ -5,6 +5,7 @@ mod fields;
 mod helper_tests;
 mod implicit_dependencies;
 mod inline_objects;
+mod intersection_union;
 pub mod metadata_tests;
 mod operations;
 mod structs;

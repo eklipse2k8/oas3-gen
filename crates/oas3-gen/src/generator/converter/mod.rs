@@ -14,7 +14,7 @@ mod type_usage_recorder;
 pub(crate) mod union;
 
 use std::{
-  collections::{BTreeSet, HashMap, HashSet},
+  collections::{BTreeSet, HashMap},
   sync::Arc,
 };
 
@@ -33,7 +33,7 @@ use super::{
   ast::{Documentation, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
 };
-use crate::generator::{converter::type_resolver::TypeResolverBuilder, naming::identifiers::to_rust_type_name};
+use crate::generator::converter::type_resolver::TypeResolverBuilder;
 
 /// Policy for handling enum variant name collisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -129,7 +129,6 @@ pub(crate) struct SchemaConverter {
   struct_converter: StructConverter,
   enum_converter: EnumConverter,
   union_converter: UnionConverter,
-  cached_schema_names: HashSet<String>,
 }
 
 impl SchemaConverter {
@@ -139,13 +138,11 @@ impl SchemaConverter {
       .config(config.clone())
       .build()
       .expect("TypeResolver");
-    let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, None),
       enum_converter: EnumConverter::new(config),
       union_converter: UnionConverter::new(graph, type_resolver, config),
-      cached_schema_names,
     }
   }
 
@@ -159,13 +156,11 @@ impl SchemaConverter {
       .config(config.clone())
       .build()
       .expect("TypeResolver");
-    let cached_schema_names = Self::build_schema_name_cache(graph);
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, Some(Arc::new(reachable_schemas))),
       enum_converter: EnumConverter::new(config),
       union_converter: UnionConverter::new(graph, type_resolver, config),
-      cached_schema_names,
     }
   }
 
@@ -178,7 +173,7 @@ impl SchemaConverter {
     schema: &ObjectSchema,
     mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
-    if !schema.all_of.is_empty() {
+    if schema.has_intersection() {
       let cache_reborrow = cache.as_deref_mut();
       return self.struct_converter.convert_all_of_schema(name, cache_reborrow);
     }
@@ -289,8 +284,14 @@ impl SchemaConverter {
       }));
     }
 
+    let effective_schema = if schema.all_of.is_empty() {
+      schema.clone()
+    } else {
+      self.type_resolver.graph().merge_inline_all_of(schema)
+    };
+
     let unique_name = cache.make_unique_name(base_name);
-    let generated = self.convert_schema(&unique_name, schema, Some(cache))?;
+    let generated = self.convert_schema(&unique_name, &effective_schema, Some(cache))?;
 
     let Some(main_type) = generated.last().cloned() else {
       return Ok(None);
@@ -304,20 +305,13 @@ impl SchemaConverter {
     }))
   }
 
-  fn build_schema_name_cache(graph: &SchemaRegistry) -> HashSet<String> {
-    graph
-      .schema_names()
-      .into_iter()
-      .flat_map(|schema_name| {
-        let rust_name = to_rust_type_name(schema_name);
-        [schema_name.clone(), rust_name]
-      })
-      .collect()
-  }
-
   /// Checks if a name corresponds to a known schema in the graph.
   pub(crate) fn is_schema_name(&self, name: &str) -> bool {
-    self.cached_schema_names.contains(name)
+    self.type_resolver.graph().is_schema_name(name)
+  }
+
+  pub(crate) fn merge_inline_all_of(&self, schema: &ObjectSchema) -> ObjectSchema {
+    self.type_resolver.graph().merge_inline_all_of(schema)
   }
 
   fn try_convert_array_type_alias_with_union_items(

@@ -672,7 +672,7 @@ pub(crate) fn derive_method_names(enum_name: &str, variant_names: &[String]) -> 
 
 /// Infers a name for an inline schema based on its context (path, operation).
 ///
-/// Used when a schema doesn't have a title or ref name.
+/// Checks in order: title, single property name, path segments.
 pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context: &str) -> String {
   let is_request = context == REQUEST_BODY_SUFFIX;
 
@@ -681,20 +681,28 @@ pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context
     if is_request {
       format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
     } else {
+      format!("{sanitized_base}{RESPONSE_SUFFIX}")
+    }
+  };
+
+  let with_context_suffix = |base: &str| {
+    let sanitized_base = sanitize(base);
+    if is_request {
+      format!("{sanitized_base}{REQUEST_BODY_SUFFIX}")
+    } else {
       format!("{sanitized_base}{context}{RESPONSE_SUFFIX}")
     }
   };
+
+  if let Some(title) = &schema.title {
+    return with_suffix(title);
+  }
 
   if schema.properties.len() == 1
     && let Some((prop_name, _)) = schema.properties.iter().next()
   {
     let singular = cruet::to_singular(prop_name);
-    let sanitized_singular = sanitize(&singular);
-    return if is_request {
-      sanitized_singular
-    } else {
-      format!("{sanitized_singular}{RESPONSE_SUFFIX}")
-    };
+    return with_suffix(&singular);
   }
 
   let segments: Vec<_> = path
@@ -704,8 +712,8 @@ pub(crate) fn infer_name_from_context(schema: &ObjectSchema, path: &str, context
 
   segments
     .last()
-    .map(|&s| with_suffix(&cruet::to_singular(s)))
-    .or_else(|| segments.first().map(|&s| with_suffix(s)))
+    .map(|&s| with_context_suffix(&cruet::to_singular(s)))
+    .or_else(|| segments.first().map(|&s| with_context_suffix(s)))
     .unwrap_or_else(|| {
       if is_request {
         REQUEST_BODY_SUFFIX.to_string()

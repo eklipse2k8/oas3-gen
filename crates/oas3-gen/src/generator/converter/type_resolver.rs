@@ -57,7 +57,7 @@ impl TypeResolver {
       if let Some(type_ref) = self.resolve_union(&schema.one_of)? {
         return Ok(type_ref);
       }
-    } else if !schema.any_of.is_empty()
+    } else if schema.has_intersection()
       && let Some(type_ref) = self.resolve_union(&schema.any_of)?
     {
       return Ok(type_ref);
@@ -113,7 +113,7 @@ impl TypeResolver {
       return self.resolve_inline_enum(parent_type_name, property_name, property_schema, cache);
     }
 
-    if property_schema.has_inline_union() {
+    if property_schema.has_union() {
       let has_one_of = !property_schema.one_of.is_empty();
       return self.resolve_inline_union_type(parent_type_name, property_name, property_schema, has_one_of, cache);
     }
@@ -350,7 +350,7 @@ impl TypeResolver {
     let result = if items_schema.is_inline_object() {
       let base_name = format!("{parent_name}{}", strip_parent_prefix(parent_name, &singular_pascal));
       self.resolve_inline_struct_schema(&items_schema, &base_name, cache)?
-    } else if items_schema.has_inline_union() {
+    } else if items_schema.has_union() {
       let has_one_of = !items_schema.one_of.is_empty();
       let variants = if has_one_of {
         &items_schema.one_of
@@ -467,7 +467,7 @@ impl TypeResolver {
         Schema::Object(o) => o.resolve(self.graph.spec()).ok(),
         Schema::Boolean(_) => None,
       })
-      .is_some_and(|items| items.has_inline_union())
+      .is_some_and(|items| items.has_union())
   }
 
   /// Tries to convert a union schema into a single `TypeRef` (e.g. `Option<T>`, `Vec<T>`).

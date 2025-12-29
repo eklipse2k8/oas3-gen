@@ -4,6 +4,8 @@ pub use better_default::Default;
 pub use event_stream::{EventStream, EventStreamError};
 /// Re-exported from `http` for HTTP method types in generated request structs.
 pub use http::Method;
+use http::{StatusCode, header::RETRY_AFTER};
+use reqwest::Response;
 use serde_with::{
   StringWithSeparator,
   formats::{CommaSeparator, Separator, SpaceSeparator},
@@ -75,5 +77,44 @@ where
   async fn xml_with_diagnostics(self) -> Result<T, XmlDiagnostics> {
     let raw_body = self.bytes().await.map_err(XmlDiagnostics::BodyReadError)?;
     quick_xml::de::from_reader(std::io::Cursor::new(raw_body)).map_err(XmlDiagnostics::DeserializationError)
+  }
+}
+
+#[derive(Debug)]
+pub enum ClientErrorCode {
+  Ok(Response),
+  /// The client has sent too many requests in a given amount of time.
+  RateLimitExceeded,
+  /// The client should try the request again after the specified number of seconds.
+  TryAgainAfter(u32),
+  UnexpectedStatus(StatusCode),
+}
+
+pub trait ClientStatus: Sized {
+  fn decode_status(self) -> ClientErrorCode;
+}
+
+impl ClientStatus for Response {
+  fn decode_status(self) -> ClientErrorCode {
+    let status = self.status();
+    if status.is_success() {
+      return ClientErrorCode::Ok(self);
+    }
+
+    match status {
+      StatusCode::TOO_MANY_REQUESTS => {
+        let retry_after = self
+          .headers()
+          .get(RETRY_AFTER)
+          .and_then(|h| String::from_utf8_lossy(h.as_bytes()).parse::<u32>().ok());
+
+        if let Some(seconds) = retry_after {
+          ClientErrorCode::TryAgainAfter(seconds)
+        } else {
+          ClientErrorCode::RateLimitExceeded
+        }
+      }
+      _ => ClientErrorCode::UnexpectedStatus(status),
+    }
   }
 }

@@ -131,7 +131,7 @@ pub(crate) trait SchemaExt {
   fn is_empty_object(&self) -> bool;
 
   /// Returns true if the schema has inline oneOf or anyOf variants.
-  fn has_inline_union(&self) -> bool;
+  fn has_union(&self) -> bool;
 
   /// Returns true if this is an array with inline union items (oneOf/anyOf in items).
   fn has_inline_union_array_items(&self, spec: &Spec) -> bool;
@@ -144,7 +144,7 @@ pub(crate) trait SchemaExt {
   fn has_enum_values(&self) -> bool;
 
   /// Returns true if the schema has allOf composition.
-  fn has_all_of(&self) -> bool;
+  fn has_intersection(&self) -> bool;
 
   /// Returns true if the schema has a const value defined.
   fn has_const_value(&self) -> bool;
@@ -264,7 +264,7 @@ impl SchemaExt for ObjectSchema {
       && self.schema_type.is_none()
   }
 
-  fn has_inline_union(&self) -> bool {
+  fn has_union(&self) -> bool {
     !self.one_of.is_empty() || !self.any_of.is_empty()
   }
 
@@ -272,9 +272,7 @@ impl SchemaExt for ObjectSchema {
     if !self.is_array() {
       return false;
     }
-    self
-      .inline_array_items(spec)
-      .is_some_and(|items| items.has_inline_union())
+    self.inline_array_items(spec).is_some_and(|items| items.has_union())
   }
 
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema> {
@@ -295,7 +293,7 @@ impl SchemaExt for ObjectSchema {
     !self.enum_values.is_empty()
   }
 
-  fn has_all_of(&self) -> bool {
+  fn has_intersection(&self) -> bool {
     !self.all_of.is_empty()
   }
 

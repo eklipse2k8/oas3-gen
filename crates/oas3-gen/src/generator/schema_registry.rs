@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet, HashMap},
+  collections::{BTreeMap, BTreeSet, HashMap, HashSet},
   string::ToString,
 };
 
@@ -9,7 +9,9 @@ use oas3::{
 };
 
 use super::orchestrator::GenerationWarning;
-use crate::generator::{converter::SchemaExt, operation_registry::OperationRegistry};
+use crate::generator::{
+  converter::SchemaExt, naming::identifiers::to_rust_type_name, operation_registry::OperationRegistry,
+};
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
@@ -136,6 +138,7 @@ pub(crate) struct SchemaRegistry {
   inheritance_depths: HashMap<String, usize>,
   spec: Spec,
   union_fingerprints: UnionFingerprints,
+  cached_schema_names: HashSet<String>,
 }
 
 impl SchemaRegistry {
@@ -171,6 +174,14 @@ impl SchemaRegistry {
     let discriminator_cache = Self::build_discriminator_cache(&schemas);
     let union_fingerprints = Self::build_union_fingerprints(&schemas);
 
+    let cached_schema_names = schemas
+      .keys()
+      .flat_map(|schema_name| {
+        let rust_name = to_rust_type_name(schema_name);
+        [schema_name.clone(), rust_name]
+      })
+      .collect();
+
     (
       Self {
         schemas,
@@ -182,6 +193,7 @@ impl SchemaRegistry {
         inheritance_depths: HashMap::new(),
         spec,
         union_fingerprints,
+        cached_schema_names,
       },
       warnings,
     )
@@ -255,6 +267,11 @@ impl SchemaRegistry {
   /// Retrieves a schema by name.
   pub(crate) fn get_schema(&self, name: &str) -> Option<&ObjectSchema> {
     self.schemas.get(name)
+  }
+
+  /// Checks if a name corresponds to a known schema in the graph.
+  pub(crate) fn is_schema_name(&self, name: &str) -> bool {
+    self.cached_schema_names.contains(name)
   }
 
   /// Returns all schema names in sorted order.
@@ -429,6 +446,16 @@ impl SchemaRegistry {
       }
     }
 
+    // Merge properties from anyOf (intersection behavior)
+    for any_of_ref in &schema.any_of {
+      self.merge_optional_properties(any_of_ref, &mut merged_properties);
+    }
+
+    // Merge properties from oneOf (intersection behavior)
+    for one_of_ref in &schema.one_of {
+      self.merge_optional_properties(one_of_ref, &mut merged_properties);
+    }
+
     Self::merge_properties_from(
       schema,
       &mut merged_properties,
@@ -479,6 +506,34 @@ impl SchemaRegistry {
     }
   }
 
+  fn merge_optional_properties(
+    &self,
+    schema_ref: &ObjectOrReference<ObjectSchema>,
+    properties: &mut BTreeMap<String, ObjectOrReference<ObjectSchema>>,
+  ) {
+    let schema = match schema_ref {
+      ObjectOrReference::Ref { ref_path, .. } => {
+        if let Some(name) = Self::extract_ref_name(ref_path) {
+          self
+            .merged_schemas
+            .get(&name)
+            .map(|m| &m.schema)
+            .or_else(|| self.schemas.get(&name))
+        } else {
+          None
+        }
+      }
+      ObjectOrReference::Object(s) => Some(s),
+    };
+
+    if let Some(source) = schema {
+      for (name, prop) in &source.properties {
+        // Only insert if not already present (prioritize allOf and base schema)
+        properties.entry(name.clone()).or_insert_with(|| prop.clone());
+      }
+    }
+  }
+
   pub(crate) fn get_merged_schema(&self, name: &str) -> Option<&MergedSchema> {
     self.merged_schemas.get(name)
   }
@@ -489,6 +544,14 @@ impl SchemaRegistry {
       .get(name)
       .map(|m| &m.schema)
       .or_else(|| self.schemas.get(name))
+  }
+
+  pub(crate) fn merge_inline_all_of(&self, schema: &ObjectSchema) -> ObjectSchema {
+    if schema.all_of.is_empty() {
+      return schema.clone();
+    }
+    let (merged, _) = self.do_merge_all_of(schema);
+    merged
   }
 
   pub(crate) fn get_discriminator_parent(&self, name: &str) -> Option<&(String, String, String)> {
