@@ -48,6 +48,7 @@ syn.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+bon.workspace = true
 oas3-gen-support.workspace = true
 reqwest = { workspace = true, features = ["json", "multipart", "native-tls-alpn", "stream"] }
 serde_with.workspace = true

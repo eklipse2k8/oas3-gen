@@ -1,8 +1,7 @@
-/// Re-exported from `better_default` to enable `#[default(value)]` attribute on struct fields.
 mod event_stream;
 pub use better_default::Default;
+pub use bon::bon;
 pub use event_stream::{EventStream, EventStreamError};
-/// Re-exported from `http` for HTTP method types in generated request structs.
 pub use http::Method;
 use http::{StatusCode, header::RETRY_AFTER};
 use reqwest::Response;

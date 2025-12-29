@@ -77,6 +77,18 @@ pub struct ListPetsRequest {
   #[validate(nested)]
   pub query: ListPetsRequestQuery,
 }
+#[bon::bon]
+impl ListPetsRequest {
+  ///Create a new request with the given parameters.
+  #[builder]
+  pub fn new(limit: Option<i32>) -> Result<Self, anyhow::Error> {
+    let request = Self {
+      query: ListPetsRequestQuery { limit },
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
 impl ListPetsRequest {
   ///Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ListPetsResponse> {
@@ -127,6 +139,21 @@ pub type Pets = Vec<Pet>;
 pub struct ShowPetByIdRequest {
   #[validate(nested)]
   pub path: ShowPetByIdRequestPath,
+}
+#[bon::bon]
+impl ShowPetByIdRequest {
+  ///Create a new request with the given parameters.
+  #[builder]
+  pub fn new(pet_id: String) -> Result<Self, anyhow::Error> {
+    if pet_id.is_empty() {
+      return Err(anyhow::anyhow!("Empty {} is disallowed", "pet_id"));
+    }
+    let request = Self {
+      path: ShowPetByIdRequestPath { pet_id },
+    };
+    request.validate()?;
+    Ok(request)
+  }
 }
 impl ShowPetByIdRequest {
   ///Parse the HTTP response into the response enum.

@@ -14,6 +14,7 @@ use reqwest::header::HeaderValue;
 #[allow(unused_imports)]
 use reqwest::multipart::{Form, Part};
 use reqwest::{Client, Url};
+
 pub const BASE_URL: &str = "https://example.com/";
 #[derive(Debug, Clone)]
 pub struct IntersectionUnionTestClient {

@@ -224,8 +224,9 @@ impl<'a> TypeAnalyzer<'a> {
         continue;
       };
       for method in &mut def.methods {
-        let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind;
-        if let Some(new_name) = replacements.get(&response_enum.to_string()) {
+        if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
+          && let Some(new_name) = replacements.get(&response_enum.to_string())
+        {
           *response_enum = EnumToken::new(new_name);
         }
       }

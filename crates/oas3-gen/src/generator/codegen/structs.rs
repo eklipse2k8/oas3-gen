@@ -12,8 +12,9 @@ use super::{
   },
 };
 use crate::generator::ast::{
-  ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseMediaType, ResponseVariant, RustPrimitive,
-  StatusCodeToken, StructDef, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+  BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseMediaType,
+  ResponseVariant, RustPrimitive, StatusCodeToken, StructDef, StructMethod, StructMethodKind, StructToken, TypeRef,
+  ValidationAttribute,
   tokens::{ConstToken, EnumToken, EnumVariantToken},
 };
 
@@ -117,14 +118,37 @@ impl<'a> StructGenerator<'a> {
       return quote! {};
     }
 
-    let name = format_ident!("{}", def.name);
-    let methods: Vec<TokenStream> = def.methods.iter().map(|m| self.generate_method(m)).collect();
+    let name = &def.name;
 
-    quote! {
-      impl #name {
-        #(#methods)*
-      }
+    let (builder_methods, other_methods): (Vec<_>, Vec<_>) = def
+      .methods
+      .iter()
+      .partition(|m| matches!(m.kind, StructMethodKind::Builder { .. }));
+
+    let mut result = quote! {};
+
+    if !builder_methods.is_empty() {
+      let methods: Vec<TokenStream> = builder_methods.iter().map(|m| self.generate_method(m)).collect();
+      result = quote! {
+        #result
+        #[bon::bon]
+        impl #name {
+          #(#methods)*
+        }
+      };
     }
+
+    if !other_methods.is_empty() {
+      let methods: Vec<TokenStream> = other_methods.iter().map(|m| self.generate_method(m)).collect();
+      result = quote! {
+        #result
+        impl #name {
+          #(#methods)*
+        }
+      };
+    }
+
+    result
   }
 
   fn generate_method(&self, method: &StructMethod) -> TokenStream {
@@ -133,6 +157,9 @@ impl<'a> StructGenerator<'a> {
         response_enum,
         variants,
       } => generate_parse_response_method(self.visibility, &method.name, &method.docs, response_enum, variants),
+      StructMethodKind::Builder { fields, nested_structs } => {
+        generate_builder_method(self.visibility, &method.docs, fields, nested_structs)
+      }
     }
   }
 }
@@ -360,5 +387,112 @@ fn generate_data_extraction(schema_type: &TypeRef, category: ContentCategory) ->
       quote! { oas3_gen_support::Diagnostics::<#schema_type>::xml_with_diagnostics(req).await? }
     }
     _ => quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? },
+  }
+}
+
+fn generate_builder_method(
+  vis: Visibility,
+  docs: impl ToTokens,
+  fields: &[BuilderField],
+  nested_structs: &[BuilderNestedStruct],
+) -> TokenStream {
+  let vis = vis.to_tokens();
+
+  let params: Vec<TokenStream> = fields
+    .iter()
+    .map(|f| {
+      let name = &f.name;
+      let ty = &f.rust_type;
+      quote! { #name: #ty }
+    })
+    .collect();
+
+  let validations = generate_builder_validations(fields);
+  let struct_construction = generate_struct_construction(fields, nested_structs);
+
+  quote! {
+    #docs
+    #[builder]
+    #vis fn new(#(#params),*) -> Result<Self, anyhow::Error> {
+      #validations
+      let request = #struct_construction;
+      request.validate()?;
+      Ok(request)
+    }
+  }
+}
+
+fn generate_builder_validations(fields: &[BuilderField]) -> TokenStream {
+  let checks: Vec<TokenStream> = fields
+    .iter()
+    .filter_map(|f| {
+      if !f.required {
+        return None;
+      }
+
+      let has_min_length = f
+        .validation_attrs
+        .iter()
+        .any(|attr| matches!(attr, ValidationAttribute::Length { min: Some(_), .. }));
+
+      if !has_min_length {
+        return None;
+      }
+
+      if !f.rust_type.is_string_like() {
+        return None;
+      }
+
+      let name = &f.name;
+      let name_str = f.name.to_string();
+
+      Some(quote! {
+        if #name.is_empty() {
+          return Err(anyhow::anyhow!("Empty {} is disallowed", #name_str));
+        }
+      })
+    })
+    .collect();
+
+  quote! { #(#checks)* }
+}
+
+fn generate_struct_construction(fields: &[BuilderField], nested_structs: &[BuilderNestedStruct]) -> TokenStream {
+  let nested_map: BTreeMap<&str, &BuilderNestedStruct> =
+    nested_structs.iter().map(|ns| (ns.field_name.as_str(), ns)).collect();
+
+  let field_assignments: Vec<TokenStream> = if nested_structs.is_empty() {
+    fields.iter().map(|f| f.name.to_token_stream()).collect()
+  } else {
+    let mut processed_nested: BTreeSet<&str> = BTreeSet::new();
+    let mut assignments = Vec::new();
+
+    for field in fields {
+      let nested_field_name = field.nested_struct.as_str();
+
+      if let Some(nested) = nested_map.get(nested_field_name) {
+        if processed_nested.insert(nested_field_name) {
+          let field_name = &nested.field_name;
+          let struct_name = &nested.struct_name;
+          let inner_fields: Vec<TokenStream> = nested
+            .field_names
+            .iter()
+            .map(quote::ToTokens::to_token_stream)
+            .collect();
+
+          assignments.push(quote! {
+            #field_name: #struct_name { #(#inner_fields),* }
+          });
+        }
+      } else {
+        assignments.push(field.name.to_token_stream());
+      }
+    }
+
+    assignments
+  };
+
+  quote! {
+    Self { #(#field_assignments),* }
   }
 }

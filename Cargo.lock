@@ -143,6 +143,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "bon"
+version = "3.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebeb9aaf9329dff6ceb65c689ca3db33dbf15f324909c60e4e5eef5701ce31b1"
+dependencies = [
+ "bon-macros",
+ "rustversion",
+]
+
+[[package]]
+name = "bon-macros"
+version = "3.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77e9d642a7e3a318e37c2c9427b5a6a48aa1ad55dcd986f3034ab2239045a645"
+dependencies = [
+ "darling 0.21.3",
+ "ident_case",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1197,6 +1222,7 @@ dependencies = [
  "any_ascii",
  "anyhow",
  "blake3",
+ "bon",
  "cfg-if",
  "chrono",
  "clap",
@@ -1238,6 +1264,7 @@ version = "0.23.6"
 dependencies = [
  "anyhow",
  "better_default",
+ "bon",
  "chrono",
  "eventsource-stream",
  "futures",

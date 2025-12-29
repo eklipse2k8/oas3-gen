@@ -6,7 +6,8 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::ast::{
-  CodeMetadata, EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, ValidationAttribute, tokens::ConstToken,
+  CodeMetadata, EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, StructMethodKind, ValidationAttribute,
+  tokens::ConstToken,
 };
 
 pub mod attributes;
@@ -105,6 +106,7 @@ pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, v
     needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
     needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
     needs_validate |= matches!(ty, RustType::Struct(def) if def.fields.iter().any(|f| f.validation_attrs.contains(&ValidationAttribute::Nested)));
+    needs_validate |= matches!(ty, RustType::Struct(def) if def.methods.iter().any(|m| matches!(m.kind, StructMethodKind::Builder { .. })));
     type_tokens.push(generate_type(ty, &regex_lookup, error_schemas, visibility));
   }
 

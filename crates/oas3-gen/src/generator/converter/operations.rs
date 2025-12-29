@@ -12,10 +12,10 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, fields::FieldConverter, responses};
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind,
-    OperationParameter, OuterAttr, ParameterLocation, ParsedPath, ResponseEnumDef, ResponseMediaType, RustType,
-    SerdeAsFieldAttr, SerdeAsSeparator, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
-    ValidationAttribute,
+    BuilderField, BuilderNestedStruct, ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken,
+    MethodNameToken, OperationBody, OperationInfo, OperationKind, OperationParameter, OuterAttr, ParameterLocation,
+    ParsedPath, ResponseEnumDef, ResponseMediaType, RustType, SerdeAsFieldAttr, SerdeAsSeparator, SerdeAttribute,
+    StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{
@@ -358,9 +358,13 @@ impl<'a> OperationConverter<'a> {
 
     let docs = Documentation::from_optional(operation.description.as_ref().or(operation.summary.as_ref()));
 
-    let methods = response_enum_info
+    let mut methods = response_enum_info
       .map(|(enum_token, def)| vec![responses::build_parse_response_method(enum_token, &def.variants)])
       .unwrap_or_default();
+
+    if let Some(builder_method) = Self::build_builder_method(&nested_structs, &main_fields) {
+      methods.push(builder_method);
+    }
 
     let main_struct = StructDef {
       name: StructToken::from_raw(name),
@@ -801,6 +805,72 @@ impl<'a> OperationConverter<'a> {
       validation_attrs,
       default_value,
       inline_types,
+    })
+  }
+
+  fn build_builder_method(nested_structs: &[StructDef], main_fields: &[FieldDef]) -> Option<StructMethod> {
+    let mut builder_fields = Vec::new();
+    let mut nested_struct_info = Vec::new();
+
+    for main_field in main_fields {
+      let nested_struct = nested_structs
+        .iter()
+        .find(|s| s.name.to_string() == main_field.rust_type.to_rust_type());
+
+      if let Some(nested) = nested_struct {
+        let field_names: Vec<FieldNameToken> = nested.fields.iter().map(|f| f.name.clone()).collect();
+
+        nested_struct_info.push(BuilderNestedStruct {
+          field_name: main_field.name.clone(),
+          struct_name: nested.name.clone(),
+          field_names,
+        });
+
+        for field in &nested.fields {
+          let required = field.is_required();
+          let rust_type = if required {
+            field.rust_type.unwrap_option()
+          } else {
+            field.rust_type.clone()
+          };
+
+          builder_fields.push(BuilderField {
+            name: field.name.clone(),
+            rust_type,
+            required,
+            nested_struct: main_field.name.clone(),
+            validation_attrs: field.validation_attrs.clone(),
+          });
+        }
+      } else {
+        let required = main_field.is_required();
+        let rust_type = if required {
+          main_field.rust_type.unwrap_option()
+        } else {
+          main_field.rust_type.clone()
+        };
+
+        builder_fields.push(BuilderField {
+          name: main_field.name.clone(),
+          rust_type,
+          required,
+          nested_struct: main_field.name.clone(),
+          validation_attrs: main_field.validation_attrs.clone(),
+        });
+      }
+    }
+
+    if builder_fields.is_empty() {
+      return None;
+    }
+
+    Some(StructMethod {
+      name: MethodNameToken::new("new"),
+      docs: Documentation::from_lines(["Create a new request with the given parameters."]),
+      kind: StructMethodKind::Builder {
+        fields: builder_fields,
+        nested_structs: nested_struct_info,
+      },
     })
   }
 }

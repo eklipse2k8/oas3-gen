@@ -9,6 +9,7 @@
 //! Comprehensive test fixture for union serialization/deserialization
 
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 ///Text annotation with different types
 #[derive(Debug, Clone, PartialEq)]
 pub enum Annotation {
@@ -590,6 +591,16 @@ pub enum Role {
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct SendContentRequest {
   pub body: ContentRequest,
+}
+#[bon::bon]
+impl SendContentRequest {
+  ///Create a new request with the given parameters.
+  #[builder]
+  pub fn new(body: ContentRequest) -> Result<Self, anyhow::Error> {
+    let request = Self { body };
+    request.validate()?;
+    Ok(request)
+  }
 }
 impl SendContentRequest {
   ///Parse the HTTP response into the response enum.

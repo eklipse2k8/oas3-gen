@@ -329,6 +329,26 @@ pub enum StructMethodKind {
     response_enum: EnumToken,
     variants: Vec<ResponseVariant>,
   },
+  Builder {
+    fields: Vec<BuilderField>,
+    nested_structs: Vec<BuilderNestedStruct>,
+  },
+}
+
+#[derive(Debug, Clone)]
+pub struct BuilderField {
+  pub name: FieldNameToken,
+  pub rust_type: TypeRef,
+  pub required: bool,
+  pub nested_struct: FieldNameToken,
+  pub validation_attrs: Vec<ValidationAttribute>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuilderNestedStruct {
+  pub field_name: FieldNameToken,
+  pub struct_name: StructToken,
+  pub field_names: Vec<FieldNameToken>,
 }
 
 /// Associated method definition for an enum

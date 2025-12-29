@@ -17,6 +17,7 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 anyhow.workspace = true
 better_default.workspace = true
+bon.workspace = true
 chrono.workspace = true
 futures-core = "0.3"
 http.workspace = true

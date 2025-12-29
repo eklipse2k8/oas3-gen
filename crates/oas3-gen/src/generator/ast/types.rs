@@ -46,6 +46,13 @@ impl TypeRef {
     self
   }
 
+  pub fn unwrap_option(&self) -> Self {
+    Self {
+      nullable: false,
+      ..self.clone()
+    }
+  }
+
   pub fn with_vec(mut self) -> Self {
     self.is_array = true;
     self
