@@ -6,9 +6,97 @@ use super::{
   attributes::{generate_deprecated_attr, generate_derives_from_slice, generate_outer_attrs, generate_serde_attrs},
 };
 use crate::generator::ast::{
-  DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethodKind, ResponseEnumDef, SerdeAttribute,
-  SerdeMode,
+  DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeAttribute, SerdeMode,
 };
+
+mod methods {
+  use proc_macro2::TokenStream;
+  use quote::{ToTokens, format_ident, quote};
+
+  use super::box_if_needed;
+  use crate::generator::ast::{EnumMethod, EnumMethodKind};
+
+  pub(super) fn emit(
+    name: &impl ToTokens,
+    vis: &TokenStream,
+    methods: &[EnumMethod],
+    allow_known_value: bool,
+  ) -> TokenStream {
+    if methods.is_empty() {
+      return quote! {};
+    }
+
+    let method_tokens = methods.iter().map(|m| emit_method(vis, m, allow_known_value));
+
+    quote! {
+      impl #name {
+        #(#method_tokens)*
+      }
+    }
+  }
+
+  fn emit_method(vis: &TokenStream, method: &EnumMethod, allow_known_value: bool) -> TokenStream {
+    let method_name = format_ident!("{}", method.name);
+    let docs = &method.docs;
+
+    match &method.kind {
+      EnumMethodKind::SimpleConstructor {
+        variant_name,
+        wrapped_type,
+      } => {
+        let inner_type = &wrapped_type.base_type;
+        let constructor = box_if_needed(wrapped_type.boxed, quote! { #inner_type::default() });
+
+        quote! {
+          #docs
+          #vis fn #method_name() -> Self {
+            Self::#variant_name(#constructor)
+          }
+        }
+      }
+      EnumMethodKind::ParameterizedConstructor {
+        variant_name,
+        wrapped_type,
+        param_name,
+        param_type,
+      } => {
+        let inner_type = &wrapped_type.base_type;
+        let param_ident = format_ident!("{param_name}");
+
+        let constructor = box_if_needed(
+          wrapped_type.boxed,
+          quote! {
+            #inner_type {
+              #param_ident,
+              ..Default::default()
+            }
+          },
+        );
+
+        quote! {
+          #docs
+          #vis fn #method_name(#param_ident: #param_type) -> Self {
+            Self::#variant_name(#constructor)
+          }
+        }
+      }
+      EnumMethodKind::KnownValueConstructor {
+        known_type,
+        known_variant,
+      } => {
+        if !allow_known_value {
+          unreachable!("KnownValueConstructor is only used for relaxed enums, not discriminated enums")
+        }
+        quote! {
+          #docs
+          #vis fn #method_name() -> Self {
+            Self::Known(#known_type::#known_variant)
+          }
+        }
+      }
+    }
+  }
+}
 
 /// Generates standard Rust enums that use serde's derive macros for serialization.
 ///
@@ -58,26 +146,29 @@ use crate::generator::ast::{
 /// enums, a custom `Deserialize` impl is generated instead of using the derive.
 pub(crate) struct EnumGenerator<'a> {
   def: &'a EnumDef,
-  visibility: Visibility,
+  vis: TokenStream,
 }
 
 impl<'a> EnumGenerator<'a> {
   pub fn new(def: &'a EnumDef, visibility: Visibility) -> Self {
-    Self { def, visibility }
+    Self {
+      def,
+      vis: visibility.to_tokens(),
+    }
   }
 
   pub fn generate(&self) -> TokenStream {
     let name = &self.def.name;
     let docs = &self.def.docs;
-    let vis = self.visibility.to_tokens();
 
     let derives = generate_derives_from_slice(&self.def.derives());
 
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
-    let serde_attrs = self.generate_serde_attrs();
-    let methods = self.generate_methods();
-    let variants = self.generate_variants();
+    let serde_attrs = self.emit_serde_attrs();
+    let methods = methods::emit(name, &self.vis, &self.def.methods, true);
+    let variants = self.emit_variants();
 
+    let vis = &self.vis;
     let enum_def = quote! {
       #docs
       #outer_attrs
@@ -90,7 +181,7 @@ impl<'a> EnumGenerator<'a> {
     };
 
     if self.def.case_insensitive {
-      let deserialize_impl = self.generate_case_insensitive_deserialize();
+      let deserialize_impl = self.emit_case_insensitive_deser();
       quote! {
         #enum_def
         #deserialize_impl
@@ -100,7 +191,7 @@ impl<'a> EnumGenerator<'a> {
     }
   }
 
-  fn generate_variants(&self) -> Vec<TokenStream> {
+  fn emit_variants(&self) -> Vec<TokenStream> {
     let has_serde_derive = self
       .def
       .derives()
@@ -138,82 +229,7 @@ impl<'a> EnumGenerator<'a> {
       .collect()
   }
 
-  fn generate_methods(&self) -> TokenStream {
-    if self.def.methods.is_empty() {
-      return quote! {};
-    }
-
-    let name = &self.def.name;
-    let vis = self.visibility.to_tokens();
-
-    let methods = self.def.methods.iter().map(|m| {
-      let method_name = format_ident!("{}", m.name);
-      let docs = &m.docs;
-
-      match &m.kind {
-        EnumMethodKind::SimpleConstructor {
-          variant_name,
-          wrapped_type,
-        } => {
-          let inner_type = &wrapped_type.base_type;
-          let constructor = box_if_needed(wrapped_type.boxed, quote! { #inner_type::default() });
-
-          quote! {
-            #docs
-            #vis fn #method_name() -> Self {
-              Self::#variant_name(#constructor)
-            }
-          }
-        }
-        EnumMethodKind::ParameterizedConstructor {
-          variant_name,
-          wrapped_type,
-          param_name,
-          param_type,
-        } => {
-          let inner_type = &wrapped_type.base_type;
-          let param_ident = format_ident!("{param_name}");
-
-          let constructor = box_if_needed(
-            wrapped_type.boxed,
-            quote! {
-              #inner_type {
-                #param_ident,
-                ..Default::default()
-              }
-            },
-          );
-
-          quote! {
-            #docs
-            #vis fn #method_name(#param_ident: #param_type) -> Self {
-              Self::#variant_name(#constructor)
-            }
-          }
-        }
-        EnumMethodKind::KnownValueConstructor {
-          known_type,
-          known_variant,
-        } => {
-          quote! {
-            #docs
-            #vis fn #method_name() -> Self {
-              Self::Known(#known_type::#known_variant)
-            }
-          }
-        }
-      }
-    });
-
-    quote! {
-      impl #name {
-        #(#methods)*
-      }
-    }
-  }
-
-  fn generate_serde_attrs(&self) -> TokenStream {
-    // Combine discriminator tag with other serde attrs into a single list
+  fn emit_serde_attrs(&self) -> TokenStream {
     let mut all_attrs: Vec<SerdeAttribute> = Vec::with_capacity(self.def.serde_attrs.len() + 1);
 
     if let Some(ref discriminator) = self.def.discriminator {
@@ -225,7 +241,7 @@ impl<'a> EnumGenerator<'a> {
     generate_serde_attrs(&all_attrs)
   }
 
-  fn generate_case_insensitive_deserialize(&self) -> TokenStream {
+  fn emit_case_insensitive_deser(&self) -> TokenStream {
     let name = &self.def.name;
 
     let (match_arms, serde_names): (Vec<TokenStream>, Vec<String>) = self
@@ -320,19 +336,21 @@ impl<'a> EnumGenerator<'a> {
 /// compatibility with API changes.
 pub(crate) struct DiscriminatedEnumGenerator<'a> {
   def: &'a DiscriminatedEnumDef,
-  visibility: Visibility,
+  vis: TokenStream,
 }
 
 impl<'a> DiscriminatedEnumGenerator<'a> {
   pub fn new(def: &'a DiscriminatedEnumDef, visibility: Visibility) -> Self {
-    Self { def, visibility }
+    Self {
+      def,
+      vis: visibility.to_tokens(),
+    }
   }
 
   pub fn generate(&self) -> TokenStream {
     let name = &self.def.name;
     let disc_field = &self.def.discriminator_field;
     let docs = &self.def.docs;
-    let vis = self.visibility.to_tokens();
 
     let variants: Vec<TokenStream> = self
       .def
@@ -346,6 +364,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
 
     let derives = generate_derives_from_slice(&self.def.derives());
 
+    let vis = &self.vis;
     let enum_def = quote! {
       #docs
       #derives
@@ -360,10 +379,10 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       }
     };
 
-    let default_impl = self.generate_default_impl();
-    let serialize_impl = self.generate_serialize_impl();
-    let deserialize_impl = self.generate_deserialize_impl();
-    let methods_impl = self.generate_methods();
+    let default_impl = self.emit_default_impl();
+    let serialize_impl = self.emit_serialize_impl();
+    let deserialize_impl = self.emit_deserialize_impl();
+    let methods_impl = methods::emit(name, &self.vis, &self.def.methods, false);
 
     quote! {
       #enum_def
@@ -375,73 +394,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
     }
   }
 
-  fn generate_methods(&self) -> TokenStream {
-    if self.def.methods.is_empty() {
-      return quote! {};
-    }
-
-    let name = &self.def.name;
-    let vis = self.visibility.to_tokens();
-
-    let methods = self.def.methods.iter().map(|m| {
-      let method_name = format_ident!("{}", m.name);
-      let docs = &m.docs;
-
-      match &m.kind {
-        EnumMethodKind::SimpleConstructor {
-          variant_name,
-          wrapped_type,
-        } => {
-          let inner_type = &wrapped_type.base_type;
-          let constructor = box_if_needed(wrapped_type.boxed, quote! { #inner_type::default() });
-
-          quote! {
-            #docs
-            #vis fn #method_name() -> Self {
-              Self::#variant_name(#constructor)
-            }
-          }
-        }
-        EnumMethodKind::ParameterizedConstructor {
-          variant_name,
-          wrapped_type,
-          param_name,
-          param_type,
-        } => {
-          let inner_type = &wrapped_type.base_type;
-          let param_ident = format_ident!("{param_name}");
-
-          let constructor = box_if_needed(
-            wrapped_type.boxed,
-            quote! {
-              #inner_type {
-                #param_ident,
-                ..Default::default()
-              }
-            },
-          );
-
-          quote! {
-            #docs
-            #vis fn #method_name(#param_ident: #param_type) -> Self {
-              Self::#variant_name(#constructor)
-            }
-          }
-        }
-        EnumMethodKind::KnownValueConstructor { .. } => {
-          unreachable!("KnownValueConstructor is only used for relaxed enums, not discriminated enums")
-        }
-      }
-    });
-
-    quote! {
-      impl #name {
-        #(#methods)*
-      }
-    }
-  }
-
-  fn generate_default_impl(&self) -> TokenStream {
+  fn emit_default_impl(&self) -> TokenStream {
     let Some(default_variant) = self.def.default_variant() else {
       return quote! {};
     };
@@ -459,7 +412,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
     }
   }
 
-  fn generate_serialize_impl(&self) -> TokenStream {
+  fn emit_serialize_impl(&self) -> TokenStream {
     if self.def.serde_mode == SerdeMode::DeserializeOnly {
       return quote! {};
     }
@@ -489,7 +442,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
     }
   }
 
-  fn generate_deserialize_impl(&self) -> TokenStream {
+  fn emit_deserialize_impl(&self) -> TokenStream {
     if self.def.serde_mode == SerdeMode::SerializeOnly {
       return quote! {};
     }
@@ -584,18 +537,20 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
 /// is handled by the client's `parse_response` method which inspects status codes.
 pub(crate) struct ResponseEnumGenerator<'a> {
   def: &'a ResponseEnumDef,
-  visibility: Visibility,
+  vis: TokenStream,
 }
 
 impl<'a> ResponseEnumGenerator<'a> {
   pub fn new(def: &'a ResponseEnumDef, visibility: Visibility) -> Self {
-    Self { def, visibility }
+    Self {
+      def,
+      vis: visibility.to_tokens(),
+    }
   }
 
   pub fn generate(&self) -> TokenStream {
     let name = &self.def.name;
     let docs = &self.def.docs;
-    let vis = self.visibility.to_tokens();
 
     let variants: Vec<TokenStream> = self
       .def
@@ -617,6 +572,7 @@ impl<'a> ResponseEnumGenerator<'a> {
 
     let derives = generate_derives_from_slice(&self.def.derives());
 
+    let vis = &self.vis;
     quote! {
       #docs
       #derives

@@ -6,9 +6,8 @@ use oas3::{
 use super::{SchemaConverter, cache::SharedSchemaCache};
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
-    ResponseVariant, RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef,
-    status_code_to_variant_name,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, ResponseEnumDef, ResponseMediaType, ResponseVariant,
+    RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
   },
   converter::SchemaExt as _,
   naming::{
@@ -58,12 +57,16 @@ pub(crate) fn build_response_enum(
     return None;
   }
 
-  Some(ResponseEnumDef {
-    name: EnumToken::new(&base_name),
-    docs: Documentation::from_lines([format!("Response types for {}", operation.operation_id.as_ref()?)]),
-    variants,
-    request_type: None,
-  })
+  Some(
+    ResponseEnumDef::builder()
+      .name(&base_name)
+      .docs(Documentation::from_lines([format!(
+        "Response types for {}",
+        operation.operation_id.as_ref()?
+      )]))
+      .variants(variants)
+      .build(),
+  )
 }
 
 fn split_mixed_content_variants(
@@ -119,35 +122,39 @@ fn split_mixed_content_variants(
         media_types: non_stream_media_types,
         schema_type: json_schema,
       },
-      ResponseVariant {
-        status_code,
-        variant_name: stream_variant_name,
-        description: description.cloned(),
-        media_types: stream_media_types,
-        schema_type: Some(stream_schema),
-      },
+      ResponseVariant::builder()
+        .status_code(status_code)
+        .variant_name(stream_variant_name)
+        .maybe_description(description.cloned())
+        .media_types(stream_media_types)
+        .schema_type(stream_schema)
+        .build(),
     ]
   } else if let Some(stream_media) = event_stream_media {
     let inner_type = stream_media.schema_type.as_ref().unwrap();
     let stream_schema = TypeRef::new(format!("oas3_gen_support::EventStream<{}>", inner_type.to_rust_type()));
 
-    vec![ResponseVariant {
-      status_code,
-      variant_name: variant_name.clone(),
-      description: description.cloned(),
-      media_types: media_types.to_vec(),
-      schema_type: Some(stream_schema),
-    }]
+    vec![
+      ResponseVariant::builder()
+        .status_code(status_code)
+        .variant_name(variant_name.clone())
+        .maybe_description(description.cloned())
+        .media_types(media_types.to_vec())
+        .schema_type(stream_schema)
+        .build(),
+    ]
   } else {
     let schema_type = non_stream_media.first().and_then(|m| m.schema_type.clone());
 
-    vec![ResponseVariant {
-      status_code,
-      variant_name: variant_name.clone(),
-      description: description.cloned(),
-      media_types: media_types.to_vec(),
-      schema_type,
-    }]
+    vec![
+      ResponseVariant::builder()
+        .status_code(status_code)
+        .variant_name(variant_name.clone())
+        .maybe_description(description.cloned())
+        .media_types(media_types.to_vec())
+        .maybe_schema_type(schema_type)
+        .build(),
+    ]
   }
 }
 
@@ -246,25 +253,27 @@ fn normalize_response_variants(mut variants: Vec<ResponseVariant>) -> Vec<Respon
 
   let has_default = variants.iter().any(|v| v.status_code.is_default());
   if !has_default {
-    variants.push(ResponseVariant {
-      status_code: StatusCodeToken::Default,
-      variant_name: EnumVariantToken::new(DEFAULT_RESPONSE_VARIANT),
-      description: Some(DEFAULT_RESPONSE_DESCRIPTION.to_string()),
-      media_types: vec![ResponseMediaType::new("application/json")],
-      schema_type: None,
-    });
+    variants.push(
+      ResponseVariant::builder()
+        .variant_name(DEFAULT_RESPONSE_VARIANT)
+        .description(DEFAULT_RESPONSE_DESCRIPTION.to_string())
+        .media_types(vec![ResponseMediaType::new("application/json")])
+        .build(),
+    );
   }
 
   variants
 }
 
 pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
-  StructMethod {
-    name: MethodNameToken::new("parse_response"),
-    docs: Documentation::from_lines(["Parse the HTTP response into the response enum."]),
-    kind: StructMethodKind::ParseResponse {
+  StructMethod::builder()
+    .name("parse_response")
+    .docs(Documentation::from_lines([
+      "Parse the HTTP response into the response enum.",
+    ]))
+    .kind(StructMethodKind::ParseResponse {
       response_enum: response_enum.clone(),
       variants: variants.to_vec(),
-    },
-  }
+    })
+    .build()
 }

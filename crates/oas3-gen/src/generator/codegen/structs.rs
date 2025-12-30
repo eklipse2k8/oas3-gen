@@ -13,43 +13,74 @@ use super::{
 };
 use crate::generator::ast::{
   BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseMediaType,
-  ResponseVariant, RustPrimitive, StatusCodeToken, StructDef, StructMethod, StructMethodKind, StructToken, TypeRef,
+  ResponseVariant, RustPrimitive, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, TypeRef,
   ValidationAttribute,
   tokens::{ConstToken, EnumToken, EnumVariantToken},
 };
 
 pub(crate) struct StructGenerator<'a> {
+  def: &'a StructDef,
   regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
-  visibility: Visibility,
+  vis: TokenStream,
 }
 
 impl<'a> StructGenerator<'a> {
-  pub(crate) fn new(regex_lookup: &'a BTreeMap<RegexKey, ConstToken>, visibility: Visibility) -> Self {
+  pub(crate) fn new(
+    def: &'a StructDef,
+    regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
+    visibility: Visibility,
+  ) -> Self {
     Self {
+      def,
       regex_lookup,
-      visibility,
+      vis: visibility.to_tokens(),
     }
   }
 
-  pub(crate) fn generate(&self, def: &StructDef) -> TokenStream {
-    let struct_def = self.generate_struct_definition(def);
-    let impl_block = self.generate_impl_block(def);
+  pub(crate) fn emit(&self) -> TokenStream {
+    let definition = self.definition().emit();
+    let impl_block = self.impl_block().emit();
+    let header_map_impl = header_map::HeaderMapConversionGenerator::new(self.def).emit();
 
     quote! {
-      #struct_def
+      #definition
       #impl_block
+      #header_map_impl
     }
   }
 
-  fn generate_struct_definition(&self, def: &StructDef) -> TokenStream {
-    let name = format_ident!("{}", def.name);
-    let docs = &def.docs;
-    let vis = self.visibility.to_tokens();
+  fn definition(&self) -> Definition<'_> {
+    Definition {
+      def: self.def,
+      regex_lookup: self.regex_lookup,
+      vis: &self.vis,
+    }
+  }
 
-    let derives = super::attributes::generate_derives_from_slice(&def.derives());
-    let outer_attrs = generate_outer_attrs(&def.outer_attrs);
-    let serde_attrs = generate_serde_attrs(&def.serde_attrs);
-    let fields = self.generate_fields(&def.name, &def.fields);
+  fn impl_block(&self) -> ImplBlock<'_> {
+    ImplBlock {
+      def: self.def,
+      vis: &self.vis,
+    }
+  }
+}
+
+struct Definition<'a> {
+  def: &'a StructDef,
+  regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
+  vis: &'a TokenStream,
+}
+
+impl Definition<'_> {
+  fn emit(&self) -> TokenStream {
+    let name = format_ident!("{}", self.def.name);
+    let docs = &self.def.docs;
+    let vis = self.vis;
+
+    let derives = super::attributes::generate_derives_from_slice(&self.def.derives());
+    let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
+    let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
+    let fields: Vec<TokenStream> = self.def.fields.iter().map(|f| self.field(f)).collect();
 
     quote! {
       #docs
@@ -62,22 +93,22 @@ impl<'a> StructGenerator<'a> {
     }
   }
 
-  fn generate_fields(&self, struct_name: &StructToken, fields: &[FieldDef]) -> Vec<TokenStream> {
-    fields
-      .iter()
-      .map(|field| self.generate_single_field(struct_name, field))
-      .collect()
-  }
-
-  fn generate_single_field(&self, struct_name: &StructToken, field: &FieldDef) -> TokenStream {
-    let name = format_ident!("{}", field.name);
+  fn field(&self, field: &FieldDef) -> TokenStream {
+    let name = &field.name;
     let docs = generate_docs_for_field(field);
-    let vis = self.visibility.to_tokens();
+    let vis = self.vis;
     let type_tokens = &field.rust_type;
 
-    let serde_as = generate_serde_as_attr(field.serde_as_attr.as_ref());
-    let serde_attrs = generate_serde_attrs(&field.serde_attrs);
-    let validation = self.resolve_validation_attrs(struct_name, field);
+    // Only generate serde attributes for structs that derive Serialize or Deserialize
+    let (serde_as, serde_attrs) = if matches!(self.def.kind, StructKind::HeaderParams | StructKind::PathParams) {
+      (quote! {}, quote! {})
+    } else {
+      (
+        generate_serde_as_attr(field.serde_as_attr.as_ref()),
+        generate_serde_attrs(&field.serde_attrs),
+      )
+    };
+    let validation = self.validation(field);
     let deprecated = generate_deprecated_attr(field.deprecated);
     let default_val = generate_field_default_attr(field);
     let doc_hidden = generate_doc_hidden_attr(field.doc_hidden);
@@ -94,13 +125,13 @@ impl<'a> StructGenerator<'a> {
     }
   }
 
-  fn resolve_validation_attrs(&self, struct_name: &StructToken, field: &FieldDef) -> TokenStream {
+  fn validation(&self, field: &FieldDef) -> TokenStream {
     let attrs: Vec<ValidationAttribute> = field
       .validation_attrs
       .iter()
       .map(|attr| match attr {
         ValidationAttribute::Regex(_) => {
-          let key = RegexKey::for_struct(struct_name, field.name.as_str());
+          let key = RegexKey::for_struct(&self.def.name, field.name.as_str());
           self.regex_lookup.get(&key).map_or_else(
             || attr.clone(),
             |const_token| ValidationAttribute::Regex(const_token.to_string()),
@@ -112,15 +143,22 @@ impl<'a> StructGenerator<'a> {
 
     generate_validation_attrs(&attrs)
   }
+}
 
-  fn generate_impl_block(&self, def: &StructDef) -> TokenStream {
-    if def.methods.is_empty() {
+struct ImplBlock<'a> {
+  def: &'a StructDef,
+  vis: &'a TokenStream,
+}
+
+impl ImplBlock<'_> {
+  fn emit(&self) -> TokenStream {
+    if self.def.methods.is_empty() {
       return quote! {};
     }
 
-    let name = &def.name;
-
-    let (builder_methods, other_methods): (Vec<_>, Vec<_>) = def
+    let name = &self.def.name;
+    let (builder_methods, other_methods): (Vec<_>, Vec<_>) = self
+      .def
       .methods
       .iter()
       .partition(|m| matches!(m.kind, StructMethodKind::Builder { .. }));
@@ -128,7 +166,7 @@ impl<'a> StructGenerator<'a> {
     let mut result = quote! {};
 
     if !builder_methods.is_empty() {
-      let methods: Vec<TokenStream> = builder_methods.iter().map(|m| self.generate_method(m)).collect();
+      let methods: Vec<TokenStream> = builder_methods.iter().map(|m| self.method(m)).collect();
       result = quote! {
         #result
         #[bon::bon]
@@ -139,7 +177,7 @@ impl<'a> StructGenerator<'a> {
     }
 
     if !other_methods.is_empty() {
-      let methods: Vec<TokenStream> = other_methods.iter().map(|m| self.generate_method(m)).collect();
+      let methods: Vec<TokenStream> = other_methods.iter().map(|m| self.method(m)).collect();
       result = quote! {
         #result
         impl #name {
@@ -151,348 +189,474 @@ impl<'a> StructGenerator<'a> {
     result
   }
 
-  fn generate_method(&self, method: &StructMethod) -> TokenStream {
+  fn method(&self, method: &StructMethod) -> TokenStream {
     match &method.kind {
       StructMethodKind::ParseResponse {
         response_enum,
         variants,
-      } => generate_parse_response_method(self.visibility, &method.name, &method.docs, response_enum, variants),
+      } => parse_response::Generator::new(response_enum, variants, self.vis, &method.name, &method.docs).emit(),
       StructMethodKind::Builder { fields, nested_structs } => {
-        generate_builder_method(self.visibility, &method.docs, fields, nested_structs)
+        builder::Generator::new(fields, nested_structs, self.vis, &method.docs).emit()
       }
     }
   }
 }
 
-fn generate_parse_response_method(
-  vis: Visibility,
-  method_name: impl ToTokens,
-  docs: impl ToTokens,
-  response_enum: &EnumToken,
-  variants: &[ResponseVariant],
-) -> TokenStream {
-  let vis = vis.to_tokens();
+mod parse_response {
+  use super::*;
 
-  let (defaults, specifics) = partition_variants(variants);
-  let grouped_specifics = group_by_status_code(&specifics);
-
-  let status_checks: Vec<TokenStream> = grouped_specifics
-    .iter()
-    .map(|(code, variants)| generate_status_code_block(response_enum, *code, variants))
-    .collect();
-
-  let fallback = generate_fallback_block(response_enum, defaults.first());
-  let status_decl = if status_checks.is_empty() {
-    quote! {}
-  } else {
-    quote! { let status = req.status(); }
-  };
-
-  quote! {
-    #docs
-    #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
-      #status_decl
-      #(#status_checks)*
-      #fallback
-    }
-  }
-}
-
-fn partition_variants(variants: &[ResponseVariant]) -> (Vec<&ResponseVariant>, Vec<&ResponseVariant>) {
-  variants.iter().partition(|v| v.status_code.is_default())
-}
-
-fn group_by_status_code<'b>(variants: &[&'b ResponseVariant]) -> IndexMap<StatusCodeToken, Vec<&'b ResponseVariant>> {
-  let mut grouped: IndexMap<StatusCodeToken, Vec<&'b ResponseVariant>> = IndexMap::new();
-  for variant in variants {
-    grouped.entry(variant.status_code).or_default().push(variant);
-  }
-  grouped
-}
-
-fn generate_status_code_block(
-  response_enum: &EnumToken,
-  status_code: StatusCodeToken,
-  variants: &[&ResponseVariant],
-) -> TokenStream {
-  let condition = status_code_condition(status_code);
-  let body = generate_dispatch_body(response_enum, variants);
-
-  quote! {
-    if #condition {
-      #body
-    }
-  }
-}
-
-fn generate_dispatch_body(response_enum: &EnumToken, variants: &[&ResponseVariant]) -> TokenStream {
-  if variants.len() == 1 {
-    let variant = variants[0];
-    let distinct_categories: BTreeSet<_> = variant.media_types.iter().map(|m| m.category).collect();
-    if distinct_categories.len() <= 1 {
-      return generate_single_variant_logic(response_enum, variant);
-    }
+  pub(super) struct Generator<'a> {
+    response_enum: &'a EnumToken,
+    variants: &'a [ResponseVariant],
+    vis: &'a TokenStream,
+    method_name: &'a dyn ToTokens,
+    docs: &'a dyn ToTokens,
   }
 
-  generate_content_type_dispatch(response_enum, variants)
-}
-
-fn generate_content_type_dispatch(response_enum: &EnumToken, variants: &[&ResponseVariant]) -> TokenStream {
-  let content_type_header = quote! {
-    let content_type_str = req.headers()
-      .get(reqwest::header::CONTENT_TYPE)
-      .and_then(|v| v.to_str().ok())
-      .unwrap_or("application/json");
-  };
-
-  let mut cases = Vec::new();
-  for variant in variants {
-    if variant.media_types.is_empty() {
-      cases.push((ResponseMediaType::primary_category(&[]), *variant));
-    } else {
-      for media_type in &variant.media_types {
-        cases.push((media_type.category, *variant));
+  impl<'a> Generator<'a> {
+    pub(super) fn new(
+      response_enum: &'a EnumToken,
+      variants: &'a [ResponseVariant],
+      vis: &'a TokenStream,
+      method_name: &'a impl ToTokens,
+      docs: &'a impl ToTokens,
+    ) -> Self {
+      Self {
+        response_enum,
+        variants,
+        vis,
+        method_name,
+        docs,
       }
     }
-  }
 
-  let (streams, others): (Vec<_>, Vec<_>) = cases
-    .into_iter()
-    .partition(|(cat, _)| *cat == ContentCategory::EventStream);
+    pub(super) fn emit(&self) -> TokenStream {
+      let vis = self.vis;
+      let method_name = self.method_name;
+      let docs = self.docs;
+      let response_enum = self.response_enum;
 
-  let stream_checks: Vec<TokenStream> = streams
-    .iter()
-    .map(|(cat, v)| {
-      let block = generate_single_variant_logic_for_category(response_enum, v, *cat);
-      quote! {
-         if content_type_str.contains("event-stream") {
-           #block
-         }
-      }
-    })
-    .collect();
+      let (defaults, specifics) = self.partition();
+      let grouped_specifics = group_by_status(&specifics);
 
-  let other_checks: Vec<TokenStream> = others
-    .iter()
-    .map(|(cat, v)| {
-      let check_expr = content_type_check_expr(*cat);
-      let block = generate_single_variant_logic_for_category(response_enum, v, *cat);
-      quote! {
-        if #check_expr {
-           #block
-        }
-      }
-    })
-    .collect();
-
-  quote! {
-    #content_type_header
-    #(#stream_checks)*
-    #(#other_checks)*
-  }
-}
-
-fn generate_single_variant_logic(response_enum: &EnumToken, variant: &ResponseVariant) -> TokenStream {
-  let category = ResponseMediaType::primary_category(&variant.media_types);
-  generate_single_variant_logic_for_category(response_enum, variant, category)
-}
-
-fn generate_single_variant_logic_for_category(
-  response_enum: &EnumToken,
-  variant: &ResponseVariant,
-  category: ContentCategory,
-) -> TokenStream {
-  let variant_name = &variant.variant_name;
-  let schema_type = variant.schema_type.as_ref();
-
-  match schema_type {
-    Some(ty) => {
-      let extraction = generate_data_extraction(ty, category);
-      quote! {
-        let data = #extraction;
-        return Ok(#response_enum::#variant_name(data));
-      }
-    }
-    None => {
-      quote! {
-        let _ = req.bytes().await?;
-        return Ok(#response_enum::#variant_name);
-      }
-    }
-  }
-}
-
-fn generate_fallback_block(response_enum: &EnumToken, default_variant: Option<&&ResponseVariant>) -> TokenStream {
-  if let Some(variant) = default_variant {
-    generate_single_variant_logic(response_enum, variant)
-  } else {
-    let unknown_variant = EnumVariantToken::from("Unknown");
-    quote! {
-      let _ = req.bytes().await?;
-      Ok(#response_enum::#unknown_variant)
-    }
-  }
-}
-
-fn status_code_condition(status_code: StatusCodeToken) -> TokenStream {
-  match status_code {
-    code if code.is_success() => quote! { status.is_success() },
-    code if code.is_default() => quote! { true },
-    StatusCodeToken::Informational1XX => quote! { status.is_informational() },
-    StatusCodeToken::Redirection3XX => quote! { status.is_redirection() },
-    StatusCodeToken::ClientError4XX => quote! { status.is_client_error() },
-    StatusCodeToken::ServerError5XX => quote! { status.is_server_error() },
-    other => other
-      .code()
-      .map_or_else(|| quote! { false }, |code| quote! { status.as_u16() == #code }),
-  }
-}
-
-fn content_type_check_expr(category: ContentCategory) -> TokenStream {
-  match category {
-    ContentCategory::Json => quote! { content_type_str.contains("json") },
-    ContentCategory::Xml => quote! { content_type_str.contains("xml") },
-    ContentCategory::Text => quote! { content_type_str.starts_with("text/") && !content_type_str.contains("xml") },
-    ContentCategory::Binary => {
-      quote! { content_type_str.starts_with("application/octet-stream") || content_type_str.starts_with("image/") || content_type_str.starts_with("audio/") || content_type_str.starts_with("video/") }
-    }
-    ContentCategory::EventStream => quote! { content_type_str.contains("event-stream") },
-    ContentCategory::FormUrlEncoded => quote! { content_type_str.contains("x-www-form-urlencoded") },
-    ContentCategory::Multipart => quote! { content_type_str.contains("multipart") },
-  }
-}
-
-fn generate_data_extraction(schema_type: &TypeRef, category: ContentCategory) -> TokenStream {
-  match category {
-    ContentCategory::Text => {
-      if schema_type.is_string_like() {
-        quote! { req.text().await? }
-      } else if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
-        quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
-      } else {
-        quote! { req.text().await?.parse::<#schema_type>()? }
-      }
-    }
-    ContentCategory::Binary => {
-      if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
-        quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
-      } else {
-        quote! { req.bytes().await?.to_vec() }
-      }
-    }
-    ContentCategory::EventStream => {
-      quote! { <#schema_type>::from_response(req) }
-    }
-    ContentCategory::Xml => {
-      quote! { oas3_gen_support::Diagnostics::<#schema_type>::xml_with_diagnostics(req).await? }
-    }
-    _ => quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? },
-  }
-}
-
-fn generate_builder_method(
-  vis: Visibility,
-  docs: impl ToTokens,
-  fields: &[BuilderField],
-  nested_structs: &[BuilderNestedStruct],
-) -> TokenStream {
-  let vis = vis.to_tokens();
-
-  let params: Vec<TokenStream> = fields
-    .iter()
-    .map(|f| {
-      let name = &f.name;
-      let ty = &f.rust_type;
-      quote! { #name: #ty }
-    })
-    .collect();
-
-  let validations = generate_builder_validations(fields);
-  let struct_construction = generate_struct_construction(fields, nested_structs);
-
-  quote! {
-    #docs
-    #[builder]
-    #vis fn new(#(#params),*) -> Result<Self, anyhow::Error> {
-      #validations
-      let request = #struct_construction;
-      request.validate()?;
-      Ok(request)
-    }
-  }
-}
-
-fn generate_builder_validations(fields: &[BuilderField]) -> TokenStream {
-  let checks: Vec<TokenStream> = fields
-    .iter()
-    .filter_map(|f| {
-      if !f.required {
-        return None;
-      }
-
-      let has_min_length = f
-        .validation_attrs
+      let status_checks: Vec<TokenStream> = grouped_specifics
         .iter()
-        .any(|attr| matches!(attr, ValidationAttribute::Length { min: Some(_), .. }));
+        .map(|(code, variants)| self.status_block(*code, variants))
+        .collect();
 
-      if !has_min_length {
-        return None;
-      }
-
-      if !f.rust_type.is_string_like() {
-        return None;
-      }
-
-      let name = &f.name;
-      let name_str = f.name.to_string();
-
-      Some(quote! {
-        if #name.is_empty() {
-          return Err(anyhow::anyhow!("Empty {} is disallowed", #name_str));
-        }
-      })
-    })
-    .collect();
-
-  quote! { #(#checks)* }
-}
-
-fn generate_struct_construction(fields: &[BuilderField], nested_structs: &[BuilderNestedStruct]) -> TokenStream {
-  let nested_map: BTreeMap<&str, &BuilderNestedStruct> =
-    nested_structs.iter().map(|ns| (ns.field_name.as_str(), ns)).collect();
-
-  let field_assignments: Vec<TokenStream> = if nested_structs.is_empty() {
-    fields.iter().map(|f| f.name.to_token_stream()).collect()
-  } else {
-    let mut processed_nested: BTreeSet<&str> = BTreeSet::new();
-    let mut assignments = Vec::new();
-
-    for field in fields {
-      let nested_field_name = field.nested_struct.as_str();
-
-      if let Some(nested) = nested_map.get(nested_field_name) {
-        if processed_nested.insert(nested_field_name) {
-          let field_name = &nested.field_name;
-          let struct_name = &nested.struct_name;
-          let inner_fields: Vec<TokenStream> = nested
-            .field_names
-            .iter()
-            .map(quote::ToTokens::to_token_stream)
-            .collect();
-
-          assignments.push(quote! {
-            #field_name: #struct_name { #(#inner_fields),* }
-          });
-        }
+      let fallback = self.fallback(defaults.first().copied());
+      let status_decl = if status_checks.is_empty() {
+        quote! {}
       } else {
-        assignments.push(field.name.to_token_stream());
+        quote! { let status = req.status(); }
+      };
+
+      quote! {
+        #docs
+        #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
+          #status_decl
+          #(#status_checks)*
+          #fallback
+        }
       }
     }
 
-    assignments
-  };
+    fn partition(&self) -> (Vec<&ResponseVariant>, Vec<&ResponseVariant>) {
+      self.variants.iter().partition(|v| v.status_code.is_default())
+    }
 
-  quote! {
-    Self { #(#field_assignments),* }
+    fn status_block(&self, code: StatusCodeToken, variants: &[&ResponseVariant]) -> TokenStream {
+      let cond = condition(code);
+      let body = self.dispatch(variants);
+
+      quote! {
+        if #cond {
+          #body
+        }
+      }
+    }
+
+    fn dispatch(&self, variants: &[&ResponseVariant]) -> TokenStream {
+      if variants.len() == 1 {
+        let variant = variants[0];
+        let distinct_categories: BTreeSet<_> = variant.media_types.iter().map(|m| m.category).collect();
+        if distinct_categories.len() <= 1 {
+          return self.variant(variant, None);
+        }
+      }
+
+      self.content_dispatch(variants)
+    }
+
+    fn content_dispatch(&self, variants: &[&ResponseVariant]) -> TokenStream {
+      let content_type_header = quote! {
+        let content_type_str = req.headers()
+          .get(reqwest::header::CONTENT_TYPE)
+          .and_then(|v| v.to_str().ok())
+          .unwrap_or("application/json");
+      };
+
+      let mut cases = Vec::new();
+      for variant in variants {
+        if variant.media_types.is_empty() {
+          cases.push((ResponseMediaType::primary_category(&[]), *variant));
+        } else {
+          for media_type in &variant.media_types {
+            cases.push((media_type.category, *variant));
+          }
+        }
+      }
+
+      let (streams, others): (Vec<_>, Vec<_>) = cases
+        .into_iter()
+        .partition(|(cat, _)| *cat == ContentCategory::EventStream);
+
+      let stream_checks: Vec<TokenStream> = streams
+        .iter()
+        .map(|(cat, v)| {
+          let block = self.variant(v, Some(*cat));
+          quote! {
+            if content_type_str.contains("event-stream") {
+              #block
+            }
+          }
+        })
+        .collect();
+
+      let other_checks: Vec<TokenStream> = others
+        .iter()
+        .map(|(cat, v)| {
+          let check = content_check(*cat);
+          let block = self.variant(v, Some(*cat));
+          quote! {
+            if #check {
+              #block
+            }
+          }
+        })
+        .collect();
+
+      quote! {
+        #content_type_header
+        #(#stream_checks)*
+        #(#other_checks)*
+      }
+    }
+
+    fn variant(&self, variant: &ResponseVariant, category: Option<ContentCategory>) -> TokenStream {
+      let cat = category.unwrap_or_else(|| ResponseMediaType::primary_category(&variant.media_types));
+      let response_enum = self.response_enum;
+      let variant_name = &variant.variant_name;
+
+      match variant.schema_type.as_ref() {
+        Some(ty) => {
+          let data = extraction(ty, cat);
+          quote! {
+            let data = #data;
+            return Ok(#response_enum::#variant_name(data));
+          }
+        }
+        None => {
+          quote! {
+            let _ = req.bytes().await?;
+            return Ok(#response_enum::#variant_name);
+          }
+        }
+      }
+    }
+
+    fn fallback(&self, default: Option<&ResponseVariant>) -> TokenStream {
+      if let Some(variant) = default {
+        self.variant(variant, None)
+      } else {
+        let response_enum = self.response_enum;
+        let unknown_variant = EnumVariantToken::from("Unknown");
+        quote! {
+          let _ = req.bytes().await?;
+          Ok(#response_enum::#unknown_variant)
+        }
+      }
+    }
+  }
+
+  fn group_by_status<'b>(variants: &[&'b ResponseVariant]) -> IndexMap<StatusCodeToken, Vec<&'b ResponseVariant>> {
+    let mut grouped: IndexMap<StatusCodeToken, Vec<&'b ResponseVariant>> = IndexMap::new();
+    for variant in variants {
+      grouped.entry(variant.status_code).or_default().push(variant);
+    }
+    grouped
+  }
+
+  fn condition(code: StatusCodeToken) -> TokenStream {
+    match code {
+      c if c.is_success() => quote! { status.is_success() },
+      c if c.is_default() => quote! { true },
+      StatusCodeToken::Informational1XX => quote! { status.is_informational() },
+      StatusCodeToken::Redirection3XX => quote! { status.is_redirection() },
+      StatusCodeToken::ClientError4XX => quote! { status.is_client_error() },
+      StatusCodeToken::ServerError5XX => quote! { status.is_server_error() },
+      other => other
+        .code()
+        .map_or_else(|| quote! { false }, |code| quote! { status.as_u16() == #code }),
+    }
+  }
+
+  fn content_check(category: ContentCategory) -> TokenStream {
+    match category {
+      ContentCategory::Json => quote! { content_type_str.contains("json") },
+      ContentCategory::Xml => quote! { content_type_str.contains("xml") },
+      ContentCategory::Text => quote! { content_type_str.starts_with("text/") && !content_type_str.contains("xml") },
+      ContentCategory::Binary => {
+        quote! { content_type_str.starts_with("application/octet-stream") || content_type_str.starts_with("image/") || content_type_str.starts_with("audio/") || content_type_str.starts_with("video/") }
+      }
+      ContentCategory::EventStream => quote! { content_type_str.contains("event-stream") },
+      ContentCategory::FormUrlEncoded => quote! { content_type_str.contains("x-www-form-urlencoded") },
+      ContentCategory::Multipart => quote! { content_type_str.contains("multipart") },
+    }
+  }
+
+  fn extraction(schema_type: &TypeRef, category: ContentCategory) -> TokenStream {
+    match category {
+      ContentCategory::Text => {
+        if schema_type.is_string_like() {
+          quote! { req.text().await? }
+        } else if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
+          quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
+        } else {
+          quote! { req.text().await?.parse::<#schema_type>()? }
+        }
+      }
+      ContentCategory::Binary => {
+        if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
+          quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
+        } else {
+          quote! { req.bytes().await?.to_vec() }
+        }
+      }
+      ContentCategory::EventStream => {
+        quote! { <#schema_type>::from_response(req) }
+      }
+      ContentCategory::Xml => {
+        quote! { oas3_gen_support::Diagnostics::<#schema_type>::xml_with_diagnostics(req).await? }
+      }
+      _ => quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? },
+    }
+  }
+}
+
+mod builder {
+  use super::*;
+
+  pub(super) struct Generator<'a> {
+    fields: &'a [BuilderField],
+    nested_structs: &'a [BuilderNestedStruct],
+    vis: &'a TokenStream,
+    docs: &'a dyn ToTokens,
+  }
+
+  impl<'a> Generator<'a> {
+    pub(super) fn new(
+      fields: &'a [BuilderField],
+      nested_structs: &'a [BuilderNestedStruct],
+      vis: &'a TokenStream,
+      docs: &'a impl ToTokens,
+    ) -> Self {
+      Self {
+        fields,
+        nested_structs,
+        vis,
+        docs,
+      }
+    }
+
+    pub(super) fn emit(&self) -> TokenStream {
+      let vis = self.vis;
+      let docs = self.docs;
+
+      let params: Vec<TokenStream> = self
+        .fields
+        .iter()
+        .map(|f| {
+          let name = &f.name;
+          let ty = &f.rust_type;
+          quote! { #name: #ty }
+        })
+        .collect();
+
+      let construction = self.construction();
+
+      quote! {
+        #docs
+        #[builder]
+        #vis fn new(#(#params),*) -> Result<Self, anyhow::Error> {
+          let request = #construction;
+          request.validate()?;
+          Ok(request)
+        }
+      }
+    }
+
+    fn construction(&self) -> TokenStream {
+      let nested_map: BTreeMap<&str, &BuilderNestedStruct> = self
+        .nested_structs
+        .iter()
+        .map(|ns| (ns.field_name.as_str(), ns))
+        .collect();
+
+      let mut processed_nested: BTreeSet<&str> = BTreeSet::new();
+      let mut assignments = Vec::new();
+
+      for field in self.fields {
+        match &field.owner_field {
+          Some(owner) => {
+            let owner_name = owner.as_str();
+            if let Some(nested) = nested_map.get(owner_name)
+              && processed_nested.insert(owner_name)
+            {
+              let field_name = &nested.field_name;
+              let struct_name = &nested.struct_name;
+              let inner_fields: Vec<TokenStream> = nested
+                .field_names
+                .iter()
+                .map(quote::ToTokens::to_token_stream)
+                .collect();
+
+              assignments.push(quote! {
+                #field_name: #struct_name { #(#inner_fields),* }
+              });
+            }
+          }
+          None => {
+            assignments.push(field.name.to_token_stream());
+          }
+        }
+      }
+
+      quote! {
+        Self { #(#assignments),* }
+      }
+    }
+  }
+}
+
+pub(crate) mod header_map {
+  use super::*;
+  use crate::generator::ast::{FieldDef, FieldNameToken, StructDef, StructKind, TypeRef, tokens::ConstToken};
+
+  pub(crate) struct HeaderMapConversionGenerator<'a> {
+    def: &'a StructDef,
+  }
+
+  impl<'a> HeaderMapConversionGenerator<'a> {
+    pub(crate) fn new(def: &'a StructDef) -> Self {
+      Self { def }
+    }
+
+    pub(crate) fn should_generate(&self) -> bool {
+      matches!(self.def.kind, StructKind::HeaderParams) && !self.def.fields.is_empty()
+    }
+
+    pub(crate) fn emit(&self) -> TokenStream {
+      if !self.should_generate() {
+        return quote! {};
+      }
+
+      let struct_name = &self.def.name;
+      let field_count = self.def.fields.len();
+      let insertions = self.generate_field_insertions();
+
+      quote! {
+        impl TryFrom<&#struct_name> for http::HeaderMap {
+          type Error = http::header::InvalidHeaderValue;
+
+          fn try_from(headers: &#struct_name) -> Result<Self, Self::Error> {
+            let mut map = http::HeaderMap::with_capacity(#field_count);
+            #insertions
+            Ok(map)
+          }
+        }
+
+        impl TryFrom<#struct_name> for http::HeaderMap {
+          type Error = http::header::InvalidHeaderValue;
+
+          fn try_from(headers: #struct_name) -> Result<Self, Self::Error> {
+            http::HeaderMap::try_from(&headers)
+          }
+        }
+      }
+    }
+
+    fn generate_field_insertions(&self) -> TokenStream {
+      let insertions: Vec<TokenStream> = self
+        .def
+        .fields
+        .iter()
+        .map(|field| self.generate_field_insertion(field))
+        .collect();
+
+      quote! { #(#insertions)* }
+    }
+
+    fn generate_field_insertion(&self, field: &FieldDef) -> TokenStream {
+      let field_name = &field.name;
+      let Some(original_name) = &field.original_name else {
+        return quote! {};
+      };
+
+      let header_const = ConstToken::from_raw(original_name);
+      let is_required = field.is_required();
+
+      let conversion = Self::value_conversion(&field.rust_type, field_name, is_required);
+
+      if is_required {
+        quote! {
+          #conversion
+          map.insert(#header_const, header_value);
+        }
+      } else {
+        quote! {
+          if let Some(value) = &headers.#field_name {
+            #conversion
+            map.insert(#header_const, header_value);
+          }
+        }
+      }
+    }
+
+    fn value_conversion(ty: &TypeRef, field_name: &FieldNameToken, required: bool) -> TokenStream {
+      if ty.is_string_like() {
+        if required {
+          quote! {
+            let header_value = http::HeaderValue::try_from(&headers.#field_name)?;
+          }
+        } else {
+          quote! {
+            let header_value = http::HeaderValue::try_from(value)?;
+          }
+        }
+      } else if ty.is_primitive_type() {
+        if required {
+          quote! {
+            let header_value = http::HeaderValue::try_from(headers.#field_name.to_string())?;
+          }
+        } else {
+          quote! {
+            let header_value = http::HeaderValue::try_from(value.to_string())?;
+          }
+        }
+      } else if required {
+        quote! {
+          let header_value = http::HeaderValue::try_from(
+            serde_plain::to_string(&headers.#field_name).map_err(|_| http::header::InvalidHeaderValue::new())?
+          )?;
+        }
+      } else {
+        quote! {
+          let header_value = http::HeaderValue::try_from(
+            serde_plain::to_string(value).map_err(|_| http::header::InvalidHeaderValue::new())?
+          )?;
+        }
+      }
+    }
   }
 }

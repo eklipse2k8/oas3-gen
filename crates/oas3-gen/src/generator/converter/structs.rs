@@ -95,7 +95,7 @@ impl StructConverter {
         resolved.result,
         is_required,
         discriminator_mapping,
-      )?;
+      );
       fields.push(field);
 
       let mut generated = resolved.inline_types;
@@ -275,13 +275,16 @@ impl StructConverter {
             "std::collections::HashMap<String, {}>",
             value_type.to_rust_type()
           ));
-          additional_field = Some(FieldDef {
-            name: FieldNameToken::new("additional_properties"),
-            docs: Documentation::from_lines(["Additional properties not defined in the schema."]),
-            rust_type: map_type,
-            serde_attrs: vec![SerdeAttribute::Flatten],
-            ..Default::default()
-          });
+          additional_field = Some(
+            FieldDef::builder()
+              .name("additional_properties")
+              .docs(Documentation::from_lines([
+                "Additional properties not defined in the schema.",
+              ]))
+              .rust_type(map_type)
+              .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))
+              .build(),
+          );
         }
         Schema::Boolean(_) => {}
       }

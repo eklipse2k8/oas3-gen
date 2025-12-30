@@ -2,7 +2,7 @@ use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::generator::{
-  ast::{RustPrimitive, TypeRef, ValidationAttribute},
+  ast::{Documentation, RustPrimitive, TypeRef, ValidationAttribute},
   converter::{SchemaExt, fields::FieldConverter},
 };
 
@@ -48,14 +48,20 @@ fn test_is_single_type() {
 #[test]
 fn test_extract_docs() {
   let schema = ObjectSchema::default();
-  let docs = FieldConverter::extract_docs(&schema);
+  let docs = {
+    let schema: &ObjectSchema = &schema;
+    Documentation::from_optional(schema.description.as_ref())
+  };
   assert!(docs.is_empty());
 
   let schema = ObjectSchema {
     description: Some("Test description\nSecond line".to_string()),
     ..Default::default()
   };
-  let docs = FieldConverter::extract_docs(&schema);
+  let docs = {
+    let schema: &ObjectSchema = &schema;
+    Documentation::from_optional(schema.description.as_ref())
+  };
   assert_eq!(docs.lines().len(), 2);
   assert_eq!(docs.lines()[0], "Test description");
   assert_eq!(docs.lines()[1], "Second line");
@@ -111,7 +117,10 @@ fn test_extract_all_validation_combined() {
   let type_ref = TypeRef::new(RustPrimitive::String);
 
   let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
-  let docs = FieldConverter::extract_docs(&schema);
+  let docs = {
+    let schema: &ObjectSchema = &schema;
+    Documentation::from_optional(schema.description.as_ref())
+  };
   let default_value = FieldConverter::extract_default_value(&schema);
 
   assert!(!docs.is_empty());

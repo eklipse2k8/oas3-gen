@@ -741,9 +741,7 @@ impl UnionConverter {
 
       match seen_names.get(&normalized.name) {
         Some(&existing_idx) if strategy == CollisionStrategy::Deduplicate => {
-          variants[existing_idx]
-            .serde_attrs
-            .push(SerdeAttribute::Alias(normalized.rename_value));
+          variants[existing_idx].add_alias(normalized.rename_value);
         }
         Some(_) => {
           let unique_name = format!("{}{i}", normalized.name);

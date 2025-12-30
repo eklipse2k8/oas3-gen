@@ -5,7 +5,7 @@ use quote::{ToTokens, quote};
 ///
 /// These attributes control serialization and deserialization behavior in generated Rust code.
 /// Each variant maps directly to a serde attribute that will be rendered in the output.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SerdeAttribute {
   Alias(String),
   Default,

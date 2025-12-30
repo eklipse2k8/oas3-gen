@@ -14,11 +14,12 @@ use crate::generator::{
 fn create_test_struct(name: &str, field_type: RustPrimitive) -> RustType {
   RustType::Struct(StructDef {
     name: StructToken::new(name),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("field"),
-      rust_type: TypeRef::new(field_type),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("field"))
+        .rust_type(TypeRef::new(field_type))
+        .build(),
+    ],
     kind: StructKind::Schema,
     ..Default::default()
   })
@@ -128,11 +129,12 @@ fn test_build_error_schema_set_expands_nested_struct_fields() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("RootError"),
-      fields: vec![FieldDef {
-        name: FieldNameToken::new("nested"),
-        rust_type: TypeRef::new(RustPrimitive::Custom("NestedError".into())),
-        ..Default::default()
-      }],
+      fields: vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("nested"))
+          .rust_type(TypeRef::new(RustPrimitive::Custom("NestedError".into())))
+          .build(),
+      ],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -186,21 +188,23 @@ fn test_build_error_schema_set_handles_deep_nesting() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("Level1"),
-      fields: vec![FieldDef {
-        name: FieldNameToken::new("nested"),
-        rust_type: TypeRef::new(RustPrimitive::Custom("Level2".into())),
-        ..Default::default()
-      }],
+      fields: vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("nested"))
+          .rust_type(TypeRef::new(RustPrimitive::Custom("Level2".into())))
+          .build(),
+      ],
       kind: StructKind::Schema,
       ..Default::default()
     }),
     RustType::Struct(StructDef {
       name: StructToken::new("Level2"),
-      fields: vec![FieldDef {
-        name: FieldNameToken::new("nested"),
-        rust_type: TypeRef::new(RustPrimitive::Custom("Level3".into())),
-        ..Default::default()
-      }],
+      fields: vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("nested"))
+          .rust_type(TypeRef::new(RustPrimitive::Custom("Level3".into())))
+          .build(),
+      ],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -224,11 +228,12 @@ fn test_build_error_schema_set_stops_at_success_types() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("ErrorType"),
-      fields: vec![FieldDef {
-        name: FieldNameToken::new("nested"),
-        rust_type: TypeRef::new(RustPrimitive::Custom("SuccessType".into())),
-        ..Default::default()
-      }],
+      fields: vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("nested"))
+          .rust_type(TypeRef::new(RustPrimitive::Custom("SuccessType".into())))
+          .build(),
+      ],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -260,21 +265,23 @@ fn test_build_error_schema_set_handles_circular_references() {
   let types = vec![
     RustType::Struct(StructDef {
       name: StructToken::new("CircularA"),
-      fields: vec![FieldDef {
-        name: FieldNameToken::new("b"),
-        rust_type: TypeRef::new(RustPrimitive::Custom("CircularB".into())),
-        ..Default::default()
-      }],
+      fields: vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("b"))
+          .rust_type(TypeRef::new(RustPrimitive::Custom("CircularB".into())))
+          .build(),
+      ],
       kind: StructKind::Schema,
       ..Default::default()
     }),
     RustType::Struct(StructDef {
       name: StructToken::new("CircularB"),
-      fields: vec![FieldDef {
-        name: FieldNameToken::new("a"),
-        rust_type: TypeRef::new(RustPrimitive::Custom("CircularA".into())),
-        ..Default::default()
-      }],
+      fields: vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("a"))
+          .rust_type(TypeRef::new(RustPrimitive::Custom("CircularA".into())))
+          .build(),
+      ],
       kind: StructKind::Schema,
       ..Default::default()
     }),
@@ -297,16 +304,14 @@ fn test_build_error_schema_set_ignores_primitive_fields() {
   let types = vec![RustType::Struct(StructDef {
     name: StructToken::new("ErrorWithPrimitives"),
     fields: vec![
-      FieldDef {
-        name: FieldNameToken::new("string_field"),
-        rust_type: TypeRef::new(RustPrimitive::String),
-        ..Default::default()
-      },
-      FieldDef {
-        name: FieldNameToken::new("int_field"),
-        rust_type: TypeRef::new(RustPrimitive::I64),
-        ..Default::default()
-      },
+      FieldDef::builder()
+        .name(FieldNameToken::new("string_field"))
+        .rust_type(TypeRef::new(RustPrimitive::String))
+        .build(),
+      FieldDef::builder()
+        .name(FieldNameToken::new("int_field"))
+        .rust_type(TypeRef::new(RustPrimitive::I64))
+        .build(),
     ],
     kind: StructKind::Schema,
     ..Default::default()

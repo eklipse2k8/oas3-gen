@@ -98,7 +98,8 @@ impl SwaggerPetstoreClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("pets")
       .push(&request.path.pet_id.clone());
-    let req_builder = self.client.get(url);
+    let mut req_builder = self.client.get(url);
+    req_builder = req_builder.headers(http::HeaderMap::try_from(&request.header).context("building request headers")?);
     let response = req_builder.send().await?;
     ShowPetByIdRequest::parse_response(response).await
   }

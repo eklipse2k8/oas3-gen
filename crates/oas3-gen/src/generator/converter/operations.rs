@@ -12,17 +12,17 @@ use serde_json::Value;
 use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, fields::FieldConverter, responses};
 use crate::generator::{
   ast::{
-    BuilderField, BuilderNestedStruct, ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken,
-    MethodNameToken, OperationBody, OperationInfo, OperationKind, OperationParameter, OuterAttr, ParameterLocation,
-    ParsedPath, ResponseEnumDef, ResponseMediaType, RustType, SerdeAsFieldAttr, SerdeAsSeparator, SerdeAttribute,
-    StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+    BuilderField, BuilderNestedStruct, ContentCategory, Documentation, EnumToken, FieldCollection as _, FieldDef,
+    FieldNameToken, OperationBody, OperationInfo, OperationKind, OuterAttr, ParameterLocation, ParsedPath,
+    ResponseEnumDef, ResponseMediaType, RustType, StructDef, StructKind, StructMethod, StructMethodKind, StructToken,
+    TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{
       BODY_FIELD_NAME, HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX,
       QUERY_PARAMS_FIELD, QUERY_PARAMS_SUFFIX, REQUEST_BODY_SUFFIX,
     },
-    identifiers::{to_rust_field_name, to_rust_type_name},
+    identifiers::to_rust_type_name,
     inference as naming,
     operations::{generate_unique_request_name, generate_unique_response_name},
     responses as naming_responses,
@@ -65,15 +65,7 @@ struct RequestBodyOutput {
 
 struct ConvertedParameter {
   field: FieldDef,
-  operation_param: OperationParameter,
-  serde_meta: ParameterSerdeMeta,
   inline_types: Vec<RustType>,
-}
-
-struct ParameterSerdeMeta {
-  original_name: String,
-  explode: bool,
-  style: Option<ParameterStyle>,
 }
 
 struct ResolvedParameterType {
@@ -85,7 +77,6 @@ struct ResolvedParameterType {
 
 struct ParameterGroup {
   field: FieldDef,
-  serde_meta: ParameterSerdeMeta,
 }
 
 struct ParametersByLocation {
@@ -108,7 +99,7 @@ struct GeneratedRequestStructs {
   main_struct: StructDef,
   nested_structs: Vec<StructDef>,
   inline_types: Vec<RustType>,
-  parameter_info: Vec<OperationParameter>,
+  parameter_fields: Vec<FieldDef>,
   warnings: Vec<String>,
 }
 
@@ -127,11 +118,11 @@ impl ParameterStructNames {
     }
   }
 
-  fn parent_for_location(&self, location: ParameterIn) -> &str {
+  fn parent_for_location(&self, location: ParameterLocation) -> &str {
     match location {
-      ParameterIn::Path => &self.path,
-      ParameterIn::Query | ParameterIn::Cookie => &self.query,
-      ParameterIn::Header => &self.header,
+      ParameterLocation::Path => &self.path,
+      ParameterLocation::Query | ParameterLocation::Cookie => &self.query,
+      ParameterLocation::Header => &self.header,
     }
   }
 }
@@ -191,7 +182,7 @@ impl<'a> OperationConverter<'a> {
     )?;
 
     warnings.extend(generated_structs.warnings.clone());
-    let parameter_metadata = generated_structs.parameter_info.clone();
+    let parameter_metadata = generated_structs.parameter_fields.clone();
 
     let request_type_name = Self::emit_request_types(&mut types, generated_structs, response_enum_def.is_some(), usage);
 
@@ -199,34 +190,26 @@ impl<'a> OperationConverter<'a> {
       def.request_type.clone_from(&request_type_name);
     }
 
-    let response_enum = Self::emit_response_enum(&mut types, response_enum_def, usage);
-
     let response_metadata = self.extract_response_metadata(operation, usage);
 
-    let body_metadata = Self::extract_body_metadata(&body_info);
-
-    let final_operation_id = operation.operation_id.clone().unwrap_or(base_name);
-    let parsed_path = ParsedPath::parse(path, &parameter_metadata)?;
-
-    let operation_info = OperationInfo {
-      stable_id: stable_id.to_string(),
-      operation_id: final_operation_id,
-      method: method.clone(),
-      path: parsed_path,
-      path_template: path.to_string(),
-      kind,
-      summary: operation.summary.clone(),
-      description: operation.description.clone(),
-      request_type: request_type_name,
-      response_type: response_metadata.type_name,
-      response_enum,
-      response_media_types: response_metadata.media_types,
-      success_response_types: response_metadata.success_types,
-      error_response_types: response_metadata.error_types,
-      warnings,
-      parameters: parameter_metadata,
-      body: body_metadata,
-    };
+    let operation_info = OperationInfo::builder()
+      .stable_id(stable_id)
+      .operation_id(operation.operation_id.clone().unwrap_or(base_name))
+      .method(method.clone())
+      .path(ParsedPath::parse(path, &parameter_metadata)?)
+      .path_template(path)
+      .kind(kind)
+      .maybe_summary(operation.summary.clone())
+      .maybe_description(operation.description.clone())
+      .maybe_response_type(response_metadata.type_name)
+      .maybe_response_enum(Self::emit_response_enum(&mut types, response_enum_def, usage))
+      .response_media_types(response_metadata.media_types)
+      .success_response_types(response_metadata.success_types)
+      .error_response_types(response_metadata.error_types)
+      .warnings(warnings)
+      .parameters(parameter_metadata)
+      .maybe_body(Self::extract_body_metadata(&body_info))
+      .build();
 
     Ok(ConversionResult { types, operation_info })
   }
@@ -323,7 +306,7 @@ impl<'a> OperationConverter<'a> {
 
     let struct_names = ParameterStructNames::from_request_name(name);
 
-    let (params_by_location, all_parameter_info, param_inline_types) =
+    let (params_by_location, all_parameter_fields, param_inline_types) =
       self.collect_and_convert_parameters(path, operation, &struct_names, cache, &mut warnings)?;
 
     inline_types.extend(param_inline_types);
@@ -379,7 +362,7 @@ impl<'a> OperationConverter<'a> {
       main_struct,
       nested_structs,
       inline_types,
-      parameter_info: all_parameter_info,
+      parameter_fields: all_parameter_fields,
       warnings,
     })
   }
@@ -391,32 +374,30 @@ impl<'a> OperationConverter<'a> {
     struct_names: &ParameterStructNames,
     cache: &mut SharedSchemaCache,
     warnings: &mut Vec<String>,
-  ) -> anyhow::Result<(ParametersByLocation, Vec<OperationParameter>, Vec<RustType>)> {
+  ) -> anyhow::Result<(ParametersByLocation, Vec<FieldDef>, Vec<RustType>)> {
     let mut params_by_location = ParametersByLocation::new();
-    let mut all_parameter_info = vec![];
+    let mut all_parameter_fields = vec![];
     let mut inline_types = vec![];
 
     for param in self.collect_parameters(path, operation) {
-      let parent_struct_name = struct_names.parent_for_location(param.location);
+      let location: ParameterLocation = param.location.into();
+      let parent_struct_name = struct_names.parent_for_location(location);
 
-      let converted = self.convert_parameter(&param, parent_struct_name, cache, warnings)?;
-      all_parameter_info.push(converted.operation_param.clone());
+      let converted = self.convert_parameter(&param, location, parent_struct_name, cache, warnings)?;
+      all_parameter_fields.push(converted.field.clone());
       inline_types.extend(converted.inline_types);
 
-      let group = ParameterGroup {
-        field: converted.field,
-        serde_meta: converted.serde_meta,
-      };
+      let group = ParameterGroup { field: converted.field };
 
-      match param.location {
-        ParameterIn::Path => params_by_location.path.push(group),
-        ParameterIn::Query => params_by_location.query.push(group),
-        ParameterIn::Header => params_by_location.header.push(group),
-        ParameterIn::Cookie => {}
+      match location {
+        ParameterLocation::Path => params_by_location.path.push(group),
+        ParameterLocation::Query => params_by_location.query.push(group),
+        ParameterLocation::Header => params_by_location.header.push(group),
+        ParameterLocation::Cookie => {}
       }
     }
 
-    Ok((params_by_location, all_parameter_info, inline_types))
+    Ok((params_by_location, all_parameter_fields, inline_types))
   }
 
   fn add_path_params_struct(
@@ -431,18 +412,18 @@ impl<'a> OperationConverter<'a> {
 
     let fields: Vec<FieldDef> = params.path.iter().map(|g| g.field.clone()).collect();
 
-    let struct_def = StructDef {
-      name: StructToken::from_raw(&names.path),
-      fields,
-      kind: StructKind::PathParams,
-      ..Default::default()
-    };
+    let struct_def = StructDef::builder()
+      .name(&names.path)
+      .fields(fields)
+      .kind(StructKind::PathParams)
+      .build();
 
-    main_fields.push(FieldDef {
-      name: FieldNameToken::new(PATH_PARAMS_FIELD),
-      rust_type: TypeRef::new(struct_def.name.to_string()),
-      ..Default::default()
-    });
+    main_fields.push(
+      FieldDef::builder()
+        .name(FieldNameToken::new(PATH_PARAMS_FIELD))
+        .rust_type(TypeRef::new(struct_def.name.to_string()))
+        .build(),
+    );
 
     nested_structs.push(struct_def);
   }
@@ -457,28 +438,27 @@ impl<'a> OperationConverter<'a> {
       return;
     }
 
-    let fields: Vec<FieldDef> = params
-      .query
-      .iter()
-      .map(|g| Self::apply_query_serde_attributes(g.field.clone(), &g.serde_meta))
-      .collect();
+    let fields: Vec<FieldDef> = params.query.iter().map(|g| g.field.clone()).collect();
 
-    let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
-    let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
-
-    let struct_def = StructDef {
-      name: StructToken::from_raw(&names.query),
-      fields,
-      outer_attrs,
-      kind: StructKind::QueryParams,
-      ..Default::default()
+    let outer_attrs = if fields.has_serde_as() {
+      vec![OuterAttr::SerdeAs]
+    } else {
+      vec![]
     };
 
-    main_fields.push(FieldDef {
-      name: FieldNameToken::new(QUERY_PARAMS_FIELD),
-      rust_type: TypeRef::new(struct_def.name.to_string()),
-      ..Default::default()
-    });
+    let struct_def = StructDef::builder()
+      .name(&names.query)
+      .fields(fields)
+      .outer_attrs(outer_attrs)
+      .kind(StructKind::QueryParams)
+      .build();
+
+    main_fields.push(
+      FieldDef::builder()
+        .name(FieldNameToken::new(QUERY_PARAMS_FIELD))
+        .rust_type(TypeRef::new(struct_def.name.to_string()))
+        .build(),
+    );
 
     nested_structs.push(struct_def);
   }
@@ -495,42 +475,20 @@ impl<'a> OperationConverter<'a> {
 
     let fields: Vec<FieldDef> = params.header.iter().map(|g| g.field.clone()).collect();
 
-    let struct_def = StructDef {
-      name: StructToken::from_raw(&names.header),
-      fields,
-      kind: StructKind::HeaderParams,
-      ..Default::default()
-    };
+    let struct_def = StructDef::builder()
+      .name(&names.header)
+      .fields(fields)
+      .kind(StructKind::HeaderParams)
+      .build();
 
-    main_fields.push(FieldDef {
-      name: FieldNameToken::new(HEADER_PARAMS_FIELD),
-      rust_type: TypeRef::new(struct_def.name.to_string()),
-      ..Default::default()
-    });
+    main_fields.push(
+      FieldDef::builder()
+        .name(FieldNameToken::new(HEADER_PARAMS_FIELD))
+        .rust_type(TypeRef::new(struct_def.name.to_string()))
+        .build(),
+    );
 
     nested_structs.push(struct_def);
-  }
-
-  fn apply_query_serde_attributes(mut field: FieldDef, meta: &ParameterSerdeMeta) -> FieldDef {
-    if field.name.as_str() != meta.original_name {
-      field
-        .serde_attrs
-        .push(SerdeAttribute::Rename(meta.original_name.clone()));
-    }
-
-    if field.rust_type.is_array && !meta.explode {
-      let separator = match meta.style {
-        Some(ParameterStyle::SpaceDelimited) => SerdeAsSeparator::Space,
-        Some(ParameterStyle::PipeDelimited) => SerdeAsSeparator::Pipe,
-        _ => SerdeAsSeparator::Comma,
-      };
-      field.serde_as_attr = Some(SerdeAsFieldAttr::SeparatedList {
-        separator,
-        optional: field.rust_type.nullable,
-      });
-    }
-
-    field
   }
 
   fn prepare_request_body(
@@ -618,20 +576,19 @@ impl<'a> OperationConverter<'a> {
     let body = body_ref.resolve(self.spec).ok()?;
     let is_required = body.required.unwrap_or(false);
 
-    let docs = Documentation::from_optional(body.description.as_ref());
-
     let rust_type = if is_required {
       body_type
     } else {
       body_type.with_option()
     };
 
-    Some(FieldDef {
-      name: FieldNameToken::new(BODY_FIELD_NAME),
-      docs,
-      rust_type,
-      ..Default::default()
-    })
+    Some(
+      FieldDef::builder()
+        .name(BODY_FIELD_NAME)
+        .docs(Documentation::from_optional(body.description.as_ref()))
+        .rust_type(rust_type)
+        .build(),
+    )
   }
 
   fn collect_parameters(&self, path: &str, operation: &Operation) -> Vec<Parameter> {
@@ -698,6 +655,7 @@ impl<'a> OperationConverter<'a> {
   fn convert_parameter(
     &self,
     param: &Parameter,
+    location: ParameterLocation,
     parent_struct_name: &str,
     cache: &mut SharedSchemaCache,
     warnings: &mut Vec<String>,
@@ -705,7 +663,6 @@ impl<'a> OperationConverter<'a> {
     let resolved = self.resolve_parameter_type(param, parent_struct_name, cache, warnings)?;
 
     let is_required = param.required.unwrap_or(false);
-    let docs = Documentation::from_optional(param.description.as_ref());
 
     let final_rust_type = if is_required {
       resolved.type_ref.clone()
@@ -713,49 +670,28 @@ impl<'a> OperationConverter<'a> {
       resolved.type_ref.clone().with_option()
     };
 
-    let rust_field = FieldNameToken::new(to_rust_field_name(&param.name));
+    let field = FieldDef::builder()
+      .name(&param.name)
+      .docs(Documentation::from_optional(param.description.as_ref()))
+      .rust_type(final_rust_type.clone())
+      .validation_attrs(resolved.validation_attrs)
+      .maybe_default_value(resolved.default_value)
+      .maybe_example_value(param.example.clone())
+      .parameter_location(location)
+      .original_name(param.name.clone())
+      .build();
 
-    let location = match param.location {
-      ParameterIn::Path => ParameterLocation::Path,
-      ParameterIn::Query => ParameterLocation::Query,
-      ParameterIn::Header => ParameterLocation::Header,
-      ParameterIn::Cookie => ParameterLocation::Cookie,
-    };
-
-    let field = FieldDef {
-      name: rust_field.clone(),
-      docs,
-      rust_type: final_rust_type.clone(),
-      validation_attrs: resolved.validation_attrs,
-      default_value: resolved.default_value,
-      example_value: param.example.clone(),
-      parameter_location: Some(location),
-      ..Default::default()
-    };
-
-    let operation_param = OperationParameter {
-      original_name: param.name.clone(),
-      rust_field,
-      location,
-      required: is_required,
-      rust_type: final_rust_type,
-    };
-
-    let serde_meta = ParameterSerdeMeta {
-      original_name: param.name.clone(),
-      explode: {
-        let param: &Parameter = param;
-        param
-          .explode
-          .unwrap_or(matches!(param.style, None | Some(ParameterStyle::Form)))
-      },
-      style: param.style,
+    let field = if location == ParameterLocation::Query {
+      let explode = param
+        .explode
+        .unwrap_or(matches!(param.style, None | Some(ParameterStyle::Form)));
+      field.with_serde_attributes(explode, param.style)
+    } else {
+      field
     };
 
     Ok(ConvertedParameter {
       field,
-      operation_param,
-      serde_meta,
       inline_types: resolved.inline_types,
     })
   }
@@ -827,8 +763,7 @@ impl<'a> OperationConverter<'a> {
         });
 
         for field in &nested.fields {
-          let required = field.is_required();
-          let rust_type = if required {
+          let rust_type = if field.is_required() {
             field.rust_type.unwrap_option()
           } else {
             field.rust_type.clone()
@@ -837,14 +772,11 @@ impl<'a> OperationConverter<'a> {
           builder_fields.push(BuilderField {
             name: field.name.clone(),
             rust_type,
-            required,
-            nested_struct: main_field.name.clone(),
-            validation_attrs: field.validation_attrs.clone(),
+            owner_field: Some(main_field.name.clone()),
           });
         }
       } else {
-        let required = main_field.is_required();
-        let rust_type = if required {
+        let rust_type = if main_field.is_required() {
           main_field.rust_type.unwrap_option()
         } else {
           main_field.rust_type.clone()
@@ -853,9 +785,7 @@ impl<'a> OperationConverter<'a> {
         builder_fields.push(BuilderField {
           name: main_field.name.clone(),
           rust_type,
-          required,
-          nested_struct: main_field.name.clone(),
-          validation_attrs: main_field.validation_attrs.clone(),
+          owner_field: None,
         });
       }
     }
@@ -864,14 +794,18 @@ impl<'a> OperationConverter<'a> {
       return None;
     }
 
-    Some(StructMethod {
-      name: MethodNameToken::new("new"),
-      docs: Documentation::from_lines(["Create a new request with the given parameters."]),
-      kind: StructMethodKind::Builder {
-        fields: builder_fields,
-        nested_structs: nested_struct_info,
-      },
-    })
+    Some(
+      StructMethod::builder()
+        .name("new")
+        .docs(Documentation::from_lines([
+          "Create a new request with the given parameters.",
+        ]))
+        .kind(StructMethodKind::Builder {
+          fields: builder_fields,
+          nested_structs: nested_struct_info,
+        })
+        .build(),
+    )
   }
 }
 

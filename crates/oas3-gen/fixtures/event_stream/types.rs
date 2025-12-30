@@ -9,6 +9,7 @@
 //! API with Server-Sent Events (SSE) endpoint
 
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct EventPayload {
   pub id: String,
@@ -51,6 +52,18 @@ pub enum StreamEventsResponse {
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct StreamTypedEventsRequest {
   pub query: StreamTypedEventsRequestQuery,
+}
+#[bon::bon]
+impl StreamTypedEventsRequest {
+  ///Create a new request with the given parameters.
+  #[builder]
+  pub fn new(filter: Option<String>) -> Result<Self, anyhow::Error> {
+    let request = Self {
+      query: StreamTypedEventsRequestQuery { filter },
+    };
+    request.validate()?;
+    Ok(request)
+  }
 }
 impl StreamTypedEventsRequest {
   ///Parse the HTTP response into the response enum.

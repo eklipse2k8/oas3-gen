@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 use validator::Validate;
+pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Cat {
   #[serde(rename = "favoriteToy")]
@@ -139,17 +140,17 @@ pub type Pets = Vec<Pet>;
 pub struct ShowPetByIdRequest {
   #[validate(nested)]
   pub path: ShowPetByIdRequestPath,
+  #[validate(nested)]
+  pub header: ShowPetByIdRequestHeader,
 }
 #[bon::bon]
 impl ShowPetByIdRequest {
   ///Create a new request with the given parameters.
   #[builder]
-  pub fn new(pet_id: String) -> Result<Self, anyhow::Error> {
-    if pet_id.is_empty() {
-      return Err(anyhow::anyhow!("Empty {} is disallowed", "pet_id"));
-    }
+  pub fn new(pet_id: String, x_api_version: String) -> Result<Self, anyhow::Error> {
     let request = Self {
       path: ShowPetByIdRequestPath { pet_id },
+      header: ShowPetByIdRequestHeader { x_api_version },
     };
     request.validate()?;
     Ok(request)
@@ -165,6 +166,27 @@ impl ShowPetByIdRequest {
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
     Ok(ShowPetByIdResponse::Unknown(data))
+  }
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct ShowPetByIdRequestHeader {
+  ///API version to use for this request
+  #[validate(length(min = 1u64))]
+  pub x_api_version: String,
+}
+impl TryFrom<&ShowPetByIdRequestHeader> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &ShowPetByIdRequestHeader) -> Result<Self, Self::Error> {
+    let mut map = http::HeaderMap::with_capacity(1usize);
+    let header_value = http::HeaderValue::try_from(&headers.x_api_version)?;
+    map.insert(X_API_VERSION, header_value);
+    Ok(map)
+  }
+}
+impl TryFrom<ShowPetByIdRequestHeader> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: ShowPetByIdRequestHeader) -> Result<Self, Self::Error> {
+    http::HeaderMap::try_from(&headers)
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]

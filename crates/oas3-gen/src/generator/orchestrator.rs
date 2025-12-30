@@ -400,8 +400,9 @@ impl Orchestrator {
     operations
       .iter()
       .flat_map(|op| &op.parameters)
-      .filter(|param| matches!(param.location, ParameterLocation::Header))
-      .map(|param| param.original_name.to_ascii_lowercase())
+      .filter(|param| matches!(param.parameter_location, Some(ParameterLocation::Header)))
+      .filter_map(|param| param.original_name.as_deref())
+      .map(str::to_ascii_lowercase)
       .collect::<BTreeSet<_>>()
       .len()
   }

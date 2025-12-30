@@ -22,5 +22,5 @@
 
 mod client;
 mod types;
-pub use client::EventStreamApiClient;
+pub use client::*;
 pub use types::*;

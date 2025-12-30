@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use proc_macro2::TokenStream;
+use quote::ToTokens;
 use strum::Display;
 
 use super::{
@@ -27,6 +29,12 @@ pub enum DeriveTrait {
   Validate,
   #[strum(serialize = "oas3_gen_support::Default")]
   Default,
+}
+
+impl ToTokens for DeriveTrait {
+  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    tokens.extend(self.to_string().parse::<TokenStream>().expect("DeriveTrait Token"));
+  }
 }
 
 pub trait DerivesProvider {

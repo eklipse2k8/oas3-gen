@@ -141,6 +141,15 @@
 						"schema": {
 							"type": "string"
 						}
+					},
+					{
+						"name": "x-api-version",
+						"in": "header",
+						"required": true,
+						"description": "API version to use for this request",
+						"schema": {
+							"type": "string"
+						}
 					}
 				],
 				"responses": {

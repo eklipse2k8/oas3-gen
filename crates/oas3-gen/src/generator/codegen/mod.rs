@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use anyhow::Context as _;
 use clap::ValueEnum;
@@ -6,8 +6,9 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::ast::{
-  CodeMetadata, EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, StructMethodKind, ValidationAttribute,
-  tokens::ConstToken,
+  CodeMetadata, EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind,
+  ValidationAttribute,
+  tokens::{ConstToken, HeaderToken},
 };
 
 pub mod attributes;
@@ -96,6 +97,7 @@ pub fn generate_source(
 pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, visibility: Visibility) -> TokenStream {
   let ordered = deduplicate_and_order_types(types);
   let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
+  let header_consts = constants::generate_header_constants(&collect_header_tokens(&ordered));
 
   let mut needs_serialize = false;
   let mut needs_deserialize = false;
@@ -129,6 +131,7 @@ pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, v
     #validator_use
 
     #regex_consts
+    #header_consts
 
     #(#type_tokens)*
   }
@@ -153,6 +156,31 @@ fn deduplicate_and_order_types<'a>(types: &'a [RustType]) -> Vec<&'a RustType> {
   map.into_values().collect()
 }
 
+fn collect_header_tokens(types: &[&RustType]) -> Vec<HeaderToken> {
+  let mut seen: BTreeSet<String> = BTreeSet::new();
+  let mut headers = Vec::new();
+
+  for rust_type in types {
+    let RustType::Struct(def) = rust_type else {
+      continue;
+    };
+
+    if !matches!(def.kind, StructKind::HeaderParams) {
+      continue;
+    }
+
+    for field in &def.fields {
+      if let Some(original_name) = &field.original_name
+        && seen.insert(original_name.clone())
+      {
+        headers.push(HeaderToken::from(original_name.as_str()));
+      }
+    }
+  }
+
+  headers
+}
+
 fn type_priority(rust_type: &RustType) -> u8 {
   match rust_type {
     RustType::Struct(_) => 0,
@@ -170,7 +198,7 @@ fn generate_type(
   visibility: Visibility,
 ) -> TokenStream {
   let type_tokens = match rust_type {
-    RustType::Struct(def) => structs::StructGenerator::new(regex_lookup, visibility).generate(def),
+    RustType::Struct(def) => structs::StructGenerator::new(def, regex_lookup, visibility).emit(),
     RustType::Enum(def) => enums::EnumGenerator::new(def, visibility).generate(),
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
     RustType::DiscriminatedEnum(def) => enums::DiscriminatedEnumGenerator::new(def, visibility).generate(),

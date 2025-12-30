@@ -1,19 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
-use string_cache::DefaultAtom;
 
 use crate::{
   generator::{
-    ast::{
-      Documentation, FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute,
-      tokens::FieldNameToken,
-    },
+    ast::{Documentation, FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute},
     converter::{
-      SchemaConverter,
-      discriminator::{DiscriminatorHandler, DiscriminatorInfo},
-      fields::FieldConverter,
-      structs::StructConverter,
+      SchemaConverter, discriminator::DiscriminatorHandler, structs::StructConverter,
       type_resolver::TypeResolverBuilder,
     },
   },
@@ -318,20 +311,12 @@ fn test_discriminator_handler_detect_parent() {
 }
 
 fn make_field(name: &str, deprecated: bool) -> FieldDef {
-  FieldDef {
-    name: FieldNameToken::from(name),
-    rust_type: TypeRef::new(RustPrimitive::String),
-    docs: make_docs(),
-    serde_attrs: vec![],
-    serde_as_attr: None,
-    doc_hidden: false,
-    validation_attrs: vec![],
-    default_value: None,
-    example_value: None,
-    parameter_location: None,
-    deprecated,
-    multiple_of: None,
-  }
+  FieldDef::builder()
+    .name(name)
+    .rust_type(TypeRef::new(RustPrimitive::String))
+    .docs(make_docs())
+    .deprecated(deprecated)
+    .build()
 }
 
 #[test]
@@ -431,153 +416,57 @@ fn make_integer_type_ref() -> TypeRef {
   TypeRef::new(RustPrimitive::I64)
 }
 
-#[test]
-fn test_apply_discriminator_attributes_none_returns_unchanged() {
-  let mut docs = make_docs();
-  let mut validation_attrs = vec![ValidationAttribute::Email];
-  let mut default_value = None;
-  let serde_attrs = vec![SerdeAttribute::Rename("original".to_string())];
-  let type_ref = make_string_type_ref();
-
-  let (result_serde_attrs, doc_hidden) = FieldConverter::apply_discriminator_attributes(
-    &mut docs,
-    &mut validation_attrs,
-    &mut default_value,
-    serde_attrs.clone(),
-    &type_ref,
-    None,
-  );
-
-  assert_eq!(docs, make_docs());
-  assert_eq!(validation_attrs.len(), 1);
-  assert_eq!(result_serde_attrs, serde_attrs);
-  assert!(!doc_hidden);
+fn make_base_field(type_ref: TypeRef) -> FieldDef {
+  FieldDef::builder()
+    .name("test_field")
+    .docs(make_docs())
+    .rust_type(type_ref)
+    .serde_attrs(BTreeSet::from([SerdeAttribute::Rename("original".to_string())]))
+    .validation_attrs(vec![ValidationAttribute::Email])
+    .build()
 }
 
 #[test]
-fn test_apply_discriminator_attributes_child_discriminator_hides_and_sets_value() {
-  let mut docs = make_docs();
-  let mut validation_attrs = vec![ValidationAttribute::Email];
-  let mut default_value = None;
-  let serde_attrs = vec![];
-  let type_ref = make_string_type_ref();
+fn test_with_discriminator_behavior_child_discriminator_hides_and_sets_value() {
+  let field = make_base_field(make_string_type_ref());
+  let result = field.with_discriminator_behavior(Some("child_type"), false);
 
-  let disc_info = DiscriminatorInfo {
-    value: Some(DefaultAtom::from("child_type")),
-    is_base: false,
-    has_enum: false,
-  };
-
-  let (result_serde_attrs, doc_hidden) = FieldConverter::apply_discriminator_attributes(
-    &mut docs,
-    &mut validation_attrs,
-    &mut default_value,
-    serde_attrs,
-    &type_ref,
-    Some(&disc_info),
-  );
-
-  assert!(docs.is_empty(), "docs should be cleared");
-  assert!(validation_attrs.is_empty(), "validation should be cleared");
-  assert_eq!(default_value, Some(serde_json::Value::String("child_type".to_string())));
-  assert!(result_serde_attrs.contains(&SerdeAttribute::SkipDeserializing));
-  assert!(result_serde_attrs.contains(&SerdeAttribute::Default));
-  assert!(doc_hidden);
-}
-
-#[test]
-fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
-  let mut docs = make_docs();
-  let mut validation_attrs = vec![ValidationAttribute::Email];
-  let mut default_value = None;
-  let serde_attrs = vec![SerdeAttribute::Rename("foo".to_string())];
-  let type_ref = make_string_type_ref();
-
-  let disc_info = DiscriminatorInfo {
-    value: None,
-    is_base: false,
-    has_enum: false,
-  };
-
-  let (result_serde_attrs, doc_hidden) = FieldConverter::apply_discriminator_attributes(
-    &mut docs,
-    &mut validation_attrs,
-    &mut default_value,
-    serde_attrs,
-    &type_ref,
-    Some(&disc_info),
-  );
-
+  assert!(result.docs.is_empty(), "docs should be cleared");
+  assert!(result.validation_attrs.is_empty(), "validation should be cleared");
   assert_eq!(
-    docs,
-    make_docs(),
-    "docs should be preserved for base discriminator without enum"
+    result.default_value,
+    Some(serde_json::Value::String("child_type".to_string()))
   );
-  assert_eq!(
-    validation_attrs.len(),
-    1,
-    "validation should be preserved when discriminator not hidden"
-  );
-  assert_eq!(default_value, None);
-  assert_eq!(result_serde_attrs, vec![SerdeAttribute::Rename("foo".to_string())]);
-  assert!(!doc_hidden);
+  assert!(result.serde_attrs.contains(&SerdeAttribute::SkipDeserializing));
+  assert!(result.serde_attrs.contains(&SerdeAttribute::Default));
+  assert!(result.doc_hidden);
 }
 
 #[test]
-fn test_apply_discriminator_attributes_base_without_enum_non_string_no_default() {
-  let mut docs = make_docs();
-  let mut validation_attrs = vec![ValidationAttribute::Email];
-  let mut default_value = None;
-  let serde_attrs = vec![];
-  let type_ref = make_integer_type_ref();
+fn test_with_discriminator_behavior_base_hides_and_skips_string() {
+  let field = make_base_field(make_string_type_ref());
+  let result = field.with_discriminator_behavior(None, true);
 
-  let disc_info = DiscriminatorInfo {
-    value: None,
-    is_base: true,
-    has_enum: false,
-  };
-
-  let (result_serde_attrs, doc_hidden) = FieldConverter::apply_discriminator_attributes(
-    &mut docs,
-    &mut validation_attrs,
-    &mut default_value,
-    serde_attrs,
-    &type_ref,
-    Some(&disc_info),
+  assert!(result.docs.is_empty(), "docs should be cleared");
+  assert!(result.validation_attrs.is_empty(), "validation should be cleared");
+  assert_eq!(result.default_value, Some(serde_json::Value::String(String::new())));
+  assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
+  assert!(
+    !result
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("original".to_string()))
   );
-
-  assert!(default_value.is_none(), "non-string type should not get default");
-  assert!(result_serde_attrs.contains(&SerdeAttribute::Skip));
-  assert!(doc_hidden);
+  assert!(result.doc_hidden);
 }
 
 #[test]
-fn test_apply_discriminator_attributes_base_with_enum_remains_visible() {
-  let mut docs = make_docs();
-  let mut validation_attrs = vec![ValidationAttribute::Email];
-  let mut default_value = None;
-  let serde_attrs = vec![SerdeAttribute::Rename("role".to_string())];
-  let type_ref = make_string_type_ref();
+fn test_with_discriminator_behavior_base_non_string_no_default() {
+  let field = make_base_field(make_integer_type_ref());
+  let result = field.with_discriminator_behavior(None, true);
 
-  let disc_info = DiscriminatorInfo {
-    value: None,
-    is_base: true,
-    has_enum: true,
-  };
-
-  let (result_serde_attrs, doc_hidden) = FieldConverter::apply_discriminator_attributes(
-    &mut docs,
-    &mut validation_attrs,
-    &mut default_value,
-    serde_attrs.clone(),
-    &type_ref,
-    Some(&disc_info),
-  );
-
-  assert_eq!(docs, make_docs(), "docs should be preserved");
-  assert_eq!(validation_attrs.len(), 1, "validation attrs should be preserved");
-  assert_eq!(result_serde_attrs, serde_attrs, "serde attrs should be unchanged");
-  assert!(!doc_hidden, "should not be hidden");
+  assert!(result.default_value.is_none(), "non-string type should not get default");
+  assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
+  assert!(result.doc_hidden);
 }
 
 #[test]

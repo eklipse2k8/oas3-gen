@@ -12,11 +12,12 @@ use crate::generator::{
 fn test_generate_error_struct_impl_with_error_field() {
   let struct_def = StructDef {
     name: StructToken::new("MyError"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("error"),
-      rust_type: TypeRef::new(RustPrimitive::Custom("InnerError".into())),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("error"))
+        .rust_type(TypeRef::new(RustPrimitive::Custom("InnerError".into())))
+        .build(),
+    ],
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -37,11 +38,12 @@ fn test_generate_error_struct_impl_with_error_field() {
 fn test_generate_error_struct_impl_with_message_field() {
   let struct_def = StructDef {
     name: StructToken::new("MyError"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("message"),
-      rust_type: TypeRef::new(RustPrimitive::String),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("message"))
+        .rust_type(TypeRef::new(RustPrimitive::String))
+        .build(),
+    ],
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -62,11 +64,12 @@ fn test_generate_error_struct_impl_with_message_field() {
 fn test_generate_error_struct_impl_without_error_fields() {
   let struct_def = StructDef {
     name: StructToken::new("MyError"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("code"),
-      rust_type: TypeRef::new(RustPrimitive::I32),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("code"))
+        .rust_type(TypeRef::new(RustPrimitive::I32))
+        .build(),
+    ],
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],
@@ -133,11 +136,12 @@ fn test_generate_error_enum_impl_with_unit_variants() {
 fn test_try_generate_error_impl_for_error_struct() {
   let struct_def = StructDef {
     name: StructToken::new("ApiError"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("message"),
-      rust_type: TypeRef::new(RustPrimitive::String),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("message"))
+        .rust_type(TypeRef::new(RustPrimitive::String))
+        .build(),
+    ],
     serde_attrs: vec![],
     outer_attrs: vec![],
     methods: vec![],

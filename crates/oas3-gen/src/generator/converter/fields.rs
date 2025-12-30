@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use oas3::spec::ObjectSchema;
 use regex::Regex;
@@ -6,7 +6,7 @@ use regex::Regex;
 use super::{CodegenConfig, SchemaExt, discriminator::DiscriminatorInfo};
 use crate::generator::{
   ast::{
-    Documentation, FieldDef, FieldDefBuilder, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+    Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
     ValidationAttribute,
   },
   naming::identifiers::to_rust_field_name,
@@ -34,7 +34,7 @@ impl FieldConverter {
     resolved_type: TypeRef,
     is_required: bool,
     discriminator_mapping: Option<&(String, String)>,
-  ) -> anyhow::Result<FieldDef> {
+  ) -> FieldDef {
     let discriminator_info = DiscriminatorInfo::new(prop_name, parent_schema, prop_schema, discriminator_mapping);
 
     let should_be_optional = self.is_field_optional(
@@ -50,44 +50,35 @@ impl FieldConverter {
       resolved_type
     };
 
-    let mut docs = Self::extract_docs(prop_schema);
-    let mut validation_attrs = Self::extract_all_validation(prop_name, is_required, prop_schema, &final_type);
-    let mut default_value = Self::extract_default_value(prop_schema);
-    let deprecated = prop_schema.deprecated.unwrap_or(false);
-    let multiple_of = prop_schema.multiple_of.clone();
+    let docs = Documentation::from_optional(prop_schema.description.as_ref());
+    let validation_attrs = Self::extract_all_validation(prop_name, is_required, prop_schema, &final_type);
+    let default_value = Self::extract_default_value(prop_schema);
 
-    let rust_field_name = to_rust_field_name(prop_name);
-    let base_serde_attrs = if rust_field_name == prop_name {
-      vec![]
+    let rust_field_name = FieldNameToken::from_raw(prop_name);
+    let serde_attrs = if rust_field_name == prop_name {
+      BTreeSet::new()
     } else {
-      vec![SerdeAttribute::Rename(prop_name.to_string())]
+      BTreeSet::from([SerdeAttribute::Rename(prop_name.to_string())])
     };
-
-    let (serde_attrs, doc_hidden) = Self::apply_discriminator_attributes(
-      &mut docs,
-      &mut validation_attrs,
-      &mut default_value,
-      base_serde_attrs,
-      &final_type,
-      discriminator_info.as_ref(),
-    );
 
     let serde_as_attr = self.get_customization_for_type(&final_type);
 
-    let field = FieldDefBuilder::default()
+    let field = FieldDef::builder()
+      .deprecated(prop_schema.deprecated.unwrap_or(false))
+      .docs(docs)
+      .maybe_default_value(default_value)
+      .maybe_multiple_of(prop_schema.multiple_of.clone())
+      .maybe_serde_as_attr(serde_as_attr)
       .name(to_rust_field_name(prop_name))
       .rust_type(final_type)
-      .docs(docs)
       .serde_attrs(serde_attrs)
-      .serde_as_attr(serde_as_attr)
-      .doc_hidden(doc_hidden)
       .validation_attrs(validation_attrs)
-      .default_value(default_value)
-      .deprecated(deprecated)
-      .multiple_of(multiple_of)
-      .build()?;
+      .build();
 
-    Ok(field)
+    match discriminator_info.as_ref().filter(|d| d.should_hide()) {
+      Some(info) => field.with_discriminator_behavior(info.value.as_deref(), info.is_base),
+      None => field,
+    }
   }
 
   fn get_customization_for_type(&self, type_ref: &TypeRef) -> Option<SerdeAsFieldAttr> {
@@ -121,10 +112,6 @@ impl FieldConverter {
     let validation_attrs = Self::extract_all_validation(prop_name, is_required, schema, type_ref);
     let default_value = Self::extract_default_value(schema);
     (validation_attrs, default_value)
-  }
-
-  pub(crate) fn extract_docs(schema: &ObjectSchema) -> Documentation {
-    Documentation::from_optional(schema.description.as_ref())
   }
 
   pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
@@ -279,35 +266,5 @@ impl FieldConverter {
       return true;
     }
     false
-  }
-
-  pub(crate) fn apply_discriminator_attributes(
-    docs: &mut Documentation,
-    validation_attrs: &mut Vec<ValidationAttribute>,
-    default_value: &mut Option<serde_json::Value>,
-    mut serde_attrs: Vec<SerdeAttribute>,
-    final_type: &TypeRef,
-    discriminator_info: Option<&DiscriminatorInfo>,
-  ) -> (Vec<SerdeAttribute>, bool) {
-    let Some(disc_info) = discriminator_info.filter(|d| d.should_hide()) else {
-      return (serde_attrs, false);
-    };
-
-    docs.clear();
-    validation_attrs.clear();
-
-    if disc_info.value.is_some() {
-      *default_value = Some(serde_json::Value::String(disc_info.value.as_ref().unwrap().to_string()));
-      serde_attrs.push(SerdeAttribute::SkipDeserializing);
-      serde_attrs.push(SerdeAttribute::Default);
-    } else {
-      serde_attrs.clear();
-      serde_attrs.push(SerdeAttribute::Skip);
-      if final_type.is_string_like() {
-        *default_value = Some(serde_json::Value::String(String::new()));
-      }
-    }
-
-    (serde_attrs, true)
   }
 }

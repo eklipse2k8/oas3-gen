@@ -79,7 +79,7 @@ pub struct Base64ImageSource {
   pub data: Vec<u8>,
   pub media_type: MediaType,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("base64".to_string()))]
   pub r#type: Option<String>,
 }
@@ -92,7 +92,7 @@ pub struct CitationAnnotation {
   pub source: String,
   pub start: i64,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("citation".to_string()))]
   pub r#type: Option<String>,
 }
@@ -104,7 +104,7 @@ pub struct CodeBlock {
   pub code: String,
   pub language: Option<String>,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("code".to_string()))]
   pub r#type: Option<String>,
 }
@@ -196,7 +196,7 @@ pub struct ContentBlockDeltaEvent {
   pub delta: Box<Delta>,
   pub index: i64,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("content_block_delta".to_string()))]
   pub r#type: Option<String>,
 }
@@ -207,7 +207,7 @@ pub struct ContentBlockStartEvent {
   pub content_block: Box<ContentBlock>,
   pub index: i64,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("content_block_start".to_string()))]
   pub r#type: Option<String>,
 }
@@ -216,7 +216,7 @@ pub struct ContentBlockStartEvent {
 pub struct ContentBlockStopEvent {
   pub index: i64,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("content_block_stop".to_string()))]
   pub r#type: Option<String>,
 }
@@ -437,7 +437,7 @@ pub struct ImageBlock {
   ///Image source can be base64 or URL
   pub source: Box<ImageSource>,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("image".to_string()))]
   pub r#type: Option<String>,
 }
@@ -500,7 +500,7 @@ impl ImageSource {
 pub struct InputJsonDelta {
   pub partial_json: String,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("input_json_delta".to_string()))]
   pub r#type: Option<String>,
 }
@@ -511,7 +511,7 @@ pub struct LinkAnnotation {
   pub end: i64,
   pub start: i64,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("link".to_string()))]
   pub r#type: Option<String>,
   #[validate(url, length(min = 1u64))]
@@ -543,7 +543,7 @@ pub struct Message {
 pub struct MessageStartEvent {
   pub message: Message,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("message_start".to_string()))]
   pub r#type: Option<String>,
 }
@@ -551,7 +551,7 @@ pub struct MessageStartEvent {
 #[serde(default)]
 pub struct MessageStopEvent {
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("message_stop".to_string()))]
   pub r#type: Option<String>,
 }
@@ -575,7 +575,7 @@ pub enum NullableStringOrNumber {
 #[serde(default)]
 pub struct PingEvent {
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("ping".to_string()))]
   pub r#type: Option<String>,
 }
@@ -648,7 +648,7 @@ pub struct TextBlock {
   #[validate(length(min = 1u64))]
   pub text: String,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("text".to_string()))]
   pub r#type: Option<String>,
 }
@@ -657,7 +657,7 @@ pub struct TextBlock {
 pub struct TextDelta {
   pub text: String,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("text_delta".to_string()))]
   pub r#type: Option<String>,
 }
@@ -671,7 +671,7 @@ pub struct ToolResultBlock {
   #[validate(length(min = 1u64))]
   pub tool_use_id: String,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("tool_result".to_string()))]
   pub r#type: Option<String>,
 }
@@ -752,7 +752,7 @@ pub struct ToolUseBlock {
   #[validate(length(min = 1u64))]
   pub name: String,
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("tool_use".to_string()))]
   pub r#type: Option<String>,
 }
@@ -761,7 +761,7 @@ pub struct ToolUseBlock {
 #[serde(default)]
 pub struct UrlImageSource {
   #[doc(hidden)]
-  #[serde(rename = "type", skip_deserializing, default)]
+  #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("url".to_string()))]
   pub r#type: Option<String>,
   #[validate(url, length(min = 1u64))]
