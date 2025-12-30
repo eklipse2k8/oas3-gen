@@ -201,6 +201,7 @@ impl<'a> OperationConverter<'a> {
       .kind(kind)
       .maybe_summary(operation.summary.clone())
       .maybe_description(operation.description.clone())
+      .maybe_request_type(request_type_name)
       .maybe_response_type(response_metadata.type_name)
       .maybe_response_enum(Self::emit_response_enum(&mut types, response_enum_def, usage))
       .response_media_types(response_metadata.media_types)
@@ -671,7 +672,7 @@ impl<'a> OperationConverter<'a> {
     };
 
     let field = FieldDef::builder()
-      .name(&param.name)
+      .name(FieldNameToken::from_raw(&param.name))
       .docs(Documentation::from_optional(param.description.as_ref()))
       .rust_type(final_rust_type.clone())
       .validation_attrs(resolved.validation_attrs)
