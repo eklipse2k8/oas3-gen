@@ -488,7 +488,7 @@ mod builder {
       quote! {
         #docs
         #[builder]
-        #vis fn new(#(#params),*) -> Result<Self, anyhow::Error> {
+        #vis fn new(#(#params),*) -> anyhow::Result<Self> {
           let request = #construction;
           request.validate()?;
           Ok(request)
@@ -566,20 +566,20 @@ pub(crate) mod header_map {
       let insertions = self.generate_field_insertions();
 
       quote! {
-        impl TryFrom<&#struct_name> for http::HeaderMap {
+        impl core::convert::TryFrom<&#struct_name> for http::HeaderMap {
           type Error = http::header::InvalidHeaderValue;
 
-          fn try_from(headers: &#struct_name) -> Result<Self, Self::Error> {
+          fn try_from(headers: &#struct_name) -> core::result::Result<Self, Self::Error> {
             let mut map = http::HeaderMap::with_capacity(#field_count);
             #insertions
             Ok(map)
           }
         }
 
-        impl TryFrom<#struct_name> for http::HeaderMap {
+        impl core::convert::TryFrom<#struct_name> for http::HeaderMap {
           type Error = http::header::InvalidHeaderValue;
 
-          fn try_from(headers: #struct_name) -> Result<Self, Self::Error> {
+          fn try_from(headers: #struct_name) -> core::result::Result<Self, Self::Error> {
             http::HeaderMap::try_from(&headers)
           }
         }

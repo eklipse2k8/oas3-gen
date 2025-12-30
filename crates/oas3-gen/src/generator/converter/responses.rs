@@ -60,7 +60,7 @@ pub(crate) fn build_response_enum(
 
   Some(
     ResponseEnumDef::builder()
-      .name(EnumToken::from_raw(&base_name))
+      .name(EnumToken::new(&base_name))
       .docs(Documentation::from_lines([format!(
         "Response types for {}",
         operation.operation_id.as_ref()?

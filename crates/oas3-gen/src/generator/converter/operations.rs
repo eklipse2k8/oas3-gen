@@ -356,7 +356,7 @@ impl<'a> OperationConverter<'a> {
     }
 
     let main_struct = StructDef {
-      name: StructToken::from_raw(name),
+      name: StructToken::new(name),
       docs,
       fields: main_fields,
       methods,

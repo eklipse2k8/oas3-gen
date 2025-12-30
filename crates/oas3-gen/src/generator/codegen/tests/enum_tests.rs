@@ -63,6 +63,120 @@ fn test_basic_enum_generation() {
 }
 
 #[test]
+fn test_simple_enum_display_impl() {
+  // Simple enum without renames - Display uses variant name
+  let simple_def = make_simple_enum(
+    "Color",
+    vec![
+      make_unit_variant("Red"),
+      make_unit_variant("Green"),
+      make_unit_variant("Blue"),
+    ],
+  );
+
+  let code = EnumGenerator::new(&simple_def, Visibility::Public).generate().to_string();
+
+  assert!(
+    code.contains("impl core :: fmt :: Display for Color"),
+    "should have Display impl for simple enum"
+  );
+  assert!(
+    code.contains("Self :: Red => write ! (f , \"Red\")"),
+    "should output variant name for Red"
+  );
+  assert!(
+    code.contains("Self :: Green => write ! (f , \"Green\")"),
+    "should output variant name for Green"
+  );
+  assert!(
+    code.contains("Self :: Blue => write ! (f , \"Blue\")"),
+    "should output variant name for Blue"
+  );
+}
+
+#[test]
+fn test_simple_enum_display_impl_with_serde_rename() {
+  // Enum with serde renames - Display uses the serde rename value
+  let renamed_def = EnumDef {
+    name: EnumToken::new("Status"),
+    variants: vec![
+      VariantDef {
+        name: EnumVariantToken::new("InProgress"),
+        content: VariantContent::Unit,
+        serde_attrs: vec![SerdeAttribute::Rename("in_progress".to_string())],
+        deprecated: false,
+        ..Default::default()
+      },
+      VariantDef {
+        name: EnumVariantToken::new("Completed"),
+        content: VariantContent::Unit,
+        serde_attrs: vec![SerdeAttribute::Rename("completed".to_string())],
+        deprecated: false,
+        ..Default::default()
+      },
+    ],
+    discriminator: None,
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&renamed_def, Visibility::Public).generate().to_string();
+
+  assert!(
+    code.contains("impl core :: fmt :: Display for Status"),
+    "should have Display impl"
+  );
+  assert!(
+    code.contains("Self :: InProgress => write ! (f , \"in_progress\")"),
+    "should output serde rename value for InProgress"
+  );
+  assert!(
+    code.contains("Self :: Completed => write ! (f , \"completed\")"),
+    "should output serde rename value for Completed"
+  );
+}
+
+#[test]
+fn test_tuple_enum_no_display_impl() {
+  // Enums with tuple variants should NOT get a Display impl
+  let tuple_def = EnumDef {
+    name: EnumToken::new("Value"),
+    variants: vec![
+      VariantDef {
+        name: EnumVariantToken::new("Text"),
+        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
+        serde_attrs: vec![],
+        deprecated: false,
+        ..Default::default()
+      },
+      VariantDef {
+        name: EnumVariantToken::new("Number"),
+        content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]),
+        serde_attrs: vec![],
+        deprecated: false,
+        ..Default::default()
+      },
+    ],
+    discriminator: None,
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&tuple_def, Visibility::Public).generate().to_string();
+
+  assert!(
+    !code.contains("impl core :: fmt :: Display for Value"),
+    "tuple enum should NOT have Display impl"
+  );
+}
+
+#[test]
 fn test_enum_with_docs() {
   let def = EnumDef {
     name: EnumToken::new("Status"),

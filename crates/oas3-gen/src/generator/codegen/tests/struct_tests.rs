@@ -216,11 +216,11 @@ fn test_header_params_struct_generates_try_from_header_map() {
   let code = tokens.to_string();
 
   assert!(
-    code.contains("impl TryFrom < & RequestHeader > for http :: HeaderMap"),
+    code.contains("impl core :: convert :: TryFrom < & RequestHeader > for http :: HeaderMap"),
     "missing TryFrom impl for reference header: {code}"
   );
   assert!(
-    code.contains("impl TryFrom < RequestHeader > for http :: HeaderMap"),
+    code.contains("impl core :: convert :: TryFrom < RequestHeader > for http :: HeaderMap"),
     "missing TryFrom impl for owned header: {code}"
   );
   assert!(

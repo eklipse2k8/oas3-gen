@@ -180,14 +180,20 @@ impl<'a> EnumGenerator<'a> {
       #methods
     };
 
+    let display_impl = self.emit_display_impl();
+
     if self.def.case_insensitive {
       let deserialize_impl = self.emit_case_insensitive_deser();
       quote! {
         #enum_def
+        #display_impl
         #deserialize_impl
       }
     } else {
-      enum_def
+      quote! {
+        #enum_def
+        #display_impl
+      }
     }
   }
 
@@ -241,6 +247,45 @@ impl<'a> EnumGenerator<'a> {
     generate_serde_attrs(&all_attrs)
   }
 
+  /// Generates a `Display` implementation for simple (unit-variant only) enums.
+  ///
+  /// For simple string enums, this outputs the serde rename value (the original JSON string)
+  /// so that `to_string()` returns the API-expected value. This is essential for path
+  /// parameters where the enum value must be serialized to the URL.
+  ///
+  /// For enums with tuple variants, no `Display` impl is generated since there's no
+  /// clear string representation for wrapped values.
+  fn emit_display_impl(&self) -> TokenStream {
+    if !self.def.is_simple() {
+      return quote! {};
+    }
+
+    let name = &self.def.name;
+
+    let match_arms: Vec<TokenStream> = self
+      .def
+      .variants
+      .iter()
+      .map(|v| {
+        let variant_name = format_ident!("{}", v.name);
+        let serde_name = v.serde_name();
+        quote! {
+          Self::#variant_name => write!(f, #serde_name),
+        }
+      })
+      .collect();
+
+    quote! {
+      impl core::fmt::Display for #name {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+          match self {
+            #(#match_arms)*
+          }
+        }
+      }
+    }
+  }
+
   fn emit_case_insensitive_deser(&self) -> TokenStream {
     let name = &self.def.name;
 
@@ -268,7 +313,7 @@ impl<'a> EnumGenerator<'a> {
 
     quote! {
       impl<'de> serde::Deserialize<'de> for #name {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
         where
           D: serde::Deserializer<'de>,
         {
@@ -430,7 +475,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
 
     quote! {
       impl serde::Serialize for #name {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
         where
           S: serde::Serializer,
         {
@@ -481,7 +526,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
 
     quote! {
       impl<'de> serde::Deserialize<'de> for #name {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
         where
           D: serde::Deserializer<'de>,
         {

@@ -118,6 +118,13 @@ pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> S
 /// 6. If the result starts with a digit, it's prefixed with `_`.
 /// 7. If the result is empty, it becomes `_`.
 pub(crate) fn to_rust_field_name(name: &str) -> String {
+  if let Some(raw) = name.strip_prefix("r#")
+    && !raw.is_empty()
+    && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+  {
+    return format!("r#{raw}");
+  }
+
   let has_leading_minus = name.starts_with('-');
   let name_without_minus = name.strip_prefix('-').unwrap_or(name);
 
@@ -166,6 +173,13 @@ pub(crate) fn to_rust_const_name(input: &str) -> String {
 /// 5. If the result starts with a digit, it's prefixed with `T`.
 /// 6. If the result is empty, it becomes `Unnamed`.
 pub(crate) fn to_rust_type_name(name: &str) -> String {
+  if let Some(raw) = name.strip_prefix("r#")
+    && !raw.is_empty()
+    && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+  {
+    return format!("r#{raw}");
+  }
+
   let has_leading_minus = name.starts_with('-');
   let name_without_minus = name.strip_prefix('-').unwrap_or(name);
 

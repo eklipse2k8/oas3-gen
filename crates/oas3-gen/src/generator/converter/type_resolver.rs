@@ -247,7 +247,7 @@ impl TypeResolver {
       && variant_references.len() >= 2
       && let Some(name) = c.get_union_name(&variant_references, discriminator)
     {
-      return Ok(ConversionOutput::new(self.create_type_reference(&name)));
+      return Ok(ConversionOutput::new(TypeRef::new(name)));
     }
 
     let uses_one_of = !schema.one_of.is_empty();
