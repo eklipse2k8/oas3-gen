@@ -36,7 +36,7 @@ mod methods {
   }
 
   fn emit_method(vis: &TokenStream, method: &EnumMethod, allow_known_value: bool) -> TokenStream {
-    let method_name = format_ident!("{}", method.name);
+    let method_name = &method.name;
     let docs = &method.docs;
 
     match &method.kind {

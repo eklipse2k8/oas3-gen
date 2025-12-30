@@ -23,10 +23,12 @@ pub(crate) static FORBIDDEN_IDENTIFIERS: LazyLock<HashSet<&str>> = LazyLock::new
   .collect()
 });
 
-static RESERVED_PASCAL_CASE: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-  ["Clone", "Copy", "Display", "Self", "Send", "Sync", "Type", "Vec"]
-    .into_iter()
-    .collect()
+static PRELUDE_TYPE_NAMES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+  [
+    "Clone", "Copy", "Display", "Option", "Result", "Send", "Sync", "Type", "Vec",
+  ]
+  .into_iter()
+  .collect()
 });
 
 static INVALID_CHARS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^A-Za-z0-9_]+").unwrap());
@@ -203,8 +205,12 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
     ident = format!("Negative{ident}");
   }
 
-  if RESERVED_PASCAL_CASE.contains(ident.as_str()) {
-    return format!("r#{ident}");
+  if ident == "Self" {
+    return "r#Self".to_string();
+  }
+
+  if PRELUDE_TYPE_NAMES.contains(ident.as_str()) {
+    return format!("{ident}Type");
   }
 
   prefix_if_digit_start(&mut ident, 'T');

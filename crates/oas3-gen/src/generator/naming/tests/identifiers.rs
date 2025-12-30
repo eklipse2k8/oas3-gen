@@ -11,6 +11,8 @@ fn test_field_names() {
     // Basic transformations
     ("foo-bar", "foo_bar"),
     ("match", "r#match"),
+    ("static", "r#static"),
+    ("type", "r#type"),
     ("self", "self_"),
     ("123name", "_123name"),
     ("", "_"),
@@ -62,9 +64,18 @@ fn test_type_names() {
     ("-modified-date", "NegativeModifiedDate"),
     ("-child-position", "NegativeChildPosition"),
     ("-", "Unnamed"),
-    // Reserved words in pascal case
-    ("clone", "r#Clone"),
-    ("Vec", "r#Vec"),
+    // Prelude types get Type suffix to avoid shadowing
+    ("clone", "CloneType"),
+    ("Vec", "VecType"),
+    ("Result", "ResultType"),
+    ("Option", "OptionType"),
+    ("Copy", "CopyType"),
+    ("Display", "DisplayType"),
+    ("Send", "SendType"),
+    ("Sync", "SyncType"),
+    ("Type", "TypeType"),
+    // Self is a keyword, so it gets raw identifier prefix
+    ("Self", "r#Self"),
   ];
   for (input, expected) in cases {
     assert_eq!(to_rust_type_name(input), expected, "failed for input {input:?}");

@@ -19,8 +19,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, RustType, SerdeAttribute, TypeRef,
-    VariantContent, VariantDef,
+    Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken, RustType,
+    SerdeAttribute, TypeRef, VariantContent, VariantDef,
   },
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -639,7 +639,7 @@ impl UnionConverter {
           .map(|v| v.docs.clone())
           .unwrap_or_default();
 
-        EnumMethod::new(method_name, kind, docs)
+        EnumMethod::new(MethodNameToken::from_raw(&method_name), kind, docs)
       })
       .collect()
   }

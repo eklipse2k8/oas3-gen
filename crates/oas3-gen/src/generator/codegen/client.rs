@@ -438,7 +438,7 @@ pub(crate) mod method {
 
       fn strict(def: &StructDef) -> TokenStream {
         let parts = def.fields.iter().map(|f| {
-          let ident = format_ident!("{}", f.name);
+          let ident = &f.name;
           let name = f.name.as_str();
           let is_bytes = matches!(f.rust_type.base_type, RustPrimitive::Bytes);
 
