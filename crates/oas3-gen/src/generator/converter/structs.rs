@@ -277,7 +277,7 @@ impl StructConverter {
           ));
           additional_field = Some(
             FieldDef::builder()
-              .name("additional_properties")
+              .name(FieldNameToken::from_raw("additional_properties"))
               .docs(Documentation::from_lines([
                 "Additional properties not defined in the schema.",
               ]))

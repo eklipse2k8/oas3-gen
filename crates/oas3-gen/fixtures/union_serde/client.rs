@@ -54,9 +54,7 @@ impl UnionSerializationTestApiClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("content");
-    let mut req_builder = self.client.post(url);
-    req_builder = req_builder.json(&request.body);
-    let response = req_builder.send().await?;
+    let response = self.client.post(url).json(&request.body).send().await?;
     SendContentRequest::parse_response(response).await
   }
   ///Get events with discriminated union
@@ -69,8 +67,7 @@ impl UnionSerializationTestApiClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("events");
-    let req_builder = self.client.get(url);
-    let response = req_builder.send().await?;
+    let response = self.client.get(url).send().await?;
     GetEventsRequest::parse_response(response).await
   }
 }

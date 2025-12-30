@@ -6,8 +6,9 @@ use oas3::{
 use super::{SchemaConverter, cache::SharedSchemaCache};
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, ResponseEnumDef, ResponseMediaType, ResponseVariant,
-    RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
+    ResponseVariant, RustPrimitive, StatusCodeToken, StructMethod, StructMethodKind, TypeRef,
+    status_code_to_variant_name,
   },
   converter::SchemaExt as _,
   naming::{
@@ -59,7 +60,7 @@ pub(crate) fn build_response_enum(
 
   Some(
     ResponseEnumDef::builder()
-      .name(&base_name)
+      .name(EnumToken::from_raw(&base_name))
       .docs(Documentation::from_lines([format!(
         "Response types for {}",
         operation.operation_id.as_ref()?
@@ -255,7 +256,7 @@ fn normalize_response_variants(mut variants: Vec<ResponseVariant>) -> Vec<Respon
   if !has_default {
     variants.push(
       ResponseVariant::builder()
-        .variant_name(DEFAULT_RESPONSE_VARIANT)
+        .variant_name(EnumVariantToken::from_raw(DEFAULT_RESPONSE_VARIANT))
         .description(DEFAULT_RESPONSE_DESCRIPTION.to_string())
         .media_types(vec![ResponseMediaType::new("application/json")])
         .build(),
@@ -267,7 +268,7 @@ fn normalize_response_variants(mut variants: Vec<ResponseVariant>) -> Vec<Respon
 
 pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
   StructMethod::builder()
-    .name("parse_response")
+    .name(MethodNameToken::from_raw("parse_response"))
     .docs(Documentation::from_lines([
       "Parse the HTTP response into the response enum.",
     ]))

@@ -4,12 +4,9 @@ use oas3::spec::ObjectSchema;
 use regex::Regex;
 
 use super::{CodegenConfig, SchemaExt, discriminator::DiscriminatorInfo};
-use crate::generator::{
-  ast::{
-    Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
-    ValidationAttribute,
-  },
-  naming::identifiers::to_rust_field_name,
+use crate::generator::ast::{
+  Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+  ValidationAttribute,
 };
 
 #[derive(Clone, Debug)]
@@ -69,7 +66,7 @@ impl FieldConverter {
       .maybe_default_value(default_value)
       .maybe_multiple_of(prop_schema.multiple_of.clone())
       .maybe_serde_as_attr(serde_as_attr)
-      .name(to_rust_field_name(prop_name))
+      .name(FieldNameToken::from_raw(prop_name))
       .rust_type(final_type)
       .serde_attrs(serde_attrs)
       .validation_attrs(validation_attrs)

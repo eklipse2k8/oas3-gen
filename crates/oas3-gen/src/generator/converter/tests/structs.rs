@@ -4,7 +4,9 @@ use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, 
 
 use crate::{
   generator::{
-    ast::{Documentation, FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute},
+    ast::{
+      Documentation, FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute,
+    },
     converter::{
       SchemaConverter, discriminator::DiscriminatorHandler, structs::StructConverter,
       type_resolver::TypeResolverBuilder,
@@ -312,7 +314,7 @@ fn test_discriminator_handler_detect_parent() {
 
 fn make_field(name: &str, deprecated: bool) -> FieldDef {
   FieldDef::builder()
-    .name(name)
+    .name(FieldNameToken::from_raw(name))
     .rust_type(TypeRef::new(RustPrimitive::String))
     .docs(make_docs())
     .deprecated(deprecated)
@@ -418,7 +420,7 @@ fn make_integer_type_ref() -> TypeRef {
 
 fn make_base_field(type_ref: TypeRef) -> FieldDef {
   FieldDef::builder()
-    .name("test_field")
+    .name(FieldNameToken::from_raw("test_field"))
     .docs(make_docs())
     .rust_type(type_ref)
     .serde_attrs(BTreeSet::from([SerdeAttribute::Rename("original".to_string())]))

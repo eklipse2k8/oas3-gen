@@ -28,7 +28,9 @@ fn build_multipart_body(
   op: &OperationInfo,
   rust_types: &[RustType],
 ) -> TokenStream {
-  method::body::multipart::MultipartGenerator::new(op, rust_types, field, optional).emit()
+  method::body::multipart::MultipartGenerator::new(op, rust_types, field, optional)
+    .emit()
+    .tokens
 }
 
 #[derive(Default)]

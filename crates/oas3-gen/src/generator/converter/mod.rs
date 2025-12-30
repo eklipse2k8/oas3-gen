@@ -124,6 +124,7 @@ pub(crate) struct InlineSchemaOutput {
 ///
 /// Coordinates `StructConverter`, `EnumConverter`, and `TypeResolver` to transform
 /// `ObjectSchema` definitions into `RustType` definitions (structs, enums, aliases).
+#[derive(Debug, Clone)]
 pub(crate) struct SchemaConverter {
   type_resolver: TypeResolver,
   struct_converter: StructConverter,

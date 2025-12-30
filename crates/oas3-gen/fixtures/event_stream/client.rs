@@ -56,8 +56,7 @@ impl EventStreamApiClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("events");
-    let mut req_builder = self.client.get(url);
-    let response = req_builder.send().await?;
+    let response = self.client.get(url).send().await?;
     StreamEventsRequest::parse_response(response).await
   }
   ///Stream typed events
@@ -76,9 +75,7 @@ impl EventStreamApiClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("events")
       .push("typed");
-    let mut req_builder = self.client.get(url);
-    req_builder = req_builder.query(&request.query);
-    let response = req_builder.send().await?;
+    let response = self.client.get(url).query(&request.query).send().await?;
     StreamTypedEventsRequest::parse_response(response).await
   }
 }

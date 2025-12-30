@@ -79,7 +79,6 @@ impl DiscriminatedEnumDef {
 /// Response enum variant definition
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct ResponseVariant {
-  #[builder(into)]
   pub variant_name: EnumVariantToken,
   #[builder(default)]
   pub status_code: StatusCodeToken,
@@ -102,7 +101,6 @@ impl ResponseVariant {
 /// Response enum definition for operation responses
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct ResponseEnumDef {
-  #[builder(into)]
   pub name: EnumToken,
   #[builder(default)]
   pub docs: Documentation,
@@ -299,7 +297,6 @@ impl ResponseMediaType {
 
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct OperationBody {
-  #[builder(into)]
   pub field_name: FieldNameToken,
   pub optional: bool,
   pub content_category: ContentCategory,
@@ -360,7 +357,6 @@ impl StructDef {
 /// Associated method definition for a struct
 #[derive(Debug, Clone, bon::Builder)]
 pub struct StructMethod {
-  #[builder(into)]
   pub name: MethodNameToken,
   pub docs: Documentation,
   pub kind: StructMethodKind,
@@ -395,7 +391,6 @@ pub struct BuilderNestedStruct {
 /// Associated method definition for an enum
 #[derive(Debug, Clone, bon::Builder)]
 pub struct EnumMethod {
-  #[builder(into)]
   pub name: MethodNameToken,
   pub docs: Documentation,
   pub kind: EnumMethodKind,
@@ -433,7 +428,6 @@ pub enum EnumMethodKind {
 /// Rust struct field definition
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct FieldDef {
-  #[builder(into)]
   pub name: FieldNameToken,
   #[builder(default)]
   pub docs: Documentation,
@@ -534,7 +528,6 @@ impl FieldCollection for [FieldDef] {
 /// Rust enum definition
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct EnumDef {
-  #[builder(into)]
   pub name: EnumToken,
   pub docs: Documentation,
   pub variants: Vec<VariantDef>,

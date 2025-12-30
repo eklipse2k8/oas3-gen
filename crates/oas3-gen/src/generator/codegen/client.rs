@@ -168,15 +168,9 @@ pub(crate) mod method {
       let builder_init = http_init(&self.op.method);
       let url_construction = url_construction(self.op);
 
-      let query_params = params::query(self.op);
-      let header_params = params::headers(self.op);
-      let body_logic = body::BodyGenerator::new(self.op, self.rust_types).emit();
-
-      let param_logic = quote! {
-        #query_params
-        #header_params
-        #body_logic
-      };
+      let query_chain = params::query(self.op);
+      let header_chain = params::headers(self.op);
+      let body_result = body::BodyGenerator::new(self.op, self.rust_types).emit();
 
       let response_logic = response::build(self.op);
 
@@ -184,14 +178,28 @@ pub(crate) mod method {
       let return_type = &response_logic.success_type;
       let parse_block = &response_logic.parse_body;
 
+      let request_chain = if body_result.needs_conditional {
+        let body_logic = &body_result.tokens;
+        quote! {
+          let mut req_builder = #builder_init #query_chain #header_chain;
+          #body_logic
+          let response = req_builder.send().await?;
+        }
+      } else {
+        let body_chain = &body_result.tokens;
+        quote! {
+          let response = #builder_init #query_chain #header_chain #body_chain
+            .send()
+            .await?;
+        }
+      };
+
       Ok(quote! {
         #doc_attrs
         #vis async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#return_type> {
           request.validate().context("parameter validation")?;
           #url_construction
-          let mut req_builder = #builder_init;
-          #param_logic
-          let response = req_builder.send().await?;
+          #request_chain
           #parse_block
         }
       })
@@ -258,7 +266,7 @@ pub(crate) mod method {
         .iter()
         .any(|p| matches!(p.parameter_location, Some(ParameterLocation::Query)))
       {
-        quote! { req_builder = req_builder.query(&request.query); }
+        quote! { .query(&request.query) }
       } else {
         quote! {}
       }
@@ -271,8 +279,8 @@ pub(crate) mod method {
         .any(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)));
       if has_headers {
         quote! {
-          req_builder = req_builder.headers(http::HeaderMap::try_from(&request.header)
-            .context("building request headers")?);
+          .headers(http::HeaderMap::try_from(&request.header)
+            .context("building request headers")?)
         }
       } else {
         quote! {}
@@ -282,6 +290,11 @@ pub(crate) mod method {
 
   pub(crate) mod body {
     use super::*;
+
+    pub(crate) struct BodyResult {
+      pub(crate) tokens: TokenStream,
+      pub(crate) needs_conditional: bool,
+    }
 
     pub(crate) struct BodyGenerator<'a> {
       op: &'a OperationInfo,
@@ -293,52 +306,70 @@ pub(crate) mod method {
         Self { op, rust_types }
       }
 
-      pub(crate) fn emit(&self) -> TokenStream {
+      pub(crate) fn emit(&self) -> BodyResult {
         let Some(body) = &self.op.body else {
-          return quote! {};
+          return BodyResult {
+            tokens: quote! {},
+            needs_conditional: false,
+          };
         };
         let field = &body.field_name;
 
         match body.content_category {
-          ContentCategory::Json => self.wrap(field, body.optional, |e| quote! { req_builder = req_builder.json(#e); }),
-          ContentCategory::FormUrlEncoded => {
-            self.wrap(field, body.optional, |e| quote! { req_builder = req_builder.form(#e); })
+          ContentCategory::Json => self.chain_or_conditional(field, body.optional, |e| quote! { .json(#e) }),
+          ContentCategory::FormUrlEncoded => self.chain_or_conditional(field, body.optional, |e| quote! { .form(#e) }),
+          ContentCategory::Text | ContentCategory::EventStream => {
+            self.chain_or_conditional(field, body.optional, |e| quote! { .body((#e).to_string()) })
           }
-          ContentCategory::Text | ContentCategory::EventStream => self.wrap(
-            field,
-            body.optional,
-            |e| quote! { req_builder = req_builder.body((#e).to_string()); },
-          ),
-          ContentCategory::Binary => self.wrap(
-            field,
-            body.optional,
-            |e| quote! { req_builder = req_builder.body((#e).clone()); },
-          ),
-          ContentCategory::Xml => self.wrap(field, body.optional, |e| {
-            quote! {
-              let xml_string = (#e).to_string();
-              req_builder = req_builder.header("Content-Type", "application/xml").body(xml_string);
+          ContentCategory::Binary => {
+            self.chain_or_conditional(field, body.optional, |e| quote! { .body((#e).clone()) })
+          }
+          ContentCategory::Xml => {
+            if body.optional {
+              BodyResult {
+                tokens: quote! {
+                  if let Some(body) = request.#field.as_ref() {
+                    let xml_string = body.to_string();
+                    req_builder = req_builder.header("Content-Type", "application/xml").body(xml_string);
+                  }
+                },
+                needs_conditional: true,
+              }
+            } else {
+              BodyResult {
+                tokens: quote! {
+                  .header("Content-Type", "application/xml")
+                  .body(request.#field.to_string())
+                },
+                needs_conditional: false,
+              }
             }
-          }),
+          }
           ContentCategory::Multipart => {
             multipart::MultipartGenerator::new(self.op, self.rust_types, field, body.optional).emit()
           }
         }
       }
 
-      fn wrap<F>(&self, field: &FieldNameToken, optional: bool, f: F) -> TokenStream
+      fn chain_or_conditional<F>(&self, field: &FieldNameToken, optional: bool, make_chain: F) -> BodyResult
       where
         F: FnOnce(TokenStream) -> TokenStream,
       {
         if optional {
-          let stmt = f(quote! { body });
-          quote! {
-            if let Some(body) = request.#field.as_ref() {
-              #stmt
-            }
+          let chain = make_chain(quote! { body });
+          BodyResult {
+            tokens: quote! {
+              if let Some(body) = request.#field.as_ref() {
+                req_builder = req_builder #chain;
+              }
+            },
+            needs_conditional: true,
           }
         } else {
-          f(quote! { &request.#field })
+          BodyResult {
+            tokens: make_chain(quote! { &request.#field }),
+            needs_conditional: false,
+          }
         }
       }
     }
@@ -369,22 +400,26 @@ pub(crate) mod method {
           }
         }
 
-        pub(crate) fn emit(&self) -> TokenStream {
+        pub(crate) fn emit(&self) -> BodyResult {
           let logic = self.resolve_struct().map_or_else(fallback, strict);
+          let field = self.field;
 
-          if self.optional {
-            let field = self.field;
+          let tokens = if self.optional {
             quote! {
               if let Some(body) = request.#field.as_ref() {
                 #logic
               }
             }
           } else {
-            let field = self.field;
             quote! {
               let body = &request.#field;
               #logic
             }
+          };
+
+          BodyResult {
+            tokens,
+            needs_conditional: true,
           }
         }
 

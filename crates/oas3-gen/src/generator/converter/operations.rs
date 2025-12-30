@@ -13,9 +13,9 @@ use super::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, fields
 use crate::generator::{
   ast::{
     BuilderField, BuilderNestedStruct, ContentCategory, Documentation, EnumToken, FieldCollection as _, FieldDef,
-    FieldNameToken, OperationBody, OperationInfo, OperationKind, OuterAttr, ParameterLocation, ParsedPath,
-    ResponseEnumDef, ResponseMediaType, RustType, StructDef, StructKind, StructMethod, StructMethodKind, StructToken,
-    TypeRef, ValidationAttribute,
+    FieldNameToken, MethodNameToken, OperationBody, OperationInfo, OperationKind, OuterAttr, ParameterLocation,
+    ParsedPath, ResponseEnumDef, ResponseMediaType, RustType, StructDef, StructKind, StructMethod, StructMethodKind,
+    StructToken, TypeRef, ValidationAttribute,
   },
   naming::{
     constants::{
@@ -30,14 +30,18 @@ use crate::generator::{
   schema_registry::SchemaRegistry,
 };
 
+#[derive(Debug, Clone)]
 pub(crate) struct ConversionResult {
   pub(crate) types: Vec<RustType>,
   pub(crate) operation_info: OperationInfo,
 }
 
+#[derive(Debug, Clone, Default, bon::Builder)]
 struct RequestBodyInfo {
   body_type: Option<TypeRef>,
+  #[builder(default)]
   generated_types: Vec<RustType>,
+  #[builder(default)]
   type_usage: Vec<String>,
   field_name: Option<FieldNameToken>,
   optional: bool,
@@ -46,28 +50,24 @@ struct RequestBodyInfo {
 
 impl RequestBodyInfo {
   fn empty(optional: bool) -> Self {
-    Self {
-      body_type: None,
-      generated_types: vec![],
-      type_usage: vec![],
-      field_name: None,
-      optional,
-      content_type: None,
-    }
+    Self::builder().optional(optional).build()
   }
 }
 
+#[derive(Debug, Clone)]
 struct RequestBodyOutput {
   body_type: TypeRef,
   generated_types: Vec<RustType>,
   type_usage: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
 struct ConvertedParameter {
   field: FieldDef,
   inline_types: Vec<RustType>,
 }
 
+#[derive(Debug, Clone)]
 struct ResolvedParameterType {
   type_ref: TypeRef,
   validation_attrs: Vec<ValidationAttribute>,
@@ -75,10 +75,12 @@ struct ResolvedParameterType {
   inline_types: Vec<RustType>,
 }
 
+#[derive(Debug, Clone)]
 struct ParameterGroup {
   field: FieldDef,
 }
 
+#[derive(Debug, Clone)]
 struct ParametersByLocation {
   path: Vec<ParameterGroup>,
   query: Vec<ParameterGroup>,
@@ -95,6 +97,7 @@ impl ParametersByLocation {
   }
 }
 
+#[derive(Debug, Clone)]
 struct GeneratedRequestStructs {
   main_struct: StructDef,
   nested_structs: Vec<StructDef>,
@@ -103,6 +106,7 @@ struct GeneratedRequestStructs {
   warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
 struct ParameterStructNames {
   path: String,
   query: String,
@@ -131,6 +135,7 @@ impl ParameterStructNames {
 ///
 /// Handles generation of request parameter structs, request body types,
 /// and response enums/structs for each operation.
+#[derive(Debug, Clone)]
 pub(crate) struct OperationConverter<'a> {
   schema_converter: &'a SchemaConverter,
   spec: &'a Spec,
@@ -421,7 +426,7 @@ impl<'a> OperationConverter<'a> {
 
     main_fields.push(
       FieldDef::builder()
-        .name(FieldNameToken::new(PATH_PARAMS_FIELD))
+        .name(FieldNameToken::from_raw(PATH_PARAMS_FIELD))
         .rust_type(TypeRef::new(struct_def.name.to_string()))
         .build(),
     );
@@ -456,7 +461,7 @@ impl<'a> OperationConverter<'a> {
 
     main_fields.push(
       FieldDef::builder()
-        .name(FieldNameToken::new(QUERY_PARAMS_FIELD))
+        .name(FieldNameToken::from_raw(QUERY_PARAMS_FIELD))
         .rust_type(TypeRef::new(struct_def.name.to_string()))
         .build(),
     );
@@ -484,7 +489,7 @@ impl<'a> OperationConverter<'a> {
 
     main_fields.push(
       FieldDef::builder()
-        .name(FieldNameToken::new(HEADER_PARAMS_FIELD))
+        .name(FieldNameToken::from_raw(HEADER_PARAMS_FIELD))
         .rust_type(TypeRef::new(struct_def.name.to_string()))
         .build(),
     );
@@ -520,14 +525,16 @@ impl<'a> OperationConverter<'a> {
 
     usage.mark_request_iter(&output.type_usage);
 
-    Ok(RequestBodyInfo {
-      body_type: Some(output.body_type),
-      generated_types: output.generated_types,
-      type_usage: output.type_usage,
-      field_name: Some(FieldNameToken::new(BODY_FIELD_NAME)),
-      optional: !is_required,
-      content_type: Some(content_type_key.clone()),
-    })
+    Ok(
+      RequestBodyInfo::builder()
+        .body_type(output.body_type)
+        .generated_types(output.generated_types)
+        .type_usage(output.type_usage)
+        .field_name(FieldNameToken::new(BODY_FIELD_NAME))
+        .optional(!is_required)
+        .content_type(content_type_key.clone())
+        .build(),
+    )
   }
 
   fn resolve_request_body_type(
@@ -585,7 +592,7 @@ impl<'a> OperationConverter<'a> {
 
     Some(
       FieldDef::builder()
-        .name(BODY_FIELD_NAME)
+        .name(FieldNameToken::from_raw(BODY_FIELD_NAME))
         .docs(Documentation::from_optional(body.description.as_ref()))
         .rust_type(rust_type)
         .build(),
@@ -797,7 +804,7 @@ impl<'a> OperationConverter<'a> {
 
     Some(
       StructMethod::builder()
-        .name("new")
+        .name(MethodNameToken::from_raw("new"))
         .docs(Documentation::from_lines([
           "Create a new request with the given parameters.",
         ]))

@@ -54,8 +54,7 @@ impl SwaggerPetstoreClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("cats");
-    let req_builder = self.client.get(url);
-    let response = req_builder.send().await?;
+    let response = self.client.get(url).send().await?;
     ListCatsRequest::parse_response(response).await
   }
   ///List all pets
@@ -68,9 +67,7 @@ impl SwaggerPetstoreClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("pets");
-    let mut req_builder = self.client.get(url);
-    req_builder = req_builder.query(&request.query);
-    let response = req_builder.send().await?;
+    let response = self.client.get(url).query(&request.query).send().await?;
     ListPetsRequest::parse_response(response).await
   }
   ///Create a pet
@@ -83,8 +80,7 @@ impl SwaggerPetstoreClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("pets");
-    let req_builder = self.client.post(url);
-    let response = req_builder.send().await?;
+    let response = self.client.post(url).send().await?;
     CreatePetsRequest::parse_response(response).await
   }
   ///Info for a specific pet
@@ -98,9 +94,12 @@ impl SwaggerPetstoreClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("pets")
       .push(&request.path.pet_id.clone());
-    let mut req_builder = self.client.get(url);
-    req_builder = req_builder.headers(http::HeaderMap::try_from(&request.header).context("building request headers")?);
-    let response = req_builder.send().await?;
+    let response = self
+      .client
+      .get(url)
+      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
+      .send()
+      .await?;
     ShowPetByIdRequest::parse_response(response).await
   }
 }

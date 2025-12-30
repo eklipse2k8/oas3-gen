@@ -1,14 +1,14 @@
 use crate::generator::{
   ast::{
-    FieldDef, RustType, StructDef, StructToken, TypeAliasDef, TypeAliasToken, TypeRef, ValidationAttribute,
-    tokens::HeaderToken,
+    FieldDef, FieldNameToken, RustType, StructDef, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
+    ValidationAttribute, tokens::HeaderToken,
   },
   codegen::constants::{generate_header_constants, generate_regex_constants},
 };
 
 fn make_field(name: &str, pattern: Option<&str>) -> FieldDef {
   FieldDef::builder()
-    .name(name)
+    .name(FieldNameToken::from_raw(name))
     .rust_type(TypeRef::default())
     .validation_attrs(
       pattern
