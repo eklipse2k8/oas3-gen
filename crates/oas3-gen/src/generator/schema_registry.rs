@@ -10,7 +10,12 @@ use oas3::{
 
 use super::orchestrator::GenerationWarning;
 use crate::generator::{
-  converter::SchemaExt, naming::identifiers::to_rust_type_name, operation_registry::OperationRegistry,
+  converter::SchemaExt,
+  naming::{
+    identifiers::to_rust_type_name,
+    name_index::{ScanResult, TypeNameIndex},
+  },
+  operation_registry::OperationRegistry,
 };
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
@@ -749,5 +754,10 @@ impl SchemaRegistry {
   pub(crate) fn reachable(&self, operation_registry: &OperationRegistry) -> BTreeSet<String> {
     let analyzer = ReachabilityAnalyzer::new(&self.spec, &self.union_fingerprints, &self.dependencies);
     analyzer.compute_reachable(operation_registry)
+  }
+
+  pub(crate) fn scan_and_compute_names(&self) -> anyhow::Result<ScanResult> {
+    let index = TypeNameIndex::new(&self.schemas);
+    index.scan_and_compute_names()
   }
 }

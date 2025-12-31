@@ -1,14 +1,14 @@
 const DEFAULT_BASE_URL: &str = "https://example.com/";
 
-#[derive(Debug, Clone)]
-pub struct CodeMetadata {
+#[derive(Debug, Clone, Default, bon::Builder)]
+pub struct ClientDef {
   pub title: String,
   pub version: String,
   pub description: Option<String>,
   pub base_url: String,
 }
 
-impl From<&oas3::Spec> for CodeMetadata {
+impl From<&oas3::Spec> for ClientDef {
   fn from(spec: &oas3::Spec) -> Self {
     Self {
       title: spec.info.title.clone(),

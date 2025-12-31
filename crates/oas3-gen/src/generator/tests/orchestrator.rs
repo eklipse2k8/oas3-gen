@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::generator::{ast::CodeMetadata, codegen::Visibility, orchestrator::Orchestrator};
+use crate::generator::{ast::ClientDef, codegen::Visibility, orchestrator::Orchestrator};
 
 fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
   Orchestrator::new(
@@ -41,7 +41,7 @@ fn make_orchestrator_with_ops(
 fn test_metadata_and_header_generation() {
   let spec_json = include_str!("../../../fixtures/basic_api.json");
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-  let metadata = CodeMetadata::from(&spec);
+  let metadata = ClientDef::from(&spec);
 
   assert_eq!(metadata.title, "Basic Test API", "title mismatch");
   assert_eq!(metadata.version, "1.0.0", "version mismatch");

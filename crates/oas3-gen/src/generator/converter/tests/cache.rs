@@ -9,7 +9,7 @@ use crate::{
     converter::{
       SchemaConverter,
       cache::SharedSchemaCache,
-      hashing,
+      hashing::CanonicalSchema,
       type_resolver::TypeResolverBuilder,
       union::{UnionConverter, UnionKind},
     },
@@ -31,7 +31,7 @@ fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
 }
 
 #[test]
-fn test_hash_schema_behavior() {
+fn test_canonical_schema_equality_and_ordering() {
   let schema1 = ObjectSchema {
     required: vec!["name".to_string(), "id".to_string()],
     ..Default::default()
@@ -47,21 +47,27 @@ fn test_hash_schema_behavior() {
     ..Default::default()
   };
 
-  let first_hash = hashing::hash_schema(&schema1).expect("hash should succeed");
-  let repeated_hash = hashing::hash_schema(&schema1).expect("hash should succeed");
-  let reordered_hash = hashing::hash_schema(&schema2).expect("hash should succeed");
-  let different_hash = hashing::hash_schema(&schema3).expect("hash should succeed");
+  let first = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let repeated = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let reordered = CanonicalSchema::from_schema(&schema2).expect("should succeed");
+  let different = CanonicalSchema::from_schema(&schema3).expect("should succeed");
 
-  assert_eq!(first_hash, repeated_hash, "Hash should be deterministic across calls");
-  assert!(!first_hash.is_empty(), "Hash should not be empty");
+  assert_eq!(first, repeated, "CanonicalSchema should be deterministic across calls");
   assert_eq!(
-    first_hash, reordered_hash,
-    "Required array order should not affect hash due to RFC 8785 canonicalization"
+    first, reordered,
+    "Required array order should not affect equality due to RFC 8785 canonicalization"
   );
   assert_ne!(
-    first_hash, different_hash,
-    "Different schemas should produce different hashes"
+    first, different,
+    "Different schemas should produce different CanonicalSchemas"
   );
+
+  assert!(first <= reordered, "Equal schemas should satisfy <= ordering");
+  assert!(first >= reordered, "Equal schemas should satisfy >= ordering");
+
+  let mut schemas_diff = [different.clone(), first.clone()];
+  schemas_diff.sort();
+  assert_eq!(schemas_diff.len(), 2, "Sorting should preserve all elements");
 }
 
 #[test]
@@ -202,9 +208,9 @@ fn test_precomputed_names() {
     ..Default::default()
   };
 
-  let schema_hash = hashing::hash_schema(&schema).expect("hash should succeed");
+  let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
   let mut precomputed_names = BTreeMap::new();
-  precomputed_names.insert(schema_hash, "CustomName".to_string());
+  precomputed_names.insert(canonical, "CustomName".to_string());
 
   let enum_values = vec!["alpha".to_string(), "beta".to_string()];
   let mut precomputed_enum_names = BTreeMap::new();
@@ -288,4 +294,132 @@ fn test_cache_operations() {
 
   let types = type_cache.into_types();
   assert_eq!(types.len(), 2, "Should return all generated types");
+}
+
+#[test]
+fn test_canonical_schema_as_btreemap_key() {
+  use std::collections::BTreeMap;
+
+  let schema_a = ObjectSchema {
+    required: vec!["alpha".to_string()],
+    ..Default::default()
+  };
+  let schema_b = ObjectSchema {
+    required: vec!["beta".to_string()],
+    ..Default::default()
+  };
+  let schema_a_reordered = ObjectSchema {
+    required: vec!["alpha".to_string()],
+    ..Default::default()
+  };
+
+  let canonical_a = CanonicalSchema::from_schema(&schema_a).expect("should succeed");
+  let canonical_b = CanonicalSchema::from_schema(&schema_b).expect("should succeed");
+  let canonical_a_dup = CanonicalSchema::from_schema(&schema_a_reordered).expect("should succeed");
+
+  let mut map: BTreeMap<CanonicalSchema, &str> = BTreeMap::new();
+  map.insert(canonical_a.clone(), "first");
+  map.insert(canonical_b.clone(), "second");
+
+  assert_eq!(map.len(), 2, "Map should have two entries for different schemas");
+  assert_eq!(map.get(&canonical_a), Some(&"first"));
+  assert_eq!(map.get(&canonical_b), Some(&"second"));
+  assert_eq!(
+    map.get(&canonical_a_dup),
+    Some(&"first"),
+    "Lookup with equivalent schema should find same entry"
+  );
+
+  map.insert(canonical_a_dup, "overwritten");
+  assert_eq!(map.len(), 2, "Map size should remain 2 after inserting duplicate key");
+  assert_eq!(
+    map.get(&canonical_a),
+    Some(&"overwritten"),
+    "Value should be overwritten for equivalent key"
+  );
+}
+
+#[test]
+fn test_canonical_schema_normalizes_enum_order() {
+  let schema1 = ObjectSchema {
+    enum_values: vec![json!("z"), json!("a"), json!("m")],
+    ..Default::default()
+  };
+  let schema2 = ObjectSchema {
+    enum_values: vec![json!("a"), json!("m"), json!("z")],
+    ..Default::default()
+  };
+
+  let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
+
+  assert_eq!(
+    canonical1, canonical2,
+    "Enum value order should not affect canonical equality"
+  );
+}
+
+#[test]
+fn test_canonical_schema_normalizes_type_array_order() {
+  let schema1 = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Null])),
+    ..Default::default()
+  };
+  let schema2 = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Null, SchemaType::String])),
+    ..Default::default()
+  };
+
+  let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
+
+  assert_eq!(
+    canonical1, canonical2,
+    "Type array order should not affect canonical equality"
+  );
+}
+
+#[test]
+fn test_canonical_schema_clone() {
+  let schema = ObjectSchema {
+    required: vec!["field".to_string()],
+    ..Default::default()
+  };
+
+  let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
+  let cloned = canonical.clone();
+
+  assert_eq!(canonical, cloned, "Cloned CanonicalSchema should equal original");
+}
+
+#[test]
+fn test_canonical_schema_hash_consistency() {
+  use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+  };
+
+  let schema = ObjectSchema {
+    required: vec!["a".to_string(), "b".to_string()],
+    ..Default::default()
+  };
+
+  let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
+
+  let mut hasher1 = DefaultHasher::new();
+  canonical.hash(&mut hasher1);
+  let hash1 = hasher1.finish();
+
+  let mut hasher2 = DefaultHasher::new();
+  canonical.hash(&mut hasher2);
+  let hash2 = hasher2.finish();
+
+  assert_eq!(hash1, hash2, "Hash should be consistent across calls");
+
+  let canonical_dup = CanonicalSchema::from_schema(&schema).expect("should succeed");
+  let mut hasher3 = DefaultHasher::new();
+  canonical_dup.hash(&mut hasher3);
+  let hash3 = hasher3.finish();
+
+  assert_eq!(hash1, hash3, "Equal CanonicalSchemas should produce equal hashes");
 }

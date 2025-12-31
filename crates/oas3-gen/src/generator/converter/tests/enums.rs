@@ -19,7 +19,7 @@ use crate::{
       type_resolver::TypeResolverBuilder,
       union::{CollisionStrategy, UnionConverter, UnionKind},
     },
-    naming::inference::VariantNameNormalizer,
+    naming::inference::NormalizedVariant,
     schema_registry::SchemaRegistry,
   },
   tests::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config},
@@ -502,14 +502,14 @@ fn test_case_insensitive_duplicates_with_preservation() -> anyhow::Result<()> {
 #[test]
 fn test_normalize_string() {
   let val = json!("active");
-  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  let res = NormalizedVariant::try_from(&val).unwrap();
   assert_eq!(res.rename_value, "active");
 }
 
 #[test]
 fn test_normalize_int() {
   let val = json!(404);
-  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  let res = NormalizedVariant::try_from(&val).unwrap();
   assert_eq!(res.name, "Value404");
   assert_eq!(res.rename_value, "404");
 }
@@ -518,7 +518,7 @@ fn test_normalize_int() {
 #[allow(clippy::approx_constant)]
 fn test_normalize_float() {
   let val = json!(3.14);
-  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  let res = NormalizedVariant::try_from(&val).unwrap();
   assert_eq!(res.name, "Value3_14");
   assert_eq!(res.rename_value, "3.14");
 }
@@ -526,12 +526,12 @@ fn test_normalize_float() {
 #[test]
 fn test_normalize_bool() {
   let val = json!(true);
-  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  let res = NormalizedVariant::try_from(&val).unwrap();
   assert_eq!(res.name, "True");
   assert_eq!(res.rename_value, "true");
 
   let val = json!(false);
-  let res = VariantNameNormalizer::normalize(&val).unwrap();
+  let res = NormalizedVariant::try_from(&val).unwrap();
   assert_eq!(res.name, "False");
   assert_eq!(res.rename_value, "false");
 }
@@ -539,7 +539,7 @@ fn test_normalize_bool() {
 #[test]
 fn test_normalize_invalid() {
   let val = json!({});
-  assert!(VariantNameNormalizer::normalize(&val).is_none());
+  assert!(NormalizedVariant::try_from(&val).is_err());
 }
 
 #[test]

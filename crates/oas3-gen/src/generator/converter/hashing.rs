@@ -1,25 +1,53 @@
+use std::{cmp::Ordering, hash::Hash};
+
 use anyhow::Context;
-use blake3::Hasher;
 use json_canon::to_string as to_canonical_json;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
-/// Computes a deterministic hash of an `ObjectSchema`.
+/// Opaque representation of a schema's canonical form.
 ///
-/// Used for caching generated types to avoid duplication.
-/// Normalizes fields like `required`, `type`, `enum` to ensure consistent hashing.
-pub(crate) fn hash_schema(schema: &ObjectSchema) -> anyhow::Result<String> {
-  let mut value = serde_json::to_value(schema).context("Failed to serialize schema for hashing")?;
+/// Used for caching and deduplication of generated types.
+/// Normalizes fields like `required`, `type`, `enum` to ensure semantically
+/// identical schemas produce the same canonical representation.
+#[derive(Debug, Clone, Eq)]
+pub struct CanonicalSchema(String);
 
-  normalize_schema_semantics(&mut value);
+impl CanonicalSchema {
+  pub fn from_schema(schema: &ObjectSchema) -> anyhow::Result<Self> {
+    let mut value = serde_json::to_value(schema).context("Failed to serialize schema for canonicalization")?;
 
-  let canonical_json = to_canonical_json(&value).context("Failed to create canonical JSON string")?;
+    normalize_schema_semantics(&mut value);
 
-  let mut hasher = Hasher::new();
-  hasher.update(canonical_json.as_bytes());
-  let hash = hasher.finalize();
+    let canonical_json = to_canonical_json(&value).context("Failed to create canonical JSON string")?;
 
-  Ok(hash.to_hex().to_string())
+    Ok(CanonicalSchema(canonical_json))
+  }
+}
+
+impl PartialEq for CanonicalSchema {
+  fn eq(&self, other: &Self) -> bool {
+    self.0 == other.0
+  }
+}
+
+impl PartialOrd for CanonicalSchema {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for CanonicalSchema {
+  fn cmp(&self, other: &Self) -> Ordering {
+    self.0.cmp(&other.0)
+  }
+}
+
+impl Hash for CanonicalSchema {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    let hash = blake3::hash(self.0.as_bytes());
+    hash.as_bytes().hash(state);
+  }
 }
 
 /// Normalizes a JSON schema `Value` in-place to ensure that

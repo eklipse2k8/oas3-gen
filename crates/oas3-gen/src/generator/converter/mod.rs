@@ -4,7 +4,6 @@ pub(crate) mod discriminator;
 mod enums;
 pub(crate) mod fields;
 pub(crate) mod hashing;
-pub(crate) mod inline_scanner;
 pub(crate) mod operations;
 pub(crate) mod responses;
 mod struct_summaries;

@@ -9,11 +9,11 @@ use strum::Display;
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::TypeAnalyzer,
-  ast::{CodeMetadata, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType},
+  ast::{ClientDef, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType},
   codegen::{self, Visibility, client::ClientGenerator, mod_file::ModFileGenerator},
   converter::{
     CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
-    TypeUsageRecorder, inline_scanner::InlineTypeScanner, operations::OperationConverter,
+    TypeUsageRecorder, operations::OperationConverter,
   },
   operation_registry::OperationRegistry,
   schema_registry::SchemaRegistry,
@@ -135,7 +135,7 @@ impl Orchestrator {
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
-    let metadata = CodeMetadata::from(&self.spec);
+    let metadata = ClientDef::from(&self.spec);
     let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility);
     let client_tokens = client_generator.into_token_stream();
     let lint_config = LintConfig::default();
@@ -160,7 +160,7 @@ impl Orchestrator {
     } = artifacts;
 
     let lint_config = LintConfig::default();
-    let metadata = CodeMetadata::from(&self.spec);
+    let metadata = ClientDef::from(&self.spec);
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
@@ -186,7 +186,7 @@ impl Orchestrator {
       mut stats,
     } = artifacts;
 
-    let metadata = CodeMetadata::from(&self.spec);
+    let metadata = ClientDef::from(&self.spec);
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
@@ -258,6 +258,8 @@ impl Orchestrator {
       customizations: self.customizations.clone(),
     };
 
+    let scan_result = graph.scan_and_compute_names().unwrap_or_default();
+
     let graph = Arc::new(graph);
 
     let schema_converter = if let Some(ref reachable) = operation_reachable {
@@ -265,9 +267,6 @@ impl Orchestrator {
     } else {
       SchemaConverter::new(&graph, &config)
     };
-
-    let scanner = InlineTypeScanner::new(&graph);
-    let scan_result = scanner.scan_and_compute_names().unwrap_or_default();
 
     let mut cache = SharedSchemaCache::new();
     cache.set_precomputed_names(scan_result.names, scan_result.enum_names);

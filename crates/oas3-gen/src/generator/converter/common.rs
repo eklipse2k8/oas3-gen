@@ -8,6 +8,7 @@ use oas3::{
 use crate::generator::{
   ast::{RustType, TypeRef},
   converter::cache::SharedSchemaCache,
+  naming::inference::has_mixed_string_variants,
   schema_registry::RefCollector,
 };
 
@@ -156,6 +157,15 @@ pub(crate) trait SchemaExt {
 
   /// Returns true if the schema has a const value defined.
   fn has_const_value(&self) -> bool;
+
+  /// Returns true if the schema requires a dedicated type definition.
+  /// This includes schemas with enum values, oneOf/anyOf unions, or typed object properties.
+  fn requires_type_definition(&self) -> bool;
+
+  /// Returns true if the schema has a relaxed enum pattern in anyOf.
+  /// A relaxed enum has both freeform string variants and constrained string variants,
+  /// allowing APIs to accept known values plus arbitrary strings for forward compatibility.
+  fn has_relaxed_anyof_enum(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -307,6 +317,14 @@ impl SchemaExt for ObjectSchema {
 
   fn has_const_value(&self) -> bool {
     self.const_value.is_some()
+  }
+
+  fn requires_type_definition(&self) -> bool {
+    self.has_enum_values() || self.has_union() || (!self.properties.is_empty() && self.additional_properties.is_none())
+  }
+
+  fn has_relaxed_anyof_enum(&self) -> bool {
+    !self.any_of.is_empty() && has_mixed_string_variants(self.any_of.iter())
   }
 }
 

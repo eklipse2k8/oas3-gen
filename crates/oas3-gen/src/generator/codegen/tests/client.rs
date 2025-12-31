@@ -4,9 +4,8 @@ use quote::ToTokens;
 
 use crate::generator::{
   ast::{
-    CodeMetadata, ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind,
-    ParameterLocation, ParsedPath, PathSegment, ResponseMediaType, RustPrimitive, RustType, StructDef, StructKind,
-    StructToken, TypeRef,
+    ClientDef, ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
+    ParsedPath, PathSegment, ResponseMediaType, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
   },
   codegen::{
     Visibility,
@@ -419,7 +418,7 @@ fn test_client_filters_webhook_operations() {
   };
 
   let operations = vec![http_operation, webhook_operation];
-  let metadata = CodeMetadata {
+  let metadata = ClientDef {
     title: "PetStore".to_string(),
     base_url: "https://api.example.com".to_string(),
     version: "1.0.0".to_string(),

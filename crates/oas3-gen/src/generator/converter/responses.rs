@@ -14,7 +14,7 @@ use crate::generator::{
   naming::{
     constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
     identifiers::to_rust_type_name,
-    inference as naming,
+    inference::InferenceExt,
   },
   schema_registry::SchemaRegistry,
 };
@@ -239,7 +239,7 @@ fn resolve_inline_response_schema(
     inline_schema.clone()
   };
 
-  let base_name = naming::infer_name_from_context(&effective_for_naming, path, status_code.as_str());
+  let base_name = effective_for_naming.infer_name_from_context(path, status_code.as_str());
   let Some(output) = schema_converter.convert_inline_schema(inline_schema, &base_name, schema_cache)? else {
     return Ok(None);
   };

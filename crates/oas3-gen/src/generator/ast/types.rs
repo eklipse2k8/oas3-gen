@@ -165,6 +165,18 @@ impl From<RustPrimitive> for TypeRef {
   }
 }
 
+impl From<&serde_json::Value> for TypeRef {
+  fn from(value: &serde_json::Value) -> Self {
+    match value {
+      serde_json::Value::String(_) => TypeRef::new(RustPrimitive::String),
+      serde_json::Value::Number(n) if n.is_i64() => TypeRef::new(RustPrimitive::I64),
+      serde_json::Value::Number(_) => TypeRef::new(RustPrimitive::F64),
+      serde_json::Value::Bool(_) => TypeRef::new(RustPrimitive::Bool),
+      _ => TypeRef::new(RustPrimitive::Value),
+    }
+  }
+}
+
 /// Rust primitive and standard library types
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RustPrimitive {

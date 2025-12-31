@@ -6,7 +6,7 @@ use syn::LitStr;
 use super::Visibility;
 use crate::generator::{
   ast::{
-    CodeMetadata, ContentCategory, Documentation, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
+    ClientDef, ContentCategory, Documentation, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
     RustPrimitive, RustType, RustTypeCollection, StructDef, StructToken,
   },
   codegen::parse_type,
@@ -14,7 +14,7 @@ use crate::generator::{
 };
 
 pub struct ClientGenerator<'a> {
-  metadata: &'a CodeMetadata,
+  def: &'a ClientDef,
   operations: &'a [OperationInfo],
   rust_types: &'a [RustType],
   visibility: Visibility,
@@ -23,13 +23,13 @@ pub struct ClientGenerator<'a> {
 
 impl<'a> ClientGenerator<'a> {
   pub fn new(
-    metadata: &'a CodeMetadata,
+    def: &'a ClientDef,
     operations: &'a [OperationInfo],
     rust_types: &'a [RustType],
     visibility: Visibility,
   ) -> Self {
     Self {
-      metadata,
+      def,
       operations,
       rust_types,
       visibility,
@@ -43,10 +43,10 @@ impl<'a> ClientGenerator<'a> {
   }
 
   pub fn client_ident(&self) -> syn::Ident {
-    let client_name = if self.metadata.title.is_empty() {
+    let client_name = if self.def.title.is_empty() {
       "Api".to_string()
     } else {
-      to_rust_type_name(&self.metadata.title)
+      to_rust_type_name(&self.def.title)
     };
     format_ident!("{client_name}Client")
   }
@@ -67,6 +67,7 @@ impl<'a> ClientGenerator<'a> {
     quote! {
       /// Create a client using the OpenAPI `servers[0]` URL.
       #[must_use]
+      #[track_caller]
       #vis fn new() -> Self {
         Self {
           client: Client::builder().build().expect("client"),
@@ -95,7 +96,7 @@ impl ToTokens for ClientGenerator<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let client_ident = self.client_ident();
     let vis = self.visibility.to_tokens();
-    let base_url = LitStr::new(&self.metadata.base_url, Span::call_site());
+    let base_url = LitStr::new(&self.def.base_url, Span::call_site());
 
     let methods = self
       .operations
@@ -130,6 +131,12 @@ impl ToTokens for ClientGenerator<'_> {
       #vis const BASE_URL: &str = #base_url;
 
       #client_struct
+
+      impl Default for #client_ident {
+        fn default() -> Self {
+          Self::new()
+        }
+      }
 
       impl #client_ident {
         #constructors

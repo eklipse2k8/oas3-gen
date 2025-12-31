@@ -19,7 +19,7 @@ use crate::generator::{
   converter::common::handle_inline_creation,
   naming::{
     identifiers::{strip_parent_prefix, to_rust_type_name},
-    inference::{CommonVariantName, extract_common_variant_prefix, extract_enum_values, is_relaxed_enum_pattern},
+    inference::{CommonVariantName, InferenceExt},
   },
   schema_registry::{RefCollector, SchemaRegistry},
 };
@@ -70,20 +70,10 @@ impl TypeResolver {
       return Ok(self.resolve_primitive(non_null, schema)?.with_option());
     }
     if let Some(ref const_value) = schema.const_value {
-      return Ok(Self::infer_type_from_const(const_value));
+      return Ok(const_value.into());
     }
 
     Ok(TypeRef::new(RustPrimitive::Value))
-  }
-
-  fn infer_type_from_const(const_value: &serde_json::Value) -> TypeRef {
-    match const_value {
-      serde_json::Value::String(_) => TypeRef::new(RustPrimitive::String),
-      serde_json::Value::Number(n) if n.is_i64() => TypeRef::new(RustPrimitive::I64),
-      serde_json::Value::Number(_) => TypeRef::new(RustPrimitive::F64),
-      serde_json::Value::Bool(_) => TypeRef::new(RustPrimitive::Bool),
-      _ => TypeRef::new(RustPrimitive::Value),
-    }
   }
 
   /// Resolves a property type, handling inline structs/enums/unions by generating them.
@@ -160,7 +150,7 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.resolve_type(property_schema)?));
     }
 
-    let enum_values: Vec<String> = extract_enum_values(property_schema).unwrap_or_default();
+    let enum_values: Vec<String> = property_schema.extract_enum_values().unwrap_or_default();
     let base_name = format!("{parent_name}{}", property_name.to_pascal_case());
 
     let forced_name = cache.as_ref().and_then(|c| c.get_enum_name(&enum_values));
@@ -255,7 +245,7 @@ impl TypeResolver {
       base_name,
       None,
       cache.as_deref_mut(),
-      |cache| Self::lookup_cached_enum_name(schema, cache),
+      |cache| cache.lookup_enum_name(schema),
       |name, cache| {
         let union_converter = UnionConverter::new(&self.graph, self.clone(), &self.config);
         union_converter.convert_union(
@@ -310,24 +300,10 @@ impl TypeResolver {
 
     let property_pascal = property_name.to_pascal_case();
     let suffix_part = format!("{property_pascal}Kind");
-    let base_name =
-      Self::get_common_union_name(variants, &suffix_part).unwrap_or_else(|| format!("{parent_name}{property_pascal}"));
+    let base_name = CommonVariantName::union_name(variants, &suffix_part)
+      .unwrap_or_else(|| format!("{parent_name}{property_pascal}"));
 
     self.create_union_type(property_schema, variants, &base_name, cache)
-  }
-
-  fn get_common_union_name(variants: &[ObjectOrReference<ObjectSchema>], suffix_part: &str) -> Option<String> {
-    let common_prefix = extract_common_variant_prefix(variants);
-
-    if let Some(CommonVariantName { name, has_suffix }) = common_prefix {
-      if has_suffix {
-        Some(format!("{name}Kind"))
-      } else {
-        Some(format!("{name}{suffix_part}"))
-      }
-    } else {
-      None
-    }
   }
 
   pub(crate) fn resolve_array_with_inline_items(
@@ -358,7 +334,7 @@ impl TypeResolver {
 
       let base_kind_name = format!("{singular_pascal}Kind");
       let name_to_use =
-        Self::get_common_union_name(variants, &base_kind_name).unwrap_or_else(|| base_kind_name.clone());
+        CommonVariantName::union_name(variants, &base_kind_name).unwrap_or_else(|| base_kind_name.clone());
 
       let final_name = if let Some(ref c) = cache
         && c.name_conflicts_with_different_schema(&name_to_use, &items_schema)?
@@ -649,15 +625,6 @@ impl TypeResolver {
     let mut type_reference = self.resolve_type(&items_schema)?;
     type_reference.boxed = false;
     Ok(type_reference)
-  }
-
-  fn lookup_cached_enum_name(schema: &ObjectSchema, cache: &SharedSchemaCache) -> Option<String> {
-    if !is_relaxed_enum_pattern(schema)
-      && let Some(values) = extract_enum_values(schema)
-    {
-      return cache.get_enum_name(&values);
-    }
-    None
   }
 
   pub(crate) fn create_discriminated_enum(

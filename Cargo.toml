@@ -43,7 +43,7 @@ oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.23.6" }
 any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
 better_default = { version = "1.0" }
-blake3 = { version = "1.8", features = ["neon"] }
+blake3 = { version = "1.8", features = ["neon", "traits-preview"] }
 bon = { version = "3.8" }
 cfg-if = { version = "1.0" }
 chrono = { version = ">=0.4.42", default-features = false, features = ["std", "clock", "serde"] }

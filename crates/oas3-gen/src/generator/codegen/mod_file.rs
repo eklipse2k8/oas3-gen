@@ -1,15 +1,15 @@
 use quote::quote;
 
 use super::Visibility;
-use crate::generator::ast::{CodeMetadata, LintConfig};
+use crate::generator::ast::{ClientDef, LintConfig};
 
 pub struct ModFileGenerator<'a> {
-  metadata: &'a CodeMetadata,
+  metadata: &'a ClientDef,
   visibility: Visibility,
 }
 
 impl<'a> ModFileGenerator<'a> {
-  pub fn new(metadata: &'a CodeMetadata, visibility: Visibility) -> Self {
+  pub fn new(metadata: &'a ClientDef, visibility: Visibility) -> Self {
     Self { metadata, visibility }
   }
 

@@ -23,7 +23,7 @@ use crate::generator::{
       QUERY_PARAMS_FIELD, QUERY_PARAMS_SUFFIX, REQUEST_BODY_SUFFIX,
     },
     identifiers::to_rust_type_name,
-    inference as naming,
+    inference::InferenceExt,
     operations::{generate_unique_request_name, generate_unique_response_name},
     responses as naming_responses,
   },
@@ -564,7 +564,7 @@ impl<'a> OperationConverter<'a> {
     path: &str,
     cache: &mut SharedSchemaCache,
   ) -> anyhow::Result<Option<RequestBodyOutput>> {
-    let base_name = naming::infer_name_from_context(schema, path, REQUEST_BODY_SUFFIX);
+    let base_name = schema.infer_name_from_context(path, REQUEST_BODY_SUFFIX);
 
     let Some(output) = self.schema_converter.convert_inline_schema(schema, &base_name, cache)? else {
       return Ok(None);

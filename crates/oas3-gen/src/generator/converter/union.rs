@@ -23,9 +23,7 @@ use crate::generator::{
   converter::discriminator::try_build_discriminated_enum_from_variants,
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
-    inference::{
-      VariantNameNormalizer, derive_method_names, extract_enum_values, infer_union_variant_label, strip_common_affixes,
-    },
+    inference::{InferenceExt, NormalizedVariant, derive_method_names, strip_common_affixes},
   },
   schema_registry::{RefCollector, SchemaRegistry},
 };
@@ -93,7 +91,7 @@ impl UnionConverter {
     let output = self.collect_union_variants(name, schema, kind, cache.as_deref_mut())?;
 
     if let Some(c) = cache
-      && let Some(values) = extract_enum_values(schema)
+      && let Some(values) = schema.extract_enum_values()
       && let RustType::Enum(e) = &output.result
     {
       c.register_enum(values, e.name.to_string());
@@ -161,7 +159,7 @@ impl UnionConverter {
         }
       });
 
-      let base_name = infer_union_variant_label(&resolved, ref_name.as_deref(), i);
+      let base_name = resolved.infer_union_variant_label(ref_name.as_deref(), i);
       let variant_name = ensure_unique(&base_name, &seen_names);
       seen_names.insert(variant_name.clone());
 
@@ -267,8 +265,8 @@ impl UnionConverter {
       return Ok(None);
     };
 
-    let normalized = VariantNameNormalizer::normalize(const_value)
-      .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
+    let normalized = NormalizedVariant::try_from(const_value)
+      .map_err(|_| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
 
     let variant = VariantDef::builder()
       .name(variant_name.clone())
@@ -511,7 +509,11 @@ impl UnionConverter {
 
     let variant_names: Vec<EnumVariantToken> = entries
       .iter()
-      .filter_map(|entry| VariantNameNormalizer::normalize(&entry.value).map(|n| EnumVariantToken::new(n.name)))
+      .filter_map(|entry| {
+        NormalizedVariant::try_from(&entry.value)
+          .ok()
+          .map(|n| EnumVariantToken::new(n.name))
+      })
       .collect();
 
     let variant_name_strings: Vec<String> = variant_names.iter().map(std::string::ToString::to_string).collect();
@@ -715,7 +717,7 @@ impl UnionConverter {
     let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
 
     for (i, entry) in entries.iter().enumerate() {
-      let Some(normalized) = VariantNameNormalizer::normalize(&entry.value) else {
+      let Ok(normalized) = NormalizedVariant::try_from(&entry.value) else {
         continue;
       };
 

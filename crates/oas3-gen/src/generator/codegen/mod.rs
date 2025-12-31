@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::ast::{
-  CodeMetadata, LintConfig, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind, ValidationAttribute,
+  ClientDef, LintConfig, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind, ValidationAttribute,
   tokens::{ConstToken, HeaderToken},
 };
 
@@ -48,7 +48,7 @@ pub fn format(code: &TokenStream) -> anyhow::Result<String> {
 pub fn generate_file(
   types: &[RustType],
   visibility: Visibility,
-  metadata: &CodeMetadata,
+  metadata: &ClientDef,
   lint_config: &LintConfig,
   source_path: &str,
   gen_version: &str,
@@ -59,7 +59,7 @@ pub fn generate_file(
 
 pub fn generate_source(
   code: &TokenStream,
-  metadata: &CodeMetadata,
+  metadata: &ClientDef,
   lint_config: Option<&LintConfig>,
   source_path: &str,
   gen_version: &str,

@@ -2,33 +2,37 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::ObjectSchema;
 
-use super::{hashing, struct_summaries::StructSummary};
+use super::{hashing::CanonicalSchema, struct_summaries::StructSummary};
 use crate::generator::{
   ast::{EnumToken, RustType, StructToken},
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
-    inference::{extract_enum_values, is_relaxed_enum_pattern},
+    inference::InferenceExt,
   },
 };
 
 #[derive(Default)]
 struct TypeIdentityCache {
-  schema_to_type: BTreeMap<String, String>,
+  schema_to_type: BTreeMap<CanonicalSchema, String>,
   enum_to_type: BTreeMap<Vec<String>, String>,
   union_refs_to_type: BTreeMap<(BTreeSet<String>, Option<String>), String>,
   used_names: BTreeSet<String>,
-  precomputed_names: BTreeMap<String, String>,
+  precomputed_names: BTreeMap<CanonicalSchema, String>,
   precomputed_enum_names: BTreeMap<Vec<String>, String>,
 }
 
 impl TypeIdentityCache {
-  fn set_precomputed_names(&mut self, names: BTreeMap<String, String>, enum_names: BTreeMap<Vec<String>, String>) {
+  fn set_precomputed_names(
+    &mut self,
+    names: BTreeMap<CanonicalSchema, String>,
+    enum_names: BTreeMap<Vec<String>, String>,
+  ) {
     self.precomputed_names = names;
     self.precomputed_enum_names = enum_names;
   }
 
-  fn schema_type(&self, schema_hash: &str) -> Option<String> {
-    self.schema_to_type.get(schema_hash).cloned()
+  fn schema_type(&self, canonical: &CanonicalSchema) -> Option<String> {
+    self.schema_to_type.get(canonical).cloned()
   }
 
   fn enum_type(&self, values: &[String]) -> Option<String> {
@@ -70,18 +74,18 @@ impl TypeIdentityCache {
     self.used_names.contains(name)
   }
 
-  fn record_schema_name(&mut self, schema_hash: String, name: String) {
-    self.schema_to_type.insert(schema_hash, name);
+  fn record_schema_name(&mut self, canonical: CanonicalSchema, name: String) {
+    self.schema_to_type.insert(canonical, name);
   }
 
-  fn has_schema_name(&self, schema_hash: &str, name: &str) -> bool {
-    self.schema_to_type.get(schema_hash).is_some_and(|n| n == name)
+  fn has_schema_name(&self, canonical: &CanonicalSchema, name: &str) -> bool {
+    self.schema_to_type.get(canonical).is_some_and(|n| n == name)
   }
 
-  fn preferred_name(&self, schema_hash: &str, base_name: &str) -> String {
+  fn preferred_name(&self, canonical: &CanonicalSchema, base_name: &str) -> String {
     self
       .precomputed_names
-      .get(schema_hash)
+      .get(canonical)
       .cloned()
       .unwrap_or_else(|| self.make_unique_name(base_name))
   }
@@ -145,7 +149,7 @@ impl SharedSchemaCache {
   /// Sets precomputed names for schemas, useful for deterministic naming or overrides.
   pub(crate) fn set_precomputed_names(
     &mut self,
-    names: BTreeMap<String, String>,
+    names: BTreeMap<CanonicalSchema, String>,
     enum_names: BTreeMap<Vec<String>, String>,
   ) {
     self.identity.set_precomputed_names(names, enum_names);
@@ -153,13 +157,22 @@ impl SharedSchemaCache {
 
   /// Retrieves a cached type name for a schema, if it exists.
   pub(crate) fn get_type_name(&self, schema: &ObjectSchema) -> anyhow::Result<Option<String>> {
-    let schema_hash = hashing::hash_schema(schema)?;
-    Ok(self.identity.schema_type(&schema_hash))
+    let canonical = CanonicalSchema::from_schema(schema)?;
+    Ok(self.identity.schema_type(&canonical))
   }
 
   /// Retrieves a cached name for an enum based on its values.
   pub(crate) fn get_enum_name(&self, values: &[String]) -> Option<String> {
     self.identity.enum_type(values)
+  }
+
+  /// Looks up a cached enum name for a schema, if it has enum values and isn't a relaxed pattern.
+  pub(crate) fn lookup_enum_name(&self, schema: &ObjectSchema) -> Option<String> {
+    if schema.is_relaxed_enum_pattern() {
+      return None;
+    }
+    let values = schema.extract_enum_values()?;
+    self.get_enum_name(&values)
   }
 
   /// Checks if an enum with the given values has already been generated.
@@ -189,17 +202,17 @@ impl SharedSchemaCache {
 
   /// Pre-registers a top-level schema so inline schemas with identical structure reuse it.
   pub(crate) fn register_top_level_schema(&mut self, schema: &ObjectSchema, name: &str) -> anyhow::Result<()> {
-    let schema_hash = hashing::hash_schema(schema)?;
+    let canonical = CanonicalSchema::from_schema(schema)?;
     let rust_name = to_rust_type_name(name);
-    self.identity.record_schema_name(schema_hash, rust_name.clone());
+    self.identity.record_schema_name(canonical, rust_name.clone());
     self.identity.mark_used(rust_name);
     Ok(())
   }
 
   /// Gets a preferred name for a schema, using precomputed names or generating a unique one.
   pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> anyhow::Result<String> {
-    let schema_hash = hashing::hash_schema(schema)?;
-    Ok(self.identity.preferred_name(&schema_hash, base_name))
+    let canonical = CanonicalSchema::from_schema(schema)?;
+    Ok(self.identity.preferred_name(&canonical, base_name))
   }
 
   /// Registers a new type definition in the cache.
@@ -212,29 +225,29 @@ impl SharedSchemaCache {
     nested_types: Vec<RustType>,
     type_def: RustType,
   ) -> anyhow::Result<String> {
-    let schema_hash = hashing::hash_schema(schema)?;
+    let canonical = CanonicalSchema::from_schema(schema)?;
 
-    if !is_relaxed_enum_pattern(schema)
-      && let Some(values) = extract_enum_values(schema)
+    if !schema.is_relaxed_enum_pattern()
+      && let Some(values) = schema.extract_enum_values()
       && let Some(existing_name) = self.identity.generated_enum_type(&values)
     {
-      self.identity.record_schema_name(schema_hash, existing_name.clone());
+      self.identity.record_schema_name(canonical, existing_name.clone());
       return Ok(existing_name);
     }
 
     let mut name = base_name.to_string();
 
     if self.identity.is_used(&name) {
-      if let Some(existing_name) = self.identity.schema_type(&schema_hash) {
+      if let Some(existing_name) = self.identity.schema_type(&canonical) {
         return Ok(existing_name);
       }
       name = self.identity.make_unique_name(&name);
     }
 
     self.identity.mark_used(name.clone());
-    self.identity.record_schema_name(schema_hash, name.clone());
+    self.identity.record_schema_name(canonical, name.clone());
 
-    if let Some(values) = extract_enum_values(schema) {
+    if let Some(values) = schema.extract_enum_values() {
       self.identity.register_enum(values, name.clone());
     }
 
@@ -262,8 +275,8 @@ impl SharedSchemaCache {
     if !self.identity.is_used(name) {
       return Ok(false);
     }
-    let schema_hash = hashing::hash_schema(schema)?;
-    Ok(!self.identity.has_schema_name(&schema_hash, name))
+    let canonical = CanonicalSchema::from_schema(schema)?;
+    Ok(!self.identity.has_schema_name(&canonical, name))
   }
 
   /// Consumes the cache and returns all generated Rust types.
