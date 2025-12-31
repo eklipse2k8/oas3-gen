@@ -289,12 +289,6 @@ pub struct ErrorDetails {
   #[serde(rename = "type")]
   pub r#type: ErrorType,
 }
-impl std::fmt::Display for ErrorDetails {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", self.message)
-  }
-}
-impl std::error::Error for ErrorDetails {}
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 #[serde(default)]
 pub struct ErrorResponse {
@@ -302,16 +296,6 @@ pub struct ErrorResponse {
   #[serde(rename = "type")]
   #[default("error".to_string())]
   pub r#type: String,
-}
-impl std::fmt::Display for ErrorResponse {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", self.error)
-  }
-}
-impl std::error::Error for ErrorResponse {
-  fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-    Some(&self.error as &(dyn std::error::Error + 'static))
-  }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum ErrorType {

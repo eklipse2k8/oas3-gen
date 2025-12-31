@@ -9,12 +9,13 @@ use strum::Display;
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::TypeAnalyzer,
-  ast::{ClientDef, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType},
+  ast::{ClientDef, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType, StructToken},
   codegen::{self, Visibility, client::ClientGenerator, mod_file::ModFileGenerator},
   converter::{
     CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
     TypeUsageRecorder, operations::OperationConverter,
   },
+  naming::identifiers::to_rust_type_name,
   operation_registry::OperationRegistry,
   schema_registry::SchemaRegistry,
 };
@@ -119,6 +120,19 @@ impl Orchestrator {
     }
   }
 
+  // TODO: Create a client converter struct to encapsulate this logic
+  fn client_struct_name(&self) -> StructToken {
+    let title = self.spec.info.title.clone();
+
+    let client_name = if title.is_empty() {
+      "ApiClient".to_string()
+    } else {
+      format!("{}Client", to_rust_type_name(&title))
+    };
+
+    StructToken::new(client_name)
+  }
+
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
@@ -135,14 +149,19 @@ impl Orchestrator {
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
-    let metadata = ClientDef::from(&self.spec);
-    let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility);
+    let client = ClientDef::builder()
+      .name(self.client_struct_name())
+      .info(&self.spec.info)
+      .servers(&self.spec.servers)
+      .build();
+
+    let client_generator = ClientGenerator::new(&client, &operations_info, &rust_types, self.visibility);
     let client_tokens = client_generator.into_token_stream();
     let lint_config = LintConfig::default();
 
     let final_code = codegen::generate_source(
       &client_tokens,
-      &metadata,
+      &client,
       Some(&lint_config),
       source_path,
       OAS3_GEN_VERSION,
@@ -160,7 +179,11 @@ impl Orchestrator {
     } = artifacts;
 
     let lint_config = LintConfig::default();
-    let metadata = ClientDef::from(&self.spec);
+    let client = ClientDef::builder()
+      .name(self.client_struct_name())
+      .info(&self.spec.info)
+      .servers(&self.spec.servers)
+      .build();
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
@@ -169,7 +192,7 @@ impl Orchestrator {
     let final_code = codegen::generate_file(
       &rust_types,
       self.visibility,
-      &metadata,
+      &client,
       &lint_config,
       source_path,
       OAS3_GEN_VERSION,
@@ -186,24 +209,28 @@ impl Orchestrator {
       mut stats,
     } = artifacts;
 
-    let metadata = ClientDef::from(&self.spec);
+    let client = ClientDef::builder()
+      .name(self.client_struct_name())
+      .info(&self.spec.info)
+      .servers(&self.spec.servers)
+      .build();
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
     analyzer.analyze();
 
     let types_tokens = codegen::generate(&rust_types, self.visibility);
-    let types_code = codegen::generate_source(&types_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
+    let types_code = codegen::generate_source(&types_tokens, &client, None, source_path, OAS3_GEN_VERSION)?;
 
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
     let client_generator =
-      ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility).with_types_import();
+      ClientGenerator::new(&client, &operations_info, &rust_types, self.visibility).with_types_import();
     let client_tokens = client_generator.into_token_stream();
-    let client_code = codegen::generate_source(&client_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
+    let client_code = codegen::generate_source(&client_tokens, &client, None, source_path, OAS3_GEN_VERSION)?;
 
-    let mod_generator = ModFileGenerator::new(&metadata, self.visibility);
+    let mod_generator = ModFileGenerator::new(&client, self.visibility);
     let mod_code = mod_generator.generate(source_path, OAS3_GEN_VERSION)?;
 
     Ok(ClientModOutput {

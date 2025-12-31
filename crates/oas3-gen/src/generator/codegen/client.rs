@@ -10,7 +10,6 @@ use crate::generator::{
     RustPrimitive, RustType, RustTypeCollection, StructDef, StructToken,
   },
   codegen::parse_type,
-  naming::identifiers::to_rust_type_name,
 };
 
 pub struct ClientGenerator<'a> {
@@ -42,16 +41,7 @@ impl<'a> ClientGenerator<'a> {
     self
   }
 
-  pub fn client_ident(&self) -> syn::Ident {
-    let client_name = if self.def.title.is_empty() {
-      "Api".to_string()
-    } else {
-      to_rust_type_name(&self.def.title)
-    };
-    format_ident!("{client_name}Client")
-  }
-
-  fn client_struct(&self, client_ident: &syn::Ident) -> TokenStream {
+  fn client_struct(&self, client_ident: &StructToken) -> TokenStream {
     let vis = self.visibility.to_tokens();
     quote! {
       #[derive(Debug, Clone)]
@@ -94,7 +84,7 @@ impl<'a> ClientGenerator<'a> {
 
 impl ToTokens for ClientGenerator<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let client_ident = self.client_ident();
+    let client_ident = &self.def.name;
     let vis = self.visibility.to_tokens();
     let base_url = LitStr::new(&self.def.base_url, Span::call_site());
 
@@ -114,16 +104,12 @@ impl ToTokens for ClientGenerator<'_> {
       quote! {}
     };
 
-    let client_struct = self.client_struct(&client_ident);
+    let client_struct = self.client_struct(client_ident);
     let constructors = self.constructors();
 
     quote! {
       use anyhow::Context;
       use reqwest::{Client, Url};
-      #[allow(unused_imports)]
-      use reqwest::multipart::{Form, Part};
-      #[allow(unused_imports)]
-      use reqwest::header::HeaderValue;
       use validator::Validate;
 
       #types_import
@@ -451,9 +437,9 @@ pub(crate) mod method {
 
           let to_part = |v: TokenStream| {
             if is_bytes {
-              quote! { Part::bytes(std::borrow::Cow::from(#v.clone())) }
+              quote! { reqwest::multipart::Part::bytes(std::borrow::Cow::from(#v.clone())) }
             } else {
-              quote! { Part::text(#v.to_string()) }
+              quote! { reqwest::multipart::Part::text(#v.to_string()) }
             }
           };
 

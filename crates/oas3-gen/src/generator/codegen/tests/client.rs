@@ -419,6 +419,7 @@ fn test_client_filters_webhook_operations() {
 
   let operations = vec![http_operation, webhook_operation];
   let metadata = ClientDef {
+    name: StructToken::new("PetStoreClient"),
     title: "PetStore".to_string(),
     base_url: "https://api.example.com".to_string(),
     version: "1.0.0".to_string(),

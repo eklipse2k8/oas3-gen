@@ -1,7 +1,7 @@
+mod client;
 mod derives;
 mod documentation;
 pub mod lints;
-mod client;
 mod outer_attrs;
 mod parsed_path;
 pub(super) mod serde_attrs;
@@ -15,13 +15,13 @@ mod tests;
 
 use std::collections::BTreeSet;
 
+pub use client::ClientDef;
 use derive_builder::Builder;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
 pub use lints::LintConfig;
 use mediatype::MediaType;
-pub use client::ClientDef;
 use oas3::spec::{ParameterIn, ParameterStyle};
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;

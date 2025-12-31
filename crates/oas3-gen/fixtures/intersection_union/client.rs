@@ -9,10 +9,6 @@
 //! No description provided
 
 use anyhow::Context;
-#[allow(unused_imports)]
-use reqwest::header::HeaderValue;
-#[allow(unused_imports)]
-use reqwest::multipart::{Form, Part};
 use reqwest::{Client, Url};
 pub const BASE_URL: &str = "https://example.com/";
 #[derive(Debug, Clone)]
@@ -20,9 +16,15 @@ pub struct IntersectionUnionTestClient {
   pub client: Client,
   pub base_url: Url,
 }
+impl Default for IntersectionUnionTestClient {
+  fn default() -> Self {
+    Self::new()
+  }
+}
 impl IntersectionUnionTestClient {
   /// Create a client using the OpenAPI `servers[0]` URL.
   #[must_use]
+  #[track_caller]
   pub fn new() -> Self {
     Self {
       client: Client::builder().build().expect("client"),

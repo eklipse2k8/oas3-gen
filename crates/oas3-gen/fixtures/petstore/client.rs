@@ -9,10 +9,6 @@
 //! No description provided
 
 use anyhow::Context;
-#[allow(unused_imports)]
-use reqwest::header::HeaderValue;
-#[allow(unused_imports)]
-use reqwest::multipart::{Form, Part};
 use reqwest::{Client, Url};
 use validator::Validate;
 
@@ -23,9 +19,15 @@ pub struct SwaggerPetstoreClient {
   pub client: Client,
   pub base_url: Url,
 }
+impl Default for SwaggerPetstoreClient {
+  fn default() -> Self {
+    Self::new()
+  }
+}
 impl SwaggerPetstoreClient {
   /// Create a client using the OpenAPI `servers[0]` URL.
   #[must_use]
+  #[track_caller]
   pub fn new() -> Self {
     Self {
       client: Client::builder().build().expect("client"),
