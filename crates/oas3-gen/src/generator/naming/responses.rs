@@ -81,7 +81,7 @@ pub fn extract_schema_name_from_response(response: &Response) -> Option<String> 
     .schema
     .as_ref()
     .and_then(|schema_ref| match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => SchemaRegistry::extract_ref_name(ref_path),
+      ObjectOrReference::Ref { ref_path, .. } => SchemaRegistry::parse_ref(ref_path),
       ObjectOrReference::Object(_) => None,
     })
 }

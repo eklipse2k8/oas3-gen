@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use oas3::spec::{Components, Discriminator, ObjectOrReference, ObjectSchema, Spec};
 
-use crate::generator::schema_registry::{ReferenceExtractor, SchemaRegistry};
+use crate::generator::schema_registry::{RefCollector, SchemaRegistry};
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
@@ -67,7 +67,7 @@ fn make_ref(name: &str) -> ObjectOrReference<ObjectSchema> {
 }
 
 #[test]
-fn test_extract_ref_name() {
+fn test_parse_ref() {
   let cases = [
     ("#/components/schemas/User", Some("User")),
     ("#/components/schemas/NestedSchema", Some("NestedSchema")),
@@ -75,15 +75,17 @@ fn test_extract_ref_name() {
     ("InvalidRef", None),
   ];
   for (input, expected) in cases {
-    let result = SchemaRegistry::extract_ref_name(input);
+    let result = SchemaRegistry::parse_ref(input);
     assert_eq!(result.as_deref(), expected, "failed for input {input:?}");
   }
 }
 
 #[test]
-fn test_reference_extractor() {
+fn test_ref_collector() {
+  let collector = RefCollector::new(None);
+
   let schema = make_schema_with_ref("User");
-  let refs = ReferenceExtractor::extract_from_schema(&schema, None);
+  let refs = collector.collect(&schema);
   assert_eq!(refs.len(), 1, "simple ref: expected 1 ref");
   assert!(refs.contains("User"), "simple ref: should contain User");
 
@@ -95,7 +97,7 @@ fn test_reference_extractor() {
     properties,
     ..Default::default()
   };
-  let refs = ReferenceExtractor::extract_from_schema(&schema, None);
+  let refs = collector.collect(&schema);
   assert_eq!(refs.len(), 2, "multiple refs: expected 2 refs");
   assert!(refs.contains("User"), "multiple refs: should contain User");
   assert!(refs.contains("Category"), "multiple refs: should contain Category");
@@ -107,7 +109,7 @@ fn test_reference_extractor() {
     all_of: vec![make_ref("Comment")],
     ..Default::default()
   };
-  let refs = ReferenceExtractor::extract_from_schema(&schema, None);
+  let refs = collector.collect(&schema);
   assert_eq!(refs.len(), 3, "combinators: expected 3 refs");
   assert!(refs.contains("User"), "combinators: should contain User");
   assert!(refs.contains("Post"), "combinators: should contain Post");
@@ -121,15 +123,12 @@ fn test_schema_registry() {
   schemas.insert("Post".to_string(), ObjectOrReference::Object(make_simple_schema()));
 
   let spec = create_test_spec_with_schemas(schemas);
-  let (registry, _) = SchemaRegistry::new(spec);
+  let registry = SchemaRegistry::from_spec(spec).registry;
 
-  assert!(registry.get_schema("User").is_some(), "should have User schema");
-  assert!(registry.get_schema("Post").is_some(), "should have Post schema");
-  assert!(
-    registry.get_schema("NonExistent").is_none(),
-    "should not have NonExistent"
-  );
-  assert_eq!(registry.schema_names().len(), 2, "should have 2 schemas");
+  assert!(registry.get("User").is_some(), "should have User schema");
+  assert!(registry.get("Post").is_some(), "should have Post schema");
+  assert!(registry.get("NonExistent").is_none(), "should not have NonExistent");
+  assert_eq!(registry.keys().len(), 2, "should have 2 schemas");
 
   let mut schemas = BTreeMap::new();
   schemas.insert("User".to_string(), ObjectOrReference::Object(make_simple_schema()));
@@ -139,12 +138,12 @@ fn test_schema_registry() {
   );
 
   let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
+  let mut graph = SchemaRegistry::from_spec(spec).registry;
   graph.build_dependencies();
 
-  assert_eq!(graph.schema_names().len(), 2, "build deps: should have 2 schemas");
-  assert!(graph.get_schema("User").is_some(), "build deps: should have User");
-  assert!(graph.get_schema("Post").is_some(), "build deps: should have Post");
+  assert_eq!(graph.keys().len(), 2, "build deps: should have 2 schemas");
+  assert!(graph.get("User").is_some(), "build deps: should have User");
+  assert!(graph.get("Post").is_some(), "build deps: should have Post");
 }
 
 #[test]
@@ -158,7 +157,7 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("C".to_string(), ObjectOrReference::Object(c_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (mut graph, _) = SchemaRegistry::new(spec);
+    let mut graph = SchemaRegistry::from_spec(spec).registry;
     graph.build_dependencies();
     let cycles = graph.detect_cycles();
 
@@ -179,7 +178,7 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("B".to_string(), ObjectOrReference::Object(b_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (mut graph, _) = SchemaRegistry::new(spec);
+    let mut graph = SchemaRegistry::from_spec(spec).registry;
     graph.build_dependencies();
     let cycles = graph.detect_cycles();
 
@@ -197,7 +196,7 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (mut graph, _) = SchemaRegistry::new(spec);
+    let mut graph = SchemaRegistry::from_spec(spec).registry;
     graph.build_dependencies();
     let cycles = graph.detect_cycles();
 
@@ -216,7 +215,7 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let (mut graph, _) = SchemaRegistry::new(spec);
+    let mut graph = SchemaRegistry::from_spec(spec).registry;
     graph.build_dependencies();
     let cycles = graph.detect_cycles();
 
@@ -236,11 +235,11 @@ fn test_schema_graph_integration() {
   );
 
   let spec = create_test_spec_with_schemas(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
+  let mut graph = SchemaRegistry::from_spec(spec).registry;
 
-  assert!(graph.get_schema("User").is_some(), "integration: should have User");
-  assert!(graph.get_schema("Post").is_some(), "integration: should have Post");
-  assert_eq!(graph.schema_names().len(), 2, "integration: should have 2 schemas");
+  assert!(graph.get("User").is_some(), "integration: should have User");
+  assert!(graph.get("Post").is_some(), "integration: should have Post");
+  assert_eq!(graph.keys().len(), 2, "integration: should have 2 schemas");
 
   graph.build_dependencies();
   let cycles = graph.detect_cycles();
@@ -280,13 +279,11 @@ fn test_schema_registry_merges_all_of_properties_and_required() {
     ("Child".to_string(), ObjectOrReference::Object(child.clone())),
   ]));
 
-  let (mut graph, _) = SchemaRegistry::new(spec);
+  let mut graph = SchemaRegistry::from_spec(spec).registry;
   graph.build_dependencies();
   graph.detect_cycles();
 
-  let merged = graph
-    .get_merged_schema("Child")
-    .expect("merged schema should exist for Child");
+  let merged = graph.merged("Child").expect("merged schema should exist for Child");
 
   assert!(merged.schema.properties.contains_key("id"));
   assert!(merged.schema.properties.contains_key("name"));
@@ -328,26 +325,20 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
     ("Child".to_string(), ObjectOrReference::Object(child_schema.clone())),
   ]));
 
-  let (mut graph, _) = SchemaRegistry::new(spec);
+  let mut graph = SchemaRegistry::from_spec(spec).registry;
   graph.build_dependencies();
   graph.detect_cycles();
 
-  let merged_child = graph
-    .get_merged_schema("Child")
-    .expect("merged schema should exist for Child");
+  let merged_child = graph.merged("Child").expect("merged schema should exist for Child");
 
   assert_eq!(merged_child.discriminator_parent.as_deref(), Some("Parent"));
   assert!(merged_child.schema.properties.contains_key("kind"));
   assert!(merged_child.schema.properties.contains_key("child_prop"));
 
-  let discriminator = graph
-    .get_discriminator_parent("Child")
-    .expect("discriminator parent should be tracked");
+  let discriminator = graph.parent("Child").expect("discriminator parent should be tracked");
 
-  assert_eq!(discriminator.0, "Parent");
-  assert_eq!(discriminator.1, "kind");
-  assert_eq!(discriminator.2, "child");
+  assert_eq!(discriminator.parent_name, "Parent");
 
-  let effective = graph.get_effective_schema("Child").unwrap();
+  let effective = graph.resolved("Child").unwrap();
   assert_eq!(effective.properties.len(), merged_child.schema.properties.len());
 }

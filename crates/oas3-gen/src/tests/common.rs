@@ -26,7 +26,8 @@ pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec 
 
 pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<SchemaRegistry> {
   let spec = create_test_spec(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
+  let init_result = SchemaRegistry::from_spec(spec);
+  let mut graph = init_result.registry;
   graph.build_dependencies();
   graph.detect_cycles();
   Arc::new(graph)

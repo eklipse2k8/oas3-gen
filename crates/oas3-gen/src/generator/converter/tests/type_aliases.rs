@@ -47,7 +47,7 @@ fn test_primitive_type_aliases() -> anyhow::Result<()> {
   for (name, schema, expected_type) in cases {
     let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
     let converter = SchemaConverter::new(&graph, &default_config());
-    let result = converter.convert_schema(name, graph.get_schema(name).unwrap(), None)?;
+    let result = converter.convert_schema(name, graph.get(name).unwrap(), None)?;
 
     assert_eq!(result.len(), 1, "expected single type for {name}");
     let RustType::TypeAlias(alias) = &result[0] else {
@@ -89,7 +89,7 @@ fn test_array_type_aliases() -> anyhow::Result<()> {
   for (name, schema, expected_type) in cases {
     let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
     let converter = SchemaConverter::new(&graph, &default_config());
-    let result = converter.convert_schema(name, graph.get_schema(name).unwrap(), None)?;
+    let result = converter.convert_schema(name, graph.get(name).unwrap(), None)?;
 
     assert_eq!(result.len(), 1, "expected single type for {name}");
     let RustType::TypeAlias(alias) = &result[0] else {
@@ -130,7 +130,7 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
   ]));
 
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Pets", graph.get_schema("Pets").unwrap(), None)?;
+  let result = converter.convert_schema("Pets", graph.get("Pets").unwrap(), None)?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -205,7 +205,7 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
   ]));
 
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("EventList", graph.get_schema("EventList").unwrap(), None)?;
+  let result = converter.convert_schema("EventList", graph.get("EventList").unwrap(), None)?;
 
   assert_eq!(result.len(), 2, "expected type alias + inline enum");
 
@@ -293,11 +293,7 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
   ]));
 
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema(
-    "NullableEventList",
-    graph.get_schema("NullableEventList").unwrap(),
-    None,
-  )?;
+  let result = converter.convert_schema("NullableEventList", graph.get("NullableEventList").unwrap(), None)?;
 
   assert_eq!(result.len(), 2, "expected type alias + inline enum");
 

@@ -9,7 +9,7 @@ use crate::generator::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
     identifiers::{sanitize, split_pascal_case, to_rust_type_name},
   },
-  schema_registry::{ReferenceExtractor, SchemaRegistry},
+  schema_registry::{RefCollector, SchemaRegistry},
 };
 
 /// Returns an iterator over all union variants (`anyOf` and `oneOf`) in a schema.
@@ -29,6 +29,9 @@ fn union_variants(schema: &ObjectSchema) -> impl Iterator<Item = &ObjectOrRefere
 fn schema_single_type(schema: &ObjectSchema) -> Option<SchemaType> {
   match &schema.schema_type {
     Some(SchemaTypeSet::Single(t)) => Some(*t),
+    Some(SchemaTypeSet::Multiple(types)) if types.len() == 2 && types.contains(&SchemaType::Null) => {
+      types.iter().find(|t| **t != SchemaType::Null).copied()
+    }
     _ => None,
   }
 }
@@ -57,10 +60,7 @@ pub(crate) struct CommonVariantName {
 ///
 /// Returns `None` if fewer than 2 variants have references or no common prefix exists.
 pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<CommonVariantName> {
-  let ref_names: Vec<String> = variants
-    .iter()
-    .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
-    .collect();
+  let ref_names: Vec<String> = variants.iter().filter_map(RefCollector::parse_schema_ref).collect();
 
   if ref_names.len() < 2 {
     return None;
@@ -479,7 +479,7 @@ fn infer_name_from_required_fields(schema: &ObjectSchema) -> Option<String> {
 fn infer_name_from_ref_properties(schema: &ObjectSchema) -> Option<String> {
   let mut ref_names = schema.properties.values().filter_map(|prop| {
     if let ObjectOrReference::Ref { ref_path, .. } = prop {
-      SchemaRegistry::extract_ref_name(ref_path)
+      SchemaRegistry::parse_ref(ref_path)
     } else {
       None
     }

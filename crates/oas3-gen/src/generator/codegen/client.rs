@@ -316,13 +316,13 @@ pub(crate) mod method {
         let field = &body.field_name;
 
         match body.content_category {
-          ContentCategory::Json => self.chain_or_conditional(field, body.optional, |e| quote! { .json(#e) }),
-          ContentCategory::FormUrlEncoded => self.chain_or_conditional(field, body.optional, |e| quote! { .form(#e) }),
+          ContentCategory::Json => Self::chain_or_conditional(field, body.optional, |e| quote! { .json(#e) }),
+          ContentCategory::FormUrlEncoded => Self::chain_or_conditional(field, body.optional, |e| quote! { .form(#e) }),
           ContentCategory::Text | ContentCategory::EventStream => {
-            self.chain_or_conditional(field, body.optional, |e| quote! { .body((#e).to_string()) })
+            Self::chain_or_conditional(field, body.optional, |e| quote! { .body((#e).to_string()) })
           }
           ContentCategory::Binary => {
-            self.chain_or_conditional(field, body.optional, |e| quote! { .body((#e).clone()) })
+            Self::chain_or_conditional(field, body.optional, |e| quote! { .body((#e).clone()) })
           }
           ContentCategory::Xml => {
             if body.optional {
@@ -351,7 +351,7 @@ pub(crate) mod method {
         }
       }
 
-      fn chain_or_conditional<F>(&self, field: &FieldNameToken, optional: bool, make_chain: F) -> BodyResult
+      fn chain_or_conditional<F>(field: &FieldNameToken, optional: bool, make_chain: F) -> BodyResult
       where
         F: FnOnce(TokenStream) -> TokenStream,
       {

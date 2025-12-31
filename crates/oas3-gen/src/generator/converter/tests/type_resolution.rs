@@ -51,7 +51,7 @@ fn create_empty_test_graph() -> Arc<SchemaRegistry> {
     extensions: BTreeMap::default(),
   };
 
-  let (graph, _) = SchemaRegistry::new(spec);
+  let graph = SchemaRegistry::from_spec(spec).registry;
   Arc::new(graph)
 }
 
@@ -1276,7 +1276,7 @@ fn test_array_with_union_items_not_treated_as_primitive() {
     summary: None,
     description: None,
   };
-  let thought_summary_schema = graph.get_schema("ThoughtSummary").unwrap();
+  let thought_summary_schema = graph.get("ThoughtSummary").unwrap();
 
   let result = resolver
     .resolve_property_type(
@@ -1320,7 +1320,7 @@ fn test_string_enum_reference_preserves_named_type() {
     summary: None,
     description: None,
   };
-  let pet_status_schema = graph.get_schema("PetStatus").unwrap();
+  let pet_status_schema = graph.get("PetStatus").unwrap();
 
   let result = resolver
     .resolve_property_type("Pet", "status", pet_status_schema, &pet_status_ref, None)

@@ -46,7 +46,7 @@ fn test_discriminated_base_struct_renamed() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap(), None)?;
 
   let struct_def = result
     .iter()
@@ -94,7 +94,7 @@ fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Message", graph.get_schema("Message").unwrap(), None)?;
+  let result = converter.convert_schema("Message", graph.get("Message").unwrap(), None)?;
 
   let struct_def = result
     .iter()
@@ -162,7 +162,7 @@ fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap(), None)?;
 
   let struct_def = result
     .iter()
@@ -218,15 +218,13 @@ fn test_schema_merger_merge_child_with_parent() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let merged_schema = graph
-    .get_merged_schema("Child")
-    .expect("merged schema should exist for Child");
+  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
 
   assert!(merged_schema.schema.properties.contains_key("parent_prop"));
   assert!(merged_schema.schema.properties.contains_key("child_prop"));
   assert!(merged_schema.schema.required.contains(&"parent_prop".to_string()));
 
-  let effective_schema = graph.get_effective_schema("Child").unwrap();
+  let effective_schema = graph.resolved("Child").unwrap();
   assert_eq!(effective_schema.properties.len(), merged_schema.schema.properties.len());
 }
 
@@ -260,9 +258,7 @@ fn test_schema_merger_conflict_resolution() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let merged_schema = graph
-    .get_merged_schema("Child")
-    .expect("merged schema should exist for Child");
+  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
 
   let prop = merged_schema.schema.properties.get("prop").unwrap();
   if let ObjectOrReference::Object(schema) = prop {
@@ -306,10 +302,8 @@ fn test_discriminator_handler_detect_parent() {
 
   let result = handler.detect_discriminated_parent("Child");
 
-  let (parent_name, field, value) = result.expect("parent should be detected");
-  assert_eq!(parent_name, "Parent");
-  assert_eq!(field, "type");
-  assert_eq!(value, "child");
+  let info = result.expect("parent should be detected");
+  assert_eq!(info.parent_name, "Parent");
 }
 
 fn make_field(name: &str, deprecated: bool) -> FieldDef {
@@ -514,7 +508,7 @@ fn test_discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<
   ]));
 
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Child", graph.get_schema("Child").unwrap(), None)?;
+  let result = converter.convert_schema("Child", graph.get("Child").unwrap(), None)?;
 
   let struct_def = result
     .iter()
@@ -579,7 +573,7 @@ fn test_schema_merger_merge_all_of() {
   ]));
 
   let merged_schema = graph
-    .get_merged_schema("Composite")
+    .merged("Composite")
     .expect("merged schema should exist for Composite");
 
   assert!(merged_schema.schema.properties.contains_key("base_prop"));
@@ -618,9 +612,7 @@ fn test_schema_merger_preserves_discriminator() {
     ("Child".to_string(), child_schema.clone()),
   ]));
 
-  let merged_schema = graph
-    .get_merged_schema("Child")
-    .expect("merged schema should exist for Child");
+  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
 
   assert_eq!(merged_schema.discriminator_parent.as_deref(), Some("Parent"));
   assert!(merged_schema.schema.discriminator.is_some());

@@ -71,7 +71,7 @@ fn test_intersection_of_union_allof_anyof() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Vehicle".to_string(), vehicle_schema)]));
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Vehicle", graph.get_schema("Vehicle").unwrap(), None)?;
+  let result = converter.convert_schema("Vehicle", graph.get("Vehicle").unwrap(), None)?;
 
   // We expect a struct "Vehicle"
   let struct_def = result

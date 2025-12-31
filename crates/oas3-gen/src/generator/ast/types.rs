@@ -46,11 +46,9 @@ impl TypeRef {
     self
   }
 
-  pub fn unwrap_option(&self) -> Self {
-    Self {
-      nullable: false,
-      ..self.clone()
-    }
+  pub fn unwrap_option(mut self) -> Self {
+    self.nullable = false;
+    self
   }
 
   pub fn with_vec(mut self) -> Self {

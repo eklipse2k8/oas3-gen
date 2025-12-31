@@ -8,9 +8,8 @@ use crate::{
     converter::{
       cache::SharedSchemaCache,
       common::{ConversionOutput, handle_inline_creation},
-      inline_scanner::InlineSchemaMerger,
     },
-    schema_registry::MergedSchema,
+    schema_registry::SchemaRegistry,
   },
   tests::common::create_test_spec,
 };
@@ -82,13 +81,7 @@ fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
     ("Extra".to_string(), extra_schema.clone()),
   ]));
 
-  let merged_schemas = BTreeMap::from([(
-    "Base".to_string(),
-    MergedSchema {
-      schema: base_schema.clone(),
-      discriminator_parent: None,
-    },
-  )]);
+  let registry = SchemaRegistry::from_spec(spec).registry;
 
   let inline_allof = ObjectSchema {
     properties: BTreeMap::from([(
@@ -126,8 +119,7 @@ fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let merged = InlineSchemaMerger::new(&spec, &merged_schemas);
-  let merged = merged.merge_inline(&target_schema)?;
+  let merged = registry.merge_inline(&target_schema)?;
 
   assert!(merged.all_of.is_empty(), "allOf entries should be flattened");
   assert_eq!(

@@ -176,7 +176,7 @@ impl<'a> OperationConverter<'a> {
       .as_ref()
       .map(|def| (EnumToken::new(def.name.to_string()), def));
 
-    let request_name = generate_unique_request_name(&base_name, |name| self.schema_converter.is_schema_name(name));
+    let request_name = generate_unique_request_name(&base_name, |name| self.schema_converter.contains(name));
     let generated_structs = self.build_request_struct(
       &request_name,
       path,
@@ -229,7 +229,7 @@ impl<'a> OperationConverter<'a> {
   ) -> Option<ResponseEnumDef> {
     operation.responses.as_ref()?;
 
-    let response_name = generate_unique_response_name(base_name, |name| self.schema_converter.is_schema_name(name));
+    let response_name = generate_unique_response_name(base_name, |name| self.schema_converter.contains(name));
 
     responses::build_response_enum(
       self.schema_converter,
@@ -550,7 +550,7 @@ impl<'a> OperationConverter<'a> {
   }
 
   fn resolve_referenced_body_type(ref_path: &str) -> Option<RequestBodyOutput> {
-    let target_name = SchemaRegistry::extract_ref_name(ref_path)?;
+    let target_name = SchemaRegistry::parse_ref(ref_path)?;
     let rust_name = to_rust_type_name(&target_name);
 
     Some(RequestBodyOutput {
@@ -772,7 +772,7 @@ impl<'a> OperationConverter<'a> {
 
         for field in &nested.fields {
           let rust_type = if field.is_required() {
-            field.rust_type.unwrap_option()
+            field.rust_type.clone().unwrap_option()
           } else {
             field.rust_type.clone()
           };
@@ -785,7 +785,7 @@ impl<'a> OperationConverter<'a> {
         }
       } else {
         let rust_type = if main_field.is_required() {
-          main_field.rust_type.unwrap_option()
+          main_field.rust_type.clone().unwrap_option()
         } else {
           main_field.rust_type.clone()
         };

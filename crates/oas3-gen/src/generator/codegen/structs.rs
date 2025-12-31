@@ -587,17 +587,12 @@ pub(crate) mod header_map {
     }
 
     fn generate_field_insertions(&self) -> TokenStream {
-      let insertions: Vec<TokenStream> = self
-        .def
-        .fields
-        .iter()
-        .map(|field| self.generate_field_insertion(field))
-        .collect();
+      let insertions: Vec<TokenStream> = self.def.fields.iter().map(Self::generate_field_insertion).collect();
 
       quote! { #(#insertions)* }
     }
 
-    fn generate_field_insertion(&self, field: &FieldDef) -> TokenStream {
+    fn generate_field_insertion(field: &FieldDef) -> TokenStream {
       let field_name = &field.name;
       let Some(original_name) = &field.original_name else {
         return quote! {};

@@ -532,10 +532,15 @@ pub struct EnumDef {
   pub docs: Documentation,
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
+  #[builder(default)]
   pub serde_attrs: Vec<SerdeAttribute>,
+  #[builder(default)]
   pub outer_attrs: Vec<OuterAttr>,
+  #[builder(default)]
   pub case_insensitive: bool,
+  #[builder(default)]
   pub methods: Vec<EnumMethod>,
+  #[builder(default)]
   pub serde_mode: SerdeMode,
 }
 
@@ -551,9 +556,12 @@ impl EnumDef {
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct VariantDef {
   pub name: EnumVariantToken,
+  #[builder(default)]
   pub docs: Documentation,
   pub content: VariantContent,
+  #[builder(default)]
   pub serde_attrs: Vec<SerdeAttribute>,
+  #[builder(default)]
   pub deprecated: bool,
 }
 

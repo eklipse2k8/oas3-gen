@@ -216,17 +216,19 @@ impl Orchestrator {
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
-    let (mut graph, mut warnings) = SchemaRegistry::new(self.spec.clone());
+    let init_result = SchemaRegistry::from_spec(self.spec.clone());
+    let mut graph = init_result.registry;
+    let mut warnings = init_result.warnings;
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
     let operation_reachable = if self.include_unused_schemas {
       None
     } else {
-      Some(graph.get_operation_reachable_schemas(&self.operation_registry))
+      Some(graph.reachable(&self.operation_registry))
     };
 
-    let total_schemas = graph.schema_names().len();
+    let total_schemas = graph.keys().len();
     let orphaned_schemas_count = if let Some(ref reachable) = operation_reachable {
       total_schemas.saturating_sub(reachable.len())
     } else {
@@ -360,18 +362,14 @@ impl Orchestrator {
     let mut rust_types = vec![];
     let mut warnings = vec![];
 
-    let mut schema_names = graph.schema_names();
-    schema_names.sort_by_key(|name| {
-      graph
-        .get_schema(name)
-        .is_none_or(|schema| schema.enum_values.is_empty())
-    });
+    let mut schema_names = graph.keys();
+    schema_names.sort_by_key(|name| graph.get(name).is_none_or(|schema| schema.enum_values.is_empty()));
 
     for schema_name in &schema_names {
       if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
         continue;
       }
-      if let Some(schema) = graph.get_schema(schema_name) {
+      if let Some(schema) = graph.get(schema_name) {
         let _ = cache.register_top_level_schema(schema, schema_name);
       }
     }
@@ -381,7 +379,7 @@ impl Orchestrator {
         continue;
       }
 
-      let Some(schema) = graph.get_schema(schema_name) else {
+      let Some(schema) = graph.get(schema_name) else {
         continue;
       };
 

@@ -8,7 +8,7 @@ use oas3::{
 use crate::generator::{
   ast::{RustType, TypeRef},
   converter::cache::SharedSchemaCache,
-  schema_registry::ReferenceExtractor,
+  schema_registry::RefCollector,
 };
 
 /// Wraps a conversion result with any inline types generated during conversion.
@@ -30,6 +30,14 @@ impl<T> ConversionOutput<T> {
 
   pub(crate) fn with_inline_types(result: T, inline_types: Vec<RustType>) -> Self {
     Self { result, inline_types }
+  }
+}
+
+impl ConversionOutput<RustType> {
+  pub(crate) fn into_vec(self) -> Vec<RustType> {
+    let mut types = self.inline_types;
+    types.push(self.result);
+    types
   }
 }
 
@@ -303,8 +311,5 @@ impl SchemaExt for ObjectSchema {
 }
 
 pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
-  variants
-    .iter()
-    .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
-    .collect()
+  variants.iter().filter_map(RefCollector::parse_schema_ref).collect()
 }

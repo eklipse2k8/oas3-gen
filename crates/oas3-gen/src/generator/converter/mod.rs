@@ -183,14 +183,16 @@ impl SchemaConverter {
       let cache_reborrow = cache.as_deref_mut();
       return self
         .union_converter
-        .convert_union(name, schema, UnionKind::OneOf, cache_reborrow);
+        .convert_union(name, schema, UnionKind::OneOf, cache_reborrow)
+        .map(ConversionOutput::into_vec);
     }
 
     if !schema.any_of.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
       return self
         .union_converter
-        .convert_union(name, schema, UnionKind::AnyOf, cache_reborrow);
+        .convert_union(name, schema, UnionKind::AnyOf, cache_reborrow)
+        .map(ConversionOutput::into_vec);
     }
 
     if !schema.enum_values.is_empty() {
@@ -288,7 +290,7 @@ impl SchemaConverter {
     let effective_schema = if schema.all_of.is_empty() {
       schema.clone()
     } else {
-      self.type_resolver.graph().merge_inline_all_of(schema)
+      self.type_resolver.graph().merge_all_of(schema)
     };
 
     let unique_name = cache.make_unique_name(base_name);
@@ -307,12 +309,12 @@ impl SchemaConverter {
   }
 
   /// Checks if a name corresponds to a known schema in the graph.
-  pub(crate) fn is_schema_name(&self, name: &str) -> bool {
-    self.type_resolver.graph().is_schema_name(name)
+  pub(crate) fn contains(&self, name: &str) -> bool {
+    self.type_resolver.graph().contains(name)
   }
 
-  pub(crate) fn merge_inline_all_of(&self, schema: &ObjectSchema) -> ObjectSchema {
-    self.type_resolver.graph().merge_inline_all_of(schema)
+  pub(crate) fn merge_all_of(&self, schema: &ObjectSchema) -> ObjectSchema {
+    self.type_resolver.graph().merge_all_of(schema)
   }
 
   fn try_convert_array_type_alias_with_union_items(

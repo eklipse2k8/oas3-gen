@@ -25,7 +25,7 @@ impl Default for Annotation {
   }
 }
 impl serde::Serialize for Annotation {
-  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
   where
     S: serde::Serializer,
   {
@@ -36,7 +36,7 @@ impl serde::Serialize for Annotation {
   }
 }
 impl<'de> serde::Deserialize<'de> for Annotation {
-  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
   where
     D: serde::Deserializer<'de>,
   {
@@ -126,7 +126,7 @@ impl Default for ContentBlock {
   }
 }
 impl serde::Serialize for ContentBlock {
-  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
   where
     S: serde::Serializer,
   {
@@ -140,7 +140,7 @@ impl serde::Serialize for ContentBlock {
   }
 }
 impl<'de> serde::Deserialize<'de> for ContentBlock {
-  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
   where
     D: serde::Deserializer<'de>,
   {
@@ -249,7 +249,7 @@ impl Default for Delta {
   }
 }
 impl<'de> serde::Deserialize<'de> for Delta {
-  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
   where
     D: serde::Deserializer<'de>,
   {
@@ -331,6 +331,19 @@ pub enum ErrorType {
   #[serde(rename = "overloaded_error")]
   OverloadedError,
 }
+impl core::fmt::Display for ErrorType {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::InvalidRequestError => write!(f, "invalid_request_error"),
+      Self::AuthenticationError => write!(f, "authentication_error"),
+      Self::PermissionError => write!(f, "permission_error"),
+      Self::NotFoundError => write!(f, "not_found_error"),
+      Self::RateLimitError => write!(f, "rate_limit_error"),
+      Self::ApiError => write!(f, "api_error"),
+      Self::OverloadedError => write!(f, "overloaded_error"),
+    }
+  }
+}
 ///Streaming event with different types
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -350,7 +363,7 @@ impl Default for Event {
   }
 }
 impl<'de> serde::Deserialize<'de> for Event {
-  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
   where
     D: serde::Deserializer<'de>,
   {
@@ -456,7 +469,7 @@ impl Default for ImageSource {
   }
 }
 impl serde::Serialize for ImageSource {
-  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
   where
     S: serde::Serializer,
   {
@@ -467,7 +480,7 @@ impl serde::Serialize for ImageSource {
   }
 }
 impl<'de> serde::Deserialize<'de> for ImageSource {
-  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
   where
     D: serde::Deserializer<'de>,
   {
@@ -529,6 +542,16 @@ pub enum MediaType {
   #[serde(rename = "image/webp")]
   ImageWebp,
 }
+impl core::fmt::Display for MediaType {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::ImageJpeg => write!(f, "image/jpeg"),
+      Self::ImagePng => write!(f, "image/png"),
+      Self::ImageGif => write!(f, "image/gif"),
+      Self::ImageWebp => write!(f, "image/webp"),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Message {
   pub content: Vec<ContentBlock>,
@@ -587,6 +610,14 @@ pub enum Role {
   #[serde(rename = "assistant")]
   Assistant,
 }
+impl core::fmt::Display for Role {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::User => write!(f, "user"),
+      Self::Assistant => write!(f, "assistant"),
+    }
+  }
+}
 ///Send content blocks
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct SendContentRequest {
@@ -596,7 +627,7 @@ pub struct SendContentRequest {
 impl SendContentRequest {
   ///Create a new request with the given parameters.
   #[builder]
-  pub fn new(body: ContentRequest) -> Result<Self, anyhow::Error> {
+  pub fn new(body: ContentRequest) -> anyhow::Result<Self> {
     let request = Self { body };
     request.validate()?;
     Ok(request)
@@ -639,6 +670,16 @@ pub enum StopReason {
   StopSequence,
   #[serde(rename = "tool_use")]
   ToolUse,
+}
+impl core::fmt::Display for StopReason {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::EndTurn => write!(f, "end_turn"),
+      Self::MaxTokens => write!(f, "max_tokens"),
+      Self::StopSequence => write!(f, "stop_sequence"),
+      Self::ToolUse => write!(f, "tool_use"),
+    }
+  }
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
@@ -697,7 +738,7 @@ impl Default for ToolResultContentBlock {
   }
 }
 impl serde::Serialize for ToolResultContentBlock {
-  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
   where
     S: serde::Serializer,
   {
@@ -708,7 +749,7 @@ impl serde::Serialize for ToolResultContentBlock {
   }
 }
 impl<'de> serde::Deserialize<'de> for ToolResultContentBlock {
-  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
   where
     D: serde::Deserializer<'de>,
   {

@@ -204,7 +204,7 @@ fn extract_single_media_type_schema(
 
   match schema_ref {
     ObjectOrReference::Ref { ref_path, .. } => {
-      Ok(SchemaRegistry::extract_ref_name(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
+      Ok(SchemaRegistry::parse_ref(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
     }
     ObjectOrReference::Object(inline_schema) => {
       resolve_inline_response_schema(schema_converter, inline_schema, path, status_code, schema_cache)
@@ -234,7 +234,7 @@ fn resolve_inline_response_schema(
   }
 
   let effective_for_naming = if has_compound_schema {
-    schema_converter.merge_inline_all_of(inline_schema)
+    schema_converter.merge_all_of(inline_schema)
   } else {
     inline_schema.clone()
   };

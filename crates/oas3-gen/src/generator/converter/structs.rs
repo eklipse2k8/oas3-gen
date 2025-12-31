@@ -17,7 +17,7 @@ use crate::generator::{
   },
   converter::type_resolver::TypeResolverBuilder,
   naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
-  schema_registry::SchemaRegistry,
+  schema_registry::{DiscriminatorMapping, SchemaRegistry},
 };
 
 #[derive(Clone, Debug)]
@@ -63,7 +63,9 @@ impl StructConverter {
     let num_properties = schema.properties.len();
     let required_set: HashSet<&String> = schema.required.iter().collect();
 
-    let discriminator_mapping = schema_name.and_then(|name| self.type_resolver.graph().get_discriminator_mapping(name));
+    let discriminator_mapping = schema_name
+      .and_then(|name| self.type_resolver.graph().mapping(name))
+      .map(DiscriminatorMapping::as_tuple);
 
     let mut fields = Vec::with_capacity(num_properties);
     let mut inline_types = vec![];
@@ -94,7 +96,7 @@ impl StructConverter {
         &prop_schema,
         resolved.result,
         is_required,
-        discriminator_mapping,
+        discriminator_mapping.as_ref(),
       );
       fields.push(field);
 
@@ -115,18 +117,18 @@ impl StructConverter {
     let graph = self.type_resolver.graph();
 
     let merged_info = graph
-      .get_merged_schema(name)
+      .merged(name)
       .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
 
     let handler = DiscriminatorHandler::new(graph, None);
-    if let Some((parent_name, _, _)) = handler.detect_discriminated_parent(name) {
+    if let Some(parent_info) = handler.detect_discriminated_parent(name) {
       let parent_merged = graph
-        .get_merged_schema(&parent_name)
-        .ok_or_else(|| anyhow::anyhow!("Parent schema '{parent_name}' not found"))?;
+        .merged(&parent_info.parent_name)
+        .ok_or_else(|| anyhow::anyhow!("Parent schema '{}' not found", parent_info.parent_name))?;
       return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema, cache);
     }
 
-    let effective_schema = graph.get_effective_schema(name).unwrap_or(&merged_info.schema);
+    let effective_schema = graph.resolved(name).unwrap_or(&merged_info.schema);
 
     let result = self.convert_struct(name, effective_schema, None, cache)?;
     self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)

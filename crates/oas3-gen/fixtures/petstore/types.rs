@@ -82,7 +82,7 @@ pub struct ListPetsRequest {
 impl ListPetsRequest {
   ///Create a new request with the given parameters.
   #[builder]
-  pub fn new(limit: Option<i32>) -> Result<Self, anyhow::Error> {
+  pub fn new(limit: Option<i32>) -> anyhow::Result<Self> {
     let request = Self {
       query: ListPetsRequestQuery { limit },
     };
@@ -147,7 +147,7 @@ pub struct ShowPetByIdRequest {
 impl ShowPetByIdRequest {
   ///Create a new request with the given parameters.
   #[builder]
-  pub fn new(pet_id: String, x_api_version: String) -> Result<Self, anyhow::Error> {
+  pub fn new(pet_id: String, x_api_version: String) -> anyhow::Result<Self> {
     let request = Self {
       path: ShowPetByIdRequestPath { pet_id },
       header: ShowPetByIdRequestHeader { x_api_version },
@@ -174,18 +174,18 @@ pub struct ShowPetByIdRequestHeader {
   #[validate(length(min = 1u64))]
   pub x_api_version: String,
 }
-impl TryFrom<&ShowPetByIdRequestHeader> for http::HeaderMap {
+impl core::convert::TryFrom<&ShowPetByIdRequestHeader> for http::HeaderMap {
   type Error = http::header::InvalidHeaderValue;
-  fn try_from(headers: &ShowPetByIdRequestHeader) -> Result<Self, Self::Error> {
+  fn try_from(headers: &ShowPetByIdRequestHeader) -> core::result::Result<Self, Self::Error> {
     let mut map = http::HeaderMap::with_capacity(1usize);
     let header_value = http::HeaderValue::try_from(&headers.x_api_version)?;
     map.insert(X_API_VERSION, header_value);
     Ok(map)
   }
 }
-impl TryFrom<ShowPetByIdRequestHeader> for http::HeaderMap {
+impl core::convert::TryFrom<ShowPetByIdRequestHeader> for http::HeaderMap {
   type Error = http::header::InvalidHeaderValue;
-  fn try_from(headers: ShowPetByIdRequestHeader) -> Result<Self, Self::Error> {
+  fn try_from(headers: ShowPetByIdRequestHeader) -> core::result::Result<Self, Self::Error> {
     http::HeaderMap::try_from(&headers)
   }
 }

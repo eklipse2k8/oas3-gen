@@ -92,7 +92,7 @@ fn test_enum_helper_with_const_discriminator() -> anyhow::Result<()> {
   ]));
 
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Pet", graph.get_schema("Pet").unwrap(), None)?;
+  let result = converter.convert_schema("Pet", graph.get("Pet").unwrap(), None)?;
 
   // Expect DiscriminatedEnum
   let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {

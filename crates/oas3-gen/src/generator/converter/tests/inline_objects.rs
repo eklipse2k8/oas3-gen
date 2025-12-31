@@ -40,7 +40,7 @@ fn test_inline_object_generation() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Parent".to_string(), parent_schema)]));
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Parent", graph.get_schema("Parent").unwrap(), None)?;
+  let result = converter.convert_schema("Parent", graph.get("Parent").unwrap(), None)?;
 
   // Check for Parent struct
   let parent_struct = result
@@ -106,7 +106,7 @@ fn test_inline_object_without_type_field() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Resource".to_string(), parent_schema)]));
   let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Resource", graph.get_schema("Resource").unwrap(), None)?;
+  let result = converter.convert_schema("Resource", graph.get("Resource").unwrap(), None)?;
 
   // Check for Resource struct
   let resource_struct = result

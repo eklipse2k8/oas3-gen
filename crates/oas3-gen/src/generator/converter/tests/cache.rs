@@ -117,7 +117,7 @@ fn test_relaxed_enum_reuses_cached_enum() {
   let mut cache = SharedSchemaCache::new();
 
   let simple_result = converter
-    .convert_schema("SimpleEnum", graph.get_schema("SimpleEnum").unwrap(), Some(&mut cache))
+    .convert_schema("SimpleEnum", graph.get("SimpleEnum").unwrap(), Some(&mut cache))
     .expect("Should convert simple enum");
   assert_eq!(simple_result.len(), 1, "Simple enum should generate one type");
 
@@ -127,10 +127,11 @@ fn test_relaxed_enum_reuses_cached_enum() {
     .build()
     .unwrap();
   let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
-  let optimized_result = union_converter
+  let optimized_output = union_converter
     .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))
     .expect("Should convert anyOf union");
 
+  let optimized_result = optimized_output.into_vec();
   assert_eq!(
     optimized_result.len(),
     1,
@@ -174,16 +175,12 @@ fn test_full_schema_conversion_with_deduplication() {
   let mut cache = SharedSchemaCache::new();
 
   let chat_model_result = converter
-    .convert_schema("ChatModel", graph.get_schema("ChatModel").unwrap(), Some(&mut cache))
+    .convert_schema("ChatModel", graph.get("ChatModel").unwrap(), Some(&mut cache))
     .expect("Should convert ChatModel");
   assert_eq!(chat_model_result.len(), 1);
 
   let model_ids_result = converter
-    .convert_schema(
-      "ModelIdsShared",
-      graph.get_schema("ModelIdsShared").unwrap(),
-      Some(&mut cache),
-    )
+    .convert_schema("ModelIdsShared", graph.get("ModelIdsShared").unwrap(), Some(&mut cache))
     .expect("Should convert ModelIdsShared");
 
   assert_eq!(

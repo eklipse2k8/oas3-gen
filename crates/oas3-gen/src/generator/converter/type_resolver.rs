@@ -21,7 +21,7 @@ use crate::generator::{
     identifiers::{strip_parent_prefix, to_rust_type_name},
     inference::{CommonVariantName, extract_common_variant_prefix, extract_enum_values, is_relaxed_enum_pattern},
   },
-  schema_registry::{ReferenceExtractor, SchemaRegistry},
+  schema_registry::{RefCollector, SchemaRegistry},
 };
 
 /// Resolves OpenAPI schemas into Rust Type References (`TypeRef`).
@@ -137,7 +137,7 @@ impl TypeResolver {
     reference_path: &str,
     resolved_schema: &ObjectSchema,
   ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    let reference_name = SchemaRegistry::extract_ref_name(reference_path)
+    let reference_name = SchemaRegistry::parse_ref(reference_path)
       .ok_or_else(|| anyhow::anyhow!("Invalid reference path: {reference_path}"))?;
 
     let is_complex_array = resolved_schema.has_inline_union_array_items(self.graph.spec());
@@ -260,7 +260,7 @@ impl TypeResolver {
       |cache| Self::lookup_cached_enum_name(schema, cache),
       |name, cache| {
         let union_converter = UnionConverter::new(&self.graph, self.clone(), &self.config);
-        union_converter.convert_union_output(
+        union_converter.convert_union(
           name,
           schema,
           if uses_one_of {
@@ -390,7 +390,7 @@ impl TypeResolver {
     if schema.schema_type.is_some() {
       return None;
     }
-    self.graph.get_schema(title)?;
+    self.graph.get(title)?;
     Some(self.create_type_reference(title))
   }
 
@@ -402,7 +402,7 @@ impl TypeResolver {
     if variant_references.len() < 2 {
       return None;
     }
-    self.graph.lookup_union_by_fingerprint(variant_references).cloned()
+    self.graph.find_union(variant_references).cloned()
   }
 
   /// Partitions union variants into nullable and non-nullable types.
@@ -441,7 +441,7 @@ impl TypeResolver {
     }
 
     if let Some(non_null) = non_null_variant {
-      if let Some(reference_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(non_null) {
+      if let Some(reference_name) = RefCollector::parse_schema_ref(non_null) {
         return Ok(Some(self.create_type_reference(&reference_name).with_option()));
       }
 
@@ -494,7 +494,7 @@ impl TypeResolver {
     let mut first_reference_name: Option<String> = None;
 
     for variant in variants {
-      if let Some(reference_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(variant) {
+      if let Some(reference_name) = RefCollector::parse_schema_ref(variant) {
         reference_count += 1;
         if reference_count >= 2 {
           return Ok(None);
@@ -526,13 +526,13 @@ impl TypeResolver {
       }
 
       if resolved.one_of.len() == 1
-        && let Some(reference_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(&resolved.one_of[0])
+        && let Some(reference_name) = RefCollector::parse_schema_ref(&resolved.one_of[0])
       {
         return Ok(Some(self.create_type_reference(&reference_name)));
       }
 
       if let Some(ref variant_title) = resolved.title
-        && self.graph.get_schema(variant_title).is_some()
+        && self.graph.get(variant_title).is_some()
       {
         return Ok(Some(self.create_type_reference(variant_title)));
       }
@@ -612,8 +612,8 @@ impl TypeResolver {
       Schema::Boolean(_) => Ok(TypeRef::new(RustPrimitive::Value)),
       Schema::Object(schema_ref) => {
         if let ObjectOrReference::Ref { ref_path, .. } = &**schema_ref {
-          let reference_name = SchemaRegistry::extract_ref_name(ref_path)
-            .ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
+          let reference_name =
+            SchemaRegistry::parse_ref(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
           return Ok(self.create_type_reference(&reference_name));
         }
 
@@ -638,7 +638,7 @@ impl TypeResolver {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };
 
-    if let Some(reference_name) = ReferenceExtractor::extract_ref_name_from_obj_ref(items_reference) {
+    if let Some(reference_name) = RefCollector::parse_schema_ref(items_reference) {
       let mut type_reference = self.create_type_reference(&reference_name);
       type_reference.boxed = false;
       return Ok(type_reference);

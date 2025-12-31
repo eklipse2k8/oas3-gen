@@ -13,7 +13,7 @@ use crate::generator::{
     RustType, TypeRef, VariantDef,
   },
   naming::identifiers::to_rust_type_name,
-  schema_registry::SchemaRegistry,
+  schema_registry::{ParentInfo, SchemaRegistry},
 };
 
 #[derive(Debug, Clone)]
@@ -70,8 +70,8 @@ impl<'a> DiscriminatorHandler<'a> {
     }
   }
 
-  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<(String, String, String)> {
-    self.graph.get_discriminator_parent(schema_name).cloned()
+  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&ParentInfo> {
+    self.graph.parent(schema_name)
   }
 
   pub(crate) fn create_discriminated_enum(
@@ -141,7 +141,7 @@ impl<'a> DiscriminatorHandler<'a> {
 
     let mut schema_to_disc_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (disc_value, ref_path) in mapping {
-      let Some(schema_name) = SchemaRegistry::extract_ref_name(ref_path) else {
+      let Some(schema_name) = SchemaRegistry::parse_ref(ref_path) else {
         continue;
       };
 
@@ -197,7 +197,7 @@ fn all_variants_match_mapping(variants: &[VariantDef], mapping: &BTreeMap<String
 
   mapping
     .values()
-    .filter_map(|ref_path| SchemaRegistry::extract_ref_name(ref_path).map(|name| to_rust_type_name(&name)))
+    .filter_map(|ref_path| SchemaRegistry::parse_ref(ref_path).map(|name| to_rust_type_name(&name)))
     .all(|type_name| variant_types.contains(&type_name))
 }
 
@@ -207,7 +207,7 @@ fn build_discriminated_variants_from_mapping(
 ) -> Vec<DiscriminatedVariant> {
   let mut type_to_disc_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
   for (disc_value, ref_path) in mapping {
-    if let Some(expected_type) = SchemaRegistry::extract_ref_name(ref_path).map(|name| to_rust_type_name(&name)) {
+    if let Some(expected_type) = SchemaRegistry::parse_ref(ref_path).map(|name| to_rust_type_name(&name)) {
       type_to_disc_values
         .entry(expected_type)
         .or_default()

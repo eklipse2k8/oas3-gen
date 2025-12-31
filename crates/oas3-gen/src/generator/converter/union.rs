@@ -1,5 +1,4 @@
 use std::{
-  borrow::Cow,
   collections::{BTreeMap, BTreeSet, HashSet},
   sync::Arc,
 };
@@ -9,26 +8,26 @@ use oas3::spec::{ObjectOrReference, ObjectSchema};
 use serde_json::Value;
 
 use super::{
-  CodegenConfig,
+  CodegenConfig, ConversionOutput,
   cache::SharedSchemaCache,
   common::{SchemaExt, handle_inline_creation},
-  inline_scanner::InlineSchemaMerger,
   struct_summaries::StructSummary,
   structs::StructConverter,
   type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
-    Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken, RustType,
-    SerdeAttribute, TypeRef, VariantContent, VariantDef,
+    Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken, RustPrimitive,
+    RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
   },
+  converter::discriminator::try_build_discriminated_enum_from_variants,
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::{
       VariantNameNormalizer, derive_method_names, extract_enum_values, infer_union_variant_label, strip_common_affixes,
     },
   },
-  schema_registry::{ReferenceExtractor, SchemaRegistry},
+  schema_registry::{RefCollector, SchemaRegistry},
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -84,36 +83,23 @@ impl UnionConverter {
     schema: &ObjectSchema,
     kind: UnionKind,
     mut cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<Vec<RustType>> {
+  ) -> anyhow::Result<ConversionOutput<RustType>> {
     if kind == UnionKind::AnyOf
-      && let Some(result) = self.try_build_relaxed_enum(name, schema, cache.as_deref_mut())
+      && let Some(output) = self.try_build_relaxed_enum(name, schema, cache.as_deref_mut())
     {
-      return Ok(result);
+      return Ok(output);
     }
 
-    let result = self.collect_union_variants(name, schema, kind, cache.as_deref_mut())?;
+    let output = self.collect_union_variants(name, schema, kind, cache.as_deref_mut())?;
 
     if let Some(c) = cache
       && let Some(values) = extract_enum_values(schema)
-      && let Some(RustType::Enum(e)) = result.last()
+      && let RustType::Enum(e) = &output.result
     {
       c.register_enum(values, e.name.to_string());
     }
 
-    Ok(result)
-  }
-
-  pub(crate) fn convert_union_output(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    kind: UnionKind,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<super::ConversionOutput<RustType>> {
-    let generated = self.convert_union(name, schema, kind, cache)?;
-    let expected = EnumToken::from_raw(name);
-    let (main_type, inline_types) = extract_primary_type(generated, &expected)?;
-    Ok(super::ConversionOutput::with_inline_types(main_type, inline_types))
+    Ok(output)
   }
 
   fn collect_union_variants(
@@ -122,21 +108,21 @@ impl UnionConverter {
     schema: &ObjectSchema,
     kind: UnionKind,
     mut cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<Vec<RustType>> {
+  ) -> anyhow::Result<ConversionOutput<RustType>> {
     let variants_src = match kind {
       UnionKind::OneOf => &schema.one_of,
       UnionKind::AnyOf => &schema.any_of,
     };
 
-    let specs = self.collect_union_variant_specs(variants_src)?;
-
-    let mut inline_types = vec![];
-    let mut variants = vec![];
-    for spec in specs {
-      let (variant, mut generated) = self.build_union_variant(name, &spec, cache.as_deref_mut())?;
-      variants.push(variant);
-      inline_types.append(&mut generated);
-    }
+    let (mut variants, inline_types) = self.collect_union_variant_specs(variants_src)?.into_iter().try_fold(
+      (vec![], vec![]),
+      |(mut variants, mut inline_types), spec| {
+        let output = self.build_union_variant(name, &spec, cache.as_deref_mut())?;
+        variants.push(output.result);
+        inline_types.extend(output.inline_types);
+        anyhow::Ok((variants, inline_types))
+      },
+    )?;
 
     strip_common_affixes(&mut variants);
 
@@ -146,10 +132,9 @@ impl UnionConverter {
       self.build_constructors(&variants, &inline_types, name, cache)
     };
 
-    let main_enum = Self::build_union_def(name, schema, kind, variants, methods);
-    inline_types.push(main_enum);
+    let main_enum = Self::build_union_def(name, schema, variants, methods);
 
-    Ok(inline_types)
+    Ok(ConversionOutput::with_inline_types(main_enum, inline_types))
   }
 
   fn collect_union_variant_specs(
@@ -168,9 +153,9 @@ impl UnionConverter {
         continue;
       }
 
-      let ref_name = ReferenceExtractor::extract_ref_name_from_obj_ref(variant_ref).or_else(|| {
+      let ref_name = RefCollector::parse_schema_ref(variant_ref).or_else(|| {
         if resolved.all_of.len() == 1 {
-          ReferenceExtractor::extract_ref_name_from_obj_ref(&resolved.all_of[0])
+          RefCollector::parse_schema_ref(&resolved.all_of[0])
         } else {
           None
         }
@@ -195,7 +180,7 @@ impl UnionConverter {
     enum_name: &str,
     spec: &UnionVariantSpec,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
+  ) -> anyhow::Result<ConversionOutput<VariantDef>> {
     if let Some(ref schema_name) = spec.ref_name {
       Ok(self.build_ref_variant(schema_name, &spec.resolved_schema, spec.variant_name.clone()))
     } else {
@@ -208,23 +193,24 @@ impl UnionConverter {
     schema_name: &str,
     resolved_schema: &ObjectSchema,
     variant_name: EnumVariantToken,
-  ) -> (VariantDef, Vec<RustType>) {
+  ) -> ConversionOutput<VariantDef> {
     let rust_type_name = to_rust_type_name(schema_name);
-    let mut type_ref = TypeRef::new(&rust_type_name);
 
-    if self.graph.is_cyclic(schema_name) {
-      type_ref = type_ref.with_boxed();
-    }
-
-    let variant = VariantDef {
-      name: variant_name,
-      docs: Documentation::from_optional(resolved_schema.description.as_ref()),
-      content: VariantContent::Tuple(vec![type_ref]),
-      deprecated: resolved_schema.deprecated.unwrap_or(false),
-      ..Default::default()
+    // We never want optional variants since this builds untagged enums
+    let type_ref = if self.graph.is_cyclic(schema_name) {
+      TypeRef::new(&rust_type_name).unwrap_option().with_boxed()
+    } else {
+      TypeRef::new(&rust_type_name).unwrap_option()
     };
 
-    (variant, vec![])
+    ConversionOutput::new(
+      VariantDef::builder()
+        .name(variant_name)
+        .docs(Documentation::from_optional(resolved_schema.description.as_ref()))
+        .content(VariantContent::Tuple(vec![type_ref]))
+        .deprecated(resolved_schema.deprecated.unwrap_or(false))
+        .build(),
+    )
   }
 
   fn build_inline_variant(
@@ -233,70 +219,66 @@ impl UnionConverter {
     enum_name: &str,
     variant_name: EnumVariantToken,
     mut cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<(VariantDef, Vec<RustType>)> {
-    let merger = InlineSchemaMerger::new(self.graph.spec(), self.graph.merged_schemas_ref());
-    let resolved_schema_owned: Cow<ObjectSchema>;
+  ) -> anyhow::Result<ConversionOutput<VariantDef>> {
     let resolved_schema = if resolved_schema.has_intersection() {
-      resolved_schema_owned = Cow::Owned(merger.merge_inline(resolved_schema)?);
-      resolved_schema_owned.as_ref()
+      self.graph.merge_inline(resolved_schema)?
     } else {
-      resolved_schema_owned = Cow::Borrowed(resolved_schema);
-      resolved_schema_owned.as_ref()
+      resolved_schema.clone()
     };
 
-    if let Some(result) = Self::build_const_variant(resolved_schema, &variant_name)? {
-      return Ok(result);
+    if let Some(output) = Self::build_const_variant(&resolved_schema, &variant_name)? {
+      return Ok(output);
     }
 
     let variant_label = variant_name.to_string();
 
-    let (content, generated_types) = if resolved_schema.properties.is_empty() {
-      if let Some(result) =
-        self.build_array_content(enum_name, &variant_label, resolved_schema, cache.as_deref_mut())?
+    let content_output = if resolved_schema.properties.is_empty() {
+      if let Some(output) =
+        self.build_array_content(enum_name, &variant_label, &resolved_schema, cache.as_deref_mut())?
       {
-        result
-      } else if let Some(result) =
-        self.build_nested_union_content(enum_name, &variant_label, resolved_schema, cache.as_deref_mut())?
+        output
+      } else if let Some(output) =
+        self.build_nested_union_content(enum_name, &variant_label, &resolved_schema, cache.as_deref_mut())?
       {
-        result
+        output
       } else {
-        self.build_primitive_content(resolved_schema)?
+        self.build_primitive_content(&resolved_schema)?
       }
     } else {
-      self.build_struct_content(enum_name, &variant_label, resolved_schema, cache)?
+      self.build_struct_content(enum_name, &variant_label, &resolved_schema, cache)?
     };
 
-    let variant = VariantDef {
-      name: variant_name,
-      docs: Documentation::from_optional(resolved_schema.description.as_ref()),
-      content,
-      serde_attrs: vec![],
-      deprecated: resolved_schema.deprecated.unwrap_or(false),
-    };
-
-    Ok((variant, generated_types))
+    Ok(ConversionOutput::with_inline_types(
+      VariantDef::builder()
+        .name(variant_name)
+        .content(content_output.result)
+        .docs(Documentation::from_optional(resolved_schema.description.as_ref()))
+        .deprecated(resolved_schema.deprecated.unwrap_or(false))
+        .build(),
+      content_output.inline_types,
+    ))
   }
 
   fn build_const_variant(
     resolved_schema: &ObjectSchema,
     variant_name: &EnumVariantToken,
-  ) -> anyhow::Result<Option<(VariantDef, Vec<RustType>)>> {
-    if let Some(const_value) = &resolved_schema.const_value {
-      let normalized = VariantNameNormalizer::normalize(const_value)
-        .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
+  ) -> anyhow::Result<Option<ConversionOutput<VariantDef>>> {
+    let Some(const_value) = &resolved_schema.const_value else {
+      return Ok(None);
+    };
 
-      let variant = VariantDef {
-        name: variant_name.clone(),
-        docs: Documentation::from_optional(resolved_schema.description.as_ref()),
-        content: VariantContent::Unit,
-        serde_attrs: vec![SerdeAttribute::Rename(normalized.rename_value)],
-        deprecated: resolved_schema.deprecated.unwrap_or(false),
-      };
+    let normalized = VariantNameNormalizer::normalize(const_value)
+      .ok_or_else(|| anyhow::anyhow!("Unsupported const value type: {const_value}"))?;
 
-      return Ok(Some((variant, vec![])));
-    }
+    let variant = VariantDef::builder()
+      .name(variant_name.clone())
+      .docs(Documentation::from_optional(resolved_schema.description.as_ref()))
+      .content(VariantContent::Unit)
+      .serde_attrs(vec![SerdeAttribute::Rename(normalized.rename_value)])
+      .deprecated(resolved_schema.deprecated.unwrap_or(false))
+      .build();
 
-    Ok(None)
+    Ok(Some(ConversionOutput::new(variant)))
   }
 
   fn build_array_content(
@@ -305,7 +287,7 @@ impl UnionConverter {
     variant_label: &str,
     resolved_schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<Option<(VariantContent, Vec<RustType>)>> {
+  ) -> anyhow::Result<Option<ConversionOutput<VariantContent>>> {
     if !resolved_schema.is_array() {
       return Ok(None);
     }
@@ -315,7 +297,7 @@ impl UnionConverter {
         .type_resolver
         .resolve_array_with_inline_items(enum_name, variant_label, resolved_schema, cache)?;
 
-    Ok(conversion.map(|c| (VariantContent::Tuple(vec![c.result]), c.inline_types)))
+    Ok(conversion.map(|c| ConversionOutput::with_inline_types(VariantContent::Tuple(vec![c.result]), c.inline_types)))
   }
 
   fn build_nested_union_content(
@@ -324,7 +306,7 @@ impl UnionConverter {
     variant_label: &str,
     resolved_schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<Option<(VariantContent, Vec<RustType>)>> {
+  ) -> anyhow::Result<Option<ConversionOutput<VariantContent>>> {
     if !resolved_schema.has_union() {
       return Ok(None);
     }
@@ -335,7 +317,10 @@ impl UnionConverter {
         .type_resolver
         .resolve_inline_union_type(enum_name, variant_label, resolved_schema, uses_one_of, cache)?;
 
-    Ok(Some((VariantContent::Tuple(vec![result.result]), result.inline_types)))
+    Ok(Some(ConversionOutput::with_inline_types(
+      VariantContent::Tuple(vec![result.result]),
+      result.inline_types,
+    )))
   }
 
   fn build_struct_content(
@@ -344,8 +329,9 @@ impl UnionConverter {
     variant_label: &str,
     resolved_schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<(VariantContent, Vec<RustType>)> {
-    let struct_name_prefix = format!("{enum_name}{variant_label}");
+  ) -> anyhow::Result<ConversionOutput<VariantContent>> {
+    let enum_name_converted = to_rust_type_name(enum_name);
+    let struct_name_prefix = format!("{enum_name_converted}{variant_label}");
 
     let result = handle_inline_creation(
       resolved_schema,
@@ -356,36 +342,40 @@ impl UnionConverter {
       |name, cache| self.struct_converter.convert_struct(name, resolved_schema, None, cache),
     )?;
 
-    Ok((VariantContent::Tuple(vec![result.result]), result.inline_types))
+    Ok(ConversionOutput::with_inline_types(
+      VariantContent::Tuple(vec![result.result]),
+      result.inline_types,
+    ))
   }
 
-  fn build_primitive_content(&self, resolved_schema: &ObjectSchema) -> anyhow::Result<(VariantContent, Vec<RustType>)> {
+  fn build_primitive_content(
+    &self,
+    resolved_schema: &ObjectSchema,
+  ) -> anyhow::Result<ConversionOutput<VariantContent>> {
     let type_ref = self.type_resolver.resolve_type(resolved_schema)?;
-    Ok((VariantContent::Tuple(vec![type_ref]), vec![]))
+    Ok(ConversionOutput::new(VariantContent::Tuple(vec![type_ref])))
   }
 
   fn build_union_def(
     name: &str,
     schema: &ObjectSchema,
-    _kind: UnionKind,
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> RustType {
-    if let Some(discriminated) =
-      super::discriminator::try_build_discriminated_enum_from_variants(name, schema, &variants, methods.clone())
-    {
+    if let Some(discriminated) = try_build_discriminated_enum_from_variants(name, schema, &variants, methods.clone()) {
       return discriminated;
     }
 
-    RustType::Enum(EnumDef {
-      name: EnumToken::from_raw(name),
-      docs: Documentation::from_optional(schema.description.as_ref()),
-      variants,
-      serde_attrs: vec![SerdeAttribute::Untagged],
-      case_insensitive: false,
-      methods,
-      ..Default::default()
-    })
+    RustType::Enum(
+      EnumDef::builder()
+        .name(EnumToken::from_raw(name))
+        .docs(Documentation::from_optional(schema.description.as_ref()))
+        .variants(variants)
+        .serde_attrs(vec![SerdeAttribute::Untagged])
+        .case_insensitive(false)
+        .methods(methods)
+        .build(),
+    )
   }
 
   fn try_build_relaxed_enum(
@@ -393,7 +383,7 @@ impl UnionConverter {
     name: &str,
     schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> Option<Vec<RustType>> {
+  ) -> Option<ConversionOutput<RustType>> {
     let known_values = self.collect_relaxed_known_values(schema);
     if known_values.is_empty() {
       return None;
@@ -454,7 +444,7 @@ impl UnionConverter {
     schema: &ObjectSchema,
     known_values: &[EnumValueEntry],
     cache: Option<&mut SharedSchemaCache>,
-  ) -> Vec<RustType> {
+  ) -> ConversionOutput<RustType> {
     let base_name = to_rust_type_name(name);
 
     let mut cache_key_values: Vec<String> = known_values
@@ -473,13 +463,9 @@ impl UnionConverter {
     };
 
     let outer_enum = Self::build_relaxed_wrapper_enum(&base_name, &known_enum_name, schema, methods);
+    let inline_types = inner_enum_type.into_iter().collect();
 
-    let mut types = vec![];
-    if let Some(ie) = inner_enum_type {
-      types.push(ie);
-    }
-    types.push(outer_enum);
-    types
+    ConversionOutput::with_inline_types(outer_enum, inline_types)
   }
 
   fn resolve_cached_known_enum(
@@ -558,31 +544,25 @@ impl UnionConverter {
     methods: Vec<EnumMethod>,
   ) -> RustType {
     let variants = vec![
-      VariantDef {
-        name: EnumVariantToken::new("Known"),
-        docs: Documentation::from_lines(["A known value."]),
-        content: VariantContent::Tuple(vec![TypeRef::new(known_type_name)]),
-        serde_attrs: vec![],
-        deprecated: false,
-      },
-      VariantDef {
-        name: EnumVariantToken::new("Other"),
-        docs: Documentation::from_lines(["An unknown value."]),
-        content: VariantContent::Tuple(vec![TypeRef::new("String")]),
-        serde_attrs: vec![],
-        deprecated: false,
-      },
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Known"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(known_type_name)]))
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Other"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]))
+        .build(),
     ];
 
-    RustType::Enum(EnumDef {
-      name: EnumToken::new(name),
-      docs: Documentation::from_optional(schema.description.as_ref()),
-      variants,
-      serde_attrs: vec![SerdeAttribute::Untagged],
-      case_insensitive: false,
-      methods,
-      ..Default::default()
-    })
+    RustType::Enum(
+      EnumDef::builder()
+        .name(EnumToken::new(name))
+        .docs(Documentation::from_optional(schema.description.as_ref()))
+        .variants(variants)
+        .serde_attrs(vec![SerdeAttribute::Untagged])
+        .methods(methods)
+        .build(),
+    )
   }
 
   fn build_constructors(
@@ -705,7 +685,7 @@ impl UnionConverter {
       return Some(summary);
     }
 
-    let schema = self.graph.get_schema(&base_name)?;
+    let schema = self.graph.get(&base_name)?;
     if !schema.is_object() && schema.properties.is_empty() {
       return None;
     }
@@ -777,20 +757,4 @@ impl UnionConverter {
       ..Default::default()
     })
   }
-}
-
-pub(crate) fn extract_primary_type(
-  mut types: Vec<RustType>,
-  target_name: &EnumToken,
-) -> anyhow::Result<(RustType, Vec<RustType>)> {
-  let pos = types
-    .iter()
-    .position(|t| match t {
-      RustType::Enum(e) => e.name == *target_name,
-      _ => false,
-    })
-    .or_else(|| (!types.is_empty()).then_some(types.len() - 1))
-    .ok_or_else(|| anyhow::anyhow!("Failed to locate generated union type"))?;
-
-  Ok((types.remove(pos), types))
 }

@@ -74,7 +74,9 @@ fn test_simple_enum_display_impl() {
     ],
   );
 
-  let code = EnumGenerator::new(&simple_def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&simple_def, Visibility::Public)
+    .generate()
+    .to_string();
 
   assert!(
     code.contains("impl core :: fmt :: Display for Color"),
@@ -123,7 +125,9 @@ fn test_simple_enum_display_impl_with_serde_rename() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&renamed_def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&renamed_def, Visibility::Public)
+    .generate()
+    .to_string();
 
   assert!(
     code.contains("impl core :: fmt :: Display for Status"),
@@ -168,7 +172,9 @@ fn test_tuple_enum_no_display_impl() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&tuple_def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&tuple_def, Visibility::Public)
+    .generate()
+    .to_string();
 
   assert!(
     !code.contains("impl core :: fmt :: Display for Value"),
