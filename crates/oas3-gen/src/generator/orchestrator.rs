@@ -130,7 +130,7 @@ impl Orchestrator {
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    let _ = analyzer.analyze();
+    analyzer.analyze();
 
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
@@ -164,11 +164,10 @@ impl Orchestrator {
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    let analysis = analyzer.analyze();
+    analyzer.analyze();
 
     let final_code = codegen::generate_file(
       &rust_types,
-      &analysis.error_schemas,
       self.visibility,
       &metadata,
       &lint_config,
@@ -191,9 +190,9 @@ impl Orchestrator {
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    let analysis = analyzer.analyze();
+    analyzer.analyze();
 
-    let types_tokens = codegen::generate(&rust_types, &analysis.error_schemas, self.visibility);
+    let types_tokens = codegen::generate(&rust_types, self.visibility);
     let types_code = codegen::generate_source(&types_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
 
     stats.client_methods_generated = Some(operations_info.len());

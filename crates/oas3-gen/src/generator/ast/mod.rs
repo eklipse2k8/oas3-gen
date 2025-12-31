@@ -194,10 +194,6 @@ pub struct OperationInfo {
   #[builder(default)]
   pub response_media_types: Vec<ResponseMediaType>,
   #[builder(default)]
-  pub success_response_types: Vec<String>,
-  #[builder(default)]
-  pub error_response_types: Vec<String>,
-  #[builder(default)]
   pub warnings: Vec<String>,
   #[builder(default)]
   pub parameters: Vec<FieldDef>,

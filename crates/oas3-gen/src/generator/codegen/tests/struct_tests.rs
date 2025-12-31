@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use crate::generator::{
   ast::{
@@ -184,8 +184,7 @@ fn test_event_stream_response_generates_from_response() {
 #[test]
 fn test_serde_import_generation() {
   let def = base_struct(StructKind::Schema);
-  let errors = HashSet::new();
-  let tokens = codegen::generate(&[RustType::Struct(def)], &errors, Visibility::Public);
+  let tokens = codegen::generate(&[RustType::Struct(def)], Visibility::Public);
   let code = tokens.to_string();
   assert!(code.contains("Debug"), "missing Debug derive");
   assert!(code.contains("Clone"), "missing Clone derive");

@@ -124,10 +124,9 @@ The generator follows a strict one-way data flow where each stage produces immut
 │                            │   - Bidirectional → Both                   │  │
 │                            │ • Deduplicates identical ResponseEnums     │  │
 │                            │ • Adds #[validate(nested)] transitively    │  │
-│                            │ • Computes error schemas set               │  │
 │                            └────────────────────────────────────────────┘  │
 │                                                                              │
-│ OUTPUT: Mutated Vec<RustType>, AnalysisResult { error_schemas }            │
+│ OUTPUT: Mutated Vec<RustType>                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │
                                      ▼

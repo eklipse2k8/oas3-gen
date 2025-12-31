@@ -210,8 +210,6 @@ impl<'a> OperationConverter<'a> {
       .maybe_response_type(response_metadata.type_name)
       .maybe_response_enum(Self::emit_response_enum(&mut types, response_enum_def, usage))
       .response_media_types(response_metadata.media_types)
-      .success_response_types(response_metadata.success_types)
-      .error_response_types(response_metadata.error_types)
       .warnings(warnings)
       .parameters(parameter_metadata)
       .maybe_body(Self::extract_body_metadata(&body_info))
@@ -820,8 +818,6 @@ impl<'a> OperationConverter<'a> {
 struct ResponseMetadata {
   type_name: Option<String>,
   media_types: Vec<ResponseMediaType>,
-  success_types: Vec<String>,
-  error_types: Vec<String>,
 }
 
 impl OperationConverter<'_> {
@@ -847,11 +843,6 @@ impl OperationConverter<'_> {
     usage.mark_response_iter(&response_types.success);
     usage.mark_response_iter(&response_types.error);
 
-    ResponseMetadata {
-      type_name,
-      media_types,
-      success_types: response_types.success,
-      error_types: response_types.error,
-    }
+    ResponseMetadata { type_name, media_types }
   }
 }

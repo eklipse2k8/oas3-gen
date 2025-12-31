@@ -58,8 +58,6 @@ impl TestOperation<'_> {
       response_media_types: self
         .response_media_types
         .unwrap_or_else(|| vec![ResponseMediaType::new("application/json")]),
-      success_response_types: vec![],
-      error_response_types: vec![],
       warnings: vec![],
       parameters: vec![],
       body: None,
@@ -319,8 +317,6 @@ fn test_multipart_generation() {
     response_type: Some("TestResponse".to_string()),
     response_enum: None,
     response_media_types: vec![ResponseMediaType::new("application/json")],
-    success_response_types: vec![],
-    error_response_types: vec![],
     warnings: vec![],
     parameters: vec![],
     body: None,
@@ -382,8 +378,6 @@ fn test_client_filters_webhook_operations() {
     response_type: Some("Vec<Pet>".to_string()),
     response_enum: None,
     response_media_types: vec![ResponseMediaType::new("application/json")],
-    success_response_types: vec![],
-    error_response_types: vec![],
     warnings: vec![],
     parameters: vec![
       FieldDef::builder()
@@ -412,8 +406,6 @@ fn test_client_filters_webhook_operations() {
     response_type: Some("WebhookResponse".to_string()),
     response_enum: None,
     response_media_types: vec![ResponseMediaType::new("application/json")],
-    success_response_types: vec![],
-    error_response_types: vec![],
     warnings: vec![],
     parameters: vec![
       FieldDef::builder()

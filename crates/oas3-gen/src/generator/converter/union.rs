@@ -352,7 +352,7 @@ impl UnionConverter {
     &self,
     resolved_schema: &ObjectSchema,
   ) -> anyhow::Result<ConversionOutput<VariantContent>> {
-    let type_ref = self.type_resolver.resolve_type(resolved_schema)?;
+    let type_ref = self.type_resolver.resolve_type(resolved_schema)?.unwrap_option();
     Ok(ConversionOutput::new(VariantContent::Tuple(vec![type_ref])))
   }
 

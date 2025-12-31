@@ -66,7 +66,6 @@ crates/
 │           │   ├── dependency_graph.rs  # Type dependency graph
 │           │   └── tests/         # Analyzer tests
 │           │       ├── mod.rs
-│           │       ├── error_tests.rs
 │           │       ├── transform_tests.rs
 │           │       └── type_usage_tests.rs
 │           ├── naming/            # Identifier naming and conversion
@@ -136,7 +135,6 @@ crates/
 │               ├── coercion.rs    # Type coercion logic
 │               ├── constants.rs   # Regex constant generation
 │               ├── enums.rs       # Enum, DiscriminatedEnum, ResponseEnum generation
-│               ├── error_impls.rs # Error trait implementations
 │               ├── mod_file.rs    # Module file generation (mod.rs)
 │               ├── structs.rs     # Struct code generation (StructGenerator)
 │               ├── type_aliases.rs # Type alias generation
@@ -146,7 +144,6 @@ crates/
 │                   ├── coercion_tests.rs
 │                   ├── constants_tests.rs
 │                   ├── enum_tests.rs
-│                   ├── error_impl_tests.rs
 │                   ├── struct_tests.rs
 │                   └── type_alias_tests.rs
 └── oas3-gen-support/              # Runtime library (rlib + cdylib)
