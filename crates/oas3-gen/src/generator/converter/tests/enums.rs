@@ -560,7 +560,7 @@ fn test_preserve_strategy_with_multiple_collisions() {
 
   let result = converter.convert_value_enum("Status", &schema, None);
 
-  if let Some(RustType::Enum(enum_def)) = result {
+  if let RustType::Enum(enum_def) = result {
     assert_eq!(enum_def.variants.len(), 3);
     assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Active"));
     assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Active1"));

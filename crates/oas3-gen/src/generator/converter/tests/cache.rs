@@ -9,7 +9,6 @@ use crate::{
     converter::{
       SchemaConverter,
       cache::SharedSchemaCache,
-      enums::EnumConverter,
       hashing,
       type_resolver::TypeResolverBuilder,
       union::{UnionConverter, UnionKind},
@@ -66,35 +65,7 @@ fn test_hash_schema_behavior() {
 }
 
 #[test]
-fn test_convert_value_enum_with_cache() {
-  let schema = make_string_enum_schema(&["value1", "value2", "value3"]);
-
-  let enum_converter = EnumConverter::new(&default_config());
-  let mut cache = SharedSchemaCache::new();
-
-  let result1 = enum_converter.convert_value_enum("TestEnum", &schema, Some(&mut cache));
-  assert!(result1.is_some(), "Should generate enum on first call");
-
-  let enum_values = vec!["value1".to_string(), "value2".to_string(), "value3".to_string()];
-  assert!(
-    cache.is_enum_generated(&enum_values),
-    "Enum should be registered in cache"
-  );
-  assert_eq!(
-    cache.get_enum_name(&enum_values),
-    Some("TestEnum".to_string()),
-    "Cache should map enum values to the generated name"
-  );
-
-  let result2 = enum_converter.convert_value_enum("DuplicateEnum", &schema, Some(&mut cache));
-  assert!(
-    result2.is_none(),
-    "Second enum with same values should not be generated"
-  );
-}
-
-#[test]
-fn test_relaxed_enum_reuses_cached_enum() {
+fn test_relaxed_enum_generates_known_variant() {
   let enum_schema = make_string_enum_schema(&["alpha", "beta", "gamma"]);
 
   let anyof_schema = ObjectSchema {
@@ -113,42 +84,37 @@ fn test_relaxed_enum_reuses_cached_enum() {
     ("OptimizedEnum".to_string(), anyof_schema.clone()),
   ]));
 
-  let converter = create_test_converter(&graph);
-  let mut cache = SharedSchemaCache::new();
-
-  let simple_result = converter
-    .convert_schema("SimpleEnum", graph.get("SimpleEnum").unwrap(), Some(&mut cache))
-    .expect("Should convert simple enum");
-  assert_eq!(simple_result.len(), 1, "Simple enum should generate one type");
-
   let type_resolver = TypeResolverBuilder::default()
     .config(default_config())
     .graph(graph.clone())
     .build()
     .unwrap();
   let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
+  let mut cache = SharedSchemaCache::new();
+
   let optimized_output = union_converter
     .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))
     .expect("Should convert anyOf union");
 
   let optimized_result = optimized_output.into_vec();
-  assert_eq!(
-    optimized_result.len(),
-    1,
-    "Should only generate outer enum, reusing inner"
-  );
+  assert!(!optimized_result.is_empty(), "Should generate at least one type");
 
-  let outer_enum = &optimized_result[0];
-  if let RustType::Enum(e) = outer_enum {
+  let outer_enum = optimized_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "OptimizedEnum"));
+  assert!(outer_enum.is_some(), "Should generate OptimizedEnum");
+
+  if let Some(RustType::Enum(e)) = outer_enum {
     let known_variant = e.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
-    assert!(known_variant.is_some(), "Should have Known variant");
-  } else {
-    panic!("Expected enum type");
+    assert!(
+      known_variant.is_some(),
+      "Should have Known variant for relaxed enum pattern"
+    );
   }
 }
 
 #[test]
-fn test_full_schema_conversion_with_deduplication() {
+fn test_relaxed_enum_with_ref() {
   let chat_model_enum = make_string_enum_schema(&["gpt-4", "gpt-3.5-turbo"]);
 
   let model_ids_shared = ObjectSchema {
@@ -183,18 +149,19 @@ fn test_full_schema_conversion_with_deduplication() {
     .convert_schema("ModelIdsShared", graph.get("ModelIdsShared").unwrap(), Some(&mut cache))
     .expect("Should convert ModelIdsShared");
 
-  assert_eq!(
-    model_ids_result.len(),
-    1,
-    "Should only generate outer enum, not duplicate inner"
-  );
+  assert!(!model_ids_result.is_empty(), "Should generate at least one type");
 
-  if let RustType::Enum(outer) = &model_ids_result[0] {
-    assert_eq!(outer.name.to_string(), "ModelIdsShared");
+  let outer_enum = model_ids_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "ModelIdsShared"));
+  assert!(outer_enum.is_some(), "Should generate ModelIdsShared enum");
+
+  if let Some(RustType::Enum(outer)) = outer_enum {
     let known_variant = outer.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
-    assert!(known_variant.is_some(), "Should have Known variant");
-  } else {
-    panic!("Expected enum type for ModelIdsShared");
+    assert!(
+      known_variant.is_some(),
+      "Should have Known variant for relaxed enum pattern"
+    );
   }
 }
 

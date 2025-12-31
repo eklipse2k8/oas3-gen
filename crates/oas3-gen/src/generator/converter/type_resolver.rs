@@ -181,9 +181,7 @@ impl TypeResolver {
       },
       |name, _| {
         let converter = EnumConverter::new(&self.config);
-        let inline_enum = converter
-          .convert_value_enum(name, property_schema, None)
-          .expect("convert_value_enum should return Some when cache is None");
+        let inline_enum = converter.convert_value_enum(name, property_schema, None);
 
         Ok(ConversionOutput::new(inline_enum))
       },

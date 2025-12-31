@@ -197,13 +197,11 @@ impl SchemaConverter {
 
     if !schema.enum_values.is_empty() {
       let cache_reborrow = cache.as_deref_mut();
-      return Ok(
-        self
-          .enum_converter
-          .convert_value_enum(name, schema, cache_reborrow)
-          .into_iter()
-          .collect(),
-      );
+      return Ok(vec![self.enum_converter.convert_value_enum(
+        name,
+        schema,
+        cache_reborrow,
+      )]);
     }
 
     if !schema.properties.is_empty() || schema.additional_properties.is_some() {

@@ -26,18 +26,7 @@ impl EnumConverter {
     name: &str,
     schema: &ObjectSchema,
     cache: Option<&mut SharedSchemaCache>,
-  ) -> Option<RustType> {
-    let mut enum_values: Vec<String> = schema
-      .enum_values
-      .iter()
-      .filter_map(|v| v.as_str().map(String::from))
-      .collect();
-    enum_values.sort();
-
-    if cache.as_ref().is_some_and(|c| c.is_enum_generated(&enum_values)) {
-      return None;
-    }
-
+  ) -> RustType {
     let strategy = if self.preserve_case_variants {
       CollisionStrategy::Preserve
     } else {
@@ -64,10 +53,9 @@ impl EnumConverter {
     );
 
     if let (Some(c), RustType::Enum(e)) = (cache, &enum_def) {
-      c.register_enum(enum_values, e.name.to_string());
       c.mark_name_used(e.name.to_string());
     }
 
-    Some(enum_def)
+    enum_def
   }
 }
