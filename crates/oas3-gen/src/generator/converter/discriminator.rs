@@ -9,8 +9,8 @@ use string_cache::DefaultAtom;
 use super::SchemaExt;
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedEnumDefBuilder, DiscriminatedVariant, Documentation, EnumMethod, EnumToken,
-    EnumVariantToken, RustType, TypeRef, VariantDef,
+    DiscriminatedEnumDefBuilder, DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken,
+    RustType, TypeRef, VariantDef,
   },
   naming::identifiers::to_rust_type_name,
   schema_registry::{ParentInfo, SchemaRegistry},
@@ -180,14 +180,16 @@ pub(crate) fn try_build_discriminated_enum_from_variants(
   }
 
   let disc_variants = build_discriminated_variants_from_mapping(variants, mapping);
-  Some(RustType::DiscriminatedEnum(DiscriminatedEnumDef {
-    name: EnumToken::from_raw(name),
-    docs: Documentation::from_optional(schema.description.as_ref()),
-    discriminator_field: discriminator.property_name.clone(),
-    variants: disc_variants,
-    methods,
-    ..Default::default()
-  }))
+  Some(RustType::DiscriminatedEnum(
+    DiscriminatedEnumDefBuilder::default()
+      .name(EnumToken::from_raw(name))
+      .docs(Documentation::from_optional(schema.description.as_ref()))
+      .discriminator_field(discriminator.property_name.clone())
+      .variants(disc_variants)
+      .methods(methods)
+      .build()
+      .ok()?,
+  ))
 }
 
 fn all_variants_match_mapping(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {

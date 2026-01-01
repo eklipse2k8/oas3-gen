@@ -1,8 +1,8 @@
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
-    OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
-    StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
+    DiscriminatedEnumDefBuilder, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
+    EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute,
+    SerdeMode, StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -744,26 +744,27 @@ fn test_known_value_constructor_methods() {
 
 #[test]
 fn test_discriminated_enum() {
-  let without_fallback = DiscriminatedEnumDef {
-    name: EnumToken::new("Pet"),
-    docs: vec!["A pet can be a dog or cat.".to_string()].into(),
-    discriminator_field: "petType".to_string(),
-    variants: vec![
-      DiscriminatedVariant {
-        discriminator_values: vec!["dog".to_string()],
-        variant_name: EnumVariantToken::new("Dog"),
-        type_name: TypeRef::new("DogData"),
-      },
-      DiscriminatedVariant {
-        discriminator_values: vec!["cat".to_string()],
-        variant_name: EnumVariantToken::new("Cat"),
-        type_name: TypeRef::new("CatData"),
-      },
-    ],
-    fallback: None,
-    serde_mode: SerdeMode::Both,
-    methods: vec![],
-  };
+  let without_fallback = DiscriminatedEnumDefBuilder::default()
+    .name("Pet")
+    .docs(vec!["A pet can be a dog or cat.".to_string()])
+    .discriminator_field("petType")
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["dog".to_string()])
+        .variant_name(EnumVariantToken::new("Dog"))
+        .type_name(TypeRef::new("DogData"))
+        .build(),
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["cat".to_string()])
+        .variant_name(EnumVariantToken::new("Cat"))
+        .type_name(TypeRef::new("CatData"))
+        .build(),
+    ])
+    .fallback(None)
+    .serde_mode(SerdeMode::Both)
+    .methods(vec![])
+    .build()
+    .unwrap();
 
   let code_without = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
     .generate()
@@ -799,22 +800,26 @@ fn test_discriminated_enum() {
     assert!(code_without.contains(expected), "{msg}:\n{code_without}");
   }
 
-  let with_fallback = DiscriminatedEnumDef {
-    name: EnumToken::new("Message"),
-    discriminator_field: "type".to_string(),
-    variants: vec![DiscriminatedVariant {
-      discriminator_values: vec!["text".to_string()],
-      variant_name: EnumVariantToken::new("Text"),
-      type_name: TypeRef::new("TextMessage"),
-    }],
-    fallback: Some(DiscriminatedVariant {
-      discriminator_values: vec![],
-      variant_name: EnumVariantToken::new("Unknown"),
-      type_name: TypeRef::new("serde_json::Value"),
-    }),
-    serde_mode: SerdeMode::Both,
-    ..Default::default()
-  };
+  let with_fallback = DiscriminatedEnumDefBuilder::default()
+    .name("Message")
+    .discriminator_field("type")
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["text".to_string()])
+        .variant_name(EnumVariantToken::new("Text"))
+        .type_name(TypeRef::new("TextMessage"))
+        .build(),
+    ])
+    .fallback(Some(
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec![])
+        .variant_name(EnumVariantToken::new("Unknown"))
+        .type_name(TypeRef::new("serde_json::Value"))
+        .build(),
+    ))
+    .serde_mode(SerdeMode::Both)
+    .build()
+    .unwrap();
 
   let code_with = DiscriminatedEnumGenerator::new(&with_fallback, Visibility::Public)
     .generate()
@@ -841,18 +846,20 @@ fn test_discriminated_enum() {
 
 #[test]
 fn test_discriminated_enum_serialize_only() {
-  let def = DiscriminatedEnumDef {
-    name: EnumToken::new("RequestType"),
-    discriminator_field: "kind".to_string(),
-    variants: vec![DiscriminatedVariant {
-      discriminator_values: vec!["create".to_string()],
-      variant_name: EnumVariantToken::new("Create"),
-      type_name: TypeRef::new("CreateRequest"),
-    }],
-    fallback: None,
-    serde_mode: SerdeMode::SerializeOnly,
-    ..Default::default()
-  };
+  let def = DiscriminatedEnumDefBuilder::default()
+    .name("RequestType")
+    .discriminator_field("kind")
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["create".to_string()])
+        .variant_name(EnumVariantToken::new("Create"))
+        .type_name(TypeRef::new("CreateRequest"))
+        .build(),
+    ])
+    .fallback(None)
+    .serde_mode(SerdeMode::SerializeOnly)
+    .build()
+    .unwrap();
 
   let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
     .generate()
@@ -869,18 +876,20 @@ fn test_discriminated_enum_serialize_only() {
 
 #[test]
 fn test_discriminated_enum_deserialize_only() {
-  let def = DiscriminatedEnumDef {
-    name: EnumToken::new("ResponseType"),
-    discriminator_field: "kind".to_string(),
-    variants: vec![DiscriminatedVariant {
-      discriminator_values: vec!["success".to_string()],
-      variant_name: EnumVariantToken::new("Success"),
-      type_name: TypeRef::new("SuccessResponse"),
-    }],
-    fallback: None,
-    serde_mode: SerdeMode::DeserializeOnly,
-    ..Default::default()
-  };
+  let def = DiscriminatedEnumDefBuilder::default()
+    .name("ResponseType")
+    .discriminator_field("kind")
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["success".to_string()])
+        .variant_name(EnumVariantToken::new("Success"))
+        .type_name(TypeRef::new("SuccessResponse"))
+        .build(),
+    ])
+    .fallback(None)
+    .serde_mode(SerdeMode::DeserializeOnly)
+    .build()
+    .unwrap();
 
   let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
     .generate()
