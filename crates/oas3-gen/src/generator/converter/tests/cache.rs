@@ -7,7 +7,7 @@ use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
     converter::{
-      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolverBuilder,
+      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
       union_types::UnionKind, unions::UnionConverter,
     },
     schema_registry::SchemaRegistry,
@@ -87,11 +87,10 @@ fn test_relaxed_enum_generates_known_variant() {
     ("OptimizedEnum".to_string(), anyof_schema.clone()),
   ]));
 
-  let _type_resolver = TypeResolverBuilder::default()
+  let _type_resolver = TypeResolver::builder()
     .config(default_config())
     .graph(graph.clone())
-    .build()
-    .unwrap();
+    .build();
   let union_converter = UnionConverter::new(&graph, &default_config());
   let mut cache = SharedSchemaCache::new();
 

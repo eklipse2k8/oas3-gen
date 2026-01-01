@@ -36,7 +36,6 @@ use super::{
   ast::{Documentation, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
   schema_registry::SchemaRegistry,
 };
-use crate::generator::converter::type_resolver::TypeResolverBuilder;
 
 /// Policy for handling enum variant name collisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -137,11 +136,10 @@ pub(crate) struct SchemaConverter {
 
 impl SchemaConverter {
   pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: &CodegenConfig) -> Self {
-    let type_resolver = TypeResolverBuilder::default()
+    let type_resolver = TypeResolver::builder()
       .graph(graph.clone())
       .config(config.clone())
-      .build()
-      .expect("TypeResolver");
+      .build();
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, None),
@@ -155,11 +153,10 @@ impl SchemaConverter {
     reachable_schemas: BTreeSet<String>,
     config: &CodegenConfig,
   ) -> Self {
-    let type_resolver = TypeResolverBuilder::default()
+    let type_resolver = TypeResolver::builder()
       .graph(graph.clone())
       .config(config.clone())
-      .build()
-      .expect("TypeResolver");
+      .build();
     Self {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, Some(Arc::new(reachable_schemas))),

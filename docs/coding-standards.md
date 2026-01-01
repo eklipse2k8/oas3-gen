@@ -90,10 +90,10 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 
 ### Builder Pattern
 
-- Use builder pattern (via `derive_builder`) for structs with multiple optional fields or complex construction
+- Use builder pattern (via `bon`) for structs with multiple optional fields or complex construction
 - Direct struct initialization is acceptable for simple parameter objects with few required fields
 - Builders improve readability when constructing objects with many fields
-- Example: `FieldDefBuilder::default().name("foo").rust_type(ty).build()?`
+- Example: `FieldDef::builder().name("foo").rust_type(ty).build()`
 
 ### Avoid Tuples
 

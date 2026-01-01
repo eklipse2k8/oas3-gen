@@ -8,8 +8,7 @@ use crate::{
       Documentation, FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute,
     },
     converter::{
-      SchemaConverter, discriminator::DiscriminatorConverter, structs::StructConverter,
-      type_resolver::TypeResolverBuilder,
+      SchemaConverter, discriminator::DiscriminatorConverter, structs::StructConverter, type_resolver::TypeResolver,
     },
   },
   tests::common::{create_test_graph, default_config},
@@ -693,11 +692,10 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
     ("ChildEvent".to_string(), child_schema),
   ]));
 
-  let type_resolver = TypeResolverBuilder::default()
+  let type_resolver = TypeResolver::builder()
     .config(default_config())
     .graph(graph.clone())
-    .build()
-    .unwrap();
+    .build();
 
   let result = type_resolver.build_discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
 

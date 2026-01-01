@@ -15,7 +15,6 @@ use crate::generator::{
     Documentation, FieldDef, OuterAttr, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
     tokens::FieldNameToken,
   },
-  converter::type_resolver::TypeResolverBuilder,
   naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
   schema_registry::{DiscriminatorMapping, SchemaRegistry},
 };
@@ -39,12 +38,11 @@ impl StructConverter {
     config: &CodegenConfig,
     reachable_schemas: Option<Arc<BTreeSet<String>>>,
   ) -> Self {
-    let type_resolver = TypeResolverBuilder::default()
+    let type_resolver = TypeResolver::builder()
       .config(config.clone())
       .graph(graph.clone())
-      .reachable_schemas(reachable_schemas)
-      .build()
-      .expect("TypeResolver");
+      .maybe_reachable_schemas(reachable_schemas)
+      .build();
     let field_converter = FieldConverter::new(config);
     Self {
       type_resolver,

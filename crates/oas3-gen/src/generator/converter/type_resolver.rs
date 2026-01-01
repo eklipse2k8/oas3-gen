@@ -1,7 +1,6 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::{Context, Result};
-use derive_builder::Builder;
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType};
 
@@ -25,11 +24,9 @@ use crate::generator::{
 };
 
 /// Resolves OpenAPI schemas into Rust Type References (`TypeRef`).
-#[derive(Clone, Debug, Builder)]
-#[builder(setter(into))]
+#[derive(Clone, Debug, bon::Builder)]
 pub(crate) struct TypeResolver {
   graph: Arc<SchemaRegistry>,
-  #[builder(default)]
   reachable_schemas: Option<Arc<BTreeSet<String>>>,
   config: CodegenConfig,
 }

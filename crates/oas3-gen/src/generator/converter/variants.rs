@@ -8,7 +8,6 @@ use super::{
 };
 use crate::generator::{
   ast::{Documentation, EnumVariantToken, SerdeAttribute, TypeRef, VariantContent, VariantDef},
-  converter::type_resolver::TypeResolverBuilder,
   naming::{identifiers::to_rust_type_name, inference::NormalizedVariant},
   schema_registry::SchemaRegistry,
 };
@@ -22,11 +21,10 @@ pub(crate) struct VariantBuilder {
 
 impl VariantBuilder {
   pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: &CodegenConfig) -> Self {
-    let type_resolver = TypeResolverBuilder::default()
+    let type_resolver = TypeResolver::builder()
       .graph(graph.clone())
       .config(config.clone())
-      .build()
-      .expect("TypeResolver");
+      .build();
     let struct_converter = StructConverter::new(graph, config, None);
     Self {
       graph: graph.clone(),

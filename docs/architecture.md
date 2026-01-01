@@ -194,7 +194,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **proc-macro2** (1.0): Token manipulation
 - **syn** (2.0): Rust syntax parser with full parsing support
 - **prettyplease** (0.2): Code formatter
-- **derive_builder** (0.20): Builder pattern derive macros
+- **bon** (3.5): Builder pattern derive macros
 
 ### CLI & Terminal
 
