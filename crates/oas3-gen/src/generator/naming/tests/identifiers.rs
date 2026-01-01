@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::generator::{
   ast::{RegexKey, StructToken, tokens::ConstToken},
-  naming::identifiers::{ensure_unique, split_pascal_case, to_rust_field_name, to_rust_type_name},
+  naming::identifiers::{ensure_unique, split_pascal_case, strip_parent_prefix, to_rust_field_name, to_rust_type_name},
 };
 
 #[test]
@@ -174,5 +174,141 @@ fn test_split_pascal_case() {
 
   for (input, expected) in cases {
     assert_eq!(split_pascal_case(input), expected, "Failed for input '{input}'");
+  }
+}
+
+#[test]
+fn test_strip_parent_prefix_basic() {
+  let cases = [
+    ("User", "UserProfile", "Profile"),
+    ("User", "UserSettings", "Settings"),
+    ("Event", "EventMessage", "Message"),
+    ("Event", "EventData", "Data"),
+    ("API", "APIResponse", "Response"),
+    ("HTTP", "HTTPRequest", "Request"),
+  ];
+
+  for (parent, child, expected) in cases {
+    assert_eq!(
+      strip_parent_prefix(parent, child),
+      expected,
+      "Failed for parent='{parent}', child='{child}'"
+    );
+  }
+}
+
+#[test]
+fn test_strip_parent_prefix_no_common_prefix() {
+  let cases = [
+    ("User", "Profile", "Profile"),
+    ("Event", "Message", "Message"),
+    ("Foo", "Bar", "Bar"),
+    ("Request", "Response", "Response"),
+  ];
+
+  for (parent, child, expected) in cases {
+    assert_eq!(
+      strip_parent_prefix(parent, child),
+      expected,
+      "Failed for parent='{parent}', child='{child}'"
+    );
+  }
+}
+
+#[test]
+fn test_strip_parent_prefix_word_boundary_respected() {
+  let cases = [
+    ("User", "Username", "Username"),
+    ("User", "Userdata", "Userdata"),
+    ("API", "Apiary", "Apiary"),
+    ("Pet", "Peter", "Peter"),
+  ];
+
+  for (parent, child, expected) in cases {
+    assert_eq!(
+      strip_parent_prefix(parent, child),
+      expected,
+      "Failed for parent='{parent}', child='{child}'"
+    );
+  }
+}
+
+#[test]
+fn test_strip_parent_prefix_complete_match() {
+  let cases = [
+    ("User", "User", "Item"),
+    ("Event", "Event", "Item"),
+    ("API", "API", "Item"),
+  ];
+
+  for (parent, child, expected) in cases {
+    assert_eq!(
+      strip_parent_prefix(parent, child),
+      expected,
+      "Failed for parent='{parent}', child='{child}'"
+    );
+  }
+}
+
+#[test]
+fn test_strip_parent_prefix_multi_word() {
+  let cases = [
+    ("UserProfile", "UserProfileSettings", "Settings"),
+    ("UserProfile", "UserSettings", "Settings"),
+    ("EventMessage", "EventMessageData", "Data"),
+    ("EventMessage", "EventData", "Data"),
+    ("APIResponse", "APIResponseError", "Error"),
+    ("HTTPRequest", "HTTPRequestBody", "Body"),
+  ];
+
+  for (parent, child, expected) in cases {
+    assert_eq!(
+      strip_parent_prefix(parent, child),
+      expected,
+      "Failed for parent='{parent}', child='{child}'"
+    );
+  }
+}
+
+#[test]
+fn test_strip_parent_prefix_discriminated_enum_scenarios() {
+  let cases = [
+    ("Pet", "PetCat", "Cat"),
+    ("Pet", "PetDog", "Dog"),
+    ("Pet", "PetBird", "Bird"),
+    ("Vehicle", "VehicleCar", "Car"),
+    ("Vehicle", "VehicleTruck", "Truck"),
+    ("Shape", "ShapeCircle", "Circle"),
+    ("Shape", "ShapeSquare", "Square"),
+    ("Message", "MessageText", "Text"),
+    ("Message", "MessageImage", "Image"),
+    ("Message", "MessageAudio", "Audio"),
+  ];
+
+  for (parent, child, expected) in cases {
+    assert_eq!(
+      strip_parent_prefix(parent, child),
+      expected,
+      "Failed for discriminated enum: parent='{parent}', child='{child}'"
+    );
+  }
+}
+
+#[test]
+fn test_strip_parent_prefix_preserves_unrelated_names() {
+  let cases = [
+    ("Pet", "Cat", "Cat"),
+    ("Pet", "Dog", "Dog"),
+    ("Vehicle", "Sedan", "Sedan"),
+    ("Shape", "Triangle", "Triangle"),
+    ("Message", "Email", "Email"),
+  ];
+
+  for (parent, child, expected) in cases {
+    assert_eq!(
+      strip_parent_prefix(parent, child),
+      expected,
+      "Failed: parent='{parent}', child='{child}' should remain unchanged"
+    );
   }
 }

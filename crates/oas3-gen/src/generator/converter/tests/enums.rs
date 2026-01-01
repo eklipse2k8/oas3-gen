@@ -15,8 +15,8 @@ use crate::{
     },
     converter::{
       SchemaConverter,
-      union_converter::{EnumConverter, UnionConverter},
       union_types::{CollisionStrategy, UnionKind},
+      unions::{EnumConverter, UnionConverter},
     },
     naming::inference::NormalizedVariant,
     schema_registry::SchemaRegistry,

@@ -8,7 +8,7 @@ use crate::{
       Documentation, FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute,
     },
     converter::{
-      SchemaConverter, discriminator::DiscriminatorHandler, structs::StructConverter,
+      SchemaConverter, discriminator::DiscriminatorConverter, structs::StructConverter,
       type_resolver::TypeResolverBuilder,
     },
   },
@@ -298,7 +298,7 @@ fn test_discriminator_handler_detect_parent() {
   graph_map.insert("Child".to_string(), child_schema.clone());
 
   let graph = create_test_graph(graph_map);
-  let handler = DiscriminatorHandler::new(&graph, None);
+  let handler = DiscriminatorConverter::new(&graph, None);
 
   let result = handler.detect_discriminated_parent("Child");
 
@@ -630,7 +630,7 @@ fn test_schema_merger_preserves_discriminator() {
 #[test]
 fn test_discriminator_handler_no_parent_returns_none() {
   let graph = create_test_graph(BTreeMap::new());
-  let handler = DiscriminatorHandler::new(&graph, None);
+  let handler = DiscriminatorConverter::new(&graph, None);
   let result = handler.detect_discriminated_parent("Unknown");
 
   assert!(result.is_none());
@@ -645,7 +645,7 @@ fn test_discriminator_handler_inline_all_of_returns_none() {
   }));
 
   let graph = create_test_graph(BTreeMap::from([("Inline".to_string(), schema.clone())]));
-  let handler = DiscriminatorHandler::new(&graph, None);
+  let handler = DiscriminatorConverter::new(&graph, None);
 
   let result = handler.detect_discriminated_parent("Inline");
 
@@ -699,7 +699,7 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
     .build()
     .unwrap();
 
-  let result = type_resolver.create_discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
+  let result = type_resolver.build_discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
 
   let RustType::DiscriminatedEnum(enum_def) = result else {
     panic!("Expected DiscriminatedEnum");
@@ -725,7 +725,7 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
 }
 
 #[test]
-fn test_extract_discriminator_children_returns_alphabetical_order() {
+fn test_discriminator_mappings_returns_alphabetical_order() {
   let base_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
@@ -760,13 +760,13 @@ fn test_extract_discriminator_children_returns_alphabetical_order() {
     ("Zebra".to_string(), empty_schema.clone()),
   ]));
 
-  let handler = DiscriminatorHandler::new(&graph, None);
-  let children = handler.extract_discriminator_children(&base_schema);
+  let handler = DiscriminatorConverter::new(&graph, None);
+  let mappings = handler.discriminator_mappings(&base_schema);
 
-  let schema_names: Vec<&str> = children.iter().map(|(_, name)| name.as_str()).collect();
+  let schema_names: Vec<&str> = mappings.iter().map(|(name, _)| name.as_str()).collect();
   assert_eq!(
     schema_names,
     vec!["Alpha", "Beta", "Middle", "Zebra"],
-    "Children should be in alphabetical order by schema name"
+    "Mappings should be in alphabetical order by schema name"
   );
 }

@@ -7,15 +7,15 @@ use super::{
   CodegenConfig, ConversionOutput,
   cache::SharedSchemaCache,
   common::SchemaExt,
-  method_generator::MethodGenerator,
-  relaxed_enum_builder::RelaxedEnumBuilder,
+  methods::MethodGenerator,
+  relaxed_enum::RelaxedEnumBuilder,
   union_types::{CollisionStrategy, EnumValueEntry, UnionKind, UnionVariantSpec},
-  value_enum_builder::ValueEnumBuilder,
-  variant_builder::VariantBuilder,
+  value_enums::ValueEnumBuilder,
+  variants::VariantBuilder,
 };
 use crate::generator::{
   ast::{Documentation, EnumVariantToken, RustType},
-  converter::discriminator::try_build_discriminated_enum,
+  converter::discriminator::DiscriminatorConverter,
   naming::{
     identifiers::ensure_unique,
     inference::{InferenceExt, strip_common_affixes},
@@ -158,7 +158,8 @@ impl UnionConverter {
         .build_constructors(&variants, &inline_types, name, cache)
     };
 
-    let main_enum = if let Some(discriminated) = try_build_discriminated_enum(name, schema, &variants, methods.clone())
+    let main_enum = if let Some(discriminated) =
+      DiscriminatorConverter::try_from_variants(name, schema, &variants, methods.clone())
     {
       discriminated
     } else {

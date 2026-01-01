@@ -7,7 +7,7 @@ use anyhow::Context as _;
 use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
-  CodegenConfig, ConversionOutput, SchemaExt, cache::SharedSchemaCache, discriminator::DiscriminatorHandler,
+  CodegenConfig, ConversionOutput, SchemaExt, cache::SharedSchemaCache, discriminator::DiscriminatorConverter,
   fields::FieldConverter, struct_summaries::StructSummary, type_resolver::TypeResolver,
 };
 use crate::generator::{
@@ -120,7 +120,7 @@ impl StructConverter {
       .merged(name)
       .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
 
-    let handler = DiscriminatorHandler::new(graph, None);
+    let handler = DiscriminatorConverter::new(graph, None);
     if let Some(parent_info) = handler.detect_discriminated_parent(name) {
       let parent_merged = graph
         .merged(&parent_info.parent_name)
@@ -253,7 +253,7 @@ impl StructConverter {
       };
       let discriminated_enum = self
         .type_resolver
-        .create_discriminated_enum(name, schema, base_struct_name.as_str())?;
+        .build_discriminated_enum(name, schema, base_struct_name.as_str())?;
       all_types.push(discriminated_enum);
     }
 

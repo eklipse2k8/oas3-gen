@@ -107,18 +107,18 @@ crates/
 │           │   ├── fields.rs      # Struct field conversion
 │           │   ├── hashing.rs     # Schema fingerprinting for deduplication
 │           │   ├── inline_scanner.rs # Pre-scan schemas for deterministic naming
-│           │   ├── method_generator.rs # Helper constructor methods for enum variants
+│           │   ├── methods.rs     # Helper constructor methods for enum variants
 │           │   ├── operations.rs  # Request/response type generation
-│           │   ├── relaxed_enum_builder.rs # anyOf enums with known values + freeform
+│           │   ├── relaxed_enum.rs # anyOf enums with known values + freeform
 │           │   ├── responses.rs   # Response enum generation
 │           │   ├── struct_summaries.rs # Struct metadata for enum helpers
 │           │   ├── structs.rs     # Object schema conversion (includes field optionality)
 │           │   ├── type_resolver.rs # Type mapping with TypeResolverBuilder
 │           │   ├── type_usage_recorder.rs # Tracks request/response type usage
-│           │   ├── union_converter.rs # EnumConverter + UnionConverter for oneOf/anyOf
+│           │   ├── unions.rs      # EnumConverter + UnionConverter for oneOf/anyOf
 │           │   ├── union_types.rs # Shared union types (UnionKind, CollisionStrategy, etc.)
-│           │   ├── value_enum_builder.rs # Builds value enums with collision handling
-│           │   ├── variant_builder.rs # Builds union variant definitions
+│           │   ├── value_enums.rs # Builds value enums with collision handling
+│           │   ├── variants.rs    # Builds union variant definitions
 │           │   └── tests/         # Converter tests
 │           │       ├── mod.rs
 │           │       ├── cache.rs
@@ -177,7 +177,7 @@ Data flows forward only - no stage feeds back to earlier stages.
 - [cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): SharedSchemaCache for type deduplication
 - [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): SchemaConverter + CodegenConfig policies
 - [type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): OpenAPI to Rust type mapping
-- [union_converter.rs](../crates/oas3-gen/src/generator/converter/union_converter.rs): oneOf/anyOf to discriminated enums
+- [unions.rs](../crates/oas3-gen/src/generator/converter/unions.rs): oneOf/anyOf to discriminated enums
 - [analyzer/mod.rs](../crates/oas3-gen/src/generator/analyzer/mod.rs): TypeAnalyzer, usage propagation, serde modes
 - [ast/metadata.rs](../crates/oas3-gen/src/generator/ast/metadata.rs): CodeMetadata from spec
 - [identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization

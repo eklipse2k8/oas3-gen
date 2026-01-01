@@ -1,20 +1,20 @@
 pub(crate) mod cache;
-mod common;
+pub(crate) mod common;
 pub(crate) mod discriminator;
 pub(crate) mod fields;
 pub(crate) mod hashing;
-mod method_generator;
+pub(crate) mod methods;
 pub(crate) mod operations;
-mod relaxed_enum_builder;
+pub(crate) mod relaxed_enum;
 pub(crate) mod responses;
-mod struct_summaries;
+pub(crate) mod struct_summaries;
 pub(crate) mod structs;
 pub(crate) mod type_resolver;
-mod type_usage_recorder;
-pub(crate) mod union_converter;
-mod union_types;
-mod value_enum_builder;
-mod variant_builder;
+pub(crate) mod type_usage_recorder;
+pub(crate) mod union_types;
+pub(crate) mod unions;
+pub(crate) mod value_enums;
+pub(crate) mod variants;
 
 use std::{
   collections::{BTreeSet, HashMap},
@@ -29,8 +29,8 @@ use self::{
   cache::SharedSchemaCache,
   structs::StructConverter,
   type_resolver::TypeResolver,
-  union_converter::{EnumConverter, UnionConverter},
   union_types::UnionKind,
+  unions::{EnumConverter, UnionConverter},
 };
 use super::{
   ast::{Documentation, RustType, TypeAliasDef, TypeAliasToken, TypeRef},

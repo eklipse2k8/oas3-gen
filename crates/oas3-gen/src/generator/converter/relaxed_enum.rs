@@ -11,7 +11,7 @@ use super::{
   ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
   union_types::{CollisionStrategy, EnumValueEntry},
-  value_enum_builder::ValueEnumBuilder,
+  value_enums::ValueEnumBuilder,
 };
 use crate::generator::{
   ast::{

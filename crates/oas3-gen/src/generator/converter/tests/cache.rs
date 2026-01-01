@@ -8,7 +8,7 @@ use crate::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
     converter::{
       SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolverBuilder,
-      union_converter::UnionConverter, union_types::UnionKind,
+      union_types::UnionKind, unions::UnionConverter,
     },
     schema_registry::SchemaRegistry,
   },

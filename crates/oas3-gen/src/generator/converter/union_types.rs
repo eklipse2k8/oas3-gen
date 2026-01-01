@@ -26,10 +26,10 @@ pub(crate) struct EnumValueEntry {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct UnionVariantSpec {
-  pub(super) variant_name: EnumVariantToken,
-  pub(super) resolved_schema: ObjectSchema,
-  pub(super) ref_name: Option<String>,
+pub(crate) struct UnionVariantSpec {
+  pub(crate) variant_name: EnumVariantToken,
+  pub(crate) resolved_schema: ObjectSchema,
+  pub(crate) ref_name: Option<String>,
 }
 
 #[bon::bon]

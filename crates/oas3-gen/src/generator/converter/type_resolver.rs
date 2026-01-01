@@ -9,10 +9,10 @@ use super::{
   CodegenConfig, ConversionOutput, SchemaExt,
   cache::SharedSchemaCache,
   common::extract_variant_references,
-  discriminator::DiscriminatorHandler,
+  discriminator::DiscriminatorConverter,
   structs::StructConverter,
-  union_converter::{EnumConverter, UnionConverter},
   union_types::UnionKind,
+  unions::{EnumConverter, UnionConverter},
 };
 use crate::generator::{
   ast::{RustPrimitive, RustType, TypeRef},
@@ -627,13 +627,13 @@ impl TypeResolver {
     Ok(type_reference)
   }
 
-  pub(crate) fn create_discriminated_enum(
+  pub(crate) fn build_discriminated_enum(
     &self,
-    base_name: &str,
+    name: &str,
     schema: &ObjectSchema,
-    base_struct_name: &str,
+    fallback_type: &str,
   ) -> anyhow::Result<RustType> {
-    let handler = DiscriminatorHandler::new(&self.graph, self.reachable_schemas.as_ref());
-    handler.create_discriminated_enum(base_name, schema, base_struct_name)
+    let handler = DiscriminatorConverter::new(&self.graph, self.reachable_schemas.as_ref());
+    handler.build_enum(name, schema, fallback_type)
   }
 }
