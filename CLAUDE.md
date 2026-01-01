@@ -161,18 +161,23 @@ The generator follows a strict one-way data flow where each stage produces immut
 
 ## Key Modules
 
-| Module                        | Responsibility                                                    |
-| ----------------------------- | ----------------------------------------------------------------- |
-| `orchestrator.rs`             | Pipeline coordinator, creates all stages, combines outputs        |
-| `schema_registry.rs`          | Schema storage, dependency graph, cycle detection, discriminator  |
-| `converter/inline_scanner.rs` | Pre-scans schemas to compute deterministic names                  |
-| `converter/cache.rs`          | Deduplicates types by schema hash during conversion               |
-| `converter/mod.rs`            | `SchemaConverter` + `CodegenConfig` policy enums                  |
-| `converter/type_resolver.rs`  | Maps OpenAPI types to Rust `TypeRef`                              |
-| `converter/union.rs`          | Handles oneOf/anyOf to discriminated or untagged enums            |
-| `analyzer/mod.rs`             | `TypeAnalyzer`: usage propagation, serde modes, error schemas     |
-| `codegen/mod.rs`              | Entry point for Rust code generation                              |
-| `ast/mod.rs`                  | AST types: `RustType`, `StructDef`, `EnumDef`, `TypeRef`, etc.    |
+| Module                              | Responsibility                                                      |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| `orchestrator.rs`                   | Pipeline coordinator, creates all stages, combines outputs          |
+| `schema_registry.rs`                | Schema storage, dependency graph, cycle detection, discriminator    |
+| `converter/inline_scanner.rs`       | Pre-scans schemas to compute deterministic names                    |
+| `converter/cache.rs`                | Deduplicates types by schema hash during conversion                 |
+| `converter/mod.rs`                  | `SchemaConverter` + `CodegenConfig` policy enums                    |
+| `converter/type_resolver.rs`        | Maps OpenAPI types to Rust `TypeRef`                                |
+| `converter/union_converter.rs`      | `EnumConverter` + `UnionConverter` for oneOf/anyOf handling         |
+| `converter/union_types.rs`          | Shared union types: `UnionKind`, `CollisionStrategy`, variant specs |
+| `converter/value_enum_builder.rs`   | Builds value enums from entries with collision handling             |
+| `converter/variant_builder.rs`      | Builds union variant definitions (ref, inline, const)               |
+| `converter/relaxed_enum_builder.rs` | Builds anyOf enums with known values + freeform string              |
+| `converter/method_generator.rs`     | Generates helper constructor methods for enum variants              |
+| `analyzer/mod.rs`                   | `TypeAnalyzer`: usage propagation, serde modes, error schemas       |
+| `codegen/mod.rs`                    | Entry point for Rust code generation                                |
+| `ast/mod.rs`                        | AST types: `RustType`, `StructDef`, `EnumDef`, `TypeRef`, etc.      |
 
 ## Key Files
 
@@ -181,7 +186,7 @@ The generator follows a strict one-way data flow where each stage produces immut
 - [inline_scanner.rs](crates/oas3-gen/src/generator/converter/inline_scanner.rs) - Pre-scan for deterministic naming
 - [cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication cache
 - [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs) - OpenAPI to Rust type mapping
-- [union.rs](crates/oas3-gen/src/generator/converter/union.rs) - oneOf/anyOf conversion
+- [union_converter.rs](crates/oas3-gen/src/generator/converter/union_converter.rs) - oneOf/anyOf conversion
 - [analyzer/mod.rs](crates/oas3-gen/src/generator/analyzer/mod.rs) - TypeAnalyzer and serde mode computation
 - [ast/metadata.rs](crates/oas3-gen/src/generator/ast/metadata.rs) - CodeMetadata from spec
 - [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization

@@ -166,6 +166,9 @@ pub(crate) trait SchemaExt {
   /// A relaxed enum has both freeform string variants and constrained string variants,
   /// allowing APIs to accept known values plus arbitrary strings for forward compatibility.
   fn has_relaxed_anyof_enum(&self) -> bool;
+
+  /// Returns true if the schema is a freeform string (string type with no const or enum constraints).
+  fn is_freeform_string(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -325,6 +328,10 @@ impl SchemaExt for ObjectSchema {
 
   fn has_relaxed_anyof_enum(&self) -> bool {
     !self.any_of.is_empty() && has_mixed_string_variants(self.any_of.iter())
+  }
+
+  fn is_freeform_string(&self) -> bool {
+    !self.has_const_value() && !self.has_enum_values() && self.is_string()
   }
 }
 

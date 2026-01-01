@@ -238,13 +238,14 @@ fn test_transitive_dependency_chain() {
 fn test_enum_with_tuple_variant() {
   let enum_def = RustType::Enum(EnumDef {
     name: EnumToken::new("Result"),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Success"),
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("User".into()))]),
-      serde_attrs: vec![],
-      deprecated: false,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Success"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom(
+          "User".into(),
+        ))]))
+        .build(),
+    ],
     ..Default::default()
   });
 
@@ -504,12 +505,12 @@ fn test_request_body_chain_with_response_enum() {
 
   let model_enum = RustType::Enum(EnumDef {
     name: EnumToken::new("ModelIds"),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Gpt4"),
-      content: VariantContent::Unit,
-      deprecated: false,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Gpt4"))
+        .content(VariantContent::Unit)
+        .build(),
+    ],
     ..Default::default()
   });
 

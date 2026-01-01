@@ -10,9 +10,9 @@ use super::{
   cache::SharedSchemaCache,
   common::extract_variant_references,
   discriminator::DiscriminatorHandler,
-  enums::EnumConverter,
   structs::StructConverter,
-  union::{UnionConverter, UnionKind},
+  union_converter::{EnumConverter, UnionConverter},
+  union_types::UnionKind,
 };
 use crate::generator::{
   ast::{RustPrimitive, RustType, TypeRef},
@@ -247,7 +247,7 @@ impl TypeResolver {
       cache.as_deref_mut(),
       |cache| cache.lookup_enum_name(schema),
       |name, cache| {
-        let union_converter = UnionConverter::new(&self.graph, self.clone(), &self.config);
+        let union_converter = UnionConverter::new(&self.graph, &self.config);
         union_converter.convert_union(
           name,
           schema,

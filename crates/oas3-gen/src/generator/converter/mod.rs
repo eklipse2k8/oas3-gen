@@ -1,16 +1,20 @@
 pub(crate) mod cache;
 mod common;
 pub(crate) mod discriminator;
-mod enums;
 pub(crate) mod fields;
 pub(crate) mod hashing;
+mod method_generator;
 pub(crate) mod operations;
+mod relaxed_enum_builder;
 pub(crate) mod responses;
 mod struct_summaries;
 pub(crate) mod structs;
 pub(crate) mod type_resolver;
 mod type_usage_recorder;
-pub(crate) mod union;
+pub(crate) mod union_converter;
+mod union_types;
+mod value_enum_builder;
+mod variant_builder;
 
 use std::{
   collections::{BTreeSet, HashMap},
@@ -23,10 +27,10 @@ pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use self::{
   cache::SharedSchemaCache,
-  enums::EnumConverter,
   structs::StructConverter,
   type_resolver::TypeResolver,
-  union::{UnionConverter, UnionKind},
+  union_converter::{EnumConverter, UnionConverter},
+  union_types::UnionKind,
 };
 use super::{
   ast::{Documentation, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
@@ -142,7 +146,7 @@ impl SchemaConverter {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, None),
       enum_converter: EnumConverter::new(config),
-      union_converter: UnionConverter::new(graph, type_resolver, config),
+      union_converter: UnionConverter::new(graph, config),
     }
   }
 
@@ -160,7 +164,7 @@ impl SchemaConverter {
       type_resolver: type_resolver.clone(),
       struct_converter: StructConverter::new(graph, config, Some(Arc::new(reachable_schemas))),
       enum_converter: EnumConverter::new(config),
-      union_converter: UnionConverter::new(graph, type_resolver, config),
+      union_converter: UnionConverter::new(graph, config),
     }
   }
 

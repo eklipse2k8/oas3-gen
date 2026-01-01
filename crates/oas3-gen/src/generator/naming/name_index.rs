@@ -73,14 +73,14 @@ impl<'a> TypeNameIndex<'a> {
       .schemas
       .iter()
       .try_fold(CandidateIndex::default(), |acc, (name, schema)| {
-        let mut index = self.collect_top_level_candidates(name, schema);
+        let mut index = Self::collect_top_level_candidates(name, schema);
         let inline = collect_inline_candidates(name, schema)?;
         index = index.merge(inline);
         Ok(acc.merge(index))
       })
   }
 
-  fn collect_top_level_candidates(&self, schema_name: &str, schema: &ObjectSchema) -> CandidateIndex {
+  fn collect_top_level_candidates(schema_name: &str, schema: &ObjectSchema) -> CandidateIndex {
     let mut index = CandidateIndex::default();
 
     if schema.requires_type_definition()

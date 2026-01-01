@@ -37,11 +37,12 @@ fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
 fn create_enum(name: &str) -> EnumDef {
   EnumDef {
     name: EnumToken::new(name),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Variant"),
-      content: VariantContent::Unit,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Variant"))
+        .content(VariantContent::Unit)
+        .build(),
+    ],
     ..Default::default()
   }
 }

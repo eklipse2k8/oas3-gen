@@ -427,13 +427,10 @@ fn test_infer_variant_name_object_variants() {
 }
 
 fn make_variant(name: &str) -> VariantDef {
-  VariantDef {
-    name: EnumVariantToken::from(name),
-    content: VariantContent::Unit,
-    serde_attrs: vec![],
-    deprecated: false,
-    ..Default::default()
-  }
+  VariantDef::builder()
+    .name(EnumVariantToken::from(name))
+    .content(VariantContent::Unit)
+    .build()
 }
 
 #[test]
@@ -490,13 +487,10 @@ fn test_strip_common_affixes_safety_guards() {
 fn test_strip_common_affixes_preserves_variant_content() {
   let tuple_type = TypeRef::new("TestStruct");
   let mut variants = vec![
-    VariantDef {
-      name: EnumVariantToken::from("CreateResponse"),
-      content: VariantContent::Tuple(vec![tuple_type]),
-      serde_attrs: vec![],
-      deprecated: false,
-      ..Default::default()
-    },
+    VariantDef::builder()
+      .name(EnumVariantToken::from("CreateResponse"))
+      .content(VariantContent::Tuple(vec![tuple_type]))
+      .build(),
     make_variant("UpdateResponse"),
   ];
 

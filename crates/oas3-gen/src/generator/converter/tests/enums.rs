@@ -15,9 +15,8 @@ use crate::{
     },
     converter::{
       SchemaConverter,
-      enums::EnumConverter,
-      type_resolver::TypeResolverBuilder,
-      union::{CollisionStrategy, UnionConverter, UnionKind},
+      union_converter::{EnumConverter, UnionConverter},
+      union_types::{CollisionStrategy, UnionKind},
     },
     naming::inference::NormalizedVariant,
     schema_registry::SchemaRegistry,
@@ -596,12 +595,7 @@ fn test_relaxed_enum_detects_freeform_pattern() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
+  let union_converter = UnionConverter::new(&graph, &default_config());
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -680,12 +674,7 @@ fn test_relaxed_enum_rejects_no_freeform() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
+  let union_converter = UnionConverter::new(&graph, &default_config());
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -1101,13 +1090,14 @@ fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
 fn test_enum_helper_skips_without_default_trait() {
   let enum_def = RustType::Enum(EnumDef {
     name: EnumToken::new("TestEnum"),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Variant"),
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("TestVariant".into()))]),
-      serde_attrs: vec![],
-      deprecated: false,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Variant"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom(
+          "TestVariant".into(),
+        ))]))
+        .build(),
+    ],
     discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
@@ -1220,12 +1210,7 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
+  let union_converter = UnionConverter::new(&graph, &default_config());
 
   let schema = ObjectSchema {
     one_of: vec![
@@ -1289,12 +1274,7 @@ fn test_union_with_underscored_raw_name_converts_correctly() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
+  let union_converter = UnionConverter::new(&graph, &default_config());
 
   let schema = ObjectSchema {
     one_of: vec![
@@ -1407,12 +1387,7 @@ fn test_already_pascalcase_name_not_double_converted() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
+  let union_converter = UnionConverter::new(&graph, &default_config());
 
   let schema = ObjectSchema {
     one_of: vec![
@@ -1476,12 +1451,7 @@ fn test_relaxed_enum_with_raw_name() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let union_converter = UnionConverter::new(&graph, type_resolver, &default_config());
+  let union_converter = UnionConverter::new(&graph, &default_config());
 
   let schema = ObjectSchema {
     any_of: vec![

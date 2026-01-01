@@ -8,10 +8,7 @@ use string_cache::DefaultAtom;
 
 use super::SchemaExt;
 use crate::generator::{
-  ast::{
-    DiscriminatedEnumDefBuilder, DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken,
-    RustType, TypeRef, VariantDef,
-  },
+  ast::{DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken, RustType, TypeRef, VariantDef},
   naming::identifiers::to_rust_type_name,
   schema_registry::{ParentInfo, SchemaRegistry},
 };
@@ -120,15 +117,15 @@ impl<'a> DiscriminatorHandler<'a> {
         .build(),
     );
 
-    Ok(RustType::DiscriminatedEnum(
-      DiscriminatedEnumDefBuilder::default()
-        .name(enum_name)
+    Ok(
+      RustType::discriminated_enum()
+        .name(&EnumToken::from_raw(enum_name))
         .docs(Documentation::from_optional(schema.description.as_ref()))
         .discriminator_field(discriminator_field.clone())
         .variants(variants)
-        .fallback(fallback)
-        .build()?,
-    ))
+        .maybe_fallback(fallback)
+        .call(),
+    )
   }
 
   /// Extracts child schemas from a discriminator mapping.
@@ -166,7 +163,7 @@ impl<'a> DiscriminatorHandler<'a> {
   }
 }
 
-pub(crate) fn try_build_discriminated_enum_from_variants(
+pub(crate) fn try_build_discriminated_enum(
   name: &str,
   schema: &ObjectSchema,
   variants: &[VariantDef],
@@ -179,17 +176,15 @@ pub(crate) fn try_build_discriminated_enum_from_variants(
     return None;
   }
 
-  let disc_variants = build_discriminated_variants_from_mapping(variants, mapping);
-  Some(RustType::DiscriminatedEnum(
-    DiscriminatedEnumDefBuilder::default()
-      .name(EnumToken::from_raw(name))
+  Some(
+    RustType::discriminated_enum()
+      .name(&EnumToken::from_raw(name))
       .docs(Documentation::from_optional(schema.description.as_ref()))
       .discriminator_field(discriminator.property_name.clone())
-      .variants(disc_variants)
+      .variants(build_discriminated_variants_from_mapping(variants, mapping))
       .methods(methods)
-      .build()
-      .ok()?,
-  ))
+      .call(),
+  )
 }
 
 fn all_variants_match_mapping(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {

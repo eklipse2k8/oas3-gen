@@ -16,7 +16,6 @@ mod tests;
 use std::collections::BTreeSet;
 
 pub use client::ClientDef;
-use derive_builder::Builder;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
@@ -54,15 +53,18 @@ pub enum SerdeMode {
 }
 
 /// Discriminated enum definition (uses macro for custom ser/de)
-#[derive(Debug, Clone, Default, Builder)]
-#[builder(default, setter(into))]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct DiscriminatedEnumDef {
   pub name: EnumToken,
+  #[builder(default)]
   pub docs: Documentation,
   pub discriminator_field: String,
+  #[builder(default)]
   pub variants: Vec<DiscriminatedVariant>,
   pub fallback: Option<DiscriminatedVariant>,
+  #[builder(default)]
   pub serde_mode: SerdeMode,
+  #[builder(default)]
   pub methods: Vec<EnumMethod>,
 }
 
