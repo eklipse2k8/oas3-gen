@@ -79,13 +79,14 @@ fn split_mixed_content_variants(
   let typed_media: Vec<_> = media_types.iter().filter(|m| m.schema_type.is_some()).collect();
 
   if typed_media.is_empty() {
-    return vec![ResponseVariant {
-      status_code,
-      variant_name: variant_name.clone(),
-      description: description.cloned(),
-      media_types: media_types.to_vec(),
-      schema_type: None,
-    }];
+    return vec![
+      ResponseVariant::builder()
+        .status_code(status_code)
+        .variant_name(variant_name.clone())
+        .maybe_description(description.cloned())
+        .media_types(media_types.to_vec())
+        .build(),
+    ];
   }
 
   let event_stream_media = typed_media.iter().find(|m| m.category == ContentCategory::EventStream);
@@ -116,13 +117,13 @@ fn split_mixed_content_variants(
     let stream_variant_name = EnumVariantToken::new(format!("{variant_name}EventStream"));
 
     vec![
-      ResponseVariant {
-        status_code,
-        variant_name: variant_name.clone(),
-        description: description.cloned(),
-        media_types: non_stream_media_types,
-        schema_type: json_schema,
-      },
+      ResponseVariant::builder()
+        .status_code(status_code)
+        .variant_name(variant_name.clone())
+        .maybe_description(description.cloned())
+        .media_types(non_stream_media_types)
+        .maybe_schema_type(json_schema)
+        .build(),
       ResponseVariant::builder()
         .status_code(status_code)
         .variant_name(stream_variant_name)

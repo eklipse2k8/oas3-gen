@@ -9,10 +9,6 @@
 //! API with Server-Sent Events (SSE) endpoint
 
 use anyhow::Context;
-#[allow(unused_imports)]
-use reqwest::header::HeaderValue;
-#[allow(unused_imports)]
-use reqwest::multipart::{Form, Part};
 use reqwest::{Client, Url};
 use validator::Validate;
 
@@ -23,9 +19,15 @@ pub struct EventStreamApiClient {
   pub client: Client,
   pub base_url: Url,
 }
+impl Default for EventStreamApiClient {
+  fn default() -> Self {
+    Self::new()
+  }
+}
 impl EventStreamApiClient {
   /// Create a client using the OpenAPI `servers[0]` URL.
   #[must_use]
+  #[track_caller]
   pub fn new() -> Self {
     Self {
       client: Client::builder().build().expect("client"),

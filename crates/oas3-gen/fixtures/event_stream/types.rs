@@ -57,7 +57,7 @@ pub struct StreamTypedEventsRequest {
 impl StreamTypedEventsRequest {
   ///Create a new request with the given parameters.
   #[builder]
-  pub fn new(filter: Option<String>) -> Result<Self, anyhow::Error> {
+  pub fn new(filter: Option<String>) -> anyhow::Result<Self> {
     let request = Self {
       query: StreamTypedEventsRequestQuery { filter },
     };
@@ -107,4 +107,13 @@ pub enum TypedEventType {
   Updated,
   #[serde(rename = "deleted")]
   Deleted,
+}
+impl core::fmt::Display for TypedEventType {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Created => write!(f, "created"),
+      Self::Updated => write!(f, "updated"),
+      Self::Deleted => write!(f, "deleted"),
+    }
+  }
 }

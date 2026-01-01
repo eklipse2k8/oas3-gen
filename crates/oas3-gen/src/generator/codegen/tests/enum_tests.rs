@@ -723,8 +723,7 @@ fn test_discriminated_enum() {
         .type_name(TypeRef::new("CatData"))
         .build(),
     ])
-    .maybe_fallback(None)
-    .serde_mode(SerdeMode::SerializeOnly)
+    .serde_mode(SerdeMode::Both)
     .build();
 
   let code = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
@@ -815,7 +814,6 @@ fn test_discriminated_enum_serialize_only() {
         .type_name(TypeRef::new("CreateRequest"))
         .build(),
     ])
-    .maybe_fallback(None)
     .serde_mode(SerdeMode::SerializeOnly)
     .build();
 
@@ -867,33 +865,31 @@ fn test_response_enum_generation() {
     name: EnumToken::new("GetUserResponse"),
     docs: vec!["Response for GET /users/{id}".to_string()].into(),
     variants: vec![
-      ResponseVariant {
-        status_code: StatusCodeToken::Ok200,
-        variant_name: EnumVariantToken::new("Ok"),
-        description: Some("User found".to_string()),
-        media_types: vec![ResponseMediaType::with_schema(
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::Ok200)
+        .variant_name(EnumVariantToken::new("Ok"))
+        .description("User found".to_string())
+        .media_types(vec![ResponseMediaType::with_schema(
           "application/json",
           Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
-        )],
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
-      },
-      ResponseVariant {
-        status_code: StatusCodeToken::NotFound404,
-        variant_name: EnumVariantToken::new("NotFound"),
-        description: Some("User not found".to_string()),
-        media_types: vec![ResponseMediaType::new("application/json")],
-        schema_type: None,
-      },
-      ResponseVariant {
-        status_code: StatusCodeToken::InternalServerError500,
-        variant_name: EnumVariantToken::new("InternalServerError"),
-        description: None,
-        media_types: vec![ResponseMediaType::with_schema(
+        )])
+        .schema_type(TypeRef::new(RustPrimitive::Custom("User".into())))
+        .build(),
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::NotFound404)
+        .variant_name(EnumVariantToken::new("NotFound"))
+        .description("User not found".to_string())
+        .media_types(vec![ResponseMediaType::new("application/json")])
+        .build(),
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::InternalServerError500)
+        .variant_name(EnumVariantToken::new("InternalServerError"))
+        .media_types(vec![ResponseMediaType::with_schema(
           "application/json",
           Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into()))),
-        )],
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into()))),
-      },
+        )])
+        .schema_type(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into())))
+        .build(),
     ],
     request_type: Some(StructToken::new("GetUserRequest")),
   };

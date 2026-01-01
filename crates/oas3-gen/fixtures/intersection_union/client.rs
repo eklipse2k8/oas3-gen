@@ -10,6 +10,7 @@
 
 use anyhow::Context;
 use reqwest::{Client, Url};
+
 pub const BASE_URL: &str = "https://example.com/";
 #[derive(Debug, Clone)]
 pub struct IntersectionUnionTestClient {

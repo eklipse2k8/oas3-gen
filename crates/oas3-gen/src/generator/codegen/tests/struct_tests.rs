@@ -75,13 +75,13 @@ fn test_validation_attribute_generation() {
 
 #[test]
 fn renders_response_parser_method() {
-  let def = make_response_parser_struct(ResponseVariant {
-    status_code: StatusCodeToken::Ok200,
-    variant_name: EnumVariantToken::new("Ok"),
-    description: None,
-    media_types: vec![ResponseMediaType::new("application/json")],
-    schema_type: None,
-  });
+  let def = make_response_parser_struct(
+    ResponseVariant::builder()
+      .status_code(StatusCodeToken::Ok200)
+      .variant_name(EnumVariantToken::new("Ok"))
+      .media_types(vec![ResponseMediaType::new("application/json")])
+      .build(),
+  );
   let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(code.contains("fn parse_response"), "missing parse_response method");
@@ -103,13 +103,14 @@ fn test_text_response_parsing() {
     ),
   ];
   for (st, expected_code, desc) in cases {
-    let def = make_response_parser_struct(ResponseVariant {
-      status_code: StatusCodeToken::Ok200,
-      variant_name: EnumVariantToken::new("Ok"),
-      description: None,
-      media_types: vec![ResponseMediaType::with_schema("text/plain", Some(st.clone()))],
-      schema_type: Some(st),
-    });
+    let def = make_response_parser_struct(
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::Ok200)
+        .variant_name(EnumVariantToken::new("Ok"))
+        .media_types(vec![ResponseMediaType::with_schema("text/plain", Some(st.clone()))])
+        .maybe_schema_type(Some(st))
+        .build(),
+    );
     let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
     let code = tokens.to_string();
     assert!(code.contains(expected_code), "missing expected code for {desc}");
@@ -122,16 +123,17 @@ fn test_text_response_parsing() {
 
 #[test]
 fn renders_json_parser_for_custom_struct() {
-  let def = make_response_parser_struct(ResponseVariant {
-    status_code: StatusCodeToken::Ok200,
-    variant_name: EnumVariantToken::new("Ok"),
-    description: None,
-    media_types: vec![ResponseMediaType::with_schema(
-      "application/json",
-      Some(TypeRef::new("MyStruct")),
-    )],
-    schema_type: Some(TypeRef::new("MyStruct")),
-  });
+  let def = make_response_parser_struct(
+    ResponseVariant::builder()
+      .status_code(StatusCodeToken::Ok200)
+      .variant_name(EnumVariantToken::new("Ok"))
+      .media_types(vec![ResponseMediaType::with_schema(
+        "application/json",
+        Some(TypeRef::new("MyStruct")),
+      )])
+      .schema_type(TypeRef::new("MyStruct"))
+      .build(),
+  );
   let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(
@@ -143,16 +145,17 @@ fn renders_json_parser_for_custom_struct() {
 
 #[test]
 fn test_binary_response_parsing() {
-  let def = make_response_parser_struct(ResponseVariant {
-    status_code: StatusCodeToken::Ok200,
-    variant_name: EnumVariantToken::new("Ok"),
-    description: None,
-    media_types: vec![ResponseMediaType::with_schema(
-      "application/octet-stream",
-      Some(TypeRef::new("Vec<u8>")),
-    )],
-    schema_type: Some(TypeRef::new("Vec<u8>")),
-  });
+  let def = make_response_parser_struct(
+    ResponseVariant::builder()
+      .status_code(StatusCodeToken::Ok200)
+      .variant_name(EnumVariantToken::new("Ok"))
+      .media_types(vec![ResponseMediaType::with_schema(
+        "application/octet-stream",
+        Some(TypeRef::new("Vec<u8>")),
+      )])
+      .schema_type(TypeRef::new("Vec<u8>"))
+      .build(),
+  );
   let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(
@@ -163,16 +166,17 @@ fn test_binary_response_parsing() {
 
 #[test]
 fn test_event_stream_response_generates_from_response() {
-  let def = make_response_parser_struct(ResponseVariant {
-    status_code: StatusCodeToken::Ok200,
-    variant_name: EnumVariantToken::new("Ok"),
-    description: None,
-    media_types: vec![ResponseMediaType::with_schema(
-      "text/event-stream",
-      Some(TypeRef::new("StreamEvent")),
-    )],
-    schema_type: Some(TypeRef::new("oas3_gen_support::EventStream<StreamEvent>")),
-  });
+  let def = make_response_parser_struct(
+    ResponseVariant::builder()
+      .status_code(StatusCodeToken::Ok200)
+      .variant_name(EnumVariantToken::new("Ok"))
+      .media_types(vec![ResponseMediaType::with_schema(
+        "text/event-stream",
+        Some(TypeRef::new("StreamEvent")),
+      )])
+      .schema_type(TypeRef::new("oas3_gen_support::EventStream<StreamEvent>"))
+      .build(),
+  );
   let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(
