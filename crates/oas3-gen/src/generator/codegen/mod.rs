@@ -15,6 +15,7 @@ pub mod client;
 pub mod coercion;
 pub mod constants;
 pub mod enums;
+pub(crate) mod headers;
 pub mod mod_file;
 pub mod structs;
 pub mod type_aliases;

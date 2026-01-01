@@ -10,7 +10,7 @@ use super::SchemaExt;
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedEnumDefBuilder, DiscriminatedVariant, Documentation, EnumMethod, EnumToken,
-    RustType, TypeRef, VariantDef,
+    EnumVariantToken, RustType, TypeRef, VariantDef,
   },
   naming::identifiers::to_rust_type_name,
   schema_registry::{ParentInfo, SchemaRegistry},
@@ -91,6 +91,7 @@ impl<'a> DiscriminatorHandler<'a> {
       .into_iter()
       .map(|(disc_values, child_schema_name)| {
         let child_type_name = to_rust_type_name(&child_schema_name);
+        // TODO: Improve variant naming strategy
         let variant_name = child_type_name
           .strip_prefix(&enum_name)
           .filter(|s| !s.is_empty())
@@ -103,20 +104,21 @@ impl<'a> DiscriminatorHandler<'a> {
           })
           .unwrap_or(child_type_name.clone());
 
-        DiscriminatedVariant {
-          discriminator_values: disc_values,
-          variant_name,
-          type_name: TypeRef::new(child_type_name).with_boxed(),
-        }
+        DiscriminatedVariant::builder()
+          .variant_name(EnumVariantToken::new(variant_name))
+          .discriminator_values(disc_values)
+          .type_name(TypeRef::new(child_type_name).with_boxed())
+          .build()
       })
       .collect();
 
     let base_variant_name = to_rust_type_name(base_name.split('.').next_back().unwrap_or(base_name));
-    let fallback = Some(DiscriminatedVariant {
-      discriminator_values: vec![],
-      variant_name: base_variant_name,
-      type_name: TypeRef::new(base_struct_name).with_boxed(),
-    });
+    let fallback = Some(
+      DiscriminatedVariant::builder()
+        .variant_name(EnumVariantToken::new(base_variant_name))
+        .type_name(TypeRef::new(base_struct_name).with_boxed())
+        .build(),
+    );
 
     Ok(RustType::DiscriminatedEnum(
       DiscriminatedEnumDefBuilder::default()
@@ -223,11 +225,13 @@ fn build_discriminated_variants_from_mapping(
         .find(|v| v.unboxed_type_name().is_some_and(|name| name == expected_type))?;
       let type_ref = variant.single_wrapped_type()?;
 
-      Some(DiscriminatedVariant {
-        discriminator_values: disc_values,
-        variant_name: variant.name.to_string(),
-        type_name: type_ref.clone(),
-      })
+      Some(
+        DiscriminatedVariant::builder()
+          .variant_name(variant.name.clone())
+          .type_name(type_ref.clone())
+          .discriminator_values(disc_values)
+          .build(),
+      )
     })
     .collect()
 }

@@ -36,10 +36,11 @@ pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 /// Discriminated enum variant mapping
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct DiscriminatedVariant {
+  #[builder(default)]
   pub discriminator_values: Vec<String>,
-  pub variant_name: String,
+  pub variant_name: EnumVariantToken,
   pub type_name: TypeRef,
 }
 

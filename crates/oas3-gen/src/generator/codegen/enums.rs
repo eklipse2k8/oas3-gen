@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 
 use super::{
   Visibility,
@@ -16,17 +16,12 @@ mod methods {
   use super::box_if_needed;
   use crate::generator::ast::{EnumMethod, EnumMethodKind};
 
-  pub(super) fn emit(
-    name: &impl ToTokens,
-    vis: &TokenStream,
-    methods: &[EnumMethod],
-    allow_known_value: bool,
-  ) -> TokenStream {
+  pub(super) fn emit(name: &impl ToTokens, vis: &TokenStream, methods: &[EnumMethod]) -> TokenStream {
     if methods.is_empty() {
       return quote! {};
     }
 
-    let method_tokens = methods.iter().map(|m| emit_method(vis, m, allow_known_value));
+    let method_tokens = methods.iter().map(|m| emit_method(vis, m));
 
     quote! {
       impl #name {
@@ -35,7 +30,7 @@ mod methods {
     }
   }
 
-  fn emit_method(vis: &TokenStream, method: &EnumMethod, allow_known_value: bool) -> TokenStream {
+  fn emit_method(vis: &TokenStream, method: &EnumMethod) -> TokenStream {
     let method_name = &method.name;
     let docs = &method.docs;
 
@@ -84,9 +79,6 @@ mod methods {
         known_type,
         known_variant,
       } => {
-        if !allow_known_value {
-          unreachable!("KnownValueConstructor is only used for relaxed enums, not discriminated enums")
-        }
         quote! {
           #docs
           #vis fn #method_name() -> Self {
@@ -165,7 +157,7 @@ impl<'a> EnumGenerator<'a> {
 
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = self.emit_serde_attrs();
-    let methods = methods::emit(name, &self.vis, &self.def.methods, true);
+    let methods = methods::emit(name, &self.vis, &self.def.methods);
     let variants = self.emit_variants();
 
     let vis = &self.vis;
@@ -210,7 +202,7 @@ impl<'a> EnumGenerator<'a> {
       .iter()
       .enumerate()
       .map(|(idx, v)| {
-        let variant_name = format_ident!("{}", v.name);
+        let variant_name = &v.name;
         let variant_docs = &v.docs;
         let variant_serde_attrs = if has_serde_derive {
           generate_serde_attrs(&v.serde_attrs)
@@ -267,7 +259,7 @@ impl<'a> EnumGenerator<'a> {
       .variants
       .iter()
       .map(|v| {
-        let variant_name = format_ident!("{}", v.name);
+        let variant_name = &v.name;
         let serde_name = v.serde_name();
         quote! {
           Self::#variant_name => write!(f, #serde_name),
@@ -294,7 +286,7 @@ impl<'a> EnumGenerator<'a> {
       .variants
       .iter()
       .map(|v| {
-        let variant_name = format_ident!("{}", v.name);
+        let variant_name = &v.name;
         let serde_name = v.serde_name();
         let lower_val = serde_name.to_ascii_lowercase();
         let match_arm = quote! {
@@ -305,7 +297,7 @@ impl<'a> EnumGenerator<'a> {
       .unzip();
 
     let fallback_arm = if let Some(fb) = self.def.fallback_variant() {
-      let variant_name = format_ident!("{}", fb.name);
+      let variant_name = &fb.name;
       quote! { _ => Ok(#name::#variant_name), }
     } else {
       quote! { _ => Err(serde::de::Error::unknown_variant(&s, &[ #(#serde_names),* ])), }
@@ -401,7 +393,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       .def
       .all_variants()
       .map(|v| {
-        let variant_name = format_ident!("{}", v.variant_name);
+        let variant_name = &v.variant_name;
         let type_name = &v.type_name;
         quote! { #variant_name(#type_name) }
       })
@@ -427,7 +419,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
     let default_impl = self.emit_default_impl();
     let serialize_impl = self.emit_serialize_impl();
     let deserialize_impl = self.emit_deserialize_impl();
-    let methods_impl = methods::emit(name, &self.vis, &self.def.methods, false);
+    let methods_impl = methods::emit(name, &self.vis, &self.def.methods);
 
     quote! {
       #enum_def
@@ -445,7 +437,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
     };
 
     let name = &self.def.name;
-    let variant_ident = format_ident!("{}", default_variant.variant_name);
+    let variant_ident = &default_variant.variant_name;
     let type_tokens = &default_variant.type_name;
 
     quote! {
@@ -468,7 +460,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       .def
       .all_variants()
       .map(|v| {
-        let variant_name = format_ident!("{}", v.variant_name);
+        let variant_name = &v.variant_name;
         quote! { Self::#variant_name(v) => v.serialize(serializer) }
       })
       .collect();
@@ -500,7 +492,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       .variants
       .iter()
       .flat_map(|v| {
-        let variant_name = format_ident!("{}", v.variant_name);
+        let variant_name = &v.variant_name;
         v.discriminator_values.iter().map(move |disc_value| {
           quote! {
             Some(#disc_value) => serde_json::from_value(value)
@@ -512,7 +504,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
       .collect();
 
     let none_handling = if let Some(ref fb) = self.def.fallback {
-      let fallback_variant = format_ident!("{}", fb.variant_name);
+      let fallback_variant = &fb.variant_name;
       quote! {
         None => serde_json::from_value(value)
           .map(Self::#fallback_variant)
