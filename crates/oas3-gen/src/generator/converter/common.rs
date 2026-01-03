@@ -7,7 +7,7 @@ use oas3::{
 
 use crate::generator::{
   ast::{RustType, TypeRef},
-  converter::cache::SharedSchemaCache,
+  converter::{ConverterContext, cache::SharedSchemaCache},
   naming::inference::has_mixed_string_variants,
   schema_registry::RefCollector,
 };
@@ -54,41 +54,38 @@ pub(crate) fn handle_inline_creation<F, C>(
   schema: &ObjectSchema,
   base_name: &str,
   forced_name: Option<String>,
-  mut cache: Option<&mut SharedSchemaCache>,
+  context: &ConverterContext,
   cached_name_check: C,
   generator: F,
 ) -> anyhow::Result<ConversionOutput<TypeRef>>
 where
-  F: FnOnce(&str, Option<&mut SharedSchemaCache>) -> anyhow::Result<ConversionOutput<RustType>>,
+  F: FnOnce(&str) -> anyhow::Result<ConversionOutput<RustType>>,
   C: FnOnce(&SharedSchemaCache) -> Option<String>,
 {
-  if let Some(cache) = &cache {
+  {
+    let cache = context.cache.borrow();
     if let Some(existing_name) = cache.get_type_name(schema)? {
       return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
     }
-    if let Some(name) = cached_name_check(cache) {
+    if let Some(name) = cached_name_check(&cache) {
       return Ok(ConversionOutput::new(TypeRef::new(name)));
     }
   }
 
   let name = if let Some(forced) = forced_name {
     forced
-  } else if let Some(cache) = &cache {
-    cache.get_preferred_name(schema, base_name)?
   } else {
-    base_name.to_string()
+    context.cache.borrow().get_preferred_name(schema, base_name)?
   };
 
-  let result = generator(&name, cache.as_deref_mut())?;
+  let result = generator(&name)?;
 
-  if let Some(cache) = cache {
-    let type_name = cache.register_type(schema, &name, result.inline_types, result.result.clone())?;
-    Ok(ConversionOutput::new(TypeRef::new(type_name)))
-  } else {
-    let mut all_types = vec![result.result];
-    all_types.extend(result.inline_types);
-    Ok(ConversionOutput::with_inline_types(TypeRef::new(name), all_types))
-  }
+  let type_name =
+    context
+      .cache
+      .borrow_mut()
+      .register_type(schema, &name, result.inline_types, result.result.clone())?;
+  Ok(ConversionOutput::new(TypeRef::new(type_name)))
 }
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.

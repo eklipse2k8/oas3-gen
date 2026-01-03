@@ -1,6 +1,6 @@
 use std::{
   collections::{BTreeMap, BTreeSet},
-  sync::Arc,
+  rc::Rc,
 };
 
 use oas3::spec::ObjectSchema;
@@ -9,6 +9,7 @@ use string_cache::DefaultAtom;
 use super::SchemaExt;
 use crate::generator::{
   ast::{DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken, RustType, TypeRef, VariantDef},
+  converter::ConverterContext,
   naming::identifiers::{split_pascal_case, strip_parent_prefix, to_rust_type_name},
   schema_registry::{ParentInfo, SchemaRegistry},
 };
@@ -55,21 +56,17 @@ impl DiscriminatorInfo {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DiscriminatorConverter<'a> {
-  graph: &'a Arc<SchemaRegistry>,
-  reachable_schemas: Option<&'a Arc<BTreeSet<String>>>,
+pub(crate) struct DiscriminatorConverter {
+  context: Rc<ConverterContext>,
 }
 
-impl<'a> DiscriminatorConverter<'a> {
-  pub(crate) fn new(graph: &'a Arc<SchemaRegistry>, reachable_schemas: Option<&'a Arc<BTreeSet<String>>>) -> Self {
-    Self {
-      graph,
-      reachable_schemas,
-    }
+impl DiscriminatorConverter {
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    Self { context }
   }
 
   pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&ParentInfo> {
-    self.graph.parent(schema_name)
+    self.context.graph().parent(schema_name)
   }
 
   /// Builds a discriminated enum from a base schema with discriminator mappings.
@@ -131,7 +128,13 @@ impl<'a> DiscriminatorConverter<'a> {
       return vec![];
     };
 
-    let is_reachable = |name: &String| self.reachable_schemas.is_none_or(|filter| filter.contains(name));
+    let is_reachable = |name: &String| {
+      self
+        .context
+        .reachable_schemas
+        .as_ref()
+        .is_none_or(|filter| filter.contains(name))
+    };
 
     mapping
       .iter()

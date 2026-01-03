@@ -1,33 +1,30 @@
-use std::sync::Arc;
+use std::rc::Rc;
 
 use oas3::spec::ObjectSchema;
 
 use super::{
-  CodegenConfig, ConversionOutput, SchemaExt, cache::SharedSchemaCache, common::handle_inline_creation,
-  structs::StructConverter, type_resolver::TypeResolver, union_types::UnionVariantSpec,
+  ConversionOutput, SchemaExt, common::handle_inline_creation, structs::StructConverter, type_resolver::TypeResolver,
+  union_types::UnionVariantSpec,
 };
 use crate::generator::{
   ast::{Documentation, EnumVariantToken, SerdeAttribute, TypeRef, VariantContent, VariantDef},
+  converter::ConverterContext,
   naming::{identifiers::to_rust_type_name, inference::NormalizedVariant},
-  schema_registry::SchemaRegistry,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct VariantBuilder {
-  graph: Arc<SchemaRegistry>,
+  context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
   struct_converter: StructConverter,
 }
 
 impl VariantBuilder {
-  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: &CodegenConfig) -> Self {
-    let type_resolver = TypeResolver::builder()
-      .graph(graph.clone())
-      .config(config.clone())
-      .build();
-    let struct_converter = StructConverter::new(graph, config, None);
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let type_resolver = TypeResolver::new(context.clone());
+    let struct_converter = StructConverter::new(context.clone());
     Self {
-      graph: graph.clone(),
+      context,
       type_resolver,
       struct_converter,
     }
@@ -37,19 +34,18 @@ impl VariantBuilder {
     &self,
     enum_name: &str,
     spec: &UnionVariantSpec,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<VariantDef>> {
     if let Some(ref schema_name) = spec.ref_name {
       Ok(self.build_ref_variant(schema_name, spec))
     } else {
-      self.build_inline_variant(&spec.resolved_schema, enum_name, &spec.variant_name, cache)
+      self.build_inline_variant(&spec.resolved_schema, enum_name, &spec.variant_name)
     }
   }
 
   fn build_ref_variant(&self, schema_name: &str, spec: &UnionVariantSpec) -> ConversionOutput<VariantDef> {
     let rust_type_name = to_rust_type_name(schema_name);
 
-    let type_ref = if self.graph.is_cyclic(schema_name) {
+    let type_ref = if self.context.graph().is_cyclic(schema_name) {
       TypeRef::new(&rust_type_name).unwrap_option().with_boxed()
     } else {
       TypeRef::new(&rust_type_name).unwrap_option()
@@ -70,10 +66,9 @@ impl VariantBuilder {
     resolved_schema: &ObjectSchema,
     enum_name: &str,
     variant_name: &EnumVariantToken,
-    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<VariantDef>> {
     let resolved_schema = if resolved_schema.has_intersection() {
-      self.graph.merge_inline(resolved_schema)?
+      self.context.graph().merge_inline(resolved_schema)?
     } else {
       resolved_schema.clone()
     };
@@ -85,19 +80,15 @@ impl VariantBuilder {
     let variant_label = variant_name.to_string();
 
     let content_output = if resolved_schema.properties.is_empty() {
-      if let Some(output) =
-        self.build_array_content(enum_name, &variant_label, &resolved_schema, cache.as_deref_mut())?
-      {
+      if let Some(output) = self.build_array_content(enum_name, &variant_label, &resolved_schema)? {
         output
-      } else if let Some(output) =
-        self.build_nested_union_content(enum_name, &variant_label, &resolved_schema, cache.as_deref_mut())?
-      {
+      } else if let Some(output) = self.build_nested_union_content(enum_name, &variant_label, &resolved_schema)? {
         output
       } else {
         self.build_primitive_content(&resolved_schema)?
       }
     } else {
-      self.build_struct_content(enum_name, &variant_label, &resolved_schema, cache)?
+      self.build_struct_content(enum_name, &variant_label, &resolved_schema)?
     };
 
     Ok(ConversionOutput::with_inline_types(
@@ -138,16 +129,14 @@ impl VariantBuilder {
     enum_name: &str,
     variant_label: &str,
     resolved_schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Option<ConversionOutput<VariantContent>>> {
     if !resolved_schema.is_array() {
       return Ok(None);
     }
 
-    let conversion =
-      self
-        .type_resolver
-        .resolve_array_with_inline_items(enum_name, variant_label, resolved_schema, cache)?;
+    let conversion = self
+      .type_resolver
+      .resolve_array_with_inline_items(enum_name, variant_label, resolved_schema)?;
 
     Ok(conversion.map(|c| ConversionOutput::with_inline_types(VariantContent::Tuple(vec![c.result]), c.inline_types)))
   }
@@ -157,7 +146,6 @@ impl VariantBuilder {
     enum_name: &str,
     variant_label: &str,
     resolved_schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Option<ConversionOutput<VariantContent>>> {
     if !resolved_schema.has_union() {
       return Ok(None);
@@ -167,7 +155,7 @@ impl VariantBuilder {
     let result =
       self
         .type_resolver
-        .resolve_inline_union_type(enum_name, variant_label, resolved_schema, uses_one_of, cache)?;
+        .resolve_inline_union_type(enum_name, variant_label, resolved_schema, uses_one_of)?;
 
     Ok(Some(ConversionOutput::with_inline_types(
       VariantContent::Tuple(vec![result.result]),
@@ -180,7 +168,6 @@ impl VariantBuilder {
     enum_name: &str,
     variant_label: &str,
     resolved_schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<VariantContent>> {
     let enum_name_converted = to_rust_type_name(enum_name);
     let struct_name_prefix = format!("{enum_name_converted}{variant_label}");
@@ -189,9 +176,9 @@ impl VariantBuilder {
       resolved_schema,
       &struct_name_prefix,
       None,
-      cache,
+      &self.context,
       |_| None,
-      |name, cache| self.struct_converter.convert_struct(name, resolved_schema, None, cache),
+      |name| self.struct_converter.convert_struct(name, resolved_schema, None),
     )?;
 
     Ok(ConversionOutput::with_inline_types(

@@ -4,7 +4,7 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use crate::{
   generator::{ast::RustType, converter::SchemaConverter},
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 #[test]
@@ -70,8 +70,9 @@ fn test_intersection_of_union_allof_anyof() -> anyhow::Result<()> {
   }));
 
   let graph = create_test_graph(BTreeMap::from([("Vehicle".to_string(), vehicle_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Vehicle", graph.get("Vehicle").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Vehicle", graph.get("Vehicle").unwrap())?;
 
   // We expect a struct "Vehicle"
   let struct_def = result

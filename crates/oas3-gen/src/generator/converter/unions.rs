@@ -1,12 +1,10 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, rc::Rc};
 
 use anyhow::Context;
 use oas3::spec::{ObjectOrReference, ObjectSchema};
 
 use super::{
-  CodegenConfig, ConversionOutput,
-  cache::SharedSchemaCache,
-  common::SchemaExt,
+  ConversionOutput, SchemaExt,
   methods::MethodGenerator,
   relaxed_enum::RelaxedEnumBuilder,
   union_types::{CollisionStrategy, EnumValueEntry, UnionKind, UnionVariantSpec},
@@ -15,35 +13,31 @@ use super::{
 };
 use crate::generator::{
   ast::{Documentation, EnumVariantToken, RustType},
-  converter::discriminator::DiscriminatorConverter,
+  converter::{ConverterContext, discriminator::DiscriminatorConverter},
   naming::{
     identifiers::ensure_unique,
     inference::{InferenceExt, strip_common_affixes},
   },
-  schema_registry::{RefCollector, SchemaRegistry},
+  schema_registry::RefCollector,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct EnumConverter {
+  context: Rc<ConverterContext>,
   value_enum_builder: ValueEnumBuilder,
-  preserve_case_variants: bool,
 }
 
 impl EnumConverter {
-  pub(crate) fn new(config: &CodegenConfig) -> Self {
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let case_insensitive = context.config().case_insensitive_enums();
     Self {
-      value_enum_builder: ValueEnumBuilder::new(config.case_insensitive_enums()),
-      preserve_case_variants: config.preserve_case_variants(),
+      context,
+      value_enum_builder: ValueEnumBuilder::new(case_insensitive),
     }
   }
 
-  pub(crate) fn convert_value_enum(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> RustType {
-    let strategy = if self.preserve_case_variants {
+  pub(crate) fn convert_value_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
+    let strategy = if self.context.config().preserve_case_variants() {
       CollisionStrategy::Preserve
     } else {
       CollisionStrategy::Deduplicate
@@ -60,42 +54,34 @@ impl EnumConverter {
       })
       .collect();
 
-    let enum_def = self.value_enum_builder.build_enum_from_values(
+    self.value_enum_builder.build_enum_from_values(
       name,
       &entries,
       strategy,
       Documentation::from_optional(schema.description.as_ref()),
-    );
-
-    if let (Some(c), RustType::Enum(e)) = (cache, &enum_def) {
-      c.mark_name_used(e.name.to_string());
-    }
-
-    enum_def
+    )
   }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct UnionConverter {
-  graph: Arc<SchemaRegistry>,
+  context: Rc<ConverterContext>,
   variant_builder: VariantBuilder,
   relaxed_enum_builder: RelaxedEnumBuilder,
   method_generator: MethodGenerator,
-  no_helpers: bool,
 }
 
 impl UnionConverter {
-  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: &CodegenConfig) -> Self {
-    let variant_builder = VariantBuilder::new(graph, config);
-    let relaxed_enum_builder = RelaxedEnumBuilder::new(graph, config.case_insensitive_enums(), config.no_helpers());
-    let method_generator = MethodGenerator::new(graph, config);
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let variant_builder = VariantBuilder::new(context.clone());
+    let relaxed_enum_builder = RelaxedEnumBuilder::new(context.clone());
+    let method_generator = MethodGenerator::new(context.clone());
 
     Self {
-      graph: graph.clone(),
+      context,
       variant_builder,
       relaxed_enum_builder,
       method_generator,
-      no_helpers: config.no_helpers(),
     }
   }
 
@@ -104,23 +90,23 @@ impl UnionConverter {
     name: &str,
     schema: &ObjectSchema,
     kind: UnionKind,
-    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<RustType>> {
     if kind == UnionKind::AnyOf
-      && let Some(output) = self
-        .relaxed_enum_builder
-        .try_build_relaxed_enum(name, schema, cache.as_deref_mut())
+      && let Some(output) = self.relaxed_enum_builder.try_build_relaxed_enum(name, schema)
     {
       return Ok(output);
     }
 
-    let output = self.collect_union_variants(name, schema, kind, cache.as_deref_mut())?;
+    let output = self.collect_union_variants(name, schema, kind)?;
 
-    if let Some(c) = cache
-      && let Some(values) = schema.extract_enum_values()
+    if let Some(values) = schema.extract_enum_values()
       && let RustType::Enum(e) = &output.result
     {
-      c.register_enum(values, e.name.to_string());
+      self
+        .context
+        .cache
+        .borrow_mut()
+        .register_enum(values, e.name.to_string());
     }
 
     Ok(output)
@@ -131,7 +117,6 @@ impl UnionConverter {
     name: &str,
     schema: &ObjectSchema,
     kind: UnionKind,
-    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<RustType>> {
     let variants_src = match kind {
       UnionKind::OneOf => &schema.one_of,
@@ -141,21 +126,19 @@ impl UnionConverter {
     let (mut variants, inline_types) = self.collect_union_variant_specs(variants_src)?.into_iter().try_fold(
       (vec![], vec![]),
       |(mut variants, mut inline_types), spec| {
-        let output = self.variant_builder.build_variant(name, &spec, cache.as_deref_mut())?;
+        let output = self.variant_builder.build_variant(name, &spec)?;
         variants.push(output.result);
         inline_types.extend(output.inline_types);
         anyhow::Ok((variants, inline_types))
       },
     )?;
 
-    strip_common_affixes(&mut variants);
+    variants = strip_common_affixes(variants);
 
-    let methods = if self.no_helpers {
+    let methods = if self.context.config().no_helpers() {
       vec![]
     } else {
-      self
-        .method_generator
-        .build_constructors(&variants, &inline_types, name, cache)
+      self.method_generator.build_constructors(&variants, &inline_types, name)
     };
 
     let main_enum = if let Some(discriminated) =
@@ -183,7 +166,7 @@ impl UnionConverter {
 
     for (i, variant_ref) in variants_src.iter().enumerate() {
       let resolved = variant_ref
-        .resolve(self.graph.spec())
+        .resolve(self.context.graph().spec())
         .context(format!("Schema resolution failed for union variant {i}"))?;
 
       if resolved.is_null() {

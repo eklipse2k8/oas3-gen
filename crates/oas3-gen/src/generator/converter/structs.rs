@@ -1,22 +1,23 @@
 use std::{
   collections::{BTreeMap, BTreeSet, HashSet},
-  sync::Arc,
+  rc::Rc,
 };
 
 use anyhow::Context as _;
 use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
-  CodegenConfig, ConversionOutput, SchemaExt, cache::SharedSchemaCache, discriminator::DiscriminatorConverter,
-  fields::FieldConverter, struct_summaries::StructSummary, type_resolver::TypeResolver,
+  ConversionOutput, SchemaExt, discriminator::DiscriminatorConverter, fields::FieldConverter,
+  struct_summaries::StructSummary, type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
     Documentation, FieldDef, OuterAttr, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
     tokens::FieldNameToken,
   },
+  converter::ConverterContext,
   naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
-  schema_registry::{DiscriminatorMapping, SchemaRegistry},
+  schema_registry::DiscriminatorMapping,
 };
 
 #[derive(Clone, Debug)]
@@ -28,23 +29,17 @@ struct AdditionalPropertiesResult {
 /// Converter for OpenAPI object schemas into Rust Structs.
 #[derive(Clone, Debug)]
 pub(crate) struct StructConverter {
+  context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
   field_converter: FieldConverter,
 }
 
 impl StructConverter {
-  pub(crate) fn new(
-    graph: &Arc<SchemaRegistry>,
-    config: &CodegenConfig,
-    reachable_schemas: Option<Arc<BTreeSet<String>>>,
-  ) -> Self {
-    let type_resolver = TypeResolver::builder()
-      .config(config.clone())
-      .graph(graph.clone())
-      .maybe_reachable_schemas(reachable_schemas)
-      .build();
-    let field_converter = FieldConverter::new(config);
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let type_resolver = TypeResolver::new(context.clone());
+    let field_converter = FieldConverter::new(&context);
     Self {
+      context,
       type_resolver,
       field_converter,
     }
@@ -56,13 +51,12 @@ impl StructConverter {
     schema: &ObjectSchema,
     exclude_field: Option<&str>,
     schema_name: Option<&str>,
-    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
     let num_properties = schema.properties.len();
     let required_set: HashSet<&String> = schema.required.iter().collect();
 
     let discriminator_mapping = schema_name
-      .and_then(|name| self.type_resolver.graph().mapping(name))
+      .and_then(|name| self.context.graph().mapping(name))
       .map(DiscriminatorMapping::as_tuple);
 
     let mut fields = Vec::with_capacity(num_properties);
@@ -76,17 +70,12 @@ impl StructConverter {
       let is_required = required_set.contains(prop_name);
 
       let prop_schema = prop_schema_ref
-        .resolve(self.type_resolver.graph().spec())
+        .resolve(self.context.graph().spec())
         .context(format!("Schema resolution failed for property '{prop_name}'"))?;
 
-      let cache_borrow = cache.as_deref_mut();
-      let resolved = self.type_resolver.resolve_property_type(
-        parent_name,
-        prop_name,
-        &prop_schema,
-        prop_schema_ref,
-        cache_borrow,
-      )?;
+      let resolved = self
+        .type_resolver
+        .resolve_property_type(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
 
       let field = self.field_converter.convert_field(
         prop_name,
@@ -107,28 +96,24 @@ impl StructConverter {
   }
 
   /// Converts a schema composed with `allOf` by merging properties.
-  pub(crate) fn convert_all_of_schema(
-    &self,
-    name: &str,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<Vec<RustType>> {
-    let graph = self.type_resolver.graph();
+  pub(crate) fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
+    let graph = self.context.graph();
 
     let merged_info = graph
       .merged(name)
       .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
 
-    let handler = DiscriminatorConverter::new(graph, None);
+    let handler = DiscriminatorConverter::new(self.context.clone());
     if let Some(parent_info) = handler.detect_discriminated_parent(name) {
       let parent_merged = graph
         .merged(&parent_info.parent_name)
         .ok_or_else(|| anyhow::anyhow!("Parent schema '{}' not found", parent_info.parent_name))?;
-      return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema, cache);
+      return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema);
     }
 
     let effective_schema = graph.resolved(name).unwrap_or(&merged_info.schema);
 
-    let result = self.convert_struct(name, effective_schema, None, cache)?;
+    let result = self.convert_struct(name, effective_schema, None)?;
     self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)
   }
 
@@ -138,7 +123,6 @@ impl StructConverter {
     name: &str,
     schema: &ObjectSchema,
     kind: Option<StructKind>,
-    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<RustType>> {
     let is_discriminated = schema.is_discriminated_base_type();
     let struct_name = if is_discriminated {
@@ -147,8 +131,7 @@ impl StructConverter {
       StructToken::from_raw(name)
     };
 
-    let cache_for_fields = cache.as_deref_mut();
-    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name), cache_for_fields)?;
+    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name))?;
     let additional_props = self.prepare_additional_properties(schema)?;
 
     let mut fields = field_result.result;
@@ -177,9 +160,11 @@ impl StructConverter {
       ..Default::default()
     };
 
-    if let Some(ref mut c) = cache {
-      c.register_struct_summary(struct_def.name.as_str(), StructSummary::from(&struct_def));
-    }
+    self
+      .context
+      .cache
+      .borrow_mut()
+      .register_struct_summary(struct_def.name.as_str(), StructSummary::from(&struct_def));
 
     Ok(ConversionOutput::with_inline_types(
       RustType::Struct(struct_def),
@@ -192,7 +177,6 @@ impl StructConverter {
     name: &str,
     merged_schema: &ObjectSchema,
     parent_schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
     if parent_schema.discriminator.is_none() {
       anyhow::bail!("Parent schema for discriminated child '{name}' is not a valid discriminator base");
@@ -200,7 +184,7 @@ impl StructConverter {
 
     let struct_name = StructToken::from_raw(name);
 
-    let field_result = self.convert_fields(struct_name.as_str(), merged_schema, None, Some(name), cache)?;
+    let field_result = self.convert_fields(struct_name.as_str(), merged_schema, None, Some(name))?;
     let additional_props = self.prepare_additional_properties(merged_schema)?;
 
     let mut fields = field_result.result;

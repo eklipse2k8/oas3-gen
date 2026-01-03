@@ -7,7 +7,10 @@ use super::{
   identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name},
   inference::InferenceExt,
 };
-use crate::generator::converter::{SchemaExt, hashing::CanonicalSchema};
+use crate::generator::{
+  converter::{SchemaExt, hashing::CanonicalSchema},
+  naming::constants::KNOWN_ENUM_VARIANT,
+};
 
 const RESERVED_TYPE_NAMES: &[&str] = &["Enum", "Struct", "Type", "Object"];
 
@@ -88,7 +91,7 @@ impl<'a> TypeNameIndex<'a> {
     {
       let mut rust_name = to_rust_type_name(schema_name);
       if schema.has_relaxed_anyof_enum() {
-        rust_name.push_str("Known");
+        rust_name.push_str(KNOWN_ENUM_VARIANT);
       }
       index.add_enum_candidate(enum_values, rust_name, true);
     }

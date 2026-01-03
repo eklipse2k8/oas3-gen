@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeMap as ResponseMap};
+use std::{
+  collections::{BTreeMap, BTreeMap as ResponseMap},
+  rc::Rc,
+};
 
 use http::Method;
 use oas3::spec::{
@@ -9,21 +12,20 @@ use oas3::spec::{
 use crate::{
   generator::{
     ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StructDef, StructToken},
-    converter::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, operations::OperationConverter},
+    converter::{SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
+    operation_registry::OperationEntry,
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
-fn setup_converter(
-  schemas: BTreeMap<String, ObjectSchema>,
-) -> (OperationConverter<'static>, TypeUsageRecorder, SharedSchemaCache) {
+fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter<'static>, TypeUsageRecorder) {
   let graph = create_test_graph(schemas);
   let spec = Box::leak(Box::new(graph.spec().clone()));
-  let schema_converter = Box::leak(Box::new(SchemaConverter::new(&graph, &default_config())));
+  let context = create_test_context(graph, default_config());
+  let schema_converter = Box::leak(Box::new(SchemaConverter::new(&context)));
   let converter = OperationConverter::new(schema_converter, spec);
   let usage = TypeUsageRecorder::new();
-  let cache = SharedSchemaCache::new();
-  (converter, usage, cache)
+  (converter, usage)
 }
 
 fn create_parameter(
@@ -65,20 +67,23 @@ fn extract_request_struct<'a>(types: &'a [RustType], expected_name: &str) -> &'a
     .expect("Request struct not found")
 }
 
+fn make_entry(stable_id: &str, method: Method, path: &str, operation: Operation) -> OperationEntry {
+  OperationEntry {
+    stable_id: stable_id.to_string(),
+    method,
+    path: path.to_string(),
+    operation: Rc::new(operation),
+    kind: OperationKind::Http,
+  }
+}
+
 #[test]
 fn test_basic_get_operation() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
   let operation = Operation::default();
 
-  let result = converter.convert(
-    "my_op",
-    &Method::GET,
-    "/test",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("my_op", Method::GET, "/test", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   assert!(result.types.is_empty(), "Should generate no new types");
   assert_eq!(result.operation_info.operation_id, "MyOp");
@@ -95,7 +100,7 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
   operation.parameters.push(create_parameter(
     "userId",
@@ -105,15 +110,8 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
     true,
   ));
 
-  let result = converter.convert(
-    "get_user",
-    &Method::GET,
-    "/users/{userId}",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_user", Method::GET, "/users/{userId}", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   assert_eq!(
     result.types.len(),
@@ -148,7 +146,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
 
   let operation = Operation {
     request_body: Some(ObjectOrReference::Object(RequestBody {
@@ -168,15 +166,8 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "create_user",
-    &Method::POST,
-    "/users",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("create_user", Method::POST, "/users", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   assert_eq!(result.types.len(), 1, "Should generate only the Request struct");
   assert!(
@@ -217,7 +208,7 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
 
   let operation = Operation {
     responses: Some(ResponseMap::from([(
@@ -240,15 +231,8 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "get_user",
-    &Method::GET,
-    "/user",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_user", Method::GET, "/user", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   assert_eq!(result.operation_info.response_type.as_deref(), Some("User"));
   Ok(())
@@ -309,7 +293,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
   ];
 
   for (param_name, op_id, schema_type, format, expected_struct, expected_type) in cases {
-    let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+    let (converter, mut usage) = setup_converter(BTreeMap::new());
     let mut operation = Operation::default();
     operation.parameters.push(create_parameter(
       param_name,
@@ -322,15 +306,8 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     let path = format!("/items/{{{param_name}}}");
     let snake_op_id = inflections::case::to_snake_case(op_id);
 
-    let result = converter.convert(
-      &snake_op_id,
-      &Method::GET,
-      &path,
-      OperationKind::Http,
-      &operation,
-      &mut usage,
-      &mut cache,
-    )?;
+    let entry = make_entry(&snake_op_id, Method::GET, &path, operation);
+    let result = converter.convert(&entry, &mut usage)?;
 
     assert_eq!(
       result.types.len(),
@@ -366,7 +343,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
   operation.parameters.push(create_parameter(
     "userId",
@@ -383,15 +360,13 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
     true,
   ));
 
-  let result = converter.convert(
+  let entry = make_entry(
     "get_user_post",
-    &Method::GET,
+    Method::GET,
     "/users/{userId}/posts/{postId}",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+    operation,
+  );
+  let result = converter.convert(&entry, &mut usage)?;
 
   let request_struct = extract_request_struct(&result.types, "GetUserPostRequest");
   assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
@@ -421,7 +396,7 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
   ];
 
   for (content_type, expected_category) in content_types {
-    let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+    let (converter, mut usage) = setup_converter(BTreeMap::new());
 
     let operation = Operation {
       operation_id: Some("downloadFile".to_string()),
@@ -463,15 +438,8 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       ..Default::default()
     };
 
-    let result = converter.convert(
-      "download_file",
-      &Method::GET,
-      "/files/download",
-      OperationKind::Http,
-      &operation,
-      &mut usage,
-      &mut cache,
-    )?;
+    let entry = make_entry("download_file", Method::GET, "/files/download", operation);
+    let result = converter.convert(&entry, &mut usage)?;
 
     let response_enum = result
       .types
@@ -552,7 +520,7 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("EventPayload".to_string(), event_schema)]));
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("EventPayload".to_string(), event_schema)]));
 
   let operation = Operation {
     operation_id: Some("getEvents".to_string()),
@@ -589,15 +557,8 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "get_events",
-    &Method::GET,
-    "/events",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_events", Method::GET, "/events", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   let response_enum = result
     .types
@@ -656,7 +617,7 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
 
 #[test]
 fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
 
   let operation = Operation {
     operation_id: Some("getItem".to_string()),
@@ -679,15 +640,8 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "get_item",
-    &Method::GET,
-    "/items",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_item", Method::GET, "/items", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   let response_enum = result
     .types
@@ -714,7 +668,7 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("Error".to_string(), error_schema)]));
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("Error".to_string(), error_schema)]));
 
   let operation = Operation {
     operation_id: Some("getItem".to_string()),
@@ -757,15 +711,8 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "get_item",
-    &Method::GET,
-    "/items",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_item", Method::GET, "/items", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   let response_enum = result
     .types
@@ -799,7 +746,7 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
 
 #[test]
 fn test_response_with_primitive_type() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
 
   let operation = Operation {
     operation_id: Some("getCount".to_string()),
@@ -823,15 +770,8 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "get_count",
-    &Method::GET,
-    "/count",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_count", Method::GET, "/count", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   let response_enum = result
     .types
@@ -859,7 +799,7 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
 
 #[test]
 fn test_response_with_no_content() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
 
   let operation = Operation {
     operation_id: Some("deleteItem".to_string()),
@@ -874,15 +814,8 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "delete_item",
-    &Method::DELETE,
-    "/items/{id}",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("delete_item", Method::DELETE, "/items/{id}", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   let response_enum = result
     .types
@@ -932,7 +865,7 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([
+  let (converter, mut usage) = setup_converter(BTreeMap::from([
     ("CreateModelParams".to_string(), model_params_schema),
     ("CreateAgentParams".to_string(), agent_params_schema),
   ]));
@@ -967,15 +900,8 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = converter.convert(
-    "create_interaction",
-    &Method::POST,
-    "/interactions",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("create_interaction", Method::POST, "/interactions", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
   assert!(
     result.operation_info.request_type.is_some(),

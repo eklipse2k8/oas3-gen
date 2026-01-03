@@ -1,7 +1,7 @@
 use std::{
   collections::{BTreeSet, HashSet},
+  rc::Rc,
   string::ToString,
-  sync::Arc,
 };
 
 use oas3::spec::ObjectSchema;
@@ -9,7 +9,6 @@ use serde_json::Value;
 
 use super::{
   ConversionOutput, SchemaExt,
-  cache::SharedSchemaCache,
   union_types::{CollisionStrategy, EnumValueEntry},
   value_enums::ValueEnumBuilder,
 };
@@ -18,41 +17,36 @@ use crate::generator::{
     Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType,
     SerdeAttribute, TypeRef, VariantContent, VariantDef,
   },
+  converter::ConverterContext,
   naming::{
+    constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
     identifiers::{ensure_unique, to_rust_type_name},
     inference::{NormalizedVariant, derive_method_names},
   },
-  schema_registry::SchemaRegistry,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct RelaxedEnumBuilder {
-  graph: Arc<SchemaRegistry>,
+  context: Rc<ConverterContext>,
   value_enum_builder: ValueEnumBuilder,
-  no_helpers: bool,
 }
 
 impl RelaxedEnumBuilder {
-  pub(crate) fn new(graph: &Arc<SchemaRegistry>, case_insensitive: bool, no_helpers: bool) -> Self {
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let case_insensitive = context.config().case_insensitive_enums();
     Self {
-      graph: graph.clone(),
+      context,
       value_enum_builder: ValueEnumBuilder::new(case_insensitive),
-      no_helpers,
     }
   }
 
-  pub(crate) fn try_build_relaxed_enum(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> Option<ConversionOutput<RustType>> {
+  pub(crate) fn try_build_relaxed_enum(&self, name: &str, schema: &ObjectSchema) -> Option<ConversionOutput<RustType>> {
     let known_values = self.collect_known_values(schema);
     if known_values.is_empty() {
       return None;
     }
 
-    Some(self.build_relaxed_enum_types(name, schema, &known_values, cache))
+    Some(self.build_relaxed_enum_types(name, schema, &known_values))
   }
 
   fn collect_known_values(&self, schema: &ObjectSchema) -> Vec<EnumValueEntry> {
@@ -61,7 +55,7 @@ impl RelaxedEnumBuilder {
     let mut has_freeform = false;
 
     for variant in &schema.any_of {
-      let Ok(resolved) = variant.resolve(self.graph.spec()) else {
+      let Ok(resolved) = variant.resolve(self.context.graph().spec()) else {
         continue;
       };
 
@@ -129,7 +123,6 @@ impl RelaxedEnumBuilder {
     name: &str,
     schema: &ObjectSchema,
     known_values: &[EnumValueEntry],
-    cache: Option<&mut SharedSchemaCache>,
   ) -> ConversionOutput<RustType> {
     let base_name = to_rust_type_name(name);
 
@@ -139,10 +132,9 @@ impl RelaxedEnumBuilder {
       .collect();
     cache_key_values.sort();
 
-    let (known_enum_name, inner_enum_type) =
-      self.resolve_cached_known_enum(&base_name, known_values, cache_key_values, cache);
+    let (known_enum_name, inner_enum_type) = self.resolve_cached_known_enum(&base_name, known_values, cache_key_values);
 
-    let methods = if self.no_helpers {
+    let methods = if self.context.config().no_helpers() {
       vec![]
     } else {
       Self::build_known_value_constructors(&base_name, &known_enum_name, known_values)
@@ -159,12 +151,13 @@ impl RelaxedEnumBuilder {
     base_name: &str,
     known_values: &[EnumValueEntry],
     cache_key: Vec<String>,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> (String, Option<RustType>) {
-    let cached_state = cache.as_ref().and_then(|c| {
-      c.get_enum_name(&cache_key)
-        .map(|name| (name.clone(), c.is_enum_generated(&cache_key)))
-    });
+    let cached_state = {
+      let cache = self.context.cache.borrow();
+      cache
+        .get_enum_name(&cache_key)
+        .map(|name| (name.clone(), cache.is_enum_generated(&cache_key)))
+    };
 
     if let Some((name, true)) = cached_state {
       return (name, None);
@@ -179,9 +172,10 @@ impl RelaxedEnumBuilder {
       Documentation::from_lines(["Known values for the string enum."]),
     );
 
-    if let Some(c) = cache {
-      c.register_enum(cache_key, name.clone());
-      c.mark_name_used(name.clone());
+    {
+      let mut cache = self.context.cache.borrow_mut();
+      cache.register_enum(cache_key, name.clone());
+      cache.mark_name_used(name.clone());
     }
 
     (name, Some(def))
@@ -234,11 +228,11 @@ impl RelaxedEnumBuilder {
   ) -> RustType {
     let variants = vec![
       VariantDef::builder()
-        .name(EnumVariantToken::new("Known"))
+        .name(EnumVariantToken::new(KNOWN_ENUM_VARIANT))
         .content(VariantContent::Tuple(vec![TypeRef::new(known_type_name)]))
         .build(),
       VariantDef::builder()
-        .name(EnumVariantToken::new("Other"))
+        .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
         .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]))
         .build(),
     ];

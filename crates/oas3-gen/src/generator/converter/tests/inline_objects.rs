@@ -4,7 +4,7 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use crate::{
   generator::{ast::RustType, converter::SchemaConverter},
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 #[test]
@@ -39,11 +39,16 @@ fn test_inline_object_generation() -> anyhow::Result<()> {
     .insert("config".to_string(), ObjectOrReference::Object(config_schema));
 
   let graph = create_test_graph(BTreeMap::from([("Parent".to_string(), parent_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Parent", graph.get("Parent").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Parent", graph.get("Parent").unwrap())?;
+
+  let binding = context.cache.borrow();
+  let generated = &binding.generated.generated_types;
+  let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
 
   // Check for Parent struct
-  let parent_struct = result
+  let parent_struct = all_types
     .iter()
     .find_map(|ty| match ty {
       RustType::Struct(def) if def.name == "Parent" => Some(def),
@@ -65,7 +70,7 @@ fn test_inline_object_generation() -> anyhow::Result<()> {
   );
 
   // Check for ParentConfig struct
-  let config_struct = result
+  let config_struct = all_types
     .iter()
     .find_map(|ty| match ty {
       RustType::Struct(def) if def.name == "ParentConfig" => Some(def),
@@ -105,11 +110,16 @@ fn test_inline_object_without_type_field() -> anyhow::Result<()> {
     .insert("metadata".to_string(), ObjectOrReference::Object(meta_schema));
 
   let graph = create_test_graph(BTreeMap::from([("Resource".to_string(), parent_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Resource", graph.get("Resource").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Resource", graph.get("Resource").unwrap())?;
+
+  let binding = context.cache.borrow();
+  let generated = &binding.generated.generated_types;
+  let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
 
   // Check for Resource struct
-  let resource_struct = result
+  let resource_struct = all_types
     .iter()
     .find_map(|ty| match ty {
       RustType::Struct(def) if def.name == "Resource" => Some(def),
@@ -131,7 +141,7 @@ fn test_inline_object_without_type_field() -> anyhow::Result<()> {
   );
 
   // Check for ResourceMetadata struct
-  let meta_struct = result
+  let meta_struct = all_types
     .iter()
     .find_map(|ty| match ty {
       RustType::Struct(def) if def.name == "ResourceMetadata" => Some(def),

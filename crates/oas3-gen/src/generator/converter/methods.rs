@@ -1,31 +1,29 @@
 use std::{
   collections::{BTreeMap, BTreeSet},
-  sync::Arc,
+  rc::Rc,
 };
 
-use super::{
-  CodegenConfig, SchemaExt, cache::SharedSchemaCache, struct_summaries::StructSummary, structs::StructConverter,
-};
+use super::{SchemaExt, struct_summaries::StructSummary, structs::StructConverter};
 use crate::generator::{
   ast::{EnumMethod, EnumMethodKind, EnumVariantToken, MethodNameToken, RustType, TypeRef, VariantDef},
+  converter::ConverterContext,
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::derive_method_names,
   },
-  schema_registry::SchemaRegistry,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct MethodGenerator {
-  graph: Arc<SchemaRegistry>,
+  context: Rc<ConverterContext>,
   struct_converter: StructConverter,
 }
 
 impl MethodGenerator {
-  pub(crate) fn new(graph: &Arc<SchemaRegistry>, config: &CodegenConfig) -> Self {
-    let struct_converter = StructConverter::new(graph, config, None);
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let struct_converter = StructConverter::new(context.clone());
     Self {
-      graph: graph.clone(),
+      context,
       struct_converter,
     }
   }
@@ -35,7 +33,6 @@ impl MethodGenerator {
     variants: &[VariantDef],
     inline_types: &[RustType],
     enum_name: &str,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
 
@@ -47,7 +44,7 @@ impl MethodGenerator {
       })
       .collect();
 
-    let eligible = self.collect_eligible_variants(variants, cache, &mut summary_cache);
+    let eligible = self.collect_eligible_variants(variants, &mut summary_cache);
 
     if eligible.is_empty() {
       return vec![];
@@ -59,7 +56,6 @@ impl MethodGenerator {
   fn collect_eligible_variants(
     &self,
     variants: &[VariantDef],
-    mut cache: Option<&mut SharedSchemaCache>,
     summary_cache: &mut BTreeMap<String, StructSummary>,
   ) -> Vec<(EnumVariantToken, EnumMethodKind)> {
     let mut eligible = vec![];
@@ -69,8 +65,7 @@ impl MethodGenerator {
         continue;
       };
 
-      let cache_reborrow = cache.as_deref_mut();
-      let Some(summary) = self.resolve_struct_summary(type_ref, cache_reborrow, summary_cache) else {
+      let Some(summary) = self.resolve_struct_summary(type_ref, summary_cache) else {
         continue;
       };
 
@@ -150,7 +145,6 @@ impl MethodGenerator {
   fn resolve_struct_summary(
     &self,
     type_ref: &TypeRef,
-    cache: Option<&mut SharedSchemaCache>,
     summary_cache: &mut BTreeMap<String, StructSummary>,
   ) -> Option<StructSummary> {
     let base_name = type_ref.unboxed_base_type_name();
@@ -159,25 +153,20 @@ impl MethodGenerator {
       return Some(summary.clone());
     }
 
-    let has_summary = cache
-      .as_ref()
-      .is_some_and(|c| c.get_struct_summary(&base_name).is_some());
-
-    if has_summary {
-      let summary = cache.as_ref().unwrap().get_struct_summary(&base_name).unwrap().clone();
-      summary_cache.insert(base_name, summary.clone());
-      return Some(summary);
+    {
+      let cache = self.context.cache.borrow();
+      if let Some(summary) = cache.get_struct_summary(&base_name) {
+        summary_cache.insert(base_name.clone(), summary.clone());
+        return Some(summary.clone());
+      }
     }
 
-    let schema = self.graph.get(&base_name)?;
+    let schema = self.context.graph().get(&base_name)?;
     if !schema.is_object() && schema.properties.is_empty() {
       return None;
     }
 
-    let struct_result = self
-      .struct_converter
-      .convert_struct(&base_name, schema, None, cache)
-      .ok()?;
+    let struct_result = self.struct_converter.convert_struct(&base_name, schema, None).ok()?;
 
     if let RustType::Struct(s) = struct_result.result {
       let summary = StructSummary::from(&s);

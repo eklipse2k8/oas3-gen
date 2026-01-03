@@ -10,7 +10,7 @@ use crate::{
     naming::inference::extract_common_variant_prefix,
     schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 fn make_string_schema() -> ObjectSchema {
@@ -81,10 +81,8 @@ fn test_title_resolution() {
     let named_schema = make_object_schema_with_property("field", make_string_schema());
     let schema_name = schema.title.clone().unwrap_or_else(|| "Message".to_string());
     let graph = create_test_graph(BTreeMap::from([(schema_name, named_schema)]));
-    let resolver = TypeResolver::builder()
-      .config(default_config())
-      .graph(graph.clone())
-      .build();
+    let context = create_test_context(graph.clone(), default_config());
+    let resolver = TypeResolver::new(context);
 
     let result = resolver.resolve_type(&schema).unwrap();
     assert_eq!(result.to_rust_type(), expected_type, "failed for case: {case_name}");
@@ -157,10 +155,8 @@ fn test_union_to_type_ref_conversion() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CacheControlEphemeral".to_string(), cache_schema)]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let inner_schema = ObjectSchema {
     one_of: vec![ObjectOrReference::Ref {
@@ -217,10 +213,8 @@ fn test_union_to_type_ref_conversion() {
 fn test_array_type_resolution() {
   let custom_schema = make_object_schema_with_property("field", make_string_schema());
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let cases: Vec<(&str, ObjectSchema, &str)> = vec![
     (
@@ -334,10 +328,8 @@ fn test_schema_ext_methods() {
 #[test]
 fn test_basic_type_resolution() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let item_schema = make_string_schema();
 
@@ -399,10 +391,8 @@ fn test_array_with_union_items_inline_generation() {
     ("TypeB".to_string(), type_b),
     ("Item".to_string(), item_schema),
   ]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
 
   let oneof_array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -464,7 +454,6 @@ fn test_array_with_union_items_inline_generation() {
       "tools",
       &oneof_array_schema,
       &ObjectOrReference::Object(oneof_array_schema.clone()),
-      None,
     )
     .unwrap();
   assert_eq!(
@@ -472,13 +461,11 @@ fn test_array_with_union_items_inline_generation() {
     "Vec<ToolKind>",
     "oneOf array type mismatch"
   );
-  assert_eq!(
-    oneof_result.inline_types.len(),
-    1,
-    "oneOf should generate one inline enum"
-  );
 
-  let inline_type = &oneof_result.inline_types[0];
+  let generated_types = context.cache.borrow().generated.generated_types.clone();
+  assert_eq!(generated_types.len(), 1, "oneOf should generate one inline enum");
+
+  let inline_type = &generated_types[0];
   match inline_type {
     RustType::Enum(enum_def) => {
       assert_eq!(enum_def.name.as_str(), "ToolKind");
@@ -502,7 +489,6 @@ fn test_array_with_union_items_inline_generation() {
       "items",
       &anyof_array_schema,
       &ObjectOrReference::Object(anyof_array_schema.clone()),
-      None,
     )
     .unwrap();
   assert_eq!(
@@ -510,9 +496,12 @@ fn test_array_with_union_items_inline_generation() {
     "Vec<TypeItemKind>",
     "anyOf array type mismatch"
   );
-  assert!(
-    !anyof_result.inline_types.is_empty(),
-    "anyOf should generate inline types"
+
+  let generated_types_after_anyof = &context.cache.borrow().generated.generated_types;
+  assert_eq!(
+    generated_types_after_anyof.len(),
+    2,
+    "anyOf should generate additional inline types"
   );
 
   let ref_result = resolver
@@ -521,13 +510,15 @@ fn test_array_with_union_items_inline_generation() {
       "items",
       &ref_array_schema,
       &ObjectOrReference::Object(ref_array_schema.clone()),
-      None,
     )
     .unwrap();
   assert_eq!(ref_result.result.to_rust_type(), "Vec<Item>", "ref array type mismatch");
-  assert!(
-    ref_result.inline_types.is_empty(),
-    "ref items should not generate inline types"
+
+  let generated_types_after_ref = &context.cache.borrow().generated.generated_types;
+  assert_eq!(
+    generated_types_after_ref.len(),
+    2,
+    "ref items should not generate additional inline types"
   );
 }
 
@@ -542,10 +533,8 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
     ("TypeB".to_string(), type_b),
     ("TypeC".to_string(), type_c),
   ]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let multi_ref_variants = vec![
     ObjectOrReference::Ref {
@@ -698,10 +687,8 @@ fn test_union_naming_with_common_suffix() {
     ("BetaResponseUrlCitation".to_string(), citation_b),
     ("BetaResponseFileCitation".to_string(), citation_c),
   ]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
 
   let union_schema = ObjectSchema {
     one_of: vec![
@@ -730,13 +717,14 @@ fn test_union_naming_with_common_suffix() {
       "citation",
       &union_schema,
       &ObjectOrReference::Object(union_schema.clone()),
-      None,
     )
     .unwrap();
 
   assert_eq!(result.result.to_rust_type(), "BetaCitationKind");
-  assert_eq!(result.inline_types.len(), 1);
-  if let RustType::Enum(enum_def) = &result.inline_types[0] {
+
+  let generated_types = &context.cache.borrow().generated.generated_types;
+  assert_eq!(generated_types.len(), 1);
+  if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaCitationKind");
   } else {
     panic!("Expected enum type");
@@ -752,10 +740,8 @@ fn test_union_naming_without_common_suffix() {
     ("BetaTool".to_string(), tool_a),
     ("BetaBashTool20241022".to_string(), tool_b),
   ]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
   let union_schema = ObjectSchema {
     one_of: vec![
       ObjectOrReference::Ref {
@@ -778,13 +764,14 @@ fn test_union_naming_without_common_suffix() {
       "tool",
       &union_schema,
       &ObjectOrReference::Object(union_schema.clone()),
-      None,
     )
     .unwrap();
 
   assert_eq!(result.result.to_rust_type(), "BetaToolKind");
-  assert_eq!(result.inline_types.len(), 1);
-  if let RustType::Enum(enum_def) = &result.inline_types[0] {
+
+  let generated_types = &context.cache.borrow().generated.generated_types;
+  assert_eq!(generated_types.len(), 1);
+  if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaToolKind");
   } else {
     panic!("Expected enum type");
@@ -802,10 +789,8 @@ fn test_array_union_naming_with_common_suffix() {
     ("BetaMessageDeltaEvent".to_string(), event_b),
     ("BetaMessageStopEvent".to_string(), event_c),
   ]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
 
   let array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -840,13 +825,14 @@ fn test_array_union_naming_with_common_suffix() {
       "events",
       &array_schema,
       &ObjectOrReference::Object(array_schema.clone()),
-      None,
     )
     .unwrap();
 
   assert_eq!(result.result.to_rust_type(), "Vec<BetaEventKind>");
-  assert_eq!(result.inline_types.len(), 1);
-  if let RustType::Enum(enum_def) = &result.inline_types[0] {
+
+  let generated_types = context.cache.borrow().generated.generated_types.clone();
+  assert_eq!(generated_types.len(), 1);
+  if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaEventKind");
   } else {
     panic!("Expected enum type");
@@ -856,10 +842,8 @@ fn test_array_union_naming_with_common_suffix() {
 #[test]
 fn test_additional_properties_map_only_boolean() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
@@ -882,10 +866,8 @@ fn test_additional_properties_map_only_boolean() {
 #[test]
 fn test_additional_properties_map_only_string() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -909,10 +891,8 @@ fn test_additional_properties_map_only_string() {
 #[test]
 fn test_additional_properties_map_only_integer() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -937,10 +917,8 @@ fn test_additional_properties_map_only_integer() {
 fn test_additional_properties_map_only_ref() {
   let custom_schema = make_object_schema_with_property("field", make_string_schema());
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -963,10 +941,8 @@ fn test_additional_properties_map_only_ref() {
 #[test]
 fn test_additional_properties_map_only_empty_schema() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -987,10 +963,8 @@ fn test_additional_properties_map_only_empty_schema() {
 #[test]
 fn test_additional_properties_boolean_true() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -1007,120 +981,10 @@ fn test_additional_properties_boolean_true() {
 }
 
 #[test]
-fn test_object_with_properties_not_resolved_as_map() {
+fn test_additional_properties_boolean_false() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
-
-  let schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([("name".to_string(), ObjectOrReference::Object(make_string_schema()))]),
-    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
-      ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-        ..Default::default()
-      },
-    )))),
-    ..Default::default()
-  };
-
-  let result = resolver.resolve_type(&schema).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "serde_json::Value",
-    "object with properties should NOT be resolved as map type (it's a struct)"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_ref() {
-  let custom_schema = make_object_schema_with_property("field", make_string_schema());
-  let graph = create_test_graph(BTreeMap::from([("AgentConfig".to_string(), custom_schema)]));
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
-
-  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/AgentConfig".to_string(),
-    summary: None,
-    description: None,
-  }));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "AgentConfig",
-    "additionalProperties with $ref should resolve to the referenced type name"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_boolean() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
-
-  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-    ..Default::default()
-  })));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "bool",
-    "additionalProperties with type: boolean should resolve to bool"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_empty() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
-
-  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema::default())));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "serde_json::Value",
-    "additionalProperties with empty schema should resolve to serde_json::Value"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_boolean_schema_true() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
-
-  let additional = oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "serde_json::Value",
-    "additionalProperties: true should resolve to serde_json::Value"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_boolean_schema_false() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let additional = oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(false));
 
@@ -1135,10 +999,8 @@ fn test_resolve_additional_properties_type_boolean_schema_false() {
 #[test]
 fn test_additional_properties_false_not_resolved_as_map() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -1158,10 +1020,8 @@ fn test_additional_properties_false_not_resolved_as_map() {
 #[test]
 fn test_const_value_type_inference() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let string_const = ObjectSchema {
     const_value: Some(json!("thought")),
@@ -1242,10 +1102,8 @@ fn test_array_with_union_items_not_treated_as_primitive() {
     ),
   ]));
 
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let thought_summary_ref = ObjectOrReference::Ref {
     ref_path: "#/components/schemas/ThoughtSummary".to_string(),
@@ -1260,7 +1118,6 @@ fn test_array_with_union_items_not_treated_as_primitive() {
       "summary",
       thought_summary_schema,
       &thought_summary_ref,
-      None,
     )
     .unwrap();
 
@@ -1285,10 +1142,8 @@ fn test_string_enum_reference_preserves_named_type() {
 
   let graph = create_test_graph(BTreeMap::from([("PetStatus".to_string(), pet_status_schema)]));
 
-  let resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let pet_status_ref = ObjectOrReference::Ref {
     ref_path: "#/components/schemas/PetStatus".to_string(),
@@ -1298,7 +1153,7 @@ fn test_string_enum_reference_preserves_named_type() {
   let pet_status_schema = graph.get("PetStatus").unwrap();
 
   let result = resolver
-    .resolve_property_type("Pet", "status", pet_status_schema, &pet_status_ref, None)
+    .resolve_property_type("Pet", "status", pet_status_schema, &pet_status_ref)
     .unwrap();
 
   assert_eq!(

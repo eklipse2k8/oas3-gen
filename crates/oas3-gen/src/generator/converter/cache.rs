@@ -11,7 +11,7 @@ use crate::generator::{
   },
 };
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 struct TypeIdentityCache {
   schema_to_type: BTreeMap<CanonicalSchema, String>,
   enum_to_type: BTreeMap<Vec<String>, String>,
@@ -96,9 +96,9 @@ impl TypeIdentityCache {
   }
 }
 
-#[derive(Default)]
-struct GeneratedTypeStore {
-  generated_types: Vec<RustType>,
+#[derive(Default, Debug, Clone)]
+pub(crate) struct GeneratedTypeStore {
+  pub(crate) generated_types: Vec<RustType>,
 }
 
 impl GeneratedTypeStore {
@@ -112,7 +112,7 @@ impl GeneratedTypeStore {
   }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 struct StructSummaryIndex {
   summaries: BTreeMap<String, StructSummary>,
 }
@@ -130,9 +130,10 @@ impl StructSummaryIndex {
 /// Cache for sharing generated Rust types across the schema graph.
 ///
 /// Prevents duplication of structs and enums by hashing schemas and storing mapping.
+#[derive(Debug, Clone)]
 pub(crate) struct SharedSchemaCache {
   identity: TypeIdentityCache,
-  generated: GeneratedTypeStore,
+  pub(crate) generated: GeneratedTypeStore,
   summaries: StructSummaryIndex,
 }
 

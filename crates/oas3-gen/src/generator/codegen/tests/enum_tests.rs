@@ -8,6 +8,7 @@ use crate::generator::{
     Visibility,
     enums::{DiscriminatedEnumGenerator, EnumGenerator, ResponseEnumGenerator},
   },
+  naming::constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
 };
 
 fn make_unit_variant(name: &str) -> VariantDef {
@@ -656,11 +657,11 @@ fn test_known_value_constructor_methods() {
     name: EnumToken::new("ModelOption"),
     variants: vec![
       VariantDef::builder()
-        .name(EnumVariantToken::new("Known"))
+        .name(EnumVariantToken::new(KNOWN_ENUM_VARIANT))
         .content(VariantContent::Tuple(vec![TypeRef::new("ModelOptionKnown")]))
         .build(),
       VariantDef::builder()
-        .name(EnumVariantToken::new("Other"))
+        .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
         .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
         .build(),
     ],

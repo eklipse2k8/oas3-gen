@@ -7,7 +7,7 @@ use crate::{
     ast::{OuterAttr, RustPrimitive, RustType, SerdeAsFieldAttr},
     converter::{CodegenConfig, SchemaConverter},
   },
-  tests::common::create_test_graph,
+  tests::common::{create_test_context, create_test_graph},
 };
 
 fn config_with_customizations(customizations: HashMap<String, String>) -> CodegenConfig {
@@ -35,8 +35,9 @@ fn test_datetime_field_with_customization() -> anyhow::Result<()> {
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
   let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_customizations(customizations));
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -92,8 +93,9 @@ fn test_optional_datetime_field_with_customization() -> anyhow::Result<()> {
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
   let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_customizations(customizations));
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -146,8 +148,9 @@ fn test_array_of_datetime_with_customization() -> anyhow::Result<()> {
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
   let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_customizations(customizations));
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -194,8 +197,9 @@ fn test_date_field_with_customization() -> anyhow::Result<()> {
 
   let customizations = HashMap::from([("date".to_string(), "crate::MyDate".to_string())]);
   let graph = create_test_graph(BTreeMap::from([("Person".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_customizations(customizations));
-  let result = converter.convert_schema("Person", graph.get("Person").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Person", graph.get("Person").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -242,8 +246,9 @@ fn test_uuid_field_with_customization() -> anyhow::Result<()> {
 
   let customizations = HashMap::from([("uuid".to_string(), "crate::MyUuid".to_string())]);
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_customizations(customizations));
-  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -289,8 +294,9 @@ fn test_no_serde_as_attr_without_customization() -> anyhow::Result<()> {
   schema.required = vec!["created_at".to_string()];
 
   let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &CodegenConfig::default());
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), CodegenConfig::default());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -336,8 +342,9 @@ fn test_string_field_no_customization() -> anyhow::Result<()> {
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
   let graph = create_test_graph(BTreeMap::from([("Person".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_customizations(customizations));
-  let result = converter.convert_schema("Person", graph.get("Person").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Person", graph.get("Person").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -401,8 +408,9 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
   ]);
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_customizations(customizations));
-  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
 
   let struct_def = result
     .iter()

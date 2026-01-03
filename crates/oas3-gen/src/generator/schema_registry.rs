@@ -5,7 +5,7 @@ use std::{
 
 use oas3::{
   Spec,
-  spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaTypeSet},
+  spec::{Discriminator, ObjectOrReference, ObjectSchema, Operation, Schema, SchemaTypeSet},
 };
 
 use super::orchestrator::GenerationWarning;
@@ -414,19 +414,14 @@ impl<'a> ReachabilityAnalyzer<'a> {
     let mut reachable = BTreeSet::new();
     let collector = RefCollector::new(Some(self.fingerprints));
 
-    for (_, _, _, operation, _) in operation_registry.operations_with_details() {
-      self.collect_from_operation(operation, &collector, &mut reachable);
+    for entry in operation_registry.operations() {
+      self.collect_from_operation(&entry.operation, &collector, &mut reachable);
     }
 
     self.expand_with_dependencies(&reachable)
   }
 
-  fn collect_from_operation(
-    &self,
-    operation: &oas3::spec::Operation,
-    collector: &RefCollector,
-    refs: &mut BTreeSet<String>,
-  ) {
+  fn collect_from_operation(&self, operation: &Operation, collector: &RefCollector, refs: &mut BTreeSet<String>) {
     for param in &operation.parameters {
       if let Ok(resolved_param) = param.resolve(self.spec)
         && let Some(ref schema_ref) = resolved_param.schema

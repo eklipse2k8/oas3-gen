@@ -5,28 +5,26 @@ use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, 
 use crate::{
   generator::{
     ast::{RustType, TypeAliasDef, TypeAliasToken, TypeRef},
-    converter::{
-      cache::SharedSchemaCache,
-      common::{ConversionOutput, handle_inline_creation},
-    },
+    converter::common::{ConversionOutput, handle_inline_creation},
     schema_registry::SchemaRegistry,
   },
-  tests::common::create_test_spec,
+  tests::common::{create_test_context, create_test_graph, create_test_spec, default_config},
 };
 
 #[test]
 fn test_handle_inline_creation_uses_cached_name_check() -> anyhow::Result<()> {
   let schema = ObjectSchema::default();
-  let mut cache = SharedSchemaCache::new();
+  let graph = create_test_graph(BTreeMap::default());
+  let context = create_test_context(graph, default_config());
   let generator_called = Cell::new(false);
 
   let result = handle_inline_creation(
     &schema,
     "Ignored",
     None,
-    Some(&mut cache),
+    &context,
     |_| Some("CachedType".to_string()),
-    |_, _| {
+    |_| {
       generator_called.set(true);
       Ok(ConversionOutput::new(RustType::TypeAlias(TypeAliasDef {
         name: TypeAliasToken::from_raw("Ignored"),

@@ -10,9 +10,10 @@ use crate::{
       SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
       union_types::UnionKind, unions::UnionConverter,
     },
+    naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
@@ -24,7 +25,8 @@ fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
 }
 
 fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
-  SchemaConverter::new(graph, &default_config())
+  let context = create_test_context(graph.clone(), default_config());
+  SchemaConverter::new(&context)
 }
 
 #[test]
@@ -87,15 +89,12 @@ fn test_relaxed_enum_generates_known_variant() {
     ("OptimizedEnum".to_string(), anyof_schema.clone()),
   ]));
 
-  let _type_resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
-  let union_converter = UnionConverter::new(&graph, &default_config());
-  let mut cache = SharedSchemaCache::new();
+  let context = create_test_context(graph.clone(), default_config());
+  let _type_resolver = TypeResolver::new(context.clone());
+  let union_converter = UnionConverter::new(context);
 
   let optimized_output = union_converter
-    .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))
+    .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf)
     .expect("Should convert anyOf union");
 
   let optimized_result = optimized_output.into_vec();
@@ -107,7 +106,10 @@ fn test_relaxed_enum_generates_known_variant() {
   assert!(outer_enum.is_some(), "Should generate OptimizedEnum");
 
   if let Some(RustType::Enum(e)) = outer_enum {
-    let known_variant = e.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
+    let known_variant = e
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT));
     assert!(
       known_variant.is_some(),
       "Should have Known variant for relaxed enum pattern"
@@ -140,15 +142,14 @@ fn test_relaxed_enum_with_ref() {
   ]));
 
   let converter = create_test_converter(&graph);
-  let mut cache = SharedSchemaCache::new();
 
   let chat_model_result = converter
-    .convert_schema("ChatModel", graph.get("ChatModel").unwrap(), Some(&mut cache))
+    .convert_schema("ChatModel", graph.get("ChatModel").unwrap())
     .expect("Should convert ChatModel");
   assert_eq!(chat_model_result.len(), 1);
 
   let model_ids_result = converter
-    .convert_schema("ModelIdsShared", graph.get("ModelIdsShared").unwrap(), Some(&mut cache))
+    .convert_schema("ModelIdsShared", graph.get("ModelIdsShared").unwrap())
     .expect("Should convert ModelIdsShared");
 
   assert!(!model_ids_result.is_empty(), "Should generate at least one type");
@@ -159,7 +160,10 @@ fn test_relaxed_enum_with_ref() {
   assert!(outer_enum.is_some(), "Should generate ModelIdsShared enum");
 
   if let Some(RustType::Enum(outer)) = outer_enum {
-    let known_variant = outer.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
+    let known_variant = outer
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT));
     assert!(
       known_variant.is_some(),
       "Should have Known variant for relaxed enum pattern"

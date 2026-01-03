@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use crate::generator::{
   ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
   naming::{
-    constants::REQUEST_BODY_SUFFIX,
+    constants::{KNOWN_ENUM_VARIANT, REQUEST_BODY_SUFFIX},
     inference::{InferenceExt, NormalizedVariant, derive_method_names, strip_common_affixes},
     name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
   },
@@ -214,7 +214,7 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
   let status_name = result.enum_names.get(&status_values);
   assert!(status_name.is_some(), "Regular enum should have a precomputed name");
   assert!(
-    !status_name.unwrap().ends_with("Known"),
+    !status_name.unwrap().ends_with(KNOWN_ENUM_VARIANT),
     "Regular enum should not have 'Known' suffix"
   );
 
@@ -435,50 +435,50 @@ fn make_variant(name: &str) -> VariantDef {
 
 #[test]
 fn test_strip_common_affixes_no_op_cases() {
-  let mut empty: Vec<VariantDef> = vec![];
-  strip_common_affixes(&mut empty);
+  let empty: Vec<VariantDef> = vec![];
+  let empty = strip_common_affixes(empty);
   assert!(empty.is_empty());
 
-  let mut single = vec![make_variant("UserResponse")];
-  strip_common_affixes(&mut single);
+  let single = vec![make_variant("UserResponse")];
+  let single = strip_common_affixes(single);
   assert_eq!(single[0].name, EnumVariantToken::new("UserResponse"));
 }
 
 #[test]
 fn test_strip_common_affixes_strips_prefix_suffix_or_both() {
-  let mut suffix_variants = vec![make_variant("CreateResponse"), make_variant("UpdateResponse")];
-  strip_common_affixes(&mut suffix_variants);
+  let suffix_variants = vec![make_variant("CreateResponse"), make_variant("UpdateResponse")];
+  let suffix_variants = strip_common_affixes(suffix_variants);
   assert_eq!(suffix_variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(suffix_variants[1].name, EnumVariantToken::new("Update"));
 
-  let mut prefix_variants = vec![make_variant("UserCreate"), make_variant("UserUpdate")];
-  strip_common_affixes(&mut prefix_variants);
+  let prefix_variants = vec![make_variant("UserCreate"), make_variant("UserUpdate")];
+  let prefix_variants = strip_common_affixes(prefix_variants);
   assert_eq!(prefix_variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(prefix_variants[1].name, EnumVariantToken::new("Update"));
 
-  let mut both_variants = vec![make_variant("UserCreateResponse"), make_variant("UserUpdateResponse")];
-  strip_common_affixes(&mut both_variants);
+  let both_variants = vec![make_variant("UserCreateResponse"), make_variant("UserUpdateResponse")];
+  let both_variants = strip_common_affixes(both_variants);
   assert_eq!(both_variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(both_variants[1].name, EnumVariantToken::new("Update"));
 }
 
 #[test]
 fn test_strip_common_affixes_no_common_parts() {
-  let mut variants = vec![make_variant("CreateUser"), make_variant("DeletePost")];
-  strip_common_affixes(&mut variants);
+  let variants = vec![make_variant("CreateUser"), make_variant("DeletePost")];
+  let variants = strip_common_affixes(variants);
   assert_eq!(variants[0].name, EnumVariantToken::new("CreateUser"));
   assert_eq!(variants[1].name, EnumVariantToken::new("DeletePost"));
 }
 
 #[test]
 fn test_strip_common_affixes_safety_guards() {
-  let mut collision_variants = vec![make_variant("UserResponse"), make_variant("UserResponse")];
-  strip_common_affixes(&mut collision_variants);
+  let collision_variants = vec![make_variant("UserResponse"), make_variant("UserResponse")];
+  let collision_variants = strip_common_affixes(collision_variants);
   assert_eq!(collision_variants[0].name, EnumVariantToken::new("UserResponse"));
   assert_eq!(collision_variants[1].name, EnumVariantToken::new("UserResponse"));
 
-  let mut empty_name_variants = vec![make_variant("Response"), make_variant("Response")];
-  strip_common_affixes(&mut empty_name_variants);
+  let empty_name_variants = vec![make_variant("Response"), make_variant("Response")];
+  let empty_name_variants = strip_common_affixes(empty_name_variants);
   assert_eq!(empty_name_variants[0].name, EnumVariantToken::new("Response"));
   assert_eq!(empty_name_variants[1].name, EnumVariantToken::new("Response"));
 }
@@ -486,7 +486,7 @@ fn test_strip_common_affixes_safety_guards() {
 #[test]
 fn test_strip_common_affixes_preserves_variant_content() {
   let tuple_type = TypeRef::new("TestStruct");
-  let mut variants = vec![
+  let variants = vec![
     VariantDef::builder()
       .name(EnumVariantToken::from("CreateResponse"))
       .content(VariantContent::Tuple(vec![tuple_type]))
@@ -494,7 +494,7 @@ fn test_strip_common_affixes_preserves_variant_content() {
     make_variant("UpdateResponse"),
   ];
 
-  strip_common_affixes(&mut variants);
+  let variants = strip_common_affixes(variants);
 
   assert_eq!(variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(variants[1].name, EnumVariantToken::new("Update"));

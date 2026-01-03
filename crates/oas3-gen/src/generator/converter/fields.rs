@@ -1,12 +1,18 @@
-use std::collections::{BTreeSet, HashMap};
+use std::{
+  collections::{BTreeSet, HashMap},
+  rc::Rc,
+};
 
 use oas3::spec::ObjectSchema;
 use regex::Regex;
 
-use super::{CodegenConfig, SchemaExt, discriminator::DiscriminatorInfo};
-use crate::generator::ast::{
-  Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
-  ValidationAttribute,
+use super::{SchemaExt, discriminator::DiscriminatorInfo};
+use crate::generator::{
+  ast::{
+    Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+    ValidationAttribute,
+  },
+  converter::ConverterContext,
 };
 
 #[derive(Clone, Debug)]
@@ -16,7 +22,8 @@ pub(crate) struct FieldConverter {
 }
 
 impl FieldConverter {
-  pub(crate) fn new(config: &CodegenConfig) -> Self {
+  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+    let config = context.config();
     Self {
       odata_support: config.odata_support(),
       customizations: config.customizations.clone(),

@@ -18,10 +18,12 @@ use crate::{
       union_types::{CollisionStrategy, UnionKind},
       unions::{EnumConverter, UnionConverter},
     },
-    naming::inference::NormalizedVariant,
+    naming::{constants::KNOWN_ENUM_VARIANT, inference::NormalizedVariant},
     schema_registry::SchemaRegistry,
   },
-  tests::common::{config_with_no_helpers, config_with_preserve_case, create_test_graph, default_config},
+  tests::common::{
+    config_with_no_helpers, config_with_preserve_case, create_test_context, create_test_graph, default_config,
+  },
 };
 
 #[test]
@@ -32,8 +34,9 @@ fn test_simple_string_enum() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("SimpleEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("SimpleEnum", graph.get("SimpleEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("SimpleEnum", graph.get("SimpleEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -103,8 +106,9 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
 
   let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
     panic!("Expected DiscriminatedEnum as last type")
@@ -170,8 +174,9 @@ fn test_anyof_without_discriminator_has_no_rename_attrs() -> anyhow::Result<()> 
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum as last type")
@@ -241,8 +246,9 @@ fn test_anyof_with_discriminator_no_untagged() -> anyhow::Result<()> {
     ("VariantA".to_string(), variant1),
     ("VariantB".to_string(), variant2),
   ]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
 
   let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
     panic!("Expected DiscriminatedEnum as last type")
@@ -262,8 +268,9 @@ fn test_integer_enum_values() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("IntEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("IntEnum", graph.get("IntEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("IntEnum", graph.get("IntEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -307,8 +314,9 @@ fn test_float_enum_values() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("FloatEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("FloatEnum", graph.get("FloatEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("FloatEnum", graph.get("FloatEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -340,8 +348,9 @@ fn test_boolean_enum_values() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("BoolEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("BoolEnum", graph.get("BoolEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("BoolEnum", graph.get("BoolEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -372,8 +381,9 @@ fn test_mixed_type_enum_values() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("MixedEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("MixedEnum", graph.get("MixedEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("MixedEnum", graph.get("MixedEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -397,8 +407,9 @@ fn test_empty_enum_converts_to_string() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("EmptyEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("EmptyEnum", graph.get("EmptyEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("EmptyEnum", graph.get("EmptyEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
@@ -418,8 +429,9 @@ fn test_case_insensitive_duplicates_with_deduplication() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("CaseEnum", graph.get("CaseEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("CaseEnum", graph.get("CaseEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -461,8 +473,9 @@ fn test_case_insensitive_duplicates_with_preservation() -> anyhow::Result<()> {
     ..Default::default()
   };
   let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
-  let converter = SchemaConverter::new(&graph, &config_with_preserve_case());
-  let result = converter.convert_schema("CaseEnum", graph.get("CaseEnum").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_preserve_case());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("CaseEnum", graph.get("CaseEnum").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::Enum(enum_def) = &result[0] else {
@@ -550,14 +563,16 @@ fn test_collision_strategy_enum() {
 
 #[test]
 fn test_preserve_strategy_with_multiple_collisions() {
-  let converter = EnumConverter::new(&config_with_preserve_case());
+  let graph = create_test_graph(BTreeMap::default());
+  let context = create_test_context(graph, config_with_preserve_case());
+  let converter = EnumConverter::new(context);
 
   let schema = ObjectSchema {
     enum_values: vec![json!("active"), json!("Active"), json!("ACTIVE")],
     ..Default::default()
   };
 
-  let result = converter.convert_value_enum("Status", &schema, None);
+  let result = converter.convert_value_enum("Status", &schema);
 
   if let RustType::Enum(enum_def) = result {
     assert_eq!(enum_def.variants.len(), 3);
@@ -595,7 +610,8 @@ fn test_relaxed_enum_detects_freeform_pattern() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let union_converter = UnionConverter::new(&graph, &default_config());
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context);
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -617,7 +633,7 @@ fn test_relaxed_enum_detects_freeform_pattern() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
+  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -674,7 +690,8 @@ fn test_relaxed_enum_rejects_no_freeform() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let union_converter = UnionConverter::new(&graph, &default_config());
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context);
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -692,7 +709,7 @@ fn test_relaxed_enum_rejects_no_freeform() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf, None);
+  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf);
   assert!(result.is_ok());
   let output = result.unwrap();
   let types = output.into_vec();
@@ -742,9 +759,10 @@ fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
     ("TextFormat".to_string(), text_schema),
   ]);
   let graph = create_test_graph(schemas);
-  let converter = SchemaConverter::new(&graph, &default_config());
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("ResponseFormat", &parent_schema, None)?;
+  let result = converter.convert_schema("ResponseFormat", &parent_schema)?;
 
   assert!(!result.is_empty());
   let RustType::Enum(enum_def) = &result[result.len() - 1] else {
@@ -917,8 +935,9 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("TestUnion".to_string(), union_schema)]));
 
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum")
@@ -991,8 +1010,9 @@ fn test_enum_helper_methods_disabled_flag() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::from([("TestUnion".to_string(), union_schema)]));
 
   // no_helpers = true
-  let converter = SchemaConverter::new(&graph, &config_with_no_helpers());
-  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), config_with_no_helpers());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum")
@@ -1023,8 +1043,9 @@ fn test_enum_helper_naming_stripping() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("ResponseFormat".to_string(), union_schema)]));
 
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("ResponseFormat", graph.get("ResponseFormat").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("ResponseFormat", graph.get("ResponseFormat").unwrap())?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum")
@@ -1069,8 +1090,9 @@ fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
 
   let graph = create_test_graph(BTreeMap::from([("Status".to_string(), union_schema)]));
 
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Status", graph.get("Status").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Status", graph.get("Status").unwrap())?;
 
   let RustType::Enum(enum_def) = result.last().unwrap() else {
     panic!("Expected enum")
@@ -1161,8 +1183,9 @@ fn test_discriminator_deduplicates_same_type_mappings() -> anyhow::Result<()> {
     ("InteractionEvent".to_string(), interaction_event),
   ]));
 
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("InteractionSseEvent", graph.get("InteractionSseEvent").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("InteractionSseEvent", graph.get("InteractionSseEvent").unwrap())?;
 
   let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
     panic!("Expected DiscriminatedEnum as last type")
@@ -1210,7 +1233,8 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let union_converter = UnionConverter::new(&graph, &default_config());
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context);
 
   let schema = ObjectSchema {
     one_of: vec![
@@ -1228,7 +1252,7 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("my-test-enum", &schema, UnionKind::OneOf, None);
+  let result = union_converter.convert_union("my-test-enum", &schema, UnionKind::OneOf);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -1274,25 +1298,26 @@ fn test_union_with_underscored_raw_name_converts_correctly() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let union_converter = UnionConverter::new(&graph, &default_config());
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context);
 
   let schema = ObjectSchema {
     one_of: vec![
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("option_a")),
+        const_value: Some(json!("option-a")),
         ..Default::default()
       }),
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("option_b")),
+        const_value: Some(json!("option-b")),
         ..Default::default()
       }),
     ],
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("my_test_enum", &schema, UnionKind::OneOf, None);
+  let result = union_converter.convert_union("my_test_enum", &schema, UnionKind::OneOf);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -1332,17 +1357,22 @@ fn test_union_with_inline_struct_and_raw_name() -> anyhow::Result<()> {
   };
 
   let graph = create_test_graph(BTreeMap::from([("my-union-type".to_string(), union_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("my-union-type", graph.get("my-union-type").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("my-union-type", graph.get("my-union-type").unwrap())?;
 
-  let enum_def = result.iter().find_map(|t| match t {
+  let binding = context.cache.borrow();
+  let generated = &binding.generated.generated_types;
+  let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
+
+  let enum_def = all_types.iter().find_map(|t| match t {
     RustType::Enum(e) => Some(e),
     _ => None,
   });
   assert!(enum_def.is_some(), "should produce an enum");
   assert_eq!(enum_def.unwrap().name.to_string(), "MyUnionType");
 
-  let struct_def = result.iter().find_map(|t| match t {
+  let struct_def = all_types.iter().find_map(|t| match t {
     RustType::Struct(s) => Some(s),
     _ => None,
   });
@@ -1387,7 +1417,8 @@ fn test_already_pascalcase_name_not_double_converted() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let union_converter = UnionConverter::new(&graph, &default_config());
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context);
 
   let schema = ObjectSchema {
     one_of: vec![
@@ -1405,7 +1436,7 @@ fn test_already_pascalcase_name_not_double_converted() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("MyPascalCaseEnum", &schema, UnionKind::OneOf, None);
+  let result = union_converter.convert_union("MyPascalCaseEnum", &schema, UnionKind::OneOf);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -1451,7 +1482,8 @@ fn test_relaxed_enum_with_raw_name() {
 
   let graph = SchemaRegistry::from_spec(spec).registry;
   let graph = Arc::new(graph);
-  let union_converter = UnionConverter::new(&graph, &default_config());
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context);
 
   let schema = ObjectSchema {
     any_of: vec![
@@ -1468,14 +1500,14 @@ fn test_relaxed_enum_with_raw_name() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("my-relaxed-enum", &schema, UnionKind::AnyOf, None);
+  let result = union_converter.convert_union("my-relaxed-enum", &schema, UnionKind::AnyOf);
   assert!(result.is_ok());
 
   let output = result.unwrap();
   let types = output.into_vec();
 
   let outer_enum = types.iter().find_map(|t| match t {
-    RustType::Enum(e) if !e.name.to_string().ends_with("Known") => Some(e),
+    RustType::Enum(e) if !e.name.to_string().ends_with(KNOWN_ENUM_VARIANT) => Some(e),
     _ => None,
   });
   assert!(outer_enum.is_some(), "should have outer wrapper enum");
@@ -1486,7 +1518,7 @@ fn test_relaxed_enum_with_raw_name() {
   );
 
   let known_enum = types.iter().find_map(|t| match t {
-    RustType::Enum(e) if e.name.to_string().ends_with("Known") => Some(e),
+    RustType::Enum(e) if e.name.to_string().ends_with(KNOWN_ENUM_VARIANT) => Some(e),
     _ => None,
   });
   assert!(known_enum.is_some(), "should have known values enum");

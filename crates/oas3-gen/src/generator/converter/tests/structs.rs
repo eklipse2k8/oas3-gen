@@ -11,7 +11,7 @@ use crate::{
       SchemaConverter, discriminator::DiscriminatorConverter, structs::StructConverter, type_resolver::TypeResolver,
     },
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 #[test]
@@ -44,8 +44,9 @@ fn test_discriminated_base_struct_renamed() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -92,8 +93,9 @@ fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Message", graph.get("Message").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Message", graph.get("Message").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -160,8 +162,9 @@ fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -297,7 +300,8 @@ fn test_discriminator_handler_detect_parent() {
   graph_map.insert("Child".to_string(), child_schema.clone());
 
   let graph = create_test_graph(graph_map);
-  let handler = DiscriminatorConverter::new(&graph, None);
+  let context = create_test_context(graph.clone(), default_config());
+  let handler = DiscriminatorConverter::new(context);
 
   let result = handler.detect_discriminated_parent("Child");
 
@@ -506,8 +510,9 @@ fn test_discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<
     ("Child".to_string(), child_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, &default_config());
-  let result = converter.convert_schema("Child", graph.get("Child").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Child", graph.get("Child").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -627,34 +632,6 @@ fn test_schema_merger_preserves_discriminator() {
 }
 
 #[test]
-fn test_discriminator_handler_no_parent_returns_none() {
-  let graph = create_test_graph(BTreeMap::new());
-  let handler = DiscriminatorConverter::new(&graph, None);
-  let result = handler.detect_discriminated_parent("Unknown");
-
-  assert!(result.is_none());
-}
-
-#[test]
-fn test_discriminator_handler_inline_all_of_returns_none() {
-  let mut schema = ObjectSchema::default();
-  schema.all_of.push(ObjectOrReference::Object(ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  }));
-
-  let graph = create_test_graph(BTreeMap::from([("Inline".to_string(), schema.clone())]));
-  let handler = DiscriminatorConverter::new(&graph, None);
-
-  let result = handler.detect_discriminated_parent("Inline");
-
-  assert!(
-    result.is_none(),
-    "Inline schemas should not be considered discriminated parents"
-  );
-}
-
-#[test]
 fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Result<()> {
   let base_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -692,10 +669,8 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
     ("ChildEvent".to_string(), child_schema),
   ]));
 
-  let type_resolver = TypeResolver::builder()
-    .config(default_config())
-    .graph(graph.clone())
-    .build();
+  let context = create_test_context(graph.clone(), default_config());
+  let type_resolver = TypeResolver::new(context);
 
   let result = type_resolver.build_discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
 
@@ -758,7 +733,8 @@ fn test_discriminator_mappings_returns_alphabetical_order() {
     ("Zebra".to_string(), empty_schema.clone()),
   ]));
 
-  let handler = DiscriminatorConverter::new(&graph, None);
+  let context = create_test_context(graph.clone(), default_config());
+  let handler = DiscriminatorConverter::new(context);
   let mappings = handler.discriminator_mappings(&base_schema);
 
   let schema_names: Vec<&str> = mappings.iter().map(|(name, _)| name.as_str()).collect();

@@ -114,7 +114,6 @@ fn test_generate_operation_id() {
 
 #[test]
 fn test_operation_registry() {
-  // Basic operations
   {
     let spec = create_test_spec(vec![
       ("/users", "get", Some("listUsers")),
@@ -122,28 +121,27 @@ fn test_operation_registry() {
       ("/posts", "post", Some("createPost")),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3, "expected 3 operations");
 
     let mut entries: Vec<_> = registry.operations().collect();
-    entries.sort_by_key(|(id, _)| *id);
+    entries.sort_by(|a, b| a.stable_id.cmp(&b.stable_id));
 
-    let (id, location) = entries[1];
-    assert_eq!(id, "get_users_by_id");
-    assert_eq!(location.method, "GET");
-    assert_eq!(location.path, "/users/{id}");
+    let entry = &entries[1];
+    assert_eq!(entry.stable_id, "get_users_by_id");
+    assert_eq!(entry.method, Method::GET);
+    assert_eq!(entry.path, "/users/{id}");
 
-    let (id, location) = entries[2];
-    assert_eq!(id, "list_users");
-    assert_eq!(location.method, "GET");
-    assert_eq!(location.path, "/users");
+    let entry = &entries[2];
+    assert_eq!(entry.stable_id, "list_users");
+    assert_eq!(entry.method, Method::GET);
+    assert_eq!(entry.path, "/users");
 
-    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     ids.sort_unstable();
     assert_eq!(ids, vec!["create_post", "get_users_by_id", "list_users"]);
   }
 
-  // Uniqueness
   {
     let spec = create_test_spec(vec![
       ("/users", "get", None),
@@ -153,29 +151,27 @@ fn test_operation_registry() {
       ("/users/{id}", "delete", None),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 5, "expected 5 operations for uniqueness test");
-    let ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     let unique_count = ids.iter().collect::<HashSet<_>>().len();
     assert_eq!(unique_count, 5, "all stable IDs should be unique");
   }
 
-  // Case sensitivity (both map to same base stable_id, deduplication + simplification)
   {
     let spec = create_test_spec(vec![
       ("/users", "get", Some("GetUsers")),
       ("/users", "post", Some("getUsers")),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 2, "both operations should be included with unique ids");
 
-    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     ids.sort_unstable();
     assert_eq!(ids, vec!["users", "users_2"], "common prefix 'get' should be stripped");
   }
 
-  // Empty registry
   {
     let spec_json = r#"{
       "openapi": "3.1.0",
@@ -186,14 +182,13 @@ fn test_operation_registry() {
       "paths": {}
     }"#;
     let spec: Spec = oas3::from_json(spec_json).unwrap();
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
 
     assert_eq!(registry.len(), 0);
     assert!(registry.is_empty());
     assert_eq!(registry.operations().count(), 0);
   }
 
-  // Filtered registry
   {
     let spec = create_test_spec(vec![
       ("/users", "get", Some("listUsers")),
@@ -204,17 +199,25 @@ fn test_operation_registry() {
     let mut excluded = HashSet::new();
     excluded.insert("list_users".to_string());
 
-    let registry = OperationRegistry::from_spec_filtered(&spec, None, Some(&excluded));
+    let registry = OperationRegistry::with_filters(&spec, None, Some(&excluded));
 
     assert_eq!(registry.len(), 2, "filtered registry should have 2 operations");
 
-    let ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
-    assert!(!ids.contains(&"list_users"), "list_users should be excluded");
-    assert!(ids.contains(&"get_users_by_id"), "get_users_by_id should be included");
-    assert!(ids.contains(&"create_post"), "create_post should be included");
+    let ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    assert!(
+      !ids.contains(&"list_users".to_string()),
+      "list_users should be excluded"
+    );
+    assert!(
+      ids.contains(&"get_users_by_id".to_string()),
+      "get_users_by_id should be included"
+    );
+    assert!(
+      ids.contains(&"create_post".to_string()),
+      "create_post should be included"
+    );
   }
 
-  // Webhook operations
   {
     let spec_json = r#"{
       "openapi": "3.1.0",
@@ -231,24 +234,17 @@ fn test_operation_registry() {
     }"#;
 
     let spec: Spec = oas3::from_json(spec_json).unwrap();
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
 
     assert_eq!(registry.len(), 1);
 
-    let (id, location) = registry.operations().next().unwrap();
-    assert_eq!(id, "pet_added_hook");
-    assert_eq!(location.path, "webhooks/petAdded");
-    assert_eq!(location.lookup_path, "petAdded");
-    assert_eq!(location.kind, OperationKind::Webhook);
-
-    let mut details = registry.operations_with_details();
-    let (_, method, path, _, kind) = details.next().unwrap();
-    assert_eq!(method, &Method::POST);
-    assert_eq!(path, "webhooks/petAdded");
-    assert_eq!(kind, OperationKind::Webhook);
+    let entry = registry.operations().next().unwrap();
+    assert_eq!(entry.stable_id, "pet_added_hook");
+    assert_eq!(entry.path, "webhooks/petAdded");
+    assert_eq!(entry.kind, OperationKind::Webhook);
+    assert_eq!(entry.method, Method::POST);
   }
 
-  // Deduplication of identical operation IDs across different paths (then simplified)
   {
     let spec = create_test_spec(vec![
       ("/api/v1/users", "get", Some("listItems")),
@@ -256,10 +252,10 @@ fn test_operation_registry() {
       ("/api/v3/users", "get", Some("listItems")),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3, "all operations should be registered with unique ids");
 
-    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     ids.sort_unstable();
     assert_eq!(
       ids,
@@ -268,7 +264,6 @@ fn test_operation_registry() {
     );
   }
 
-  // Simplification of common prefixes
   {
     let spec = create_test_spec(vec![
       (
@@ -288,15 +283,14 @@ fn test_operation_registry() {
       ),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3);
 
-    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     ids.sort_unstable();
     assert_eq!(ids, vec!["delete", "get", "list"], "common prefix should be stripped");
   }
 
-  // Simplification with common suffix
   {
     let spec = create_test_spec(vec![
       ("/users", "get", Some("list_users_request")),
@@ -304,10 +298,10 @@ fn test_operation_registry() {
       ("/users/{id}", "delete", Some("delete_users_request")),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3);
 
-    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     ids.sort_unstable();
     assert_eq!(
       ids,
@@ -316,17 +310,16 @@ fn test_operation_registry() {
     );
   }
 
-  // No simplification when it would create duplicates
   {
     let spec = create_test_spec(vec![
       ("/users", "get", Some("api_users_list")),
       ("/posts", "get", Some("api_posts_list")),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 2);
 
-    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     ids.sort_unstable();
     assert_eq!(
       ids,
@@ -335,17 +328,16 @@ fn test_operation_registry() {
     );
   }
 
-  // No simplification when names have nothing in common
   {
     let spec = create_test_spec(vec![
       ("/users", "get", Some("listUsers")),
       ("/posts", "post", Some("createPost")),
     ]);
 
-    let registry = OperationRegistry::from_spec(&spec);
+    let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 2);
 
-    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
     ids.sort_unstable();
     assert_eq!(
       ids,

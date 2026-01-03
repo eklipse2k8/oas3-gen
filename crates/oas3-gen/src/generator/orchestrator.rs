@@ -1,5 +1,6 @@
 use std::{
   collections::{BTreeSet, HashMap, HashSet},
+  rc::Rc,
   sync::Arc,
 };
 
@@ -12,8 +13,8 @@ use crate::generator::{
   ast::{ClientDef, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType, StructToken},
   codegen::{self, Visibility, client::ClientGenerator, mod_file::ModFileGenerator},
   converter::{
-    CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
-    TypeUsageRecorder, operations::OperationConverter,
+    CodegenConfig, ConverterContext, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy,
+    SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
   },
   naming::identifiers::to_rust_type_name,
   operation_registry::OperationRegistry,
@@ -106,7 +107,7 @@ impl Orchestrator {
     no_helpers: bool,
     customizations: HashMap<String, String>,
   ) -> Self {
-    let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
+    let operation_registry = OperationRegistry::with_filters(&spec, only_operations, excluded_operations);
     Self {
       spec,
       visibility,
@@ -251,7 +252,7 @@ impl Orchestrator {
     let operation_reachable = if self.include_unused_schemas {
       None
     } else {
-      Some(graph.reachable(&self.operation_registry))
+      Some(Arc::new(graph.reachable(&self.operation_registry)))
     };
 
     let total_schemas = graph.keys().len();
@@ -289,24 +290,27 @@ impl Orchestrator {
 
     let graph = Arc::new(graph);
 
-    let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), &config)
-    } else {
-      SchemaConverter::new(&graph, &config)
-    };
-
     let mut cache = SharedSchemaCache::new();
     cache.set_precomputed_names(scan_result.names, scan_result.enum_names);
 
+    let context = Rc::new(ConverterContext::new(
+      graph.clone(),
+      config,
+      cache,
+      operation_reachable.clone(),
+    ));
+
+    let schema_converter = SchemaConverter::new(&context);
+
     let (schema_rust_types, schema_warnings) =
-      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref(), &mut cache);
+      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_deref());
 
     let (op_rust_types, operations_info, op_warnings, usage_recorder) =
-      self.convert_all_operations(&graph, &schema_converter, &mut cache);
+      self.convert_all_operations(&graph, &schema_converter);
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
-    rust_types.extend(cache.into_types());
+    rust_types.extend(context.cache.replace(SharedSchemaCache::new()).into_types());
 
     warnings.extend(schema_warnings);
     warnings.extend(op_warnings);
@@ -362,27 +366,10 @@ impl Orchestrator {
   }
 
   /// Converts all schemas from the OpenAPI spec to Rust types.
-  ///
-  /// Processing order: Enums are converted before other schema types to ensure deterministic
-  /// code generation. This ordering prevents issues where enum types might be referenced
-  /// before they are defined, and ensures generated code is stable across multiple runs.
-  ///
-  /// Algorithm:
-  /// 1. Collect all schema names from the graph
-  /// 2. Sort schemas by `is_none_or(|s| s.enum_values.is_empty())` to place enums first:
-  ///    - Schemas with non-empty `enum_values` sort as `false` (enums first)
-  ///    - Schemas with empty `enum_values` sort as `true` (non-enums after)
-  ///    - Missing schemas sort as `true` (last)
-  /// 3. Process each schema in order, applying operation reachability filtering if enabled
-  /// 4. Collect conversion errors as warnings rather than failing fast
-  ///
-  /// The `operation_reachable` filter, when provided, limits conversion to schemas that are
-  /// referenced by at least one operation, reducing generated code size.
   fn convert_all_schemas(
     graph: &SchemaRegistry,
     schema_converter: &SchemaConverter,
     operation_reachable: Option<&std::collections::BTreeSet<String>>,
-    cache: &mut SharedSchemaCache,
   ) -> (Vec<RustType>, Vec<GenerationWarning>) {
     let mut rust_types = vec![];
     let mut warnings = vec![];
@@ -390,12 +377,15 @@ impl Orchestrator {
     let mut schema_names = graph.keys();
     schema_names.sort_by_key(|name| graph.get(name).is_none_or(|schema| schema.enum_values.is_empty()));
 
-    for schema_name in &schema_names {
-      if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
-        continue;
-      }
-      if let Some(schema) = graph.get(schema_name) {
-        let _ = cache.register_top_level_schema(schema, schema_name);
+    {
+      let mut cache = schema_converter.context().cache.borrow_mut();
+      for schema_name in &schema_names {
+        if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
+          continue;
+        }
+        if let Some(schema) = graph.get(schema_name) {
+          let _ = cache.register_top_level_schema(schema, schema_name);
+        }
       }
     }
 
@@ -408,7 +398,7 @@ impl Orchestrator {
         continue;
       };
 
-      match schema_converter.convert_schema(schema_name, schema, Some(cache)) {
+      match schema_converter.convert_schema(schema_name, schema) {
         Ok(types) => rust_types.extend(types),
         Err(e) => warnings.push(GenerationWarning::SchemaConversionFailed {
           schema_name: schema_name.clone(),
@@ -434,7 +424,6 @@ impl Orchestrator {
     &self,
     graph: &SchemaRegistry,
     schema_converter: &SchemaConverter,
-    cache: &mut SharedSchemaCache,
   ) -> (
     Vec<RustType>,
     Vec<OperationInfo>,
@@ -448,8 +437,8 @@ impl Orchestrator {
 
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
-    for (stable_id, method, path, operation, kind) in self.operation_registry.operations_with_details() {
-      match operation_converter.convert(stable_id, method, path, kind, operation, &mut usage_recorder, cache) {
+    for entry in self.operation_registry.operations() {
+      match operation_converter.convert(entry, &mut usage_recorder) {
         Ok(result) => {
           warnings.extend(
             result
@@ -466,8 +455,8 @@ impl Orchestrator {
         }
         Err(e) => {
           warnings.push(GenerationWarning::OperationConversionFailed {
-            method: method.to_string(),
-            path: path.to_string(),
+            method: entry.method.to_string(),
+            path: entry.path.clone(),
             error: e.to_string(),
           });
         }

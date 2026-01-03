@@ -633,9 +633,9 @@ impl TryFrom<&serde_json::Value> for NormalizedVariant {
 /// - Input: `["User", "UserProfile"]`
 /// - Common prefix: 1 word (User)
 /// - Stripping would empty the first variant, so no changes applied
-pub fn strip_common_affixes(variants: &mut [VariantDef]) {
+pub fn strip_common_affixes(variants: Vec<VariantDef>) -> Vec<VariantDef> {
   if variants.len() < 2 {
-    return;
+    return variants;
   }
 
   let word_segments: Vec<Vec<String>> = variants
@@ -654,12 +654,17 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
     .collect();
 
   if !all_non_empty_and_unique(&stripped_names) {
-    return;
+    return variants;
   }
 
-  for (variant, new_name) in variants.iter_mut().zip(stripped_names) {
-    variant.name = EnumVariantToken::from(new_name);
-  }
+  variants
+    .into_iter()
+    .zip(stripped_names)
+    .map(|(mut variant, new_name)| {
+      variant.name = EnumVariantToken::from(new_name);
+      variant
+    })
+    .collect()
 }
 
 /// Joins word segments after stripping common prefix and suffix.
