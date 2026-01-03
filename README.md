@@ -64,7 +64,7 @@ Executing `oas3-gen` produces the corresponding Rust types.
 
 use serde::Deserialize;
 
-#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Pet {
   pub id: i64,
   pub name: String,
@@ -76,19 +76,30 @@ pub struct Pet {
 
 | Feature | Description |
 |---------|-------------|
+| Custom Formats | Use `serde_as` to parse formats |
 | Cycle Detection | Prevents infinite type recursion |
 | Doc Comments | Schema descriptions become rustdoc |
 | Enum Helpers | Ergonomic is_/as_ methods |
 | Enum Modes | Merge, preserve, or relaxed |
+| Event stream | Simple event stream capture if media-type is specified |
 | JSON/YAML Support | Auto-detects format from file extension |
 | OData Support | Optional @odata.* field handling |
-| OpenAPI 3.1 | Full spec parsing support |
+| OpenAPI 3.1 | Most common spec parsing support |
 | Operation Filtering | Include/exclude specific operations |
 | Operation Types | Request/response type generation |
 | Schema Composition | Handles allOf/oneOf/anyOf correctly |
 | Serde Integration | Automatic derive for serialization |
 | Smart Naming | Auto-detects camelCase/snake_case conventions |
 | Validation | Constraint attributes from spec |
+| Webhooks | Generates structs from Webhook components |
+
+### Missing features
+
+* Server Code generation
+* OAS 3.1 Links and `$dynamic-ref` (oas3 doesn't support this yet)
+* OAS 3.2 Event-stream support
+* External schema references
+* HTTP schema references and fetching
 
 ### Command-Line Options
 
@@ -130,6 +141,7 @@ Code Generation:
       --odata-support          Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types)
       --enum-mode <ENUM_MODE>  Specifies how to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
       --no-helpers             Disable generation of ergonomic helper methods for enum variants
+  -c, --customize <TYPE=PATH>  Custom serde_as type overrides (format: type_name=custom::Path)
 
 Operation Filtering:
       --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
@@ -181,6 +193,9 @@ oas3-gen generate -i graph-api.json -o types.rs --odata-support
 
 # Enable relaxed (case-insensitive) enum deserialization
 oas3-gen generate -i openapi.json -o types.rs --enum-mode relaxed
+
+# Enable custom parsing through serde_as traits
+oas3-gen generate client-mod -i openapi.json -o generated --customize datetime=MyCustomDateTime
 
 # List all operations in the specification
 oas3-gen list operations -i openapi.json
