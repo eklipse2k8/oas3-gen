@@ -74,14 +74,14 @@ mod tests {
 
   #[test]
   fn test_stream_events_request_is_empty() {
-    let request = StreamEventsRequest {};
+    let request = EventsRequest {};
     assert!(std::mem::size_of_val(&request) == 0 || std::mem::size_of_val(&request) == 1);
   }
 
   #[test]
   fn test_stream_typed_events_request_has_query() {
-    let request = StreamTypedEventsRequest {
-      query: StreamTypedEventsRequestQuery {
+    let request = TypedEventsRequest {
+      query: TypedEventsRequestQuery {
         filter: Some("active".to_string()),
       },
     };
@@ -90,7 +90,7 @@ mod tests {
 
   #[test]
   fn test_query_serialization() {
-    let query = StreamTypedEventsRequestQuery {
+    let query = TypedEventsRequestQuery {
       filter: Some("status:active".to_string()),
     };
     let serialized = serde_json::to_string(&query).unwrap();
@@ -100,7 +100,7 @@ mod tests {
 
   #[test]
   fn test_query_with_none_filter() {
-    let query = StreamTypedEventsRequestQuery { filter: None };
+    let query = TypedEventsRequestQuery { filter: None };
     let serialized = serde_json::to_string(&query).unwrap();
     assert!(!serialized.contains("filter"));
   }

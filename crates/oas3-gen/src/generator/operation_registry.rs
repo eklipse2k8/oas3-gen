@@ -4,7 +4,13 @@ use http::Method;
 use indexmap::IndexMap;
 use oas3::Spec;
 
-use crate::generator::{ast::OperationKind, naming::identifiers::to_rust_field_name};
+use crate::generator::{
+  ast::OperationKind,
+  naming::{
+    identifiers::ensure_unique_snake_case_id,
+    operations::{compute_stable_id, trim_common_affixes},
+  },
+};
 
 #[derive(Debug, Clone)]
 pub struct OperationLocation {
@@ -37,6 +43,15 @@ impl OperationRegistry {
 
     Self::ingest_http_operations(spec, only_operations, excluded_operations, &mut id_to_location);
     Self::ingest_webhooks(spec, only_operations, excluded_operations, &mut id_to_location);
+
+    let original_keys: Vec<_> = id_to_location.keys().cloned().collect();
+    let simplified_keys = trim_common_affixes(&original_keys);
+
+    let id_to_location = original_keys
+      .into_iter()
+      .zip(simplified_keys)
+      .map(|(old, new)| (new, id_to_location.swap_remove(&old).unwrap()))
+      .collect();
 
     Self {
       id_to_location,
@@ -86,19 +101,21 @@ impl OperationRegistry {
     id_to_location: &mut IndexMap<String, OperationLocation>,
   ) {
     for (path, method, operation) in spec.operations() {
-      let stable_id = compute_stable_id(method.as_str(), &path, operation);
+      let base_id = compute_stable_id(method.as_str(), &path, operation.operation_id.as_deref());
 
       if let Some(included) = only_operations
-        && !included.contains(&stable_id)
+        && !included.contains(&base_id)
       {
         continue;
       }
 
       if let Some(excluded) = excluded_operations
-        && excluded.contains(&stable_id)
+        && excluded.contains(&base_id)
       {
         continue;
       }
+
+      let stable_id = ensure_unique_snake_case_id(&base_id, |id| id_to_location.contains_key(id));
 
       let location = OperationLocation {
         method: method.clone(),
@@ -119,19 +136,21 @@ impl OperationRegistry {
     for (name, path_item) in &spec.webhooks {
       for (method, operation) in path_item.methods() {
         let display_path = format!("webhooks/{name}");
-        let stable_id = compute_stable_id(method.as_str(), &display_path, operation);
+        let base_id = compute_stable_id(method.as_str(), &display_path, operation.operation_id.as_deref());
 
         if let Some(included) = only_operations
-          && !included.contains(&stable_id)
+          && !included.contains(&base_id)
         {
           continue;
         }
 
         if let Some(excluded) = excluded_operations
-          && excluded.contains(&stable_id)
+          && excluded.contains(&base_id)
         {
           continue;
         }
+
+        let stable_id = ensure_unique_snake_case_id(&base_id, |id| id_to_location.contains_key(id));
 
         let location = OperationLocation {
           method: method.clone(),
@@ -154,34 +173,5 @@ impl OperationRegistry {
   #[must_use]
   pub fn is_empty(&self) -> bool {
     self.id_to_location.is_empty()
-  }
-}
-
-pub fn compute_stable_id(method: &str, path: &str, operation: &oas3::spec::Operation) -> String {
-  let id = operation
-    .operation_id
-    .clone()
-    .unwrap_or_else(|| generate_operation_id(method, path));
-  to_rust_field_name(&id)
-}
-
-pub(crate) fn generate_operation_id(method: &str, path: &str) -> String {
-  let path_parts: Vec<&str> = path
-    .split('/')
-    .filter(|s| !s.is_empty())
-    .map(|s| {
-      if s.starts_with('{') && s.ends_with('}') {
-        "by_id"
-      } else {
-        s
-      }
-    })
-    .collect();
-
-  let method_lower = method.to_lowercase();
-  if path_parts.is_empty() {
-    method_lower
-  } else {
-    format!("{}_{}", method_lower, path_parts.join("_"))
   }
 }

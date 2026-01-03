@@ -79,6 +79,19 @@ pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
   words
 }
 
+/// Splits a `snake_case` string into words.
+pub(crate) fn split_snake_case<S>(name: S) -> Vec<String>
+where
+  S: AsRef<str>,
+{
+  name
+    .as_ref()
+    .split('_')
+    .filter(|s| !s.is_empty())
+    .map(std::string::ToString::to_string)
+    .collect()
+}
+
 pub(crate) fn strip_parent_prefix(parent_name: &str, prop_pascal: &str) -> String {
   let parent_words = split_pascal_case(parent_name);
   let prop_words = split_pascal_case(prop_pascal);
@@ -104,6 +117,25 @@ pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> S
       return new_name;
     }
     i += 1;
+  }
+}
+
+/// Ensures a snake_case identifier is unique by appending `_2`, `_3`, etc. if needed.
+pub fn ensure_unique_snake_case_id<F>(base_id: &str, is_taken: F) -> String
+where
+  F: Fn(&str) -> bool,
+{
+  if !is_taken(base_id) {
+    return base_id.to_string();
+  }
+
+  let mut counter = 2;
+  loop {
+    let candidate = format!("{base_id}_{counter}");
+    if !is_taken(&candidate) {
+      return candidate;
+    }
+    counter += 1;
   }
 }
 

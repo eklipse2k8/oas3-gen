@@ -449,18 +449,7 @@ impl Orchestrator {
     let operation_converter = OperationConverter::new(schema_converter, graph.spec());
 
     for (stable_id, method, path, operation, kind) in self.operation_registry.operations_with_details() {
-      let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
-
-      match operation_converter.convert(
-        stable_id,
-        operation_id,
-        method,
-        path,
-        kind,
-        operation,
-        &mut usage_recorder,
-        cache,
-      ) {
+      match operation_converter.convert(stable_id, method, path, kind, operation, &mut usage_recorder, cache) {
         Ok(result) => {
           warnings.extend(
             result

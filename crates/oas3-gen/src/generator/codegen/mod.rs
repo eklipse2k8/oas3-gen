@@ -156,7 +156,7 @@ fn deduplicate_and_order_types<'a>(types: &'a [RustType]) -> Vec<&'a RustType> {
 
 fn collect_header_tokens(types: &[&RustType]) -> Vec<HeaderToken> {
   let mut seen: BTreeSet<String> = BTreeSet::new();
-  let mut headers = Vec::new();
+  let mut headers = vec![];
 
   for rust_type in types {
     let RustType::Struct(def) = rust_type else {

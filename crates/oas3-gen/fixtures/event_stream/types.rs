@@ -16,6 +16,29 @@ pub struct EventPayload {
   pub name: Option<String>,
   pub value: Option<i64>,
 }
+///Returns a stream of server-sent events
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct EventsRequest {}
+impl EventsRequest {
+  ///Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<EventsResponse> {
+    let status = req.status();
+    if status.is_success() {
+      let data = <oas3_gen_support::EventStream<StreamEvent>>::from_response(req);
+      return Ok(EventsResponse::Ok(data));
+    }
+    let _ = req.bytes().await?;
+    Ok(EventsResponse::Unknown)
+  }
+}
+///Response types for streamEvents
+#[derive(Debug)]
+pub enum EventsResponse {
+  ///200: A stream of events
+  Ok(oas3_gen_support::EventStream<StreamEvent>),
+  ///default: Unknown response
+  Unknown,
+}
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct StreamEvent {
   ///Event data payload
@@ -24,71 +47,6 @@ pub struct StreamEvent {
   pub id: String,
   ///Event timestamp
   pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
-}
-///Returns a stream of server-sent events
-#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct StreamEventsRequest {}
-impl StreamEventsRequest {
-  ///Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<StreamEventsResponse> {
-    let status = req.status();
-    if status.is_success() {
-      let data = <oas3_gen_support::EventStream<StreamEvent>>::from_response(req);
-      return Ok(StreamEventsResponse::Ok(data));
-    }
-    let _ = req.bytes().await?;
-    Ok(StreamEventsResponse::Unknown)
-  }
-}
-///Response types for streamEvents
-#[derive(Debug)]
-pub enum StreamEventsResponse {
-  ///200: A stream of events
-  Ok(oas3_gen_support::EventStream<StreamEvent>),
-  ///default: Unknown response
-  Unknown,
-}
-///Returns a stream of typed server-sent events with query parameters
-#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct StreamTypedEventsRequest {
-  pub query: StreamTypedEventsRequestQuery,
-}
-#[bon::bon]
-impl StreamTypedEventsRequest {
-  ///Create a new request with the given parameters.
-  #[builder]
-  pub fn new(filter: Option<String>) -> anyhow::Result<Self> {
-    let request = Self {
-      query: StreamTypedEventsRequestQuery { filter },
-    };
-    request.validate()?;
-    Ok(request)
-  }
-}
-impl StreamTypedEventsRequest {
-  ///Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<StreamTypedEventsResponse> {
-    let status = req.status();
-    if status.is_success() {
-      let data = <oas3_gen_support::EventStream<TypedEvent>>::from_response(req);
-      return Ok(StreamTypedEventsResponse::Ok(data));
-    }
-    let _ = req.bytes().await?;
-    Ok(StreamTypedEventsResponse::Unknown)
-  }
-}
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
-pub struct StreamTypedEventsRequestQuery {
-  pub filter: Option<String>,
-}
-///Response types for streamTypedEvents
-#[derive(Debug)]
-pub enum StreamTypedEventsResponse {
-  ///200: A stream of typed events
-  Ok(oas3_gen_support::EventStream<TypedEvent>),
-  ///default: Unknown response
-  Unknown,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct TypedEvent {
@@ -116,4 +74,46 @@ impl core::fmt::Display for TypedEventType {
       Self::Deleted => write!(f, "deleted"),
     }
   }
+}
+///Returns a stream of typed server-sent events with query parameters
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct TypedEventsRequest {
+  pub query: TypedEventsRequestQuery,
+}
+#[bon::bon]
+impl TypedEventsRequest {
+  ///Create a new request with the given parameters.
+  #[builder]
+  pub fn new(filter: Option<String>) -> anyhow::Result<Self> {
+    let request = Self {
+      query: TypedEventsRequestQuery { filter },
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
+impl TypedEventsRequest {
+  ///Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<TypedEventsResponse> {
+    let status = req.status();
+    if status.is_success() {
+      let data = <oas3_gen_support::EventStream<TypedEvent>>::from_response(req);
+      return Ok(TypedEventsResponse::Ok(data));
+    }
+    let _ = req.bytes().await?;
+    Ok(TypedEventsResponse::Unknown)
+  }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct TypedEventsRequestQuery {
+  pub filter: Option<String>,
+}
+///Response types for streamTypedEvents
+#[derive(Debug)]
+pub enum TypedEventsResponse {
+  ///200: A stream of typed events
+  Ok(oas3_gen_support::EventStream<TypedEvent>),
+  ///default: Unknown response
+  Unknown,
 }

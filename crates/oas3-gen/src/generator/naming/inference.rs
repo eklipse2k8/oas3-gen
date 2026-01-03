@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+  collections::{BTreeSet, HashMap, HashSet},
+  hash::Hash,
+};
 
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
@@ -19,22 +22,13 @@ pub(crate) trait InferenceExt {
   /// ```text
   /// schema.any_of = [A, B], schema.one_of = [C] => yields A, B, C
   /// ```
-  ///
-  /// # Complexity
-  /// O(1) - creates a chained iterator without allocation.
   fn union_variants(&self) -> impl Iterator<Item = &ObjectOrReference<ObjectSchema>>;
 
   /// Returns the single `SchemaType` if exactly one is defined, or the non-null type
   /// from a two-type nullable set (e.g., `[string, null]` -> `string`).
-  ///
-  /// # Complexity
-  /// O(1) - field access only.
   fn single_type_or_nullable(&self) -> Option<SchemaType>;
 
   /// Returns true if the schema is a string type (including nullable string).
-  ///
-  /// # Complexity
-  /// O(1) - delegates to `single_type_or_nullable`.
   fn is_string_type(&self) -> bool;
 
   /// Returns true if schema is an unconstrained string type (no enum/const restrictions).
@@ -45,9 +39,6 @@ pub(crate) trait InferenceExt {
   /// { "type": "string", "enum": ["a"] }     => false
   /// { "type": "string", "const": "x" }      => false
   /// ```
-  ///
-  /// # Complexity
-  /// O(1) - field access only.
   fn is_freeform_string(&self) -> bool;
 
   /// Returns true if schema has enum values or a const constraint.
@@ -58,9 +49,6 @@ pub(crate) trait InferenceExt {
   /// { "const": "x" }        => true
   /// { "type": "string" }    => false
   /// ```
-  ///
-  /// # Complexity
-  /// O(1) - field access only.
   fn is_constrained(&self) -> bool;
 
   /// Checks if a schema matches the "relaxed enum" pattern.
@@ -82,9 +70,6 @@ pub(crate) trait InferenceExt {
   /// { "enum": ["active", "pending", 123] } => Some(["active", "pending"])
   /// { "type": "string" }                   => None
   /// ```
-  ///
-  /// # Complexity
-  /// O(n log n) where n = number of enum values (due to sorting).
   fn extract_standard_enum_values(&self) -> Option<Vec<String>>;
 
   /// Infers a variant name for an inline schema in a union.
@@ -383,7 +368,7 @@ pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<Object
   Some(build_common_variant_name(first, prefix_len, suffix_len))
 }
 
-/// Counts word segments shared at the start of all PascalCase-split name lists.
+/// Counts word segments shared at the start of all name lists.
 ///
 /// # Example
 /// ```text
@@ -392,18 +377,21 @@ pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<Object
 /// => 1 (only "User" is common prefix)
 /// ```
 ///
-/// # Complexity
-/// O(p * n) where p = prefix length, n = number of variants in `rest`.
 #[must_use]
-fn common_prefix_len(first: &[String], rest: &[Vec<String>]) -> usize {
+pub(crate) fn common_prefix_len<S: AsRef<str>>(first: &[S], rest: &[Vec<S>]) -> usize {
   first
     .iter()
     .enumerate()
-    .take_while(|(i, seg)| rest.iter().all(|other| other.get(*i) == Some(seg)))
+    .take_while(|(i, seg)| {
+      let seg_str = seg.as_ref();
+      rest
+        .iter()
+        .all(|other| other.get(*i).map(AsRef::as_ref) == Some(seg_str))
+    })
     .count()
 }
 
-/// Counts word segments shared at the end of all PascalCase-split name lists.
+/// Counts word segments shared at the end of all name lists.
 ///
 /// # Example
 /// ```text
@@ -412,10 +400,8 @@ fn common_prefix_len(first: &[String], rest: &[Vec<String>]) -> usize {
 /// => 2 ("User", "Response" are common suffix)
 /// ```
 ///
-/// # Complexity
-/// O(s * n) where s = suffix length, n = number of variants in `rest`.
 #[must_use]
-fn common_suffix_len(first: &[String], rest: &[Vec<String>]) -> usize {
+pub(crate) fn common_suffix_len<S: AsRef<str>>(first: &[S], rest: &[Vec<S>]) -> usize {
   let min_len = std::iter::once(first.len())
     .chain(rest.iter().map(Vec::len))
     .min()
@@ -423,8 +409,13 @@ fn common_suffix_len(first: &[String], rest: &[Vec<String>]) -> usize {
 
   (1..=min_len)
     .take_while(|&offset| {
-      let seg = &first[first.len() - offset];
-      rest.iter().all(|other| other.get(other.len() - offset) == Some(seg))
+      let seg = first[first.len() - offset].as_ref();
+      rest.iter().all(|other| {
+        other
+          .get(other.len() - offset)
+          .map(AsRef::as_ref)
+          .is_some_and(|s| s == seg)
+      })
     })
     .count()
 }
@@ -443,8 +434,6 @@ fn common_suffix_len(first: &[String], rest: &[Vec<String>]) -> usize {
 /// => CommonVariantName { name: "Beta", has_suffix: false }
 /// ```
 ///
-/// # Complexity
-/// O(k) where k = number of segments joined.
 #[must_use]
 fn build_common_variant_name(segments: &[String], prefix_len: usize, suffix_len: usize) -> CommonVariantName {
   if suffix_len > 0 {
@@ -472,8 +461,6 @@ fn build_common_variant_name(segments: &[String], prefix_len: usize, suffix_len:
 /// anyOf: [{ type: string, enum: ["a"] }, { type: string, enum: ["b"] }] => false
 /// ```
 ///
-/// # Complexity
-/// O(n) where n = number of variants (single pass).
 pub(crate) fn has_mixed_string_variants<'a>(
   variants: impl Iterator<Item = &'a ObjectOrReference<ObjectSchema>>,
 ) -> bool {
@@ -508,8 +495,6 @@ pub(crate) fn has_mixed_string_variants<'a>(
 /// => Some(["a", "b", "c"])
 /// ```
 ///
-/// # Complexity
-/// O(v * e) where v = variants, e = enum values per variant. Uses BTreeSet for deduplication.
 fn extract_relaxed_enum_values(variants: &[&ObjectOrReference<ObjectSchema>]) -> Option<Vec<String>> {
   let values: BTreeSet<_> = variants
     .iter()
@@ -665,7 +650,7 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
 
   let stripped_names: Vec<String> = word_segments
     .iter()
-    .map(|segments| extract_middle_segments(segments, common_prefix_len, common_suffix_len))
+    .map(|segments| extract_middle_segments(segments, common_prefix_len, common_suffix_len, ""))
     .collect();
 
   if !all_non_empty_and_unique(&stripped_names) {
@@ -690,16 +675,23 @@ pub fn strip_common_affixes(variants: &mut [VariantDef]) {
 /// => "Response" (unchanged, stripping would empty it)
 /// ```
 ///
-/// # Complexity
-/// O(k) where k = number of segments joined.
 #[must_use]
-fn extract_middle_segments(segments: &[String], prefix_len: usize, suffix_len: usize) -> String {
+pub(crate) fn extract_middle_segments<S>(
+  segments: &[S],
+  prefix_len: usize,
+  suffix_len: usize,
+  separator: &str,
+) -> String
+where
+  S: AsRef<str>,
+{
   let end_idx = segments.len().saturating_sub(suffix_len);
-  if prefix_len < end_idx {
-    segments[prefix_len..end_idx].join("")
+  let parts = if prefix_len < end_idx {
+    &segments[prefix_len..end_idx]
   } else {
-    segments.join("")
-  }
+    segments
+  };
+  parts.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(separator)
 }
 
 /// Returns true if all strings are non-empty and unique.
@@ -713,65 +705,82 @@ fn extract_middle_segments(segments: &[String], prefix_len: usize, suffix_len: u
 /// ["Create", ""]                 => false (empty)
 /// ```
 ///
-/// # Complexity
-/// O(n log n) where n = number of names (BTreeSet insertion).
 #[must_use]
-fn all_non_empty_and_unique(names: &[String]) -> bool {
-  if names.iter().any(String::is_empty) {
-    return false;
-  }
-  let unique: BTreeSet<&String> = names.iter().collect();
-  unique.len() == names.len()
+pub(crate) fn all_non_empty_and_unique<S>(names: &[S]) -> bool
+where
+  S: AsRef<str> + Eq + Hash,
+{
+  let mut seen = HashSet::with_capacity(names.len());
+  names.iter().all(|s| !s.as_ref().is_empty() && seen.insert(s))
+}
+
+#[derive(Debug, Clone)]
+struct Candidate {
+  short: String,
+  original: String,
 }
 
 /// Derives method names for multiple enum variants, ensuring they remain unique
 /// after filtering out common words with the enum name.
 ///
-/// Algorithm:
+/// # Algorithm
+///
 /// 1. Split enum name into words (e.g., `"MyEnum"` -> `["My", "Enum"]`).
-/// 2. For each variant, split into words.
-/// 3. Remove words present in the enum name from the variant name.
-/// 4. If the result is unique and non-empty, use it.
-/// 5. Otherwise, fall back to the full variant name (snake_cased).
-pub(crate) fn derive_method_names(enum_name: &str, variant_names: &[String]) -> Vec<String> {
-  if variant_names.is_empty() {
+/// 2. For each variant, split into words and filter out words present in the enum name.
+/// 3. If the filtered result is unique across all variants, use it.
+/// 4. Otherwise, fall back to the full variant name (snake_cased).
+///
+pub(crate) fn derive_method_names<S, V>(name: S, variants: &[V]) -> Vec<String>
+where
+  S: AsRef<str>,
+  V: AsRef<str>,
+{
+  if variants.is_empty() {
     return vec![];
   }
 
-  let enum_words: BTreeSet<_> = split_pascal_case(enum_name).into_iter().collect();
-
-  let candidates: Vec<(String, String)> = variant_names
+  let exclusion_set = split_pascal_case(name.as_ref())
     .iter()
-    .map(|variant_name| {
-      let variant_words = split_pascal_case(variant_name);
-      let unique_words: Vec<_> = variant_words
+    .map(|w| w.to_lowercase())
+    .collect::<HashSet<_>>();
+
+  let mut short_counts = HashMap::new();
+
+  let candidates = variants
+    .iter()
+    .map(|variant| {
+      let variant = variant.as_ref();
+
+      let parts = split_pascal_case(variant)
         .iter()
-        .filter(|word| !enum_words.contains(*word))
-        .cloned()
-        .collect();
+        .map(|w| w.to_lowercase())
+        .filter(|w| !exclusion_set.contains(w))
+        .collect::<Vec<_>>();
 
-      let original = variant_name.to_snake_case();
-      let simplified = if unique_words.is_empty() {
-        original.clone()
+      let short_name = if parts.is_empty() {
+        // Fallback: If all words were filtered out, use the full name as the "short" name.
+        variant.to_snake_case()
       } else {
-        unique_words.join("").to_snake_case()
+        parts.join("_")
       };
-      (original, simplified)
-    })
-    .collect();
 
-  let mut simplified_counts = BTreeMap::new();
-  for (_, simplified) in &candidates {
-    *simplified_counts.entry(simplified.clone()).or_insert(0) += 1;
-  }
+      *short_counts.entry(short_name.clone()).or_insert(0) += 1;
+
+      Candidate {
+        short: short_name,
+        original: variant.to_string(),
+      }
+    })
+    .collect::<Vec<_>>();
 
   candidates
-    .into_iter()
-    .map(|(original, simplified)| {
-      if simplified_counts[&simplified] > 1 {
-        original
+    .iter()
+    .map(|ctx| {
+      // If the short name appears more than once, fall back to the full original name.
+      if short_counts[&ctx.short] > 1 {
+        ctx.original.to_snake_case()
       } else {
-        simplified
+        ctx.short.clone()
       }
     })
     .collect()

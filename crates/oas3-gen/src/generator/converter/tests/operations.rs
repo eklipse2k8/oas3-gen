@@ -72,7 +72,6 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "my_op",
-    "myOp",
     &Method::GET,
     "/test",
     OperationKind::Http,
@@ -108,7 +107,6 @@ fn test_operation_with_path_parameter() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "get_user",
-    "getUser",
     &Method::GET,
     "/users/{userId}",
     OperationKind::Http,
@@ -172,7 +170,6 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "create_user",
-    "createUser",
     &Method::POST,
     "/users",
     OperationKind::Http,
@@ -245,7 +242,6 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "get_user",
-    "getUser",
     &Method::GET,
     "/user",
     OperationKind::Http,
@@ -328,7 +324,6 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
 
     let result = converter.convert(
       &snake_op_id,
-      op_id,
       &Method::GET,
       &path,
       OperationKind::Http,
@@ -390,7 +385,6 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "get_user_post",
-    "getUserPost",
     &Method::GET,
     "/users/{userId}/posts/{postId}",
     OperationKind::Http,
@@ -471,7 +465,6 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
 
     let result = converter.convert(
       "download_file",
-      "downloadFile",
       &Method::GET,
       "/files/download",
       OperationKind::Http,
@@ -598,7 +591,6 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "get_events",
-    "getEvents",
     &Method::GET,
     "/events",
     OperationKind::Http,
@@ -689,7 +681,6 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "get_item",
-    "getItem",
     &Method::GET,
     "/items",
     OperationKind::Http,
@@ -768,7 +759,6 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "get_item",
-    "getItem",
     &Method::GET,
     "/items",
     OperationKind::Http,
@@ -835,7 +825,6 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "get_count",
-    "getCount",
     &Method::GET,
     "/count",
     OperationKind::Http,
@@ -887,7 +876,6 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "delete_item",
-    "deleteItem",
     &Method::DELETE,
     "/items/{id}",
     OperationKind::Http,
@@ -981,7 +969,6 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
 
   let result = converter.convert(
     "create_interaction",
-    "createInteraction",
     &Method::POST,
     "/interactions",
     OperationKind::Http,

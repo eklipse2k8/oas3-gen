@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 
 use http::Method;
-use oas3::{Spec, spec::Operation};
+use oas3::Spec;
 
 use crate::generator::{
   ast::OperationKind,
-  operation_registry::{OperationRegistry, compute_stable_id, generate_operation_id},
+  naming::operations::{compute_stable_id, generate_operation_id},
+  operation_registry::OperationRegistry,
 };
 
 fn create_test_spec(operations: Vec<(&str, &str, Option<&str>)>) -> Spec {
@@ -70,12 +71,8 @@ fn test_compute_stable_id() {
   ];
 
   for (method, path, op_id, expected) in cases {
-    let operation = Operation {
-      operation_id: op_id.map(String::from),
-      ..Default::default()
-    };
     assert_eq!(
-      compute_stable_id(method, path, &operation),
+      compute_stable_id(method, path, op_id),
       expected,
       "failed for {method} {path} with operation_id={op_id:?}"
     );
@@ -163,7 +160,7 @@ fn test_operation_registry() {
     assert_eq!(unique_count, 5, "all stable IDs should be unique");
   }
 
-  // Case sensitivity (both map to same stable_id)
+  // Case sensitivity (both map to same base stable_id, deduplication + simplification)
   {
     let spec = create_test_spec(vec![
       ("/users", "get", Some("GetUsers")),
@@ -171,9 +168,11 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::from_spec(&spec);
-    assert_eq!(registry.len(), 1, "both operations should map to same stable_id");
-    let operations: Vec<_> = registry.operations().collect();
-    assert_eq!(operations[0].0, "get_users");
+    assert_eq!(registry.len(), 2, "both operations should be included with unique ids");
+
+    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["users", "users_2"], "common prefix 'get' should be stripped");
   }
 
   // Empty registry
@@ -247,5 +246,111 @@ fn test_operation_registry() {
     assert_eq!(method, &Method::POST);
     assert_eq!(path, "webhooks/petAdded");
     assert_eq!(kind, OperationKind::Webhook);
+  }
+
+  // Deduplication of identical operation IDs across different paths (then simplified)
+  {
+    let spec = create_test_spec(vec![
+      ("/api/v1/users", "get", Some("listItems")),
+      ("/api/v2/users", "get", Some("listItems")),
+      ("/api/v3/users", "get", Some("listItems")),
+    ]);
+
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 3, "all operations should be registered with unique ids");
+
+    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(
+      ids,
+      vec!["items", "items_2", "items_3"],
+      "common prefix 'list' should be stripped"
+    );
+  }
+
+  // Simplification of common prefixes
+  {
+    let spec = create_test_spec(vec![
+      (
+        "/me/mail/folders/messages",
+        "get",
+        Some("me_mail_folders_messages_list"),
+      ),
+      (
+        "/me/mail/folders/messages/{id}",
+        "get",
+        Some("me_mail_folders_messages_get"),
+      ),
+      (
+        "/me/mail/folders/messages/{id}",
+        "delete",
+        Some("me_mail_folders_messages_delete"),
+      ),
+    ]);
+
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 3);
+
+    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["delete", "get", "list"], "common prefix should be stripped");
+  }
+
+  // Simplification with common suffix
+  {
+    let spec = create_test_spec(vec![
+      ("/users", "get", Some("list_users_request")),
+      ("/users", "post", Some("create_users_request")),
+      ("/users/{id}", "delete", Some("delete_users_request")),
+    ]);
+
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 3);
+
+    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(
+      ids,
+      vec!["create", "delete", "list"],
+      "common suffix should be stripped"
+    );
+  }
+
+  // No simplification when it would create duplicates
+  {
+    let spec = create_test_spec(vec![
+      ("/users", "get", Some("api_users_list")),
+      ("/posts", "get", Some("api_posts_list")),
+    ]);
+
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 2);
+
+    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(
+      ids,
+      vec!["posts", "users"],
+      "middle segment retained when prefix/suffix stripped"
+    );
+  }
+
+  // No simplification when names have nothing in common
+  {
+    let spec = create_test_spec(vec![
+      ("/users", "get", Some("listUsers")),
+      ("/posts", "post", Some("createPost")),
+    ]);
+
+    let registry = OperationRegistry::from_spec(&spec);
+    assert_eq!(registry.len(), 2);
+
+    let mut ids: Vec<&str> = registry.operations().map(|(id, _)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(
+      ids,
+      vec!["create_post", "list_users"],
+      "no simplification when no common affixes"
+    );
   }
 }

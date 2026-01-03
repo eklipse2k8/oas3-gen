@@ -54,7 +54,7 @@ impl PathSegment {
   }
 
   fn tokenize(segment: &str) -> Result<Vec<SegmentPart<'_>>, PathParseError> {
-    let mut parts = Vec::new();
+    let mut parts = vec![];
     let mut rest = segment;
     let mut offset = 0;
 
@@ -118,7 +118,7 @@ impl PathSegment {
 
   fn build_mixed(segment: &str, parts: &[SegmentPart<'_>], params: &HashMap<&str, &FieldNameToken>) -> Self {
     let mut format_str = String::new();
-    let mut field_params = Vec::new();
+    let mut field_params = vec![];
 
     for part in parts {
       match part {

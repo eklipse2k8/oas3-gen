@@ -299,7 +299,7 @@ mod parse_response {
           .unwrap_or("application/json");
       };
 
-      let mut cases = Vec::new();
+      let mut cases = vec![];
       for variant in variants {
         if variant.media_types.is_empty() {
           cases.push((ResponseMediaType::primary_category(&[]), *variant));
@@ -507,7 +507,7 @@ mod builder {
         .collect();
 
       let mut processed_nested: BTreeSet<&str> = BTreeSet::new();
-      let mut assignments = Vec::new();
+      let mut assignments = vec![];
 
       for field in self.fields {
         match &field.owner_field {

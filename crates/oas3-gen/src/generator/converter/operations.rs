@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use http::Method;
 use oas3::{
@@ -131,6 +131,12 @@ impl ParameterStructNames {
   }
 }
 
+#[derive(Debug, Clone)]
+struct ResponseMetadata {
+  type_name: Option<String>,
+  media_types: Vec<ResponseMediaType>,
+}
+
 /// Converter for OpenAPI Operations into Rust request/response types.
 ///
 /// Handles generation of request parameter structs, request body types,
@@ -149,11 +155,13 @@ impl<'a> OperationConverter<'a> {
   /// Converts an OpenAPI operation into a set of Rust types and metadata.
   ///
   /// Generates request structs, response enums, and body types.
+  /// The `stable_id` parameter is the single source of truth for naming: it determines
+  /// both the client method name (used as-is, in snake_case) and the generated struct
+  /// names (converted to PascalCase for Request/Response types).
   #[allow(clippy::too_many_arguments)]
   pub(crate) fn convert(
     &self,
     stable_id: &str,
-    operation_id: &str,
     method: &Method,
     path: &str,
     kind: OperationKind,
@@ -161,7 +169,7 @@ impl<'a> OperationConverter<'a> {
     usage: &mut TypeUsageRecorder,
     schema_cache: &mut SharedSchemaCache,
   ) -> anyhow::Result<ConversionResult> {
-    let base_name = to_rust_type_name(operation_id);
+    let base_name = to_rust_type_name(stable_id);
 
     let mut warnings = vec![];
     let mut types = vec![];
@@ -616,24 +624,22 @@ impl<'a> OperationConverter<'a> {
       }
     }
 
-    Self::synthesize_missing_path_params(path, &mut params);
+    params.extend(Self::synthesize_missing_path_params(path, &params));
 
     params
   }
 
-  fn synthesize_missing_path_params(path: &str, params: &mut Vec<Parameter>) {
-    let declared: HashSet<&str> = params
+  fn synthesize_missing_path_params(path: &str, existing_params: &[Parameter]) -> Vec<Parameter> {
+    let declared = existing_params
       .iter()
       .filter(|p| p.location == ParameterIn::Path)
       .map(|p| p.name.as_str())
-      .collect();
+      .collect::<HashSet<_>>();
 
-    let missing: Vec<_> = ParsedPath::extract_template_params(path)
+    ParsedPath::extract_template_params(path)
       .filter(|name| !declared.contains(name))
       .map(Self::synthesize_string_path_param)
-      .collect();
-
-    params.extend(missing);
+      .collect()
   }
 
   fn synthesize_string_path_param(name: &str) -> Parameter {
@@ -652,9 +658,9 @@ impl<'a> OperationConverter<'a> {
         ..Default::default()
       })),
       example: None,
-      examples: std::collections::BTreeMap::new(),
+      examples: BTreeMap::new(),
       content: None,
-      extensions: std::collections::BTreeMap::new(),
+      extensions: BTreeMap::new(),
     }
   }
 
@@ -751,8 +757,8 @@ impl<'a> OperationConverter<'a> {
   }
 
   fn build_builder_method(nested_structs: &[StructDef], main_fields: &[FieldDef]) -> Option<StructMethod> {
-    let mut builder_fields = Vec::new();
-    let mut nested_struct_info = Vec::new();
+    let mut builder_fields = vec![];
+    let mut nested_struct_info = vec![];
 
     for main_field in main_fields {
       let nested_struct = nested_structs
@@ -813,14 +819,7 @@ impl<'a> OperationConverter<'a> {
         .build(),
     )
   }
-}
 
-struct ResponseMetadata {
-  type_name: Option<String>,
-  media_types: Vec<ResponseMediaType>,
-}
-
-impl OperationConverter<'_> {
   fn extract_response_metadata(&self, operation: &Operation, usage: &mut TypeUsageRecorder) -> ResponseMetadata {
     let type_name = naming_responses::extract_response_type_name(self.spec, operation);
 

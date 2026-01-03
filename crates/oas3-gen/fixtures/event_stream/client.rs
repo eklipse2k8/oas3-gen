@@ -51,7 +51,7 @@ impl EventStreamApiClient {
   ///Returns a stream of server-sent events
   ///
   ///GET /events
-  pub async fn stream_events(&self, request: StreamEventsRequest) -> anyhow::Result<StreamEventsResponse> {
+  pub async fn events(&self, request: EventsRequest) -> anyhow::Result<EventsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -59,17 +59,14 @@ impl EventStreamApiClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("events");
     let response = self.client.get(url).send().await?;
-    StreamEventsRequest::parse_response(response).await
+    EventsRequest::parse_response(response).await
   }
   ///Stream typed events
   ///
   ///Returns a stream of typed server-sent events with query parameters
   ///
   ///GET /events/typed
-  pub async fn stream_typed_events(
-    &self,
-    request: StreamTypedEventsRequest,
-  ) -> anyhow::Result<StreamTypedEventsResponse> {
+  pub async fn typed_events(&self, request: TypedEventsRequest) -> anyhow::Result<TypedEventsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -78,6 +75,6 @@ impl EventStreamApiClient {
       .push("events")
       .push("typed");
     let response = self.client.get(url).query(&request.query).send().await?;
-    StreamTypedEventsRequest::parse_response(response).await
+    TypedEventsRequest::parse_response(response).await
   }
 }
