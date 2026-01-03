@@ -50,6 +50,7 @@ impl ValueEnumBuilder {
         .docs(docs)
         .variants(variants)
         .case_insensitive(self.case_insensitive)
+        .generate_display(true)
         .build(),
     )
   }

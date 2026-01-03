@@ -7,6 +7,7 @@ use super::{
 };
 use crate::generator::ast::{
   DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeAttribute, SerdeMode,
+  VariantContent, VariantDef,
 };
 
 mod methods {
@@ -172,7 +173,11 @@ impl<'a> EnumGenerator<'a> {
       #methods
     };
 
-    let display_impl = self.emit_display_impl();
+    let display_impl = if self.def.generate_display {
+      self.emit_display_impl()
+    } else {
+      quote! {}
+    };
 
     if self.def.case_insensitive {
       let deserialize_impl = self.emit_case_insensitive_deser();
@@ -239,33 +244,9 @@ impl<'a> EnumGenerator<'a> {
     generate_serde_attrs(&all_attrs)
   }
 
-  /// Generates a `Display` implementation for simple (unit-variant only) enums.
-  ///
-  /// For simple string enums, this outputs the serde rename value (the original JSON string)
-  /// so that `to_string()` returns the API-expected value. This is essential for path
-  /// parameters where the enum value must be serialized to the URL.
-  ///
-  /// For enums with tuple variants, no `Display` impl is generated since there's no
-  /// clear string representation for wrapped values.
   fn emit_display_impl(&self) -> TokenStream {
-    if !self.def.is_simple() {
-      return quote! {};
-    }
-
     let name = &self.def.name;
-
-    let match_arms: Vec<TokenStream> = self
-      .def
-      .variants
-      .iter()
-      .map(|v| {
-        let variant_name = &v.name;
-        let serde_name = v.serde_name();
-        quote! {
-          Self::#variant_name => write!(f, #serde_name),
-        }
-      })
-      .collect();
+    let match_arms: Vec<TokenStream> = self.def.variants.iter().map(Self::emit_variant_display_arm).collect();
 
     quote! {
       impl core::fmt::Display for #name {
@@ -274,6 +255,19 @@ impl<'a> EnumGenerator<'a> {
             #(#match_arms)*
           }
         }
+      }
+    }
+  }
+
+  fn emit_variant_display_arm(variant: &VariantDef) -> TokenStream {
+    let variant_name = &variant.name;
+    match &variant.content {
+      VariantContent::Unit => {
+        let serde_name = variant.serde_name();
+        quote! { Self::#variant_name => write!(f, #serde_name), }
+      }
+      VariantContent::Tuple(_) => {
+        quote! { Self::#variant_name(v) => write!(f, "{v}"), }
       }
     }
   }

@@ -244,6 +244,7 @@ impl RelaxedEnumBuilder {
         .variants(variants)
         .serde_attrs(vec![SerdeAttribute::Untagged])
         .methods(methods)
+        .generate_display(true)
         .build(),
     )
   }

@@ -551,6 +551,8 @@ pub struct EnumDef {
   pub methods: Vec<EnumMethod>,
   #[builder(default)]
   pub serde_mode: SerdeMode,
+  #[builder(default)]
+  pub generate_display: bool,
 }
 
 impl EnumDef {

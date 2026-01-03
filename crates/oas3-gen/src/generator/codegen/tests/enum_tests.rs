@@ -27,6 +27,7 @@ fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    generate_display: true,
     ..Default::default()
   }
 }
@@ -116,6 +117,7 @@ fn test_simple_enum_display_impl_with_serde_rename() {
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    generate_display: true,
     ..Default::default()
   };
 
@@ -921,4 +923,70 @@ fn test_response_enum_generation() {
   for (expected, msg) in assertions {
     assert!(code.contains(expected), "{msg}");
   }
+}
+
+#[test]
+fn test_relaxed_wrapper_enum_generates_display() {
+  let def = EnumDef {
+    name: EnumToken::new("CuisineType"),
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new(KNOWN_ENUM_VARIANT))
+        .content(VariantContent::Tuple(vec![TypeRef::new("CuisineTypeKnown")]))
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
+        .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
+        .build(),
+    ],
+    generate_display: true,
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+
+  let assertions = [
+    (
+      "impl core :: fmt :: Display for CuisineType",
+      "should generate Display impl for relaxed wrapper enum",
+    ),
+    (
+      "Self :: Known (v) => write ! (f , \"{v}\")",
+      "should delegate Known variant to inner Display",
+    ),
+    (
+      "Self :: Other (v) => write ! (f , \"{v}\")",
+      "should delegate Other variant to inner Display",
+    ),
+  ];
+
+  for (expected, msg) in assertions {
+    assert!(code.contains(expected), "{msg}\nGenerated code:\n{code}");
+  }
+}
+
+#[test]
+fn test_non_simple_enum_without_generate_display_has_no_display() {
+  let def = EnumDef {
+    name: EnumToken::new("StringOrNumber"),
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("StringVal"))
+        .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new("NumberVal"))
+        .content(VariantContent::Tuple(vec![TypeRef::new("f64")]))
+        .build(),
+    ],
+    generate_display: false,
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+
+  assert!(
+    !code.contains("impl core :: fmt :: Display"),
+    "should NOT generate Display impl for non-simple enum without generate_display flag"
+  );
 }
