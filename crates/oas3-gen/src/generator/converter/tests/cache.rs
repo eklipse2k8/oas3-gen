@@ -423,3 +423,84 @@ fn test_canonical_schema_hash_consistency() {
 
   assert_eq!(hash1, hash3, "Equal CanonicalSchemas should produce equal hashes");
 }
+
+#[test]
+fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
+  let enum_schema = make_string_enum_schema(&["easy", "medium", "hard", "expert"]);
+
+  let anyof_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(enum_schema.clone()),
+    ],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("SimpleEnum".to_string(), enum_schema),
+    ("FirstRelaxedEnum".to_string(), anyof_schema.clone()),
+    ("SecondRelaxedEnum".to_string(), anyof_schema.clone()),
+  ]));
+
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context.clone());
+
+  let first_output = union_converter
+    .convert_union("FirstRelaxedEnum", &anyof_schema, UnionKind::AnyOf)
+    .expect("Should convert first anyOf union");
+  let first_result = first_output.into_vec();
+
+  let first_outer = first_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "FirstRelaxedEnum"))
+    .expect("Should generate FirstRelaxedEnum");
+
+  let inner_enum_name = if let RustType::Enum(e) = first_outer {
+    let known_variant = e
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
+      .expect("Should have Known variant");
+    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+      refs[0].base_type.to_string()
+    } else {
+      panic!("Known variant should have tuple content");
+    }
+  } else {
+    panic!("FirstRelaxedEnum should be an enum");
+  };
+
+  let second_output = union_converter
+    .convert_union("SecondRelaxedEnum", &anyof_schema, UnionKind::AnyOf)
+    .expect("Should convert second anyOf union");
+  let second_result = second_output.into_vec();
+
+  let second_outer = second_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "SecondRelaxedEnum"))
+    .expect("Should generate SecondRelaxedEnum");
+
+  if let RustType::Enum(e) = second_outer {
+    let known_variant = e
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
+      .expect("Should have Known variant");
+    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+      let second_inner_name = refs[0].base_type.to_string();
+      assert_eq!(
+        inner_enum_name, second_inner_name,
+        "Both relaxed enums should reference the same inner known values enum. \
+        First references '{inner_enum_name}', second references '{second_inner_name}'. \
+        This is a regression of issue #57."
+      );
+    } else {
+      panic!("Known variant should have tuple content");
+    }
+  } else {
+    panic!("SecondRelaxedEnum should be an enum");
+  }
+}

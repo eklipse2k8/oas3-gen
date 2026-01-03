@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::ObjectSchema;
 
-use super::{hashing::CanonicalSchema, struct_summaries::StructSummary};
+use super::{SchemaExt, hashing::CanonicalSchema, struct_summaries::StructSummary};
 use crate::generator::{
   ast::{EnumToken, RustType, StructToken},
   naming::{
@@ -248,7 +248,9 @@ impl SharedSchemaCache {
     self.identity.mark_used(name.clone());
     self.identity.record_schema_name(canonical, name.clone());
 
-    if let Some(values) = schema.extract_enum_values() {
+    if !schema.has_relaxed_anyof_enum()
+      && let Some(values) = schema.extract_enum_values()
+    {
       self.identity.register_enum(values, name.clone());
     }
 
