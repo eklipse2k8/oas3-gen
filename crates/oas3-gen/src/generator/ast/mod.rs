@@ -373,22 +373,23 @@ pub enum StructMethodKind {
   },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct BuilderField {
   pub name: FieldNameToken,
   pub rust_type: TypeRef,
   pub owner_field: Option<FieldNameToken>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct BuilderNestedStruct {
   pub field_name: FieldNameToken,
   pub struct_name: StructToken,
+  #[builder(default)]
   pub field_names: Vec<FieldNameToken>,
 }
 
 /// Associated method definition for an enum
-#[derive(Debug, Clone, bon::Builder)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct EnumMethod {
   pub name: MethodNameToken,
   pub docs: Documentation,
@@ -422,6 +423,15 @@ pub enum EnumMethodKind {
     known_type: EnumToken,
     known_variant: EnumVariantToken,
   },
+}
+
+impl Default for EnumMethodKind {
+  fn default() -> Self {
+    Self::SimpleConstructor {
+      variant_name: EnumVariantToken::from_raw("Default"),
+      wrapped_type: TypeRef::default(),
+    }
+  }
 }
 
 /// Rust struct field definition

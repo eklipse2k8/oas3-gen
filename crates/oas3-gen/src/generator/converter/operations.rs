@@ -1,8 +1,8 @@
-use oas3::Spec;
+use std::rc::Rc;
 
 use super::{
-  SchemaConverter, TypeUsageRecorder,
-  requests::{self, BodyInfo, RequestConverter, RequestOutput},
+  ConverterContext, SchemaConverter, TypeUsageRecorder,
+  requests::{BodyInfo, RequestConverter, RequestOutput},
   responses::ResponseConverter,
 };
 use crate::generator::{
@@ -26,14 +26,17 @@ pub(crate) struct ConversionResult {
 /// operation definitions into request/response type definitions.
 #[derive(Debug, Clone)]
 pub(crate) struct OperationConverter<'a> {
+  context: Rc<ConverterContext>,
   schema_converter: &'a SchemaConverter,
-  spec: &'a Spec,
 }
 
 impl<'a> OperationConverter<'a> {
   /// Creates a new operation converter.
-  pub(crate) fn new(schema_converter: &'a SchemaConverter, spec: &'a Spec) -> Self {
-    Self { schema_converter, spec }
+  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: &'a SchemaConverter) -> Self {
+    Self {
+      context,
+      schema_converter,
+    }
   }
 
   /// Converts an OpenAPI operation into Rust types and metadata.
@@ -49,11 +52,11 @@ impl<'a> OperationConverter<'a> {
     let mut types = vec![];
     let mut warnings = vec![];
 
-    let body_info = requests::prepare_body_info(self.schema_converter, self.spec, &entry.operation, &entry.path)?;
+    let body_info = BodyInfo::new(&self.context, entry)?;
     types.extend(body_info.generated_types.clone());
     usage.mark_request_iter(&body_info.type_usage);
 
-    let response_converter = ResponseConverter::new(self.schema_converter, self.spec);
+    let response_converter = ResponseConverter::new(self.context.clone());
     let response_name = generate_unique_response_name(&base_name, |n| self.schema_converter.contains(n));
     let mut response_enum = response_converter.build_enum(&response_name, &entry.operation, &entry.path);
 
@@ -62,10 +65,10 @@ impl<'a> OperationConverter<'a> {
       .map(|def| (EnumToken::new(def.name.to_string()), def));
 
     let request_name = generate_unique_request_name(&base_name, |n| self.schema_converter.contains(n));
-    let request_output = RequestConverter::new(self.schema_converter, self.spec).build(
+    let request_output = RequestConverter::new(&self.context).build(
       &request_name,
-      &entry.path,
-      &entry.operation,
+      entry,
+      &body_info,
       response_enum_ref.as_ref().map(|(t, d)| (t, *d)),
     )?;
 

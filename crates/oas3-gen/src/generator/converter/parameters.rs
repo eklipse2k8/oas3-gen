@@ -1,19 +1,20 @@
-use std::collections::{BTreeMap, HashSet};
+use std::{
+  collections::{BTreeMap, HashSet},
+  rc::Rc,
+};
 
-use oas3::{
-  Spec,
-  spec::{
-    ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, ParameterStyle, SchemaType, SchemaTypeSet,
-  },
+use oas3::spec::{
+  ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, ParameterStyle, SchemaType, SchemaTypeSet,
 };
 use serde_json::Value;
 
-use super::{SchemaConverter, fields::FieldConverter};
+use super::{TypeResolver, fields::FieldConverter};
 use crate::generator::{
   ast::{
     Documentation, FieldCollection as _, FieldDef, FieldNameToken, OuterAttr, ParameterLocation, ParsedPath, RustType,
     StructDef, StructKind, StructToken, TypeRef, ValidationAttribute,
   },
+  converter::ConverterContext,
   naming::constants::{
     HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD,
     QUERY_PARAMS_SUFFIX,
@@ -37,15 +38,16 @@ pub(crate) struct ConvertedParams {
 /// Groups parameters by location (path, query, header) and generates
 /// nested structs for each group.
 #[derive(Debug, Clone)]
-pub(crate) struct ParameterConverter<'a> {
-  schema_converter: &'a SchemaConverter,
-  spec: &'a Spec,
+pub(crate) struct ParameterConverter {
+  context: Rc<ConverterContext>,
 }
 
-impl<'a> ParameterConverter<'a> {
+impl ParameterConverter {
   /// Creates a new parameter converter.
-  pub(crate) fn new(schema_converter: &'a SchemaConverter, spec: &'a Spec) -> Self {
-    Self { schema_converter, spec }
+  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+    Self {
+      context: context.clone(),
+    }
   }
 
   /// Converts all parameters for an operation.
@@ -85,16 +87,16 @@ impl<'a> ParameterConverter<'a> {
   fn collect_parameters(&self, path: &str, operation: &Operation) -> Vec<Parameter> {
     let mut params = vec![];
 
-    if let Some(path_item) = self.spec.paths.as_ref().and_then(|p| p.get(path)) {
+    if let Some(path_item) = self.context.graph().spec().paths.as_ref().and_then(|p| p.get(path)) {
       for param_ref in &path_item.parameters {
-        if let Ok(param) = param_ref.resolve(self.spec) {
+        if let Ok(param) = param_ref.resolve(self.context.graph().spec()) {
           params.push(param);
         }
       }
     }
 
     for param_ref in &operation.parameters {
-      if let Ok(param) = param_ref.resolve(self.spec) {
+      if let Ok(param) = param_ref.resolve(self.context.graph().spec()) {
         let key = (param.location, param.name.clone());
         params.retain(|p| (p.location, p.name.clone()) != key);
         params.push(param);
@@ -183,16 +185,15 @@ impl<'a> ParameterConverter<'a> {
       return Ok((TypeRef::new("String"), vec![], None, vec![]));
     };
 
-    let schema = schema_ref.resolve(self.spec)?;
+    let schema = schema_ref.resolve(self.context.graph().spec())?;
     let has_inline_enum = schema.enum_values.len() > 1;
 
+    let type_resolver = TypeResolver::new(self.context.clone());
     let (type_ref, inline_types) = if has_inline_enum {
-      let result = self
-        .schema_converter
-        .resolve_property_type(parent_name, &param.name, &schema, schema_ref)?;
+      let result = type_resolver.resolve_property_type(parent_name, &param.name, &schema, schema_ref)?;
       (result.result, result.inline_types)
     } else {
-      (self.schema_converter.resolve_type(&schema)?, vec![])
+      (type_resolver.resolve_type(&schema)?, vec![])
     };
 
     let is_required = param.required.unwrap_or(false);

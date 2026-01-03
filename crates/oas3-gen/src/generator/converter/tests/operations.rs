@@ -20,10 +20,9 @@ use crate::{
 
 fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter<'static>, TypeUsageRecorder) {
   let graph = create_test_graph(schemas);
-  let spec = Box::leak(Box::new(graph.spec().clone()));
   let context = create_test_context(graph, default_config());
   let schema_converter = Box::leak(Box::new(SchemaConverter::new(&context)));
-  let converter = OperationConverter::new(schema_converter, spec);
+  let converter = OperationConverter::new(context, schema_converter);
   let usage = TypeUsageRecorder::new();
   (converter, usage)
 }

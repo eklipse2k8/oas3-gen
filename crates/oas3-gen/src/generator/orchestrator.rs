@@ -306,7 +306,7 @@ impl Orchestrator {
       Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_deref());
 
     let (op_rust_types, operations_info, op_warnings, usage_recorder) =
-      self.convert_all_operations(&graph, &schema_converter);
+      self.convert_all_operations(&context, &schema_converter);
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
@@ -422,7 +422,7 @@ impl Orchestrator {
 
   fn convert_all_operations(
     &self,
-    graph: &SchemaRegistry,
+    context: &Rc<ConverterContext>,
     schema_converter: &SchemaConverter,
   ) -> (
     Vec<RustType>,
@@ -435,7 +435,7 @@ impl Orchestrator {
     let mut warnings = vec![];
     let mut usage_recorder = TypeUsageRecorder::new();
 
-    let operation_converter = OperationConverter::new(schema_converter, graph.spec());
+    let operation_converter = OperationConverter::new(context.clone(), schema_converter);
 
     for entry in self.operation_registry.operations() {
       match operation_converter.convert(entry, &mut usage_recorder) {

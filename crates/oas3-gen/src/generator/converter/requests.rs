@@ -1,23 +1,25 @@
-use oas3::{
-  Spec,
-  spec::{ObjectOrReference, ObjectSchema, Operation},
-};
+use std::rc::Rc;
+
+use oas3::spec::ObjectOrReference;
 
 use super::{
-  SchemaConverter,
+  TypeResolver,
+  methods::MethodGenerator,
   parameters::{ConvertedParams, ParameterConverter},
   responses,
 };
 use crate::generator::{
   ast::{
-    BuilderField, BuilderNestedStruct, Documentation, EnumToken, FieldDef, FieldNameToken, MethodNameToken,
-    ResponseEnumDef, RustType, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef,
+    Documentation, EnumToken, FieldDef, FieldNameToken, ResponseEnumDef, RustType, StructDef, StructKind, StructToken,
+    TypeRef,
   },
+  converter::ConverterContext,
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
     identifiers::to_rust_type_name,
     inference::InferenceExt,
   },
+  operation_registry::OperationEntry,
   schema_registry::SchemaRegistry,
 };
 
@@ -35,15 +37,16 @@ pub(crate) struct RequestOutput {
 /// Coordinates parameter conversion and body resolution to produce
 /// a complete request struct with nested parameter structs.
 #[derive(Debug, Clone)]
-pub(crate) struct RequestConverter<'a> {
-  schema_converter: &'a SchemaConverter,
-  spec: &'a Spec,
+pub(crate) struct RequestConverter {
+  context: Rc<ConverterContext>,
 }
 
-impl<'a> RequestConverter<'a> {
+impl RequestConverter {
   /// Creates a new request converter.
-  pub(crate) fn new(schema_converter: &'a SchemaConverter, spec: &'a Spec) -> Self {
-    Self { schema_converter, spec }
+  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+    Self {
+      context: context.clone(),
+    }
   }
 
   /// Builds a request struct for an operation.
@@ -52,11 +55,12 @@ impl<'a> RequestConverter<'a> {
   pub(crate) fn build(
     &self,
     name: &str,
-    path: &str,
-    operation: &Operation,
+    entry: &OperationEntry,
+    body_info: &BodyInfo,
     response_enum: Option<(&EnumToken, &ResponseEnumDef)>,
   ) -> anyhow::Result<RequestOutput> {
-    let params = ParameterConverter::new(self.schema_converter, self.spec).convert_all(name, path, operation)?;
+    let param_converter = ParameterConverter::new(&self.context);
+    let params = param_converter.convert_all(name, &entry.path, &entry.operation)?;
 
     let ConvertedParams {
       mut main_fields,
@@ -66,7 +70,7 @@ impl<'a> RequestConverter<'a> {
       warnings,
     } = params;
 
-    if let Some(body_field) = self.create_body_field(operation, path)? {
+    if let Some(body_field) = body_info.create_field() {
       main_fields.push(body_field);
     }
 
@@ -74,14 +78,18 @@ impl<'a> RequestConverter<'a> {
     if let Some((enum_token, def)) = response_enum {
       methods.push(responses::build_parse_response_method(enum_token, &def.variants));
     }
-    if let Some(builder) = Self::build_builder_method(&nested_structs, &main_fields) {
+    if let Some(builder) = MethodGenerator::build_builder_method(&nested_structs, &main_fields) {
       methods.push(builder);
     }
 
     let main_struct = StructDef::builder()
       .name(StructToken::new(name))
       .docs(Documentation::from_optional(
-        operation.description.as_ref().or(operation.summary.as_ref()),
+        entry
+          .operation
+          .description
+          .as_ref()
+          .or(entry.operation.summary.as_ref()),
       ))
       .fields(main_fields)
       .methods(methods)
@@ -96,118 +104,6 @@ impl<'a> RequestConverter<'a> {
       warnings,
     })
   }
-
-  fn create_body_field(&self, operation: &Operation, path: &str) -> anyhow::Result<Option<FieldDef>> {
-    let Some(body_ref) = operation.request_body.as_ref() else {
-      return Ok(None);
-    };
-
-    let body = body_ref.resolve(self.spec)?;
-    let is_required = body.required.unwrap_or(false);
-
-    let Some((_, media_type)) = body.content.iter().next() else {
-      return Ok(None);
-    };
-
-    let Some(schema_ref) = media_type.schema.as_ref() else {
-      return Ok(None);
-    };
-
-    let body_type = self.resolve_body_type(schema_ref, path)?;
-    let Some(type_ref) = body_type else {
-      return Ok(None);
-    };
-
-    let rust_type = if is_required { type_ref } else { type_ref.with_option() };
-
-    Ok(Some(
-      FieldDef::builder()
-        .name(FieldNameToken::from_raw(BODY_FIELD_NAME))
-        .docs(Documentation::from_optional(body.description.as_ref()))
-        .rust_type(rust_type)
-        .build(),
-    ))
-  }
-
-  fn resolve_body_type(
-    &self,
-    schema_ref: &ObjectOrReference<ObjectSchema>,
-    path: &str,
-  ) -> anyhow::Result<Option<TypeRef>> {
-    match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => {
-        let Some(name) = SchemaRegistry::parse_ref(ref_path) else {
-          return Ok(None);
-        };
-        Ok(Some(TypeRef::new(to_rust_type_name(&name))))
-      }
-      ObjectOrReference::Object(schema) => {
-        let base_name = schema.infer_name_from_context(path, REQUEST_BODY_SUFFIX);
-        let Some(output) = self.schema_converter.convert_inline_schema(schema, &base_name)? else {
-          return Ok(None);
-        };
-        Ok(Some(TypeRef::new(output.type_name)))
-      }
-    }
-  }
-
-  fn build_builder_method(nested_structs: &[StructDef], main_fields: &[FieldDef]) -> Option<StructMethod> {
-    let mut builder_fields = vec![];
-    let mut nested_info = vec![];
-
-    for main_field in main_fields {
-      let nested = nested_structs
-        .iter()
-        .find(|s| s.name.to_string() == main_field.rust_type.to_rust_type());
-
-      if let Some(nested_struct) = nested {
-        nested_info.push(BuilderNestedStruct {
-          field_name: main_field.name.clone(),
-          struct_name: nested_struct.name.clone(),
-          field_names: nested_struct.fields.iter().map(|f| f.name.clone()).collect(),
-        });
-
-        for field in &nested_struct.fields {
-          builder_fields.push(BuilderField {
-            name: field.name.clone(),
-            rust_type: if field.is_required() {
-              field.rust_type.clone().unwrap_option()
-            } else {
-              field.rust_type.clone()
-            },
-            owner_field: Some(main_field.name.clone()),
-          });
-        }
-      } else {
-        builder_fields.push(BuilderField {
-          name: main_field.name.clone(),
-          rust_type: if main_field.is_required() {
-            main_field.rust_type.clone().unwrap_option()
-          } else {
-            main_field.rust_type.clone()
-          },
-          owner_field: None,
-        });
-      }
-    }
-
-    if builder_fields.is_empty() {
-      return None;
-    }
-
-    Some(
-      StructMethod::builder()
-        .name(MethodNameToken::from_raw("new"))
-        .docs(Documentation::from_lines([
-          "Create a new request with the given parameters.",
-        ]))
-        .kind(StructMethodKind::Builder {
-          fields: builder_fields,
-          nested_structs: nested_info,
-        })
-        .build(),
-    )
-  }
 }
 
 /// Information about a request body for operation metadata.
@@ -216,66 +112,85 @@ pub(crate) struct BodyInfo {
   pub(crate) generated_types: Vec<RustType>,
   pub(crate) type_usage: Vec<String>,
   pub(crate) field_name: Option<FieldNameToken>,
+  pub(crate) body_type: Option<TypeRef>,
+  pub(crate) description: Option<String>,
   pub(crate) optional: bool,
   pub(crate) content_type: Option<String>,
 }
 
 impl BodyInfo {
-  pub(crate) fn empty(optional: bool) -> Self {
+  /// Prepares request body information for an operation.
+  ///
+  /// This is used by the operation converter to track body metadata
+  /// separately from request struct generation.
+  pub(crate) fn new(context: &Rc<ConverterContext>, entry: &OperationEntry) -> anyhow::Result<Self> {
+    let spec = context.graph().spec();
+    let Some(body_ref) = entry.operation.request_body.as_ref() else {
+      return Ok(Self::empty(true));
+    };
+
+    let body = body_ref.resolve(spec)?;
+    let is_required = body.required.unwrap_or(false);
+
+    let Some((content_type, media_type)) = body.content.iter().next() else {
+      return Ok(Self::empty(!is_required));
+    };
+
+    let Some(schema_ref) = media_type.schema.as_ref() else {
+      return Ok(Self::empty(!is_required));
+    };
+
+    let (generated_types, type_name) = match schema_ref {
+      ObjectOrReference::Ref { ref_path, .. } => {
+        let Some(name) = SchemaRegistry::parse_ref(ref_path) else {
+          return Ok(Self::empty(!is_required));
+        };
+        (vec![], to_rust_type_name(&name))
+      }
+      ObjectOrReference::Object(schema) => {
+        let base_name = schema.infer_name_from_context(&entry.path, REQUEST_BODY_SUFFIX);
+        let type_resolver = TypeResolver::new(context.clone());
+        let Some(output) = type_resolver.resolve_inline_schema(schema, &base_name)? else {
+          return Ok(Self::empty(!is_required));
+        };
+        (output.generated_types, output.type_name)
+      }
+    };
+
+    let body_type = TypeRef::new(&type_name);
+
+    Ok(Self {
+      generated_types,
+      type_usage: vec![type_name],
+      field_name: Some(FieldNameToken::new(BODY_FIELD_NAME)),
+      body_type: Some(body_type),
+      description: body.description.clone(),
+      optional: !is_required,
+      content_type: Some(content_type.clone()),
+    })
+  }
+
+  pub(crate) fn create_field(&self) -> Option<FieldDef> {
+    let type_ref = self.body_type.clone()?;
+    let rust_type = if self.optional {
+      type_ref.with_option()
+    } else {
+      type_ref
+    };
+
+    Some(
+      FieldDef::builder()
+        .name(FieldNameToken::from_raw(BODY_FIELD_NAME))
+        .docs(Documentation::from_optional(self.description.as_ref()))
+        .rust_type(rust_type)
+        .build(),
+    )
+  }
+
+  fn empty(optional: bool) -> Self {
     Self {
       optional,
       ..Default::default()
     }
   }
-}
-
-/// Prepares request body information for an operation.
-///
-/// This is used by the operation converter to track body metadata
-/// separately from request struct generation.
-pub(crate) fn prepare_body_info(
-  schema_converter: &SchemaConverter,
-  spec: &Spec,
-  operation: &Operation,
-  path: &str,
-) -> anyhow::Result<BodyInfo> {
-  let Some(body_ref) = operation.request_body.as_ref() else {
-    return Ok(BodyInfo::empty(true));
-  };
-
-  let body = body_ref.resolve(spec)?;
-  let is_required = body.required.unwrap_or(false);
-
-  let Some((content_type, media_type)) = body.content.iter().next() else {
-    return Ok(BodyInfo::empty(!is_required));
-  };
-
-  let Some(schema_ref) = media_type.schema.as_ref() else {
-    return Ok(BodyInfo::empty(!is_required));
-  };
-
-  let (generated_types, type_usage) = match schema_ref {
-    ObjectOrReference::Ref { ref_path, .. } => {
-      let Some(name) = SchemaRegistry::parse_ref(ref_path) else {
-        return Ok(BodyInfo::empty(!is_required));
-      };
-      let rust_name = to_rust_type_name(&name);
-      (vec![], vec![rust_name])
-    }
-    ObjectOrReference::Object(schema) => {
-      let base_name = schema.infer_name_from_context(path, REQUEST_BODY_SUFFIX);
-      let Some(output) = schema_converter.convert_inline_schema(schema, &base_name)? else {
-        return Ok(BodyInfo::empty(!is_required));
-      };
-      (output.generated_types, vec![output.type_name])
-    }
-  };
-
-  Ok(BodyInfo {
-    generated_types,
-    type_usage,
-    field_name: Some(FieldNameToken::new(BODY_FIELD_NAME)),
-    optional: !is_required,
-    content_type: Some(content_type.clone()),
-  })
 }

@@ -26,16 +26,11 @@ use std::{
 };
 
 pub(crate) use common::{ConversionOutput, SchemaExt};
-use oas3::spec::{ObjectOrReference, ObjectSchema};
+use oas3::spec::ObjectSchema;
+pub(crate) use type_resolver::TypeResolver;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
-use self::{
-  structs::StructConverter,
-  type_resolver::TypeResolver,
-  union_types::UnionKind,
-  unions::{EnumConverter, UnionConverter},
-};
-use super::ast::{Documentation, RustType, TypeAliasDef, TypeAliasToken, TypeRef};
+use super::ast::RustType;
 use crate::generator::{converter::cache::SharedSchemaCache, schema_registry::SchemaRegistry};
 
 /// Policy for handling enum variant name collisions.
@@ -117,12 +112,6 @@ impl CodegenConfig {
   }
 }
 
-/// Output from converting an inline schema.
-pub(crate) struct InlineSchemaOutput {
-  pub type_name: String,
-  pub generated_types: Vec<RustType>,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ConverterContext {
   pub(crate) graph: Arc<SchemaRegistry>,
@@ -159,15 +148,12 @@ impl ConverterContext {
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.
 ///
-/// Coordinates `StructConverter`, `EnumConverter`, and `TypeResolver` to transform
-/// `ObjectSchema` definitions into `RustType` definitions (structs, enums, aliases).
+/// Delegates to `TypeResolver` for schema conversion, providing a stable API
+/// for the orchestrator while centralizing conversion logic in `TypeResolver`.
 #[derive(Debug, Clone)]
 pub(crate) struct SchemaConverter {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
-  struct_converter: StructConverter,
-  enum_converter: EnumConverter,
-  union_converter: UnionConverter,
 }
 
 impl SchemaConverter {
@@ -175,9 +161,6 @@ impl SchemaConverter {
     Self {
       context: context.clone(),
       type_resolver: TypeResolver::new(context.clone()),
-      struct_converter: StructConverter::new(context.clone()),
-      enum_converter: EnumConverter::new(context.clone()),
-      union_converter: UnionConverter::new(context.clone()),
     }
   }
 
@@ -189,157 +172,12 @@ impl SchemaConverter {
   ///
   /// Handles `allOf`, `oneOf`, `anyOf`, enums, and objects.
   pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
-    if schema.has_intersection() {
-      return self.struct_converter.convert_all_of_schema(name);
-    }
-
-    if !schema.one_of.is_empty() {
-      return self
-        .union_converter
-        .convert_union(name, schema, UnionKind::OneOf)
-        .map(ConversionOutput::into_vec);
-    }
-
-    if !schema.any_of.is_empty() {
-      return self
-        .union_converter
-        .convert_union(name, schema, UnionKind::AnyOf)
-        .map(ConversionOutput::into_vec);
-    }
-
-    if !schema.enum_values.is_empty() {
-      return Ok(vec![self.enum_converter.convert_value_enum(name, schema)]);
-    }
-
-    if !schema.properties.is_empty() || schema.additional_properties.is_some() {
-      let result = self.struct_converter.convert_struct(name, schema, None)?;
-      return self
-        .struct_converter
-        .finalize_struct_types(name, schema, result.result, result.inline_types);
-    }
-
-    if let Some(output) = self.try_convert_array_type_alias_with_union_items(name, schema)? {
-      let alias = RustType::TypeAlias(TypeAliasDef {
-        name: TypeAliasToken::from_raw(name),
-        docs: Documentation::from_optional(schema.description.as_ref()),
-        target: output.result,
-      });
-      let mut result = vec![alias];
-      result.extend(output.inline_types);
-      return Ok(result);
-    }
-
-    let type_ref = self.type_resolver.resolve_type(schema)?;
-    let alias = RustType::TypeAlias(TypeAliasDef {
-      name: TypeAliasToken::from_raw(name),
-      docs: Documentation::from_optional(schema.description.as_ref()),
-      target: type_ref,
-    });
-
-    Ok(vec![alias])
-  }
-
-  /// Resolves a schema to a Rust type reference (e.g. `String`, `Vec<i32>`, `MyStruct`).
-  pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> anyhow::Result<TypeRef> {
-    self.type_resolver.resolve_type(schema)
-  }
-
-  /// Resolves a property-like schema (struct field or parameter) to a Rust type.
-  ///
-  /// Unlike `resolve_type`, this method handles inline enums, structs, and unions,
-  /// generating new types as needed and returning them along with the type reference.
-  pub(crate) fn resolve_property_type(
-    &self,
-    parent_type_name: &str,
-    property_name: &str,
-    property_schema: &ObjectSchema,
-    property_schema_ref: &ObjectOrReference<ObjectSchema>,
-  ) -> anyhow::Result<ConversionOutput<TypeRef>> {
-    self
-      .type_resolver
-      .resolve_property_type(parent_type_name, property_name, property_schema, property_schema_ref)
-  }
-
-  /// Converts an inline schema with caching and deduplication.
-  ///
-  /// This handles the common pattern for inline schemas in request bodies and responses:
-  /// 1. Check if schema was already converted (cache lookup by hash)
-  /// 2. If not, convert the schema and register in cache
-  ///
-  /// Returns the type name and any generated types, or None if the schema is empty.
-  pub(crate) fn convert_inline_schema(
-    &self,
-    schema: &ObjectSchema,
-    base_name: &str,
-  ) -> anyhow::Result<Option<InlineSchemaOutput>> {
-    if schema.is_empty_object() {
-      return Ok(None);
-    }
-
-    {
-      let cache = self.context.cache.borrow();
-      if let Some(cached_name) = cache.get_type_name(schema)? {
-        return Ok(Some(InlineSchemaOutput {
-          type_name: cached_name,
-          generated_types: vec![],
-        }));
-      }
-    }
-
-    let effective_schema = if schema.all_of.is_empty() {
-      schema.clone()
-    } else {
-      self.context.graph().merge_all_of(schema)
-    };
-
-    // We must drop the borrow before calling convert_schema which might borrow mutable
-    let unique_name = self.context.cache.borrow_mut().make_unique_name(base_name);
-    let generated = self.convert_schema(&unique_name, &effective_schema)?;
-
-    let Some(main_type) = generated.last().cloned() else {
-      return Ok(None);
-    };
-
-    let final_name = self
-      .context
-      .cache
-      .borrow_mut()
-      .register_type(schema, &unique_name, vec![], main_type)?;
-
-    Ok(Some(InlineSchemaOutput {
-      type_name: final_name,
-      generated_types: generated,
-    }))
+    self.type_resolver.convert_schema(name, schema)
   }
 
   /// Checks if a name corresponds to a known schema in the graph.
   pub(crate) fn contains(&self, name: &str) -> bool {
     self.context.graph().contains(name)
-  }
-
-  pub(crate) fn merge_all_of(&self, schema: &ObjectSchema) -> ObjectSchema {
-    self.context.graph().merge_all_of(schema)
-  }
-
-  fn try_convert_array_type_alias_with_union_items(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-  ) -> anyhow::Result<Option<ConversionOutput<TypeRef>>> {
-    if !schema.is_array() && !schema.is_nullable_array() {
-      return Ok(None);
-    }
-
-    if let Some(output) = self.type_resolver.resolve_array_with_inline_items(name, name, schema)? {
-      let type_ref = if schema.is_nullable_array() {
-        output.result.with_option()
-      } else {
-        output.result
-      };
-      return Ok(Some(ConversionOutput::with_inline_types(type_ref, output.inline_types)));
-    }
-
-    Ok(None)
   }
 }
 

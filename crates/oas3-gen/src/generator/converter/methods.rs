@@ -5,7 +5,10 @@ use std::{
 
 use super::{SchemaExt, struct_summaries::StructSummary, structs::StructConverter};
 use crate::generator::{
-  ast::{EnumMethod, EnumMethodKind, EnumVariantToken, MethodNameToken, RustType, TypeRef, VariantDef},
+  ast::{
+    BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
+    FieldNameToken, MethodNameToken, RustType, StructDef, StructMethod, StructMethodKind, TypeRef, VariantDef,
+  },
   converter::ConverterContext,
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
@@ -175,5 +178,82 @@ impl MethodGenerator {
     } else {
       None
     }
+  }
+
+  pub(crate) fn build_builder_method(nested_structs: &[StructDef], main_fields: &[FieldDef]) -> Option<StructMethod> {
+    let (fields, nested): BuilderFieldTuple = main_fields
+      .iter()
+      .map(|field| Self::resolve_field_components(field, nested_structs))
+      .unzip();
+
+    let fields = fields.into_iter().flatten().collect::<Vec<_>>();
+    let nested = nested.into_iter().flatten().collect::<Vec<_>>();
+
+    if fields.is_empty() {
+      return None;
+    }
+
+    Some(
+      StructMethod::builder()
+        .name(MethodNameToken::from_raw("new"))
+        .docs(Documentation::from_lines([
+          "Create a new request with the given parameters.",
+        ]))
+        .kind(StructMethodKind::Builder {
+          fields,
+          nested_structs: nested,
+        })
+        .build(),
+    )
+  }
+
+  fn resolve_field_components(
+    field: &FieldDef,
+    nested_structs: &[StructDef],
+  ) -> (Vec<BuilderField>, Option<BuilderNestedStruct>) {
+    let type_name = field.rust_type.to_rust_type();
+
+    let Some(nested) = nested_structs.iter().find(|s| s.name.to_string() == type_name) else {
+      return (vec![BuilderField::from(field)], None);
+    };
+
+    let nested_info = BuilderNestedStruct::builder()
+      .field_name(field.name.clone())
+      .struct_name(nested.name.clone())
+      .field_names(nested.fields.iter().map(|f| f.name.clone()).collect())
+      .build();
+
+    let flattened_fields = nested
+      .fields
+      .iter()
+      .map(|nested_field| BuilderField::from_nested(nested_field, &field.name))
+      .collect();
+
+    (flattened_fields, Some(nested_info))
+  }
+}
+
+type BuilderFieldTuple = (Vec<Vec<BuilderField>>, Vec<Option<BuilderNestedStruct>>);
+
+impl BuilderField {
+  pub(crate) fn from_nested(field: &FieldDef, owner: &FieldNameToken) -> Self {
+    let mut builder_field = Self::from(field);
+    builder_field.owner_field = Some(owner.clone());
+    builder_field
+  }
+}
+
+impl From<&FieldDef> for BuilderField {
+  fn from(field: &FieldDef) -> Self {
+    let type_ref = &field.rust_type;
+
+    BuilderField::builder()
+      .name(field.name.clone())
+      .rust_type(if field.is_required() {
+        type_ref.clone().unwrap_option()
+      } else {
+        type_ref.clone()
+      })
+      .build()
   }
 }

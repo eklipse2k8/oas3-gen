@@ -1,9 +1,8 @@
-use oas3::{
-  Spec,
-  spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response},
-};
+use std::rc::Rc;
 
-use super::{SchemaConverter, TypeUsageRecorder};
+use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
+
+use super::{ConverterContext, TypeResolver, TypeUsageRecorder};
 use crate::generator::{
   ast::{
     ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
@@ -30,27 +29,27 @@ pub(crate) struct ResponseMetadata {
 ///
 /// Handles status codes, media types, and schema resolution for each response.
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseConverter<'a> {
-  schema_converter: &'a SchemaConverter,
-  spec: &'a Spec,
+pub(crate) struct ResponseConverter {
+  context: Rc<ConverterContext>,
 }
 
-impl<'a> ResponseConverter<'a> {
+impl ResponseConverter {
   /// Creates a new response converter.
-  pub(crate) fn new(schema_converter: &'a SchemaConverter, spec: &'a Spec) -> Self {
-    Self { schema_converter, spec }
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    Self { context }
   }
 
   /// Builds a response enum for an operation.
   ///
   /// Returns `None` if the operation has no responses or only empty responses.
   pub(crate) fn build_enum(&self, name: &str, operation: &Operation, path: &str) -> Option<ResponseEnumDef> {
+    let spec = self.context.graph().spec();
     let responses = operation.responses.as_ref()?;
     let base_name = to_rust_type_name(name);
 
     let mut variants = vec![];
     for (status_str, resp_ref) in responses {
-      let Ok(response) = resp_ref.resolve(self.spec) else {
+      let Ok(response) = resp_ref.resolve(spec) else {
         continue;
       };
 
@@ -94,11 +93,11 @@ impl<'a> ResponseConverter<'a> {
   ///
   /// Gathers type names and media types, marking them for usage tracking.
   pub(crate) fn extract_metadata(&self, operation: &Operation, usage: &mut TypeUsageRecorder) -> ResponseMetadata {
-    let type_name = naming_responses::extract_response_type_name(self.spec, operation);
-    let response_types = naming_responses::extract_all_response_types(self.spec, operation);
+    let spec = self.context.graph().spec();
+    let type_name = naming_responses::extract_response_type_name(spec, operation);
+    let response_types = naming_responses::extract_all_response_types(spec, operation);
 
-    // Collect media types
-    let media_types: Vec<_> = naming_responses::extract_all_response_content_types(self.spec, operation)
+    let media_types: Vec<_> = naming_responses::extract_all_response_content_types(spec, operation)
       .into_iter()
       .map(|ct| ResponseMediaType::new(&ct))
       .collect();
@@ -109,7 +108,6 @@ impl<'a> ResponseConverter<'a> {
       media_types
     };
 
-    // Mark usage
     if let Some(ref name) = type_name {
       usage.mark_response(name);
     }
@@ -156,11 +154,11 @@ impl<'a> ResponseConverter<'a> {
       ObjectOrReference::Ref { ref_path, .. } => {
         Ok(SchemaRegistry::parse_ref(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
       }
-      ObjectOrReference::Object(schema) => self.resolve_inline_schema(schema, path, status_code),
+      ObjectOrReference::Object(schema) => self.resolve_inline_response_schema(schema, path, status_code),
     }
   }
 
-  fn resolve_inline_schema(
+  fn resolve_inline_response_schema(
     &self,
     schema: &ObjectSchema,
     path: &str,
@@ -172,22 +170,24 @@ impl<'a> ResponseConverter<'a> {
       return Ok(None);
     }
 
+    let type_resolver = TypeResolver::new(self.context.clone());
+
     if schema.properties.is_empty()
       && !has_compound
-      && let Ok(primitive) = self.schema_converter.resolve_type(schema)
+      && let Ok(primitive) = type_resolver.resolve_type(schema)
       && !matches!(primitive.base_type, RustPrimitive::Custom(_))
     {
       return Ok(Some(primitive));
     }
 
     let effective = if has_compound {
-      self.schema_converter.merge_all_of(schema)
+      self.context.graph().merge_all_of(schema)
     } else {
       schema.clone()
     };
 
     let base_name = effective.infer_name_from_context(path, status_code.as_str());
-    let Some(output) = self.schema_converter.convert_inline_schema(schema, &base_name)? else {
+    let Some(output) = type_resolver.resolve_inline_schema(schema, &base_name)? else {
       return Ok(None);
     };
 

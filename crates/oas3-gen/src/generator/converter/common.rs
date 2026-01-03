@@ -42,6 +42,12 @@ impl ConversionOutput<RustType> {
   }
 }
 
+/// Output from converting an inline schema.
+pub(crate) struct InlineSchemaOutput {
+  pub type_name: String,
+  pub generated_types: Vec<RustType>,
+}
+
 /// Helper to handle the common pattern of checking cache, generating an inline type, and registering it.
 ///
 /// This function orchestrates inline type creation by:
