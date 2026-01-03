@@ -67,15 +67,15 @@ The generator follows a strict one-way data flow where each stage produces immut
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STAGE 2: NAME PRE-COMPUTATION (InlineTypeScanner)                           │
+│ STAGE 2: NAME INFERENCE (naming/)                                           │
 │ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
-│ │ InlineTypeScanner   │───▶│ • Scans ALL schemas before conversion      │  │
-│ │ (inline_scanner.rs) │    │ • Collects naming candidates per schema    │  │
-│ └─────────────────────┘    │ • Computes longest common suffix           │  │
-│           │                │ • Resolves name conflicts globally         │  │
-│           ▼                │ • Produces: ScanResult { names, enum_names}│  │
-│ ┌─────────────────────┐    └────────────────────────────────────────────┘  │
-│ │ SharedSchemaCache   │───▶ Seeded with precomputed names                  │
+│ │   InferenceExt      │───▶│ • Infers type names from schema context    │  │
+│ │ (naming/inference)  │    │ • Schema type inference                    │  │
+│ └─────────────────────┘    │ • Union variant inference                  │  │
+│           │                │ • Enum value extraction                    │  │
+│           ▼                └────────────────────────────────────────────┘  │
+│ ┌─────────────────────┐                                                     │
+│ │ SharedSchemaCache   │───▶ Deduplicates types by schema hash              │
 │ │     (cache.rs)      │    (ensures deterministic naming across runs)      │
 │ └─────────────────────┘                                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -165,31 +165,47 @@ The generator follows a strict one-way data flow where each stage produces immut
 | ----------------------------------- | ------------------------------------------------------------------- |
 | `orchestrator.rs`                   | Pipeline coordinator, creates all stages, combines outputs          |
 | `schema_registry.rs`                | Schema storage, dependency graph, cycle detection, discriminator    |
-| `converter/inline_scanner.rs`       | Pre-scans schemas to compute deterministic names                    |
+| `converter/mod.rs`                  | `SchemaConverter`, `ConverterContext`, `CodegenConfig` policy enums |
+| `converter/type_resolver.rs`        | Central conversion logic: maps OpenAPI types to Rust `TypeRef`      |
 | `converter/cache.rs`                | Deduplicates types by schema hash during conversion                 |
-| `converter/mod.rs`                  | `SchemaConverter` + `CodegenConfig` policy enums                    |
-| `converter/type_resolver.rs`        | Maps OpenAPI types to Rust `TypeRef`                                |
-| `converter/unions.rs`               | `EnumConverter` + `UnionConverter` for oneOf/anyOf handling         |
+| `converter/common.rs`               | `ConversionOutput<T>` wrapper and inline type tracking              |
+| `converter/hashing.rs`              | Schema hashing utilities for cache keying                           |
+| `converter/unions.rs`               | `UnionConverter` for oneOf/anyOf handling                           |
 | `converter/union_types.rs`          | Shared union types: `UnionKind`, `CollisionStrategy`, variant specs |
+| `converter/discriminator.rs`        | Discriminator-based union handling                                  |
 | `converter/value_enums.rs`          | Builds value enums from entries with collision handling             |
 | `converter/variants.rs`             | Builds union variant definitions (ref, inline, const)               |
 | `converter/relaxed_enum.rs`         | Builds anyOf enums with known values + freeform string              |
 | `converter/methods.rs`              | Generates helper constructor methods for enum variants              |
+| `converter/type_usage_recorder.rs`  | `TypeUsageRecorder` for tracking request/response type usage        |
+| `naming/inference.rs`               | `InferenceExt` trait for type/variant/enum name inference           |
+| `naming/identifiers.rs`             | Identifier sanitization (reserved words, casing)                    |
+| `naming/name_index.rs`              | Name indexing for conflict resolution                               |
+| `naming/operations.rs`              | Operation-specific naming logic                                     |
+| `naming/responses.rs`               | Response-specific naming logic                                      |
 | `analyzer/mod.rs`                   | `TypeAnalyzer`: usage propagation, serde modes, error schemas       |
+| `analyzer/dependency_graph.rs`      | Type dependency tracking for analysis                               |
 | `codegen/mod.rs`                    | Entry point for Rust code generation                                |
+| `codegen/structs.rs`                | Struct code generation with derives and serde attrs                 |
+| `codegen/enums.rs`                  | Enum code generation with case-insensitive deser support            |
+| `codegen/client.rs`                 | HTTP client code generation                                         |
+| `codegen/mod_file.rs`               | Modular output file generation (mod.rs)                             |
 | `ast/mod.rs`                        | AST types: `RustType`, `StructDef`, `EnumDef`, `TypeRef`, etc.      |
 
 ## Key Files
 
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs) - Pipeline coordinator
 - [schema_registry.rs](crates/oas3-gen/src/generator/schema_registry.rs) - Dependency graph and cycle detection
-- [inline_scanner.rs](crates/oas3-gen/src/generator/converter/inline_scanner.rs) - Pre-scan for deterministic naming
-- [cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication cache
-- [type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs) - OpenAPI to Rust type mapping
-- [unions.rs](crates/oas3-gen/src/generator/converter/unions.rs) - oneOf/anyOf conversion
+- [converter/mod.rs](crates/oas3-gen/src/generator/converter/mod.rs) - SchemaConverter and ConverterContext
+- [converter/type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs) - Central OpenAPI to Rust type conversion
+- [converter/cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication cache
+- [converter/unions.rs](crates/oas3-gen/src/generator/converter/unions.rs) - oneOf/anyOf conversion
+- [naming/inference.rs](crates/oas3-gen/src/generator/naming/inference.rs) - Name inference from schema context
+- [naming/identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization
 - [analyzer/mod.rs](crates/oas3-gen/src/generator/analyzer/mod.rs) - TypeAnalyzer and serde mode computation
-- [ast/metadata.rs](crates/oas3-gen/src/generator/ast/metadata.rs) - CodeMetadata from spec
-- [identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization
+- [codegen/mod.rs](crates/oas3-gen/src/generator/codegen/mod.rs) - Code generation entry point
+- [codegen/client.rs](crates/oas3-gen/src/generator/codegen/client.rs) - HTTP client generation
+- [ast/mod.rs](crates/oas3-gen/src/generator/ast/mod.rs) - AST type definitions
 - [operation_registry.rs](crates/oas3-gen/src/generator/operation_registry.rs) - HTTP operations and webhooks
 
 ## Collection Types (Critical)
