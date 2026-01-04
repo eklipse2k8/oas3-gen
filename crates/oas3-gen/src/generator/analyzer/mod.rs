@@ -1,6 +1,6 @@
 mod dependency_graph;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use self::dependency_graph::DependencyGraph;
 use crate::generator::ast::{
@@ -33,14 +33,9 @@ impl TypeUsage {
   }
 }
 
-pub(crate) struct AnalysisResult {
-  pub error_schemas: HashSet<EnumToken>,
-}
-
 pub(crate) struct TypeAnalyzer<'a> {
   types: &'a mut Vec<RustType>,
   operations: &'a mut [OperationInfo],
-  dependency_graph: DependencyGraph,
   usage_map: BTreeMap<EnumToken, TypeUsage>,
 }
 
@@ -56,19 +51,14 @@ impl<'a> TypeAnalyzer<'a> {
     Self {
       types,
       operations,
-      dependency_graph,
       usage_map,
     }
   }
 
-  pub(crate) fn analyze(mut self) -> AnalysisResult {
+  pub(crate) fn analyze(mut self) {
     self.deduplicate_response_enums();
     self.add_nested_validation_attrs();
     self.update_serde_modes();
-
-    AnalysisResult {
-      error_schemas: self.compute_error_schemas(),
-    }
   }
 
   fn build_usage_map(
@@ -138,7 +128,9 @@ impl<'a> TypeAnalyzer<'a> {
   }
 
   fn deduplicate_response_enums(&mut self) {
-    type Signature = Vec<(StatusCodeToken, String, String, ContentCategory)>;
+    // Signature includes all media type schemas to properly distinguish response enums
+    // that have different inner types (e.g., EventStream<A> vs EventStream<B>)
+    type Signature = Vec<(StatusCodeToken, String, Vec<(ContentCategory, String)>)>;
 
     struct Candidate {
       index: usize,
@@ -156,14 +148,20 @@ impl<'a> TypeAnalyzer<'a> {
         .variants
         .iter()
         .map(|v| {
-          (
-            v.status_code,
-            v.variant_name.to_string(),
-            v.schema_type
-              .as_ref()
-              .map_or_else(|| "None".to_string(), TypeRef::to_rust_type),
-            v.content_category,
-          )
+          // Include all media types with their schemas in the signature
+          let mut media_type_sigs: Vec<_> = v
+            .media_types
+            .iter()
+            .map(|m| {
+              let schema_repr = m
+                .schema_type
+                .as_ref()
+                .map_or_else(|| "None".to_string(), TypeRef::to_rust_type);
+              (m.category, schema_repr)
+            })
+            .collect();
+          media_type_sigs.sort();
+          (v.status_code, v.variant_name.to_string(), media_type_sigs)
         })
         .collect();
       signature.sort();
@@ -216,8 +214,9 @@ impl<'a> TypeAnalyzer<'a> {
         continue;
       };
       for method in &mut def.methods {
-        let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind;
-        if let Some(new_name) = replacements.get(&response_enum.to_string()) {
+        if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
+          && let Some(new_name) = replacements.get(&response_enum.to_string())
+        {
           *response_enum = EnumToken::new(new_name);
         }
       }
@@ -316,45 +315,6 @@ impl<'a> TypeAnalyzer<'a> {
         _ => {}
       }
     }
-  }
-
-  fn compute_error_schemas(&self) -> HashSet<EnumToken> {
-    let mut error_schemas: HashSet<String> = HashSet::new();
-    let mut success_schemas: HashSet<String> = HashSet::new();
-
-    for op in self.operations.iter() {
-      error_schemas.extend(op.error_response_types.iter().cloned());
-      success_schemas.extend(op.success_response_types.iter().cloned());
-    }
-
-    let root_errors: HashSet<String> = error_schemas
-      .into_iter()
-      .filter(|schema| !success_schemas.contains(schema))
-      .collect();
-
-    self.expand_error_types(&root_errors, &success_schemas)
-  }
-
-  fn expand_error_types(&self, roots: &HashSet<String>, success_schemas: &HashSet<String>) -> HashSet<EnumToken> {
-    let mut result: HashSet<EnumToken> = roots.iter().map(EnumToken::new).collect();
-    let mut queue: Vec<String> = roots.iter().cloned().collect();
-    let mut visited: HashSet<String> = HashSet::new();
-
-    while let Some(type_name) = queue.pop() {
-      if !visited.insert(type_name.clone()) {
-        continue;
-      }
-
-      if let Some(deps) = self.dependency_graph.dependencies_of(&type_name) {
-        for nested_type in deps {
-          if !success_schemas.contains(nested_type) && result.insert(EnumToken::new(nested_type)) {
-            queue.push(nested_type.clone());
-          }
-        }
-      }
-    }
-
-    result
   }
 }
 

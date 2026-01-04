@@ -20,8 +20,10 @@ pub fn extract_response_type_name(spec: &Spec, operation: &Operation) -> Option<
     .map(|s| to_rust_type_name(&s))
 }
 
-pub fn extract_response_content_type(spec: &Spec, operation: &Operation) -> Option<String> {
-  find_primary_response(spec, operation).and_then(|resp| resp.content.keys().next().cloned())
+pub fn extract_all_response_content_types(spec: &Spec, operation: &Operation) -> Vec<String> {
+  find_primary_response(spec, operation)
+    .map(|resp| resp.content.keys().cloned().collect())
+    .unwrap_or_default()
 }
 
 pub fn extract_all_response_types(spec: &Spec, operation: &Operation) -> ResponseTypes {
@@ -79,7 +81,7 @@ pub fn extract_schema_name_from_response(response: &Response) -> Option<String> 
     .schema
     .as_ref()
     .and_then(|schema_ref| match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => SchemaRegistry::extract_ref_name(ref_path),
+      ObjectOrReference::Ref { ref_path, .. } => SchemaRegistry::parse_ref(ref_path),
       ObjectOrReference::Object(_) => None,
     })
 }

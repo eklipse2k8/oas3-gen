@@ -6,11 +6,11 @@ use serde_json::json;
 use crate::{
   generator::{
     ast::RustType,
-    converter::{SchemaExt, type_resolver::TypeResolverBuilder},
+    converter::{SchemaExt, type_resolver::TypeResolver},
     naming::inference::extract_common_variant_prefix,
     schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 fn make_string_schema() -> ObjectSchema {
@@ -51,7 +51,7 @@ fn create_empty_test_graph() -> Arc<SchemaRegistry> {
     extensions: BTreeMap::default(),
   };
 
-  let (graph, _) = SchemaRegistry::new(spec);
+  let graph = SchemaRegistry::from_spec(spec).registry;
   Arc::new(graph)
 }
 
@@ -81,11 +81,8 @@ fn test_title_resolution() {
     let named_schema = make_object_schema_with_property("field", make_string_schema());
     let schema_name = schema.title.clone().unwrap_or_else(|| "Message".to_string());
     let graph = create_test_graph(BTreeMap::from([(schema_name, named_schema)]));
-    let resolver = TypeResolverBuilder::default()
-      .config(default_config())
-      .graph(graph.clone())
-      .build()
-      .unwrap();
+    let context = create_test_context(graph.clone(), default_config());
+    let resolver = TypeResolver::new(context);
 
     let result = resolver.resolve_type(&schema).unwrap();
     assert_eq!(result.to_rust_type(), expected_type, "failed for case: {case_name}");
@@ -158,11 +155,8 @@ fn test_union_to_type_ref_conversion() {
   };
 
   let graph = create_test_graph(BTreeMap::from([("CacheControlEphemeral".to_string(), cache_schema)]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let inner_schema = ObjectSchema {
     one_of: vec![ObjectOrReference::Ref {
@@ -198,7 +192,7 @@ fn test_union_to_type_ref_conversion() {
   ];
 
   for (case_name, variants, expected_type) in cases {
-    let result = resolver.resolve_union(&variants).unwrap();
+    let result = resolver.try_union(&variants).unwrap();
     match expected_type {
       Some(expected) => {
         assert!(result.is_some(), "expected Some for case: {case_name}");
@@ -219,11 +213,8 @@ fn test_union_to_type_ref_conversion() {
 fn test_array_type_resolution() {
   let custom_schema = make_object_schema_with_property("field", make_string_schema());
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let cases: Vec<(&str, ObjectSchema, &str)> = vec![
     (
@@ -312,16 +303,33 @@ fn test_schema_ext_methods() {
     !nullable_with_props.is_nullable_object(),
     "object|null with properties should not be nullable"
   );
+
+  let string_enum_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("auto"), json!("none")],
+    ..ObjectSchema::default()
+  };
+  assert!(
+    !string_enum_schema.is_primitive(),
+    "string enum with 2+ values should NOT be primitive"
+  );
+
+  let single_enum_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("only_value")],
+    ..ObjectSchema::default()
+  };
+  assert!(
+    single_enum_schema.is_primitive(),
+    "string enum with 1 value should be primitive (const-like)"
+  );
 }
 
 #[test]
 fn test_basic_type_resolution() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let item_schema = make_string_schema();
 
@@ -383,11 +391,8 @@ fn test_array_with_union_items_inline_generation() {
     ("TypeB".to_string(), type_b),
     ("Item".to_string(), item_schema),
   ]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
 
   let oneof_array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -444,12 +449,11 @@ fn test_array_with_union_items_inline_generation() {
   };
 
   let oneof_result = resolver
-    .resolve_property_type(
+    .resolve_property(
       "CreateMessageParams",
       "tools",
       &oneof_array_schema,
       &ObjectOrReference::Object(oneof_array_schema.clone()),
-      None,
     )
     .unwrap();
   assert_eq!(
@@ -457,13 +461,11 @@ fn test_array_with_union_items_inline_generation() {
     "Vec<ToolKind>",
     "oneOf array type mismatch"
   );
-  assert_eq!(
-    oneof_result.inline_types.len(),
-    1,
-    "oneOf should generate one inline enum"
-  );
 
-  let inline_type = &oneof_result.inline_types[0];
+  let generated_types = context.cache.borrow().generated.generated_types.clone();
+  assert_eq!(generated_types.len(), 1, "oneOf should generate one inline enum");
+
+  let inline_type = &generated_types[0];
   match inline_type {
     RustType::Enum(enum_def) => {
       assert_eq!(enum_def.name.as_str(), "ToolKind");
@@ -482,12 +484,11 @@ fn test_array_with_union_items_inline_generation() {
   }
 
   let anyof_result = resolver
-    .resolve_property_type(
+    .resolve_property(
       "Response",
       "items",
       &anyof_array_schema,
       &ObjectOrReference::Object(anyof_array_schema.clone()),
-      None,
     )
     .unwrap();
   assert_eq!(
@@ -495,24 +496,29 @@ fn test_array_with_union_items_inline_generation() {
     "Vec<TypeItemKind>",
     "anyOf array type mismatch"
   );
-  assert!(
-    !anyof_result.inline_types.is_empty(),
-    "anyOf should generate inline types"
+
+  let generated_types_after_anyof = &context.cache.borrow().generated.generated_types;
+  assert_eq!(
+    generated_types_after_anyof.len(),
+    2,
+    "anyOf should generate additional inline types"
   );
 
   let ref_result = resolver
-    .resolve_property_type(
+    .resolve_property(
       "Parent",
       "items",
       &ref_array_schema,
       &ObjectOrReference::Object(ref_array_schema.clone()),
-      None,
     )
     .unwrap();
   assert_eq!(ref_result.result.to_rust_type(), "Vec<Item>", "ref array type mismatch");
-  assert!(
-    ref_result.inline_types.is_empty(),
-    "ref items should not generate inline types"
+
+  let generated_types_after_ref = &context.cache.borrow().generated.generated_types;
+  assert_eq!(
+    generated_types_after_ref.len(),
+    2,
+    "ref items should not generate additional inline types"
   );
 }
 
@@ -527,11 +533,8 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
     ("TypeB".to_string(), type_b),
     ("TypeC".to_string(), type_c),
   ]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let multi_ref_variants = vec![
     ObjectOrReference::Ref {
@@ -551,7 +554,7 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
     },
   ];
 
-  let result = resolver.resolve_union(&multi_ref_variants).unwrap();
+  let result = resolver.try_union(&multi_ref_variants).unwrap();
   assert!(
     result.is_none(),
     "multi-ref oneOf should return None to trigger enum generation, got: {:?}",
@@ -570,7 +573,7 @@ fn test_multi_ref_oneof_returns_none_for_fallback() {
     }),
   ];
 
-  let result = resolver.resolve_union(&single_ref_with_null).unwrap();
+  let result = resolver.try_union(&single_ref_with_null).unwrap();
   assert!(result.is_some(), "single ref with null should collapse to Option<T>");
   assert_eq!(
     result.unwrap().to_rust_type(),
@@ -684,11 +687,8 @@ fn test_union_naming_with_common_suffix() {
     ("BetaResponseUrlCitation".to_string(), citation_b),
     ("BetaResponseFileCitation".to_string(), citation_c),
   ]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
 
   let union_schema = ObjectSchema {
     one_of: vec![
@@ -712,18 +712,19 @@ fn test_union_naming_with_common_suffix() {
   };
 
   let result = resolver
-    .resolve_property_type(
+    .resolve_property(
       "BetaResponse",
       "citation",
       &union_schema,
       &ObjectOrReference::Object(union_schema.clone()),
-      None,
     )
     .unwrap();
 
   assert_eq!(result.result.to_rust_type(), "BetaCitationKind");
-  assert_eq!(result.inline_types.len(), 1);
-  if let RustType::Enum(enum_def) = &result.inline_types[0] {
+
+  let generated_types = &context.cache.borrow().generated.generated_types;
+  assert_eq!(generated_types.len(), 1);
+  if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaCitationKind");
   } else {
     panic!("Expected enum type");
@@ -739,11 +740,8 @@ fn test_union_naming_without_common_suffix() {
     ("BetaTool".to_string(), tool_a),
     ("BetaBashTool20241022".to_string(), tool_b),
   ]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
   let union_schema = ObjectSchema {
     one_of: vec![
       ObjectOrReference::Ref {
@@ -761,18 +759,19 @@ fn test_union_naming_without_common_suffix() {
   };
 
   let result = resolver
-    .resolve_property_type(
+    .resolve_property(
       "Request",
       "tool",
       &union_schema,
       &ObjectOrReference::Object(union_schema.clone()),
-      None,
     )
     .unwrap();
 
   assert_eq!(result.result.to_rust_type(), "BetaToolKind");
-  assert_eq!(result.inline_types.len(), 1);
-  if let RustType::Enum(enum_def) = &result.inline_types[0] {
+
+  let generated_types = &context.cache.borrow().generated.generated_types;
+  assert_eq!(generated_types.len(), 1);
+  if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaToolKind");
   } else {
     panic!("Expected enum type");
@@ -790,11 +789,8 @@ fn test_array_union_naming_with_common_suffix() {
     ("BetaMessageDeltaEvent".to_string(), event_b),
     ("BetaMessageStopEvent".to_string(), event_c),
   ]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
 
   let array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
@@ -824,18 +820,19 @@ fn test_array_union_naming_with_common_suffix() {
   };
 
   let result = resolver
-    .resolve_property_type(
+    .resolve_property(
       "Stream",
       "events",
       &array_schema,
       &ObjectOrReference::Object(array_schema.clone()),
-      None,
     )
     .unwrap();
 
   assert_eq!(result.result.to_rust_type(), "Vec<BetaEventKind>");
-  assert_eq!(result.inline_types.len(), 1);
-  if let RustType::Enum(enum_def) = &result.inline_types[0] {
+
+  let generated_types = context.cache.borrow().generated.generated_types.clone();
+  assert_eq!(generated_types.len(), 1);
+  if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaEventKind");
   } else {
     panic!("Expected enum type");
@@ -845,11 +842,8 @@ fn test_array_union_naming_with_common_suffix() {
 #[test]
 fn test_additional_properties_map_only_boolean() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
@@ -872,11 +866,8 @@ fn test_additional_properties_map_only_boolean() {
 #[test]
 fn test_additional_properties_map_only_string() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -900,11 +891,8 @@ fn test_additional_properties_map_only_string() {
 #[test]
 fn test_additional_properties_map_only_integer() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -929,11 +917,8 @@ fn test_additional_properties_map_only_integer() {
 fn test_additional_properties_map_only_ref() {
   let custom_schema = make_object_schema_with_property("field", make_string_schema());
   let graph = create_test_graph(BTreeMap::from([("CustomType".to_string(), custom_schema)]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -956,11 +941,8 @@ fn test_additional_properties_map_only_ref() {
 #[test]
 fn test_additional_properties_map_only_empty_schema() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -981,11 +963,8 @@ fn test_additional_properties_map_only_empty_schema() {
 #[test]
 fn test_additional_properties_boolean_true() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -1002,130 +981,14 @@ fn test_additional_properties_boolean_true() {
 }
 
 #[test]
-fn test_object_with_properties_not_resolved_as_map() {
+fn test_additional_properties_boolean_false() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-
-  let schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([("name".to_string(), ObjectOrReference::Object(make_string_schema()))]),
-    additional_properties: Some(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(
-      ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-        ..Default::default()
-      },
-    )))),
-    ..Default::default()
-  };
-
-  let result = resolver.resolve_type(&schema).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "serde_json::Value",
-    "object with properties should NOT be resolved as map type (it's a struct)"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_ref() {
-  let custom_schema = make_object_schema_with_property("field", make_string_schema());
-  let graph = create_test_graph(BTreeMap::from([("AgentConfig".to_string(), custom_schema)]));
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-
-  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/AgentConfig".to_string(),
-    summary: None,
-    description: None,
-  }));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "AgentConfig",
-    "additionalProperties with $ref should resolve to the referenced type name"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_boolean() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-
-  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-    ..Default::default()
-  })));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "bool",
-    "additionalProperties with type: boolean should resolve to bool"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_empty() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-
-  let additional = oas3::spec::Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema::default())));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "serde_json::Value",
-    "additionalProperties with empty schema should resolve to serde_json::Value"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_boolean_schema_true() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-
-  let additional = oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true));
-
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
-  assert_eq!(
-    result.to_rust_type(),
-    "serde_json::Value",
-    "additionalProperties: true should resolve to serde_json::Value"
-  );
-}
-
-#[test]
-fn test_resolve_additional_properties_type_boolean_schema_false() {
-  let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let additional = oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(false));
 
-  let result = resolver.resolve_additional_properties_type(&additional).unwrap();
+  let result = resolver.additional_properties_type(&additional).unwrap();
   assert_eq!(
     result.to_rust_type(),
     "serde_json::Value",
@@ -1136,11 +999,8 @@ fn test_resolve_additional_properties_type_boolean_schema_false() {
 #[test]
 fn test_additional_properties_false_not_resolved_as_map() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
@@ -1160,11 +1020,8 @@ fn test_additional_properties_false_not_resolved_as_map() {
 #[test]
 fn test_const_value_type_inference() {
   let graph = create_empty_test_graph();
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let string_const = ObjectSchema {
     const_value: Some(json!("thought")),
@@ -1245,26 +1102,22 @@ fn test_array_with_union_items_not_treated_as_primitive() {
     ),
   ]));
 
-  let resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
 
   let thought_summary_ref = ObjectOrReference::Ref {
     ref_path: "#/components/schemas/ThoughtSummary".to_string(),
     summary: None,
     description: None,
   };
-  let thought_summary_schema = graph.get_schema("ThoughtSummary").unwrap();
+  let thought_summary_schema = graph.get("ThoughtSummary").unwrap();
 
   let result = resolver
-    .resolve_property_type(
+    .resolve_property(
       "ThoughtContent",
       "summary",
       thought_summary_schema,
       &thought_summary_ref,
-      None,
     )
     .unwrap();
 
@@ -1277,4 +1130,544 @@ fn test_array_with_union_items_not_treated_as_primitive() {
     result.inline_types.is_empty(),
     "should not generate inline types for named schema reference"
   );
+}
+
+#[test]
+fn test_string_enum_reference_preserves_named_type() {
+  let pet_status_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("available"), json!("pending"), json!("sold")],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("PetStatus".to_string(), pet_status_schema)]));
+
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let pet_status_ref = ObjectOrReference::Ref {
+    ref_path: "#/components/schemas/PetStatus".to_string(),
+    summary: None,
+    description: None,
+  };
+  let pet_status_schema = graph.get("PetStatus").unwrap();
+
+  let result = resolver
+    .resolve_property("Pet", "status", pet_status_schema, &pet_status_ref)
+    .unwrap();
+
+  assert_eq!(
+    result.result.to_rust_type(),
+    "PetStatus",
+    "reference to string enum should preserve the named type, not collapse to String"
+  );
+  assert!(
+    result.inline_types.is_empty(),
+    "should not generate inline types for named enum reference"
+  );
+}
+
+#[test]
+fn test_primitive_type_formatting() {
+  let graph = create_empty_test_graph();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let cases: Vec<(&str, ObjectSchema, &str)> = vec![
+    (
+      "int32_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+        format: Some("int32".to_string()),
+        ..Default::default()
+      },
+      "i32",
+    ),
+    (
+      "int64_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+        format: Some("int64".to_string()),
+        ..Default::default()
+      },
+      "i64",
+    ),
+    (
+      "float_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
+        format: Some("float".to_string()),
+        ..Default::default()
+      },
+      "f32",
+    ),
+    (
+      "double_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
+        format: Some("double".to_string()),
+        ..Default::default()
+      },
+      "f64",
+    ),
+    (
+      "date_time_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        format: Some("date-time".to_string()),
+        ..Default::default()
+      },
+      "chrono::DateTime<chrono::Utc>",
+    ),
+    (
+      "date_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        format: Some("date".to_string()),
+        ..Default::default()
+      },
+      "chrono::NaiveDate",
+    ),
+    (
+      "uuid_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        format: Some("uuid".to_string()),
+        ..Default::default()
+      },
+      "uuid::Uuid",
+    ),
+    (
+      "uri_format_unsupported",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        format: Some("uri".to_string()),
+        ..Default::default()
+      },
+      "String",
+    ),
+    (
+      "byte_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        format: Some("byte".to_string()),
+        ..Default::default()
+      },
+      "Vec<u8>",
+    ),
+    (
+      "boolean_type",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
+        ..Default::default()
+      },
+      "bool",
+    ),
+    (
+      "null_type",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+        ..Default::default()
+      },
+      "Option<()>",
+    ),
+    (
+      "number_without_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
+        ..Default::default()
+      },
+      "f64",
+    ),
+    (
+      "integer_without_format",
+      ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+        ..Default::default()
+      },
+      "i64",
+    ),
+  ];
+
+  for (case_name, schema, expected_type) in cases {
+    let result = resolver.resolve_type(&schema).unwrap();
+    assert_eq!(result.to_rust_type(), expected_type, "failed for case: {case_name}");
+  }
+}
+
+#[test]
+fn test_try_nullable_union_edge_cases() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+  let type_b = make_object_schema_with_property("field_b", make_string_schema());
+  let type_c = make_object_schema_with_property("field_c", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+    ("TypeC".to_string(), type_c),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let null_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+    ..Default::default()
+  };
+
+  let three_variants_with_null = vec![
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeA".to_string(),
+      summary: None,
+      description: None,
+    },
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeB".to_string(),
+      summary: None,
+      description: None,
+    },
+    ObjectOrReference::Object(null_schema.clone()),
+  ];
+  let result = resolver.try_union(&three_variants_with_null).unwrap();
+  assert!(
+    result.is_none(),
+    "3 variants with null should not collapse to Option<T>"
+  );
+
+  let two_refs_no_null = vec![
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeA".to_string(),
+      summary: None,
+      description: None,
+    },
+    ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeB".to_string(),
+      summary: None,
+      description: None,
+    },
+  ];
+  let result = resolver.try_union(&two_refs_no_null).unwrap();
+  assert!(result.is_none(), "2 refs without null should not collapse to Option<T>");
+
+  let nullable_object = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Object, SchemaType::Null])),
+    ..Default::default()
+  };
+  let two_nullable_objects = vec![
+    ObjectOrReference::Object(nullable_object.clone()),
+    ObjectOrReference::Object(null_schema.clone()),
+  ];
+  let result = resolver.try_union(&two_nullable_objects).unwrap();
+  assert!(
+    result.is_none(),
+    "two nullable objects should not have a non-null variant"
+  );
+
+  let inline_string = make_string_schema();
+  let inline_with_null = vec![
+    ObjectOrReference::Object(inline_string),
+    ObjectOrReference::Object(null_schema.clone()),
+  ];
+  let result = resolver.try_union(&inline_with_null).unwrap();
+  assert!(
+    result.is_some(),
+    "inline string with null should collapse to Option<String>"
+  );
+  assert_eq!(
+    result.unwrap().to_rust_type(),
+    "Option<String>",
+    "should be Option<String>"
+  );
+}
+
+#[test]
+fn test_is_wrapper_union() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+  let type_b = make_object_schema_with_property("field_b", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let null_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+    ..Default::default()
+  };
+
+  let wrapper_with_ref_and_null = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/TypeA".to_string(),
+        summary: None,
+        description: None,
+      },
+      ObjectOrReference::Object(null_schema.clone()),
+    ],
+    ..Default::default()
+  };
+  let result = resolver.try_union(&wrapper_with_ref_and_null.one_of).unwrap();
+  assert!(result.is_some(), "single ref + null should be a wrapper union");
+  assert_eq!(result.unwrap().to_rust_type(), "Option<TypeA>");
+
+  let wrapper_with_string_and_null = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Object(make_string_schema()),
+      ObjectOrReference::Object(null_schema.clone()),
+    ],
+    ..Default::default()
+  };
+  let result = resolver.try_union(&wrapper_with_string_and_null.one_of).unwrap();
+  assert!(result.is_some(), "single string + null should be a wrapper union");
+  assert_eq!(result.unwrap().to_rust_type(), "Option<String>");
+
+  let two_refs = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/TypeA".to_string(),
+        summary: None,
+        description: None,
+      },
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/TypeB".to_string(),
+        summary: None,
+        description: None,
+      },
+    ],
+    ..Default::default()
+  };
+  let result = resolver.try_union(&two_refs.one_of).unwrap();
+  assert!(result.is_none(), "two refs should not be a wrapper union");
+}
+
+#[test]
+fn test_try_flatten_nested_union() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+  let type_b = make_object_schema_with_property("field_b", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
+
+  let null_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+    ..Default::default()
+  };
+
+  let inner_union = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/TypeA".to_string(),
+        summary: None,
+        description: None,
+      },
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/TypeB".to_string(),
+        summary: None,
+        description: None,
+      },
+    ],
+    ..Default::default()
+  };
+
+  let nested_schema = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Object(inner_union),
+      ObjectOrReference::Object(null_schema.clone()),
+    ],
+    ..Default::default()
+  };
+
+  let types = resolver.convert_schema("NestedUnion", &nested_schema).unwrap();
+  assert!(!types.is_empty(), "nested union should generate types");
+
+  let type_names: Vec<_> = types
+    .iter()
+    .map(|t| match t {
+      RustType::Enum(e) => e.name.as_str().to_string(),
+      RustType::DiscriminatedEnum(e) => e.name.as_str().to_string(),
+      _ => "other".to_string(),
+    })
+    .collect();
+  assert!(
+    type_names.iter().any(|n| n == "NestedUnion"),
+    "should generate NestedUnion type, got: {type_names:?}"
+  );
+}
+
+#[test]
+fn test_has_union_items() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+  let type_b = make_object_schema_with_property("field_b", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+  ]));
+
+  let array_with_union_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+      ObjectOrReference::Object(ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/TypeA".to_string(),
+            summary: None,
+            description: None,
+          },
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/TypeB".to_string(),
+            summary: None,
+            description: None,
+          },
+        ],
+        ..Default::default()
+      }),
+    )))),
+    ..Default::default()
+  };
+
+  assert!(
+    array_with_union_items.has_inline_union_array_items(graph.spec()),
+    "array with oneOf items should have union items"
+  );
+
+  let array_with_string_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+      ObjectOrReference::Object(make_string_schema()),
+    )))),
+    ..Default::default()
+  };
+
+  assert!(
+    !array_with_string_items.has_inline_union_array_items(graph.spec()),
+    "array with string items should not have union items"
+  );
+
+  let array_with_ref_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeA".to_string(),
+      summary: None,
+      description: None,
+    })))),
+    ..Default::default()
+  };
+
+  assert!(
+    !array_with_ref_items.has_inline_union_array_items(graph.spec()),
+    "array with ref items should not have inline union items"
+  );
+
+  let array_without_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: None,
+    ..Default::default()
+  };
+
+  assert!(
+    !array_without_items.has_inline_union_array_items(graph.spec()),
+    "array without items should not have union items"
+  );
+}
+
+#[test]
+fn test_unique_items_flag_preserved() {
+  let graph = create_empty_test_graph();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let unique_array = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+      ObjectOrReference::Object(make_string_schema()),
+    )))),
+    unique_items: Some(true),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&unique_array).unwrap();
+  assert!(result.unique_items, "unique_items flag should be preserved in TypeRef");
+  assert_eq!(
+    result.to_rust_type(),
+    "Vec<String>",
+    "unique array still generates Vec<> in to_rust_type (codegen handles BTreeSet conversion)"
+  );
+
+  let non_unique_array = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
+      ObjectOrReference::Object(make_string_schema()),
+    )))),
+    unique_items: Some(false),
+    ..Default::default()
+  };
+
+  let result = resolver.resolve_type(&non_unique_array).unwrap();
+  assert!(!result.unique_items, "unique_items flag should be false when not set");
+  assert_eq!(
+    result.to_rust_type(),
+    "Vec<String>",
+    "non-unique array should resolve to Vec"
+  );
+}
+
+#[test]
+fn test_convert_schema_type_alias() {
+  let graph = create_empty_test_graph();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let string_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    description: Some("A custom string type".to_string()),
+    ..Default::default()
+  };
+
+  let types = resolver.convert_schema("MyString", &string_schema).unwrap();
+  assert_eq!(types.len(), 1, "should generate one type");
+
+  match &types[0] {
+    RustType::TypeAlias(alias) => {
+      assert_eq!(alias.name.as_str(), "MyString");
+      assert_eq!(alias.target.to_rust_type(), "String");
+    }
+    _ => panic!("expected TypeAlias, got {:?}", types[0]),
+  }
+}
+
+#[test]
+fn test_convert_schema_with_allof() {
+  let base_schema = make_object_schema_with_property("base_field", make_string_schema());
+  let extended_schema = ObjectSchema {
+    all_of: vec![
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/BaseType".to_string(),
+        summary: None,
+        description: None,
+      },
+      ObjectOrReference::Object(make_object_schema_with_property("extra_field", make_string_schema())),
+    ],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("BaseType".to_string(), base_schema),
+    ("ExtendedType".to_string(), extended_schema),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let allof_schema = graph.get("ExtendedType").unwrap();
+
+  let types = resolver.convert_schema("ExtendedType", allof_schema).unwrap();
+  assert!(!types.is_empty(), "allOf schema should generate types");
+
+  let has_struct = types.iter().any(|t| matches!(t, RustType::Struct(_)));
+  assert!(has_struct, "allOf should generate a struct");
 }

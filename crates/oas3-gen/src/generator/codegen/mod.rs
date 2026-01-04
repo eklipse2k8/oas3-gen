@@ -1,19 +1,21 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Context as _;
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::ast::{EnumToken, LintConfig, RegexKey, RustType, SerdeImpl, ValidationAttribute, tokens::ConstToken};
+use super::ast::{
+  ClientDef, LintConfig, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind, ValidationAttribute,
+  tokens::{ConstToken, HeaderToken},
+};
 
 pub mod attributes;
 pub mod client;
 pub mod coercion;
 pub mod constants;
 pub mod enums;
-pub mod error_impls;
-pub mod metadata;
+pub(crate) mod headers;
 pub mod mod_file;
 pub mod structs;
 pub mod type_aliases;
@@ -46,20 +48,19 @@ pub fn format(code: &TokenStream) -> anyhow::Result<String> {
 
 pub fn generate_file(
   types: &[RustType],
-  error_schemas: &HashSet<EnumToken>,
   visibility: Visibility,
-  metadata: &metadata::CodeMetadata,
+  metadata: &ClientDef,
   lint_config: &LintConfig,
   source_path: &str,
   gen_version: &str,
 ) -> anyhow::Result<String> {
-  let code_tokens = generate(types, error_schemas, visibility);
+  let code_tokens = generate(types, visibility);
   generate_source(&code_tokens, metadata, Some(lint_config), source_path, gen_version)
 }
 
 pub fn generate_source(
   code: &TokenStream,
-  metadata: &metadata::CodeMetadata,
+  metadata: &ClientDef,
   lint_config: Option<&LintConfig>,
   source_path: &str,
   gen_version: &str,
@@ -91,9 +92,10 @@ pub fn generate_source(
   Ok(format!("{header}\n\n{formatted_code}\n"))
 }
 
-pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, visibility: Visibility) -> TokenStream {
+pub(crate) fn generate(types: &[RustType], visibility: Visibility) -> TokenStream {
   let ordered = deduplicate_and_order_types(types);
   let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
+  let header_consts = constants::generate_header_constants(&collect_header_tokens(&ordered));
 
   let mut needs_serialize = false;
   let mut needs_deserialize = false;
@@ -104,7 +106,8 @@ pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, v
     needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
     needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
     needs_validate |= matches!(ty, RustType::Struct(def) if def.fields.iter().any(|f| f.validation_attrs.contains(&ValidationAttribute::Nested)));
-    type_tokens.push(generate_type(ty, &regex_lookup, error_schemas, visibility));
+    needs_validate |= matches!(ty, RustType::Struct(def) if def.methods.iter().any(|m| matches!(m.kind, StructMethodKind::Builder { .. })));
+    type_tokens.push(generate_type(ty, &regex_lookup, visibility));
   }
 
   // TODO: Create a more general way to track imports needed by types
@@ -126,6 +129,7 @@ pub(crate) fn generate(types: &[RustType], error_schemas: &HashSet<EnumToken>, v
     #validator_use
 
     #regex_consts
+    #header_consts
 
     #(#type_tokens)*
   }
@@ -150,6 +154,31 @@ fn deduplicate_and_order_types<'a>(types: &'a [RustType]) -> Vec<&'a RustType> {
   map.into_values().collect()
 }
 
+fn collect_header_tokens(types: &[&RustType]) -> Vec<HeaderToken> {
+  let mut seen: BTreeSet<String> = BTreeSet::new();
+  let mut headers = vec![];
+
+  for rust_type in types {
+    let RustType::Struct(def) = rust_type else {
+      continue;
+    };
+
+    if !matches!(def.kind, StructKind::HeaderParams) {
+      continue;
+    }
+
+    for field in &def.fields {
+      if let Some(original_name) = &field.original_name
+        && seen.insert(original_name.clone())
+      {
+        headers.push(HeaderToken::from(original_name.as_str()));
+      }
+    }
+  }
+
+  headers
+}
+
 fn type_priority(rust_type: &RustType) -> u8 {
   match rust_type {
     RustType::Struct(_) => 0,
@@ -163,37 +192,14 @@ fn type_priority(rust_type: &RustType) -> u8 {
 fn generate_type(
   rust_type: &RustType,
   regex_lookup: &BTreeMap<RegexKey, ConstToken>,
-  error_schemas: &HashSet<EnumToken>,
   visibility: Visibility,
 ) -> TokenStream {
-  let type_tokens = match rust_type {
-    RustType::Struct(def) => structs::StructGenerator::new(regex_lookup, visibility).generate(def),
+  match rust_type {
+    RustType::Struct(def) => structs::StructGenerator::new(def, regex_lookup, visibility).emit(),
     RustType::Enum(def) => enums::EnumGenerator::new(def, visibility).generate(),
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
     RustType::DiscriminatedEnum(def) => enums::DiscriminatedEnumGenerator::new(def, visibility).generate(),
     RustType::ResponseEnum(def) => enums::ResponseEnumGenerator::new(def, visibility).generate(),
-  };
-
-  if let Some(error_impl) = try_generate_error_impl(rust_type, error_schemas) {
-    quote! {
-      #type_tokens
-      #error_impl
-    }
-  } else {
-    type_tokens
-  }
-}
-
-fn try_generate_error_impl(rust_type: &RustType, error_schemas: &HashSet<EnumToken>) -> Option<TokenStream> {
-  match rust_type {
-    RustType::Struct(def) if error_schemas.contains(&EnumToken::from(&def.name)) => {
-      error_impls::generate_error_impl(rust_type)
-    }
-    RustType::Enum(def) if error_schemas.contains(&def.name) => error_impls::generate_error_impl(rust_type),
-    RustType::DiscriminatedEnum(def) if error_schemas.contains(&def.name) => {
-      error_impls::generate_error_impl(rust_type)
-    }
-    _ => None,
   }
 }
 

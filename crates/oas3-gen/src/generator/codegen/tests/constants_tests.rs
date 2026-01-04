@@ -1,19 +1,21 @@
 use crate::generator::{
   ast::{
-    FieldDef, RustType, StructDef, StructToken, TypeAliasDef, TypeAliasToken, TypeRef, ValidationAttribute,
-    tokens::{FieldNameToken, HeaderToken},
+    FieldDef, FieldNameToken, RustType, StructDef, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
+    ValidationAttribute, tokens::HeaderToken,
   },
   codegen::constants::{generate_header_constants, generate_regex_constants},
 };
 
 fn make_field(name: &str, pattern: Option<&str>) -> FieldDef {
-  FieldDef {
-    name: FieldNameToken::new(name),
-    validation_attrs: pattern
-      .map(|p| vec![ValidationAttribute::Regex(p.to_string())])
-      .unwrap_or_default(),
-    ..Default::default()
-  }
+  FieldDef::builder()
+    .name(FieldNameToken::from_raw(name))
+    .rust_type(TypeRef::default())
+    .validation_attrs(
+      pattern
+        .map(|p| vec![ValidationAttribute::Regex(p.to_string())])
+        .unwrap_or_default(),
+    )
+    .build()
 }
 
 fn make_struct(name: &str, fields: Vec<FieldDef>) -> RustType {
@@ -119,7 +121,7 @@ fn test_generate_header_constants_empty() {
 
 #[test]
 fn test_generate_header_constants_single() {
-  let headers: Vec<HeaderToken> = vec![HeaderToken::from("x-request-id")];
+  let headers = vec![HeaderToken::from("x-request-id")];
   let tokens = generate_header_constants(&headers);
   let code = tokens.to_string();
 
@@ -136,7 +138,7 @@ fn test_generate_header_constants_single() {
 
 #[test]
 fn test_generate_header_constants_multiple() {
-  let headers: Vec<HeaderToken> = vec![
+  let headers = vec![
     HeaderToken::from("x-request-id"),
     HeaderToken::from("x-correlation-id"),
     HeaderToken::from("content-type"),

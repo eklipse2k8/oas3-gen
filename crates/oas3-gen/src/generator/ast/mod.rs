@@ -1,3 +1,4 @@
+mod client;
 mod derives;
 mod documentation;
 pub mod lints;
@@ -12,11 +13,15 @@ pub(super) mod validation_attrs;
 #[cfg(test)]
 mod tests;
 
-use derive_builder::Builder;
+use std::collections::{BTreeMap, BTreeSet};
+
+pub use client::ClientDef;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
 pub use lints::LintConfig;
+use mediatype::MediaType;
+use oas3::spec::{ParameterIn, ParameterStyle};
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
@@ -30,10 +35,11 @@ pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 /// Discriminated enum variant mapping
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct DiscriminatedVariant {
-  pub discriminator_value: String,
-  pub variant_name: String,
+  #[builder(default)]
+  pub discriminator_values: Vec<String>,
+  pub variant_name: EnumVariantToken,
   pub type_name: TypeRef,
 }
 
@@ -47,15 +53,18 @@ pub enum SerdeMode {
 }
 
 /// Discriminated enum definition (uses macro for custom ser/de)
-#[derive(Debug, Clone, Default, Builder)]
-#[builder(default, setter(into))]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct DiscriminatedEnumDef {
   pub name: EnumToken,
+  #[builder(default)]
   pub docs: Documentation,
   pub discriminator_field: String,
+  #[builder(default)]
   pub variants: Vec<DiscriminatedVariant>,
   pub fallback: Option<DiscriminatedVariant>,
+  #[builder(default)]
   pub serde_mode: SerdeMode,
+  #[builder(default)]
   pub methods: Vec<EnumMethod>,
 }
 
@@ -71,13 +80,15 @@ impl DiscriminatedEnumDef {
 }
 
 /// Response enum variant definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct ResponseVariant {
-  pub status_code: StatusCodeToken,
   pub variant_name: EnumVariantToken,
+  #[builder(default)]
+  pub status_code: StatusCodeToken,
   pub description: Option<String>,
+  #[builder(default)]
+  pub media_types: Vec<ResponseMediaType>,
   pub schema_type: Option<TypeRef>,
-  pub content_category: ContentCategory,
 }
 
 impl ResponseVariant {
@@ -90,11 +101,34 @@ impl ResponseVariant {
   }
 }
 
+#[derive(Debug, Clone, Default, bon::Builder)]
+pub struct ResponseVariantCategory {
+  pub category: ContentCategory,
+  pub variant: ResponseVariant,
+}
+
+#[derive(Debug, Clone)]
+pub enum ResponseStatusCategory {
+  Single(ResponseVariantCategory),
+  ContentDispatch {
+    streams: Vec<ResponseVariantCategory>,
+    variants: Vec<ResponseVariantCategory>,
+  },
+}
+
+#[derive(Debug, Clone)]
+pub struct StatusHandler {
+  pub status_code: StatusCodeToken,
+  pub dispatch: ResponseStatusCategory,
+}
+
 /// Response enum definition for operation responses
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct ResponseEnumDef {
   pub name: EnumToken,
+  #[builder(default)]
   pub docs: Documentation,
+  #[builder(default)]
   pub variants: Vec<ResponseVariant>,
   pub request_type: Option<StructToken>,
 }
@@ -143,6 +177,19 @@ impl RustType {
   }
 }
 
+pub trait RustTypeCollection {
+  fn find_struct(&self, name: &StructToken) -> Option<&StructDef>;
+}
+
+impl RustTypeCollection for [RustType] {
+  fn find_struct(&self, name: &StructToken) -> Option<&StructDef> {
+    self.iter().find_map(|t| match t {
+      RustType::Struct(s) if &s.name == name => Some(s),
+      _ => None,
+    })
+  }
+}
+
 /// Metadata about an API operation (for tracking, not direct code generation)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationKind {
@@ -150,24 +197,30 @@ pub enum OperationKind {
   Webhook,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, bon::Builder)]
 pub struct OperationInfo {
+  #[builder(into)]
   pub stable_id: String,
+  #[builder(into)]
   pub operation_id: String,
   pub method: Method,
   pub path: ParsedPath,
+  #[builder(into)]
   pub path_template: String,
   pub kind: OperationKind,
+  #[builder(into)]
   pub summary: Option<String>,
+  #[builder(into)]
   pub description: Option<String>,
   pub request_type: Option<StructToken>,
   pub response_type: Option<String>,
   pub response_enum: Option<EnumToken>,
-  pub response_content_category: ContentCategory,
-  pub success_response_types: Vec<String>,
-  pub error_response_types: Vec<String>,
+  #[builder(default)]
+  pub response_media_types: Vec<ResponseMediaType>,
+  #[builder(default)]
   pub warnings: Vec<String>,
-  pub parameters: Vec<OperationParameter>,
+  #[builder(default)]
+  pub parameters: Vec<FieldDef>,
   pub body: Option<OperationBody>,
 }
 
@@ -180,16 +233,18 @@ pub enum ParameterLocation {
   Cookie,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct OperationParameter {
-  pub original_name: String,
-  pub rust_field: FieldNameToken,
-  pub location: ParameterLocation,
-  pub required: bool,
-  pub rust_type: TypeRef,
+impl From<ParameterIn> for ParameterLocation {
+  fn from(value: ParameterIn) -> Self {
+    match value {
+      ParameterIn::Path => Self::Path,
+      ParameterIn::Query => Self::Query,
+      ParameterIn::Header => Self::Header,
+      ParameterIn::Cookie => Self::Cookie,
+    }
+  }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub enum ContentCategory {
   #[default]
   Json,
@@ -198,37 +253,123 @@ pub enum ContentCategory {
   Text,
   Binary,
   Xml,
+  EventStream,
 }
 
 impl ContentCategory {
   #[must_use]
   pub fn from_content_type(content_type: &str) -> Self {
-    let ct = content_type.to_ascii_lowercase();
-    if ct.contains("json") {
-      Self::Json
-    } else if ct.contains("x-www-form-urlencoded") {
-      Self::FormUrlEncoded
-    } else if ct.contains("multipart") {
-      Self::Multipart
-    } else if ct.contains("text/plain") || ct.contains("text/html") {
-      Self::Text
-    } else if ct.contains("xml") {
-      Self::Xml
-    } else if ct.contains("octet-stream")
-      || ct.starts_with("image/")
-      || ct.starts_with("video/")
-      || ct.starts_with("audio/")
-      || ct.starts_with("application/pdf")
-      || (ct.starts_with("application/") && !ct.contains("json"))
-    {
-      Self::Binary
-    } else {
-      Self::Json
+    let Some(media) = MediaType::parse(content_type).ok() else {
+      return Self::Json;
+    };
+
+    match (media.ty.as_str(), media.subty.as_str()) {
+      ("multipart", _) => Self::Multipart,
+      ("text", "event-stream") => Self::EventStream,
+      ("text" | "application", "xml") => Self::Xml,
+      ("application", "x-www-form-urlencoded") => Self::FormUrlEncoded,
+      ("application", "json") => Self::Json,
+      ("image" | "audio" | "video", _) | ("application", "pdf" | "octet-stream") => Self::Binary,
+      ("application" | "text", _) => Self::Text,
+      _ => Self::Json,
+    }
+  }
+
+  #[must_use]
+  pub const fn variant_suffix(self) -> &'static str {
+    match self {
+      Self::Json => "",
+      Self::Binary => "Binary",
+      Self::Text => "Text",
+      Self::Xml => "Xml",
+      Self::EventStream => "EventStream",
+      Self::FormUrlEncoded => "Form",
+      Self::Multipart => "Multipart",
     }
   }
 }
 
-#[derive(Debug, Clone, Default)]
+impl EnumVariantToken {
+  pub fn with_content_suffix(self, category: ContentCategory) -> Self {
+    Self::new(format!("{}{}", self, category.variant_suffix()))
+  }
+}
+
+/// Media type information for a response variant.
+///
+/// Stores the parsed category (for determining parsing strategy) and the schema
+/// type for this specific media type (since different content types can have
+/// different schemas).
+#[derive(Debug, Clone)]
+pub struct ResponseMediaType {
+  pub category: ContentCategory,
+  pub schema_type: Option<TypeRef>,
+}
+
+impl ResponseMediaType {
+  #[must_use]
+  pub fn new(content_type: &str) -> Self {
+    Self {
+      category: ContentCategory::from_content_type(content_type),
+      schema_type: None,
+    }
+  }
+
+  #[must_use]
+  pub fn with_schema(content_type: &str, schema_type: Option<TypeRef>) -> Self {
+    Self {
+      category: ContentCategory::from_content_type(content_type),
+      schema_type,
+    }
+  }
+
+  #[must_use]
+  pub fn primary_category(media_types: &[Self]) -> ContentCategory {
+    media_types.first().map_or(ContentCategory::Json, |m| m.category)
+  }
+
+  #[must_use]
+  pub fn has_event_stream(media_types: &[Self]) -> bool {
+    media_types.iter().any(|m| m.category == ContentCategory::EventStream)
+  }
+}
+
+pub(crate) struct ContentMediaTypes(BTreeMap<ContentCategory, Vec<ResponseMediaType>>);
+
+impl From<&[ResponseMediaType]> for ContentMediaTypes {
+  fn from(media_types: &[ResponseMediaType]) -> Self {
+    Self(
+      media_types
+        .iter()
+        .filter(|m| m.schema_type.is_some())
+        .fold(BTreeMap::new(), |mut acc, m| {
+          acc.entry(m.category).or_default().push(m.clone());
+          acc
+        }),
+    )
+  }
+}
+
+impl ContentMediaTypes {
+  pub(crate) fn is_empty(&self) -> bool {
+    self.0.is_empty()
+  }
+
+  pub(crate) fn requires_suffix(&self) -> bool {
+    self.0.len() > 1
+  }
+}
+
+impl IntoIterator for ContentMediaTypes {
+  type Item = (ContentCategory, Vec<ResponseMediaType>);
+  type IntoIter = std::collections::btree_map::IntoIter<ContentCategory, Vec<ResponseMediaType>>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    self.0.into_iter()
+  }
+}
+
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct OperationBody {
   pub field_name: FieldNameToken,
   pub optional: bool,
@@ -252,15 +393,22 @@ pub enum StructKind {
 }
 
 /// Rust struct definition
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct StructDef {
+  #[builder(into)]
   pub name: StructToken,
+  #[builder(default)]
   pub docs: Documentation,
+  #[builder(default)]
   pub fields: Vec<FieldDef>,
+  #[builder(default)]
   pub serde_attrs: Vec<SerdeAttribute>,
+  #[builder(default)]
   pub outer_attrs: Vec<OuterAttr>,
+  #[builder(default)]
   pub methods: Vec<StructMethod>,
   pub kind: StructKind,
+  #[builder(default)]
   pub serde_mode: SerdeMode,
 }
 
@@ -281,7 +429,7 @@ impl StructDef {
 }
 
 /// Associated method definition for a struct
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, bon::Builder)]
 pub struct StructMethod {
   pub name: MethodNameToken,
   pub docs: Documentation,
@@ -292,12 +440,32 @@ pub struct StructMethod {
 pub enum StructMethodKind {
   ParseResponse {
     response_enum: EnumToken,
-    variants: Vec<ResponseVariant>,
+    status_handlers: Vec<StatusHandler>,
+    default_handler: Option<ResponseVariantCategory>,
+  },
+  Builder {
+    fields: Vec<BuilderField>,
+    nested_structs: Vec<BuilderNestedStruct>,
   },
 }
 
+#[derive(Debug, Clone, Default, bon::Builder)]
+pub struct BuilderField {
+  pub name: FieldNameToken,
+  pub rust_type: TypeRef,
+  pub owner_field: Option<FieldNameToken>,
+}
+
+#[derive(Debug, Clone, Default, bon::Builder)]
+pub struct BuilderNestedStruct {
+  pub field_name: FieldNameToken,
+  pub struct_name: StructToken,
+  #[builder(default)]
+  pub field_names: Vec<FieldNameToken>,
+}
+
 /// Associated method definition for an enum
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct EnumMethod {
   pub name: MethodNameToken,
   pub docs: Documentation,
@@ -333,23 +501,38 @@ pub enum EnumMethodKind {
   },
 }
 
+impl Default for EnumMethodKind {
+  fn default() -> Self {
+    Self::SimpleConstructor {
+      variant_name: EnumVariantToken::from_raw("Default"),
+      wrapped_type: TypeRef::default(),
+    }
+  }
+}
+
 /// Rust struct field definition
-#[derive(Debug, Clone, Default, Builder)]
-#[builder(default, setter(into))]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct FieldDef {
   pub name: FieldNameToken,
+  #[builder(default)]
   pub docs: Documentation,
   pub rust_type: TypeRef,
-  pub serde_attrs: Vec<SerdeAttribute>,
+  #[builder(default)]
+  pub serde_attrs: BTreeSet<SerdeAttribute>,
   pub serde_as_attr: Option<SerdeAsFieldAttr>,
-  /// Whether to emit `#[doc(hidden)]` for this field (used for discriminator fields)
+  #[builder(default)]
   pub doc_hidden: bool,
+  #[builder(default)]
   pub validation_attrs: Vec<ValidationAttribute>,
   pub default_value: Option<serde_json::Value>,
   pub example_value: Option<serde_json::Value>,
+  #[builder(into)]
   pub parameter_location: Option<ParameterLocation>,
+  #[builder(default)]
   pub deprecated: bool,
   pub multiple_of: Option<serde_json::Number>,
+  #[builder(into)]
+  pub original_name: Option<String>,
 }
 
 impl FieldDef {
@@ -357,20 +540,95 @@ impl FieldDef {
   pub fn is_required(&self) -> bool {
     self.default_value.is_none() && !self.rust_type.nullable
   }
+
+  #[must_use]
+  pub fn with_discriminator_behavior(mut self, discriminator_value: Option<&str>, is_base: bool) -> Self {
+    self.docs.clear();
+    self.validation_attrs.clear();
+    self.doc_hidden = true;
+
+    if let Some(value) = discriminator_value {
+      self.default_value = Some(serde_json::Value::String(value.to_string()));
+      self.serde_attrs.insert(SerdeAttribute::SkipDeserializing);
+      self.serde_attrs.insert(SerdeAttribute::Default);
+    } else if is_base {
+      self.serde_attrs.clear();
+      self.serde_attrs.insert(SerdeAttribute::Skip);
+      if self.rust_type.is_string_like() {
+        self.default_value = Some(serde_json::Value::String(String::new()));
+      }
+    }
+
+    self
+  }
+
+  #[must_use]
+  pub fn with_serde_attributes(mut self, explode: bool, style: Option<ParameterStyle>) -> Self {
+    if let Some(original) = &self.original_name
+      && self.name != original.as_str()
+    {
+      self.serde_attrs.insert(SerdeAttribute::Rename(original.clone()));
+    }
+
+    if self.rust_type.is_array && !explode {
+      let separator = match style {
+        Some(ParameterStyle::SpaceDelimited) => SerdeAsSeparator::Space,
+        Some(ParameterStyle::PipeDelimited) => SerdeAsSeparator::Pipe,
+        _ => SerdeAsSeparator::Comma,
+      };
+
+      self.serde_as_attr = Some(SerdeAsFieldAttr::SeparatedList {
+        separator,
+        optional: self.rust_type.nullable,
+      });
+    }
+
+    self
+  }
+}
+
+pub trait FieldCollection: Send + Sync {
+  type Token;
+
+  /// Find the element matching `name` token
+  #[must_use]
+  fn find_name(&self, name: &FieldNameToken) -> Option<&Self::Token>;
+
+  #[must_use]
+  fn has_serde_as(&self) -> bool;
+}
+
+impl FieldCollection for [FieldDef] {
+  type Token = FieldDef;
+
+  fn find_name(&self, name: &FieldNameToken) -> Option<&Self::Token> {
+    self.iter().find(|t| t.name == *name)
+  }
+
+  fn has_serde_as(&self) -> bool {
+    self.iter().any(|t| t.serde_as_attr.is_some())
+  }
 }
 
 /// Rust enum definition
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct EnumDef {
   pub name: EnumToken,
   pub docs: Documentation,
   pub variants: Vec<VariantDef>,
   pub discriminator: Option<String>,
+  #[builder(default)]
   pub serde_attrs: Vec<SerdeAttribute>,
+  #[builder(default)]
   pub outer_attrs: Vec<OuterAttr>,
+  #[builder(default)]
   pub case_insensitive: bool,
+  #[builder(default)]
   pub methods: Vec<EnumMethod>,
+  #[builder(default)]
   pub serde_mode: SerdeMode,
+  #[builder(default)]
+  pub generate_display: bool,
 }
 
 impl EnumDef {
@@ -382,12 +640,15 @@ impl EnumDef {
 }
 
 /// Rust enum variant definition
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct VariantDef {
   pub name: EnumVariantToken,
+  #[builder(default)]
   pub docs: Documentation,
   pub content: VariantContent,
+  #[builder(default)]
   pub serde_attrs: Vec<SerdeAttribute>,
+  #[builder(default)]
   pub deprecated: bool,
 }
 
@@ -402,6 +663,10 @@ impl VariantDef {
         _ => None,
       })
       .unwrap_or_else(|| self.name.to_string())
+  }
+
+  pub fn add_alias(&mut self, value: impl Into<String>) {
+    self.serde_attrs.push(SerdeAttribute::Alias(value.into()));
   }
 
   #[must_use]
@@ -442,7 +707,7 @@ impl VariantContent {
 }
 
 /// Type alias definition
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct TypeAliasDef {
   pub name: TypeAliasToken,
   pub docs: Documentation,

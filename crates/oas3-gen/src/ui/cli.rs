@@ -110,6 +110,17 @@ pub struct GenerateCommand {
   #[arg(long, default_value_t = false, display_order = 13, help_heading = "Code Generation")]
   pub no_helpers: bool,
 
+  /// Custom serde_as type overrides (format: type_name=custom::Path)
+  #[arg(
+    short = 'c',
+    long = "customize",
+    action = ArgAction::Append,
+    value_name = "TYPE=PATH",
+    display_order = 14,
+    help_heading = "Code Generation"
+  )]
+  pub customize: Option<Vec<String>>,
+
   /// Generate all schemas, even those unreferenced by selected operations
   #[arg(
     group = "filter",

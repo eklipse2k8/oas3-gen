@@ -12,22 +12,23 @@ use crate::generator::{
 fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
   StructDef {
     name: StructToken::new(name),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("field"),
-      rust_type: if nullable {
-        TypeRef::new("String").with_option()
-      } else {
-        TypeRef::new("String")
-      },
-      validation_attrs: vec![
-        ValidationAttribute::Length {
-          min: Some(1),
-          max: None,
-        },
-        ValidationAttribute::Regex("regex".to_string()),
-      ],
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("field"))
+        .rust_type(if nullable {
+          TypeRef::new("String").with_option()
+        } else {
+          TypeRef::new("String")
+        })
+        .validation_attrs(vec![
+          ValidationAttribute::Length {
+            min: Some(1),
+            max: None,
+          },
+          ValidationAttribute::Regex("regex".to_string()),
+        ])
+        .build(),
+    ],
     kind,
     ..Default::default()
   }
@@ -36,11 +37,12 @@ fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
 fn create_enum(name: &str) -> EnumDef {
   EnumDef {
     name: EnumToken::new(name),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Variant"),
-      content: VariantContent::Unit,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Variant"))
+        .content(VariantContent::Unit)
+        .build(),
+    ],
     ..Default::default()
   }
 }
@@ -170,22 +172,24 @@ fn test_adds_nested_validation_attrs_transitively() {
 
   let middle = StructDef {
     name: StructToken::new("Middle"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("inner"),
-      rust_type: TypeRef::new("Inner"),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("inner"))
+        .rust_type(TypeRef::new("Inner"))
+        .build(),
+    ],
     kind: StructKind::Schema,
     ..Default::default()
   };
 
   let outer = StructDef {
     name: StructToken::new("Outer"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("middle"),
-      rust_type: TypeRef::new("Middle"),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("middle"))
+        .rust_type(TypeRef::new("Middle"))
+        .build(),
+    ],
     kind: StructKind::Schema,
     ..Default::default()
   };
@@ -219,22 +223,24 @@ fn test_adds_nested_validation_attrs_transitively() {
 fn test_does_not_add_nested_validation_for_unvalidated_structs() {
   let unvalidated = StructDef {
     name: StructToken::new("Plain"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("field"),
-      rust_type: TypeRef::new("String"),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("field"))
+        .rust_type(TypeRef::new("String"))
+        .build(),
+    ],
     kind: StructKind::Schema,
     ..Default::default()
   };
 
   let outer = StructDef {
     name: StructToken::new("Outer"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("plain"),
-      rust_type: TypeRef::new("Plain"),
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("plain"))
+        .rust_type(TypeRef::new("Plain"))
+        .build(),
+    ],
     kind: StructKind::Schema,
     ..Default::default()
   };

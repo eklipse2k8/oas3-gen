@@ -23,10 +23,12 @@ pub(crate) static FORBIDDEN_IDENTIFIERS: LazyLock<HashSet<&str>> = LazyLock::new
   .collect()
 });
 
-static RESERVED_PASCAL_CASE: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-  ["Clone", "Copy", "Display", "Self", "Send", "Sync", "Type", "Vec"]
-    .into_iter()
-    .collect()
+static PRELUDE_TYPE_NAMES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+  [
+    "Clone", "Copy", "Display", "Option", "Result", "Send", "Sync", "Type", "Vec",
+  ]
+  .into_iter()
+  .collect()
 });
 
 static INVALID_CHARS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^A-Za-z0-9_]+").unwrap());
@@ -77,6 +79,19 @@ pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
   words
 }
 
+/// Splits a `snake_case` string into words.
+pub(crate) fn split_snake_case<S>(name: S) -> Vec<String>
+where
+  S: AsRef<str>,
+{
+  name
+    .as_ref()
+    .split('_')
+    .filter(|s| !s.is_empty())
+    .map(std::string::ToString::to_string)
+    .collect()
+}
+
 pub(crate) fn strip_parent_prefix(parent_name: &str, prop_pascal: &str) -> String {
   let parent_words = split_pascal_case(parent_name);
   let prop_words = split_pascal_case(prop_pascal);
@@ -105,6 +120,25 @@ pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> S
   }
 }
 
+/// Ensures a snake_case identifier is unique by appending `_2`, `_3`, etc. if needed.
+pub fn ensure_unique_snake_case_id<F>(base_id: &str, is_taken: F) -> String
+where
+  F: Fn(&str) -> bool,
+{
+  if !is_taken(base_id) {
+    return base_id.to_string();
+  }
+
+  let mut counter = 2;
+  loop {
+    let candidate = format!("{base_id}_{counter}");
+    if !is_taken(&candidate) {
+      return candidate;
+    }
+    counter += 1;
+  }
+}
+
 /// Converts a string into a valid Rust field name (`snake_case`).
 ///
 /// # Rules:
@@ -116,6 +150,13 @@ pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> S
 /// 6. If the result starts with a digit, it's prefixed with `_`.
 /// 7. If the result is empty, it becomes `_`.
 pub(crate) fn to_rust_field_name(name: &str) -> String {
+  if let Some(raw) = name.strip_prefix("r#")
+    && !raw.is_empty()
+    && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+  {
+    return format!("r#{raw}");
+  }
+
   let has_leading_minus = name.starts_with('-');
   let name_without_minus = name.strip_prefix('-').unwrap_or(name);
 
@@ -164,6 +205,13 @@ pub(crate) fn to_rust_const_name(input: &str) -> String {
 /// 5. If the result starts with a digit, it's prefixed with `T`.
 /// 6. If the result is empty, it becomes `Unnamed`.
 pub(crate) fn to_rust_type_name(name: &str) -> String {
+  if let Some(raw) = name.strip_prefix("r#")
+    && !raw.is_empty()
+    && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+  {
+    return format!("r#{raw}");
+  }
+
   let has_leading_minus = name.starts_with('-');
   let name_without_minus = name.strip_prefix('-').unwrap_or(name);
 
@@ -203,8 +251,12 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
     ident = format!("Negative{ident}");
   }
 
-  if RESERVED_PASCAL_CASE.contains(ident.as_str()) {
-    return format!("r#{ident}");
+  if ident == "Self" {
+    return "r#Self".to_string();
+  }
+
+  if PRELUDE_TYPE_NAMES.contains(ident.as_str()) {
+    return format!("{ident}Type");
   }
 
   prefix_if_digit_start(&mut ident, 'T');

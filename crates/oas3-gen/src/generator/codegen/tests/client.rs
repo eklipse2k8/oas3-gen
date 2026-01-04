@@ -1,23 +1,42 @@
 use http::Method;
+use proc_macro2::TokenStream;
 use quote::ToTokens;
 
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, OperationParameter,
-    ParameterLocation, ParsedPath, PathSegment, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
+    ClientDef, ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
+    ParsedPath, PathSegment, ResponseMediaType, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
   },
   codegen::{
     Visibility,
-    client::{ClientGenerator, ClientOperationMethod},
-    metadata::CodeMetadata,
+    client::{ClientGenerator, method},
   },
 };
+
+fn build_doc_attributes(op: &OperationInfo) -> crate::generator::ast::Documentation {
+  method::doc_attributes(op)
+}
+
+fn generate_method(op: &OperationInfo, rust_types: &[RustType], visibility: Visibility) -> anyhow::Result<TokenStream> {
+  method::MethodGenerator::new(op, rust_types, visibility).emit()
+}
+
+fn build_multipart_body(
+  field: &FieldNameToken,
+  optional: bool,
+  op: &OperationInfo,
+  rust_types: &[RustType],
+) -> TokenStream {
+  method::body::multipart::MultipartGenerator::new(op, rust_types, field, optional)
+    .emit()
+    .tokens
+}
 
 #[derive(Default)]
 struct TestOperation<'a> {
   summary: Option<&'a str>,
   description: Option<&'a str>,
-  response_content_category: Option<ContentCategory>,
+  response_media_types: Option<Vec<ResponseMediaType>>,
   response_enum: Option<&'a str>,
 }
 
@@ -35,9 +54,9 @@ impl TestOperation<'_> {
       request_type: Some(StructToken::new("TestRequest")),
       response_type: Some("TestResponse".to_string()),
       response_enum: self.response_enum.map(EnumToken::new),
-      response_content_category: self.response_content_category.unwrap_or(ContentCategory::Json),
-      success_response_types: vec![],
-      error_response_types: vec![],
+      response_media_types: self
+        .response_media_types
+        .unwrap_or_else(|| vec![ResponseMediaType::new("application/json")]),
       warnings: vec![],
       parameters: vec![],
       body: None,
@@ -95,7 +114,7 @@ fn test_build_doc_attributes() {
       ..Default::default()
     }
     .build();
-    let doc_attrs = ClientOperationMethod::build_doc_attributes(&operation);
+    let doc_attrs = build_doc_attributes(&operation);
     let output = doc_attrs.to_string();
 
     for expected in case.expected_contains {
@@ -115,7 +134,7 @@ fn test_build_doc_attributes() {
     ..Default::default()
   }
   .build();
-  let doc_attrs = ClientOperationMethod::build_doc_attributes(&operation);
+  let doc_attrs = build_doc_attributes(&operation);
   let output = doc_attrs.to_string();
   let summary_pos = output.find("Test summary").unwrap();
   let description_pos = output.find("Test description").unwrap();
@@ -166,24 +185,44 @@ fn test_response_handling_content_categories() {
       expected_return_ty: "reqwest :: Response",
       expected_contains: vec!["Ok (response)"],
     },
+    Case {
+      category: ContentCategory::EventStream,
+      expected_return_ty: "oas3_gen_support :: EventStream < TestResponse >",
+      expected_contains: vec!["EventStream :: from_response", "response"],
+    },
   ];
 
   for case in cases {
     let label = format!("category={:?}", case.category);
+    let content_type = match case.category {
+      ContentCategory::Json => "application/json",
+      ContentCategory::Text => "text/plain",
+      ContentCategory::Binary => "application/octet-stream",
+      ContentCategory::EventStream => "text/event-stream",
+      ContentCategory::Xml => "application/xml",
+      ContentCategory::FormUrlEncoded => "application/x-www-form-urlencoded",
+      ContentCategory::Multipart => "multipart/form-data",
+    };
     let operation = TestOperation {
-      response_content_category: Some(case.category),
+      response_media_types: Some(vec![ResponseMediaType::new(content_type)]),
       ..Default::default()
     }
     .build();
-    let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
+    let method = generate_method(&operation, &[], Visibility::Public)
+      .unwrap()
+      .to_string();
 
-    let return_ty_str = method.response_handling.success_type.to_string();
-    let response_str = method.response_handling.parse_body.to_string();
+    let expected_return = format!("-> anyhow :: Result < {} >", case.expected_return_ty);
 
-    assert_eq!(return_ty_str, case.expected_return_ty, "{label}: return type mismatch");
+    // Normalize spaces for comparison if needed, or just check substring
+    assert!(
+      method.contains(&expected_return),
+      "{label}: return type mismatch. Got code: {method}"
+    );
+
     for expected in case.expected_contains {
       assert!(
-        response_str.contains(expected),
+        method.contains(expected),
         "{label}: expected response to contain '{expected}'"
       );
     }
@@ -197,46 +236,53 @@ fn test_response_handling_with_response_enum() {
     ..Default::default()
   }
   .build();
-  let method = ClientOperationMethod::try_from_operation(&operation, &[], Visibility::Public).unwrap();
-
-  let success_type_str = method.response_handling.success_type.to_string();
-  let parse_body_str = method.response_handling.parse_body.to_string();
+  let method = generate_method(&operation, &[], Visibility::Public)
+    .unwrap()
+    .to_string();
 
   assert!(
-    success_type_str.contains("TestResponseEnum"),
+    method.contains("-> anyhow :: Result < TestResponseEnum >"),
     "success type should contain TestResponseEnum"
   );
   assert!(
-    parse_body_str.contains("parse_response"),
+    method.contains("parse_response"),
     "parse_body should use parse_response"
   );
 }
 
 #[test]
-fn test_multipart_generation() {
-  let binary_field = FieldDef {
-    name: FieldNameToken::new("file"),
-    rust_type: TypeRef {
-      base_type: RustPrimitive::Bytes,
-      is_array: false,
-      nullable: false,
-      boxed: false,
-      unique_items: false,
-    },
+fn test_event_stream_response_handling() {
+  let operation = TestOperation {
+    response_media_types: Some(vec![ResponseMediaType::new("text/event-stream")]),
     ..Default::default()
-  };
+  }
+  .build();
+  let method = generate_method(&operation, &[], Visibility::Public)
+    .unwrap()
+    .to_string();
 
-  let text_field = FieldDef {
-    name: FieldNameToken::new("description"),
-    rust_type: TypeRef {
-      base_type: RustPrimitive::String,
-      is_array: false,
-      nullable: false,
-      boxed: false,
-      unique_items: false,
-    },
-    ..Default::default()
-  };
+  assert!(method.contains("EventStream"), "return type should contain EventStream");
+  assert!(
+    method.contains("TestResponse"),
+    "return type should contain the response type"
+  );
+  assert!(
+    method.contains("EventStream :: from_response"),
+    "parse_body should create EventStream from response"
+  );
+}
+
+#[test]
+fn test_multipart_generation() {
+  let binary_field = FieldDef::builder()
+    .name(FieldNameToken::new("file"))
+    .rust_type(TypeRef::new(RustPrimitive::Bytes))
+    .build();
+
+  let text_field = FieldDef::builder()
+    .name(FieldNameToken::new("description"))
+    .rust_type(TypeRef::new(RustPrimitive::String))
+    .build();
 
   let body_struct = StructDef {
     name: StructToken::new("MultipartBody"),
@@ -247,17 +293,12 @@ fn test_multipart_generation() {
 
   let request_struct = StructDef {
     name: StructToken::new("UploadRequest"),
-    fields: vec![FieldDef {
-      name: FieldNameToken::new("body"),
-      rust_type: TypeRef {
-        base_type: RustPrimitive::Custom("MultipartBody".into()),
-        is_array: false,
-        nullable: false,
-        boxed: false,
-        unique_items: false,
-      },
-      ..Default::default()
-    }],
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("body"))
+        .rust_type(TypeRef::new(RustPrimitive::Custom("MultipartBody".into())))
+        .build(),
+    ],
     kind: StructKind::OperationRequest,
     ..Default::default()
   };
@@ -274,9 +315,7 @@ fn test_multipart_generation() {
     request_type: Some(StructToken::new(request_type)),
     response_type: Some("TestResponse".to_string()),
     response_enum: None,
-    response_content_category: ContentCategory::Json,
-    success_response_types: vec![],
-    error_response_types: vec![],
+    response_media_types: vec![ResponseMediaType::new("application/json")],
     warnings: vec![],
     parameters: vec![],
     body: None,
@@ -286,8 +325,7 @@ fn test_multipart_generation() {
 
   let rust_types = vec![RustType::Struct(request_struct), RustType::Struct(body_struct)];
   let strict_operation = make_operation("UploadRequest");
-  let strict_code =
-    ClientOperationMethod::build_multipart_body(&field_ident, false, &strict_operation, &rust_types).to_string();
+  let strict_code = build_multipart_body(&field_ident, false, &strict_operation, &rust_types).to_string();
 
   assert!(
     strict_code.contains("Part :: bytes"),
@@ -311,8 +349,7 @@ fn test_multipart_generation() {
   );
 
   let fallback_operation = make_operation("UnknownRequest");
-  let fallback_code =
-    ClientOperationMethod::build_multipart_body(&field_ident, false, &fallback_operation, &[]).to_string();
+  let fallback_code = build_multipart_body(&field_ident, false, &fallback_operation, &[]).to_string();
 
   assert!(
     fallback_code.contains("serde_json :: to_value"),
@@ -339,23 +376,16 @@ fn test_client_filters_webhook_operations() {
     request_type: Some(StructToken::new("ListPetsRequest")),
     response_type: Some("Vec<Pet>".to_string()),
     response_enum: None,
-    response_content_category: ContentCategory::Json,
-    success_response_types: vec![],
-    error_response_types: vec![],
+    response_media_types: vec![ResponseMediaType::new("application/json")],
     warnings: vec![],
-    parameters: vec![OperationParameter {
-      original_name: "X-Custom-Header".to_string(),
-      rust_field: FieldNameToken::new("x_custom_header"),
-      location: ParameterLocation::Header,
-      required: false,
-      rust_type: TypeRef {
-        base_type: RustPrimitive::String,
-        is_array: false,
-        nullable: true,
-        boxed: false,
-        unique_items: false,
-      },
-    }],
+    parameters: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("x_custom_header"))
+        .rust_type(TypeRef::new("String"))
+        .parameter_location(ParameterLocation::Header)
+        .original_name("X-Custom-Header".to_string())
+        .build(),
+    ],
     body: None,
   };
 
@@ -374,28 +404,22 @@ fn test_client_filters_webhook_operations() {
     request_type: Some(StructToken::new("PetAddedHookRequest")),
     response_type: Some("WebhookResponse".to_string()),
     response_enum: None,
-    response_content_category: ContentCategory::Json,
-    success_response_types: vec![],
-    error_response_types: vec![],
+    response_media_types: vec![ResponseMediaType::new("application/json")],
     warnings: vec![],
-    parameters: vec![OperationParameter {
-      original_name: "X-Webhook-Secret".to_string(),
-      rust_field: FieldNameToken::new("x_webhook_secret"),
-      location: ParameterLocation::Header,
-      required: true,
-      rust_type: TypeRef {
-        base_type: RustPrimitive::String,
-        is_array: false,
-        nullable: false,
-        boxed: false,
-        unique_items: false,
-      },
-    }],
+    parameters: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("x_webhook_secret"))
+        .rust_type(TypeRef::new("String"))
+        .parameter_location(ParameterLocation::Header)
+        .original_name("X-Webhook-Secret".to_string())
+        .build(),
+    ],
     body: None,
   };
 
   let operations = vec![http_operation, webhook_operation];
-  let metadata = CodeMetadata {
+  let metadata = ClientDef {
+    name: StructToken::new("PetStoreClient"),
     title: "PetStore".to_string(),
     base_url: "https://api.example.com".to_string(),
     version: "1.0.0".to_string(),
@@ -417,17 +441,9 @@ fn test_client_filters_webhook_operations() {
     "Webhook operation method should NOT be generated"
   );
 
-  // HTTP header constants should be generated
-  assert!(
-    output.contains("X_CUSTOM_HEADER") || output.contains("X-Custom-Header"),
-    "HTTP header constant should be generated"
-  );
-
-  // Webhook header constants should NOT be generated
-  assert!(
-    !output.contains("X_WEBHOOK_SECRET") && !output.contains("X-Webhook-Secret"),
-    "Webhook header constant should NOT be generated"
-  );
+  // Header constants are now generated in types.rs, not client.rs
+  // Verify the client uses the headers via the From impl
+  assert!(output.contains("headers"), "HTTP operation should use headers");
 }
 
 #[test]

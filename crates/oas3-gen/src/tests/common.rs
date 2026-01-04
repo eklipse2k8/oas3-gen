@@ -1,10 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 
 use oas3::spec::{ObjectSchema, Spec};
 use serde_json::json;
 
 use crate::generator::{
-  converter::{CodegenConfig, EnumCasePolicy, EnumHelperPolicy},
+  converter::{CodegenConfig, ConverterContext, EnumCasePolicy, EnumHelperPolicy, cache::SharedSchemaCache},
   schema_registry::SchemaRegistry,
 };
 
@@ -26,7 +26,8 @@ pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec 
 
 pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<SchemaRegistry> {
   let spec = create_test_spec(schemas);
-  let (mut graph, _) = SchemaRegistry::new(spec);
+  let init_result = SchemaRegistry::from_spec(spec);
+  let mut graph = init_result.registry;
   graph.build_dependencies();
   graph.detect_cycles();
   Arc::new(graph)
@@ -48,4 +49,9 @@ pub(crate) fn config_with_no_helpers() -> CodegenConfig {
     enum_helpers: EnumHelperPolicy::Disable,
     ..Default::default()
   }
+}
+
+pub(crate) fn create_test_context(graph: Arc<SchemaRegistry>, config: CodegenConfig) -> Rc<ConverterContext> {
+  let cache = SharedSchemaCache::new();
+  Rc::new(ConverterContext::new(graph, config, cache, None))
 }

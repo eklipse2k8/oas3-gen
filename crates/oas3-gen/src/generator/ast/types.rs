@@ -20,7 +20,7 @@ pub(crate) fn format_number_with_underscores<T: ToFormattedString>(value: &T) ->
 }
 
 /// Type reference with wrapper support (Box, Option, Vec)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct TypeRef {
   pub base_type: RustPrimitive,
@@ -43,6 +43,11 @@ impl TypeRef {
 
   pub fn with_option(mut self) -> Self {
     self.nullable = true;
+    self
+  }
+
+  pub fn unwrap_option(mut self) -> Self {
+    self.nullable = false;
     self
   }
 
@@ -88,6 +93,10 @@ impl TypeRef {
         | RustPrimitive::F64
         | RustPrimitive::Bool
     ) && !self.is_array
+  }
+
+  pub fn requires_json_serialization(&self) -> bool {
+    self.is_array || matches!(self.base_type, RustPrimitive::Custom(_) | RustPrimitive::Value)
   }
 
   /// Get the full Rust type string
@@ -157,6 +166,18 @@ impl TypeRef {
 impl From<RustPrimitive> for TypeRef {
   fn from(primitive: RustPrimitive) -> Self {
     TypeRef::new(primitive)
+  }
+}
+
+impl From<&serde_json::Value> for TypeRef {
+  fn from(value: &serde_json::Value) -> Self {
+    match value {
+      serde_json::Value::String(_) => TypeRef::new(RustPrimitive::String),
+      serde_json::Value::Number(n) if n.is_i64() => TypeRef::new(RustPrimitive::I64),
+      serde_json::Value::Number(_) => TypeRef::new(RustPrimitive::F64),
+      serde_json::Value::Bool(_) => TypeRef::new(RustPrimitive::Bool),
+      _ => TypeRef::new(RustPrimitive::Value),
+    }
   }
 }
 

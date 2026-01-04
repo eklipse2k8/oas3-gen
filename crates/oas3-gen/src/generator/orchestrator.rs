@@ -1,4 +1,8 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+  collections::{BTreeSet, HashMap, HashSet},
+  rc::Rc,
+  sync::Arc,
+};
 
 use quote::ToTokens;
 use strum::Display;
@@ -6,13 +10,13 @@ use strum::Display;
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::TypeAnalyzer,
-  ast::{LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType},
-  codegen::{self, Visibility, client::ClientGenerator, metadata::CodeMetadata, mod_file::ModFileGenerator},
+  ast::{ClientDef, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType, StructToken},
+  codegen::{self, Visibility, client::ClientGenerator, mod_file::ModFileGenerator},
   converter::{
-    CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy, SchemaConverter,
-    TypeUsageRecorder, operations::OperationConverter,
+    CodegenConfig, ConverterContext, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy,
+    SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
   },
-  naming::inference::InlineTypeScanner,
+  naming::identifiers::to_rust_type_name,
   operation_registry::OperationRegistry,
   schema_registry::SchemaRegistry,
 };
@@ -29,6 +33,7 @@ pub struct Orchestrator {
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   no_helpers: bool,
+  customizations: HashMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -100,8 +105,9 @@ impl Orchestrator {
     preserve_case_variants: bool,
     case_insensitive_enums: bool,
     no_helpers: bool,
+    customizations: HashMap<String, String>,
   ) -> Self {
-    let operation_registry = OperationRegistry::from_spec_filtered(&spec, only_operations, excluded_operations);
+    let operation_registry = OperationRegistry::with_filters(&spec, only_operations, excluded_operations);
     Self {
       spec,
       visibility,
@@ -111,7 +117,21 @@ impl Orchestrator {
       preserve_case_variants,
       case_insensitive_enums,
       no_helpers,
+      customizations,
     }
+  }
+
+  // TODO: Create a client converter struct to encapsulate this logic
+  fn client_struct_name(&self) -> StructToken {
+    let title = self.spec.info.title.clone();
+
+    let client_name = if title.is_empty() {
+      "ApiClient".to_string()
+    } else {
+      format!("{}Client", to_rust_type_name(&title))
+    };
+
+    StructToken::new(client_name)
   }
 
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
@@ -125,19 +145,24 @@ impl Orchestrator {
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    let _ = analyzer.analyze();
+    analyzer.analyze();
 
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
-    let metadata = CodeMetadata::from_spec(&self.spec);
-    let client_generator = ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility);
+    let client = ClientDef::builder()
+      .name(self.client_struct_name())
+      .info(&self.spec.info)
+      .servers(&self.spec.servers)
+      .build();
+
+    let client_generator = ClientGenerator::new(&client, &operations_info, &rust_types, self.visibility);
     let client_tokens = client_generator.into_token_stream();
     let lint_config = LintConfig::default();
 
     let final_code = codegen::generate_source(
       &client_tokens,
-      &metadata,
+      &client,
       Some(&lint_config),
       source_path,
       OAS3_GEN_VERSION,
@@ -155,17 +180,20 @@ impl Orchestrator {
     } = artifacts;
 
     let lint_config = LintConfig::default();
-    let metadata = CodeMetadata::from_spec(&self.spec);
+    let client = ClientDef::builder()
+      .name(self.client_struct_name())
+      .info(&self.spec.info)
+      .servers(&self.spec.servers)
+      .build();
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    let analysis = analyzer.analyze();
+    analyzer.analyze();
 
     let final_code = codegen::generate_file(
       &rust_types,
-      &analysis.error_schemas,
       self.visibility,
-      &metadata,
+      &client,
       &lint_config,
       source_path,
       OAS3_GEN_VERSION,
@@ -182,25 +210,28 @@ impl Orchestrator {
       mut stats,
     } = artifacts;
 
-    let metadata = CodeMetadata::from_spec(&self.spec);
+    let client = ClientDef::builder()
+      .name(self.client_struct_name())
+      .info(&self.spec.info)
+      .servers(&self.spec.servers)
+      .build();
 
     let seed_map = usage_recorder.into_usage_map();
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    let analysis = analyzer.analyze();
+    analyzer.analyze();
 
-    let types_tokens = codegen::generate(&rust_types, &analysis.error_schemas, self.visibility);
-    let types_code = codegen::generate_source(&types_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
+    let types_tokens = codegen::generate(&rust_types, self.visibility);
+    let types_code = codegen::generate_source(&types_tokens, &client, None, source_path, OAS3_GEN_VERSION)?;
 
     stats.client_methods_generated = Some(operations_info.len());
     stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
 
     let client_generator =
-      ClientGenerator::new(&metadata, &operations_info, &rust_types, self.visibility).with_types_import();
-    let client_ident = client_generator.client_ident();
+      ClientGenerator::new(&client, &operations_info, &rust_types, self.visibility).with_types_import();
     let client_tokens = client_generator.into_token_stream();
-    let client_code = codegen::generate_source(&client_tokens, &metadata, None, source_path, OAS3_GEN_VERSION)?;
+    let client_code = codegen::generate_source(&client_tokens, &client, None, source_path, OAS3_GEN_VERSION)?;
 
-    let mod_generator = ModFileGenerator::new(&metadata, &client_ident, self.visibility);
+    let mod_generator = ModFileGenerator::new(&client, self.visibility);
     let mod_code = mod_generator.generate(source_path, OAS3_GEN_VERSION)?;
 
     Ok(ClientModOutput {
@@ -212,17 +243,19 @@ impl Orchestrator {
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
-    let (mut graph, mut warnings) = SchemaRegistry::new(self.spec.clone());
+    let init_result = SchemaRegistry::from_spec(self.spec.clone());
+    let mut graph = init_result.registry;
+    let mut warnings = init_result.warnings;
     graph.build_dependencies();
     let cycle_details = graph.detect_cycles();
 
     let operation_reachable = if self.include_unused_schemas {
       None
     } else {
-      Some(graph.get_operation_reachable_schemas(&self.operation_registry))
+      Some(Arc::new(graph.reachable(&self.operation_registry)))
     };
 
-    let total_schemas = graph.schema_names().len();
+    let total_schemas = graph.keys().len();
     let orphaned_schemas_count = if let Some(ref reachable) = operation_reachable {
       total_schemas.saturating_sub(reachable.len())
     } else {
@@ -250,31 +283,34 @@ impl Orchestrator {
       } else {
         ODataPolicy::Disabled
       },
+      customizations: self.customizations.clone(),
     };
+
+    let scan_result = graph.scan_and_compute_names().unwrap_or_default();
 
     let graph = Arc::new(graph);
-
-    let schema_converter = if let Some(ref reachable) = operation_reachable {
-      SchemaConverter::new_with_filter(&graph, reachable.clone(), config)
-    } else {
-      SchemaConverter::new(&graph, config)
-    };
-
-    let scanner = InlineTypeScanner::new(&graph);
-    let scan_result = scanner.scan_and_compute_names().unwrap_or_default();
 
     let mut cache = SharedSchemaCache::new();
     cache.set_precomputed_names(scan_result.names, scan_result.enum_names);
 
+    let context = Rc::new(ConverterContext::new(
+      graph.clone(),
+      config,
+      cache,
+      operation_reachable.clone(),
+    ));
+
+    let schema_converter = SchemaConverter::new(&context);
+
     let (schema_rust_types, schema_warnings) =
-      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_ref(), &mut cache);
+      Self::convert_all_schemas(&graph, &schema_converter, operation_reachable.as_deref());
 
     let (op_rust_types, operations_info, op_warnings, usage_recorder) =
-      self.convert_all_operations(&graph, &schema_converter, &mut cache);
+      self.convert_all_operations(&context, &schema_converter);
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(op_rust_types);
-    rust_types.extend(cache.into_types());
+    rust_types.extend(context.cache.replace(SharedSchemaCache::new()).into_types());
 
     warnings.extend(schema_warnings);
     warnings.extend(op_warnings);
@@ -330,44 +366,26 @@ impl Orchestrator {
   }
 
   /// Converts all schemas from the OpenAPI spec to Rust types.
-  ///
-  /// Processing order: Enums are converted before other schema types to ensure deterministic
-  /// code generation. This ordering prevents issues where enum types might be referenced
-  /// before they are defined, and ensures generated code is stable across multiple runs.
-  ///
-  /// Algorithm:
-  /// 1. Collect all schema names from the graph
-  /// 2. Sort schemas by `is_none_or(|s| s.enum_values.is_empty())` to place enums first:
-  ///    - Schemas with non-empty `enum_values` sort as `false` (enums first)
-  ///    - Schemas with empty `enum_values` sort as `true` (non-enums after)
-  ///    - Missing schemas sort as `true` (last)
-  /// 3. Process each schema in order, applying operation reachability filtering if enabled
-  /// 4. Collect conversion errors as warnings rather than failing fast
-  ///
-  /// The `operation_reachable` filter, when provided, limits conversion to schemas that are
-  /// referenced by at least one operation, reducing generated code size.
   fn convert_all_schemas(
     graph: &SchemaRegistry,
     schema_converter: &SchemaConverter,
     operation_reachable: Option<&std::collections::BTreeSet<String>>,
-    cache: &mut SharedSchemaCache,
   ) -> (Vec<RustType>, Vec<GenerationWarning>) {
     let mut rust_types = vec![];
     let mut warnings = vec![];
 
-    let mut schema_names = graph.schema_names();
-    schema_names.sort_by_key(|name| {
-      graph
-        .get_schema(name)
-        .is_none_or(|schema| schema.enum_values.is_empty())
-    });
+    let mut schema_names = graph.keys();
+    schema_names.sort_by_key(|name| graph.get(name).is_none_or(|schema| schema.enum_values.is_empty()));
 
-    for schema_name in &schema_names {
-      if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
-        continue;
-      }
-      if let Some(schema) = graph.get_schema(schema_name) {
-        let _ = cache.register_top_level_schema(schema, schema_name);
+    {
+      let mut cache = schema_converter.context().cache.borrow_mut();
+      for schema_name in &schema_names {
+        if operation_reachable.is_some_and(|filter| !filter.contains(schema_name.as_str())) {
+          continue;
+        }
+        if let Some(schema) = graph.get(schema_name) {
+          let _ = cache.register_top_level_schema(schema, schema_name);
+        }
       }
     }
 
@@ -376,11 +394,11 @@ impl Orchestrator {
         continue;
       }
 
-      let Some(schema) = graph.get_schema(schema_name) else {
+      let Some(schema) = graph.get(schema_name) else {
         continue;
       };
 
-      match schema_converter.convert_schema(schema_name, schema, Some(cache)) {
+      match schema_converter.convert_schema(schema_name, schema) {
         Ok(types) => rust_types.extend(types),
         Err(e) => warnings.push(GenerationWarning::SchemaConversionFailed {
           schema_name: schema_name.clone(),
@@ -395,17 +413,17 @@ impl Orchestrator {
     operations
       .iter()
       .flat_map(|op| &op.parameters)
-      .filter(|param| matches!(param.location, ParameterLocation::Header))
-      .map(|param| param.original_name.to_ascii_lowercase())
-      .collect::<std::collections::BTreeSet<_>>()
+      .filter(|param| matches!(param.parameter_location, Some(ParameterLocation::Header)))
+      .filter_map(|param| param.original_name.as_deref())
+      .map(str::to_ascii_lowercase)
+      .collect::<BTreeSet<_>>()
       .len()
   }
 
   fn convert_all_operations(
     &self,
-    graph: &SchemaRegistry,
+    context: &Rc<ConverterContext>,
     schema_converter: &SchemaConverter,
-    cache: &mut SharedSchemaCache,
   ) -> (
     Vec<RustType>,
     Vec<OperationInfo>,
@@ -417,33 +435,28 @@ impl Orchestrator {
     let mut warnings = vec![];
     let mut usage_recorder = TypeUsageRecorder::new();
 
-    let operation_converter = OperationConverter::new(schema_converter, graph.spec());
+    let operation_converter = OperationConverter::new(context.clone(), schema_converter);
 
-    for (stable_id, method, path, operation, kind) in self.operation_registry.operations_with_details() {
-      let operation_id = operation.operation_id.as_deref().unwrap_or("unknown");
-
-      match operation_converter.convert(
-        stable_id,
-        operation_id,
-        method,
-        path,
-        kind,
-        operation,
-        &mut usage_recorder,
-        cache,
-      ) {
-        Ok((types, op_info)) => {
-          warnings.extend(op_info.warnings.iter().map(|w| GenerationWarning::OperationSpecific {
-            operation_id: op_info.operation_id.clone(),
-            message: w.clone(),
-          }));
-          rust_types.extend(types);
-          operations_info.push(op_info);
+    for entry in self.operation_registry.operations() {
+      match operation_converter.convert(entry, &mut usage_recorder) {
+        Ok(result) => {
+          warnings.extend(
+            result
+              .operation_info
+              .warnings
+              .iter()
+              .map(|w| GenerationWarning::OperationSpecific {
+                operation_id: result.operation_info.operation_id.clone(),
+                message: w.clone(),
+              }),
+          );
+          rust_types.extend(result.types);
+          operations_info.push(result.operation_info);
         }
         Err(e) => {
           warnings.push(GenerationWarning::OperationConversionFailed {
-            method: method.to_string(),
-            path: path.to_string(),
+            method: entry.method.to_string(),
+            path: entry.path.clone(),
             error: e.to_string(),
           });
         }

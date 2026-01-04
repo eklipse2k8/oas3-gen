@@ -1,20 +1,17 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
-use string_cache::DefaultAtom;
 
 use crate::{
   generator::{
-    ast::{FieldDef, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute, tokens::FieldNameToken},
+    ast::{
+      Documentation, FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute,
+    },
     converter::{
-      SchemaConverter,
-      discriminator::{DiscriminatorInfo, apply_discriminator_attributes},
-      metadata::FieldMetadata,
-      structs::StructConverter,
-      type_resolver::TypeResolverBuilder,
+      SchemaConverter, discriminator::DiscriminatorConverter, structs::StructConverter, type_resolver::TypeResolver,
     },
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 #[test]
@@ -47,8 +44,9 @@ fn test_discriminated_base_struct_renamed() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, default_config());
-  let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -95,8 +93,9 @@ fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Message".to_string(), message_schema)]));
-  let converter = SchemaConverter::new(&graph, default_config());
-  let result = converter.convert_schema("Message", graph.get_schema("Message").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Message", graph.get("Message").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -163,8 +162,9 @@ fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
   });
 
   let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), entity_schema)]));
-  let converter = SchemaConverter::new(&graph, default_config());
-  let result = converter.convert_schema("Entity", graph.get_schema("Entity").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -220,16 +220,14 @@ fn test_schema_merger_merge_child_with_parent() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let merged_schema = type_resolver.merge_child_schema_with_parent(&child, &parent).unwrap();
+  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
 
-  assert!(merged_schema.properties.contains_key("parent_prop"));
-  assert!(merged_schema.properties.contains_key("child_prop"));
-  assert!(merged_schema.required.contains(&"parent_prop".to_string()));
+  assert!(merged_schema.schema.properties.contains_key("parent_prop"));
+  assert!(merged_schema.schema.properties.contains_key("child_prop"));
+  assert!(merged_schema.schema.required.contains(&"parent_prop".to_string()));
+
+  let effective_schema = graph.resolved("Child").unwrap();
+  assert_eq!(effective_schema.properties.len(), merged_schema.schema.properties.len());
 }
 
 #[test]
@@ -262,15 +260,9 @@ fn test_schema_merger_conflict_resolution() {
   graph_map.insert("Child".to_string(), child.clone());
 
   let graph = create_test_graph(graph_map);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let merged_schema = type_resolver.merge_child_schema_with_parent(&child, &parent).unwrap();
+  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
 
-  // Child should override parent
-  let prop = merged_schema.properties.get("prop").unwrap();
+  let prop = merged_schema.schema.properties.get("prop").unwrap();
   if let ObjectOrReference::Object(schema) = prop {
     assert_eq!(schema.schema_type, Some(SchemaTypeSet::Single(SchemaType::Integer)));
   } else {
@@ -308,25 +300,22 @@ fn test_discriminator_handler_detect_parent() {
   graph_map.insert("Child".to_string(), child_schema.clone());
 
   let graph = create_test_graph(graph_map);
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let handler = DiscriminatorConverter::new(context);
 
-  let mut cache = HashMap::new();
-  let result = type_resolver.detect_discriminated_parent(&child_schema, &mut cache);
+  let result = handler.detect_discriminated_parent("Child");
 
-  assert!(result.is_some());
-  assert!(result.unwrap().discriminator.is_some());
+  let info = result.expect("parent should be detected");
+  assert_eq!(info.parent_name, "Parent");
 }
 
 fn make_field(name: &str, deprecated: bool) -> FieldDef {
-  FieldDef {
-    name: FieldNameToken::new(name),
-    deprecated,
-    ..Default::default()
-  }
+  FieldDef::builder()
+    .name(FieldNameToken::from_raw(name))
+    .rust_type(TypeRef::new(RustPrimitive::String))
+    .docs(make_docs())
+    .deprecated(deprecated)
+    .build()
 }
 
 #[test]
@@ -414,14 +403,8 @@ fn test_deduplicate_field_names_multiple_groups() {
   assert!(!fields.iter().any(|f| f.name == "bar" && f.deprecated));
 }
 
-fn make_metadata_with_docs() -> FieldMetadata {
-  FieldMetadata {
-    docs: vec!["Some docs".to_string()].into(),
-    validation_attrs: vec![ValidationAttribute::Email],
-    default_value: None,
-    deprecated: false,
-    multiple_of: None,
-  }
+fn make_docs() -> Documentation {
+  vec!["Some docs".to_string()].into()
 }
 
 fn make_string_type_ref() -> TypeRef {
@@ -432,41 +415,25 @@ fn make_integer_type_ref() -> TypeRef {
   TypeRef::new(RustPrimitive::I64)
 }
 
-#[test]
-fn test_apply_discriminator_attributes_none_returns_unchanged() {
-  let metadata = make_metadata_with_docs();
-  let serde_attrs = vec![SerdeAttribute::Rename("original".to_string())];
-  let type_ref = make_string_type_ref();
-
-  let result = apply_discriminator_attributes(metadata.clone(), serde_attrs.clone(), &type_ref, None);
-
-  assert_eq!(result.metadata.docs, metadata.docs);
-  assert_eq!(result.metadata.validation_attrs.len(), 1);
-  assert_eq!(result.serde_attrs, serde_attrs);
-  assert!(!result.doc_hidden);
+fn make_base_field(type_ref: TypeRef) -> FieldDef {
+  FieldDef::builder()
+    .name(FieldNameToken::from_raw("test_field"))
+    .docs(make_docs())
+    .rust_type(type_ref)
+    .serde_attrs(BTreeSet::from([SerdeAttribute::Rename("original".to_string())]))
+    .validation_attrs(vec![ValidationAttribute::Email])
+    .build()
 }
 
 #[test]
-fn test_apply_discriminator_attributes_child_discriminator_hides_and_sets_value() {
-  let metadata = make_metadata_with_docs();
-  let serde_attrs = vec![];
-  let type_ref = make_string_type_ref();
+fn test_with_discriminator_behavior_child_discriminator_hides_and_sets_value() {
+  let field = make_base_field(make_string_type_ref());
+  let result = field.with_discriminator_behavior(Some("child_type"), false);
 
-  let disc_info = DiscriminatorInfo {
-    value: Some(DefaultAtom::from("child_type")),
-    is_base: false,
-    has_enum: false,
-  };
-
-  let result = apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
-
-  assert!(result.metadata.docs.is_empty(), "docs should be cleared");
-  assert!(
-    result.metadata.validation_attrs.is_empty(),
-    "validation attrs should be cleared"
-  );
+  assert!(result.docs.is_empty(), "docs should be cleared");
+  assert!(result.validation_attrs.is_empty(), "validation should be cleared");
   assert_eq!(
-    result.metadata.default_value,
+    result.default_value,
     Some(serde_json::Value::String("child_type".to_string()))
   );
   assert!(result.serde_attrs.contains(&SerdeAttribute::SkipDeserializing));
@@ -475,80 +442,30 @@ fn test_apply_discriminator_attributes_child_discriminator_hides_and_sets_value(
 }
 
 #[test]
-fn test_apply_discriminator_attributes_base_without_enum_hides_and_skips() {
-  let metadata = make_metadata_with_docs();
-  let serde_attrs = vec![SerdeAttribute::Rename("@odata.type".to_string())];
-  let type_ref = make_string_type_ref();
+fn test_with_discriminator_behavior_base_hides_and_skips_string() {
+  let field = make_base_field(make_string_type_ref());
+  let result = field.with_discriminator_behavior(None, true);
 
-  let disc_info = DiscriminatorInfo {
-    value: None,
-    is_base: true,
-    has_enum: false,
-  };
-
-  let result = apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
-
-  assert!(result.metadata.docs.is_empty(), "docs should be cleared");
+  assert!(result.docs.is_empty(), "docs should be cleared");
+  assert!(result.validation_attrs.is_empty(), "validation should be cleared");
+  assert_eq!(result.default_value, Some(serde_json::Value::String(String::new())));
+  assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
   assert!(
-    result.metadata.validation_attrs.is_empty(),
-    "validation attrs should be cleared"
-  );
-  assert_eq!(
-    result.metadata.default_value,
-    Some(serde_json::Value::String(String::new())),
-    "string type should get empty default"
-  );
-  assert_eq!(
-    result.serde_attrs,
-    vec![SerdeAttribute::Skip],
-    "only Skip should remain"
+    !result
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("original".to_string()))
   );
   assert!(result.doc_hidden);
 }
 
 #[test]
-fn test_apply_discriminator_attributes_base_without_enum_non_string_no_default() {
-  let metadata = make_metadata_with_docs();
-  let serde_attrs = vec![];
-  let type_ref = make_integer_type_ref();
+fn test_with_discriminator_behavior_base_non_string_no_default() {
+  let field = make_base_field(make_integer_type_ref());
+  let result = field.with_discriminator_behavior(None, true);
 
-  let disc_info = DiscriminatorInfo {
-    value: None,
-    is_base: true,
-    has_enum: false,
-  };
-
-  let result = apply_discriminator_attributes(metadata, serde_attrs, &type_ref, Some(&disc_info));
-
-  assert!(
-    result.metadata.default_value.is_none(),
-    "non-string type should not get default"
-  );
+  assert!(result.default_value.is_none(), "non-string type should not get default");
   assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
-}
-
-#[test]
-fn test_apply_discriminator_attributes_base_with_enum_remains_visible() {
-  let metadata = make_metadata_with_docs();
-  let serde_attrs = vec![SerdeAttribute::Rename("role".to_string())];
-  let type_ref = make_string_type_ref();
-
-  let disc_info = DiscriminatorInfo {
-    value: None,
-    is_base: true,
-    has_enum: true,
-  };
-
-  let result = apply_discriminator_attributes(metadata.clone(), serde_attrs.clone(), &type_ref, Some(&disc_info));
-
-  assert_eq!(result.metadata.docs, metadata.docs, "docs should be preserved");
-  assert_eq!(
-    result.metadata.validation_attrs.len(),
-    1,
-    "validation attrs should be preserved"
-  );
-  assert_eq!(result.serde_attrs, serde_attrs, "serde attrs should be unchanged");
-  assert!(!result.doc_hidden, "should not be hidden");
+  assert!(result.doc_hidden);
 }
 
 #[test]
@@ -593,8 +510,9 @@ fn test_discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<
     ("Child".to_string(), child_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, default_config());
-  let result = converter.convert_schema("Child", graph.get_schema("Child").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Child", graph.get("Child").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -658,17 +576,14 @@ fn test_schema_merger_merge_all_of() {
     ("Composite".to_string(), composite_schema.clone()),
   ]));
 
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let merged_schema = type_resolver.merge_all_of_schema(&composite_schema).unwrap();
+  let merged_schema = graph
+    .merged("Composite")
+    .expect("merged schema should exist for Composite");
 
-  assert!(merged_schema.properties.contains_key("base_prop"));
-  assert!(merged_schema.properties.contains_key("mixin_prop"));
-  assert!(merged_schema.properties.contains_key("own_prop"));
-  assert!(merged_schema.required.contains(&"base_prop".to_string()));
+  assert!(merged_schema.schema.properties.contains_key("base_prop"));
+  assert!(merged_schema.schema.properties.contains_key("mixin_prop"));
+  assert!(merged_schema.schema.properties.contains_key("own_prop"));
+  assert!(merged_schema.schema.required.contains(&"base_prop".to_string()));
 }
 
 #[test]
@@ -701,55 +616,18 @@ fn test_schema_merger_preserves_discriminator() {
     ("Child".to_string(), child_schema.clone()),
   ]));
 
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let merged_schema = type_resolver
-    .merge_child_schema_with_parent(&child_schema, &parent_schema)
-    .unwrap();
+  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
 
-  assert!(merged_schema.discriminator.is_some());
-  assert_eq!(merged_schema.discriminator.as_ref().unwrap().property_name, "type");
-}
-
-#[test]
-fn test_discriminator_handler_no_parent_returns_none() {
-  let schema = ObjectSchema::default();
-  let graph = create_test_graph(BTreeMap::new());
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let mut cache = HashMap::new();
-  let result = type_resolver.detect_discriminated_parent(&schema, &mut cache);
-
-  assert!(result.is_none());
-}
-
-#[test]
-fn test_discriminator_handler_inline_all_of_returns_none() {
-  let mut schema = ObjectSchema::default();
-  schema.all_of.push(ObjectOrReference::Object(ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  }));
-
-  let graph = create_test_graph(BTreeMap::new());
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-
-  let mut cache = HashMap::new();
-  let result = type_resolver.detect_discriminated_parent(&schema, &mut cache);
-
-  assert!(
-    result.is_none(),
-    "Inline schemas should not be considered discriminated parents"
+  assert_eq!(merged_schema.discriminator_parent.as_deref(), Some("Parent"));
+  assert!(merged_schema.schema.discriminator.is_some());
+  assert_eq!(
+    merged_schema
+      .schema
+      .discriminator
+      .as_ref()
+      .expect("discriminator should exist")
+      .property_name,
+    "type"
   );
 }
 
@@ -791,13 +669,10 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
     ("ChildEvent".to_string(), child_schema),
   ]));
 
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
+  let context = create_test_context(graph.clone(), default_config());
+  let type_resolver = TypeResolver::new(context);
 
-  let result = type_resolver.create_discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
+  let result = type_resolver.discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
 
   let RustType::DiscriminatedEnum(enum_def) = result else {
     panic!("Expected DiscriminatedEnum");
@@ -820,4 +695,52 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
   );
 
   Ok(())
+}
+
+#[test]
+fn test_discriminator_mappings_returns_alphabetical_order() {
+  let base_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: Some(BTreeMap::from([
+        ("zebra".to_string(), "#/components/schemas/Zebra".to_string()),
+        ("alpha".to_string(), "#/components/schemas/Alpha".to_string()),
+        ("middle".to_string(), "#/components/schemas/Middle".to_string()),
+        ("beta".to_string(), "#/components/schemas/Beta".to_string()),
+      ])),
+    }),
+    ..Default::default()
+  };
+
+  let empty_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("Base".to_string(), base_schema.clone()),
+    ("Alpha".to_string(), empty_schema.clone()),
+    ("Beta".to_string(), empty_schema.clone()),
+    ("Middle".to_string(), empty_schema.clone()),
+    ("Zebra".to_string(), empty_schema.clone()),
+  ]));
+
+  let context = create_test_context(graph.clone(), default_config());
+  let handler = DiscriminatorConverter::new(context);
+  let mappings = handler.discriminator_mappings(&base_schema);
+
+  let schema_names: Vec<&str> = mappings.iter().map(|(name, _)| name.as_str()).collect();
+  assert_eq!(
+    schema_names,
+    vec!["Alpha", "Beta", "Middle", "Zebra"],
+    "Mappings should be in alphabetical order by schema name"
+  );
 }

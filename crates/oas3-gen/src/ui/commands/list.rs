@@ -11,11 +11,11 @@ use crate::{
 pub async fn list_operations(input: &Path, colors: &Colors) -> anyhow::Result<()> {
   let spec = SpecLoader::open(input).await?.parse()?;
 
-  let registry = OperationRegistry::from_spec(&spec);
+  let registry = OperationRegistry::new(&spec);
 
   let mut operations: Vec<_> = registry
     .operations()
-    .map(|(id, location)| (id.to_string(), location.method.clone(), location.path.clone()))
+    .map(|entry| (entry.stable_id.clone(), entry.method.clone(), entry.path.clone()))
     .collect();
 
   operations.sort_by(|a, b| a.0.cmp(&b.0));

@@ -49,6 +49,11 @@
 								"schema": {
 									"$ref": "#/components/schemas/Pets"
 								}
+							},
+							"application/xml": {
+								"schema": {
+									"$ref": "#/components/schemas/Pets"
+								}
 							}
 						}
 					},
@@ -85,6 +90,43 @@
 				}
 			}
 		},
+		"/cats": {
+			"get": {
+				"summary": "List all cats",
+				"operationId": "listCats",
+				"tags": ["pets"],
+				"responses": {
+					"200": {
+						"description": "A paged array of cats",
+						"headers": {
+							"x-next": {
+								"description": "A link to the next page of responses",
+								"schema": {
+									"type": "string"
+								}
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Cats"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/pets/{petId}": {
 			"get": {
 				"summary": "Info for a specific pet",
@@ -96,6 +138,15 @@
 						"in": "path",
 						"required": true,
 						"description": "The id of the pet to retrieve",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "x-api-version",
+						"in": "header",
+						"required": true,
+						"description": "API version to use for this request",
 						"schema": {
 							"type": "string"
 						}
@@ -144,10 +195,38 @@
 					}
 				}
 			},
+			"Cat": {
+				"allOf": [
+					{
+						"$ref": "#/components/schemas/Pet"
+					},
+					{
+						"type": "object",
+						"required": ["lives"],
+						"properties": {
+							"lives": {
+								"type": "integer",
+								"format": "int32",
+								"minimum": 1,
+								"maximum": 9
+							},
+							"favoriteToy": {
+								"type": "string"
+							}
+						}
+					}
+				]
+			},
 			"Pets": {
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Pet"
+				}
+			},
+			"Cats": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Cat"
 				}
 			},
 			"Error": {

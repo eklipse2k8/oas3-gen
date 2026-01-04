@@ -1,59 +1,47 @@
 use std::{
-  collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-  sync::Arc,
+  collections::{BTreeMap, BTreeSet, HashSet},
+  rc::Rc,
 };
 
 use anyhow::Context as _;
 use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
-  CodegenConfig, ConversionOutput, SchemaExt,
-  cache::{SharedSchemaCache, StructSummary},
-  discriminator::{DiscriminatorInfo, apply_discriminator_attributes, get_discriminator_info},
-  metadata::{self, FieldMetadata},
-  type_resolver::TypeResolver,
+  ConversionOutput, SchemaExt, discriminator::DiscriminatorConverter, fields::FieldConverter,
+  struct_summaries::StructSummary, type_resolver::TypeResolver,
 };
 use crate::generator::{
   ast::{
-    Documentation, FieldDef, FieldDefBuilder, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
+    Documentation, FieldDef, OuterAttr, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
     tokens::FieldNameToken,
   },
-  converter::type_resolver::TypeResolverBuilder,
-  naming::{
-    constants::{DISCRIMINATED_BASE_SUFFIX, MERGED_SCHEMA_CACHE_SUFFIX},
-    identifiers::{to_rust_field_name, to_rust_type_name},
-  },
-  schema_registry::SchemaRegistry,
+  converter::ConverterContext,
+  naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
+  schema_registry::DiscriminatorMapping,
 };
 
+#[derive(Clone, Debug)]
 struct AdditionalPropertiesResult {
   serde_attrs: Vec<SerdeAttribute>,
   additional_field: Option<FieldDef>,
 }
 
 /// Converter for OpenAPI object schemas into Rust Structs.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct StructConverter {
+  context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
-  field_processor: FieldProcessor,
+  field_converter: FieldConverter,
 }
 
 impl StructConverter {
-  pub(crate) fn new(
-    graph: &Arc<SchemaRegistry>,
-    config: CodegenConfig,
-    reachable_schemas: Option<Arc<BTreeSet<String>>>,
-  ) -> Self {
-    let type_resolver = TypeResolverBuilder::default()
-      .config(config)
-      .graph(graph.clone())
-      .reachable_schemas(reachable_schemas)
-      .build()
-      .expect("TypeResolver");
-    let field_processor = FieldProcessor::new(config, type_resolver.clone());
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let type_resolver = TypeResolver::new(context.clone());
+    let field_converter = FieldConverter::new(&context);
     Self {
+      context,
       type_resolver,
-      field_processor,
+      field_converter,
     }
   }
 
@@ -63,12 +51,13 @@ impl StructConverter {
     schema: &ObjectSchema,
     exclude_field: Option<&str>,
     schema_name: Option<&str>,
-    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
     let num_properties = schema.properties.len();
     let required_set: HashSet<&String> = schema.required.iter().collect();
 
-    let discriminator_mapping = schema_name.and_then(|name| self.type_resolver.graph().get_discriminator_mapping(name));
+    let discriminator_mapping = schema_name
+      .and_then(|name| self.context.graph().mapping(name))
+      .map(DiscriminatorMapping::as_tuple);
 
     let mut fields = Vec::with_capacity(num_properties);
     let mut inline_types = vec![];
@@ -81,26 +70,21 @@ impl StructConverter {
       let is_required = required_set.contains(prop_name);
 
       let prop_schema = prop_schema_ref
-        .resolve(self.type_resolver.graph().spec())
-        .with_context(|| format!("Schema resolution failed for property '{prop_name}'"))?;
+        .resolve(self.context.graph().spec())
+        .context(format!("Schema resolution failed for property '{prop_name}'"))?;
 
-      let cache_borrow = cache.as_deref_mut();
-      let resolved = self.type_resolver.resolve_property_type(
-        parent_name,
-        prop_name,
-        &prop_schema,
-        prop_schema_ref,
-        cache_borrow,
-      )?;
+      let resolved = self
+        .type_resolver
+        .resolve_property(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
 
-      let field = self.field_processor.process_single_field(
+      let field = self.field_converter.convert_field(
         prop_name,
         schema,
         &prop_schema,
         resolved.result,
         is_required,
-        discriminator_mapping,
-      )?;
+        discriminator_mapping.as_ref(),
+      );
       fields.push(field);
 
       let mut generated = resolved.inline_types;
@@ -112,25 +96,25 @@ impl StructConverter {
   }
 
   /// Converts a schema composed with `allOf` by merging properties.
-  pub(crate) fn convert_all_of_schema(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    cache: Option<&mut SharedSchemaCache>,
-  ) -> anyhow::Result<Vec<RustType>> {
-    let mut merged_schema_cache = HashMap::new();
+  pub(crate) fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
+    let graph = self.context.graph();
 
-    if let Some(parent_schema) = self
-      .type_resolver
-      .detect_discriminated_parent(schema, &mut merged_schema_cache)
-    {
-      return self.convert_discriminated_child(name, schema, &parent_schema, &mut merged_schema_cache, cache);
+    let merged_info = graph
+      .merged(name)
+      .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
+
+    let handler = DiscriminatorConverter::new(self.context.clone());
+    if let Some(parent_info) = handler.detect_discriminated_parent(name) {
+      let parent_merged = graph
+        .merged(&parent_info.parent_name)
+        .ok_or_else(|| anyhow::anyhow!("Parent schema '{}' not found", parent_info.parent_name))?;
+      return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema);
     }
 
-    let merged_schema = self.type_resolver.merge_all_of_schema(schema)?;
-    let result = self.convert_struct(name, &merged_schema, None, cache)?;
+    let effective_schema = graph.resolved(name).unwrap_or(&merged_info.schema);
 
-    self.finalize_struct_types(name, &merged_schema, result.result, result.inline_types)
+    let result = self.convert_struct(name, effective_schema, None)?;
+    self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)
   }
 
   /// Converts a standard object schema into a Rust Struct.
@@ -139,7 +123,6 @@ impl StructConverter {
     name: &str,
     schema: &ObjectSchema,
     kind: Option<StructKind>,
-    mut cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<ConversionOutput<RustType>> {
     let is_discriminated = schema.is_discriminated_base_type();
     let struct_name = if is_discriminated {
@@ -148,9 +131,8 @@ impl StructConverter {
       StructToken::from_raw(name)
     };
 
-    let cache_for_fields = cache.as_deref_mut();
-    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name), cache_for_fields)?;
-    let additional_props = self.field_processor.prepare_additional_properties(schema)?;
+    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name))?;
+    let additional_props = self.prepare_additional_properties(schema)?;
 
     let mut fields = field_result.result;
     let mut serde_attrs = additional_props.serde_attrs;
@@ -164,28 +146,25 @@ impl StructConverter {
       serde_attrs.push(SerdeAttribute::Default);
     }
 
+    let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
+    let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
+
     let struct_def = StructDef {
       name: struct_name,
-      docs: metadata::extract_docs(schema.description.as_ref()),
+      docs: Documentation::from_optional(schema.description.as_ref()),
       fields,
       serde_attrs,
-      outer_attrs: vec![],
+      outer_attrs,
       methods: vec![],
       kind: kind.unwrap_or(StructKind::Schema),
       ..Default::default()
     };
 
-    // Register struct summary for enum helper generation
-    if let Some(ref mut c) = cache {
-      let summary = StructSummary {
-        has_default: struct_def.has_default(),
-        required_fields: struct_def
-          .required_fields()
-          .map(|f| (f.name.clone(), f.rust_type.clone()))
-          .collect(),
-      };
-      c.register_struct_summary(struct_def.name.as_str(), summary);
-    }
+    self
+      .context
+      .cache
+      .borrow_mut()
+      .register_struct_summary(struct_def.name.as_str(), StructSummary::from(&struct_def));
 
     Ok(ConversionOutput::with_inline_types(
       RustType::Struct(struct_def),
@@ -196,10 +175,8 @@ impl StructConverter {
   fn convert_discriminated_child(
     &self,
     name: &str,
-    schema: &ObjectSchema,
+    merged_schema: &ObjectSchema,
     parent_schema: &ObjectSchema,
-    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
-    cache: Option<&mut SharedSchemaCache>,
   ) -> anyhow::Result<Vec<RustType>> {
     if parent_schema.discriminator.is_none() {
       anyhow::bail!("Parent schema for discriminated child '{name}' is not a valid discriminator base");
@@ -207,19 +184,8 @@ impl StructConverter {
 
     let struct_name = StructToken::from_raw(name);
 
-    let cache_key = format!("{name}{MERGED_SCHEMA_CACHE_SUFFIX}");
-    let merged_schema = if let Some(cached) = merged_schema_cache.get(&cache_key) {
-      cached.clone()
-    } else {
-      let new_merged = self
-        .type_resolver
-        .merge_child_schema_with_parent(schema, parent_schema)?;
-      merged_schema_cache.insert(cache_key, new_merged.clone());
-      new_merged
-    };
-
-    let field_result = self.convert_fields(struct_name.as_str(), &merged_schema, None, Some(name), cache)?;
-    let additional_props = self.field_processor.prepare_additional_properties(&merged_schema)?;
+    let field_result = self.convert_fields(struct_name.as_str(), merged_schema, None, Some(name))?;
+    let additional_props = self.prepare_additional_properties(merged_schema)?;
 
     let mut fields = field_result.result;
     let mut serde_attrs = additional_props.serde_attrs;
@@ -232,12 +198,16 @@ impl StructConverter {
       serde_attrs.push(SerdeAttribute::Default);
     }
 
+    let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
+    let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
+
     let mut all_types = Vec::with_capacity(1 + field_result.inline_types.len());
     all_types.push(RustType::Struct(StructDef {
       name: struct_name,
-      docs: metadata::extract_docs(schema.description.as_ref()),
+      docs: Documentation::from_optional(merged_schema.description.as_ref()),
       fields,
       serde_attrs,
+      outer_attrs,
       kind: StructKind::Schema,
       ..Default::default()
     }));
@@ -265,13 +235,48 @@ impl StructConverter {
       };
       let discriminated_enum = self
         .type_resolver
-        .create_discriminated_enum(name, schema, base_struct_name.as_str())?;
+        .discriminated_enum(name, schema, base_struct_name.as_str())?;
       all_types.push(discriminated_enum);
     }
 
     all_types.push(main_type);
     all_types.append(&mut inline_types);
     Ok(all_types)
+  }
+
+  fn prepare_additional_properties(&self, schema: &ObjectSchema) -> anyhow::Result<AdditionalPropertiesResult> {
+    let mut serde_attrs = vec![];
+    let mut additional_field = None;
+
+    if let Some(ref additional) = schema.additional_properties {
+      match additional {
+        Schema::Boolean(b) if !b.0 => {
+          serde_attrs.push(SerdeAttribute::DenyUnknownFields);
+        }
+        Schema::Object(_) => {
+          let value_type = self.type_resolver.additional_properties_type(additional)?;
+          let map_type = TypeRef::new(format!(
+            "std::collections::HashMap<String, {}>",
+            value_type.to_rust_type()
+          ));
+          additional_field = Some(
+            FieldDef::builder()
+              .name(FieldNameToken::from_raw("additional_properties"))
+              .docs(Documentation::from_lines([
+                "Additional properties not defined in the schema.",
+              ]))
+              .rust_type(map_type)
+              .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))
+              .build(),
+          );
+        }
+        Schema::Boolean(_) => {}
+      }
+    }
+    Ok(AdditionalPropertiesResult {
+      serde_attrs,
+      additional_field,
+    })
   }
 
   pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
@@ -303,129 +308,5 @@ impl StructConverter {
         keep
       });
     }
-  }
-}
-
-#[derive(Clone)]
-pub(crate) struct FieldProcessor {
-  odata_support: bool,
-  type_resolver: TypeResolver,
-}
-
-impl FieldProcessor {
-  fn new(config: CodegenConfig, type_resolver: TypeResolver) -> Self {
-    Self {
-      odata_support: config.odata_support(),
-      type_resolver,
-    }
-  }
-
-  fn process_single_field(
-    &self,
-    prop_name: &str,
-    parent_schema: &ObjectSchema,
-    prop_schema: &ObjectSchema,
-    resolved_type: TypeRef,
-    is_required: bool,
-    discriminator_mapping: Option<&(String, String)>,
-  ) -> anyhow::Result<FieldDef> {
-    let discriminator_info = get_discriminator_info(prop_name, parent_schema, prop_schema, discriminator_mapping);
-
-    let should_be_optional = self.is_field_optional(
-      prop_name,
-      parent_schema,
-      prop_schema,
-      discriminator_info.as_ref(),
-      is_required,
-    );
-    let final_type = if should_be_optional && !resolved_type.nullable {
-      resolved_type.with_option()
-    } else {
-      resolved_type
-    };
-
-    let metadata = FieldMetadata::from_schema(prop_name, is_required, prop_schema, &final_type);
-    let rust_field_name = to_rust_field_name(prop_name);
-    let serde_attrs = if rust_field_name == prop_name {
-      vec![]
-    } else {
-      vec![SerdeAttribute::Rename(prop_name.to_string())]
-    };
-
-    let disc_attrs = apply_discriminator_attributes(metadata, serde_attrs, &final_type, discriminator_info.as_ref());
-
-    let field = FieldDefBuilder::default()
-      .name(to_rust_field_name(prop_name))
-      .rust_type(final_type)
-      .docs(disc_attrs.metadata.docs)
-      .serde_attrs(disc_attrs.serde_attrs)
-      .doc_hidden(disc_attrs.doc_hidden)
-      .validation_attrs(disc_attrs.metadata.validation_attrs)
-      .default_value(disc_attrs.metadata.default_value)
-      .deprecated(disc_attrs.metadata.deprecated)
-      .multiple_of(disc_attrs.metadata.multiple_of)
-      .build()?;
-
-    Ok(field)
-  }
-
-  fn is_field_optional(
-    &self,
-    prop_name: &str,
-    parent_schema: &ObjectSchema,
-    prop_schema: &ObjectSchema,
-    discriminator_info: Option<&DiscriminatorInfo>,
-    is_required: bool,
-  ) -> bool {
-    let has_default = prop_schema.default.is_some();
-    let is_discriminator_field = discriminator_info.is_some();
-    let discriminator_has_enum = discriminator_info.is_some_and(|i| i.has_enum);
-
-    if !is_required || has_default {
-      return true;
-    }
-    if is_discriminator_field && !discriminator_has_enum {
-      return true;
-    }
-    if self.odata_support
-      && prop_name.starts_with("@odata.")
-      && parent_schema.discriminator.is_none()
-      && parent_schema.all_of.is_empty()
-    {
-      return true;
-    }
-    false
-  }
-
-  fn prepare_additional_properties(&self, schema: &ObjectSchema) -> anyhow::Result<AdditionalPropertiesResult> {
-    let mut serde_attrs = vec![];
-    let mut additional_field = None;
-
-    if let Some(ref additional) = schema.additional_properties {
-      match additional {
-        Schema::Boolean(b) if !b.0 => {
-          serde_attrs.push(SerdeAttribute::DenyUnknownFields);
-        }
-        Schema::Object(_) => {
-          let value_type = self.type_resolver.resolve_additional_properties_type(additional)?;
-          let map_type = TypeRef::new(format!(
-            "std::collections::HashMap<String, {}>",
-            value_type.to_rust_type()
-          ));
-          additional_field = Some(FieldDef {
-            name: FieldNameToken::new("additional_properties"),
-            docs: Documentation::from_lines(["Additional properties not defined in the schema."]),
-            rust_type: map_type,
-            serde_attrs: vec![SerdeAttribute::Flatten],
-            ..Default::default()
-          });
-        }
-        Schema::Boolean(_) => {}
-      }
-    }
-    Ok(AdditionalPropertiesResult {
-      serde_attrs,
-      additional_field,
-    })
   }
 }

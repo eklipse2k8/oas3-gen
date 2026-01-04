@@ -1,4 +1,7 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+  collections::{HashMap, HashSet},
+  path::PathBuf,
+};
 
 use chrono::{Local, Timelike};
 use crossterm::style::Stylize;
@@ -33,6 +36,7 @@ pub struct GenerateConfig {
   pub only_operations: Option<HashSet<String>>,
   pub excluded_operations: Option<HashSet<String>>,
   pub no_helpers: bool,
+  pub customizations: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +61,7 @@ impl GenerateConfig {
       self.preserve_case_variants,
       self.case_insensitive_enums,
       self.no_helpers,
+      self.customizations.clone(),
     )
   }
 
@@ -92,6 +97,7 @@ impl GenerateConfig {
       exclude,
       verbose,
       quiet,
+      customize,
     } = command;
 
     let output = match (&mode, output) {
@@ -100,6 +106,7 @@ impl GenerateConfig {
       (_, Some(path)) => path,
     };
     let enum_policies = EnumPolicies::from(enum_mode);
+    let customizations = parse_customizations(customize)?;
 
     Ok(Self {
       mode,
@@ -115,8 +122,24 @@ impl GenerateConfig {
       only_operations: only.map(|ops| ops.into_iter().collect()),
       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
       no_helpers,
+      customizations,
     })
   }
+}
+
+fn parse_customizations(customize: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
+  let Some(entries) = customize else {
+    return Ok(HashMap::new());
+  };
+
+  let mut map = HashMap::new();
+  for entry in entries {
+    let (key, value) = entry.split_once('=').ok_or_else(|| {
+      anyhow::anyhow!("Invalid customize format '{entry}': expected TYPE=PATH (e.g., date_time=crate::MyDateTime)")
+    })?;
+    map.insert(key.to_string(), value.to_string());
+  }
+  Ok(map)
 }
 
 impl From<EnumCaseMode> for EnumPolicies {
@@ -352,4 +375,67 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
 
   logger.log_success();
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_parse_customizations_none() {
+    let result = parse_customizations(None).unwrap();
+    assert!(result.is_empty());
+  }
+
+  #[test]
+  fn test_parse_customizations_empty_vec() {
+    let result = parse_customizations(Some(vec![])).unwrap();
+    assert!(result.is_empty());
+  }
+
+  #[test]
+  fn test_parse_customizations_single_entry() {
+    let result = parse_customizations(Some(vec!["date_time=crate::MyDateTime".to_string()])).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result.get("date_time"), Some(&"crate::MyDateTime".to_string()));
+  }
+
+  #[test]
+  fn test_parse_customizations_multiple_entries() {
+    let result = parse_customizations(Some(vec![
+      "date_time=crate::MyDateTime".to_string(),
+      "date=crate::MyDate".to_string(),
+      "uuid=crate::MyUuid".to_string(),
+    ]))
+    .unwrap();
+
+    assert_eq!(result.len(), 3);
+    assert_eq!(result.get("date_time"), Some(&"crate::MyDateTime".to_string()));
+    assert_eq!(result.get("date"), Some(&"crate::MyDate".to_string()));
+    assert_eq!(result.get("uuid"), Some(&"crate::MyUuid".to_string()));
+  }
+
+  #[test]
+  fn test_parse_customizations_with_module_path() {
+    let result =
+      parse_customizations(Some(vec!["date_time=my_crate::types::custom::IsoDateTime".to_string()])).unwrap();
+    assert_eq!(
+      result.get("date_time"),
+      Some(&"my_crate::types::custom::IsoDateTime".to_string())
+    );
+  }
+
+  #[test]
+  fn test_parse_customizations_invalid_format_no_equals() {
+    let result = parse_customizations(Some(vec!["date_time".to_string()]));
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("Invalid customize format"));
+  }
+
+  #[test]
+  fn test_parse_customizations_with_equals_in_value() {
+    let result = parse_customizations(Some(vec!["date_time=crate::Type=Something".to_string()])).unwrap();
+    assert_eq!(result.get("date_time"), Some(&"crate::Type=Something".to_string()));
+  }
 }

@@ -4,8 +4,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use strum::Display;
 
-use super::{OperationParameter, tokens::FieldNameToken};
-use crate::generator::ast::ParameterLocation;
+use super::{FieldDef, ParameterLocation, tokens::FieldNameToken};
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum PathParseError {
@@ -55,7 +54,7 @@ impl PathSegment {
   }
 
   fn tokenize(segment: &str) -> Result<Vec<SegmentPart<'_>>, PathParseError> {
-    let mut parts = Vec::new();
+    let mut parts = vec![];
     let mut rest = segment;
     let mut offset = 0;
 
@@ -119,7 +118,7 @@ impl PathSegment {
 
   fn build_mixed(segment: &str, parts: &[SegmentPart<'_>], params: &HashMap<&str, &FieldNameToken>) -> Self {
     let mut format_str = String::new();
-    let mut field_params = Vec::new();
+    let mut field_params = vec![];
 
     for part in parts {
       match part {
@@ -163,11 +162,11 @@ impl ToTokens for PathSegment {
 pub struct ParsedPath(pub Vec<PathSegment>);
 
 impl ParsedPath {
-  pub fn parse(path: &str, parameters: &[OperationParameter]) -> Result<Self, PathParseError> {
+  pub fn parse(path: &str, parameters: &[FieldDef]) -> Result<Self, PathParseError> {
     let param_map: HashMap<&str, &FieldNameToken> = parameters
       .iter()
-      .filter(|p| matches!(p.location, ParameterLocation::Path))
-      .map(|p| (p.original_name.as_str(), &p.rust_field))
+      .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Path)))
+      .filter_map(|p| p.original_name.as_deref().map(|name| (name, &p.name)))
       .collect();
 
     let segments: Result<Vec<_>, _> = path

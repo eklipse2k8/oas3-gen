@@ -76,6 +76,37 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 
 ## Preferred Code Patterns
 
+### Rust 2024 Edition Style
+
+Follow Rust standard library conventions and Rust 2024 idioms:
+
+- **Turbofish for collect**: Prefer `.collect::<Vec<_>>()` over `let x: Vec<_> = ...collect()`
+- **`into_iter()` over `.iter().cloned()`**: Consume owned collections directly when possible
+- **`let-else` for early returns**: Use `let Some(x) = y else { return None; }` pattern
+- **`bool::then` over `if`**: Prefer `condition.then(|| value)` for Option construction
+- **Iterator chains**: Favor iterator methods (`map`, `filter`, `flat_map`) over manual loops
+- **`From`/`Into` traits**: Implement standard conversion traits instead of ad-hoc methods
+- **Type aliases for complex types**: Use `type Foo = (Vec<A>, Vec<B>)` to document tuple semantics
+- **Early returns**: Return early on error/empty cases to reduce nesting
+- **Method chaining**: Keep transformations flowing left-to-right in single expressions
+
+### State Management
+
+Prefer encapsulated state over passing mutable references between functions:
+
+- **Bad**: `fn process(data: &[Item], cache: &mut Cache) -> Result`
+- **Good**: `impl Processor { fn process(&mut self, data: &[Item]) -> Result }`
+
+Guidelines:
+
+- Keep mutable state inside structs, accessed via `&mut self`
+- Avoid `&mut` parameters for accumulator/cache patterns
+- Use `RefCell` for interior mutability when shared references need mutation
+- Functions should be pure transformations when possible: `fn transform(input: &T) -> U`
+- Side effects belong in methods, not free functions
+
+This makes ownership clear, simplifies call sites, and prevents "parameter threading" where mutable refs pass through multiple layers.
+
 ### Reference Counting and Cloning
 
 - Use `Arc<T>` for shared ownership of expensive-to-clone types (e.g., `Arc<ObjectSchema>`)
@@ -90,19 +121,22 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 
 ### Builder Pattern
 
-- Use builder pattern (via `derive_builder`) for structs with multiple optional fields or complex construction
+- Use builder pattern (via `bon`) for structs with multiple optional fields or complex construction
 - Direct struct initialization is acceptable for simple parameter objects with few required fields
 - Builders improve readability when constructing objects with many fields
-- Example: `FieldDefBuilder::default().name("foo").rust_type(ty).build()?`
+- Example: `FieldDef::builder().name("foo").rust_type(ty).build()`
 
-### Avoid Tuples
+### Avoid Tuples in Public APIs
 
-- NEVER use tuples as function return types when returning multiple values
+- NEVER use tuples as public function return types when returning multiple values
 - Use named structs instead for clarity and maintainability
 - Good: `fn convert() -> Generated<RustType>` with `struct Generated<T> { item: T, inline_types: Vec<RustType> }`
-- Bad: `fn convert() -> (RustType, Vec<RustType>)`
+- Bad: `pub fn convert() -> (RustType, Vec<RustType>)`
 - Tuples lack semantic meaning and make code harder to understand
-- Exception: Standard library patterns like `Iterator::enumerate()` where tuple meaning is well-established
+- **Exceptions**:
+  - Standard library patterns like `Iterator::enumerate()`, `unzip()` where tuple meaning is well-established
+  - Private helper functions with type aliases: `type FieldTuple = (Vec<Field>, Option<Nested>);`
+  - Intermediate iterator results that are immediately destructured
 
 ### String Enums
 
@@ -122,12 +156,12 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 
 ### Error Context with anyhow
 
-- Use `with_context()` instead of `map_err()` when adding context to errors
-- `with_context()` preserves the error chain and is more idiomatic with anyhow
+- Use `context()` or `with_context()` instead of `map_err()` when adding context to errors
+- `with_context()` can be used when you need a lambda to execute a contextual result. Prefer `context()` for simple strings.
 - Bad: `.map_err(|e| anyhow::anyhow!("Failed for '{}': {e}", name))?`
-- Good: `.with_context(|| format!("Failed for '{}'", name))?`
+- Good: `.context(format!("Failed for '{}'", name))?`
 - The underlying error is automatically chained; don't manually interpolate it into the message
-- Import `use anyhow::Context;` to access the `with_context()` method on `Result` types
+- Import `use anyhow::Context;` to access the `with_context()` or `context()` method on `Result` types
 
 ### Type-Safe Enums for Configuration
 

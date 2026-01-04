@@ -19,6 +19,9 @@ cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o cr
 
 # Rebuild union_serde fixture (types.rs, client.rs, mod.rs)
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --all-schemas
+
+# Rebuild intersection_union fixture (types.rs, client.rs, mod.rs)
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/intersection_union.json -o crates/oas3-gen/fixtures/intersection_union --all-schemas
 ```
 
 ## Code Coverage

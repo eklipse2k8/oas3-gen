@@ -8,7 +8,7 @@ use crate::{
     ast::{EnumMethodKind, RustType},
     converter::SchemaConverter,
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 #[test]
@@ -91,8 +91,9 @@ fn test_enum_helper_with_const_discriminator() -> anyhow::Result<()> {
     ("Cat".to_string(), cat_schema),
   ]));
 
-  let converter = SchemaConverter::new(&graph, default_config());
-  let result = converter.convert_schema("Pet", graph.get_schema("Pet").unwrap(), None)?;
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Pet", graph.get("Pet").unwrap())?;
 
   // Expect DiscriminatedEnum
   let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {

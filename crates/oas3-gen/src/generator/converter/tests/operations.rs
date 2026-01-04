@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeMap as ResponseMap};
+use std::{
+  collections::{BTreeMap, BTreeMap as ResponseMap},
+  rc::Rc,
+};
 
 use http::Method;
 use oas3::spec::{
@@ -9,21 +12,19 @@ use oas3::spec::{
 use crate::{
   generator::{
     ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StructDef, StructToken},
-    converter::{SchemaConverter, TypeUsageRecorder, cache::SharedSchemaCache, operations::OperationConverter},
+    converter::{SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
+    operation_registry::OperationEntry,
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
-fn setup_converter(
-  schemas: BTreeMap<String, ObjectSchema>,
-) -> (OperationConverter<'static>, TypeUsageRecorder, SharedSchemaCache) {
+fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter<'static>, TypeUsageRecorder) {
   let graph = create_test_graph(schemas);
-  let spec = Box::leak(Box::new(graph.spec().clone()));
-  let schema_converter = Box::leak(Box::new(SchemaConverter::new(&graph, default_config())));
-  let converter = OperationConverter::new(schema_converter, spec);
+  let context = create_test_context(graph, default_config());
+  let schema_converter = Box::leak(Box::new(SchemaConverter::new(&context)));
+  let converter = OperationConverter::new(context, schema_converter);
   let usage = TypeUsageRecorder::new();
-  let cache = SharedSchemaCache::new();
-  (converter, usage, cache)
+  (converter, usage)
 }
 
 fn create_parameter(
@@ -65,70 +66,175 @@ fn extract_request_struct<'a>(types: &'a [RustType], expected_name: &str) -> &'a
     .expect("Request struct not found")
 }
 
+fn make_entry(stable_id: &str, method: Method, path: &str, operation: Operation) -> OperationEntry {
+  OperationEntry {
+    stable_id: stable_id.to_string(),
+    method,
+    path: path.to_string(),
+    operation: Rc::new(operation),
+    kind: OperationKind::Http,
+  }
+}
+
 #[test]
 fn test_basic_get_operation() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
   let operation = Operation::default();
 
-  let (types, info) = converter.convert(
-    "my_op",
-    "myOp",
-    &Method::GET,
-    "/test",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("my_op", Method::GET, "/test", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  assert!(types.is_empty(), "Should generate no new types");
-  assert_eq!(info.operation_id, "MyOp");
-  assert!(info.request_type.is_none(), "Should have no request type");
-  assert!(info.response_type.is_none(), "Should have no response type");
+  assert!(result.types.is_empty(), "Should generate no new types");
+  assert_eq!(result.operation_info.operation_id, "MyOp");
+  assert!(
+    result.operation_info.request_type.is_none(),
+    "Should have no request type"
+  );
+  assert!(
+    result.operation_info.response_type.is_none(),
+    "Should have no response type"
+  );
   Ok(())
 }
 
 #[test]
-fn test_operation_with_path_parameter() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "userId",
-    ParameterIn::Path,
-    SchemaType::String,
-    None,
-    true,
-  ));
+fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
 
-  let (types, info) = converter.convert(
-    "get_user",
-    "getUser",
-    &Method::GET,
-    "/users/{userId}",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let operation = Operation {
+    operation_id: Some("getMenuItemImage".to_string()),
+    responses: Some(ResponseMap::from([(
+      "200".to_string(),
+      ObjectOrReference::Object(Response {
+        description: Some("The menu item image or metadata".to_string()),
+        content: BTreeMap::from([
+          (
+            "application/json".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+                properties: BTreeMap::from([(
+                  "url".to_string(),
+                  ObjectOrReference::Object(ObjectSchema {
+                    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                    ..Default::default()
+                  }),
+                )]),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+          (
+            "image/webp".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                format: Some("binary".to_string()),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+          (
+            "image/png".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                format: Some("binary".to_string()),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+          (
+            "image/jpeg".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                format: Some("binary".to_string()),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+        ]),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
 
-  assert_eq!(types.len(), 2, "Should generate request struct and nested path struct");
-  let request_type_name = info
-    .request_type
-    .as_ref()
-    .map(StructToken::as_str)
-    .expect("Request type should exist");
-  assert_eq!(request_type_name, "GetUserRequest");
+  let entry = make_entry("get_menu_item_image", Method::GET, "/menu-items/image", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  let request_struct = extract_request_struct(&types, request_type_name);
-  assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
-  assert_eq!(
-    request_struct.fields[0].name, "path",
-    "Main struct should have path field"
+  let response_enum = result
+    .types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "GetMenuItemImageResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let ok_variant = response_enum.variants.iter().find(|v| v.variant_name == "Ok");
+  let binary_variant = response_enum.variants.iter().find(|v| v.variant_name == "OkBinary");
+
+  assert!(
+    ok_variant.is_some(),
+    "Should have Ok variant for JSON content type (JSON is default, no suffix). Variants: {:?}",
+    response_enum
+      .variants
+      .iter()
+      .map(|v| &v.variant_name)
+      .collect::<Vec<_>>()
+  );
+  assert!(
+    binary_variant.is_some(),
+    "Should have OkBinary variant for binary content types. Variants: {:?}",
+    response_enum
+      .variants
+      .iter()
+      .map(|v| &v.variant_name)
+      .collect::<Vec<_>>()
   );
 
-  let path_struct = extract_request_struct(&types, "GetUserRequestPath");
-  assert_eq!(path_struct.fields.len(), 1);
-  assert_eq!(path_struct.fields[0].name, "user_id");
+  let json_variant = ok_variant.unwrap();
+  let binary_variant = binary_variant.unwrap();
+
+  assert_eq!(
+    json_variant.media_types.len(),
+    1,
+    "JSON variant should have 1 media type"
+  );
+  assert_eq!(
+    json_variant.media_types[0].category,
+    ContentCategory::Json,
+    "JSON variant should have Json category"
+  );
+
+  assert_eq!(
+    binary_variant.media_types.len(),
+    3,
+    "Binary variant should have 3 media types (webp, png, jpeg)"
+  );
+  assert!(
+    binary_variant
+      .media_types
+      .iter()
+      .all(|m| m.category == ContentCategory::Binary),
+    "All binary variant media types should have Binary category"
+  );
+
+  let binary_schema = binary_variant
+    .schema_type
+    .as_ref()
+    .expect("Binary variant should have schema");
+  assert_eq!(
+    binary_schema.base_type,
+    RustPrimitive::Bytes,
+    "Binary variant should use Vec<u8>"
+  );
 
   Ok(())
 }
@@ -139,7 +245,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
 
   let operation = Operation {
     request_body: Some(ObjectOrReference::Object(RequestBody {
@@ -159,25 +265,19 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, info) = converter.convert(
-    "create_user",
-    "createUser",
-    &Method::POST,
-    "/users",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("create_user", Method::POST, "/users", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  assert_eq!(types.len(), 1, "Should generate only the Request struct");
+  assert_eq!(result.types.len(), 1, "Should generate only the Request struct");
   assert!(
-    types
+    result
+      .types
       .iter()
       .any(|t| matches!(t, RustType::Struct(s) if s.name == "CreateUserRequest"))
   );
 
-  let request_struct = types
+  let request_struct = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::Struct(s) if s.name == "CreateUserRequest" => Some(s),
@@ -197,7 +297,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     "Body field should reference User directly"
   );
 
-  assert!(info.body.is_some(), "Should have body metadata");
+  assert!(result.operation_info.body.is_some(), "Should have body metadata");
   Ok(())
 }
 
@@ -207,7 +307,7 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
 
   let operation = Operation {
     responses: Some(ResponseMap::from([(
@@ -230,18 +330,10 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (_, info) = converter.convert(
-    "get_user",
-    "getUser",
-    &Method::GET,
-    "/user",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_user", Method::GET, "/user", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  assert_eq!(info.response_type.as_deref(), Some("User"));
+  assert_eq!(result.operation_info.response_type.as_deref(), Some("User"));
   Ok(())
 }
 
@@ -300,7 +392,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
   ];
 
   for (param_name, op_id, schema_type, format, expected_struct, expected_type) in cases {
-    let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+    let (converter, mut usage) = setup_converter(BTreeMap::new());
     let mut operation = Operation::default();
     operation.parameters.push(create_parameter(
       param_name,
@@ -313,23 +405,16 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     let path = format!("/items/{{{param_name}}}");
     let snake_op_id = inflections::case::to_snake_case(op_id);
 
-    let (types, info) = converter.convert(
-      &snake_op_id,
-      op_id,
-      &Method::GET,
-      &path,
-      OperationKind::Http,
-      &operation,
-      &mut usage,
-      &mut cache,
-    )?;
+    let entry = make_entry(&snake_op_id, Method::GET, &path, operation);
+    let result = converter.convert(&entry, &mut usage)?;
 
     assert_eq!(
-      types.len(),
+      result.types.len(),
       2,
       "Should generate request struct and path struct for {op_id}"
     );
-    let request_type_name = info
+    let request_type_name = result
+      .operation_info
       .request_type
       .as_ref()
       .map(StructToken::as_str)
@@ -340,7 +425,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     );
 
     let path_struct_name = format!("{expected_struct}Path");
-    let path_struct = extract_request_struct(&types, &path_struct_name);
+    let path_struct = extract_request_struct(&result.types, &path_struct_name);
     assert_eq!(
       path_struct.fields.len(),
       1,
@@ -357,7 +442,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
   let mut operation = Operation::default();
   operation.parameters.push(create_parameter(
     "userId",
@@ -374,25 +459,22 @@ fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
     true,
   ));
 
-  let (types, _) = converter.convert(
+  let entry = make_entry(
     "get_user_post",
-    "getUserPost",
-    &Method::GET,
+    Method::GET,
     "/users/{userId}/posts/{postId}",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+    operation,
+  );
+  let result = converter.convert(&entry, &mut usage)?;
 
-  let request_struct = extract_request_struct(&types, "GetUserPostRequest");
+  let request_struct = extract_request_struct(&result.types, "GetUserPostRequest");
   assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
   assert_eq!(
     request_struct.fields[0].name, "path",
     "Main struct should have path field"
   );
 
-  let path_struct = extract_request_struct(&types, "GetUserPostRequestPath");
+  let path_struct = extract_request_struct(&result.types, "GetUserPostRequestPath");
   assert_eq!(path_struct.fields.len(), 2);
   assert_eq!(path_struct.fields[0].name, "user_id");
   assert_eq!(path_struct.fields[0].rust_type.to_rust_type(), "i64");
@@ -413,7 +495,7 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
   ];
 
   for (content_type, expected_category) in content_types {
-    let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+    let (converter, mut usage) = setup_converter(BTreeMap::new());
 
     let operation = Operation {
       operation_id: Some("downloadFile".to_string()),
@@ -455,18 +537,11 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       ..Default::default()
     };
 
-    let (types, info) = converter.convert(
-      "download_file",
-      "downloadFile",
-      &Method::GET,
-      "/files/download",
-      OperationKind::Http,
-      &operation,
-      &mut usage,
-      &mut cache,
-    )?;
+    let entry = make_entry("download_file", Method::GET, "/files/download", operation);
+    let result = converter.convert(&entry, &mut usage)?;
 
-    let response_enum = types
+    let response_enum = result
+      .types
       .iter()
       .find_map(|t| match t {
         RustType::ResponseEnum(e) if e.name == "DownloadFileResponse" => Some(e),
@@ -481,7 +556,11 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       .unwrap_or_else(|| panic!("Ok variant not found for {content_type}"));
 
     assert_eq!(
-      ok_variant.content_category, expected_category,
+      ok_variant
+        .media_types
+        .first()
+        .map_or(ContentCategory::Json, |m| m.category),
+      expected_category,
       "content_category mismatch for {content_type}"
     );
 
@@ -498,7 +577,7 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
     );
 
     assert!(
-      info.response_enum.is_some(),
+      result.operation_info.response_enum.is_some(),
       "response_enum should be set for {content_type}"
     );
 
@@ -509,13 +588,16 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
       .unwrap_or_else(|| panic!("ClientError variant not found for {content_type}"));
 
     assert_eq!(
-      error_variant.content_category,
+      error_variant
+        .media_types
+        .first()
+        .map_or(ContentCategory::Json, |m| m.category),
       ContentCategory::Json,
       "error response should be Json for {content_type}"
     );
 
     assert!(
-      error_variant.schema_type.is_some(),
+      error_variant.schema_type.as_ref().is_some(),
       "error response should preserve schema type for {content_type}"
     );
   }
@@ -523,8 +605,118 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
+  let event_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "message".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    required: vec!["message".to_string()],
+    ..Default::default()
+  };
+
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("EventPayload".to_string(), event_schema)]));
+
+  let operation = Operation {
+    operation_id: Some("getEvents".to_string()),
+    responses: Some(ResponseMap::from([(
+      "200".to_string(),
+      ObjectOrReference::Object(Response {
+        content: BTreeMap::from([
+          (
+            "application/json".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/EventPayload".to_string(),
+                summary: None,
+                description: None,
+              }),
+              ..Default::default()
+            },
+          ),
+          (
+            "text/event-stream".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Ref {
+                ref_path: "#/components/schemas/EventPayload".to_string(),
+                summary: None,
+                description: None,
+              }),
+              ..Default::default()
+            },
+          ),
+        ]),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
+
+  let entry = make_entry("get_events", Method::GET, "/events", operation);
+  let result = converter.convert(&entry, &mut usage)?;
+
+  let response_enum = result
+    .types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "GetEventsResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let ok_variant = response_enum
+    .variants
+    .iter()
+    .find(|v| v.variant_name == "Ok")
+    .expect("Ok variant not found (JSON is the default, no suffix)");
+
+  let stream_variant = response_enum
+    .variants
+    .iter()
+    .find(|v| v.variant_name == "OkEventStream")
+    .expect("OkEventStream variant not found");
+
+  assert_eq!(
+    ok_variant
+      .schema_type
+      .as_ref()
+      .expect("Ok variant should have schema")
+      .to_rust_type(),
+    "EventPayload",
+  );
+  assert!(
+    ok_variant
+      .media_types
+      .iter()
+      .all(|m| m.category == ContentCategory::Json),
+    "Ok variant should only contain JSON media types",
+  );
+
+  assert_eq!(
+    stream_variant
+      .schema_type
+      .as_ref()
+      .expect("Event stream variant should have schema")
+      .to_rust_type(),
+    "oas3_gen_support::EventStream<EventPayload>",
+  );
+  assert!(
+    stream_variant
+      .media_types
+      .iter()
+      .all(|m| m.category == ContentCategory::EventStream),
+    "Event stream variant should only contain event stream media types",
+  );
+  Ok(())
+}
+
+#[test]
 fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
 
   let operation = Operation {
     operation_id: Some("getItem".to_string()),
@@ -547,18 +739,11 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
-    "get_item",
-    "getItem",
-    &Method::GET,
-    "/items",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_item", Method::GET, "/items", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
@@ -570,7 +755,7 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
 
   assert!(default_variant.is_some(), "Default variant should be added");
   assert!(
-    default_variant.unwrap().schema_type.is_none(),
+    default_variant.unwrap().schema_type.as_ref().is_none(),
     "Default variant should have no schema type"
   );
   Ok(())
@@ -582,7 +767,7 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([("Error".to_string(), error_schema)]));
+  let (converter, mut usage) = setup_converter(BTreeMap::from([("Error".to_string(), error_schema)]));
 
   let operation = Operation {
     operation_id: Some("getItem".to_string()),
@@ -625,18 +810,11 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
-    "get_item",
-    "getItem",
-    &Method::GET,
-    "/items",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_item", Method::GET, "/items", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
@@ -659,7 +837,7 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
 
   assert!(default_variant.is_some(), "Default variant should exist");
   assert!(
-    default_variant.unwrap().schema_type.is_some(),
+    default_variant.unwrap().schema_type.as_ref().is_some(),
     "Default variant should have schema type from spec"
   );
   Ok(())
@@ -667,7 +845,7 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
 
 #[test]
 fn test_response_with_primitive_type() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
 
   let operation = Operation {
     operation_id: Some("getCount".to_string()),
@@ -691,18 +869,11 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
-    "get_count",
-    "getCount",
-    &Method::GET,
-    "/count",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("get_count", Method::GET, "/count", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "GetCountResponse" => Some(e),
@@ -716,7 +887,7 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
     .find(|v| v.variant_name == "Ok")
     .expect("Ok variant not found");
 
-  assert!(ok_variant.schema_type.is_some(), "Should have schema type");
+  assert!(ok_variant.schema_type.as_ref().is_some(), "Should have schema type");
   assert_eq!(
     ok_variant.schema_type.as_ref().unwrap().base_type,
     RustPrimitive::I64,
@@ -727,7 +898,7 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
 
 #[test]
 fn test_response_with_no_content() -> anyhow::Result<()> {
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::new());
+  let (converter, mut usage) = setup_converter(BTreeMap::new());
 
   let operation = Operation {
     operation_id: Some("deleteItem".to_string()),
@@ -742,18 +913,11 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, _) = converter.convert(
-    "delete_item",
-    "deleteItem",
-    &Method::DELETE,
-    "/items/{id}",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("delete_item", Method::DELETE, "/items/{id}", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  let response_enum = types
+  let response_enum = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::ResponseEnum(e) if e.name == "DeleteItemResponse" => Some(e),
@@ -768,7 +932,7 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
     .expect("NoContent variant not found");
 
   assert!(
-    no_content_variant.schema_type.is_none(),
+    no_content_variant.schema_type.as_ref().is_none(),
     "No content response should have no schema type"
   );
   Ok(())
@@ -800,7 +964,7 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (converter, mut usage, mut cache) = setup_converter(BTreeMap::from([
+  let (converter, mut usage) = setup_converter(BTreeMap::from([
     ("CreateModelParams".to_string(), model_params_schema),
     ("CreateAgentParams".to_string(), agent_params_schema),
   ]));
@@ -835,30 +999,23 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let (types, info) = converter.convert(
-    "create_interaction",
-    "createInteraction",
-    &Method::POST,
-    "/interactions",
-    OperationKind::Http,
-    &operation,
-    &mut usage,
-    &mut cache,
-  )?;
+  let entry = make_entry("create_interaction", Method::POST, "/interactions", operation);
+  let result = converter.convert(&entry, &mut usage)?;
 
-  // Should have a request type
-  assert!(info.request_type.is_some(), "Should have a request type");
-  let request_type_name = info.request_type.as_ref().unwrap().as_str();
+  assert!(
+    result.operation_info.request_type.is_some(),
+    "Should have a request type"
+  );
+  let request_type_name = result.operation_info.request_type.as_ref().unwrap().as_str();
   assert_eq!(request_type_name, "CreateInteractionRequest");
 
-  // Should have body metadata
-  assert!(info.body.is_some(), "Should have body metadata");
-  let body_meta = info.body.as_ref().unwrap();
+  assert!(result.operation_info.body.is_some(), "Should have body metadata");
+  let body_meta = result.operation_info.body.as_ref().unwrap();
   assert_eq!(body_meta.field_name.as_str(), "body");
   assert!(!body_meta.optional, "Body should be required");
 
-  // Find the request struct and check it has a body field
-  let request_struct = types
+  let request_struct = result
+    .types
     .iter()
     .find_map(|t| match t {
       RustType::Struct(s) if s.name == "CreateInteractionRequest" => Some(s),
@@ -872,15 +1029,14 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     .find(|f| f.name == "body")
     .expect("Body field not found");
 
-  // The body field should reference a union type (enum) for the oneOf
   assert!(!body_field.rust_type.nullable, "Required body should not be nullable");
 
-  // Check that a union enum was generated for the request body
-  let union_enum = types.iter().find(|t| matches!(t, RustType::Enum(e) if e.name.as_str().contains("InteractionRequestBody") || e.name.as_str().contains("RequestBody")));
+  let union_enum = result.types.iter().find(|t| matches!(t, RustType::Enum(e) if e.name.as_str().contains("InteractionRequestBody") || e.name.as_str().contains("RequestBody")));
   assert!(
     union_enum.is_some(),
     "Should generate a union enum for oneOf request body. Generated types: {:?}",
-    types
+    result
+      .types
       .iter()
       .map(|t| match t {
         RustType::Struct(s) => format!("Struct({})", s.name),

@@ -19,18 +19,19 @@ mdformat = []
 any_ascii.workspace = true
 anyhow.workspace = true
 blake3.workspace = true
+bon.workspace = true
 cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 comfy-table.workspace = true
 crossterm.workspace = true
 cruet.workspace = true
-derive_builder.workspace = true
 fmmap.workspace = true
 http.workspace = true
 indexmap.workspace = true
 inflections.workspace = true
 json-canon.workspace = true
+mediatype.workspace = true
 num-format.workspace = true
 oas3.workspace = true
 percent-encoding.workspace = true
@@ -48,7 +49,7 @@ tokio.workspace = true
 
 [dev-dependencies]
 oas3-gen-support.workspace = true
-reqwest = { workspace = true, features = ["json", "multipart"] }
+reqwest = { workspace = true, features = ["json", "multipart", "native-tls-alpn", "stream"] }
 serde_with.workspace = true
 tempfile.workspace = true
 uuid.workspace = true

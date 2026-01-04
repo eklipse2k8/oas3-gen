@@ -2,8 +2,8 @@ use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::generator::{
-  ast::{RustPrimitive, TypeRef, ValidationAttribute},
-  converter::{SchemaExt, metadata::*},
+  ast::{Documentation, RustPrimitive, TypeRef, ValidationAttribute},
+  converter::{SchemaExt, fields::FieldConverter},
 };
 
 fn create_string_schema() -> ObjectSchema {
@@ -34,34 +34,6 @@ fn create_array_schema() -> ObjectSchema {
   }
 }
 
-fn make_extractor<'a>(
-  prop_name: &'a str,
-  is_required: bool,
-  schema: &'a ObjectSchema,
-  type_ref: &'a TypeRef,
-) -> MetadataExtractor<'a> {
-  MetadataExtractor::new(prop_name, is_required, schema, type_ref)
-}
-
-#[test]
-fn test_is_non_string_format() {
-  let non_string_formats = vec!["date", "date-time", "duration", "time", "binary", "byte", "uuid"];
-  for format in non_string_formats {
-    assert!(
-      MetadataExtractor::is_non_string_format(format),
-      "Format {format} should be non-string"
-    );
-  }
-
-  let string_formats = vec!["email", "uri", "url", "other", "ipv4", "ipv6"];
-  for format in string_formats {
-    assert!(
-      !MetadataExtractor::is_non_string_format(format),
-      "Format {format} should be string"
-    );
-  }
-}
-
 #[test]
 fn test_is_single_type() {
   let string_schema = create_string_schema();
@@ -76,16 +48,20 @@ fn test_is_single_type() {
 #[test]
 fn test_extract_docs() {
   let schema = ObjectSchema::default();
-  let type_ref = TypeRef::default();
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert!(extractor.extract_docs().is_empty());
+  let docs = {
+    let schema: &ObjectSchema = &schema;
+    Documentation::from_optional(schema.description.as_ref())
+  };
+  assert!(docs.is_empty());
 
   let schema = ObjectSchema {
     description: Some("Test description\nSecond line".to_string()),
     ..Default::default()
   };
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let docs = extractor.extract_docs();
+  let docs = {
+    let schema: &ObjectSchema = &schema;
+    Documentation::from_optional(schema.description.as_ref())
+  };
   assert_eq!(docs.lines().len(), 2);
   assert_eq!(docs.lines()[0], "Test description");
   assert_eq!(docs.lines()[1], "Second line");
@@ -93,144 +69,115 @@ fn test_extract_docs() {
 
 #[test]
 fn test_extract_default_value() {
-  let type_ref = TypeRef::default();
-
-  // Test default
   let schema = ObjectSchema {
     default: Some(json!("default_value")),
     ..Default::default()
   };
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_default_value(), Some(json!("default_value")));
+  assert_eq!(
+    FieldConverter::extract_default_value(&schema),
+    Some(json!("default_value"))
+  );
 
-  // Test const
   let schema = ObjectSchema {
     const_value: Some(json!("const_value")),
     ..Default::default()
   };
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_default_value(), Some(json!("const_value")));
+  assert_eq!(
+    FieldConverter::extract_default_value(&schema),
+    Some(json!("const_value"))
+  );
 
-  // Test single enum
   let schema = ObjectSchema {
     enum_values: vec![json!("only_value")],
     ..Default::default()
   };
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_default_value(), Some(json!("only_value")));
+  assert_eq!(
+    FieldConverter::extract_default_value(&schema),
+    Some(json!("only_value"))
+  );
 
-  // Test priority: default > const > enum
   let schema = ObjectSchema {
     default: Some(json!("default")),
     const_value: Some(json!("const")),
     enum_values: vec![json!("enum")],
     ..Default::default()
   };
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_default_value(), Some(json!("default")));
+  assert_eq!(FieldConverter::extract_default_value(&schema), Some(json!("default")));
 
-  // Test None
   let schema = ObjectSchema::default();
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_default_value(), None);
+  assert_eq!(FieldConverter::extract_default_value(&schema), None);
 }
 
 #[test]
-fn test_extract_validation_pattern() {
+fn test_extract_all_validation_combined() {
+  let mut schema = create_string_schema();
+  schema.description = Some("Test field".to_string());
+  schema.format = Some("email".to_string());
+
   let type_ref = TypeRef::new(RustPrimitive::String);
 
-  // Valid pattern
-  let mut schema = create_string_schema();
-  schema.pattern = Some("^[a-z]+$".to_string());
-  let extractor = make_extractor("test_field", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_validation_pattern(), Some(&"^[a-z]+$".to_string()));
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  let docs = {
+    let schema: &ObjectSchema = &schema;
+    Documentation::from_optional(schema.description.as_ref())
+  };
+  let default_value = FieldConverter::extract_default_value(&schema);
 
-  // Non-string type
-  let mut schema = create_number_schema();
-  schema.pattern = Some("^[0-9]+$".to_string());
-  let extractor = make_extractor("test_field", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_validation_pattern(), None);
-
-  // Non-string format
-  let mut schema = create_string_schema();
-  schema.pattern = Some("^[a-z]+$".to_string());
-  schema.format = Some("date".to_string());
-  let extractor = make_extractor("test_field", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_validation_pattern(), None);
-
-  // With enum
-  let mut schema = create_string_schema();
-  schema.pattern = Some("^[a-z]+$".to_string());
-  schema.enum_values = vec![json!("value1"), json!("value2")];
-  let extractor = make_extractor("test_field", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_validation_pattern(), None);
-
-  // Invalid regex
-  let mut schema = create_string_schema();
-  schema.pattern = Some("^[a-z+$".to_string());
-  let extractor = make_extractor("test_field", false, &schema, &type_ref);
-  assert_eq!(extractor.extract_validation_pattern(), None);
+  assert!(!docs.is_empty());
+  assert!(attrs.contains(&ValidationAttribute::Email));
+  assert!(default_value.is_none());
 }
 
 #[test]
-fn test_filter_regex_validation() {
-  let schema = ObjectSchema::default();
+fn test_extract_parameter_metadata() {
+  let mut schema = create_string_schema();
+  schema.min_length = Some(5);
+  schema.max_length = Some(50);
+  schema.default = Some(json!("default_value"));
 
-  // DateTime
-  let type_ref = TypeRef::new(RustPrimitive::DateTime);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.filter_regex_validation(Some("pattern".to_string())), None);
-
-  // Date
-  let type_ref = TypeRef::new(RustPrimitive::Date);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.filter_regex_validation(Some("pattern".to_string())), None);
-
-  // Uuid
-  let type_ref = TypeRef::new(RustPrimitive::Uuid);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  assert_eq!(extractor.filter_regex_validation(Some("pattern".to_string())), None);
-
-  // String (should keep regex)
   let type_ref = TypeRef::new(RustPrimitive::String);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
+
+  let (validation_attrs, default_value) = FieldConverter::extract_parameter_metadata("param", true, &schema, &type_ref);
+
   assert_eq!(
-    extractor.filter_regex_validation(Some("pattern".to_string())),
-    Some("pattern".to_string())
+    validation_attrs,
+    vec![ValidationAttribute::Length {
+      min: Some(5),
+      max: Some(50)
+    }]
   );
+  assert_eq!(default_value, Some(json!("default_value")));
 }
 
 #[test]
-fn test_extract_validation_attrs() {
-  // Email
+fn test_extract_all_validation_email_format() {
   let mut schema = create_string_schema();
   schema.format = Some("email".to_string());
   let type_ref = TypeRef::new(RustPrimitive::String);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let attrs = extractor.extract_validation_attrs();
-  assert_eq!(attrs, vec![ValidationAttribute::Email]);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(attrs.contains(&ValidationAttribute::Email));
+}
 
-  // URL
+#[test]
+fn test_extract_all_validation_url_format() {
   let mut schema = create_string_schema();
   schema.format = Some("url".to_string());
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let attrs = extractor.extract_validation_attrs();
-  assert_eq!(attrs, vec![ValidationAttribute::Url]);
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(attrs.contains(&ValidationAttribute::Url));
 
-  // URI (should map to URL)
-  let mut schema = create_string_schema();
   schema.format = Some("uri".to_string());
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let attrs = extractor.extract_validation_attrs();
-  assert_eq!(attrs, vec![ValidationAttribute::Url]);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(attrs.contains(&ValidationAttribute::Url));
+}
 
-  // Integer Range
+#[test]
+fn test_extract_all_validation_integer_range() {
   let mut schema = create_integer_schema();
   schema.minimum = Some(json!(0).as_number().unwrap().clone());
   schema.maximum = Some(json!(100).as_number().unwrap().clone());
   let type_ref = TypeRef::new(RustPrimitive::I32);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let attrs = extractor.extract_validation_attrs();
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
   assert_eq!(attrs.len(), 1);
   assert_eq!(
     attrs[0],
@@ -245,162 +192,170 @@ fn test_extract_validation_attrs() {
 }
 
 #[test]
-fn test_build_range_validation_attr() {
-  // Min/Max
-  let mut schema = create_number_schema();
-  schema.minimum = Some(json!(0).as_number().unwrap().clone());
-  schema.maximum = Some(json!(100).as_number().unwrap().clone());
-  let type_ref = TypeRef::new(RustPrimitive::I32);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let result = extractor.build_range_validation_attr();
-  assert_eq!(
-    result,
-    Some(ValidationAttribute::Range {
-      primitive: RustPrimitive::I32,
-      min: Some(json!(0).as_number().unwrap().clone()),
-      max: Some(json!(100).as_number().unwrap().clone()),
-      exclusive_min: None,
-      exclusive_max: None,
-    })
-  );
-
-  // Exclusive Min/Max
+fn test_extract_all_validation_exclusive_range() {
   let mut schema = create_number_schema();
   schema.exclusive_minimum = Some(json!(0).as_number().unwrap().clone());
   schema.exclusive_maximum = Some(json!(100).as_number().unwrap().clone());
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let result = extractor.build_range_validation_attr();
+  let type_ref = TypeRef::new(RustPrimitive::I32);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert_eq!(attrs.len(), 1);
   assert_eq!(
-    result,
-    Some(ValidationAttribute::Range {
+    attrs[0],
+    ValidationAttribute::Range {
       primitive: RustPrimitive::I32,
       min: None,
       max: None,
       exclusive_min: Some(json!(0).as_number().unwrap().clone()),
       exclusive_max: Some(json!(100).as_number().unwrap().clone()),
-    })
+    }
   );
-
-  // None
-  let schema = create_number_schema();
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let result = extractor.build_range_validation_attr();
-  assert_eq!(result, None);
 }
 
 #[test]
-fn test_build_string_length_validation_attr() {
-  let type_ref = TypeRef::new(RustPrimitive::String);
+fn test_extract_all_validation_no_range_when_empty() {
+  let schema = create_number_schema();
+  let type_ref = TypeRef::new(RustPrimitive::I32);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(attrs.is_empty());
+}
 
-  // Min/Max
+#[test]
+fn test_extract_all_validation_string_length() {
   let mut schema = create_string_schema();
   schema.min_length = Some(1);
   schema.max_length = Some(100);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let result = extractor.build_string_length_validation_attr();
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
   assert_eq!(
-    result,
-    Some(ValidationAttribute::Length {
+    attrs,
+    vec![ValidationAttribute::Length {
       min: Some(1),
       max: Some(100)
-    })
+    }]
   );
+}
 
-  // Non-string format
+#[test]
+fn test_extract_all_validation_string_length_min_only() {
+  let mut schema = create_string_schema();
+  schema.min_length = Some(5);
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert_eq!(
+    attrs,
+    vec![ValidationAttribute::Length {
+      min: Some(5),
+      max: None
+    }]
+  );
+}
+
+#[test]
+fn test_extract_all_validation_string_length_max_only() {
+  let mut schema = create_string_schema();
+  schema.max_length = Some(20);
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert_eq!(
+    attrs,
+    vec![ValidationAttribute::Length {
+      min: None,
+      max: Some(20)
+    }]
+  );
+}
+
+#[test]
+fn test_extract_all_validation_string_length_skipped_for_non_string_format() {
   let mut schema = create_string_schema();
   schema.min_length = Some(1);
   schema.format = Some("date".to_string());
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let result = extractor.build_string_length_validation_attr();
-  assert_eq!(result, None);
+  let type_ref = TypeRef::new(RustPrimitive::Date);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(attrs.is_empty());
+}
 
-  // Required (implies min_length=1 if not set)
+#[test]
+fn test_extract_all_validation_required_implies_min_length() {
   let schema = create_string_schema();
-  let extractor = make_extractor("test", true, &schema, &type_ref);
-  let result = extractor.build_string_length_validation_attr();
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", true, &schema, &type_ref);
   assert_eq!(
-    result,
-    Some(ValidationAttribute::Length {
+    attrs,
+    vec![ValidationAttribute::Length {
       min: Some(1),
       max: None
-    })
+    }]
   );
 }
 
 #[test]
-fn test_build_array_length_validation_attr() {
-  let type_ref = TypeRef::new(RustPrimitive::String).with_vec();
+fn test_extract_all_validation_regex() {
+  let mut schema = create_string_schema();
+  schema.pattern = Some("^[a-z]+$".to_string());
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(attrs.contains(&ValidationAttribute::Regex("^[a-z]+$".to_string())));
+}
 
+#[test]
+fn test_extract_all_validation_regex_skipped_for_enums() {
+  let mut schema = create_string_schema();
+  schema.pattern = Some("^[a-z]+$".to_string());
+  schema.enum_values = vec![json!("value1"), json!("value2")];
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(attrs.is_empty());
+}
+
+#[test]
+fn test_extract_all_validation_regex_skipped_for_datetime() {
+  let mut schema = create_string_schema();
+  schema.pattern = Some("^[0-9]+$".to_string());
+  let type_ref = TypeRef::new(RustPrimitive::DateTime);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(!attrs.iter().any(|a| matches!(a, ValidationAttribute::Regex(_))));
+}
+
+#[test]
+fn test_extract_all_validation_regex_skipped_for_date() {
+  let mut schema = create_string_schema();
+  schema.pattern = Some("pattern".to_string());
+  let type_ref = TypeRef::new(RustPrimitive::Date);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(!attrs.iter().any(|a| matches!(a, ValidationAttribute::Regex(_))));
+}
+
+#[test]
+fn test_extract_all_validation_regex_skipped_for_uuid() {
+  let mut schema = create_string_schema();
+  schema.pattern = Some("pattern".to_string());
+  let type_ref = TypeRef::new(RustPrimitive::Uuid);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(!attrs.iter().any(|a| matches!(a, ValidationAttribute::Regex(_))));
+}
+
+#[test]
+fn test_extract_all_validation_invalid_regex_skipped() {
+  let mut schema = create_string_schema();
+  schema.pattern = Some("^[a-z+$".to_string());
+  let type_ref = TypeRef::new(RustPrimitive::String);
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
+  assert!(!attrs.iter().any(|a| matches!(a, ValidationAttribute::Regex(_))));
+}
+
+#[test]
+fn test_extract_all_validation_array_length() {
   let mut schema = create_array_schema();
   schema.min_items = Some(1);
   schema.max_items = Some(10);
-  let extractor = make_extractor("test", false, &schema, &type_ref);
-  let result = extractor.build_array_length_validation_attr();
+  let type_ref = TypeRef::new(RustPrimitive::String).with_vec();
+  let attrs = FieldConverter::extract_all_validation("test", false, &schema, &type_ref);
   assert_eq!(
-    result,
-    Some(ValidationAttribute::Length {
+    attrs,
+    vec![ValidationAttribute::Length {
       min: Some(1),
       max: Some(10)
-    })
+    }]
   );
-}
-
-#[test]
-fn test_build_length_attribute() {
-  // Both
-  assert_eq!(
-    MetadataExtractor::build_length_attribute(Some(1), Some(10), false),
-    Some(ValidationAttribute::Length {
-      min: Some(1),
-      max: Some(10)
-    })
-  );
-
-  // Min only
-  assert_eq!(
-    MetadataExtractor::build_length_attribute(Some(5), None, false),
-    Some(ValidationAttribute::Length {
-      min: Some(5),
-      max: None
-    })
-  );
-
-  // Max only
-  assert_eq!(
-    MetadataExtractor::build_length_attribute(None, Some(20), false),
-    Some(ValidationAttribute::Length {
-      min: None,
-      max: Some(20)
-    })
-  );
-
-  // Required non-empty
-  assert_eq!(
-    MetadataExtractor::build_length_attribute(None, None, true),
-    Some(ValidationAttribute::Length {
-      min: Some(1),
-      max: None
-    })
-  );
-
-  // None
-  assert_eq!(MetadataExtractor::build_length_attribute(None, None, false), None);
-}
-
-#[test]
-fn test_field_metadata_from_schema() {
-  let mut schema = create_string_schema();
-  schema.description = Some("Test field".to_string());
-  schema.deprecated = Some(true);
-  schema.format = Some("email".to_string());
-  schema.multiple_of = Some(json!(2).as_number().unwrap().clone());
-
-  let type_ref = TypeRef::new(RustPrimitive::String);
-
-  let metadata = FieldMetadata::from_schema("test", false, &schema, &type_ref);
-
-  assert!(!metadata.docs.is_empty());
-  assert!(metadata.deprecated);
-  assert!(!metadata.validation_attrs.is_empty());
-  assert!(metadata.multiple_of.is_some());
 }

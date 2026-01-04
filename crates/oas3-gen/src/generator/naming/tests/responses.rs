@@ -7,8 +7,8 @@ use oas3::{
 use serde_json::json;
 
 use crate::generator::naming::responses::{
-  extract_all_response_types, extract_response_content_type, extract_response_type_name,
-  extract_schema_name_from_response, is_error_code, is_success_code,
+  extract_all_response_types, extract_response_type_name, extract_schema_name_from_response, is_error_code,
+  is_success_code,
 };
 
 fn create_test_spec() -> Spec {
@@ -174,45 +174,6 @@ fn test_extract_response_type_name() {
       ..Default::default()
     };
     let result = extract_response_type_name(&spec, &operation);
-    assert_eq!(result.as_deref(), expected, "failed for case: {desc}");
-  }
-}
-
-#[test]
-#[allow(clippy::type_complexity)]
-fn test_extract_response_content_type() {
-  let spec = create_test_spec();
-
-  let cases: Vec<(
-    Option<BTreeMap<String, ObjectOrReference<Response>>>,
-    Option<&str>,
-    &str,
-  )> = vec![
-    (
-      Some(BTreeMap::from([(
-        "200".to_string(),
-        ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/json")),
-      )])),
-      Some("application/json"),
-      "json content type",
-    ),
-    (
-      Some(BTreeMap::from([(
-        "200".to_string(),
-        ObjectOrReference::Object(create_response_with_schema_ref("UserResponse", "application/xml")),
-      )])),
-      Some("application/xml"),
-      "xml content type",
-    ),
-    (None, None, "no responses"),
-  ];
-
-  for (responses, expected, desc) in cases {
-    let operation = Operation {
-      responses,
-      ..Default::default()
-    };
-    let result = extract_response_content_type(&spec, &operation);
     assert_eq!(result.as_deref(), expected, "failed for case: {desc}");
   }
 }

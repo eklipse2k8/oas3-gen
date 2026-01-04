@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.23.5"
+version = "0.23.6"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -37,33 +37,36 @@ split-debuginfo = "unpacked"
 
 [workspace.dependencies]
 # Workspace Members
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.23.5" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.23.6" }
 
 # External Dependencies
 any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
 better_default = { version = "1.0" }
-blake3 = { version = "1.8", features = ["neon"] }
+blake3 = { version = "1.8", features = ["neon", "traits-preview"] }
+bon = { version = "3.8" }
 cfg-if = { version = "1.0" }
 chrono = { version = ">=0.4.42", default-features = false, features = ["std", "clock", "serde"] }
 clap = { version = "4.5", features = ["derive", "color"] }
 comfy-table = { version = "7.2" }
 crossterm = { version = "0.29", default-features = false }
 cruet = { version = "0.15" }
-derive_builder = {version = "0.20", features = ["clippy"] }
 fmmap = { version = "0.4", features = ["tokio"] }
 http = { version = "1.4" }
 indexmap = { version = "2.12", features = ["serde"] }
 inflections = { version = "1.1" }
 json-canon = { version = "0.1" }
+mediatype = { version = "0.21", features = ["serde"] }
 num-format = { version = "0.4" }
 oas3 = { version = "0.20", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }
+quick-xml = { version = ">=0.38", features = ["serde", "serialize"] }
 quote = { version = "1.0" }
 regex = { version = "1.12" }
 reqwest = { version = "0.12", default-features = false }
+eventsource-stream = { version = "0.2" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }

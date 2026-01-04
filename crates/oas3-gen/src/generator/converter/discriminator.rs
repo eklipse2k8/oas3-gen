@@ -1,261 +1,227 @@
 use std::{
-  cmp::Reverse,
-  collections::{BTreeSet, HashMap},
-  sync::Arc,
+  collections::{BTreeMap, BTreeSet},
+  rc::Rc,
 };
 
-use oas3::spec::{ObjectOrReference, ObjectSchema};
+use oas3::spec::ObjectSchema;
 use string_cache::DefaultAtom;
 
-use super::{SchemaExt, metadata::FieldMetadata};
+use super::SchemaExt;
 use crate::generator::{
-  ast::{DiscriminatedEnumDefBuilder, DiscriminatedVariant, RustType, SerdeAttribute, TypeRef},
-  converter::metadata,
-  naming::identifiers::to_rust_type_name,
-  schema_registry::{ReferenceExtractor, SchemaRegistry},
+  ast::{DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken, RustType, TypeRef, VariantDef},
+  converter::ConverterContext,
+  naming::identifiers::{split_pascal_case, strip_parent_prefix, to_rust_type_name},
+  schema_registry::{ParentInfo, SchemaRegistry},
 };
 
+#[derive(Debug, Clone)]
 pub(crate) struct DiscriminatorInfo {
   pub value: Option<DefaultAtom>,
   pub is_base: bool,
   pub has_enum: bool,
 }
 
-pub(crate) struct DiscriminatorAttributesResult {
-  pub metadata: FieldMetadata,
-  pub serde_attrs: Vec<SerdeAttribute>,
-  pub doc_hidden: bool,
-}
+impl DiscriminatorInfo {
+  pub fn new(
+    prop_name: &str,
+    parent_schema: &ObjectSchema,
+    prop_schema: &ObjectSchema,
+    discriminator_mapping: Option<&(String, String)>,
+  ) -> Option<Self> {
+    let value = discriminator_mapping
+      .filter(|(prop, _)| prop == prop_name)
+      .map(|(_, v)| DefaultAtom::from(v.as_str()));
 
-pub(crate) fn get_discriminator_info(
-  prop_name: &str,
-  parent_schema: &ObjectSchema,
-  prop_schema: &ObjectSchema,
-  discriminator_mapping: Option<&(String, String)>,
-) -> Option<DiscriminatorInfo> {
-  let is_child_discriminator = discriminator_mapping
-    .as_ref()
-    .is_some_and(|(prop, _)| prop == prop_name);
+    let is_base_discriminator = parent_schema
+      .discriminator
+      .as_ref()
+      .is_some_and(|d| d.property_name == prop_name);
 
-  let is_base_discriminator = parent_schema
-    .discriminator
-    .as_ref()
-    .is_some_and(|d| d.property_name == prop_name);
+    let is_child_discriminator = value.is_some();
 
-  let has_enum = !prop_schema.enum_values.is_empty();
-
-  if is_child_discriminator {
-    let (_, value) = discriminator_mapping?;
-    Some(DiscriminatorInfo {
-      value: Some(DefaultAtom::from(value.as_str())),
-      is_base: false,
-      has_enum,
-    })
-  } else if is_base_discriminator {
-    Some(DiscriminatorInfo {
-      value: None,
-      is_base: true,
-      has_enum,
-    })
-  } else {
-    None
-  }
-}
-
-pub(crate) fn apply_discriminator_attributes(
-  mut metadata: FieldMetadata,
-  mut serde_attrs: Vec<SerdeAttribute>,
-  final_type: &TypeRef,
-  discriminator_info: Option<&DiscriminatorInfo>,
-) -> DiscriminatorAttributesResult {
-  let should_hide = discriminator_info
-    .as_ref()
-    .is_some_and(|d| d.value.is_some() || (d.is_base && !d.has_enum));
-
-  if !should_hide {
-    return DiscriminatorAttributesResult {
-      metadata,
-      serde_attrs,
-      doc_hidden: false,
-    };
-  }
-
-  let disc_info = discriminator_info.expect("checked above");
-
-  metadata.docs.clear();
-  metadata.validation_attrs.clear();
-
-  if let Some(ref disc_value) = disc_info.value {
-    metadata.default_value = Some(serde_json::Value::String(disc_value.to_string()));
-    serde_attrs.push(SerdeAttribute::SkipDeserializing);
-    serde_attrs.push(SerdeAttribute::Default);
-  } else {
-    serde_attrs.clear();
-    serde_attrs.push(SerdeAttribute::Skip);
-    if final_type.is_string_like() {
-      metadata.default_value = Some(serde_json::Value::String(String::new()));
-    }
-  }
-
-  DiscriminatorAttributesResult {
-    metadata,
-    serde_attrs,
-    doc_hidden: true,
-  }
-}
-
-pub(crate) struct DiscriminatorHandler<'a> {
-  graph: &'a Arc<SchemaRegistry>,
-  reachable_schemas: Option<&'a Arc<BTreeSet<String>>>,
-}
-
-impl<'a> DiscriminatorHandler<'a> {
-  pub(crate) fn new(graph: &'a Arc<SchemaRegistry>, reachable_schemas: Option<&'a Arc<BTreeSet<String>>>) -> Self {
-    Self {
-      graph,
-      reachable_schemas,
-    }
-  }
-
-  pub(crate) fn detect_discriminated_parent(
-    &self,
-    schema: &ObjectSchema,
-    merged_schema_cache: &mut HashMap<String, ObjectSchema>,
-    merge_fn: impl Fn(&str, &ObjectSchema, &mut HashMap<String, ObjectSchema>) -> anyhow::Result<ObjectSchema>,
-  ) -> Option<ObjectSchema> {
-    if schema.all_of.is_empty() {
+    if !is_child_discriminator && !is_base_discriminator {
       return None;
     }
 
-    schema.all_of.iter().find_map(|all_of_ref| {
-      let ObjectOrReference::Ref { ref_path, .. } = all_of_ref else {
-        return None;
-      };
-      let parent_name = SchemaRegistry::extract_ref_name(ref_path)?;
-      let parent_schema = self.graph.get_schema(&parent_name)?;
-
-      parent_schema.discriminator.as_ref()?;
-
-      let merged_parent = merge_fn(&parent_name, parent_schema, merged_schema_cache).ok()?;
-      if merged_parent.is_discriminated_base_type() {
-        Some(merged_parent)
-      } else {
-        None
-      }
+    Some(Self {
+      value,
+      is_base: is_base_discriminator && !is_child_discriminator,
+      has_enum: prop_schema.has_enum_values(),
     })
   }
 
-  pub(crate) fn create_discriminated_enum(
-    &self,
-    base_name: &str,
-    schema: &ObjectSchema,
-    base_struct_name: &str,
-  ) -> anyhow::Result<RustType> {
-    let Some(discriminator_field) = schema.discriminator.as_ref().map(|d| &d.property_name) else {
-      anyhow::bail!("Failed to find discriminator property for schema '{base_name}'");
-    };
+  pub fn should_hide(&self) -> bool {
+    !self.has_enum && (self.value.is_some() || self.is_base)
+  }
+}
 
-    let children = self.extract_discriminator_children(schema);
-    let enum_name = to_rust_type_name(base_name);
+#[derive(Debug, Clone)]
+pub(crate) struct DiscriminatorConverter {
+  context: Rc<ConverterContext>,
+}
 
-    let variants: Vec<_> = children
-      .into_iter()
-      .map(|(disc_value, child_schema_name)| {
-        let child_type_name = to_rust_type_name(&child_schema_name);
-        let variant_name = child_type_name
-          .strip_prefix(&enum_name)
-          .filter(|s| !s.is_empty())
-          .map(|s| {
-            let mut chars = s.chars();
-            match chars.next() {
-              None => String::new(),
-              Some(first) => first.to_uppercase().chain(chars).collect(),
-            }
-          })
-          .unwrap_or(child_type_name.clone());
-
-        DiscriminatedVariant {
-          discriminator_value: disc_value,
-          variant_name,
-          type_name: TypeRef::new(child_type_name).with_boxed(),
-        }
-      })
-      .collect();
-
-    let base_variant_name = to_rust_type_name(base_name.split('.').next_back().unwrap_or(base_name));
-    let fallback = Some(DiscriminatedVariant {
-      discriminator_value: String::new(),
-      variant_name: base_variant_name,
-      type_name: TypeRef::new(base_struct_name).with_boxed(),
-    });
-
-    Ok(RustType::DiscriminatedEnum(
-      DiscriminatedEnumDefBuilder::default()
-        .name(enum_name)
-        .docs(metadata::extract_docs(schema.description.as_ref()))
-        .discriminator_field(discriminator_field.clone())
-        .variants(variants)
-        .fallback(fallback)
-        .build()?,
-    ))
+impl DiscriminatorConverter {
+  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    Self { context }
   }
 
-  /// Extracts child schemas from a discriminator mapping.
+  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&ParentInfo> {
+    self.context.graph().parent(schema_name)
+  }
+
+  /// Builds a discriminated enum from a base schema with discriminator mappings.
   ///
-  /// Returns `(discriminator_value, schema_name)` pairs, deduplicated by schema name.
-  /// When multiple discriminator values map to the same schema, only the first
-  /// (by sorted order) is kept. Results are sorted by inheritance depth (deepest first).
-  pub(crate) fn extract_discriminator_children(&self, schema: &ObjectSchema) -> Vec<(String, String)> {
+  /// Returns an error if the schema lacks a discriminator property.
+  pub(crate) fn build_enum(&self, name: &str, schema: &ObjectSchema, fallback_type: &str) -> anyhow::Result<RustType> {
+    let tag_field = schema
+      .discriminator
+      .as_ref()
+      .map(|d| &d.property_name)
+      .ok_or_else(|| anyhow::anyhow!("missing discriminator property for schema '{name}'"))?;
+
+    let enum_name = to_rust_type_name(name);
+
+    let to_variant = |(schema_name, tags): (String, Vec<String>)| {
+      let type_name = to_rust_type_name(&schema_name);
+      let variant_name = strip_parent_prefix(&enum_name, &type_name);
+
+      DiscriminatedVariant::builder()
+        .variant_name(EnumVariantToken::new(variant_name))
+        .discriminator_values(tags)
+        .type_name(TypeRef::new(type_name).with_boxed())
+        .build()
+    };
+
+    let variants: Vec<_> = self
+      .discriminator_mappings(schema)
+      .into_iter()
+      .map(to_variant)
+      .collect();
+
+    let fallback_name = split_pascal_case(&enum_name)
+      .last()
+      .cloned()
+      .unwrap_or_else(|| enum_name.clone());
+
+    let fallback = DiscriminatedVariant::builder()
+      .variant_name(EnumVariantToken::new(fallback_name))
+      .type_name(TypeRef::new(fallback_type).with_boxed())
+      .build();
+
+    Ok(
+      RustType::discriminated_enum()
+        .name(&EnumToken::from_raw(enum_name))
+        .docs(Documentation::from_optional(schema.description.as_ref()))
+        .discriminator_field(tag_field.clone())
+        .variants(variants)
+        .maybe_fallback(Some(fallback))
+        .call(),
+    )
+  }
+
+  /// Returns discriminator tag-to-schema mappings grouped by target schema.
+  ///
+  /// Each entry contains `(schema_name, tags)` where `tags` are the discriminator
+  /// values that map to that schema. Results are ordered alphabetically by schema name.
+  pub(crate) fn discriminator_mappings(&self, schema: &ObjectSchema) -> Vec<(String, Vec<String>)> {
     let Some(mapping) = schema.discriminator.as_ref().and_then(|d| d.mapping.as_ref()) else {
       return vec![];
     };
 
-    // Deduplicate by schema name - multiple discriminator values may map to the same schema
-    let mut seen_schemas = BTreeSet::new();
-    let mut children: Vec<_> = mapping
+    let is_reachable = |name: &String| {
+      self
+        .context
+        .reachable_schemas
+        .as_ref()
+        .is_none_or(|filter| filter.contains(name))
+    };
+
+    mapping
       .iter()
-      .filter_map(|(val, ref_path)| SchemaRegistry::extract_ref_name(ref_path).map(|name| (val.clone(), name)))
-      .filter(|(_, name)| {
-        if let Some(filter) = self.reachable_schemas {
-          filter.contains(name)
-        } else {
-          true
-        }
+      .filter_map(|(tag, ref_path)| {
+        let name = SchemaRegistry::parse_ref(ref_path)?;
+        is_reachable(&name).then_some((tag.clone(), name))
       })
-      .filter(|(_, name)| seen_schemas.insert(name.clone()))
-      .collect();
-
-    let mut depth_memo = HashMap::new();
-    children.sort_by_key(|(_, name)| Reverse(compute_inheritance_depth(self.graph, name, &mut depth_memo)));
-    children
+      .fold(BTreeMap::<String, Vec<String>>::new(), |mut acc, (tag, name)| {
+        acc.entry(name).or_default().push(tag);
+        acc
+      })
+      .into_iter()
+      .collect()
   }
-}
 
-pub(crate) fn compute_inheritance_depth(
-  graph: &SchemaRegistry,
-  schema_name: &str,
-  memo: &mut HashMap<String, usize>,
-) -> usize {
-  if let Some(&depth) = memo.get(schema_name) {
-    return depth;
+  /// Tries to convert existing union variants into a discriminated enum.
+  ///
+  /// Returns `None` if the schema lacks a discriminator mapping or if the
+  /// variants don't match the mapping entries.
+  pub(crate) fn try_from_variants(
+    name: &str,
+    schema: &ObjectSchema,
+    variants: &[VariantDef],
+    methods: Vec<EnumMethod>,
+  ) -> Option<RustType> {
+    let discriminator = schema.discriminator.as_ref()?;
+    let mapping = discriminator.mapping.as_ref()?;
+
+    if !Self::variants_cover_mapping(variants, mapping) {
+      return None;
+    }
+
+    let discriminated_variants = Self::map_variants(variants, mapping);
+
+    Some(
+      RustType::discriminated_enum()
+        .name(&EnumToken::from_raw(name))
+        .docs(Documentation::from_optional(schema.description.as_ref()))
+        .discriminator_field(discriminator.property_name.clone())
+        .variants(discriminated_variants)
+        .methods(methods)
+        .call(),
+    )
   }
-  let Some(schema) = graph.get_schema(schema_name) else {
-    return 0;
-  };
 
-  let depth = if schema.all_of.is_empty() {
-    0
-  } else {
-    schema
-      .all_of
+  /// Returns true if all mapping entries have a corresponding variant type.
+  fn variants_cover_mapping(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {
+    if variants.is_empty() || mapping.is_empty() {
+      return false;
+    }
+
+    let known_types: BTreeSet<_> = variants.iter().filter_map(VariantDef::unboxed_type_name).collect();
+
+    mapping.values().all(|ref_path| {
+      SchemaRegistry::parse_ref(ref_path).is_some_and(|name| known_types.contains(&to_rust_type_name(&name)))
+    })
+  }
+
+  /// Converts union variants to discriminated variants using the mapping.
+  fn map_variants(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> Vec<DiscriminatedVariant> {
+    let tags_by_type = mapping
       .iter()
-      .filter_map(ReferenceExtractor::extract_ref_name_from_obj_ref)
-      .map(|parent| compute_inheritance_depth(graph, &parent, memo))
-      .max()
-      .unwrap_or(0)
-      + 1
-  };
+      .filter_map(|(tag, ref_path)| {
+        let type_name = SchemaRegistry::parse_ref(ref_path).map(|n| to_rust_type_name(&n))?;
+        Some((type_name, tag.clone()))
+      })
+      .fold(BTreeMap::<String, Vec<String>>::new(), |mut acc, (type_name, tag)| {
+        acc.entry(type_name).or_default().push(tag);
+        acc
+      });
 
-  memo.insert(schema_name.to_string(), depth);
-  depth
+    tags_by_type
+      .into_iter()
+      .filter_map(|(type_name, tags)| {
+        let variant = variants
+          .iter()
+          .find(|v| v.unboxed_type_name() == Some(type_name.clone()))?;
+        let inner_type = variant.single_wrapped_type()?;
+
+        Some(
+          DiscriminatedVariant::builder()
+            .variant_name(variant.name.clone())
+            .type_name(inner_type.clone())
+            .discriminator_values(tags)
+            .build(),
+        )
+      })
+      .collect()
+  }
 }

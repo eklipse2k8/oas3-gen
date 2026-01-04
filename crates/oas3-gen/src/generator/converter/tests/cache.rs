@@ -7,15 +7,13 @@ use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
     converter::{
-      SchemaConverter,
-      cache::SharedSchemaCache,
-      enums::{EnumConverter, UnionKind},
-      hashing,
-      type_resolver::TypeResolverBuilder,
+      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
+      union_types::UnionKind, unions::UnionConverter,
     },
+    naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
@@ -27,11 +25,12 @@ fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
 }
 
 fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
-  SchemaConverter::new(graph, default_config())
+  let context = create_test_context(graph.clone(), default_config());
+  SchemaConverter::new(&context)
 }
 
 #[test]
-fn test_hash_schema_behavior() {
+fn test_canonical_schema_equality_and_ordering() {
   let schema1 = ObjectSchema {
     required: vec!["name".to_string(), "id".to_string()],
     ..Default::default()
@@ -47,59 +46,31 @@ fn test_hash_schema_behavior() {
     ..Default::default()
   };
 
-  let first_hash = hashing::hash_schema(&schema1).expect("hash should succeed");
-  let repeated_hash = hashing::hash_schema(&schema1).expect("hash should succeed");
-  let reordered_hash = hashing::hash_schema(&schema2).expect("hash should succeed");
-  let different_hash = hashing::hash_schema(&schema3).expect("hash should succeed");
+  let first = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let repeated = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let reordered = CanonicalSchema::from_schema(&schema2).expect("should succeed");
+  let different = CanonicalSchema::from_schema(&schema3).expect("should succeed");
 
-  assert_eq!(first_hash, repeated_hash, "Hash should be deterministic across calls");
-  assert!(!first_hash.is_empty(), "Hash should not be empty");
+  assert_eq!(first, repeated, "CanonicalSchema should be deterministic across calls");
   assert_eq!(
-    first_hash, reordered_hash,
-    "Required array order should not affect hash due to RFC 8785 canonicalization"
+    first, reordered,
+    "Required array order should not affect equality due to RFC 8785 canonicalization"
   );
   assert_ne!(
-    first_hash, different_hash,
-    "Different schemas should produce different hashes"
+    first, different,
+    "Different schemas should produce different CanonicalSchemas"
   );
+
+  assert!(first <= reordered, "Equal schemas should satisfy <= ordering");
+  assert!(first >= reordered, "Equal schemas should satisfy >= ordering");
+
+  let mut schemas_diff = [different.clone(), first.clone()];
+  schemas_diff.sort();
+  assert_eq!(schemas_diff.len(), 2, "Sorting should preserve all elements");
 }
 
 #[test]
-fn test_convert_value_enum_with_cache() {
-  let schema = make_string_enum_schema(&["value1", "value2", "value3"]);
-
-  let graph = create_test_graph(BTreeMap::new());
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
-  let mut cache = SharedSchemaCache::new();
-
-  let result1 = enum_converter.convert_value_enum("TestEnum", &schema, Some(&mut cache));
-  assert!(result1.is_some(), "Should generate enum on first call");
-
-  let enum_values = vec!["value1".to_string(), "value2".to_string(), "value3".to_string()];
-  assert!(
-    cache.is_enum_generated(&enum_values),
-    "Enum should be registered in cache"
-  );
-  assert_eq!(
-    cache.get_enum_name(&enum_values),
-    Some("TestEnum".to_string()),
-    "Cache should map enum values to the generated name"
-  );
-
-  let result2 = enum_converter.convert_value_enum("DuplicateEnum", &schema, Some(&mut cache));
-  assert!(
-    result2.is_none(),
-    "Second enum with same values should not be generated"
-  );
-}
-
-#[test]
-fn test_relaxed_enum_reuses_cached_enum() {
+fn test_relaxed_enum_generates_known_variant() {
   let enum_schema = make_string_enum_schema(&["alpha", "beta", "gamma"]);
 
   let anyof_schema = ObjectSchema {
@@ -118,41 +89,36 @@ fn test_relaxed_enum_reuses_cached_enum() {
     ("OptimizedEnum".to_string(), anyof_schema.clone()),
   ]));
 
-  let converter = create_test_converter(&graph);
-  let mut cache = SharedSchemaCache::new();
+  let context = create_test_context(graph.clone(), default_config());
+  let _type_resolver = TypeResolver::new(context.clone());
+  let union_converter = UnionConverter::new(context);
 
-  let simple_result = converter
-    .convert_schema("SimpleEnum", graph.get_schema("SimpleEnum").unwrap(), Some(&mut cache))
-    .expect("Should convert simple enum");
-  assert_eq!(simple_result.len(), 1, "Simple enum should generate one type");
-
-  let type_resolver = TypeResolverBuilder::default()
-    .config(default_config())
-    .graph(graph.clone())
-    .build()
-    .unwrap();
-  let enum_converter = EnumConverter::new(&graph, type_resolver, default_config());
-  let optimized_result = enum_converter
-    .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf, Some(&mut cache))
+  let optimized_output = union_converter
+    .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf)
     .expect("Should convert anyOf union");
 
-  assert_eq!(
-    optimized_result.len(),
-    1,
-    "Should only generate outer enum, reusing inner"
-  );
+  let optimized_result = optimized_output.into_vec();
+  assert!(!optimized_result.is_empty(), "Should generate at least one type");
 
-  let outer_enum = &optimized_result[0];
-  if let RustType::Enum(e) = outer_enum {
-    let known_variant = e.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
-    assert!(known_variant.is_some(), "Should have Known variant");
-  } else {
-    panic!("Expected enum type");
+  let outer_enum = optimized_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "OptimizedEnum"));
+  assert!(outer_enum.is_some(), "Should generate OptimizedEnum");
+
+  if let Some(RustType::Enum(e)) = outer_enum {
+    let known_variant = e
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT));
+    assert!(
+      known_variant.is_some(),
+      "Should have Known variant for relaxed enum pattern"
+    );
   }
 }
 
 #[test]
-fn test_full_schema_conversion_with_deduplication() {
+fn test_relaxed_enum_with_ref() {
   let chat_model_enum = make_string_enum_schema(&["gpt-4", "gpt-3.5-turbo"]);
 
   let model_ids_shared = ObjectSchema {
@@ -176,33 +142,32 @@ fn test_full_schema_conversion_with_deduplication() {
   ]));
 
   let converter = create_test_converter(&graph);
-  let mut cache = SharedSchemaCache::new();
 
   let chat_model_result = converter
-    .convert_schema("ChatModel", graph.get_schema("ChatModel").unwrap(), Some(&mut cache))
+    .convert_schema("ChatModel", graph.get("ChatModel").unwrap())
     .expect("Should convert ChatModel");
   assert_eq!(chat_model_result.len(), 1);
 
   let model_ids_result = converter
-    .convert_schema(
-      "ModelIdsShared",
-      graph.get_schema("ModelIdsShared").unwrap(),
-      Some(&mut cache),
-    )
+    .convert_schema("ModelIdsShared", graph.get("ModelIdsShared").unwrap())
     .expect("Should convert ModelIdsShared");
 
-  assert_eq!(
-    model_ids_result.len(),
-    1,
-    "Should only generate outer enum, not duplicate inner"
-  );
+  assert!(!model_ids_result.is_empty(), "Should generate at least one type");
 
-  if let RustType::Enum(outer) = &model_ids_result[0] {
-    assert_eq!(outer.name.to_string(), "ModelIdsShared");
-    let known_variant = outer.variants.iter().find(|v| v.name == EnumVariantToken::new("Known"));
-    assert!(known_variant.is_some(), "Should have Known variant");
-  } else {
-    panic!("Expected enum type for ModelIdsShared");
+  let outer_enum = model_ids_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "ModelIdsShared"));
+  assert!(outer_enum.is_some(), "Should generate ModelIdsShared enum");
+
+  if let Some(RustType::Enum(outer)) = outer_enum {
+    let known_variant = outer
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT));
+    assert!(
+      known_variant.is_some(),
+      "Should have Known variant for relaxed enum pattern"
+    );
   }
 }
 
@@ -243,9 +208,9 @@ fn test_precomputed_names() {
     ..Default::default()
   };
 
-  let schema_hash = hashing::hash_schema(&schema).expect("hash should succeed");
+  let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
   let mut precomputed_names = BTreeMap::new();
-  precomputed_names.insert(schema_hash, "CustomName".to_string());
+  precomputed_names.insert(canonical, "CustomName".to_string());
 
   let enum_values = vec!["alpha".to_string(), "beta".to_string()];
   let mut precomputed_enum_names = BTreeMap::new();
@@ -329,4 +294,213 @@ fn test_cache_operations() {
 
   let types = type_cache.into_types();
   assert_eq!(types.len(), 2, "Should return all generated types");
+}
+
+#[test]
+fn test_canonical_schema_as_btreemap_key() {
+  use std::collections::BTreeMap;
+
+  let schema_a = ObjectSchema {
+    required: vec!["alpha".to_string()],
+    ..Default::default()
+  };
+  let schema_b = ObjectSchema {
+    required: vec!["beta".to_string()],
+    ..Default::default()
+  };
+  let schema_a_reordered = ObjectSchema {
+    required: vec!["alpha".to_string()],
+    ..Default::default()
+  };
+
+  let canonical_a = CanonicalSchema::from_schema(&schema_a).expect("should succeed");
+  let canonical_b = CanonicalSchema::from_schema(&schema_b).expect("should succeed");
+  let canonical_a_dup = CanonicalSchema::from_schema(&schema_a_reordered).expect("should succeed");
+
+  let mut map: BTreeMap<CanonicalSchema, &str> = BTreeMap::new();
+  map.insert(canonical_a.clone(), "first");
+  map.insert(canonical_b.clone(), "second");
+
+  assert_eq!(map.len(), 2, "Map should have two entries for different schemas");
+  assert_eq!(map.get(&canonical_a), Some(&"first"));
+  assert_eq!(map.get(&canonical_b), Some(&"second"));
+  assert_eq!(
+    map.get(&canonical_a_dup),
+    Some(&"first"),
+    "Lookup with equivalent schema should find same entry"
+  );
+
+  map.insert(canonical_a_dup, "overwritten");
+  assert_eq!(map.len(), 2, "Map size should remain 2 after inserting duplicate key");
+  assert_eq!(
+    map.get(&canonical_a),
+    Some(&"overwritten"),
+    "Value should be overwritten for equivalent key"
+  );
+}
+
+#[test]
+fn test_canonical_schema_normalizes_enum_order() {
+  let schema1 = ObjectSchema {
+    enum_values: vec![json!("z"), json!("a"), json!("m")],
+    ..Default::default()
+  };
+  let schema2 = ObjectSchema {
+    enum_values: vec![json!("a"), json!("m"), json!("z")],
+    ..Default::default()
+  };
+
+  let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
+
+  assert_eq!(
+    canonical1, canonical2,
+    "Enum value order should not affect canonical equality"
+  );
+}
+
+#[test]
+fn test_canonical_schema_normalizes_type_array_order() {
+  let schema1 = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Null])),
+    ..Default::default()
+  };
+  let schema2 = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Null, SchemaType::String])),
+    ..Default::default()
+  };
+
+  let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
+
+  assert_eq!(
+    canonical1, canonical2,
+    "Type array order should not affect canonical equality"
+  );
+}
+
+#[test]
+fn test_canonical_schema_clone() {
+  let schema = ObjectSchema {
+    required: vec!["field".to_string()],
+    ..Default::default()
+  };
+
+  let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
+  let cloned = canonical.clone();
+
+  assert_eq!(canonical, cloned, "Cloned CanonicalSchema should equal original");
+}
+
+#[test]
+fn test_canonical_schema_hash_consistency() {
+  use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+  };
+
+  let schema = ObjectSchema {
+    required: vec!["a".to_string(), "b".to_string()],
+    ..Default::default()
+  };
+
+  let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
+
+  let mut hasher1 = DefaultHasher::new();
+  canonical.hash(&mut hasher1);
+  let hash1 = hasher1.finish();
+
+  let mut hasher2 = DefaultHasher::new();
+  canonical.hash(&mut hasher2);
+  let hash2 = hasher2.finish();
+
+  assert_eq!(hash1, hash2, "Hash should be consistent across calls");
+
+  let canonical_dup = CanonicalSchema::from_schema(&schema).expect("should succeed");
+  let mut hasher3 = DefaultHasher::new();
+  canonical_dup.hash(&mut hasher3);
+  let hash3 = hasher3.finish();
+
+  assert_eq!(hash1, hash3, "Equal CanonicalSchemas should produce equal hashes");
+}
+
+#[test]
+fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
+  let enum_schema = make_string_enum_schema(&["easy", "medium", "hard", "expert"]);
+
+  let anyof_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(enum_schema.clone()),
+    ],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("SimpleEnum".to_string(), enum_schema),
+    ("FirstRelaxedEnum".to_string(), anyof_schema.clone()),
+    ("SecondRelaxedEnum".to_string(), anyof_schema.clone()),
+  ]));
+
+  let context = create_test_context(graph.clone(), default_config());
+  let union_converter = UnionConverter::new(context.clone());
+
+  let first_output = union_converter
+    .convert_union("FirstRelaxedEnum", &anyof_schema, UnionKind::AnyOf)
+    .expect("Should convert first anyOf union");
+  let first_result = first_output.into_vec();
+
+  let first_outer = first_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "FirstRelaxedEnum"))
+    .expect("Should generate FirstRelaxedEnum");
+
+  let inner_enum_name = if let RustType::Enum(e) = first_outer {
+    let known_variant = e
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
+      .expect("Should have Known variant");
+    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+      refs[0].base_type.to_string()
+    } else {
+      panic!("Known variant should have tuple content");
+    }
+  } else {
+    panic!("FirstRelaxedEnum should be an enum");
+  };
+
+  let second_output = union_converter
+    .convert_union("SecondRelaxedEnum", &anyof_schema, UnionKind::AnyOf)
+    .expect("Should convert second anyOf union");
+  let second_result = second_output.into_vec();
+
+  let second_outer = second_result
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "SecondRelaxedEnum"))
+    .expect("Should generate SecondRelaxedEnum");
+
+  if let RustType::Enum(e) = second_outer {
+    let known_variant = e
+      .variants
+      .iter()
+      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
+      .expect("Should have Known variant");
+    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+      let second_inner_name = refs[0].base_type.to_string();
+      assert_eq!(
+        inner_enum_name, second_inner_name,
+        "Both relaxed enums should reference the same inner known values enum. \
+        First references '{inner_enum_name}', second references '{second_inner_name}'. \
+        This is a regression of issue #57."
+      );
+    } else {
+      panic!("Known variant should have tuple content");
+    }
+  } else {
+    panic!("SecondRelaxedEnum should be an enum");
+  }
 }

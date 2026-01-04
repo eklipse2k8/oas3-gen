@@ -1,11 +1,13 @@
 mod cache;
+mod common_tests;
 mod enums;
+mod fields;
 mod helper_tests;
 mod implicit_dependencies;
 mod inline_objects;
+mod intersection_union;
 pub mod metadata_tests;
 mod operations;
-mod path_renderer;
 mod structs;
 mod type_aliases;
 mod type_resolution;

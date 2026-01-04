@@ -3,18 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::{Value, json};
 
-use crate::{
-  generator::{
-    ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
-    naming::{
-      constants::REQUEST_BODY_SUFFIX,
-      inference::{
-        InlineTypeScanner, VariantNameNormalizer, derive_method_names, infer_name_from_context, infer_variant_name,
-        strip_common_affixes,
-      },
-    },
+use crate::generator::{
+  ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
+  naming::{
+    constants::{KNOWN_ENUM_VARIANT, REQUEST_BODY_SUFFIX},
+    inference::{InferenceExt, NormalizedVariant, derive_method_names, strip_common_affixes},
+    name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
   },
-  tests::common::create_test_graph,
 };
 
 fn make_string_schema() -> ObjectSchema {
@@ -81,7 +76,7 @@ fn test_longest_common_suffix() {
     let input_strings: Vec<String> = inputs.into_iter().map(String::from).collect();
     let refs: Vec<&String> = input_strings.iter().collect();
     assert_eq!(
-      InlineTypeScanner::longest_common_suffix(&refs),
+      longest_common_suffix(&refs),
       expected,
       "Failed for inputs {input_strings:?}"
     );
@@ -102,11 +97,7 @@ fn test_is_valid_common_name() {
   ];
 
   for (input, expected) in cases {
-    assert_eq!(
-      InlineTypeScanner::is_valid_common_name(input),
-      expected,
-      "Failed for input '{input}'"
-    );
+    assert_eq!(is_valid_common_name(input), expected, "Failed for input '{input}'");
   }
 }
 
@@ -130,7 +121,7 @@ fn test_compute_best_name() {
     let candidates: BTreeSet<(String, bool)> = candidate_pairs.iter().map(|(s, b)| ((*s).to_string(), *b)).collect();
     let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
     assert_eq!(
-      InlineTypeScanner::compute_best_name(&candidates, &used),
+      compute_best_name(&candidates, &used),
       expected,
       "Failed for candidates {candidates:?} with used {used:?}"
     );
@@ -161,13 +152,13 @@ fn test_inline_type_scanner_known_suffix_patterns() {
     ..Default::default()
   };
 
-  let graph = create_test_graph(BTreeMap::from([
+  let schemas = BTreeMap::from([
     ("VoiceIdsShared".to_string(), voice_ids_shared),
     ("FormatType".to_string(), format_type),
-  ]));
+  ]);
 
-  let scanner = InlineTypeScanner::new(&graph);
-  let result = scanner.scan_and_compute_names().expect("Should scan successfully");
+  let index = TypeNameIndex::new(&schemas);
+  let result = index.scan_and_compute_names().expect("Should scan successfully");
 
   let cases = [
     (
@@ -210,20 +201,20 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
     ..Default::default()
   };
 
-  let graph = create_test_graph(BTreeMap::from([
+  let schemas = BTreeMap::from([
     ("Status".to_string(), status),
     ("ChatModel".to_string(), chat_model),
     ("ModelIdsShared".to_string(), model_ids_shared),
-  ]));
+  ]);
 
-  let scanner = InlineTypeScanner::new(&graph);
-  let result = scanner.scan_and_compute_names().expect("Should scan successfully");
+  let index = TypeNameIndex::new(&schemas);
+  let result = index.scan_and_compute_names().expect("Should scan successfully");
 
   let status_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
   let status_name = result.enum_names.get(&status_values);
   assert!(status_name.is_some(), "Regular enum should have a precomputed name");
   assert!(
-    !status_name.unwrap().ends_with("Known"),
+    !status_name.unwrap().ends_with(KNOWN_ENUM_VARIANT),
     "Regular enum should not have 'Known' suffix"
   );
 
@@ -266,7 +257,7 @@ fn test_infer_name_from_context() {
   ];
 
   for (schema, path, status, expected, description) in cases {
-    let result = infer_name_from_context(&schema, path, status);
+    let result = schema.infer_name_from_context(path, status);
     assert_eq!(result, expected, "Failed: {description}");
     assert!(
       !result.contains('-') && !result.contains('.'),
@@ -278,7 +269,7 @@ fn test_infer_name_from_context() {
   schema_with_property
     .properties
     .insert("user".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
-  let result = infer_name_from_context(&schema_with_property, "/api/check-access", "200");
+  let result = schema_with_property.infer_name_from_context("/api/check-access", "200");
   assert_eq!(
     result, "userResponse",
     "Single property response should use property name"
@@ -294,7 +285,7 @@ fn test_normalize_strings() {
   ];
 
   for (val, expected_name, expected_rename) in cases {
-    let res = VariantNameNormalizer::normalize(&val).unwrap();
+    let res = NormalizedVariant::try_from(&val).unwrap();
     assert_eq!(res.name, expected_name, "name mismatch for {val:?}");
     assert_eq!(res.rename_value, expected_rename, "rename mismatch for {val:?}");
   }
@@ -312,7 +303,7 @@ fn test_normalize_numbers() {
   ];
 
   for (val, expected_name, expected_rename) in cases {
-    let res = VariantNameNormalizer::normalize(&val).unwrap();
+    let res = NormalizedVariant::try_from(&val).unwrap();
     assert_eq!(res.name, expected_name, "name mismatch for {val:?}");
     assert_eq!(res.rename_value, expected_rename, "rename mismatch for {val:?}");
   }
@@ -320,17 +311,17 @@ fn test_normalize_numbers() {
 
 #[test]
 fn test_normalize_booleans_and_unsupported_types() {
-  let true_res = VariantNameNormalizer::normalize(&json!(true)).unwrap();
+  let true_res = NormalizedVariant::try_from(&json!(true)).unwrap();
   assert_eq!(true_res.name, "True");
   assert_eq!(true_res.rename_value, "true");
 
-  let false_res = VariantNameNormalizer::normalize(&json!(false)).unwrap();
+  let false_res = NormalizedVariant::try_from(&json!(false)).unwrap();
   assert_eq!(false_res.name, "False");
   assert_eq!(false_res.rename_value, "false");
 
-  assert!(VariantNameNormalizer::normalize(&json!(null)).is_none());
-  assert!(VariantNameNormalizer::normalize(&json!({"key": "value"})).is_none());
-  assert!(VariantNameNormalizer::normalize(&json!([1, 2, 3])).is_none());
+  assert!(NormalizedVariant::try_from(&json!(null)).is_err());
+  assert!(NormalizedVariant::try_from(&json!({"key": "value"})).is_err());
+  assert!(NormalizedVariant::try_from(&json!([1, 2, 3])).is_err());
 }
 
 #[test]
@@ -351,7 +342,7 @@ fn test_infer_variant_name_single_types() {
       ..Default::default()
     };
     assert_eq!(
-      infer_variant_name(&schema, 0),
+      schema.infer_variant_name(0),
       expected,
       "type mismatch for {schema_type:?}"
     );
@@ -364,74 +355,130 @@ fn test_infer_variant_name_special_cases() {
     enum_values: vec![json!("a"), json!("b")],
     ..Default::default()
   };
-  assert_eq!(infer_variant_name(&enum_schema, 0), "Enum");
+  assert_eq!(enum_schema.infer_variant_name(0), "Enum");
 
   let multi_type_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Number])),
     ..Default::default()
   };
-  assert_eq!(infer_variant_name(&multi_type_schema, 0), "Mixed");
+  assert_eq!(multi_type_schema.infer_variant_name(0), "Mixed");
 
   let no_type_schema = ObjectSchema::default();
-  assert_eq!(infer_variant_name(&no_type_schema, 5), "Variant5");
+  assert_eq!(no_type_schema.infer_variant_name(5), "Variant5");
+}
+
+#[test]
+fn test_infer_variant_name_object_variants() {
+  let bare_object = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+  assert_eq!(
+    bare_object.infer_variant_name(0),
+    "Object",
+    "bare object without properties should be Object"
+  );
+
+  let object_with_single_property = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [("items".to_string(), ObjectOrReference::Object(ObjectSchema::default()))]
+      .into_iter()
+      .collect(),
+    ..Default::default()
+  };
+  assert_eq!(
+    object_with_single_property.infer_variant_name(0),
+    "Items",
+    "object with single property should use property name"
+  );
+
+  let object_with_single_required = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [
+      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+    ]
+    .into_iter()
+    .collect(),
+    required: vec!["id".to_string()],
+    ..Default::default()
+  };
+  assert_eq!(
+    object_with_single_required.infer_variant_name(0),
+    "Id",
+    "object with single required field should use required field name"
+  );
+
+  let object_with_multiple_properties = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [
+      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+    ]
+    .into_iter()
+    .collect(),
+    ..Default::default()
+  };
+  assert_eq!(
+    object_with_multiple_properties.infer_variant_name(0),
+    "Object",
+    "object with multiple properties and no single required should be Object"
+  );
 }
 
 fn make_variant(name: &str) -> VariantDef {
-  VariantDef {
-    name: EnumVariantToken::from(name),
-    content: VariantContent::Unit,
-    serde_attrs: vec![],
-    deprecated: false,
-    ..Default::default()
-  }
+  VariantDef::builder()
+    .name(EnumVariantToken::from(name))
+    .content(VariantContent::Unit)
+    .build()
 }
 
 #[test]
 fn test_strip_common_affixes_no_op_cases() {
-  let mut empty: Vec<VariantDef> = vec![];
-  strip_common_affixes(&mut empty);
+  let empty: Vec<VariantDef> = vec![];
+  let empty = strip_common_affixes(empty);
   assert!(empty.is_empty());
 
-  let mut single = vec![make_variant("UserResponse")];
-  strip_common_affixes(&mut single);
+  let single = vec![make_variant("UserResponse")];
+  let single = strip_common_affixes(single);
   assert_eq!(single[0].name, EnumVariantToken::new("UserResponse"));
 }
 
 #[test]
 fn test_strip_common_affixes_strips_prefix_suffix_or_both() {
-  let mut suffix_variants = vec![make_variant("CreateResponse"), make_variant("UpdateResponse")];
-  strip_common_affixes(&mut suffix_variants);
+  let suffix_variants = vec![make_variant("CreateResponse"), make_variant("UpdateResponse")];
+  let suffix_variants = strip_common_affixes(suffix_variants);
   assert_eq!(suffix_variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(suffix_variants[1].name, EnumVariantToken::new("Update"));
 
-  let mut prefix_variants = vec![make_variant("UserCreate"), make_variant("UserUpdate")];
-  strip_common_affixes(&mut prefix_variants);
+  let prefix_variants = vec![make_variant("UserCreate"), make_variant("UserUpdate")];
+  let prefix_variants = strip_common_affixes(prefix_variants);
   assert_eq!(prefix_variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(prefix_variants[1].name, EnumVariantToken::new("Update"));
 
-  let mut both_variants = vec![make_variant("UserCreateResponse"), make_variant("UserUpdateResponse")];
-  strip_common_affixes(&mut both_variants);
+  let both_variants = vec![make_variant("UserCreateResponse"), make_variant("UserUpdateResponse")];
+  let both_variants = strip_common_affixes(both_variants);
   assert_eq!(both_variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(both_variants[1].name, EnumVariantToken::new("Update"));
 }
 
 #[test]
 fn test_strip_common_affixes_no_common_parts() {
-  let mut variants = vec![make_variant("CreateUser"), make_variant("DeletePost")];
-  strip_common_affixes(&mut variants);
+  let variants = vec![make_variant("CreateUser"), make_variant("DeletePost")];
+  let variants = strip_common_affixes(variants);
   assert_eq!(variants[0].name, EnumVariantToken::new("CreateUser"));
   assert_eq!(variants[1].name, EnumVariantToken::new("DeletePost"));
 }
 
 #[test]
 fn test_strip_common_affixes_safety_guards() {
-  let mut collision_variants = vec![make_variant("UserResponse"), make_variant("UserResponse")];
-  strip_common_affixes(&mut collision_variants);
+  let collision_variants = vec![make_variant("UserResponse"), make_variant("UserResponse")];
+  let collision_variants = strip_common_affixes(collision_variants);
   assert_eq!(collision_variants[0].name, EnumVariantToken::new("UserResponse"));
   assert_eq!(collision_variants[1].name, EnumVariantToken::new("UserResponse"));
 
-  let mut empty_name_variants = vec![make_variant("Response"), make_variant("Response")];
-  strip_common_affixes(&mut empty_name_variants);
+  let empty_name_variants = vec![make_variant("Response"), make_variant("Response")];
+  let empty_name_variants = strip_common_affixes(empty_name_variants);
   assert_eq!(empty_name_variants[0].name, EnumVariantToken::new("Response"));
   assert_eq!(empty_name_variants[1].name, EnumVariantToken::new("Response"));
 }
@@ -439,18 +486,15 @@ fn test_strip_common_affixes_safety_guards() {
 #[test]
 fn test_strip_common_affixes_preserves_variant_content() {
   let tuple_type = TypeRef::new("TestStruct");
-  let mut variants = vec![
-    VariantDef {
-      name: EnumVariantToken::from("CreateResponse"),
-      content: VariantContent::Tuple(vec![tuple_type]),
-      serde_attrs: vec![],
-      deprecated: false,
-      ..Default::default()
-    },
+  let variants = vec![
+    VariantDef::builder()
+      .name(EnumVariantToken::from("CreateResponse"))
+      .content(VariantContent::Tuple(vec![tuple_type]))
+      .build(),
     make_variant("UpdateResponse"),
   ];
 
-  strip_common_affixes(&mut variants);
+  let variants = strip_common_affixes(variants);
 
   assert_eq!(variants[0].name, EnumVariantToken::new("Create"));
   assert_eq!(variants[1].name, EnumVariantToken::new("Update"));

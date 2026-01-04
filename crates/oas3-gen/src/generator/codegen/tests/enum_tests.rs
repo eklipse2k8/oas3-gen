@@ -1,23 +1,21 @@
 use crate::generator::{
   ast::{
-    ContentCategory, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
-    EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
+    DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
+    OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
     StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
     enums::{DiscriminatedEnumGenerator, EnumGenerator, ResponseEnumGenerator},
   },
+  naming::constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
 };
 
 fn make_unit_variant(name: &str) -> VariantDef {
-  VariantDef {
-    name: EnumVariantToken::from(name),
-    content: VariantContent::Unit,
-    serde_attrs: vec![],
-    deprecated: false,
-    ..Default::default()
-  }
+  VariantDef::builder()
+    .name(EnumVariantToken::from(name))
+    .content(VariantContent::Unit)
+    .build()
 }
 
 fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
@@ -29,6 +27,7 @@ fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![],
+    generate_display: true,
     ..Default::default()
   }
 }
@@ -60,6 +59,117 @@ fn test_basic_enum_generation() {
   for (expected, msg) in assertions {
     assert!(code.contains(expected), "{msg}");
   }
+}
+
+#[test]
+fn test_simple_enum_display_impl() {
+  // Simple enum without renames - Display uses variant name
+  let simple_def = make_simple_enum(
+    "Color",
+    vec![
+      make_unit_variant("Red"),
+      make_unit_variant("Green"),
+      make_unit_variant("Blue"),
+    ],
+  );
+
+  let code = EnumGenerator::new(&simple_def, Visibility::Public)
+    .generate()
+    .to_string();
+
+  assert!(
+    code.contains("impl core :: fmt :: Display for Color"),
+    "should have Display impl for simple enum"
+  );
+  assert!(
+    code.contains("Self :: Red => write ! (f , \"Red\")"),
+    "should output variant name for Red"
+  );
+  assert!(
+    code.contains("Self :: Green => write ! (f , \"Green\")"),
+    "should output variant name for Green"
+  );
+  assert!(
+    code.contains("Self :: Blue => write ! (f , \"Blue\")"),
+    "should output variant name for Blue"
+  );
+}
+
+#[test]
+fn test_simple_enum_display_impl_with_serde_rename() {
+  // Enum with serde renames - Display uses the serde rename value
+  let renamed_def = EnumDef {
+    name: EnumToken::new("Status"),
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("InProgress"))
+        .content(VariantContent::Unit)
+        .serde_attrs(vec![SerdeAttribute::Rename("in_progress".to_string())])
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Completed"))
+        .content(VariantContent::Unit)
+        .serde_attrs(vec![SerdeAttribute::Rename("completed".to_string())])
+        .build(),
+    ],
+    discriminator: None,
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+    generate_display: true,
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&renamed_def, Visibility::Public)
+    .generate()
+    .to_string();
+
+  assert!(
+    code.contains("impl core :: fmt :: Display for Status"),
+    "should have Display impl"
+  );
+  assert!(
+    code.contains("Self :: InProgress => write ! (f , \"in_progress\")"),
+    "should output serde rename value for InProgress"
+  );
+  assert!(
+    code.contains("Self :: Completed => write ! (f , \"completed\")"),
+    "should output serde rename value for Completed"
+  );
+}
+
+#[test]
+fn test_tuple_enum_no_display_impl() {
+  // Enums with tuple variants should NOT get a Display impl
+  let tuple_def = EnumDef {
+    name: EnumToken::new("Value"),
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Text"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]))
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Number"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]))
+        .build(),
+    ],
+    discriminator: None,
+    serde_attrs: vec![],
+    outer_attrs: vec![],
+    case_insensitive: false,
+    methods: vec![],
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&tuple_def, Visibility::Public)
+    .generate()
+    .to_string();
+
+  assert!(
+    !code.contains("impl core :: fmt :: Display for Value"),
+    "tuple enum should NOT have Display impl"
+  );
 }
 
 #[test]
@@ -98,20 +208,14 @@ fn test_enum_tuple_variants() {
     (
       "single type tuple",
       vec![
-        VariantDef {
-          name: EnumVariantToken::new("Text"),
-          content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]),
-          serde_attrs: vec![],
-          deprecated: false,
-          ..Default::default()
-        },
-        VariantDef {
-          name: EnumVariantToken::new("Number"),
-          content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]),
-          serde_attrs: vec![],
-          deprecated: false,
-          ..Default::default()
-        },
+        VariantDef::builder()
+          .name(EnumVariantToken::new("Text"))
+          .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]))
+          .build(),
+        VariantDef::builder()
+          .name(EnumVariantToken::new("Number"))
+          .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]))
+          .build(),
         make_unit_variant("Null"),
       ],
       vec![
@@ -122,16 +226,15 @@ fn test_enum_tuple_variants() {
     ),
     (
       "multiple type tuple",
-      vec![VariantDef {
-        name: EnumVariantToken::new("KeyValue"),
-        content: VariantContent::Tuple(vec![
-          TypeRef::new(RustPrimitive::String),
-          TypeRef::new(RustPrimitive::I32),
-        ]),
-        serde_attrs: vec![],
-        deprecated: false,
-        ..Default::default()
-      }],
+      vec![
+        VariantDef::builder()
+          .name(EnumVariantToken::new("KeyValue"))
+          .content(VariantContent::Tuple(vec![
+            TypeRef::new(RustPrimitive::String),
+            TypeRef::new(RustPrimitive::I32),
+          ]))
+          .build(),
+      ],
       vec![("KeyValue (String , i32)", "multi-type tuple variant")],
     ),
   ];
@@ -151,13 +254,11 @@ fn test_enum_variant_attributes() {
   let deprecated_def = EnumDef {
     name: EnumToken::new("ApiVersion"),
     variants: vec![
-      VariantDef {
-        name: EnumVariantToken::new("V1"),
-        content: VariantContent::Unit,
-        serde_attrs: vec![],
-        deprecated: true,
-        ..Default::default()
-      },
+      VariantDef::builder()
+        .name(EnumVariantToken::new("V1"))
+        .content(VariantContent::Unit)
+        .deprecated(true)
+        .build(),
       make_unit_variant("V2"),
     ],
     discriminator: None,
@@ -204,20 +305,16 @@ fn test_enum_serde_attributes() {
       EnumDef {
         name: EnumToken::new("Status"),
         variants: vec![
-          VariantDef {
-            name: EnumVariantToken::new("InProgress"),
-            content: VariantContent::Unit,
-            serde_attrs: vec![SerdeAttribute::Rename("in_progress".to_string())],
-            deprecated: false,
-            ..Default::default()
-          },
-          VariantDef {
-            name: EnumVariantToken::new("Completed"),
-            content: VariantContent::Unit,
-            serde_attrs: vec![SerdeAttribute::Rename("completed".to_string())],
-            deprecated: false,
-            ..Default::default()
-          },
+          VariantDef::builder()
+            .name(EnumVariantToken::new("InProgress"))
+            .content(VariantContent::Unit)
+            .serde_attrs(vec![SerdeAttribute::Rename("in_progress".to_string())])
+            .build(),
+          VariantDef::builder()
+            .name(EnumVariantToken::new("Completed"))
+            .content(VariantContent::Unit)
+            .serde_attrs(vec![SerdeAttribute::Rename("completed".to_string())])
+            .build(),
         ],
         discriminator: None,
         serde_attrs: vec![],
@@ -278,20 +375,16 @@ fn test_case_insensitive_enum() {
   let base_def = EnumDef {
     name: EnumToken::new("Status"),
     variants: vec![
-      VariantDef {
-        name: EnumVariantToken::new("Active"),
-        content: VariantContent::Unit,
-        serde_attrs: vec![SerdeAttribute::Rename("active".to_string())],
-        deprecated: false,
-        ..Default::default()
-      },
-      VariantDef {
-        name: EnumVariantToken::new("InProgress"),
-        content: VariantContent::Unit,
-        serde_attrs: vec![SerdeAttribute::Rename("in-progress".to_string())],
-        deprecated: false,
-        ..Default::default()
-      },
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Active"))
+        .content(VariantContent::Unit)
+        .serde_attrs(vec![SerdeAttribute::Rename("active".to_string())])
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new("InProgress"))
+        .content(VariantContent::Unit)
+        .serde_attrs(vec![SerdeAttribute::Rename("in-progress".to_string())])
+        .build(),
     ],
     discriminator: None,
     serde_attrs: vec![],
@@ -356,20 +449,16 @@ fn test_case_insensitive_enum_deserialize_only() {
   let def = EnumDef {
     name: EnumToken::new("Status"),
     variants: vec![
-      VariantDef {
-        name: EnumVariantToken::new("Active"),
-        content: VariantContent::Unit,
-        serde_attrs: vec![SerdeAttribute::Rename("active".to_string())],
-        deprecated: false,
-        ..Default::default()
-      },
-      VariantDef {
-        name: EnumVariantToken::new("Inactive"),
-        content: VariantContent::Unit,
-        serde_attrs: vec![SerdeAttribute::Rename("inactive".to_string())],
-        deprecated: false,
-        ..Default::default()
-      },
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Active"))
+        .content(VariantContent::Unit)
+        .serde_attrs(vec![SerdeAttribute::Rename("active".to_string())])
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Inactive"))
+        .content(VariantContent::Unit)
+        .serde_attrs(vec![SerdeAttribute::Rename("inactive".to_string())])
+        .build(),
     ],
     case_insensitive: true,
     serde_mode: SerdeMode::DeserializeOnly,
@@ -449,13 +538,14 @@ fn test_enum_visibility() {
 fn test_enum_constructor_methods() {
   let simple_def = EnumDef {
     name: EnumToken::new("RequestBody"),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Json"),
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("JsonPayload".into()))]),
-      serde_attrs: vec![],
-      deprecated: false,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Json"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom(
+          "JsonPayload".into(),
+        ))]))
+        .build(),
+    ],
     discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
@@ -486,13 +576,14 @@ fn test_enum_constructor_methods() {
 
   let param_def = EnumDef {
     name: EnumToken::new("Request"),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Create"),
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("CreateParams".into()))]),
-      serde_attrs: vec![],
-      deprecated: false,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Create"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom(
+          "CreateParams".into(),
+        ))]))
+        .build(),
+    ],
     discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
@@ -527,13 +618,14 @@ fn test_enum_constructor_methods() {
 fn test_enum_constructor_methods_without_docs() {
   let def = EnumDef {
     name: EnumToken::new("RequestBody"),
-    variants: vec![VariantDef {
-      name: EnumVariantToken::new("Json"),
-      content: VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom("JsonPayload".into()))]),
-      serde_attrs: vec![],
-      deprecated: false,
-      ..Default::default()
-    }],
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Json"))
+        .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::Custom(
+          "JsonPayload".into(),
+        ))]))
+        .build(),
+    ],
     discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
@@ -566,20 +658,14 @@ fn test_known_value_constructor_methods() {
   let def = EnumDef {
     name: EnumToken::new("ModelOption"),
     variants: vec![
-      VariantDef {
-        name: EnumVariantToken::new("Known"),
-        content: VariantContent::Tuple(vec![TypeRef::new("ModelOptionKnown")]),
-        serde_attrs: vec![],
-        deprecated: false,
-        ..Default::default()
-      },
-      VariantDef {
-        name: EnumVariantToken::new("Other"),
-        content: VariantContent::Tuple(vec![TypeRef::new("String")]),
-        serde_attrs: vec![],
-        deprecated: false,
-        ..Default::default()
-      },
+      VariantDef::builder()
+        .name(EnumVariantToken::new(KNOWN_ENUM_VARIANT))
+        .content(VariantContent::Tuple(vec![TypeRef::new("ModelOptionKnown")]))
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
+        .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
+        .build(),
     ],
     discriminator: None,
     serde_attrs: vec![],
@@ -624,31 +710,28 @@ fn test_known_value_constructor_methods() {
 
 #[test]
 fn test_discriminated_enum() {
-  let without_fallback = DiscriminatedEnumDef {
-    name: EnumToken::new("Pet"),
-    docs: vec!["A pet can be a dog or cat.".to_string()].into(),
-    discriminator_field: "petType".to_string(),
-    variants: vec![
-      DiscriminatedVariant {
-        discriminator_value: "dog".to_string(),
-        variant_name: "Dog".to_string(),
-        type_name: TypeRef::new("DogData"),
-      },
-      DiscriminatedVariant {
-        discriminator_value: "cat".to_string(),
-        variant_name: "Cat".to_string(),
-        type_name: TypeRef::new("CatData"),
-      },
-    ],
-    fallback: None,
-    serde_mode: SerdeMode::Both,
-    methods: vec![],
-  };
+  let without_fallback = DiscriminatedEnumDef::builder()
+    .name("Pet".into())
+    .docs(vec!["A pet can be a dog or cat.".to_string()].into())
+    .discriminator_field("petType".to_string())
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["dog".to_string()])
+        .variant_name(EnumVariantToken::new("Dog"))
+        .type_name(TypeRef::new("DogData"))
+        .build(),
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["cat".to_string()])
+        .variant_name(EnumVariantToken::new("Cat"))
+        .type_name(TypeRef::new("CatData"))
+        .build(),
+    ])
+    .serde_mode(SerdeMode::Both)
+    .build();
 
-  let code_without = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
+  let code = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
     .generate()
     .to_string();
-
   let assertions_without = [
     (
       "# [derive (Debug , Clone , PartialEq)]",
@@ -676,25 +759,28 @@ fn test_discriminated_enum() {
     ),
   ];
   for (expected, msg) in assertions_without {
-    assert!(code_without.contains(expected), "{msg}:\n{code_without}");
+    assert!(code.contains(expected), "{msg}:\n{code}");
   }
 
-  let with_fallback = DiscriminatedEnumDef {
-    name: EnumToken::new("Message"),
-    discriminator_field: "type".to_string(),
-    variants: vec![DiscriminatedVariant {
-      discriminator_value: "text".to_string(),
-      variant_name: "Text".to_string(),
-      type_name: TypeRef::new("TextMessage"),
-    }],
-    fallback: Some(DiscriminatedVariant {
-      discriminator_value: String::new(),
-      variant_name: "Unknown".to_string(),
-      type_name: TypeRef::new("serde_json::Value"),
-    }),
-    serde_mode: SerdeMode::Both,
-    ..Default::default()
-  };
+  let with_fallback = DiscriminatedEnumDef::builder()
+    .name("Message".into())
+    .discriminator_field("type".to_string())
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["text".to_string()])
+        .variant_name(EnumVariantToken::new("Text"))
+        .type_name(TypeRef::new("TextMessage"))
+        .build(),
+    ])
+    .fallback(
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec![])
+        .variant_name(EnumVariantToken::new("Unknown"))
+        .type_name(TypeRef::new("serde_json::Value"))
+        .build(),
+    )
+    .serde_mode(SerdeMode::Both)
+    .build();
 
   let code_with = DiscriminatedEnumGenerator::new(&with_fallback, Visibility::Public)
     .generate()
@@ -721,18 +807,18 @@ fn test_discriminated_enum() {
 
 #[test]
 fn test_discriminated_enum_serialize_only() {
-  let def = DiscriminatedEnumDef {
-    name: EnumToken::new("RequestType"),
-    discriminator_field: "kind".to_string(),
-    variants: vec![DiscriminatedVariant {
-      discriminator_value: "create".to_string(),
-      variant_name: "Create".to_string(),
-      type_name: TypeRef::new("CreateRequest"),
-    }],
-    fallback: None,
-    serde_mode: SerdeMode::SerializeOnly,
-    ..Default::default()
-  };
+  let def = DiscriminatedEnumDef::builder()
+    .name("RequestType".into())
+    .discriminator_field("kind".to_string())
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["create".to_string()])
+        .variant_name(EnumVariantToken::new("Create"))
+        .type_name(TypeRef::new("CreateRequest"))
+        .build(),
+    ])
+    .serde_mode(SerdeMode::SerializeOnly)
+    .build();
 
   let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
     .generate()
@@ -749,18 +835,19 @@ fn test_discriminated_enum_serialize_only() {
 
 #[test]
 fn test_discriminated_enum_deserialize_only() {
-  let def = DiscriminatedEnumDef {
-    name: EnumToken::new("ResponseType"),
-    discriminator_field: "kind".to_string(),
-    variants: vec![DiscriminatedVariant {
-      discriminator_value: "success".to_string(),
-      variant_name: "Success".to_string(),
-      type_name: TypeRef::new("SuccessResponse"),
-    }],
-    fallback: None,
-    serde_mode: SerdeMode::DeserializeOnly,
-    ..Default::default()
-  };
+  let def = DiscriminatedEnumDef::builder()
+    .name("ResponseType".into())
+    .discriminator_field("kind".to_string())
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["success".to_string()])
+        .variant_name(EnumVariantToken::new("Success"))
+        .type_name(TypeRef::new("SuccessResponse"))
+        .build(),
+    ])
+    .maybe_fallback(None)
+    .serde_mode(SerdeMode::DeserializeOnly)
+    .build();
 
   let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
     .generate()
@@ -781,27 +868,31 @@ fn test_response_enum_generation() {
     name: EnumToken::new("GetUserResponse"),
     docs: vec!["Response for GET /users/{id}".to_string()].into(),
     variants: vec![
-      ResponseVariant {
-        status_code: StatusCodeToken::Ok200,
-        variant_name: EnumVariantToken::new("Ok"),
-        description: Some("User found".to_string()),
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
-        content_category: ContentCategory::Json,
-      },
-      ResponseVariant {
-        status_code: StatusCodeToken::NotFound404,
-        variant_name: EnumVariantToken::new("NotFound"),
-        description: Some("User not found".to_string()),
-        schema_type: None,
-        content_category: ContentCategory::Json,
-      },
-      ResponseVariant {
-        status_code: StatusCodeToken::InternalServerError500,
-        variant_name: EnumVariantToken::new("InternalServerError"),
-        description: None,
-        schema_type: Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into()))),
-        content_category: ContentCategory::Json,
-      },
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::Ok200)
+        .variant_name(EnumVariantToken::new("Ok"))
+        .description("User found".to_string())
+        .media_types(vec![ResponseMediaType::with_schema(
+          "application/json",
+          Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
+        )])
+        .schema_type(TypeRef::new(RustPrimitive::Custom("User".into())))
+        .build(),
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::NotFound404)
+        .variant_name(EnumVariantToken::new("NotFound"))
+        .description("User not found".to_string())
+        .media_types(vec![ResponseMediaType::new("application/json")])
+        .build(),
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::InternalServerError500)
+        .variant_name(EnumVariantToken::new("InternalServerError"))
+        .media_types(vec![ResponseMediaType::with_schema(
+          "application/json",
+          Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into()))),
+        )])
+        .schema_type(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into())))
+        .build(),
     ],
     request_type: Some(StructToken::new("GetUserRequest")),
   };
@@ -832,4 +923,70 @@ fn test_response_enum_generation() {
   for (expected, msg) in assertions {
     assert!(code.contains(expected), "{msg}");
   }
+}
+
+#[test]
+fn test_relaxed_wrapper_enum_generates_display() {
+  let def = EnumDef {
+    name: EnumToken::new("CuisineType"),
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new(KNOWN_ENUM_VARIANT))
+        .content(VariantContent::Tuple(vec![TypeRef::new("CuisineTypeKnown")]))
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
+        .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
+        .build(),
+    ],
+    generate_display: true,
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+
+  let assertions = [
+    (
+      "impl core :: fmt :: Display for CuisineType",
+      "should generate Display impl for relaxed wrapper enum",
+    ),
+    (
+      "Self :: Known (v) => write ! (f , \"{v}\")",
+      "should delegate Known variant to inner Display",
+    ),
+    (
+      "Self :: Other (v) => write ! (f , \"{v}\")",
+      "should delegate Other variant to inner Display",
+    ),
+  ];
+
+  for (expected, msg) in assertions {
+    assert!(code.contains(expected), "{msg}\nGenerated code:\n{code}");
+  }
+}
+
+#[test]
+fn test_non_simple_enum_without_generate_display_has_no_display() {
+  let def = EnumDef {
+    name: EnumToken::new("StringOrNumber"),
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("StringVal"))
+        .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
+        .build(),
+      VariantDef::builder()
+        .name(EnumVariantToken::new("NumberVal"))
+        .content(VariantContent::Tuple(vec![TypeRef::new("f64")]))
+        .build(),
+    ],
+    generate_display: false,
+    ..Default::default()
+  };
+
+  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+
+  assert!(
+    !code.contains("impl core :: fmt :: Display"),
+    "should NOT generate Display impl for non-simple enum without generate_display flag"
+  );
 }

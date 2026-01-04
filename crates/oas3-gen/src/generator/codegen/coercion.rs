@@ -1,5 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+use serde_json::Value;
 
 use crate::generator::ast::{RustPrimitive, TypeRef};
 
@@ -48,15 +49,15 @@ fn coerce_to_rust_type(value: &serde_json::Value, rust_type: &RustPrimitive) -> 
   }
 }
 
-fn coerce_to_string(value: &serde_json::Value) -> TokenStream {
+fn coerce_to_string(value: &Value) -> TokenStream {
   match value {
-    serde_json::Value::String(s) if s.is_empty() => quote! { String::new() },
-    serde_json::Value::String(s) => quote! { #s.to_string() },
-    serde_json::Value::Number(n) => {
+    Value::String(s) if s.is_empty() => quote! { String::new() },
+    Value::String(s) => quote! { #s.to_string() },
+    Value::Number(n) => {
       let n_str = n.to_string();
       quote! { #n_str.to_string() }
     }
-    serde_json::Value::Bool(b) => {
+    Value::Bool(b) => {
       let b_str = b.to_string();
       quote! { #b_str.to_string() }
     }
@@ -64,14 +65,14 @@ fn coerce_to_string(value: &serde_json::Value) -> TokenStream {
   }
 }
 
-fn coerce_to_bool(value: &serde_json::Value) -> TokenStream {
+fn coerce_to_bool(value: &Value) -> TokenStream {
   match value {
-    serde_json::Value::Bool(b) => quote! { #b },
-    serde_json::Value::Number(n) => {
+    Value::Bool(b) => quote! { #b },
+    Value::Number(n) => {
       let b = n.as_i64().is_some_and(|i| i != 0);
       quote! { #b }
     }
-    serde_json::Value::String(s) => {
+    Value::String(s) => {
       let b = matches!(s.to_lowercase().as_str(), "true" | "1" | "yes");
       quote! { #b }
     }
@@ -79,13 +80,13 @@ fn coerce_to_bool(value: &serde_json::Value) -> TokenStream {
   }
 }
 
-fn coerce_to_int(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
+fn coerce_to_int(value: &Value, rust_type: &RustPrimitive) -> TokenStream {
   let type_suffix = rust_type.to_string();
   let to_literal = |i| typed_literal(i, &type_suffix);
 
   match value {
-    serde_json::Value::Number(n) => n.as_i64().map_or_else(|| quote! { Default::default() }, to_literal),
-    serde_json::Value::String(s) => s
+    Value::Number(n) => n.as_i64().map_or_else(|| quote! { Default::default() }, to_literal),
+    Value::String(s) => s
       .parse::<i64>()
       .ok()
       .map_or_else(|| quote! { Default::default() }, to_literal),
@@ -93,13 +94,13 @@ fn coerce_to_int(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenS
   }
 }
 
-fn coerce_to_uint(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
+fn coerce_to_uint(value: &Value, rust_type: &RustPrimitive) -> TokenStream {
   let type_suffix = rust_type.to_string();
   let to_literal = |u| typed_literal(u, &type_suffix);
 
   match value {
-    serde_json::Value::Number(n) => n.as_u64().map_or_else(|| quote! { Default::default() }, to_literal),
-    serde_json::Value::String(s) => s
+    Value::Number(n) => n.as_u64().map_or_else(|| quote! { Default::default() }, to_literal),
+    Value::String(s) => s
       .parse::<u64>()
       .ok()
       .map_or_else(|| quote! { Default::default() }, to_literal),
@@ -107,12 +108,12 @@ fn coerce_to_uint(value: &serde_json::Value, rust_type: &RustPrimitive) -> Token
   }
 }
 
-fn coerce_to_float(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
+fn coerce_to_float(value: &Value, rust_type: &RustPrimitive) -> TokenStream {
   let type_suffix = rust_type.to_string();
   let to_literal = |f: f64| typed_literal(f, &type_suffix);
 
   match value {
-    serde_json::Value::Number(n) => {
+    Value::Number(n) => {
       if let Some(f) = n.as_f64() {
         to_literal(f)
       } else if let Some(i) = n.as_i64() {
@@ -122,7 +123,7 @@ fn coerce_to_float(value: &serde_json::Value, rust_type: &RustPrimitive) -> Toke
         quote! { Default::default() }
       }
     }
-    serde_json::Value::String(s) => s
+    Value::String(s) => s
       .parse::<f64>()
       .ok()
       .map_or_else(|| quote! { Default::default() }, to_literal),

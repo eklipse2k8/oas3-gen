@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::generator::{codegen::Visibility, orchestrator::Orchestrator};
 
@@ -20,6 +20,7 @@ fn test_implicit_dependency_via_union_fingerprint() {
     false,
     false,
     false,
+    HashMap::new(),
   );
 
   let (code, _) = orchestrator.generate_with_header("test.json").unwrap();

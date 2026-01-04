@@ -1,8 +1,12 @@
 use std::collections::BTreeSet;
 
+use proc_macro2::TokenStream;
+use quote::ToTokens;
 use strum::Display;
 
-use super::{DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeMode, StructDef, StructKind, VariantContent};
+use super::{
+  DiscriminatedEnumDef, EnumDef, ResponseEnumDef, ResponseMediaType, SerdeMode, StructDef, StructKind, VariantContent,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SerdeImpl {
@@ -25,6 +29,12 @@ pub enum DeriveTrait {
   Validate,
   #[strum(serialize = "oas3_gen_support::Default")]
   Default,
+}
+
+impl ToTokens for DeriveTrait {
+  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    tokens.extend(self.to_string().parse::<TokenStream>().expect("DeriveTrait Token"));
+  }
 }
 
 pub trait DerivesProvider {
@@ -169,7 +179,18 @@ impl DerivesProvider for DiscriminatedEnumDef {
 
 impl DerivesProvider for ResponseEnumDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
+    let mut derives = BTreeSet::from([DeriveTrait::Debug]);
+
+    let has_event_stream = self
+      .variants
+      .iter()
+      .any(|v| ResponseMediaType::has_event_stream(&v.media_types));
+
+    if !has_event_stream {
+      derives.insert(DeriveTrait::Clone);
+    }
+
+    derives
   }
 
   fn is_serializable(&self) -> SerdeImpl {

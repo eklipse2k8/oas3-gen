@@ -1,8 +1,15 @@
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
+use std::collections::BTreeSet;
+
+use oas3::{
+  Spec,
+  spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
+};
 
 use crate::generator::{
   ast::{RustType, TypeRef},
-  converter::cache::SharedSchemaCache,
+  converter::{ConverterContext, cache::SharedSchemaCache},
+  naming::inference::has_mixed_string_variants,
+  schema_registry::RefCollector,
 };
 
 /// Wraps a conversion result with any inline types generated during conversion.
@@ -27,6 +34,20 @@ impl<T> ConversionOutput<T> {
   }
 }
 
+impl ConversionOutput<RustType> {
+  pub(crate) fn into_vec(self) -> Vec<RustType> {
+    let mut types = self.inline_types;
+    types.push(self.result);
+    types
+  }
+}
+
+/// Output from converting an inline schema.
+pub(crate) struct InlineSchemaOutput {
+  pub type_name: String,
+  pub generated_types: Vec<RustType>,
+}
+
 /// Helper to handle the common pattern of checking cache, generating an inline type, and registering it.
 ///
 /// This function orchestrates inline type creation by:
@@ -39,41 +60,38 @@ pub(crate) fn handle_inline_creation<F, C>(
   schema: &ObjectSchema,
   base_name: &str,
   forced_name: Option<String>,
-  mut cache: Option<&mut SharedSchemaCache>,
+  context: &ConverterContext,
   cached_name_check: C,
   generator: F,
 ) -> anyhow::Result<ConversionOutput<TypeRef>>
 where
-  F: FnOnce(&str, Option<&mut SharedSchemaCache>) -> anyhow::Result<ConversionOutput<RustType>>,
+  F: FnOnce(&str) -> anyhow::Result<ConversionOutput<RustType>>,
   C: FnOnce(&SharedSchemaCache) -> Option<String>,
 {
-  if let Some(cache) = &cache {
+  {
+    let cache = context.cache.borrow();
     if let Some(existing_name) = cache.get_type_name(schema)? {
       return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
     }
-    if let Some(name) = cached_name_check(cache) {
+    if let Some(name) = cached_name_check(&cache) {
       return Ok(ConversionOutput::new(TypeRef::new(name)));
     }
   }
 
   let name = if let Some(forced) = forced_name {
     forced
-  } else if let Some(cache) = &cache {
-    cache.get_preferred_name(schema, base_name)?
   } else {
-    base_name.to_string()
+    context.cache.borrow().get_preferred_name(schema, base_name)?
   };
 
-  let result = generator(&name, cache.as_deref_mut())?;
+  let result = generator(&name)?;
 
-  if let Some(cache) = cache {
-    let type_name = cache.register_type(schema, &name, result.inline_types, result.result.clone())?;
-    Ok(ConversionOutput::new(TypeRef::new(type_name)))
-  } else {
-    let mut all_types = vec![result.result];
-    all_types.extend(result.inline_types);
-    Ok(ConversionOutput::with_inline_types(TypeRef::new(name), all_types))
-  }
+  let type_name =
+    context
+      .cache
+      .borrow_mut()
+      .register_type(schema, &name, result.inline_types, result.result.clone())?;
+  Ok(ConversionOutput::new(TypeRef::new(type_name)))
 }
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
@@ -125,7 +143,7 @@ pub(crate) trait SchemaExt {
   fn is_empty_object(&self) -> bool;
 
   /// Returns true if the schema has inline oneOf or anyOf variants.
-  fn has_inline_union(&self) -> bool;
+  fn has_union(&self) -> bool;
 
   /// Returns true if this is an array with inline union items (oneOf/anyOf in items).
   fn has_inline_union_array_items(&self, spec: &Spec) -> bool;
@@ -133,6 +151,27 @@ pub(crate) trait SchemaExt {
   /// Extracts the inline array items schema if present and not a reference.
   /// Returns None if: no items, items is a boolean schema, or items is a $ref.
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema>;
+
+  /// Returns true if the schema has enum values defined.
+  fn has_enum_values(&self) -> bool;
+
+  /// Returns true if the schema has allOf composition.
+  fn has_intersection(&self) -> bool;
+
+  /// Returns true if the schema has a const value defined.
+  fn has_const_value(&self) -> bool;
+
+  /// Returns true if the schema requires a dedicated type definition.
+  /// This includes schemas with enum values, oneOf/anyOf unions, or typed object properties.
+  fn requires_type_definition(&self) -> bool;
+
+  /// Returns true if the schema has a relaxed enum pattern in anyOf.
+  /// A relaxed enum has both freeform string variants and constrained string variants,
+  /// allowing APIs to accept known values plus arbitrary strings for forward compatibility.
+  fn has_relaxed_anyof_enum(&self) -> bool;
+
+  /// Returns true if the schema is a freeform string (string type with no const or enum constraints).
+  fn is_freeform_string(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -141,7 +180,8 @@ impl SchemaExt for ObjectSchema {
       && self.one_of.is_empty()
       && self.any_of.is_empty()
       && self.all_of.is_empty()
-      && (self.schema_type.is_some() || self.enum_values.len() <= 1)
+      && self.enum_values.len() <= 1
+      && (self.schema_type.is_some() || self.enum_values.is_empty())
   }
 
   fn is_null(&self) -> bool {
@@ -248,7 +288,7 @@ impl SchemaExt for ObjectSchema {
       && self.schema_type.is_none()
   }
 
-  fn has_inline_union(&self) -> bool {
+  fn has_union(&self) -> bool {
     !self.one_of.is_empty() || !self.any_of.is_empty()
   }
 
@@ -256,9 +296,7 @@ impl SchemaExt for ObjectSchema {
     if !self.is_array() {
       return false;
     }
-    self
-      .inline_array_items(spec)
-      .is_some_and(|items| items.has_inline_union())
+    self.inline_array_items(spec).is_some_and(|items| items.has_union())
   }
 
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema> {
@@ -274,4 +312,32 @@ impl SchemaExt for ObjectSchema {
 
     items_schema_ref.resolve(spec).ok()
   }
+
+  fn has_enum_values(&self) -> bool {
+    !self.enum_values.is_empty()
+  }
+
+  fn has_intersection(&self) -> bool {
+    !self.all_of.is_empty()
+  }
+
+  fn has_const_value(&self) -> bool {
+    self.const_value.is_some()
+  }
+
+  fn requires_type_definition(&self) -> bool {
+    self.has_enum_values() || self.has_union() || (!self.properties.is_empty() && self.additional_properties.is_none())
+  }
+
+  fn has_relaxed_anyof_enum(&self) -> bool {
+    !self.any_of.is_empty() && has_mixed_string_variants(self.any_of.iter())
+  }
+
+  fn is_freeform_string(&self) -> bool {
+    !self.has_const_value() && !self.has_enum_values() && self.is_string()
+  }
+}
+
+pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
+  variants.iter().filter_map(RefCollector::parse_schema_ref).collect()
 }
