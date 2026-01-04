@@ -593,6 +593,16 @@ impl TypeResolver {
     let unique_name = self.context.cache.borrow_mut().make_unique_name(base_name);
     let generated = self.convert_schema(&unique_name, &effective)?;
 
+    if generated.is_empty()
+      && let Some((v, _)) = Self::union_variants(schema)
+      && let Some(t) = self.try_nullable_union(v)?
+    {
+      return Ok(Some(InlineSchemaOutput {
+        type_name: t.to_rust_type(),
+        generated_types: vec![],
+      }));
+    }
+
     let Some(main_type) = generated.last().cloned() else {
       return Ok(None);
     };
