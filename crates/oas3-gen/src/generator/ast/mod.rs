@@ -13,7 +13,7 @@ pub(super) mod validation_attrs;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub use client::ClientDef;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
@@ -99,6 +99,27 @@ impl ResponseVariant {
       None => self.status_code.to_string(),
     }
   }
+}
+
+#[derive(Debug, Clone, Default, bon::Builder)]
+pub struct ResponseVariantCategory {
+  pub category: ContentCategory,
+  pub variant: ResponseVariant,
+}
+
+#[derive(Debug, Clone)]
+pub enum ResponseStatusCategory {
+  Single(ResponseVariantCategory),
+  ContentDispatch {
+    streams: Vec<ResponseVariantCategory>,
+    variants: Vec<ResponseVariantCategory>,
+  },
+}
+
+#[derive(Debug, Clone)]
+pub struct StatusHandler {
+  pub status_code: StatusCodeToken,
+  pub dispatch: ResponseStatusCategory,
 }
 
 /// Response enum definition for operation responses
@@ -253,6 +274,25 @@ impl ContentCategory {
       _ => Self::Json,
     }
   }
+
+  #[must_use]
+  pub const fn variant_suffix(self) -> &'static str {
+    match self {
+      Self::Json => "",
+      Self::Binary => "Binary",
+      Self::Text => "Text",
+      Self::Xml => "Xml",
+      Self::EventStream => "EventStream",
+      Self::FormUrlEncoded => "Form",
+      Self::Multipart => "Multipart",
+    }
+  }
+}
+
+impl EnumVariantToken {
+  pub fn with_content_suffix(self, category: ContentCategory) -> Self {
+    Self::new(format!("{}{}", self, category.variant_suffix()))
+  }
 }
 
 /// Media type information for a response variant.
@@ -291,6 +331,41 @@ impl ResponseMediaType {
   #[must_use]
   pub fn has_event_stream(media_types: &[Self]) -> bool {
     media_types.iter().any(|m| m.category == ContentCategory::EventStream)
+  }
+}
+
+pub(crate) struct ContentMediaTypes(BTreeMap<ContentCategory, Vec<ResponseMediaType>>);
+
+impl From<&[ResponseMediaType]> for ContentMediaTypes {
+  fn from(media_types: &[ResponseMediaType]) -> Self {
+    Self(
+      media_types
+        .iter()
+        .filter(|m| m.schema_type.is_some())
+        .fold(BTreeMap::new(), |mut acc, m| {
+          acc.entry(m.category).or_default().push(m.clone());
+          acc
+        }),
+    )
+  }
+}
+
+impl ContentMediaTypes {
+  pub(crate) fn is_empty(&self) -> bool {
+    self.0.is_empty()
+  }
+
+  pub(crate) fn requires_suffix(&self) -> bool {
+    self.0.len() > 1
+  }
+}
+
+impl IntoIterator for ContentMediaTypes {
+  type Item = (ContentCategory, Vec<ResponseMediaType>);
+  type IntoIter = std::collections::btree_map::IntoIter<ContentCategory, Vec<ResponseMediaType>>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    self.0.into_iter()
   }
 }
 
@@ -365,7 +440,8 @@ pub struct StructMethod {
 pub enum StructMethodKind {
   ParseResponse {
     response_enum: EnumToken,
-    variants: Vec<ResponseVariant>,
+    status_handlers: Vec<StatusHandler>,
+    default_handler: Option<ResponseVariantCategory>,
   },
   Builder {
     fields: Vec<BuilderField>,

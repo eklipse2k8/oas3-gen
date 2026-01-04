@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::generator::{
   ast::{
-    EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, ResponseMediaType, ResponseVariant,
-    RustType, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef,
-    ValidationAttribute,
+    ContentCategory, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, ResponseMediaType,
+    ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustType, StatusCodeToken, StatusHandler,
+    StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   },
   codegen::{self, Visibility, structs},
 };
@@ -33,12 +33,22 @@ fn base_struct(kind: StructKind) -> StructDef {
 
 fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
   let mut def = base_struct(StructKind::OperationRequest);
+  let category = variant
+    .media_types
+    .first()
+    .map_or(ContentCategory::Json, |m| m.category);
+  let status_code = variant.status_code;
+
   def.methods.push(StructMethod {
     name: MethodNameToken::new("parse_response"),
     docs: vec!["Parse response".to_string()].into(),
     kind: StructMethodKind::ParseResponse {
       response_enum: EnumToken::new("ResponseEnum"),
-      variants: vec![variant],
+      status_handlers: vec![StatusHandler {
+        status_code,
+        dispatch: ResponseStatusCategory::Single(ResponseVariantCategory { category, variant }),
+      }],
+      default_handler: None,
     },
   });
   def

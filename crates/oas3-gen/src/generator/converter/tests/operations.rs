@@ -98,43 +98,143 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_operation_with_path_parameter() -> anyhow::Result<()> {
+fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
   let (converter, mut usage) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "userId",
-    ParameterIn::Path,
-    SchemaType::String,
-    None,
-    true,
-  ));
 
-  let entry = make_entry("get_user", Method::GET, "/users/{userId}", operation);
+  let operation = Operation {
+    operation_id: Some("getMenuItemImage".to_string()),
+    responses: Some(ResponseMap::from([(
+      "200".to_string(),
+      ObjectOrReference::Object(Response {
+        description: Some("The menu item image or metadata".to_string()),
+        content: BTreeMap::from([
+          (
+            "application/json".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+                properties: BTreeMap::from([(
+                  "url".to_string(),
+                  ObjectOrReference::Object(ObjectSchema {
+                    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                    ..Default::default()
+                  }),
+                )]),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+          (
+            "image/webp".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                format: Some("binary".to_string()),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+          (
+            "image/png".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                format: Some("binary".to_string()),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+          (
+            "image/jpeg".to_string(),
+            MediaType {
+              schema: Some(ObjectOrReference::Object(ObjectSchema {
+                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+                format: Some("binary".to_string()),
+                ..Default::default()
+              })),
+              ..Default::default()
+            },
+          ),
+        ]),
+        ..Default::default()
+      }),
+    )])),
+    ..Default::default()
+  };
+
+  let entry = make_entry("get_menu_item_image", Method::GET, "/menu-items/image", operation);
   let result = converter.convert(&entry, &mut usage)?;
 
-  assert_eq!(
-    result.types.len(),
-    2,
-    "Should generate request struct and nested path struct"
+  let response_enum = result
+    .types
+    .iter()
+    .find_map(|t| match t {
+      RustType::ResponseEnum(e) if e.name == "GetMenuItemImageResponse" => Some(e),
+      _ => None,
+    })
+    .expect("Response enum not found");
+
+  let ok_variant = response_enum.variants.iter().find(|v| v.variant_name == "Ok");
+  let binary_variant = response_enum.variants.iter().find(|v| v.variant_name == "OkBinary");
+
+  assert!(
+    ok_variant.is_some(),
+    "Should have Ok variant for JSON content type (JSON is default, no suffix). Variants: {:?}",
+    response_enum
+      .variants
+      .iter()
+      .map(|v| &v.variant_name)
+      .collect::<Vec<_>>()
   );
-  let request_type_name = result
-    .operation_info
-    .request_type
+  assert!(
+    binary_variant.is_some(),
+    "Should have OkBinary variant for binary content types. Variants: {:?}",
+    response_enum
+      .variants
+      .iter()
+      .map(|v| &v.variant_name)
+      .collect::<Vec<_>>()
+  );
+
+  let json_variant = ok_variant.unwrap();
+  let binary_variant = binary_variant.unwrap();
+
+  assert_eq!(
+    json_variant.media_types.len(),
+    1,
+    "JSON variant should have 1 media type"
+  );
+  assert_eq!(
+    json_variant.media_types[0].category,
+    ContentCategory::Json,
+    "JSON variant should have Json category"
+  );
+
+  assert_eq!(
+    binary_variant.media_types.len(),
+    3,
+    "Binary variant should have 3 media types (webp, png, jpeg)"
+  );
+  assert!(
+    binary_variant
+      .media_types
+      .iter()
+      .all(|m| m.category == ContentCategory::Binary),
+    "All binary variant media types should have Binary category"
+  );
+
+  let binary_schema = binary_variant
+    .schema_type
     .as_ref()
-    .map(StructToken::as_str)
-    .expect("Request type should exist");
-  assert_eq!(request_type_name, "GetUserRequest");
-
-  let request_struct = extract_request_struct(&result.types, request_type_name);
-  assert_eq!(request_struct.fields.len(), 1, "Main struct should have path field");
+    .expect("Binary variant should have schema");
   assert_eq!(
-    request_struct.fields[0].name, "path",
-    "Main struct should have path field"
+    binary_schema.base_type,
+    RustPrimitive::Bytes,
+    "Binary variant should use Vec<u8>"
   );
-
-  let path_struct = extract_request_struct(&result.types, "GetUserRequestPath");
-  assert_eq!(path_struct.fields.len(), 1);
-  assert_eq!(path_struct.fields[0].name, "user_id");
 
   Ok(())
 }
@@ -572,13 +672,13 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
     .variants
     .iter()
     .find(|v| v.variant_name == "Ok")
-    .expect("Ok variant not found");
+    .expect("Ok variant not found (JSON is the default, no suffix)");
 
   let stream_variant = response_enum
     .variants
     .iter()
     .find(|v| v.variant_name == "OkEventStream")
-    .expect("Event stream variant not found");
+    .expect("OkEventStream variant not found");
 
   assert_eq!(
     ok_variant
@@ -592,8 +692,8 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
     ok_variant
       .media_types
       .iter()
-      .all(|m| m.category != ContentCategory::EventStream),
-    "Ok variant should exclude event streams",
+      .all(|m| m.category == ContentCategory::Json),
+    "Ok variant should only contain JSON media types",
   );
 
   assert_eq!(

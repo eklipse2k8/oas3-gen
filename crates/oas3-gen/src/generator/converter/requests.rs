@@ -6,14 +6,13 @@ use super::{
   TypeResolver,
   methods::MethodGenerator,
   parameters::{ConvertedParams, ParameterConverter},
-  responses,
 };
 use crate::generator::{
   ast::{
     Documentation, EnumToken, FieldDef, FieldNameToken, ResponseEnumDef, RustType, StructDef, StructKind, StructToken,
     TypeRef,
   },
-  converter::ConverterContext,
+  converter::{ConverterContext, responses::build_parse_response_method},
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
     identifiers::to_rust_type_name,
@@ -76,7 +75,7 @@ impl RequestConverter {
 
     let mut methods = vec![];
     if let Some((enum_token, def)) = response_enum {
-      methods.push(responses::build_parse_response_method(enum_token, &def.variants));
+      methods.push(build_parse_response_method(enum_token, &def.variants));
     }
     if let Some(builder) = MethodGenerator::build_builder_method(&nested_structs, &main_fields) {
       methods.push(builder);

@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
@@ -13,9 +12,9 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseMediaType,
-    ResponseVariant, RustPrimitive, StatusCodeToken, StructDef, StructKind, StructMethod, StructMethodKind, TypeRef,
-    ValidationAttribute,
+    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseStatusCategory,
+    ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod,
+    StructMethodKind, TypeRef, ValidationAttribute,
     tokens::{ConstToken, EnumToken, EnumVariantToken},
   },
   codegen::headers::HeaderMapGenerator,
@@ -196,8 +195,17 @@ impl ImplBlock<'_> {
     match &method.kind {
       StructMethodKind::ParseResponse {
         response_enum,
-        variants,
-      } => parse_response::Generator::new(response_enum, variants, self.vis, &method.name, &method.docs).emit(),
+        status_handlers,
+        default_handler,
+      } => parse_response::Generator::new(
+        response_enum,
+        status_handlers,
+        default_handler.as_ref(),
+        self.vis,
+        &method.name,
+        &method.docs,
+      )
+      .emit(),
       StructMethodKind::Builder { fields, nested_structs } => {
         builder::Generator::new(fields, nested_structs, self.vis, &method.docs).emit()
       }
@@ -210,7 +218,8 @@ mod parse_response {
 
   pub(super) struct Generator<'a> {
     response_enum: &'a EnumToken,
-    variants: &'a [ResponseVariant],
+    status_handlers: &'a [StatusHandler],
+    default_handler: Option<&'a ResponseVariantCategory>,
     vis: &'a TokenStream,
     method_name: &'a dyn ToTokens,
     docs: &'a dyn ToTokens,
@@ -219,14 +228,16 @@ mod parse_response {
   impl<'a> Generator<'a> {
     pub(super) fn new(
       response_enum: &'a EnumToken,
-      variants: &'a [ResponseVariant],
+      status_handlers: &'a [StatusHandler],
+      default_handler: Option<&'a ResponseVariantCategory>,
       vis: &'a TokenStream,
       method_name: &'a impl ToTokens,
       docs: &'a impl ToTokens,
     ) -> Self {
       Self {
         response_enum,
-        variants,
+        status_handlers,
+        default_handler,
         vis,
         method_name,
         docs,
@@ -239,15 +250,9 @@ mod parse_response {
       let docs = self.docs;
       let response_enum = self.response_enum;
 
-      let (defaults, specifics) = self.partition();
-      let grouped_specifics = group_by_status(&specifics);
+      let status_checks: Vec<TokenStream> = self.status_handlers.iter().map(|h| self.status_block(h)).collect();
 
-      let status_checks: Vec<TokenStream> = grouped_specifics
-        .iter()
-        .map(|(code, variants)| self.status_block(*code, variants))
-        .collect();
-
-      let fallback = self.fallback(defaults.first().copied());
+      let fallback = self.fallback();
       let status_decl = if status_checks.is_empty() {
         quote! {}
       } else {
@@ -264,13 +269,9 @@ mod parse_response {
       }
     }
 
-    fn partition(&self) -> (Vec<&ResponseVariant>, Vec<&ResponseVariant>) {
-      self.variants.iter().partition(|v| v.status_code.is_default())
-    }
-
-    fn status_block(&self, code: StatusCodeToken, variants: &[&ResponseVariant]) -> TokenStream {
-      let cond = condition(code);
-      let body = self.dispatch(variants);
+    fn status_block(&self, handler: &StatusHandler) -> TokenStream {
+      let cond = condition(handler.status_code);
+      let body = self.dispatch(&handler.dispatch);
 
       quote! {
         if #cond {
@@ -279,19 +280,21 @@ mod parse_response {
       }
     }
 
-    fn dispatch(&self, variants: &[&ResponseVariant]) -> TokenStream {
-      if variants.len() == 1 {
-        let variant = variants[0];
-        let distinct_categories: BTreeSet<_> = variant.media_types.iter().map(|m| m.category).collect();
-        if distinct_categories.len() <= 1 {
-          return self.variant(variant, None);
-        }
+    fn dispatch(&self, dispatch: &ResponseStatusCategory) -> TokenStream {
+      match dispatch {
+        ResponseStatusCategory::Single(case) => self.dispatch_case(case),
+        ResponseStatusCategory::ContentDispatch {
+          streams: event_streams,
+          variants: others,
+        } => self.content_dispatch(event_streams, others),
       }
-
-      self.content_dispatch(variants)
     }
 
-    fn content_dispatch(&self, variants: &[&ResponseVariant]) -> TokenStream {
+    fn content_dispatch(
+      &self,
+      event_streams: &[ResponseVariantCategory],
+      others: &[ResponseVariantCategory],
+    ) -> TokenStream {
       let content_type_header = quote! {
         let content_type_str = req.headers()
           .get(reqwest::header::CONTENT_TYPE)
@@ -299,25 +302,10 @@ mod parse_response {
           .unwrap_or("application/json");
       };
 
-      let mut cases = vec![];
-      for variant in variants {
-        if variant.media_types.is_empty() {
-          cases.push((ResponseMediaType::primary_category(&[]), *variant));
-        } else {
-          for media_type in &variant.media_types {
-            cases.push((media_type.category, *variant));
-          }
-        }
-      }
-
-      let (streams, others): (Vec<_>, Vec<_>) = cases
-        .into_iter()
-        .partition(|(cat, _)| *cat == ContentCategory::EventStream);
-
-      let stream_checks: Vec<TokenStream> = streams
+      let stream_checks: Vec<TokenStream> = event_streams
         .iter()
-        .map(|(cat, v)| {
-          let block = self.variant(v, Some(*cat));
+        .map(|case| {
+          let block = self.dispatch_case(case);
           quote! {
             if content_type_str.contains("event-stream") {
               #block
@@ -328,9 +316,9 @@ mod parse_response {
 
       let other_checks: Vec<TokenStream> = others
         .iter()
-        .map(|(cat, v)| {
-          let check = content_check(*cat);
-          let block = self.variant(v, Some(*cat));
+        .map(|case| {
+          let check = content_check(case.category);
+          let block = self.dispatch_case(case);
           quote! {
             if #check {
               #block
@@ -346,14 +334,13 @@ mod parse_response {
       }
     }
 
-    fn variant(&self, variant: &ResponseVariant, category: Option<ContentCategory>) -> TokenStream {
-      let cat = category.unwrap_or_else(|| ResponseMediaType::primary_category(&variant.media_types));
+    fn dispatch_case(&self, case: &ResponseVariantCategory) -> TokenStream {
       let response_enum = self.response_enum;
-      let variant_name = &variant.variant_name;
+      let variant_name = &case.variant.variant_name;
 
-      match variant.schema_type.as_ref() {
+      match case.variant.schema_type.as_ref() {
         Some(ty) => {
-          let data = extraction(ty, cat);
+          let data = extraction(ty, case.category);
           quote! {
             let data = #data;
             return Ok(#response_enum::#variant_name(data));
@@ -368,9 +355,9 @@ mod parse_response {
       }
     }
 
-    fn fallback(&self, default: Option<&ResponseVariant>) -> TokenStream {
-      if let Some(variant) = default {
-        self.variant(variant, None)
+    fn fallback(&self) -> TokenStream {
+      if let Some(case) = self.default_handler {
+        self.dispatch_case(case)
       } else {
         let response_enum = self.response_enum;
         let unknown_variant = EnumVariantToken::from("Unknown");
@@ -380,14 +367,6 @@ mod parse_response {
         }
       }
     }
-  }
-
-  fn group_by_status<'b>(variants: &[&'b ResponseVariant]) -> IndexMap<StatusCodeToken, Vec<&'b ResponseVariant>> {
-    let mut grouped: IndexMap<StatusCodeToken, Vec<&'b ResponseVariant>> = IndexMap::new();
-    for variant in variants {
-      grouped.entry(variant.status_code).or_default().push(variant);
-    }
-    grouped
   }
 
   fn condition(code: StatusCodeToken) -> TokenStream {
@@ -430,11 +409,7 @@ mod parse_response {
         }
       }
       ContentCategory::Binary => {
-        if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
-          quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
-        } else {
-          quote! { req.bytes().await?.to_vec() }
-        }
+        quote! { req.bytes().await?.to_vec() }
       }
       ContentCategory::EventStream => {
         quote! { <#schema_type>::from_response(req) }
