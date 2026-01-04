@@ -434,10 +434,13 @@ pub(crate) mod method {
           let ident = &f.name;
           let name = f.name.as_str();
           let is_bytes = matches!(f.rust_type.base_type, RustPrimitive::Bytes);
+          let requires_json = f.rust_type.requires_json_serialization();
 
           let to_part = |v: TokenStream| {
             if is_bytes {
               quote! { reqwest::multipart::Part::bytes(std::borrow::Cow::from(#v.clone())) }
+            } else if requires_json {
+              quote! { reqwest::multipart::Part::text(serde_json::to_string(&#v)?) }
             } else {
               quote! { reqwest::multipart::Part::text(#v.to_string()) }
             }

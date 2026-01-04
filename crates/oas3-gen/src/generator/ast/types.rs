@@ -95,6 +95,10 @@ impl TypeRef {
     ) && !self.is_array
   }
 
+  pub fn requires_json_serialization(&self) -> bool {
+    self.is_array || matches!(self.base_type, RustPrimitive::Custom(_) | RustPrimitive::Value)
+  }
+
   /// Get the full Rust type string
   pub fn to_rust_type(&self) -> String {
     let mut result = self.base_type.to_string();
