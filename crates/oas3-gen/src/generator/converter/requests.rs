@@ -150,7 +150,7 @@ impl BodyInfo {
       ObjectOrReference::Object(schema) => {
         let base_name = schema.infer_name_from_context(&entry.path, REQUEST_BODY_SUFFIX);
         let type_resolver = TypeResolver::new(context.clone());
-        let Some(output) = type_resolver.resolve_inline_schema(schema, &base_name)? else {
+        let Some(output) = type_resolver.try_inline_schema(schema, &base_name)? else {
           return Ok(Self::empty(!is_required));
         };
         (output.generated_types, output.type_name)

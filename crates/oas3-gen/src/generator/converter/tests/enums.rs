@@ -4,7 +4,7 @@ use std::{
   sync::Arc,
 };
 
-use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::{
@@ -1527,4 +1527,248 @@ fn test_relaxed_enum_with_raw_name() {
     "MyRelaxedEnumKnown",
     "known enum should have converted name + Known suffix"
   );
+}
+
+#[test]
+fn test_nested_anyof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
+  let custom_config_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "mode".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let outer_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        description: Some("The cooking method configuration".to_string()),
+        any_of: vec![
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            const_value: Some(json!("auto")),
+            ..Default::default()
+          }),
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/CustomCookingConfig".to_string(),
+            description: None,
+            summary: None,
+          },
+        ],
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+        ..Default::default()
+      }),
+    ],
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("CookingStrategy".to_string(), outer_schema.clone()),
+    ("CustomCookingConfig".to_string(), custom_config_schema),
+  ]);
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let result = converter.convert_schema("CookingStrategy", &outer_schema)?;
+
+  let enum_def = result.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == "CookingStrategy" => Some(e),
+    _ => None,
+  });
+
+  assert!(enum_def.is_some(), "should produce CookingStrategy enum");
+  let enum_def = enum_def.unwrap();
+
+  assert_eq!(
+    enum_def.variants.len(),
+    2,
+    "should have 2 variants (Auto and CustomCookingConfig), not a single Variant0 wrapper"
+  );
+
+  let variant_names: Vec<String> = enum_def.variants.iter().map(|v| v.name.to_string()).collect();
+  assert!(
+    variant_names.contains(&"Auto".to_string()),
+    "should have Auto variant, got {variant_names:?}"
+  );
+  assert!(
+    variant_names.contains(&"CustomCookingConfig".to_string()),
+    "should have CustomCookingConfig variant, got {variant_names:?}"
+  );
+
+  assert!(
+    !variant_names.iter().any(|n| n.starts_with("Variant")),
+    "should NOT have Variant0-style wrapper variants, got {variant_names:?}"
+  );
+
+  Ok(())
+}
+
+#[test]
+fn test_nested_oneof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
+  let option_a_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "value".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let outer_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            const_value: Some(json!("default")),
+            ..Default::default()
+          }),
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/OptionA".to_string(),
+            description: None,
+            summary: None,
+          },
+        ],
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+        ..Default::default()
+      }),
+    ],
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("NestedUnion".to_string(), outer_schema.clone()),
+    ("OptionA".to_string(), option_a_schema),
+  ]);
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let result = converter.convert_schema("NestedUnion", &outer_schema)?;
+
+  let enum_def = result.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == "NestedUnion" => Some(e),
+    _ => None,
+  });
+
+  assert!(enum_def.is_some(), "should produce NestedUnion enum");
+  let enum_def = enum_def.unwrap();
+
+  assert_eq!(
+    enum_def.variants.len(),
+    2,
+    "should have 2 variants (Default and OptionA), not a single Variant0 wrapper"
+  );
+
+  let variant_names: Vec<String> = enum_def.variants.iter().map(|v| v.name.to_string()).collect();
+  assert!(
+    variant_names.contains(&"Default".to_string()),
+    "should have Default variant, got {variant_names:?}"
+  );
+  assert!(
+    variant_names.contains(&"OptionA".to_string()),
+    "should have OptionA variant, got {variant_names:?}"
+  );
+
+  Ok(())
+}
+
+#[test]
+fn test_anyof_with_nullable_map_type_generates_enum() -> anyhow::Result<()> {
+  let map_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+        title: Some("Prompt Variables".to_string()),
+        description: Some("Optional map of values to substitute".to_string()),
+        additional_properties: Some(Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema {
+          any_of: vec![
+            ObjectOrReference::Object(ObjectSchema {
+              schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+              ..Default::default()
+            }),
+            ObjectOrReference::Ref {
+              ref_path: "#/components/schemas/InputContent".to_string(),
+              description: None,
+              summary: None,
+            },
+          ],
+          ..Default::default()
+        })))),
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+        ..Default::default()
+      }),
+    ],
+    ..Default::default()
+  };
+
+  let input_content = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("ResponsePromptVariables".to_string(), map_schema.clone()),
+    ("InputContent".to_string(), input_content),
+  ]);
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let result = converter.convert_schema("ResponsePromptVariables", &map_schema)?;
+
+  assert!(
+    !result.is_empty(),
+    "should generate types for anyOf with nullable map, not skip as single-variant wrapper"
+  );
+
+  let enum_def = result.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == "ResponsePromptVariables" => Some(e),
+    _ => None,
+  });
+
+  assert!(
+    enum_def.is_some(),
+    "should generate ResponsePromptVariables enum, got types: {:?}",
+    result.iter().map(|t| t.type_name().to_string()).collect::<Vec<_>>()
+  );
+
+  let enum_def = enum_def.unwrap();
+  assert_eq!(
+    enum_def.variants.len(),
+    1,
+    "should have 1 variant (the map type, with null filtered out)"
+  );
+
+  let variant = &enum_def.variants[0];
+  assert!(
+    matches!(&variant.content, VariantContent::Tuple(types) if !types.is_empty()),
+    "variant should have tuple content with the map type"
+  );
+
+  Ok(())
 }

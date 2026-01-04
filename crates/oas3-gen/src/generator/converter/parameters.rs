@@ -190,7 +190,7 @@ impl ParameterConverter {
 
     let type_resolver = TypeResolver::new(self.context.clone());
     let (type_ref, inline_types) = if has_inline_enum {
-      let result = type_resolver.resolve_property_type(parent_name, &param.name, &schema, schema_ref)?;
+      let result = type_resolver.resolve_property(parent_name, &param.name, &schema, schema_ref)?;
       (result.result, result.inline_types)
     } else {
       (type_resolver.resolve_type(&schema)?, vec![])

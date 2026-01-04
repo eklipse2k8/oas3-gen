@@ -75,7 +75,7 @@ impl StructConverter {
 
       let resolved = self
         .type_resolver
-        .resolve_property_type(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
+        .resolve_property(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
 
       let field = self.field_converter.convert_field(
         prop_name,
@@ -235,7 +235,7 @@ impl StructConverter {
       };
       let discriminated_enum = self
         .type_resolver
-        .build_discriminated_enum(name, schema, base_struct_name.as_str())?;
+        .discriminated_enum(name, schema, base_struct_name.as_str())?;
       all_types.push(discriminated_enum);
     }
 
@@ -254,7 +254,7 @@ impl StructConverter {
           serde_attrs.push(SerdeAttribute::DenyUnknownFields);
         }
         Schema::Object(_) => {
-          let value_type = self.type_resolver.resolve_additional_properties_type(additional)?;
+          let value_type = self.type_resolver.additional_properties_type(additional)?;
           let map_type = TypeRef::new(format!(
             "std::collections::HashMap<String, {}>",
             value_type.to_rust_type()

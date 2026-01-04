@@ -136,7 +136,7 @@ impl VariantBuilder {
 
     let conversion = self
       .type_resolver
-      .resolve_array_with_inline_items(enum_name, variant_label, resolved_schema)?;
+      .try_inline_array(enum_name, variant_label, resolved_schema)?;
 
     Ok(conversion.map(|c| ConversionOutput::with_inline_types(VariantContent::Tuple(vec![c.result]), c.inline_types)))
   }
@@ -151,11 +151,9 @@ impl VariantBuilder {
       return Ok(None);
     }
 
-    let uses_one_of = !resolved_schema.one_of.is_empty();
-    let result =
-      self
-        .type_resolver
-        .resolve_inline_union_type(enum_name, variant_label, resolved_schema, uses_one_of)?;
+    let result = self
+      .type_resolver
+      .inline_union(enum_name, variant_label, resolved_schema)?;
 
     Ok(Some(ConversionOutput::with_inline_types(
       VariantContent::Tuple(vec![result.result]),

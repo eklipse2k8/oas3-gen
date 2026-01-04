@@ -4,6 +4,7 @@ pub const DEFAULT_RESPONSE_VARIANT: &str = "Unknown";
 pub const DISCRIMINATED_BASE_SUFFIX: &str = "Base";
 pub const HEADER_PARAMS_FIELD: &str = "header";
 pub const HEADER_PARAMS_SUFFIX: &str = "Header";
+pub const VARIANT_KIND_SUFFIX: &str = "Kind";
 pub const KNOWN_ENUM_VARIANT: &str = "Known";
 pub const OTHER_ENUM_VARIANT: &str = "Other";
 pub const PATH_PARAMS_FIELD: &str = "path";

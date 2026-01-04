@@ -123,15 +123,17 @@ impl UnionConverter {
       UnionKind::AnyOf => &schema.any_of,
     };
 
-    let (mut variants, inline_types) = self.collect_union_variant_specs(variants_src)?.into_iter().try_fold(
-      (vec![], vec![]),
-      |(mut variants, mut inline_types), spec| {
-        let output = self.variant_builder.build_variant(name, &spec)?;
-        variants.push(output.result);
-        inline_types.extend(output.inline_types);
-        anyhow::Ok((variants, inline_types))
-      },
-    )?;
+    let variant_specs = self.collect_union_variant_specs(variants_src)?;
+
+    let (mut variants, inline_types) =
+      variant_specs
+        .into_iter()
+        .try_fold((vec![], vec![]), |(mut variants, mut inline_types), spec| {
+          let output = self.variant_builder.build_variant(name, &spec)?;
+          variants.push(output.result);
+          inline_types.extend(output.inline_types);
+          anyhow::Ok((variants, inline_types))
+        })?;
 
     variants = strip_common_affixes(variants);
 

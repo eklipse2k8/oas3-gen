@@ -9,7 +9,7 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use crate::generator::{
   ast::{EnumVariantToken, VariantDef},
   naming::{
-    constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
+    constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX, VARIANT_KIND_SUFFIX},
     identifiers::{sanitize, split_pascal_case, to_rust_type_name},
   },
   schema_registry::{RefCollector, SchemaRegistry},
@@ -325,12 +325,21 @@ pub(crate) struct CommonVariantName {
 }
 
 impl CommonVariantName {
-  pub(crate) fn union_name(variants: &[ObjectOrReference<ObjectSchema>], suffix_part: &str) -> Option<String> {
-    let common = extract_common_variant_prefix(variants)?;
+  pub(crate) fn union_name_or<S>(
+    variants: &[ObjectOrReference<ObjectSchema>],
+    suffix_part: S,
+    fallback: impl FnOnce() -> String,
+  ) -> String
+  where
+    S: AsRef<str>,
+  {
+    let Some(common) = extract_common_variant_prefix(variants) else {
+      return fallback();
+    };
     if common.has_suffix {
-      Some(format!("{}Kind", common.name))
+      format!("{}{VARIANT_KIND_SUFFIX}", common.name)
     } else {
-      Some(format!("{}{suffix_part}", common.name))
+      format!("{}{}", common.name, suffix_part.as_ref())
     }
   }
 }

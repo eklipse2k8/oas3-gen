@@ -12,6 +12,16 @@ pub(crate) enum UnionKind {
   AnyOf,
 }
 
+impl UnionKind {
+  pub(crate) fn from_schema(schema: &ObjectSchema) -> Self {
+    if schema.one_of.is_empty() {
+      UnionKind::AnyOf
+    } else {
+      UnionKind::OneOf
+    }
+  }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) enum CollisionStrategy {
   Preserve,

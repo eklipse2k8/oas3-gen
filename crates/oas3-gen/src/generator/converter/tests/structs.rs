@@ -672,7 +672,7 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
   let context = create_test_context(graph.clone(), default_config());
   let type_resolver = TypeResolver::new(context);
 
-  let result = type_resolver.build_discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
+  let result = type_resolver.discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
 
   let RustType::DiscriminatedEnum(enum_def) = result else {
     panic!("Expected DiscriminatedEnum");

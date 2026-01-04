@@ -187,7 +187,7 @@ impl ResponseConverter {
     };
 
     let base_name = effective.infer_name_from_context(path, status_code.as_str());
-    let Some(output) = type_resolver.resolve_inline_schema(schema, &base_name)? else {
+    let Some(output) = type_resolver.try_inline_schema(schema, &base_name)? else {
       return Ok(None);
     };
 
