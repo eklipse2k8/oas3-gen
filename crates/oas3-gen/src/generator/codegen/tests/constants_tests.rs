@@ -1,7 +1,7 @@
 use crate::generator::{
   ast::{
     FieldDef, FieldNameToken, RustType, StructDef, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
-    ValidationAttribute, tokens::HeaderToken,
+    ValidationAttribute, constants::HttpHeaderRef,
   },
   codegen::constants::{generate_header_constants, generate_regex_constants},
 };
@@ -28,7 +28,7 @@ fn make_struct(name: &str, fields: Vec<FieldDef>) -> RustType {
 
 #[test]
 fn test_generate_regex_constants_empty() {
-  let types: Vec<&RustType> = vec![];
+  let types: Vec<RustType> = vec![];
   let (tokens, lookup) = generate_regex_constants(&types);
 
   assert!(lookup.is_empty());
@@ -38,7 +38,7 @@ fn test_generate_regex_constants_empty() {
 #[test]
 fn test_generate_regex_constants_no_regex_fields() {
   let struct_type = make_struct("User", vec![make_field("name", None), make_field("email", None)]);
-  let types: Vec<&RustType> = vec![&struct_type];
+  let types: Vec<RustType> = vec![struct_type];
   let (tokens, lookup) = generate_regex_constants(&types);
 
   assert!(lookup.is_empty());
@@ -48,7 +48,7 @@ fn test_generate_regex_constants_no_regex_fields() {
 #[test]
 fn test_generate_regex_constants_single_field() {
   let struct_type = make_struct("User", vec![make_field("email", Some(r"^[\w.-]+@[\w.-]+$"))]);
-  let types: Vec<&RustType> = vec![&struct_type];
+  let types: Vec<RustType> = vec![struct_type];
   let (tokens, lookup) = generate_regex_constants(&types);
 
   assert_eq!(lookup.len(), 1);
@@ -70,7 +70,7 @@ fn test_generate_regex_constants_multiple_fields_same_struct() {
       make_field("phone", Some(r"^\+?[0-9]{10,15}$")),
     ],
   );
-  let types: Vec<&RustType> = vec![&struct_type];
+  let types: Vec<RustType> = vec![struct_type];
   let (tokens, lookup) = generate_regex_constants(&types);
 
   assert_eq!(lookup.len(), 2);
@@ -84,7 +84,7 @@ fn test_generate_regex_constants_deduplicates_patterns() {
   let email_pattern = r"^[\w.-]+@[\w.-]+$";
   let struct1 = make_struct("User", vec![make_field("email", Some(email_pattern))]);
   let struct2 = make_struct("Contact", vec![make_field("email", Some(email_pattern))]);
-  let types: Vec<&RustType> = vec![&struct1, &struct2];
+  let types: Vec<RustType> = vec![struct1, struct2];
   let (tokens, lookup) = generate_regex_constants(&types);
 
   assert_eq!(lookup.len(), 2, "both fields should be in lookup");
@@ -105,7 +105,7 @@ fn test_generate_regex_constants_skips_non_structs() {
     target: TypeRef::new("String"),
     ..Default::default()
   });
-  let types: Vec<&RustType> = vec![&struct_type, &alias];
+  let types: Vec<RustType> = vec![struct_type, alias];
   let (_, lookup) = generate_regex_constants(&types);
 
   assert_eq!(lookup.len(), 1);
@@ -113,7 +113,7 @@ fn test_generate_regex_constants_skips_non_structs() {
 
 #[test]
 fn test_generate_header_constants_empty() {
-  let headers: Vec<HeaderToken> = vec![];
+  let headers: Vec<HttpHeaderRef> = vec![];
   let tokens = generate_header_constants(&headers);
 
   assert!(tokens.is_empty());
@@ -121,7 +121,7 @@ fn test_generate_header_constants_empty() {
 
 #[test]
 fn test_generate_header_constants_single() {
-  let headers = vec![HeaderToken::from("x-request-id")];
+  let headers = vec![HttpHeaderRef::from("x-request-id")];
   let tokens = generate_header_constants(&headers);
   let code = tokens.to_string();
 
@@ -139,9 +139,9 @@ fn test_generate_header_constants_single() {
 #[test]
 fn test_generate_header_constants_multiple() {
   let headers = vec![
-    HeaderToken::from("x-request-id"),
-    HeaderToken::from("x-correlation-id"),
-    HeaderToken::from("content-type"),
+    HttpHeaderRef::from("x-request-id"),
+    HttpHeaderRef::from("x-correlation-id"),
+    HttpHeaderRef::from("content-type"),
   ];
   let tokens = generate_header_constants(&headers);
   let code = tokens.to_string();

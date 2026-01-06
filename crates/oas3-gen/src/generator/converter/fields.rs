@@ -1,22 +1,27 @@
 use std::{
-  collections::{BTreeSet, HashMap},
+  collections::{BTreeMap, BTreeSet, HashMap},
   rc::Rc,
 };
 
-use oas3::spec::ObjectSchema;
+use anyhow::Context as _;
+use oas3::spec::{ObjectSchema, Schema};
 use regex::Regex;
+use string_cache::DefaultAtom;
 
-use super::{SchemaExt, discriminator::DiscriminatorInfo};
+use super::{ConversionOutput, SchemaExt, type_resolver::TypeResolver};
 use crate::generator::{
   ast::{
-    Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+    Documentation, FieldDef, FieldNameToken, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
     ValidationAttribute,
   },
   converter::ConverterContext,
+  schema_registry::DiscriminatorMapping,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct FieldConverter {
+  context: Rc<ConverterContext>,
+  type_resolver: TypeResolver,
   odata_support: bool,
   customizations: HashMap<String, String>,
 }
@@ -25,9 +30,108 @@ impl FieldConverter {
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
     let config = context.config();
     Self {
+      context: context.clone(),
+      type_resolver: TypeResolver::new(context.clone()),
       odata_support: config.odata_support(),
       customizations: config.customizations.clone(),
     }
+  }
+
+  /// Collects fields from an object schema, applying deduplication and inline type extraction.
+  pub(crate) fn collect_fields(
+    &self,
+    parent_name: &str,
+    schema: &ObjectSchema,
+    schema_name: Option<&str>,
+  ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
+    let required = schema.required.iter().collect::<BTreeSet<_>>();
+    let discriminator_mapping = schema_name
+      .and_then(|name| self.context.graph().mapping(name))
+      .map(DiscriminatorMapping::as_tuple);
+
+    let conversions = schema
+      .properties
+      .iter()
+      .map(|(prop_name, prop_schema_ref)| {
+        let prop_schema = prop_schema_ref
+          .resolve(self.context.graph().spec())
+          .context(format!("Schema resolution failed for property '{prop_name}'"))?;
+
+        let resolved = self
+          .type_resolver
+          .resolve_property(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
+
+        let field = self.convert_field(
+          prop_name,
+          schema,
+          &prop_schema,
+          resolved.result,
+          required.contains(prop_name),
+          discriminator_mapping.as_ref(),
+        );
+
+        Ok((field, resolved.inline_types))
+      })
+      .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let (fields, inline_types): (Vec<_>, Vec<_>) = conversions.into_iter().unzip();
+    let inline_types = inline_types.into_iter().flatten().collect();
+
+    Ok(ConversionOutput::with_inline_types(
+      Self::deduplicate_names(fields),
+      inline_types,
+    ))
+  }
+
+  pub(crate) fn build_additional_properties(
+    &self,
+    schema: &ObjectSchema,
+  ) -> anyhow::Result<(Vec<SerdeAttribute>, Option<FieldDef>)> {
+    let Some(ref additional) = schema.additional_properties else {
+      return Ok((vec![], None));
+    };
+
+    match additional {
+      Schema::Boolean(b) if !b.0 => Ok((vec![SerdeAttribute::DenyUnknownFields], None)),
+      Schema::Object(_) => {
+        let value_type = self.type_resolver.additional_properties_type(additional)?;
+        let map_type = TypeRef::new(format!(
+          "std::collections::HashMap<String, {}>",
+          value_type.to_rust_type()
+        ));
+        let field = FieldDef::builder()
+          .name(FieldNameToken::from_raw("additional_properties"))
+          .docs(Documentation::from_lines([
+            "Additional properties not defined in the schema.",
+          ]))
+          .rust_type(map_type)
+          .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))
+          .build();
+        Ok((vec![], Some(field)))
+      }
+      Schema::Boolean(_) => Ok((vec![], None)),
+    }
+  }
+
+  pub(crate) fn struct_attributes(
+    fields: &[FieldDef],
+    base_serde: Vec<SerdeAttribute>,
+  ) -> (Vec<SerdeAttribute>, Vec<OuterAttr>) {
+    let default_serde = fields
+      .iter()
+      .any(|f| f.default_value.is_some())
+      .then_some(SerdeAttribute::Default);
+
+    let serde_attrs = base_serde.into_iter().chain(default_serde).collect();
+
+    let outer_attrs = fields
+      .iter()
+      .any(|f| f.serde_as_attr.is_some())
+      .then_some(OuterAttr::SerdeAs)
+      .into_iter()
+      .collect();
+
+    (serde_attrs, outer_attrs)
   }
 
   pub(crate) fn convert_field(
@@ -39,7 +143,7 @@ impl FieldConverter {
     is_required: bool,
     discriminator_mapping: Option<&(String, String)>,
   ) -> FieldDef {
-    let discriminator_info = DiscriminatorInfo::new(prop_name, parent_schema, prop_schema, discriminator_mapping);
+    let discriminator_info = DiscriminatorFieldInfo::new(prop_name, parent_schema, prop_schema, discriminator_mapping);
 
     let should_be_optional = self.is_field_optional(
       prop_name,
@@ -249,7 +353,7 @@ impl FieldConverter {
     prop_name: &str,
     parent_schema: &ObjectSchema,
     prop_schema: &ObjectSchema,
-    discriminator_info: Option<&DiscriminatorInfo>,
+    discriminator_info: Option<&DiscriminatorFieldInfo>,
     is_required: bool,
   ) -> bool {
     let has_default = prop_schema.default.is_some();
@@ -270,5 +374,107 @@ impl FieldConverter {
       return true;
     }
     false
+  }
+
+  pub(crate) fn deduplicate_names(fields: Vec<FieldDef>) -> Vec<FieldDef> {
+    let indices_by_name =
+      fields
+        .iter()
+        .enumerate()
+        .fold(BTreeMap::<String, Vec<usize>>::new(), |mut acc, (i, field)| {
+          acc.entry(field.name.to_string()).or_default().push(i);
+          acc
+        });
+
+    let collisions = indices_by_name
+      .into_iter()
+      .filter(|(_, v)| v.len() > 1)
+      .collect::<BTreeMap<_, _>>();
+
+    if collisions.is_empty() {
+      return fields;
+    }
+
+    let indices_to_remove = collisions
+      .iter()
+      .filter_map(|(_, indices)| {
+        let (deprecated, non_deprecated): (Vec<_>, Vec<_>) =
+          indices.iter().copied().partition(|&i| fields[i].deprecated);
+        (!deprecated.is_empty() && !non_deprecated.is_empty()).then_some(deprecated)
+      })
+      .flatten()
+      .collect::<BTreeSet<_>>();
+
+    let suffix_renames = collisions
+      .iter()
+      .flat_map(|(name, indices)| {
+        let (deprecated, non_deprecated): (Vec<_>, Vec<_>) =
+          indices.iter().copied().partition(|&i| fields[i].deprecated);
+        if deprecated.is_empty() || non_deprecated.is_empty() {
+          indices
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(suffix_num, &idx)| (idx, format!("{name}_{}", suffix_num + 1)))
+            .collect::<Vec<_>>()
+        } else {
+          vec![]
+        }
+      })
+      .collect::<BTreeMap<_, _>>();
+
+    fields
+      .into_iter()
+      .enumerate()
+      .filter(|(i, _)| !indices_to_remove.contains(i))
+      .map(|(i, field)| match suffix_renames.get(&i) {
+        Some(new_name) => FieldDef {
+          name: FieldNameToken::new(new_name),
+          ..field
+        },
+        None => field,
+      })
+      .collect()
+  }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DiscriminatorFieldInfo {
+  pub value: Option<DefaultAtom>,
+  pub is_base: bool,
+  pub has_enum: bool,
+}
+
+impl DiscriminatorFieldInfo {
+  pub fn new(
+    prop_name: &str,
+    parent_schema: &ObjectSchema,
+    prop_schema: &ObjectSchema,
+    discriminator_mapping: Option<&(String, String)>,
+  ) -> Option<Self> {
+    let value = discriminator_mapping
+      .filter(|(prop, _)| prop == prop_name)
+      .map(|(_, v)| DefaultAtom::from(v.as_str()));
+
+    let is_base_discriminator = parent_schema
+      .discriminator
+      .as_ref()
+      .is_some_and(|d| d.property_name == prop_name);
+
+    let is_child_discriminator = value.is_some();
+
+    if !is_child_discriminator && !is_base_discriminator {
+      return None;
+    }
+
+    Some(Self {
+      value,
+      is_base: is_base_discriminator && !is_child_discriminator,
+      has_enum: prop_schema.has_enum_values(),
+    })
+  }
+
+  pub fn should_hide(&self) -> bool {
+    !self.has_enum && (self.value.is_some() || self.is_base)
   }
 }

@@ -475,13 +475,13 @@ mod builder {
     }
 
     fn construction(&self) -> TokenStream {
-      let nested_map: BTreeMap<&str, &BuilderNestedStruct> = self
+      let nested_map = self
         .nested_structs
         .iter()
         .map(|ns| (ns.field_name.as_str(), ns))
-        .collect();
+        .collect::<BTreeMap<_, _>>();
 
-      let mut processed_nested: BTreeSet<&str> = BTreeSet::new();
+      let mut processed_nested = BTreeSet::new();
       let mut assignments = vec![];
 
       for field in self.fields {

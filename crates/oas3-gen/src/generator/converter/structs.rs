@@ -1,170 +1,73 @@
-use std::{
-  collections::{BTreeMap, BTreeSet, HashSet},
-  rc::Rc,
-};
+use std::rc::Rc;
 
-use anyhow::Context as _;
-use oas3::spec::{ObjectSchema, Schema};
+use oas3::spec::ObjectSchema;
 
 use super::{
   ConversionOutput, SchemaExt, discriminator::DiscriminatorConverter, fields::FieldConverter,
-  struct_summaries::StructSummary, type_resolver::TypeResolver,
+  type_resolver::TypeResolver,
 };
 use crate::generator::{
-  ast::{
-    Documentation, FieldDef, OuterAttr, RustType, SerdeAttribute, StructDef, StructKind, StructToken, TypeRef,
-    tokens::FieldNameToken,
-  },
+  ast::{Documentation, RustType, StructDef, StructKind, StructToken},
   converter::ConverterContext,
   naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
-  schema_registry::DiscriminatorMapping,
 };
 
-#[derive(Clone, Debug)]
-struct AdditionalPropertiesResult {
-  serde_attrs: Vec<SerdeAttribute>,
-  additional_field: Option<FieldDef>,
-}
-
-/// Converter for OpenAPI object schemas into Rust Structs.
 #[derive(Clone, Debug)]
 pub(crate) struct StructConverter {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
   field_converter: FieldConverter,
+  discriminator_converter: DiscriminatorConverter,
 }
 
 impl StructConverter {
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let type_resolver = TypeResolver::new(context.clone());
     let field_converter = FieldConverter::new(&context);
+    let discriminator_converter = DiscriminatorConverter::new(context.clone());
     Self {
       context,
       type_resolver,
       field_converter,
+      discriminator_converter,
     }
   }
 
-  fn convert_fields(
-    &self,
-    parent_name: &str,
-    schema: &ObjectSchema,
-    exclude_field: Option<&str>,
-    schema_name: Option<&str>,
-  ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
-    let num_properties = schema.properties.len();
-    let required_set: HashSet<&String> = schema.required.iter().collect();
-
-    let discriminator_mapping = schema_name
-      .and_then(|name| self.context.graph().mapping(name))
-      .map(DiscriminatorMapping::as_tuple);
-
-    let mut fields = Vec::with_capacity(num_properties);
-    let mut inline_types = vec![];
-
-    for (prop_name, prop_schema_ref) in &schema.properties {
-      if exclude_field == Some(prop_name.as_str()) {
-        continue;
-      }
-
-      let is_required = required_set.contains(prop_name);
-
-      let prop_schema = prop_schema_ref
-        .resolve(self.context.graph().spec())
-        .context(format!("Schema resolution failed for property '{prop_name}'"))?;
-
-      let resolved = self
-        .type_resolver
-        .resolve_property(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
-
-      let field = self.field_converter.convert_field(
-        prop_name,
-        schema,
-        &prop_schema,
-        resolved.result,
-        is_required,
-        discriminator_mapping.as_ref(),
-      );
-      fields.push(field);
-
-      let mut generated = resolved.inline_types;
-      inline_types.append(&mut generated);
-    }
-
-    Self::deduplicate_field_names(&mut fields);
-    Ok(ConversionOutput::with_inline_types(fields, inline_types))
-  }
-
-  /// Converts a schema composed with `allOf` by merging properties.
-  pub(crate) fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
-    let graph = self.context.graph();
-
-    let merged_info = graph
-      .merged(name)
-      .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
-
-    let handler = DiscriminatorConverter::new(self.context.clone());
-    if let Some(parent_info) = handler.detect_discriminated_parent(name) {
-      let parent_merged = graph
-        .merged(&parent_info.parent_name)
-        .ok_or_else(|| anyhow::anyhow!("Parent schema '{}' not found", parent_info.parent_name))?;
-      return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema);
-    }
-
-    let effective_schema = graph.resolved(name).unwrap_or(&merged_info.schema);
-
-    let result = self.convert_struct(name, effective_schema, None)?;
-    self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)
-  }
-
-  /// Converts a standard object schema into a Rust Struct.
-  pub(crate) fn convert_struct(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    kind: Option<StructKind>,
-  ) -> anyhow::Result<ConversionOutput<RustType>> {
-    let is_discriminated = schema.is_discriminated_base_type();
-    let struct_name = if is_discriminated {
+  fn struct_name(name: &str, schema: &ObjectSchema) -> StructToken {
+    if schema.is_discriminated_base_type() {
       StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)))
     } else {
       StructToken::from_raw(name)
-    };
+    }
+  }
 
-    let field_result = self.convert_fields(struct_name.as_str(), schema, None, Some(name))?;
-    let additional_props = self.prepare_additional_properties(schema)?;
+  fn build_struct(
+    &self,
+    name: StructToken,
+    schema: &ObjectSchema,
+    schema_name: Option<&str>,
+    kind: StructKind,
+  ) -> anyhow::Result<ConversionOutput<RustType>> {
+    let field_result = self
+      .field_converter
+      .collect_fields(name.as_str(), schema, schema_name)?;
+    let (additional_serde_attrs, additional_field) = self.field_converter.build_additional_properties(schema)?;
 
     let mut fields = field_result.result;
-    let mut serde_attrs = additional_props.serde_attrs;
-
-    if let Some(field) = additional_props.additional_field {
-      fields.push(field);
+    if let Some(extra) = additional_field {
+      fields.push(extra);
     }
 
-    let has_defaults = fields.iter().any(|f| f.default_value.is_some());
-    if has_defaults {
-      serde_attrs.push(SerdeAttribute::Default);
-    }
+    let (serde_attrs, outer_attrs) = FieldConverter::struct_attributes(&fields, additional_serde_attrs);
 
-    let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
-    let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
-
-    let struct_def = StructDef {
-      name: struct_name,
-      docs: Documentation::from_optional(schema.description.as_ref()),
-      fields,
-      serde_attrs,
-      outer_attrs,
-      methods: vec![],
-      kind: kind.unwrap_or(StructKind::Schema),
-      ..Default::default()
-    };
-
-    self
-      .context
-      .cache
-      .borrow_mut()
-      .register_struct_summary(struct_def.name.as_str(), StructSummary::from(&struct_def));
+    let struct_def = StructDef::builder()
+      .name(name)
+      .docs(Documentation::from_optional(schema.description.as_ref()))
+      .fields(fields)
+      .serde_attrs(serde_attrs)
+      .outer_attrs(outer_attrs)
+      .kind(kind)
+      .build();
 
     Ok(ConversionOutput::with_inline_types(
       RustType::Struct(struct_def),
@@ -182,39 +85,60 @@ impl StructConverter {
       anyhow::bail!("Parent schema for discriminated child '{name}' is not a valid discriminator base");
     }
 
-    let struct_name = StructToken::from_raw(name);
-
-    let field_result = self.convert_fields(struct_name.as_str(), merged_schema, None, Some(name))?;
-    let additional_props = self.prepare_additional_properties(merged_schema)?;
+    let struct_token = StructToken::from_raw(name);
+    let field_result = self
+      .field_converter
+      .collect_fields(struct_token.as_str(), merged_schema, Some(name))?;
+    let (additional_serde_attrs, additional_field) = self.field_converter.build_additional_properties(merged_schema)?;
 
     let mut fields = field_result.result;
-    let mut serde_attrs = additional_props.serde_attrs;
-
-    if let Some(field) = additional_props.additional_field {
-      fields.push(field);
+    if let Some(extra) = additional_field {
+      fields.push(extra);
     }
 
-    if fields.iter().any(|f| f.default_value.is_some()) {
-      serde_attrs.push(SerdeAttribute::Default);
-    }
+    let (serde_attrs, outer_attrs) = FieldConverter::struct_attributes(&fields, additional_serde_attrs);
 
-    let has_serde_as = fields.iter().any(|f| f.serde_as_attr.is_some());
-    let outer_attrs = if has_serde_as { vec![OuterAttr::SerdeAs] } else { vec![] };
+    let struct_def = StructDef::builder()
+      .name(struct_token)
+      .docs(Documentation::from_optional(merged_schema.description.as_ref()))
+      .fields(fields)
+      .serde_attrs(serde_attrs)
+      .outer_attrs(outer_attrs)
+      .kind(StructKind::Schema)
+      .build();
 
-    let mut all_types = Vec::with_capacity(1 + field_result.inline_types.len());
-    all_types.push(RustType::Struct(StructDef {
-      name: struct_name,
-      docs: Documentation::from_optional(merged_schema.description.as_ref()),
-      fields,
-      serde_attrs,
-      outer_attrs,
-      kind: StructKind::Schema,
-      ..Default::default()
-    }));
+    Ok(
+      std::iter::once(RustType::Struct(struct_def))
+        .chain(field_result.inline_types)
+        .collect(),
+    )
+  }
 
-    let mut inline_types = field_result.inline_types;
-    all_types.append(&mut inline_types);
-    Ok(all_types)
+  /// Converts an object schema into a struct definition.
+  pub(crate) fn convert_struct(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    kind: Option<StructKind>,
+  ) -> anyhow::Result<ConversionOutput<RustType>> {
+    let struct_name = Self::struct_name(name, schema);
+
+    let result = self.build_struct(
+      struct_name.clone(),
+      schema,
+      Some(name),
+      kind.unwrap_or(StructKind::Schema),
+    )?;
+
+    self.context.cache.borrow_mut().register_struct_def(
+      struct_name.as_str(),
+      match &result.result {
+        RustType::Struct(def) => def.clone(),
+        _ => unreachable!(),
+      },
+    );
+
+    Ok(result)
   }
 
   pub(crate) fn finalize_struct_types(
@@ -222,91 +146,52 @@ impl StructConverter {
     name: &str,
     schema: &ObjectSchema,
     main_type: RustType,
-    mut inline_types: Vec<RustType>,
+    inline_types: Vec<RustType>,
   ) -> anyhow::Result<Vec<RustType>> {
-    let is_discriminated = schema.is_discriminated_base_type();
-    let capacity = if is_discriminated { 2 } else { 1 } + inline_types.len();
-    let mut all_types = Vec::with_capacity(capacity);
+    let discriminated_enum = schema
+      .is_discriminated_base_type()
+      .then(|| {
+        let base_struct_name = match &main_type {
+          RustType::Struct(def) => def.name.clone(),
+          _ => StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))),
+        };
+        self
+          .type_resolver
+          .discriminated_enum(name, schema, base_struct_name.as_str())
+      })
+      .transpose()?;
 
-    if is_discriminated {
-      let base_struct_name = match &main_type {
-        RustType::Struct(def) => def.name.clone(),
-        _ => StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))),
-      };
-      let discriminated_enum = self
-        .type_resolver
-        .discriminated_enum(name, schema, base_struct_name.as_str())?;
-      all_types.push(discriminated_enum);
-    }
-
-    all_types.push(main_type);
-    all_types.append(&mut inline_types);
-    Ok(all_types)
+    Ok(
+      discriminated_enum
+        .into_iter()
+        .chain(std::iter::once(main_type))
+        .chain(inline_types)
+        .collect(),
+    )
   }
 
-  fn prepare_additional_properties(&self, schema: &ObjectSchema) -> anyhow::Result<AdditionalPropertiesResult> {
-    let mut serde_attrs = vec![];
-    let mut additional_field = None;
+  pub(crate) fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
+    let graph = self.context.graph();
 
-    if let Some(ref additional) = schema.additional_properties {
-      match additional {
-        Schema::Boolean(b) if !b.0 => {
-          serde_attrs.push(SerdeAttribute::DenyUnknownFields);
-        }
-        Schema::Object(_) => {
-          let value_type = self.type_resolver.additional_properties_type(additional)?;
-          let map_type = TypeRef::new(format!(
-            "std::collections::HashMap<String, {}>",
-            value_type.to_rust_type()
-          ));
-          additional_field = Some(
-            FieldDef::builder()
-              .name(FieldNameToken::from_raw("additional_properties"))
-              .docs(Documentation::from_lines([
-                "Additional properties not defined in the schema.",
-              ]))
-              .rust_type(map_type)
-              .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))
-              .build(),
-          );
-        }
-        Schema::Boolean(_) => {}
-      }
-    }
-    Ok(AdditionalPropertiesResult {
-      serde_attrs,
-      additional_field,
-    })
-  }
+    let merged_info = graph
+      .merged(name)
+      .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
 
-  pub(crate) fn deduplicate_field_names(fields: &mut Vec<FieldDef>) {
-    let mut indices_by_name: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for (i, field) in fields.iter().enumerate() {
-      indices_by_name.entry(field.name.to_string()).or_default().push(i);
+    if let Some(parent_info) = self.discriminator_converter.detect_discriminated_parent(name) {
+      let parent_merged = graph
+        .merged(&parent_info.parent_name)
+        .ok_or_else(|| anyhow::anyhow!("Parent schema '{}' not found", parent_info.parent_name))?;
+      return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema);
     }
 
-    let mut indices_to_remove = HashSet::<usize>::new();
+    let effective_schema = graph.resolved(name).unwrap_or(&merged_info.schema);
 
-    for (name, colliding_indices) in indices_by_name.into_iter().filter(|(_, v)| v.len() > 1) {
-      let (deprecated, non_deprecated): (Vec<usize>, Vec<usize>) =
-        colliding_indices.iter().copied().partition(|&i| fields[i].deprecated);
-
-      if !deprecated.is_empty() && !non_deprecated.is_empty() {
-        indices_to_remove.extend(deprecated);
-      } else {
-        for (suffix_num, &idx) in colliding_indices.iter().enumerate().skip(1) {
-          fields[idx].name = FieldNameToken::new(format!("{name}_{}", suffix_num + 1));
-        }
-      }
-    }
-
-    if !indices_to_remove.is_empty() {
-      let mut idx = 0;
-      fields.retain(|_| {
-        let keep = !indices_to_remove.contains(&idx);
-        idx += 1;
-        keep
-      });
-    }
+    let result = self.build_struct(
+      Self::struct_name(name, effective_schema),
+      effective_schema,
+      Some(name),
+      StructKind::Schema,
+    )?;
+    self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)
   }
 }

@@ -31,6 +31,29 @@
 							"minimum": 1,
 							"maximum": 100
 						}
+					},
+					{
+						"name": "x-sort-order",
+						"in": "header",
+						"description": "Sort order for the results",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["asc", "desc"]
+						}
+					},
+					{
+						"name": "x-only",
+						"in": "header",
+						"description": "Only include pets with a tag",
+						"required": false,
+						"schema": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"enum": ["cat", "dog", "fish", "bird"]
+							}
+						}
 					}
 				],
 				"responses": {
@@ -95,6 +118,30 @@
 				"summary": "List all cats",
 				"operationId": "listCats",
 				"tags": ["pets"],
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"description": "How many items to return at one time (max 100)",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"format": "int32",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "x-sort-order",
+						"in": "header",
+						"description": "Sort order for the results",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["asc", "desc"]
+						}
+					}
+				],
 				"responses": {
 					"200": {
 						"description": "A paged array of cats",

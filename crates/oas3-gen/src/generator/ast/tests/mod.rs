@@ -1,3 +1,4 @@
+mod content_category;
 mod outer_attrs;
 mod parsed_path;
 mod status_codes;

@@ -74,27 +74,6 @@ impl TypeRef {
     self.base_type.to_string()
   }
 
-  pub fn is_primitive_type(&self) -> bool {
-    matches!(
-      self.base_type,
-      RustPrimitive::I8
-        | RustPrimitive::I16
-        | RustPrimitive::I32
-        | RustPrimitive::I64
-        | RustPrimitive::I128
-        | RustPrimitive::Isize
-        | RustPrimitive::U8
-        | RustPrimitive::U16
-        | RustPrimitive::U32
-        | RustPrimitive::U64
-        | RustPrimitive::U128
-        | RustPrimitive::Usize
-        | RustPrimitive::F32
-        | RustPrimitive::F64
-        | RustPrimitive::Bool
-    ) && !self.is_array
-  }
-
   pub fn requires_json_serialization(&self) -> bool {
     self.is_array || matches!(self.base_type, RustPrimitive::Custom(_) | RustPrimitive::Value)
   }
@@ -182,7 +161,8 @@ impl From<&serde_json::Value> for TypeRef {
 }
 
 /// Rust primitive and standard library types
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, strum::Display)]
+#[strum(serialize_all = "lowercase")]
 pub enum RustPrimitive {
   #[serde(rename = "i8")]
   I8,
@@ -216,23 +196,33 @@ pub enum RustPrimitive {
   Bool,
   #[default]
   #[serde(rename = "String")]
+  #[strum(serialize = "String")]
   String,
   #[serde(rename = "Vec<u8>")]
+  #[strum(serialize = "Vec<u8>")]
   Bytes,
   #[serde(rename = "chrono::NaiveDate")]
+  #[strum(serialize = "chrono::NaiveDate")]
   Date,
   #[serde(rename = "chrono::DateTime<chrono::Utc>")]
+  #[strum(serialize = "chrono::DateTime<chrono::Utc>")]
   DateTime,
   #[serde(rename = "chrono::NaiveTime")]
+  #[strum(serialize = "chrono::NaiveTime")]
   Time,
   #[serde(rename = "chrono::Duration")]
+  #[strum(serialize = "chrono::Duration")]
   Duration,
   #[serde(rename = "uuid::Uuid")]
+  #[strum(serialize = "uuid::Uuid")]
   Uuid,
   #[serde(rename = "serde_json::Value")]
+  #[strum(serialize = "serde_json::Value")]
   Value,
   #[serde(rename = "()")]
+  #[strum(serialize = "()")]
   Unit,
+  #[strum(to_string = "{0}")]
   Custom(DefaultAtom),
 }
 
@@ -310,16 +300,6 @@ impl RustPrimitive {
       RustPrimitive::Uuid => format!("uuid::Uuid::parse_str(\"{}\")?", escape_string_literal(s)),
       _ => format!("\"{}\"", escape_string_literal(s)),
     }
-  }
-}
-
-impl std::fmt::Display for RustPrimitive {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let s: &str = match self {
-      RustPrimitive::Custom(name) => name,
-      _ => &serde_plain::to_string(self).unwrap(),
-    };
-    write!(f, "{s}")
   }
 }
 

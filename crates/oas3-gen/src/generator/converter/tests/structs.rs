@@ -8,7 +8,7 @@ use crate::{
       Documentation, FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute,
     },
     converter::{
-      SchemaConverter, discriminator::DiscriminatorConverter, structs::StructConverter, type_resolver::TypeResolver,
+      SchemaConverter, discriminator::DiscriminatorConverter, fields::FieldConverter, type_resolver::TypeResolver,
     },
   },
   tests::common::{create_test_context, create_test_graph, default_config},
@@ -320,13 +320,13 @@ fn make_field(name: &str, deprecated: bool) -> FieldDef {
 
 #[test]
 fn test_deduplicate_field_names_no_duplicates() {
-  let mut fields = vec![
+  let fields = vec![
     make_field("foo", false),
     make_field("bar", false),
     make_field("baz", false),
   ];
 
-  StructConverter::deduplicate_field_names(&mut fields);
+  let fields = FieldConverter::deduplicate_names(fields);
 
   assert_eq!(fields.len(), 3);
   assert_eq!(fields[0].name.as_str(), "foo");
@@ -336,20 +336,20 @@ fn test_deduplicate_field_names_no_duplicates() {
 
 #[test]
 fn test_deduplicate_field_names_empty() {
-  let mut fields: Vec<FieldDef> = vec![];
-  StructConverter::deduplicate_field_names(&mut fields);
+  let fields: Vec<FieldDef> = vec![];
+  let fields = FieldConverter::deduplicate_names(fields);
   assert!(fields.is_empty());
 }
 
 #[test]
 fn test_deduplicate_field_names_all_non_deprecated_renamed() {
-  let mut fields = vec![
+  let fields = vec![
     make_field("foo", false),
     make_field("foo", false),
     make_field("foo", false),
   ];
 
-  StructConverter::deduplicate_field_names(&mut fields);
+  let fields = FieldConverter::deduplicate_names(fields);
 
   assert_eq!(fields.len(), 3);
   assert_eq!(fields[0].name.as_str(), "foo");
@@ -359,13 +359,13 @@ fn test_deduplicate_field_names_all_non_deprecated_renamed() {
 
 #[test]
 fn test_deduplicate_field_names_deprecated_removed_when_mixed() {
-  let mut fields = vec![
+  let fields = vec![
     make_field("foo", true),
     make_field("foo", false),
     make_field("bar", false),
   ];
 
-  StructConverter::deduplicate_field_names(&mut fields);
+  let fields = FieldConverter::deduplicate_names(fields);
 
   assert_eq!(fields.len(), 2);
   assert_eq!(fields[0].name.as_str(), "foo");
@@ -375,9 +375,9 @@ fn test_deduplicate_field_names_deprecated_removed_when_mixed() {
 
 #[test]
 fn test_deduplicate_field_names_all_deprecated_renamed() {
-  let mut fields = vec![make_field("foo", true), make_field("foo", true)];
+  let fields = vec![make_field("foo", true), make_field("foo", true)];
 
-  StructConverter::deduplicate_field_names(&mut fields);
+  let fields = FieldConverter::deduplicate_names(fields);
 
   assert_eq!(fields.len(), 2);
   assert_eq!(fields[0].name.as_str(), "foo");
@@ -386,14 +386,14 @@ fn test_deduplicate_field_names_all_deprecated_renamed() {
 
 #[test]
 fn test_deduplicate_field_names_multiple_groups() {
-  let mut fields = vec![
+  let fields = vec![
     make_field("foo", false),
     make_field("bar", true),
     make_field("foo", false),
     make_field("bar", false),
   ];
 
-  StructConverter::deduplicate_field_names(&mut fields);
+  let fields = FieldConverter::deduplicate_names(fields);
 
   assert_eq!(fields.len(), 3);
   let names: Vec<_> = fields.iter().map(|f| f.name.as_str()).collect();
@@ -735,11 +735,11 @@ fn test_discriminator_mappings_returns_alphabetical_order() {
 
   let context = create_test_context(graph.clone(), default_config());
   let handler = DiscriminatorConverter::new(context);
-  let mappings = handler.discriminator_mappings(&base_schema);
+  let mappings = handler.build_variants_from_mapping("Base", &base_schema);
 
-  let schema_names: Vec<&str> = mappings.iter().map(|(name, _)| name.as_str()).collect();
+  let variant_names: Vec<&str> = mappings.iter().map(|v| v.variant_name.as_str()).collect();
   assert_eq!(
-    schema_names,
+    variant_names,
     vec!["Alpha", "Beta", "Middle", "Zebra"],
     "Mappings should be in alphabetical order by schema name"
   );

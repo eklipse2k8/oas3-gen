@@ -3,7 +3,7 @@ use std::{
   rc::Rc,
 };
 
-use super::{SchemaExt, struct_summaries::StructSummary, structs::StructConverter};
+use super::{SchemaExt, structs::StructConverter};
 use crate::generator::{
   ast::{
     BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
@@ -39,15 +39,15 @@ impl MethodGenerator {
   ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
 
-    let mut summary_cache: BTreeMap<String, StructSummary> = inline_types
+    let mut struct_cache: BTreeMap<String, StructDef> = inline_types
       .iter()
       .filter_map(|t| match t {
-        RustType::Struct(s) => Some((s.name.to_string(), StructSummary::from(s))),
+        RustType::Struct(s) => Some((s.name.to_string(), s.clone())),
         _ => None,
       })
       .collect();
 
-    let eligible = self.collect_eligible_variants(variants, &mut summary_cache);
+    let eligible = self.collect_eligible_variants(variants, &mut struct_cache);
 
     if eligible.is_empty() {
       return vec![];
@@ -59,7 +59,7 @@ impl MethodGenerator {
   fn collect_eligible_variants(
     &self,
     variants: &[VariantDef],
-    summary_cache: &mut BTreeMap<String, StructSummary>,
+    struct_cache: &mut BTreeMap<String, StructDef>,
   ) -> Vec<(EnumVariantToken, EnumMethodKind)> {
     let mut eligible = vec![];
 
@@ -68,11 +68,11 @@ impl MethodGenerator {
         continue;
       };
 
-      let Some(summary) = self.resolve_struct_summary(type_ref, summary_cache) else {
+      let Some(struct_def) = self.resolve_struct_def(type_ref, struct_cache) else {
         continue;
       };
 
-      if let Some(method_kind) = Self::constructor_kind_for(type_ref, &variant.name, &summary) {
+      if let Some(method_kind) = Self::constructor_kind_for(type_ref, &variant.name, &struct_def) {
         eligible.push((variant.name.clone(), method_kind));
       }
     }
@@ -109,21 +109,24 @@ impl MethodGenerator {
   fn constructor_kind_for(
     type_ref: &TypeRef,
     variant_name: &EnumVariantToken,
-    summary: &StructSummary,
+    struct_def: &StructDef,
   ) -> Option<EnumMethodKind> {
-    if !summary.has_default || type_ref.is_array {
+    if !struct_def.has_default() || type_ref.is_array {
       return None;
     }
 
-    match summary.required_fields.len() {
+    let required_fields: Vec<_> = struct_def.required_fields().collect();
+    let user_fields: Vec<_> = struct_def.user_fields().collect();
+
+    match required_fields.len() {
       0 => {
-        if summary.user_fields.len() == 1 {
-          let (ref name, ref rust_type) = summary.user_fields[0];
+        if user_fields.len() == 1 {
+          let field = &user_fields[0];
           Some(EnumMethodKind::ParameterizedConstructor {
             variant_name: variant_name.clone(),
             wrapped_type: type_ref.clone(),
-            param_name: name.to_string(),
-            param_type: rust_type.clone(),
+            param_name: field.name.to_string(),
+            param_type: field.rust_type.clone(),
           })
         } else {
           Some(EnumMethodKind::SimpleConstructor {
@@ -133,34 +136,34 @@ impl MethodGenerator {
         }
       }
       1 => {
-        let (ref name, ref rust_type) = summary.required_fields[0];
+        let field = &required_fields[0];
         Some(EnumMethodKind::ParameterizedConstructor {
           variant_name: variant_name.clone(),
           wrapped_type: type_ref.clone(),
-          param_name: name.to_string(),
-          param_type: rust_type.clone(),
+          param_name: field.name.to_string(),
+          param_type: field.rust_type.clone(),
         })
       }
       _ => None,
     }
   }
 
-  fn resolve_struct_summary(
+  fn resolve_struct_def(
     &self,
     type_ref: &TypeRef,
-    summary_cache: &mut BTreeMap<String, StructSummary>,
-  ) -> Option<StructSummary> {
+    struct_cache: &mut BTreeMap<String, StructDef>,
+  ) -> Option<StructDef> {
     let base_name = type_ref.unboxed_base_type_name();
 
-    if let Some(summary) = summary_cache.get(&base_name) {
-      return Some(summary.clone());
+    if let Some(struct_def) = struct_cache.get(&base_name) {
+      return Some(struct_def.clone());
     }
 
     {
       let cache = self.context.cache.borrow();
-      if let Some(summary) = cache.get_struct_summary(&base_name) {
-        summary_cache.insert(base_name.clone(), summary.clone());
-        return Some(summary.clone());
+      if let Some(struct_def) = cache.get_struct_def(&base_name) {
+        struct_cache.insert(base_name.clone(), struct_def.clone());
+        return Some(struct_def.clone());
       }
     }
 
@@ -172,9 +175,8 @@ impl MethodGenerator {
     let struct_result = self.struct_converter.convert_struct(&base_name, schema, None).ok()?;
 
     if let RustType::Struct(s) = struct_result.result {
-      let summary = StructSummary::from(&s);
-      summary_cache.insert(base_name, summary.clone());
-      Some(summary)
+      struct_cache.insert(base_name, s.clone());
+      Some(s)
     } else {
       None
     }

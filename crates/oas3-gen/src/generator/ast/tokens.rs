@@ -3,15 +3,13 @@ use std::{
   str::FromStr,
 };
 
-use inflections::Inflect;
 use proc_macro2::{Span, TokenStream};
 use quote::{IdentFragment, ToTokens};
 pub use string_cache::DefaultAtom;
 use syn::{Ident, LitStr};
 
-use crate::generator::{
-  ast::RegexKey,
-  naming::identifiers::{sanitize, to_http_header_name, to_rust_const_name, to_rust_field_name, to_rust_type_name},
+use crate::generator::naming::identifiers::{
+  to_http_header_name, to_rust_const_name, to_rust_field_name, to_rust_type_name,
 };
 
 macro_rules! define_ident_token {
@@ -224,37 +222,6 @@ define_literal_token!(
   /// Token representing a header name literal
   HeaderNameToken => to_http_header_name
 );
-
-impl From<&RegexKey> for ConstToken {
-  fn from(key: &RegexKey) -> Self {
-    let joined = key
-      .parts()
-      .iter()
-      .map(|part| sanitize(part))
-      .collect::<Vec<_>>()
-      .join("_");
-    let mut ident = joined.to_constant_case();
-    if ident.starts_with(|c: char| c.is_ascii_digit()) {
-      ident.insert(0, '_');
-    }
-    ConstToken::new(format!("REGEX_{ident}"))
-  }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct HeaderToken {
-  pub const_token: ConstToken,
-  pub header_name: HeaderNameToken,
-}
-
-impl From<&str> for HeaderToken {
-  fn from(s: &str) -> Self {
-    Self {
-      const_token: ConstToken::from_raw(s),
-      header_name: HeaderNameToken::from_raw(s),
-    }
-  }
-}
 
 impl From<StructToken> for EnumToken {
   fn from(token: StructToken) -> Self {

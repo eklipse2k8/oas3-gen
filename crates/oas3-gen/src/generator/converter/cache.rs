@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::ObjectSchema;
 
-use super::{SchemaExt, hashing::CanonicalSchema, struct_summaries::StructSummary};
+use super::{SchemaExt, hashing::CanonicalSchema};
 use crate::generator::{
-  ast::{EnumToken, RustType, StructToken},
+  ast::{EnumToken, RustType, StructDef, StructToken},
   naming::{
     identifiers::{ensure_unique, to_rust_type_name},
     inference::InferenceExt,
@@ -113,17 +113,17 @@ impl GeneratedTypeStore {
 }
 
 #[derive(Default, Debug, Clone)]
-struct StructSummaryIndex {
-  summaries: BTreeMap<String, StructSummary>,
+struct StructDefIndex {
+  structs: BTreeMap<String, StructDef>,
 }
 
-impl StructSummaryIndex {
-  fn register(&mut self, type_name: &str, summary: StructSummary) {
-    self.summaries.insert(type_name.to_string(), summary);
+impl StructDefIndex {
+  fn register(&mut self, type_name: &str, struct_def: StructDef) {
+    self.structs.insert(type_name.to_string(), struct_def);
   }
 
-  fn get(&self, type_name: &str) -> Option<&StructSummary> {
-    self.summaries.get(type_name)
+  fn get(&self, type_name: &str) -> Option<&StructDef> {
+    self.structs.get(type_name)
   }
 }
 
@@ -134,7 +134,7 @@ impl StructSummaryIndex {
 pub(crate) struct SharedSchemaCache {
   identity: TypeIdentityCache,
   pub(crate) generated: GeneratedTypeStore,
-  summaries: StructSummaryIndex,
+  struct_defs: StructDefIndex,
 }
 
 impl SharedSchemaCache {
@@ -143,7 +143,7 @@ impl SharedSchemaCache {
     Self {
       identity: TypeIdentityCache::default(),
       generated: GeneratedTypeStore::default(),
-      summaries: StructSummaryIndex::default(),
+      struct_defs: StructDefIndex::default(),
     }
   }
 
@@ -287,13 +287,13 @@ impl SharedSchemaCache {
     self.generated.into_inner()
   }
 
-  /// Stores a struct summary for enum helper generation.
-  pub(crate) fn register_struct_summary(&mut self, type_name: &str, summary: StructSummary) {
-    self.summaries.register(type_name, summary);
+  /// Stores a struct definition for enum helper generation.
+  pub(crate) fn register_struct_def(&mut self, type_name: &str, struct_def: StructDef) {
+    self.struct_defs.register(type_name, struct_def);
   }
 
-  /// Retrieves a cached struct summary by type name.
-  pub(crate) fn get_struct_summary(&self, type_name: &str) -> Option<&StructSummary> {
-    self.summaries.get(type_name)
+  /// Retrieves a cached struct definition by type name.
+  pub(crate) fn get_struct_def(&self, type_name: &str) -> Option<&StructDef> {
+    self.struct_defs.get(type_name)
   }
 }

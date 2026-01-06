@@ -9,7 +9,6 @@ pub(crate) mod parameters;
 pub(crate) mod relaxed_enum;
 pub(crate) mod requests;
 pub(crate) mod responses;
-pub(crate) mod struct_summaries;
 pub(crate) mod structs;
 pub(crate) mod type_resolver;
 pub(crate) mod type_usage_recorder;

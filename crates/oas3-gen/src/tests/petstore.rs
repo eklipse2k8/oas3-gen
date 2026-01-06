@@ -1,13 +1,30 @@
+use http::HeaderMap;
 use validator::Validate;
 
 use crate::fixtures::petstore::*;
 
 #[test]
 fn test_list_pets_request_compiles() {
-  let request = ListPetsRequest::builder().limit(50).build();
+  let request = ListPetsRequest::builder()
+    .x_sort_order(ListCatsRequestHeaderXSortOrder::Asc)
+    .x_only(vec![ListPetsRequestHeaderXonly::Bird, ListPetsRequestHeaderXonly::Fish])
+    .limit(50)
+    .build();
   assert!(request.is_ok(), "request should be valid");
   let request = request.unwrap();
   assert_eq!(request.query.limit, Some(50), "limit should be 50");
+
+  let headers: HeaderMap = request.header.try_into().unwrap();
+  assert_eq!(
+    headers.get("x-sort-order").unwrap().to_str().unwrap(),
+    "asc",
+    "header map should contain x-sort-order"
+  );
+  assert_eq!(
+    headers.get("x-only").unwrap().to_str().unwrap(),
+    "bird,fish",
+    "header map should contain x-only values"
+  );
 }
 
 #[test]

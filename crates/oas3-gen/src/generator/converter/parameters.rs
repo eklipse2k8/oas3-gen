@@ -8,7 +8,7 @@ use oas3::spec::{
 };
 use serde_json::Value;
 
-use super::{TypeResolver, fields::FieldConverter};
+use super::{SchemaExt, TypeResolver, fields::FieldConverter};
 use crate::generator::{
   ast::{
     Documentation, FieldCollection as _, FieldDef, FieldNameToken, OuterAttr, ParameterLocation, ParsedPath, RustType,
@@ -186,7 +186,10 @@ impl ParameterConverter {
     };
 
     let schema = schema_ref.resolve(self.context.graph().spec())?;
-    let has_inline_enum = schema.enum_values.len() > 1;
+    let has_inline_enum = schema.enum_values.len() > 1
+      || schema
+        .inline_array_items(self.context.graph().spec())
+        .is_some_and(|items| items.enum_values.len() > 1);
 
     let type_resolver = TypeResolver::new(self.context.clone());
     let (type_ref, inline_types) = if has_inline_enum {

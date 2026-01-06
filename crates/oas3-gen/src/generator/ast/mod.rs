@@ -1,4 +1,5 @@
 mod client;
+pub mod constants;
 mod derives;
 mod documentation;
 pub mod lints;
@@ -13,7 +14,7 @@ pub(super) mod validation_attrs;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub use client::ClientDef;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
@@ -27,7 +28,7 @@ pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
 pub use serde_attrs::SerdeAttribute;
-pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
+pub use status_codes::StatusCodeToken;
 pub use tokens::{
   DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TypeAliasToken,
 };
@@ -35,7 +36,7 @@ pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 /// Discriminated enum variant mapping
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct DiscriminatedVariant {
   #[builder(default)]
   pub discriminator_values: Vec<String>,
@@ -53,7 +54,7 @@ pub enum SerdeMode {
 }
 
 /// Discriminated enum definition (uses macro for custom ser/de)
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct DiscriminatedEnumDef {
   pub name: EnumToken,
   #[builder(default)]
@@ -80,7 +81,7 @@ impl DiscriminatedEnumDef {
 }
 
 /// Response enum variant definition
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct ResponseVariant {
   pub variant_name: EnumVariantToken,
   #[builder(default)]
@@ -101,13 +102,13 @@ impl ResponseVariant {
   }
 }
 
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct ResponseVariantCategory {
   pub category: ContentCategory,
   pub variant: ResponseVariant,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseStatusCategory {
   Single(ResponseVariantCategory),
   ContentDispatch {
@@ -116,14 +117,14 @@ pub enum ResponseStatusCategory {
   },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusHandler {
   pub status_code: StatusCodeToken,
   pub dispatch: ResponseStatusCategory,
 }
 
 /// Response enum definition for operation responses
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct ResponseEnumDef {
   pub name: EnumToken,
   #[builder(default)]
@@ -134,7 +135,7 @@ pub struct ResponseEnumDef {
 }
 
 /// Top-level Rust type representation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RustType {
   Struct(StructDef),
   Enum(EnumDef),
@@ -151,6 +152,16 @@ impl RustType {
       RustType::TypeAlias(def) => def.name.to_atom(),
       RustType::DiscriminatedEnum(def) => def.name.to_atom(),
       RustType::ResponseEnum(def) => def.name.to_atom(),
+    }
+  }
+
+  pub fn type_priority(&self) -> u8 {
+    match self {
+      RustType::Struct(_) => 0,
+      RustType::ResponseEnum(_) => 1,
+      RustType::DiscriminatedEnum(_) => 2,
+      RustType::Enum(_) => 3,
+      RustType::TypeAlias(_) => 4,
     }
   }
 
@@ -263,14 +274,16 @@ impl ContentCategory {
       return Self::Json;
     };
 
-    match (media.ty.as_str(), media.subty.as_str()) {
-      ("multipart", _) => Self::Multipart,
-      ("text", "event-stream") => Self::EventStream,
-      ("text" | "application", "xml") => Self::Xml,
-      ("application", "x-www-form-urlencoded") => Self::FormUrlEncoded,
-      ("application", "json") => Self::Json,
-      ("image" | "audio" | "video", _) | ("application", "pdf" | "octet-stream") => Self::Binary,
-      ("application" | "text", _) => Self::Text,
+    let suffix = media.suffix.as_ref().map(|s| s.as_str());
+
+    match (media.ty.as_str(), media.subty.as_str(), suffix) {
+      ("multipart", _, _) => Self::Multipart,
+      ("text", "event-stream", _) => Self::EventStream,
+      ("text" | "application", "xml", _) | (_, _, Some("xml")) => Self::Xml,
+      ("application", "x-www-form-urlencoded", _) => Self::FormUrlEncoded,
+      ("application", "json", _) | (_, _, Some("json")) => Self::Json,
+      ("image" | "audio" | "video", _, _) | ("application", "pdf" | "octet-stream", _) => Self::Binary,
+      ("application" | "text", _, _) => Self::Text,
       _ => Self::Json,
     }
   }
@@ -300,7 +313,7 @@ impl EnumVariantToken {
 /// Stores the parsed category (for determining parsing strategy) and the schema
 /// type for this specific media type (since different content types can have
 /// different schemas).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseMediaType {
   pub category: ContentCategory,
   pub schema_type: Option<TypeRef>,
@@ -334,41 +347,6 @@ impl ResponseMediaType {
   }
 }
 
-pub(crate) struct ContentMediaTypes(BTreeMap<ContentCategory, Vec<ResponseMediaType>>);
-
-impl From<&[ResponseMediaType]> for ContentMediaTypes {
-  fn from(media_types: &[ResponseMediaType]) -> Self {
-    Self(
-      media_types
-        .iter()
-        .filter(|m| m.schema_type.is_some())
-        .fold(BTreeMap::new(), |mut acc, m| {
-          acc.entry(m.category).or_default().push(m.clone());
-          acc
-        }),
-    )
-  }
-}
-
-impl ContentMediaTypes {
-  pub(crate) fn is_empty(&self) -> bool {
-    self.0.is_empty()
-  }
-
-  pub(crate) fn requires_suffix(&self) -> bool {
-    self.0.len() > 1
-  }
-}
-
-impl IntoIterator for ContentMediaTypes {
-  type Item = (ContentCategory, Vec<ResponseMediaType>);
-  type IntoIter = std::collections::btree_map::IntoIter<ContentCategory, Vec<ResponseMediaType>>;
-
-  fn into_iter(self) -> Self::IntoIter {
-    self.0.into_iter()
-  }
-}
-
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct OperationBody {
   pub field_name: FieldNameToken,
@@ -393,7 +371,7 @@ pub enum StructKind {
 }
 
 /// Rust struct definition
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct StructDef {
   #[builder(into)]
   pub name: StructToken,
@@ -426,17 +404,21 @@ impl StructDef {
   pub fn required_fields(&self) -> impl Iterator<Item = &FieldDef> {
     self.fields.iter().filter(|f| f.is_required())
   }
+
+  pub fn user_fields(&self) -> impl Iterator<Item = &FieldDef> {
+    self.fields.iter().filter(|f| !f.doc_hidden)
+  }
 }
 
 /// Associated method definition for a struct
-#[derive(Debug, Clone, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Eq, bon::Builder)]
 pub struct StructMethod {
   pub name: MethodNameToken,
   pub docs: Documentation,
   pub kind: StructMethodKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructMethodKind {
   ParseResponse {
     response_enum: EnumToken,
@@ -449,14 +431,14 @@ pub enum StructMethodKind {
   },
 }
 
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct BuilderField {
   pub name: FieldNameToken,
   pub rust_type: TypeRef,
   pub owner_field: Option<FieldNameToken>,
 }
 
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct BuilderNestedStruct {
   pub field_name: FieldNameToken,
   pub struct_name: StructToken,
@@ -465,7 +447,7 @@ pub struct BuilderNestedStruct {
 }
 
 /// Associated method definition for an enum
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct EnumMethod {
   pub name: MethodNameToken,
   pub docs: Documentation,
@@ -482,7 +464,7 @@ impl EnumMethod {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
 pub enum EnumMethodKind {
   SimpleConstructor {
@@ -511,7 +493,7 @@ impl Default for EnumMethodKind {
 }
 
 /// Rust struct field definition
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct FieldDef {
   pub name: FieldNameToken,
   #[builder(default)]
@@ -611,7 +593,7 @@ impl FieldCollection for [FieldDef] {
 }
 
 /// Rust enum definition
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct EnumDef {
   pub name: EnumToken,
   pub docs: Documentation,
@@ -640,7 +622,7 @@ impl EnumDef {
 }
 
 /// Rust enum variant definition
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct VariantDef {
   pub name: EnumVariantToken,
   #[builder(default)]
@@ -681,7 +663,7 @@ impl VariantDef {
 }
 
 /// Enum variant content (Unit, Tuple, or Struct)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum VariantContent {
   #[default]
   Unit,
@@ -707,7 +689,7 @@ impl VariantContent {
 }
 
 /// Type alias definition
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct TypeAliasDef {
   pub name: TypeAliasToken,
   pub docs: Documentation,
