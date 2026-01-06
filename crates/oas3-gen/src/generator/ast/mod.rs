@@ -274,14 +274,16 @@ impl ContentCategory {
       return Self::Json;
     };
 
-    match (media.ty.as_str(), media.subty.as_str()) {
-      ("multipart", _) => Self::Multipart,
-      ("text", "event-stream") => Self::EventStream,
-      ("text" | "application", "xml") => Self::Xml,
-      ("application", "x-www-form-urlencoded") => Self::FormUrlEncoded,
-      ("application", "json") => Self::Json,
-      ("image" | "audio" | "video", _) | ("application", "pdf" | "octet-stream") => Self::Binary,
-      ("application" | "text", _) => Self::Text,
+    let suffix = media.suffix.as_ref().map(|s| s.as_str());
+
+    match (media.ty.as_str(), media.subty.as_str(), suffix) {
+      ("multipart", _, _) => Self::Multipart,
+      ("text", "event-stream", _) => Self::EventStream,
+      ("text" | "application", "xml", _) | (_, _, Some("xml")) => Self::Xml,
+      ("application", "x-www-form-urlencoded", _) => Self::FormUrlEncoded,
+      ("application", "json", _) | (_, _, Some("json")) => Self::Json,
+      ("image" | "audio" | "video", _, _) | ("application", "pdf" | "octet-stream", _) => Self::Binary,
+      ("application" | "text", _, _) => Self::Text,
       _ => Self::Json,
     }
   }
