@@ -205,6 +205,10 @@ oas3-gen list operations -i openapi.json
 
 This project is licensed under the MIT License. See the [LICENSE.md](LICENSE.md) file for details.
 
+```md
+Copyright (c) 2026 Individual contributors
+```
+
 ### Contribution
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more details on how to get started.
