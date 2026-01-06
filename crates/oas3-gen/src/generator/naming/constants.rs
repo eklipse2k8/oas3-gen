@@ -17,3 +17,5 @@ pub const REQUEST_SUFFIX: &str = "Request";
 pub const RESPONSE_ENUM_SUFFIX: &str = "Enum";
 pub const RESPONSE_PREFIX: &str = "Response";
 pub const RESPONSE_SUFFIX: &str = "Response";
+
+pub const DEFAULT_MEDIA_TYPE: &str = "application/json";

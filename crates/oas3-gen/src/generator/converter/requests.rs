@@ -8,11 +8,8 @@ use super::{
   parameters::{ConvertedParams, ParameterConverter},
 };
 use crate::generator::{
-  ast::{
-    Documentation, EnumToken, FieldDef, FieldNameToken, ResponseEnumDef, RustType, StructDef, StructKind, StructToken,
-    TypeRef,
-  },
-  converter::{ConverterContext, responses::build_parse_response_method},
+  ast::{Documentation, FieldDef, FieldNameToken, RustType, StructDef, StructKind, StructMethod, StructToken, TypeRef},
+  converter::ConverterContext,
   naming::{
     constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
     identifiers::to_rust_type_name,
@@ -37,14 +34,14 @@ pub(crate) struct RequestOutput {
 /// a complete request struct with nested parameter structs.
 #[derive(Debug, Clone)]
 pub(crate) struct RequestConverter {
-  context: Rc<ConverterContext>,
+  param_converter: ParameterConverter,
 }
 
 impl RequestConverter {
   /// Creates a new request converter.
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
-      context: context.clone(),
+      param_converter: ParameterConverter::new(context),
     }
   }
 
@@ -56,10 +53,9 @@ impl RequestConverter {
     name: &str,
     entry: &OperationEntry,
     body_info: &BodyInfo,
-    response_enum: Option<(&EnumToken, &ResponseEnumDef)>,
+    extra_method: Option<StructMethod>,
   ) -> anyhow::Result<RequestOutput> {
-    let param_converter = ParameterConverter::new(&self.context);
-    let params = param_converter.convert_all(name, &entry.path, &entry.operation)?;
+    let params = self.param_converter.convert_all(name, &entry.path, &entry.operation)?;
 
     let ConvertedParams {
       mut main_fields,
@@ -73,13 +69,10 @@ impl RequestConverter {
       main_fields.push(body_field);
     }
 
-    let mut methods = vec![];
-    if let Some((enum_token, def)) = response_enum {
-      methods.push(build_parse_response_method(enum_token, &def.variants));
-    }
-    if let Some(builder) = MethodGenerator::build_builder_method(&nested_structs, &main_fields) {
-      methods.push(builder);
-    }
+    let methods = extra_method
+      .into_iter()
+      .chain(MethodGenerator::build_builder_method(&nested_structs, &main_fields))
+      .collect::<Vec<_>>();
 
     let main_struct = StructDef::builder()
       .name(StructToken::new(name))

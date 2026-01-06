@@ -14,7 +14,7 @@ pub(super) mod validation_attrs;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub use client::ClientDef;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
@@ -28,7 +28,7 @@ pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
 pub use serde_attrs::SerdeAttribute;
-pub use status_codes::{StatusCodeToken, status_code_to_variant_name};
+pub use status_codes::StatusCodeToken;
 pub use tokens::{
   DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TypeAliasToken,
 };
@@ -342,41 +342,6 @@ impl ResponseMediaType {
   #[must_use]
   pub fn has_event_stream(media_types: &[Self]) -> bool {
     media_types.iter().any(|m| m.category == ContentCategory::EventStream)
-  }
-}
-
-pub(crate) struct ContentMediaTypes(BTreeMap<ContentCategory, Vec<ResponseMediaType>>);
-
-impl From<&[ResponseMediaType]> for ContentMediaTypes {
-  fn from(media_types: &[ResponseMediaType]) -> Self {
-    Self(
-      media_types
-        .iter()
-        .filter(|m| m.schema_type.is_some())
-        .fold(BTreeMap::new(), |mut acc, m| {
-          acc.entry(m.category).or_default().push(m.clone());
-          acc
-        }),
-    )
-  }
-}
-
-impl ContentMediaTypes {
-  pub(crate) fn is_empty(&self) -> bool {
-    self.0.is_empty()
-  }
-
-  pub(crate) fn requires_suffix(&self) -> bool {
-    self.0.len() > 1
-  }
-}
-
-impl IntoIterator for ContentMediaTypes {
-  type Item = (ContentCategory, Vec<ResponseMediaType>);
-  type IntoIter = std::collections::btree_map::IntoIter<ContentCategory, Vec<ResponseMediaType>>;
-
-  fn into_iter(self) -> Self::IntoIter {
-    self.0.into_iter()
   }
 }
 

@@ -1,6 +1,4 @@
-use oas3::spec::Response;
-
-use crate::generator::ast::{StatusCodeToken, status_codes::status_code_to_variant_name};
+use crate::generator::ast::StatusCodeToken;
 
 #[test]
 fn test_parse_openapi_specific_codes() {
@@ -167,13 +165,6 @@ fn test_is_success() {
   assert!(!StatusCodeToken::Default.is_success());
 }
 
-fn make_response(description: Option<&str>) -> Response {
-  Response {
-    description: description.map(ToString::to_string),
-    ..Default::default()
-  }
-}
-
 #[test]
 fn test_known_status_codes_variant_generation() {
   let cases = [
@@ -185,7 +176,7 @@ fn test_known_status_codes_variant_generation() {
     (StatusCodeToken::ImUsed226, "ImUsed"),
   ];
   for (token, expected) in cases {
-    let result = status_code_to_variant_name(token, &make_response(None));
+    let result = token.to_variant_token();
     assert_eq!(result.to_string(), expected, "failed for {token:?}");
   }
 }
@@ -200,26 +191,29 @@ fn test_wildcard_status_codes_variant_generation() {
     (StatusCodeToken::ServerError5XX, "ServerError"),
   ];
   for (token, expected) in cases {
-    let result = status_code_to_variant_name(token, &make_response(None));
+    let result = token.to_variant_token();
     assert_eq!(result.to_string(), expected, "failed for {token:?}");
   }
 }
 
 #[test]
 fn test_default_status_code_variant_generation() {
-  let result = status_code_to_variant_name(StatusCodeToken::Default, &make_response(None));
+  let result = StatusCodeToken::Default.to_variant_token();
   assert_eq!(result.to_string(), "Unknown");
 }
 
 #[test]
-fn test_unknown_with_description_variant_generation() {
-  let response = make_response(Some("I'm a teapot"));
-  let result = status_code_to_variant_name(StatusCodeToken::Unknown(418), &response);
-  assert_eq!(result.to_string(), "ImATeapot");
-}
-
-#[test]
-fn test_unknown_without_description_variant_generation() {
-  let result = status_code_to_variant_name(StatusCodeToken::Unknown(418), &make_response(None));
-  assert_eq!(result.to_string(), "Status418");
+fn test_unknown_status_code_variant_generation() {
+  assert_eq!(
+    StatusCodeToken::Unknown(418).to_variant_token().to_string(),
+    "Status418"
+  );
+  assert_eq!(
+    StatusCodeToken::Unknown(599).to_variant_token().to_string(),
+    "Status599"
+  );
+  assert_eq!(
+    StatusCodeToken::Unknown(104).to_variant_token().to_string(),
+    "Status104"
+  );
 }

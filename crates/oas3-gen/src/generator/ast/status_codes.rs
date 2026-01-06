@@ -4,9 +4,7 @@ use std::{
   str::FromStr,
 };
 
-use oas3::spec::Response;
-
-use crate::generator::{ast::EnumVariantToken, naming::identifiers::to_rust_type_name};
+use crate::generator::ast::EnumVariantToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum StatusCodeToken {
@@ -410,20 +408,11 @@ impl Display for StatusCodeToken {
   }
 }
 
-pub fn status_code_to_variant_name(status_code: StatusCodeToken, response: &Response) -> EnumVariantToken {
-  if let StatusCodeToken::Unknown(code) = status_code {
-    if let Some(desc) = &response.description {
-      let sanitized = desc
-        .chars()
-        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-        .collect::<String>();
-      let words: Vec<&str> = sanitized.split_whitespace().take(3).collect();
-      if !words.is_empty() {
-        return EnumVariantToken::new(to_rust_type_name(&words.join("_")));
-      }
+impl StatusCodeToken {
+  pub fn to_variant_token(self) -> EnumVariantToken {
+    match self {
+      Self::Unknown(code) => EnumVariantToken::new(format!("Status{code}")),
+      _ => EnumVariantToken::new(self.variant_name()),
     }
-    return EnumVariantToken::new(format!("Status{code}"));
   }
-
-  EnumVariantToken::new(status_code.variant_name())
 }

@@ -60,17 +60,13 @@ impl<'a> OperationConverter<'a> {
     let response_name = generate_unique_response_name(&base_name, |n| self.schema_converter.contains(n));
     let mut response_enum = response_converter.build_enum(&response_name, &entry.operation, &entry.path);
 
-    let response_enum_ref = response_enum
+    let parse_response_method = response_enum
       .as_ref()
-      .map(|def| (EnumToken::new(def.name.to_string()), def));
+      .map(|def| ResponseConverter::build_parse_method(&EnumToken::new(def.name.to_string()), &def.variants));
 
     let request_name = generate_unique_request_name(&base_name, |n| self.schema_converter.contains(n));
-    let request_output = RequestConverter::new(&self.context).build(
-      &request_name,
-      entry,
-      &body_info,
-      response_enum_ref.as_ref().map(|(t, d)| (t, *d)),
-    )?;
+    let request_output =
+      RequestConverter::new(&self.context).build(&request_name, entry, &body_info, parse_response_method)?;
 
     warnings.extend(request_output.warnings.clone());
     let parameters = request_output.parameter_fields.clone();

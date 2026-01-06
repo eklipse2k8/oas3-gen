@@ -6,13 +6,13 @@ use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response
 use super::{ConverterContext, TypeResolver, TypeUsageRecorder};
 use crate::generator::{
   ast::{
-    ContentCategory, ContentMediaTypes, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef,
-    ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive,
-    StatusCodeToken, StatusHandler, StructMethod, StructMethodKind, TypeRef, status_code_to_variant_name,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
+    ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler,
+    StructMethod, StructMethodKind, TypeRef,
   },
   converter::SchemaExt as _,
   naming::{
-    constants::{DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
+    constants::{DEFAULT_MEDIA_TYPE, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
     identifiers::to_rust_type_name,
     inference::InferenceExt,
     responses as naming_responses,
@@ -31,13 +31,15 @@ pub(crate) struct ResponseMetadata {
 /// Handles status codes, media types, and schema resolution for each response.
 #[derive(Debug, Clone)]
 pub(crate) struct ResponseConverter {
+  type_resolver: TypeResolver,
   context: Rc<ConverterContext>,
 }
 
 impl ResponseConverter {
   /// Creates a new response converter.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
-    Self { context }
+    let type_resolver = TypeResolver::new(context.clone());
+    Self { type_resolver, context }
   }
 
   /// Builds a response enum for an operation.
@@ -48,32 +50,29 @@ impl ResponseConverter {
     let responses = operation.responses.as_ref()?;
     let base_name = to_rust_type_name(name);
 
-    let mut variants = vec![];
-    for (status_str, resp_ref) in responses {
-      let Ok(response) = resp_ref.resolve(spec) else {
-        continue;
-      };
+    let variants = responses
+      .iter()
+      .filter_map(|(status_str, resp_ref)| {
+        let response = resp_ref.resolve(spec).ok()?;
+        let status_code: StatusCodeToken = status_str.parse().unwrap_or(StatusCodeToken::Default);
+        let media_types = Self::with_default_media_type(
+          self
+            .extract_media_types(&response, path, status_code)
+            .unwrap_or_default(),
+        );
 
-      let status_code = status_str.parse().unwrap_or(StatusCodeToken::Default);
-      let variant_name = status_code_to_variant_name(status_code, &response);
+        Some(Self::split_variants_by_content_type(
+          status_code,
+          &status_code.to_variant_token(),
+          response.description.as_ref(),
+          &media_types,
+        ))
+      })
+      .flatten()
+      .collect::<Vec<_>>();
 
-      let mut media_types = self
-        .extract_media_types(&response, path, status_code)
-        .unwrap_or_default();
+    let variants = Self::with_default_variant(variants);
 
-      if media_types.is_empty() {
-        media_types.push(ResponseMediaType::new("application/json"));
-      }
-
-      variants.extend(split_by_content_type(
-        status_code,
-        &variant_name,
-        response.description.as_ref(),
-        &media_types,
-      ));
-    }
-
-    let variants = ensure_default_variant(variants);
     if variants.is_empty() {
       return None;
     }
@@ -83,11 +82,27 @@ impl ResponseConverter {
         .name(EnumToken::new(&base_name))
         .docs(Documentation::from_lines([format!(
           "Response types for {}",
-          operation.operation_id.as_ref()?
+          operation.operation_id.as_deref().unwrap_or(&base_name)
         )]))
         .variants(variants)
         .build(),
     )
+  }
+
+  pub(crate) fn build_parse_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
+    let (status_handlers, default_handler) = Self::build_status_handlers(variants);
+
+    StructMethod::builder()
+      .name(MethodNameToken::from_raw("parse_response"))
+      .docs(Documentation::from_lines([
+        "Parse the HTTP response into the response enum.",
+      ]))
+      .kind(StructMethodKind::ParseResponse {
+        response_enum: response_enum.clone(),
+        status_handlers,
+        default_handler,
+      })
+      .build()
   }
 
   /// Extracts response metadata for operation info.
@@ -98,16 +113,12 @@ impl ResponseConverter {
     let type_name = naming_responses::extract_response_type_name(spec, operation);
     let response_types = naming_responses::extract_all_response_types(spec, operation);
 
-    let media_types: Vec<_> = naming_responses::extract_all_response_content_types(spec, operation)
-      .into_iter()
-      .map(|ct| ResponseMediaType::new(&ct))
-      .collect();
-
-    let media_types = if media_types.is_empty() {
-      vec![ResponseMediaType::new("application/json")]
-    } else {
-      media_types
-    };
+    let media_types = Self::with_default_media_type(
+      naming_responses::extract_all_response_content_types(spec, operation)
+        .into_iter()
+        .map(|ct| ResponseMediaType::new(&ct))
+        .collect(),
+    );
 
     if let Some(ref name) = type_name {
       usage.mark_response(name);
@@ -155,11 +166,11 @@ impl ResponseConverter {
       ObjectOrReference::Ref { ref_path, .. } => {
         Ok(SchemaRegistry::parse_ref(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
       }
-      ObjectOrReference::Object(schema) => self.resolve_inline_response_schema(schema, path, status_code),
+      ObjectOrReference::Object(schema) => self.resolve_inline_schema(schema, path, status_code),
     }
   }
 
-  fn resolve_inline_response_schema(
+  fn resolve_inline_schema(
     &self,
     schema: &ObjectSchema,
     path: &str,
@@ -171,11 +182,9 @@ impl ResponseConverter {
       return Ok(None);
     }
 
-    let type_resolver = TypeResolver::new(self.context.clone());
-
     if schema.properties.is_empty()
       && !has_compound
-      && let Ok(primitive) = type_resolver.resolve_type(schema)
+      && let Ok(primitive) = self.type_resolver.resolve_type(schema)
       && !matches!(primitive.base_type, RustPrimitive::Custom(_))
     {
       return Ok(Some(primitive));
@@ -188,142 +197,142 @@ impl ResponseConverter {
     };
 
     let base_name = effective.infer_name_from_context(path, status_code.as_str());
-    let Some(output) = type_resolver.try_inline_schema(schema, &base_name)? else {
+    let Some(output) = self.type_resolver.try_inline_schema(schema, &base_name)? else {
       return Ok(None);
     };
 
     Ok(Some(TypeRef::new(output.type_name)))
   }
-}
 
-fn split_by_content_type(
-  status_code: StatusCodeToken,
-  base_name: &EnumVariantToken,
-  description: Option<&String>,
-  media_types: &[ResponseMediaType],
-) -> Vec<ResponseVariant> {
-  let grouped: ContentMediaTypes = media_types.into();
-
-  if grouped.is_empty() {
-    return vec![
-      ResponseVariant::builder()
-        .status_code(status_code)
-        .variant_name(base_name.clone())
-        .maybe_description(description.cloned())
-        .media_types(media_types.to_vec())
-        .build(),
-    ];
-  }
-
-  let needs_suffix = grouped.requires_suffix();
-
-  grouped
-    .into_iter()
-    .map(|(category, types)| {
-      let schema = types.first().and_then(|m| m.schema_type.clone());
-      let schema = wrap_event_stream(category, schema);
-
-      ResponseVariant::builder()
-        .status_code(status_code)
-        .variant_name(if needs_suffix {
-          base_name.clone().with_content_suffix(category)
-        } else {
-          base_name.clone()
-        })
-        .maybe_description(description.cloned())
-        .media_types(types)
-        .maybe_schema_type(schema)
-        .build()
-    })
-    .collect()
-}
-
-fn wrap_event_stream(category: ContentCategory, schema: Option<TypeRef>) -> Option<TypeRef> {
-  match (category, schema) {
-    (ContentCategory::EventStream, Some(inner)) => Some(TypeRef::new(format!(
-      "oas3_gen_support::EventStream<{}>",
-      inner.to_rust_type()
-    ))),
-    (_, schema) => schema,
-  }
-}
-
-fn ensure_default_variant(mut variants: Vec<ResponseVariant>) -> Vec<ResponseVariant> {
-  if variants.is_empty() {
-    return variants;
-  }
-
-  if !variants.iter().any(|v| v.status_code.is_default()) {
-    variants.push(
-      ResponseVariant::builder()
-        .variant_name(EnumVariantToken::from_raw(DEFAULT_RESPONSE_VARIANT))
-        .description(DEFAULT_RESPONSE_DESCRIPTION.to_string())
-        .media_types(vec![ResponseMediaType::new("application/json")])
-        .build(),
-    );
-  }
-
-  variants
-}
-
-pub(crate) fn build_parse_response_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
-  let (status_handlers, default_handler) = build_status_handlers(variants);
-
-  StructMethod::builder()
-    .name(MethodNameToken::from_raw("parse_response"))
-    .docs(Documentation::from_lines([
-      "Parse the HTTP response into the response enum.",
-    ]))
-    .kind(StructMethodKind::ParseResponse {
-      response_enum: response_enum.clone(),
-      status_handlers,
-      default_handler,
-    })
-    .build()
-}
-
-fn build_status_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseVariantCategory>) {
-  let mut grouped = IndexMap::<StatusCodeToken, Vec<&ResponseVariant>>::new();
-  let mut first_default = None;
-
-  for variant in variants {
-    if variant.status_code.is_default() {
-      if first_default.is_none() {
-        first_default = Some(variant);
-      }
+  fn with_default_media_type(media_types: Vec<ResponseMediaType>) -> Vec<ResponseMediaType> {
+    if media_types.is_empty() {
+      vec![ResponseMediaType::new(DEFAULT_MEDIA_TYPE)]
     } else {
-      grouped.entry(variant.status_code).or_default().push(variant);
+      media_types
     }
   }
 
-  let status_handlers = grouped
-    .into_iter()
-    .map(|(code, group)| StatusHandler {
-      status_code: code,
-      dispatch: ResponseStatusCategory::from_variants(&group),
-    })
-    .collect();
+  fn with_default_variant(variants: Vec<ResponseVariant>) -> Vec<ResponseVariant> {
+    if variants.is_empty() || variants.iter().any(|v| v.status_code.is_default()) {
+      return variants;
+    }
 
-  let default_handler = first_default.map(|v| ResponseVariantCategory {
-    category: ResponseMediaType::primary_category(&v.media_types),
-    variant: v.clone(),
-  });
+    variants
+      .into_iter()
+      .chain(std::iter::once(
+        ResponseVariant::builder()
+          .variant_name(EnumVariantToken::from_raw(DEFAULT_RESPONSE_VARIANT))
+          .description(DEFAULT_RESPONSE_DESCRIPTION.to_string())
+          .media_types(vec![ResponseMediaType::new(DEFAULT_MEDIA_TYPE)])
+          .build(),
+      ))
+      .collect()
+  }
 
-  (status_handlers, default_handler)
+  fn split_variants_by_content_type(
+    status_code: StatusCodeToken,
+    base_name: &EnumVariantToken,
+    description: Option<&String>,
+    media_types: &[ResponseMediaType],
+  ) -> Vec<ResponseVariant> {
+    let grouped = Self::group_media_types_by_schema(media_types);
+
+    if grouped.is_empty() {
+      return vec![
+        ResponseVariant::builder()
+          .status_code(status_code)
+          .variant_name(base_name.clone())
+          .maybe_description(description.cloned())
+          .media_types(media_types.to_vec())
+          .build(),
+      ];
+    }
+
+    let needs_suffix = grouped.len() > 1;
+
+    grouped
+      .into_iter()
+      .map(|(schema_key, types)| {
+        let primary_category = types.first().map_or(ContentCategory::Json, |m| m.category);
+
+        ResponseVariant::builder()
+          .status_code(status_code)
+          .variant_name(if needs_suffix {
+            base_name.clone().with_content_suffix(primary_category)
+          } else {
+            base_name.clone()
+          })
+          .maybe_description(description.cloned())
+          .media_types(types)
+          .maybe_schema_type(Some(TypeRef::new(schema_key)))
+          .build()
+      })
+      .collect()
+  }
+
+  fn group_media_types_by_schema(media_types: &[ResponseMediaType]) -> Vec<(String, Vec<ResponseMediaType>)> {
+    media_types
+      .iter()
+      .filter_map(|media_type| {
+        let schema = media_type.schema_type.as_ref()?;
+        let key = match media_type.category {
+          ContentCategory::EventStream => format!("oas3_gen_support::EventStream<{}>", schema.to_rust_type()),
+          _ => schema.to_rust_type(),
+        };
+        Some((key, media_type.clone()))
+      })
+      .fold(
+        IndexMap::<String, Vec<ResponseMediaType>>::new(),
+        |mut groups, (key, item)| {
+          groups.entry(key).or_default().push(item);
+          groups
+        },
+      )
+      .into_iter()
+      .collect()
+  }
+
+  fn build_status_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseVariantCategory>) {
+    let (default_variants, status_variants): (Vec<_>, Vec<_>) =
+      variants.iter().partition(|v| v.status_code.is_default());
+
+    let status_handlers = status_variants
+      .into_iter()
+      .fold(
+        IndexMap::<StatusCodeToken, Vec<&ResponseVariant>>::new(),
+        |mut acc, v| {
+          acc.entry(v.status_code).or_default().push(v);
+          acc
+        },
+      )
+      .into_iter()
+      .map(|(code, group)| StatusHandler {
+        status_code: code,
+        dispatch: ResponseStatusCategory::from_variants(&group),
+      })
+      .collect();
+
+    let default_handler = default_variants.first().map(|v| ResponseVariantCategory {
+      category: ResponseMediaType::primary_category(&v.media_types),
+      variant: (*v).clone(),
+    });
+
+    (status_handlers, default_handler)
+  }
 }
 
 impl ResponseStatusCategory {
   #[must_use]
   pub fn from_variants(variants: &[&ResponseVariant]) -> Self {
     if let [variant] = variants {
-      let unique = variant
+      let unique_categories = variant
         .media_types
         .iter()
         .map(|m| m.category)
         .collect::<HashSet<_>>()
         .len();
 
-      if unique <= 1 {
+      if unique_categories <= 1 {
         return Self::Single(
           ResponseVariantCategory::builder()
             .category(ResponseMediaType::primary_category(&variant.media_types))
@@ -338,38 +347,36 @@ impl ResponseStatusCategory {
 
   #[must_use]
   pub(crate) fn from_content_types(variants: &[&ResponseVariant]) -> Self {
-    let mut seen = HashSet::new();
-
-    let (event_streams, others) = variants
+    let all_categories = variants
       .iter()
       .flat_map(|variant| {
-        let default = variant
+        let default_category = variant
           .media_types
           .is_empty()
           .then(|| ResponseMediaType::primary_category(&[]));
 
-        let explicit = variant.media_types.iter().map(|m| m.category);
+        let explicit_categories = variant.media_types.iter().map(|m| m.category);
 
-        default
+        default_category
           .into_iter()
-          .chain(explicit)
-          .map(move |category| (category, *variant))
+          .chain(explicit_categories)
+          .map(move |category| (category, variant.variant_name.as_str(), (*variant).clone()))
       })
-      .filter_map(|(category, variant)| {
-        if seen.insert((category, variant.variant_name.as_str())) {
-          Some(ResponseVariantCategory {
-            category,
-            variant: variant.clone(),
-          })
-        } else {
-          None
-        }
-      })
+      .fold(
+        (HashSet::new(), Vec::new()),
+        |(mut seen, mut result), (category, name, variant)| {
+          if seen.insert((category, name)) {
+            result.push(ResponseVariantCategory { category, variant });
+          }
+          (seen, result)
+        },
+      )
+      .1;
+
+    let (streams, variants): (Vec<_>, Vec<_>) = all_categories
+      .into_iter()
       .partition(|c| c.category == ContentCategory::EventStream);
 
-    Self::ContentDispatch {
-      streams: event_streams,
-      variants: others,
-    }
+    Self::ContentDispatch { streams, variants }
   }
 }
