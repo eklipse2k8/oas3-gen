@@ -2,7 +2,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.23.7/status.svg)](https://deps.rs/crate/oas3-gen/0.23.7)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.24.0/status.svg)](https://deps.rs/crate/oas3-gen/0.24.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.2?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.2.md)
 <!-- prettier-ignore-end -->
@@ -204,6 +204,10 @@ oas3-gen list operations -i openapi.json
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE.md](LICENSE.md) file for details.
+
+```md
+Copyright (c) 2026 Individual contributors
+```
 
 ### Contribution
 
