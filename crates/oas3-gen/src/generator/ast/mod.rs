@@ -274,7 +274,7 @@ impl ContentCategory {
       return Self::Json;
     };
 
-    let suffix = media.suffix.as_ref().map(|s| s.as_str());
+    let suffix = media.suffix.as_ref().map(mediatype::Name::as_str);
 
     match (media.ty.as_str(), media.subty.as_str(), suffix) {
       ("multipart", _, _) => Self::Multipart,

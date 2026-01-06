@@ -48,7 +48,7 @@ tokio.workspace = true
 
 [dev-dependencies]
 oas3-gen-support.workspace = true
-reqwest = { workspace = true, features = ["json", "multipart", "native-tls-alpn", "stream"] }
+reqwest = { workspace = true, features = ["json", "multipart", "http2", "native-tls", "query", "stream"] }
 serde_with.workspace = true
 tempfile.workspace = true
 uuid.workspace = true

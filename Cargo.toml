@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.23.7"
+version = "0.24.0"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -37,7 +37,7 @@ split-debuginfo = "unpacked"
 
 [workspace.dependencies]
 # Workspace Members
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.23.7" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.24.0" }
 
 # External Dependencies
 any_ascii = { version = "0.3" }
@@ -65,7 +65,7 @@ proc-macro2 = { version = "1.0" }
 quick-xml = { version = ">=0.38", features = ["serde", "serialize"] }
 quote = { version = "1.0" }
 regex = { version = "1.12" }
-reqwest = { version = "0.12", default-features = false }
+reqwest = { version = "0.13", default-features = false }
 eventsource-stream = { version = "0.2" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
