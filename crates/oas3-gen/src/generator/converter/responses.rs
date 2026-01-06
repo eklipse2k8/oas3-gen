@@ -363,7 +363,7 @@ impl ResponseStatusCategory {
           .map(move |category| (category, variant.variant_name.as_str(), (*variant).clone()))
       })
       .fold(
-        (HashSet::new(), Vec::new()),
+        (HashSet::new(), vec![]),
         |(mut seen, mut result), (category, name, variant)| {
           if seen.insert((category, name)) {
             result.push(ResponseVariantCategory { category, variant });

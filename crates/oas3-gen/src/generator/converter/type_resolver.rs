@@ -568,7 +568,7 @@ impl TypeResolver {
   }
 
   pub(crate) fn discriminated_enum(&self, name: &str, schema: &ObjectSchema, fallback_type: &str) -> Result<RustType> {
-    DiscriminatorConverter::new(self.context.clone()).build_enum(name, schema, fallback_type)
+    DiscriminatorConverter::new(self.context.clone()).build_base_discriminated_enum(name, schema, fallback_type)
   }
 
   pub(crate) fn try_inline_schema(&self, schema: &ObjectSchema, base_name: &str) -> Result<Option<InlineSchemaOutput>> {

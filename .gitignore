@@ -10,6 +10,8 @@
 
 # No custom agent settings
 .claude/settings.local.json
+.opencode/
+opencode.*
 
 # No IDE files
 .idea/

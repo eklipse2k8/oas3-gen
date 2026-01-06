@@ -402,6 +402,10 @@ impl StructDef {
   pub fn required_fields(&self) -> impl Iterator<Item = &FieldDef> {
     self.fields.iter().filter(|f| f.is_required())
   }
+
+  pub fn user_fields(&self) -> impl Iterator<Item = &FieldDef> {
+    self.fields.iter().filter(|f| !f.doc_hidden)
+  }
 }
 
 /// Associated method definition for a struct

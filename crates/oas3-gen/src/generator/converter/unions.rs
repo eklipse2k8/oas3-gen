@@ -144,7 +144,7 @@ impl UnionConverter {
     };
 
     let main_enum = if let Some(discriminated) =
-      DiscriminatorConverter::try_from_variants(name, schema, &variants, methods.clone())
+      DiscriminatorConverter::try_upgrade_to_discriminated(name, schema, &variants, methods.clone())
     {
       discriminated
     } else {
