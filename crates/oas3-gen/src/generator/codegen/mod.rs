@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Context as _;
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::ast::{
   ClientDef, LintConfig, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind, ValidationAttribute,
-  tokens::{ConstToken, HeaderToken},
+  tokens::ConstToken,
 };
+use crate::generator::ast::constants::HttpHeaderRef;
 
 pub mod attributes;
 pub mod client;
@@ -93,9 +93,9 @@ pub fn generate_source(
 }
 
 pub(crate) fn generate(types: &[RustType], visibility: Visibility) -> TokenStream {
-  let ordered = deduplicate_and_order_types(types);
+  let ordered = sort_and_dedup_types(types);
   let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
-  let header_consts = constants::generate_header_constants(&collect_header_tokens(&ordered));
+  let header_consts = constants::generate_header_constants(&unique_header_tokens(&ordered));
 
   let mut needs_serialize = false;
   let mut needs_deserialize = false;
@@ -135,58 +135,35 @@ pub(crate) fn generate(types: &[RustType], visibility: Visibility) -> TokenStrea
   }
 }
 
-fn deduplicate_and_order_types<'a>(types: &'a [RustType]) -> Vec<&'a RustType> {
-  let mut map: BTreeMap<String, &'a RustType> = BTreeMap::new();
-  for ty in types {
-    let name = ty.type_name().to_string();
+fn sort_and_dedup_types(types: &[RustType]) -> Vec<RustType> {
+  let mut types = types.to_vec();
 
-    if let Some(existing) = map.get(&name) {
-      let existing_priority = type_priority(existing);
-      let new_priority = type_priority(ty);
+  // Sort by name (primary), then priority (secondary, lower = better)
+  types.sort_by(|a, b| {
+    a.type_name()
+      .cmp(&b.type_name())
+      .then_with(|| a.type_priority().cmp(&b.type_priority()))
+  });
 
-      if new_priority < existing_priority {
-        map.insert(name, ty);
-      }
-    } else {
-      map.insert(name, ty);
-    }
-  }
-  map.into_values().collect()
+  // Dedup keeps first of each name group (which has better priority)
+  types.dedup_by(|a, b| a.type_name() == b.type_name());
+
+  types
 }
 
-fn collect_header_tokens(types: &[&RustType]) -> Vec<HeaderToken> {
-  let mut seen: BTreeSet<String> = BTreeSet::new();
-  let mut headers = vec![];
-
-  for rust_type in types {
-    let RustType::Struct(def) = rust_type else {
-      continue;
-    };
-
-    if !matches!(def.kind, StructKind::HeaderParams) {
-      continue;
-    }
-
-    for field in &def.fields {
-      if let Some(original_name) = &field.original_name
-        && seen.insert(original_name.clone())
-      {
-        headers.push(HeaderToken::from(original_name.as_str()));
-      }
-    }
-  }
-
-  headers
-}
-
-fn type_priority(rust_type: &RustType) -> u8 {
-  match rust_type {
-    RustType::Struct(_) => 0,
-    RustType::ResponseEnum(_) => 1,
-    RustType::DiscriminatedEnum(_) => 2,
-    RustType::Enum(_) => 3,
-    RustType::TypeAlias(_) => 4,
-  }
+fn unique_header_tokens(types: &[RustType]) -> Vec<HttpHeaderRef> {
+  types
+    .iter()
+    .filter_map(|t| match t {
+      RustType::Struct(def) if def.kind == StructKind::HeaderParams => Some(def),
+      _ => None,
+    })
+    .flat_map(|def| &def.fields)
+    .filter_map(|field| field.original_name.as_ref())
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .map(|name| HttpHeaderRef::from(name.as_str()))
+    .collect()
 }
 
 fn generate_type(
@@ -201,8 +178,4 @@ fn generate_type(
     RustType::DiscriminatedEnum(def) => enums::DiscriminatedEnumGenerator::new(def, visibility).generate(),
     RustType::ResponseEnum(def) => enums::ResponseEnumGenerator::new(def, visibility).generate(),
   }
-}
-
-pub(crate) fn parse_type(type_name: &str) -> anyhow::Result<syn::Type> {
-  syn::parse_str(type_name).context("failed to parse type `{type_name}`")
 }

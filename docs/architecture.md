@@ -217,7 +217,6 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **serde** (1.0): Serialization framework
 - **serde_json** (1.0): JSON with order preservation
 - **serde_with** (3.15): Enhanced serde utilities and chrono support
-- **serde_plain** (1.0): Plain text serialization
 - **serde_path_to_error** (0.1): Detailed deserialization error paths
 - **json-canon** (0.1): Canonical JSON representation
 

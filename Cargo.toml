@@ -70,7 +70,6 @@ eventsource-stream = { version = "0.2" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }
-serde_plain = { version = "1.0" }
 serde_with = { version = "3.15", features = ["chrono"] }
 string_cache = { version = "0.9", features = ["serde"] }
 strum = { version = "0.27", features = ["derive"] }

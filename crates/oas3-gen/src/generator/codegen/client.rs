@@ -4,12 +4,9 @@ use quote::{ToTokens, format_ident, quote};
 use syn::LitStr;
 
 use super::Visibility;
-use crate::generator::{
-  ast::{
-    ClientDef, ContentCategory, Documentation, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
-    RustPrimitive, RustType, RustTypeCollection, StructDef, StructToken,
-  },
-  codegen::parse_type,
+use crate::generator::ast::{
+  ClientDef, ContentCategory, Documentation, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
+  RustPrimitive, RustType, RustTypeCollection, StructDef, StructToken,
 };
 
 pub struct ClientGenerator<'a> {
@@ -485,6 +482,8 @@ pub(crate) mod method {
   }
 
   pub(crate) mod response {
+    use anyhow::Context as _;
+
     use super::*;
 
     pub(crate) struct ResponseHandling {
@@ -505,7 +504,7 @@ pub(crate) mod method {
         return raw();
       };
 
-      let Ok(resp_ty) = parse_type(resp_type_str) else {
+      let Ok(resp_ty) = syn::parse_str::<syn::Type>(resp_type_str).context("failed to parse {resp_type_str}") else {
         return raw();
       };
 

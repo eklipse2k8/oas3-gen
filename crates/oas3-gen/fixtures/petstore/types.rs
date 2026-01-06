@@ -11,6 +11,8 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
+pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
+pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Cat {
   #[serde(rename = "favoriteToy")]
@@ -51,7 +53,24 @@ pub struct Error {
 }
 ///List all cats
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct ListCatsRequest {}
+pub struct ListCatsRequest {
+  #[validate(nested)]
+  pub query: ListCatsRequestQuery,
+  pub header: ListCatsRequestHeader,
+}
+#[bon::bon]
+impl ListCatsRequest {
+  ///Create a new request with the given parameters.
+  #[builder]
+  pub fn new(limit: Option<i32>, x_sort_order: Option<ListCatsRequestHeaderXSortOrder>) -> anyhow::Result<Self> {
+    let request = Self {
+      query: ListCatsRequestQuery { limit },
+      header: ListCatsRequestHeader { x_sort_order },
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
 impl ListCatsRequest {
   ///Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ListCatsResponse> {
@@ -63,6 +82,51 @@ impl ListCatsRequest {
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
     Ok(ListCatsResponse::Unknown(data))
   }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct ListCatsRequestHeader {
+  ///Sort order for the results
+  pub x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
+}
+impl core::convert::TryFrom<&ListCatsRequestHeader> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &ListCatsRequestHeader) -> core::result::Result<Self, Self::Error> {
+    let mut map = http::HeaderMap::with_capacity(1usize);
+    if let Some(value) = &headers.x_sort_order {
+      let header_value = http::HeaderValue::try_from(value.to_string())?;
+      map.insert(X_SORT_ORDER, header_value);
+    }
+    Ok(map)
+  }
+}
+impl core::convert::TryFrom<ListCatsRequestHeader> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: ListCatsRequestHeader) -> core::result::Result<Self, Self::Error> {
+    http::HeaderMap::try_from(&headers)
+  }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
+pub enum ListCatsRequestHeaderXSortOrder {
+  #[serde(rename = "asc")]
+  #[default]
+  Asc,
+  #[serde(rename = "desc")]
+  Desc,
+}
+impl core::fmt::Display for ListCatsRequestHeaderXSortOrder {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Asc => write!(f, "asc"),
+      Self::Desc => write!(f, "desc"),
+    }
+  }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+pub struct ListCatsRequestQuery {
+  ///How many items to return at one time (max 100)
+  #[validate(range(min = 1i32, max = 100i32))]
+  pub limit: Option<i32>,
 }
 ///Response types for listCats
 #[derive(Debug, Clone)]
@@ -77,14 +141,20 @@ pub enum ListCatsResponse {
 pub struct ListPetsRequest {
   #[validate(nested)]
   pub query: ListPetsRequestQuery,
+  pub header: ListPetsRequestHeader,
 }
 #[bon::bon]
 impl ListPetsRequest {
   ///Create a new request with the given parameters.
   #[builder]
-  pub fn new(limit: Option<i32>) -> anyhow::Result<Self> {
+  pub fn new(
+    limit: Option<i32>,
+    x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
+    x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
+  ) -> anyhow::Result<Self> {
     let request = Self {
       query: ListPetsRequestQuery { limit },
+      header: ListPetsRequestHeader { x_sort_order, x_only },
     };
     request.validate()?;
     Ok(request)
@@ -106,11 +176,67 @@ impl ListPetsRequest {
       }
       if content_type_str.contains("xml") {
         let data = oas3_gen_support::Diagnostics::<Pets>::xml_with_diagnostics(req).await?;
-        return Ok(ListPetsResponse::Ok(data));
+        return Ok(ListPetsResponse::OkXml(data));
       }
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
     Ok(ListPetsResponse::Unknown(data))
+  }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct ListPetsRequestHeader {
+  ///Sort order for the results
+  pub x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
+  ///Only include pets with a tag
+  pub x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
+}
+impl core::convert::TryFrom<&ListPetsRequestHeader> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &ListPetsRequestHeader) -> core::result::Result<Self, Self::Error> {
+    let mut map = http::HeaderMap::with_capacity(2usize);
+    if let Some(value) = &headers.x_sort_order {
+      let header_value = http::HeaderValue::try_from(value.to_string())?;
+      map.insert(X_SORT_ORDER, header_value);
+    }
+    if let Some(value) = &headers.x_only {
+      let header_value = http::HeaderValue::try_from(
+        value
+          .iter()
+          .map(std::string::ToString::to_string)
+          .collect::<Vec<_>>()
+          .join(","),
+      )?;
+      map.insert(X_ONLY, header_value);
+    }
+    Ok(map)
+  }
+}
+impl core::convert::TryFrom<ListPetsRequestHeader> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: ListPetsRequestHeader) -> core::result::Result<Self, Self::Error> {
+    http::HeaderMap::try_from(&headers)
+  }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
+pub enum ListPetsRequestHeaderXonly {
+  #[serde(rename = "cat")]
+  #[default]
+  Cat,
+  #[serde(rename = "dog")]
+  Dog,
+  #[serde(rename = "fish")]
+  Fish,
+  #[serde(rename = "bird")]
+  Bird,
+}
+impl core::fmt::Display for ListPetsRequestHeaderXonly {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Cat => write!(f, "cat"),
+      Self::Dog => write!(f, "dog"),
+      Self::Fish => write!(f, "fish"),
+      Self::Bird => write!(f, "bird"),
+    }
   }
 }
 #[serde_with::skip_serializing_none]
@@ -125,6 +251,8 @@ pub struct ListPetsRequestQuery {
 pub enum ListPetsResponse {
   ///200: A paged array of pets
   Ok(Pets),
+  ///200: A paged array of pets
+  OkXml(Pets),
   ///default: unexpected error
   Unknown(Error),
 }

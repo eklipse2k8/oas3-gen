@@ -3,12 +3,9 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::{
-  RegexKey, RustType, ValidationAttribute,
-  tokens::{ConstToken, HeaderToken},
-};
+use crate::generator::ast::{RegexKey, RustType, ValidationAttribute, constants::HttpHeaderRef, tokens::ConstToken};
 
-pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTreeMap<RegexKey, ConstToken>) {
+pub(crate) fn generate_regex_constants(types: &[RustType]) -> (TokenStream, BTreeMap<RegexKey, ConstToken>) {
   let mut const_defs: BTreeMap<ConstToken, String> = BTreeMap::new();
   let mut lookup: BTreeMap<RegexKey, ConstToken> = BTreeMap::new();
   let mut pattern_to_const: BTreeMap<String, ConstToken> = BTreeMap::new();
@@ -57,21 +54,10 @@ pub(crate) fn generate_regex_constants(types: &[&RustType]) -> (TokenStream, BTr
   (quote! { #(#regex_defs)* }, lookup)
 }
 
-pub(crate) fn generate_header_constants(headers: &[HeaderToken]) -> TokenStream {
+pub(crate) fn generate_header_constants(headers: &[HttpHeaderRef]) -> TokenStream {
   if headers.is_empty() {
     return quote! {};
   }
-
-  let const_tokens: Vec<TokenStream> = headers
-    .iter()
-    .map(|header| {
-      let const_token = &header.const_token;
-      let header_name = &header.header_name;
-      quote! {
-        pub const #const_token: http::HeaderName = http::HeaderName::from_static(#header_name);
-      }
-    })
-    .collect();
-
+  let const_tokens = headers.iter().map(|token| quote! { #token }).collect::<Vec<_>>();
   quote! { #(#const_tokens)* }
 }

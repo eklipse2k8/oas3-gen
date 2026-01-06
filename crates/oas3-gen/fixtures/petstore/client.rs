@@ -56,7 +56,13 @@ impl SwaggerPetstoreClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("cats");
-    let response = self.client.get(url).send().await?;
+    let response = self
+      .client
+      .get(url)
+      .query(&request.query)
+      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
+      .send()
+      .await?;
     ListCatsRequest::parse_response(response).await
   }
   ///List all pets
@@ -69,7 +75,13 @@ impl SwaggerPetstoreClient {
       .path_segments_mut()
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("pets");
-    let response = self.client.get(url).query(&request.query).send().await?;
+    let response = self
+      .client
+      .get(url)
+      .query(&request.query)
+      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
+      .send()
+      .await?;
     ListPetsRequest::parse_response(response).await
   }
   ///Create a pet

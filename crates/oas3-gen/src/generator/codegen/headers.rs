@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::generator::ast::{FieldDef, FieldNameToken, StructDef, StructKind, TypeRef, tokens::ConstToken};
+use crate::generator::ast::{FieldDef, StructDef, StructKind, TypeRef, tokens::ConstToken};
 
 pub(crate) struct HeaderMapGenerator<'a> {
   def: &'a StructDef,
@@ -59,58 +59,32 @@ impl<'a> HeaderMapGenerator<'a> {
     };
 
     let header_const = ConstToken::from_raw(original_name);
-    let is_required = field.is_required();
+    let ty = &field.rust_type;
 
-    let conversion = Self::value_conversion(&field.rust_type, field_name, is_required);
-
-    if is_required {
+    if field.is_required() {
+      let header_value = Self::header_value_expr(ty, quote! { &headers.#field_name });
       quote! {
-        #conversion
+        let header_value = http::HeaderValue::try_from(#header_value)?;
         map.insert(#header_const, header_value);
       }
     } else {
+      let header_value = Self::header_value_expr(ty, quote! { value });
       quote! {
         if let Some(value) = &headers.#field_name {
-          #conversion
+          let header_value = http::HeaderValue::try_from(#header_value)?;
           map.insert(#header_const, header_value);
         }
       }
     }
   }
 
-  fn value_conversion(ty: &TypeRef, field_name: &FieldNameToken, required: bool) -> TokenStream {
+  fn header_value_expr(ty: &TypeRef, accessor: TokenStream) -> TokenStream {
     if ty.is_string_like() {
-      if required {
-        quote! {
-          let header_value = http::HeaderValue::try_from(&headers.#field_name)?;
-        }
-      } else {
-        quote! {
-          let header_value = http::HeaderValue::try_from(value)?;
-        }
-      }
-    } else if ty.is_primitive_type() {
-      if required {
-        quote! {
-          let header_value = http::HeaderValue::try_from(headers.#field_name.to_string())?;
-        }
-      } else {
-        quote! {
-          let header_value = http::HeaderValue::try_from(value.to_string())?;
-        }
-      }
-    } else if required {
-      quote! {
-        let header_value = http::HeaderValue::try_from(
-          serde_plain::to_string(&headers.#field_name).map_err(|_| http::header::InvalidHeaderValue::new())?
-        )?;
-      }
+      accessor
+    } else if ty.is_array {
+      quote! { #accessor.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",") }
     } else {
-      quote! {
-        let header_value = http::HeaderValue::try_from(
-          serde_plain::to_string(value).map_err(|_| http::header::InvalidHeaderValue::new())?
-        )?;
-      }
+      quote! { #accessor.to_string() }
     }
   }
 }

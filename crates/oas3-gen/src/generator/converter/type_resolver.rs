@@ -335,6 +335,8 @@ impl TypeResolver {
       };
 
       self.union_type(&items, variants, &final_name)?
+    } else if items.has_enum_values() {
+      self.inline_enum(parent_name, &singular, &items)?
     } else {
       return Ok(None);
     };
