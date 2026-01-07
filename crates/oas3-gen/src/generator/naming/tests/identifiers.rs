@@ -76,6 +76,16 @@ fn test_type_names() {
     ("Type", "TypeType"),
     // Self is a keyword, so it gets raw identifier prefix
     ("Self", "r#Self"),
+    // Raw identifier prefixes should be stripped and PascalCased
+    ("r#move", "Move"),
+    ("r#static", "Static"),
+    ("r#type", "TypeType"),
+    ("r#match", "Match"),
+    // Keywords become proper PascalCase (no r# needed for type names)
+    ("move", "Move"),
+    ("static", "Static"),
+    ("type", "TypeType"),
+    ("match", "Match"),
   ];
   for (input, expected) in cases {
     assert_eq!(to_rust_type_name(input), expected, "failed for input {input:?}");
