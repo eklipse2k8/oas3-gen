@@ -3,6 +3,7 @@ pub(crate) mod common;
 pub(crate) mod discriminator;
 pub(crate) mod fields;
 pub(crate) mod hashing;
+pub(crate) mod inline_resolver;
 pub(crate) mod methods;
 pub(crate) mod operations;
 pub(crate) mod parameters;

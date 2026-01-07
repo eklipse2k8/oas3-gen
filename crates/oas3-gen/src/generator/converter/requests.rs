@@ -145,7 +145,7 @@ impl BodyInfo {
         let Some(output) = type_resolver.try_inline_schema(schema, &base_name)? else {
           return Ok(Self::empty(!is_required));
         };
-        (output.generated_types, output.type_name)
+        (output.inline_types, output.result)
       }
     };
 

@@ -190,18 +190,12 @@ impl ResponseConverter {
       return Ok(Some(primitive));
     }
 
-    let effective = if has_compound {
-      self.context.graph().merge_all_of(schema)
-    } else {
-      schema.clone()
-    };
-
-    let base_name = effective.infer_name_from_context(path, status_code.as_str());
+    let base_name = schema.infer_name_from_context(path, status_code.as_str());
     let Some(output) = self.type_resolver.try_inline_schema(schema, &base_name)? else {
       return Ok(None);
     };
 
-    Ok(Some(TypeRef::new(output.type_name)))
+    Ok(Some(TypeRef::new(output.result)))
   }
 
   fn with_default_media_type(media_types: Vec<ResponseMediaType>) -> Vec<ResponseMediaType> {

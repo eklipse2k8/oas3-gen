@@ -6,15 +6,16 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
   ConversionOutput, SchemaExt,
-  common::{InlineSchemaOutput, extract_variant_references},
+  common::extract_variant_references,
   discriminator::DiscriminatorConverter,
+  inline_resolver::InlineTypeResolver,
   structs::StructConverter,
   union_types::UnionKind,
   unions::{EnumConverter, UnionConverter},
 };
 use crate::generator::{
   ast::{Documentation, RustPrimitive, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
-  converter::{ConverterContext, common::handle_inline_creation},
+  converter::ConverterContext,
   naming::{
     constants::VARIANT_KIND_SUFFIX,
     identifiers::{strip_parent_prefix, to_rust_type_name},
@@ -27,11 +28,15 @@ use crate::generator::{
 #[derive(Clone, Debug)]
 pub(crate) struct TypeResolver {
   context: Rc<ConverterContext>,
+  inline_resolver: InlineTypeResolver,
 }
 
 impl TypeResolver {
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
-    Self { context }
+    Self {
+      inline_resolver: InlineTypeResolver::new(context.clone()),
+      context,
+    }
   }
 
   fn spec(&self) -> &Spec {
@@ -190,24 +195,9 @@ impl TypeResolver {
     }
 
     let enum_values: Vec<String> = schema.extract_enum_values().unwrap_or_default();
-    let base_name = format!("{parent_name}{}", property_name.to_pascal_case());
-    let forced_name = self.context.cache.borrow().get_enum_name(&enum_values);
-
-    handle_inline_creation(
-      schema,
-      &base_name,
-      forced_name,
-      &self.context,
-      |cache| {
-        cache
-          .get_enum_name(&enum_values)
-          .filter(|_| cache.is_enum_generated(&enum_values))
-      },
-      |name| {
-        let converter = EnumConverter::new(self.context.clone());
-        Ok(ConversionOutput::new(converter.convert_value_enum(name, schema)))
-      },
-    )
+    self
+      .inline_resolver
+      .resolve_inline_enum(parent_name, property_name, schema, &enum_values)
   }
 
   fn inline_struct(
@@ -216,20 +206,17 @@ impl TypeResolver {
     property_name: &str,
     schema: &ObjectSchema,
   ) -> Result<ConversionOutput<TypeRef>> {
-    let prop_pascal = property_name.to_pascal_case();
-    let base_name = format!("{parent_name}{}", strip_parent_prefix(parent_name, &prop_pascal));
-    self.inline_struct_from_schema(schema, &base_name)
+    self
+      .inline_resolver
+      .resolve_inline_struct(parent_name, property_name, schema)
   }
 
-  fn inline_struct_from_schema(&self, schema: &ObjectSchema, base_name: &str) -> Result<ConversionOutput<TypeRef>> {
-    handle_inline_creation(
-      schema,
-      base_name,
-      None,
-      &self.context,
-      |_| None,
-      |name| StructConverter::new(self.context.clone()).convert_struct(name, schema, None),
-    )
+  pub(crate) fn inline_struct_from_schema(
+    &self,
+    schema: &ObjectSchema,
+    base_name: &str,
+  ) -> Result<ConversionOutput<TypeRef>> {
+    self.inline_resolver.resolve_inline_struct_with_name(schema, base_name)
   }
 
   pub(crate) fn inline_union(
@@ -262,46 +249,14 @@ impl TypeResolver {
     base_name: &str,
   ) -> Result<ConversionOutput<TypeRef>> {
     let refs = extract_variant_references(variants);
-
-    if let Some(name) = self.find_union_by_refs(&refs) {
-      return Ok(ConversionOutput::new(self.type_ref(&name)));
-    }
-
-    let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
-
-    {
-      let cache = self.context.cache.borrow();
-      if refs.len() >= 2
-        && let Some(name) = cache.get_union_name(&refs, discriminator)
-      {
-        return Ok(ConversionOutput::new(TypeRef::new(name)));
-      }
-    }
-
     let kind = if schema.one_of.is_empty() {
       UnionKind::AnyOf
     } else {
       UnionKind::OneOf
     };
-
-    let result = handle_inline_creation(
-      schema,
-      base_name,
-      None,
-      &self.context,
-      |cache| cache.lookup_enum_name(schema),
-      |name| UnionConverter::new(self.context.clone()).convert_union(name, schema, kind),
-    )?;
-
-    if refs.len() >= 2 {
-      self.context.cache.borrow_mut().register_union(
-        refs,
-        schema.discriminator.as_ref().map(|d| d.property_name.clone()),
-        result.result.base_type.to_string(),
-      );
-    }
-
-    Ok(result)
+    self
+      .inline_resolver
+      .resolve_inline_union(schema, &refs, base_name, kind)
   }
 
   pub(crate) fn try_inline_array(
@@ -571,54 +526,28 @@ impl TypeResolver {
     DiscriminatorConverter::new(self.context.clone()).build_base_discriminated_enum(name, schema, fallback_type)
   }
 
-  pub(crate) fn try_inline_schema(&self, schema: &ObjectSchema, base_name: &str) -> Result<Option<InlineSchemaOutput>> {
-    if schema.is_empty_object() {
-      return Ok(None);
+  pub(crate) fn try_inline_schema(
+    &self,
+    schema: &ObjectSchema,
+    base_name: &str,
+  ) -> Result<Option<ConversionOutput<String>>> {
+    let result = self
+      .inline_resolver
+      .resolve_inline_schema(schema, base_name, |name, effective| {
+        self.convert_schema(name, effective)
+      })?;
+
+    if result.is_some() {
+      return Ok(result);
     }
 
-    {
-      let cache = self.context.cache.borrow();
-      if let Some(cached) = cache.get_type_name(schema)? {
-        return Ok(Some(InlineSchemaOutput {
-          type_name: cached,
-          generated_types: vec![],
-        }));
-      }
-    }
-
-    let effective = if schema.all_of.is_empty() {
-      schema.clone()
-    } else {
-      self.context.graph().merge_all_of(schema)
-    };
-
-    let unique_name = self.context.cache.borrow_mut().make_unique_name(base_name);
-    let generated = self.convert_schema(&unique_name, &effective)?;
-
-    if generated.is_empty()
-      && let Some((v, _)) = Self::union_variants(schema)
+    if let Some((v, _)) = Self::union_variants(schema)
       && let Some(t) = self.try_nullable_union(v)?
     {
-      return Ok(Some(InlineSchemaOutput {
-        type_name: t.to_rust_type(),
-        generated_types: vec![],
-      }));
+      return Ok(Some(ConversionOutput::new(t.to_rust_type())));
     }
 
-    let Some(main_type) = generated.last().cloned() else {
-      return Ok(None);
-    };
-
-    let final_name = self
-      .context
-      .cache
-      .borrow_mut()
-      .register_type(schema, &unique_name, vec![], main_type)?;
-
-    Ok(Some(InlineSchemaOutput {
-      type_name: final_name,
-      generated_types: generated,
-    }))
+    Ok(None)
   }
 
   pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> Result<Vec<RustType>> {

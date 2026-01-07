@@ -107,6 +107,7 @@ crates/
 │           │   ├── discriminator.rs # Discriminator handling for oneOf
 │           │   ├── fields.rs      # Struct field conversion
 │           │   ├── hashing.rs     # Schema fingerprinting for deduplication
+│           │   ├── inline_resolver.rs # InlineTypeResolver for cache-aware inline type creation
 │           │   ├── methods.rs     # Helper constructor methods for enum variants
 │           │   ├── operations.rs  # Request/response type generation
 │           │   ├── parameters.rs  # Parameter conversion
@@ -178,8 +179,10 @@ Data flows forward only - no stage feeds back to earlier stages.
 - [schema_registry.rs](../crates/oas3-gen/src/generator/schema_registry.rs): Dependency graph, cycle detection, merged schemas
 - [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): SchemaConverter, ConverterContext, CodegenConfig
 - [converter/type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): Central OpenAPI to Rust type conversion
+- [converter/inline_resolver.rs](../crates/oas3-gen/src/generator/converter/inline_resolver.rs): Cache-aware inline type creation coordinator
 - [converter/cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): SharedSchemaCache for type deduplication
 - [converter/unions.rs](../crates/oas3-gen/src/generator/converter/unions.rs): oneOf/anyOf to discriminated enums
+- [converter/variants.rs](../crates/oas3-gen/src/generator/converter/variants.rs): Union variant building (ref, inline, const)
 - [naming/inference.rs](../crates/oas3-gen/src/generator/naming/inference.rs): InferenceExt trait for name inference
 - [naming/identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization
 - [analyzer/mod.rs](../crates/oas3-gen/src/generator/analyzer/mod.rs): TypeAnalyzer, usage propagation, serde modes

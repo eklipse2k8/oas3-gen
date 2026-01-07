@@ -2,10 +2,7 @@ use std::rc::Rc;
 
 use oas3::spec::ObjectSchema;
 
-use super::{
-  ConversionOutput, SchemaExt, common::handle_inline_creation, structs::StructConverter, type_resolver::TypeResolver,
-  union_types::UnionVariantSpec,
-};
+use super::{ConversionOutput, SchemaExt, type_resolver::TypeResolver, union_types::UnionVariantSpec};
 use crate::generator::{
   ast::{Documentation, EnumVariantToken, SerdeAttribute, TypeRef, VariantContent, VariantDef},
   converter::ConverterContext,
@@ -16,18 +13,12 @@ use crate::generator::{
 pub(crate) struct VariantBuilder {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
-  struct_converter: StructConverter,
 }
 
 impl VariantBuilder {
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let type_resolver = TypeResolver::new(context.clone());
-    let struct_converter = StructConverter::new(context.clone());
-    Self {
-      context,
-      type_resolver,
-      struct_converter,
-    }
+    Self { context, type_resolver }
   }
 
   pub(crate) fn build_variant(
@@ -170,14 +161,9 @@ impl VariantBuilder {
     let enum_name_converted = to_rust_type_name(enum_name);
     let struct_name_prefix = format!("{enum_name_converted}{variant_label}");
 
-    let result = handle_inline_creation(
-      resolved_schema,
-      &struct_name_prefix,
-      None,
-      &self.context,
-      |_| None,
-      |name| self.struct_converter.convert_struct(name, resolved_schema, None),
-    )?;
+    let result = self
+      .type_resolver
+      .inline_struct_from_schema(resolved_schema, &struct_name_prefix)?;
 
     Ok(ConversionOutput::with_inline_types(
       VariantContent::Tuple(vec![result.result]),

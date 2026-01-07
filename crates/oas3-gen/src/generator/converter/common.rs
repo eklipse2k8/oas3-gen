@@ -5,12 +5,7 @@ use oas3::{
   spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
 };
 
-use crate::generator::{
-  ast::{RustType, TypeRef},
-  converter::{ConverterContext, cache::SharedSchemaCache},
-  naming::inference::has_mixed_string_variants,
-  schema_registry::RefCollector,
-};
+use crate::generator::{ast::RustType, naming::inference::has_mixed_string_variants, schema_registry::RefCollector};
 
 /// Wraps a conversion result with any inline types generated during conversion.
 ///
@@ -40,58 +35,6 @@ impl ConversionOutput<RustType> {
     types.push(self.result);
     types
   }
-}
-
-/// Output from converting an inline schema.
-pub(crate) struct InlineSchemaOutput {
-  pub type_name: String,
-  pub generated_types: Vec<RustType>,
-}
-
-/// Helper to handle the common pattern of checking cache, generating an inline type, and registering it.
-///
-/// This function orchestrates inline type creation by:
-/// 1. Checking if the type already exists in cache (early return if found)
-/// 2. Running a cached name check for special cases like enums (early return if found)
-/// 3. Determining the appropriate name for the new type
-/// 4. Calling the generator function to create the type
-/// 5. Registering the new type in cache or collecting inline types
-pub(crate) fn handle_inline_creation<F, C>(
-  schema: &ObjectSchema,
-  base_name: &str,
-  forced_name: Option<String>,
-  context: &ConverterContext,
-  cached_name_check: C,
-  generator: F,
-) -> anyhow::Result<ConversionOutput<TypeRef>>
-where
-  F: FnOnce(&str) -> anyhow::Result<ConversionOutput<RustType>>,
-  C: FnOnce(&SharedSchemaCache) -> Option<String>,
-{
-  {
-    let cache = context.cache.borrow();
-    if let Some(existing_name) = cache.get_type_name(schema)? {
-      return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
-    }
-    if let Some(name) = cached_name_check(&cache) {
-      return Ok(ConversionOutput::new(TypeRef::new(name)));
-    }
-  }
-
-  let name = if let Some(forced) = forced_name {
-    forced
-  } else {
-    context.cache.borrow().get_preferred_name(schema, base_name)?
-  };
-
-  let result = generator(&name)?;
-
-  let type_name =
-    context
-      .cache
-      .borrow_mut()
-      .register_type(schema, &name, result.inline_types, result.result.clone())?;
-  Ok(ConversionOutput::new(TypeRef::new(type_name)))
 }
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
