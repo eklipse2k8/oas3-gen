@@ -1,4 +1,5 @@
 pub mod common;
+#[cfg(feature = "eventsource")]
 #[cfg(test)]
 mod event_stream;
 #[cfg(test)]

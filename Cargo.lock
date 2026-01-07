@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen"
-version = "0.24.0"
+version = "0.24.1"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -1315,9 +1315,8 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen-support"
-version = "0.24.0"
+version = "0.24.1"
 dependencies = [
- "anyhow",
  "better_default",
  "bon",
  "chrono",
@@ -1325,22 +1324,14 @@ dependencies = [
  "futures",
  "futures-core",
  "http",
- "indexmap 2.12.1",
- "oas3",
- "prettyplease",
- "proc-macro2",
  "quick-xml",
- "quote",
- "regex",
  "reqwest",
  "serde",
  "serde_json",
  "serde_path_to_error",
  "serde_with",
- "syn",
  "thiserror",
  "tokio",
- "uuid",
  "validator",
 ]
 

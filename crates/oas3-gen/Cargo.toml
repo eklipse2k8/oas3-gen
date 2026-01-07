@@ -12,8 +12,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
-default = []
+default = ["quick-xml", "reqwest", "eventsource"]
 mdformat = []
+reqwest = []
+eventsource = ["reqwest"]
+quick-xml = []
 
 [dependencies]
 any_ascii.workspace = true

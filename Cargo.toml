@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.24.0"
+version = "0.24.1"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -37,7 +37,7 @@ split-debuginfo = "unpacked"
 
 [workspace.dependencies]
 # Workspace Members
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.24.0" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.24.1" }
 
 # External Dependencies
 any_ascii = { version = "0.3" }
@@ -52,6 +52,8 @@ comfy-table = { version = "7.2" }
 crossterm = { version = "0.29", default-features = false }
 cruet = { version = "0.15" }
 fmmap = { version = "0.4", features = ["tokio"] }
+futures = { version = "0.3" }
+futures-core = { version = "0.3" }
 http = { version = "1.4" }
 indexmap = { version = "2.12", features = ["serde"] }
 inflections = { version = "1.1" }
@@ -62,7 +64,7 @@ oas3 = { version = "0.20", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }
-quick-xml = { version = ">=0.38", features = ["serde", "serialize"] }
+quick-xml = { version = ">=0.38", default-features = false }
 quote = { version = "1.0" }
 regex = { version = "1.12" }
 reqwest = { version = "0.13", default-features = false }

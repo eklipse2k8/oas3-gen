@@ -14,31 +14,32 @@ rust-version.workspace = true
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[features]
+default = ["quick-xml", "reqwest", "eventsource"]
+
+reqwest = ["dep:reqwest"]
+
+eventsource = ["reqwest", "reqwest/stream", "dep:eventsource-stream"]
+
+quick-xml = ["dep:quick-xml", "quick-xml/serde", "quick-xml/serialize"]
+
+
 [dependencies]
-anyhow.workspace = true
 better_default.workspace = true
 bon.workspace = true
 chrono.workspace = true
-futures-core = "0.3"
+eventsource-stream = { workspace = true, optional = true }
+futures-core.workspace = true
 http.workspace = true
-indexmap.workspace = true
-oas3.workspace = true
-prettyplease.workspace = true
-proc-macro2.workspace = true
-quick-xml.workspace = true
-quote.workspace = true
-regex.workspace = true
-reqwest = { workspace = true, features = ["json", "multipart", "query", "stream"] }
-eventsource-stream.workspace = true
+quick-xml = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 serde_json.workspace = true
 serde_path_to_error.workspace = true
 serde_with.workspace = true
 serde.workspace = true
-syn.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
 validator.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-futures = "0.3"
+futures.workspace = true
