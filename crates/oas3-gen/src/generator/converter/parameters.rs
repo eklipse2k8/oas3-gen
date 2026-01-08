@@ -40,6 +40,7 @@ pub(crate) struct ConvertedParams {
 #[derive(Debug, Clone)]
 pub(crate) struct ParameterConverter {
   context: Rc<ConverterContext>,
+  type_resolver: TypeResolver,
 }
 
 impl ParameterConverter {
@@ -47,6 +48,7 @@ impl ParameterConverter {
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       context: context.clone(),
+      type_resolver: TypeResolver::new(context.clone()),
     }
   }
 
@@ -191,12 +193,13 @@ impl ParameterConverter {
         .inline_array_items(self.context.graph().spec())
         .is_some_and(|items| items.enum_values.len() > 1);
 
-    let type_resolver = TypeResolver::new(self.context.clone());
     let (type_ref, inline_types) = if has_inline_enum {
-      let result = type_resolver.resolve_property(parent_name, &param.name, &schema, schema_ref)?;
+      let result = self
+        .type_resolver
+        .resolve_property(parent_name, &param.name, &schema, schema_ref)?;
       (result.result, result.inline_types)
     } else {
-      (type_resolver.resolve_type(&schema)?, vec![])
+      (self.type_resolver.resolve_type(&schema)?, vec![])
     };
 
     let is_required = param.required.unwrap_or(false);

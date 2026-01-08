@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
@@ -8,52 +8,12 @@ use crate::{
     ast::RustType,
     converter::{SchemaExt, type_resolver::TypeResolver},
     naming::inference::extract_common_variant_prefix,
-    schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_context, create_test_graph, default_config},
+  tests::common::{
+    create_empty_test_graph, create_schema_converter, create_test_context, create_test_graph, default_config,
+    make_object_schema_with_property, make_string_schema,
+  },
 };
-
-fn make_string_schema() -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    ..Default::default()
-  }
-}
-
-fn make_object_schema_with_property(prop_name: &str, prop_schema: ObjectSchema) -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(prop_name.to_string(), ObjectOrReference::Object(prop_schema))]),
-    ..Default::default()
-  }
-}
-
-fn create_empty_test_graph() -> Arc<SchemaRegistry> {
-  let spec = oas3::Spec {
-    openapi: "3.0.0".to_string(),
-    info: oas3::spec::Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::new(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
-
-  let graph = SchemaRegistry::from_spec(spec).registry;
-  Arc::new(graph)
-}
 
 #[test]
 fn test_title_resolution() {
@@ -393,7 +353,6 @@ fn test_array_with_union_items_inline_generation() {
   ]));
   let context = create_test_context(graph.clone(), default_config());
   let resolver = TypeResolver::new(context.clone());
-
   let oneof_array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
@@ -689,7 +648,6 @@ fn test_union_naming_with_common_suffix() {
   ]));
   let context = create_test_context(graph.clone(), default_config());
   let resolver = TypeResolver::new(context.clone());
-
   let union_schema = ObjectSchema {
     one_of: vec![
       ObjectOrReference::Ref {
@@ -791,7 +749,6 @@ fn test_array_union_naming_with_common_suffix() {
   ]));
   let context = create_test_context(graph.clone(), default_config());
   let resolver = TypeResolver::new(context.clone());
-
   let array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(oas3::spec::Schema::Object(Box::new(
@@ -1103,8 +1060,7 @@ fn test_array_with_union_items_not_treated_as_primitive() {
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
-  let resolver = TypeResolver::new(context);
-
+  let resolver = TypeResolver::new(context.clone());
   let thought_summary_ref = ObjectOrReference::Ref {
     ref_path: "#/components/schemas/ThoughtSummary".to_string(),
     summary: None,
@@ -1143,8 +1099,7 @@ fn test_string_enum_reference_preserves_named_type() {
   let graph = create_test_graph(BTreeMap::from([("PetStatus".to_string(), pet_status_schema)]));
 
   let context = create_test_context(graph.clone(), default_config());
-  let resolver = TypeResolver::new(context);
-
+  let resolver = TypeResolver::new(context.clone());
   let pet_status_ref = ObjectOrReference::Ref {
     ref_path: "#/components/schemas/PetStatus".to_string(),
     summary: None,
@@ -1451,7 +1406,7 @@ fn test_try_flatten_nested_union() {
     ("TypeB".to_string(), type_b),
   ]));
   let context = create_test_context(graph.clone(), default_config());
-  let resolver = TypeResolver::new(context.clone());
+  let converter = create_schema_converter(&context);
 
   let null_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
@@ -1482,7 +1437,7 @@ fn test_try_flatten_nested_union() {
     ..Default::default()
   };
 
-  let types = resolver.convert_schema("NestedUnion", &nested_schema).unwrap();
+  let types = converter.convert_schema("NestedUnion", &nested_schema).unwrap();
   assert!(!types.is_empty(), "nested union should generate types");
 
   let type_names: Vec<_> = types
@@ -1621,7 +1576,7 @@ fn test_unique_items_flag_preserved() {
 fn test_convert_schema_type_alias() {
   let graph = create_empty_test_graph();
   let context = create_test_context(graph.clone(), default_config());
-  let resolver = TypeResolver::new(context);
+  let converter = create_schema_converter(&context);
 
   let string_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
@@ -1629,7 +1584,7 @@ fn test_convert_schema_type_alias() {
     ..Default::default()
   };
 
-  let types = resolver.convert_schema("MyString", &string_schema).unwrap();
+  let types = converter.convert_schema("MyString", &string_schema).unwrap();
   assert_eq!(types.len(), 1, "should generate one type");
 
   match &types[0] {
@@ -1661,11 +1616,11 @@ fn test_convert_schema_with_allof() {
     ("ExtendedType".to_string(), extended_schema),
   ]));
   let context = create_test_context(graph.clone(), default_config());
-  let resolver = TypeResolver::new(context);
+  let converter = create_schema_converter(&context);
 
   let allof_schema = graph.get("ExtendedType").unwrap();
 
-  let types = resolver.convert_schema("ExtendedType", allof_schema).unwrap();
+  let types = converter.convert_schema("ExtendedType", allof_schema).unwrap();
   assert!(!types.is_empty(), "allOf schema should generate types");
 
   let has_struct = types.iter().any(|t| matches!(t, RustType::Struct(_)));

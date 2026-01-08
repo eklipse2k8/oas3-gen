@@ -18,10 +18,10 @@ use crate::{
   tests::common::{create_test_context, create_test_graph, default_config},
 };
 
-fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter<'static>, TypeUsageRecorder) {
+fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter, TypeUsageRecorder) {
   let graph = create_test_graph(schemas);
   let context = create_test_context(graph, default_config());
-  let schema_converter = Box::leak(Box::new(SchemaConverter::new(&context)));
+  let schema_converter = SchemaConverter::new(&context);
   let converter = OperationConverter::new(context, schema_converter);
   let usage = TypeUsageRecorder::new();
   (converter, usage)

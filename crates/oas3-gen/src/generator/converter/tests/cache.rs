@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
+    ast::{EnumDef, EnumToken, EnumVariantToken, RustType, VariantContent},
     converter::{
       SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
       union_types::UnionKind, unions::UnionConverter,
@@ -464,7 +464,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       .iter()
       .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
       .expect("Should have Known variant");
-    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+    if let VariantContent::Tuple(refs) = &known_variant.content {
       refs[0].base_type.to_string()
     } else {
       panic!("Known variant should have tuple content");
@@ -489,7 +489,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       .iter()
       .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
       .expect("Should have Known variant");
-    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+    if let VariantContent::Tuple(refs) = &known_variant.content {
       let second_inner_name = refs[0].base_type.to_string();
       assert_eq!(
         inner_enum_name, second_inner_name,

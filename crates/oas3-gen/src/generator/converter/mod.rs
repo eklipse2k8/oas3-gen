@@ -25,13 +25,25 @@ use std::{
   sync::Arc,
 };
 
+use anyhow::Result;
 pub(crate) use common::{ConversionOutput, SchemaExt};
 use oas3::spec::ObjectSchema;
 pub(crate) use type_resolver::TypeResolver;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use super::ast::RustType;
-use crate::generator::{converter::cache::SharedSchemaCache, schema_registry::SchemaRegistry};
+use crate::generator::{
+  ast::{Documentation, TypeAliasDef, TypeAliasToken, TypeRef},
+  converter::{
+    cache::SharedSchemaCache,
+    discriminator::DiscriminatorConverter,
+    structs::StructConverter,
+    union_types::UnionKind,
+    unions::{EnumConverter, UnionConverter},
+  },
+  naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name, inference::InferenceExt},
+  schema_registry::SchemaRegistry,
+};
 
 /// Policy for handling enum variant name collisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -148,19 +160,28 @@ impl ConverterContext {
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.
 ///
-/// Delegates to `TypeResolver` for schema conversion, providing a stable API
-/// for the orchestrator while centralizing conversion logic in `TypeResolver`.
+/// Orchestrates the one-way conversion pipeline from OpenAPI schemas to Rust types.
+/// Uses `TypeResolver` for read-only type mapping and navigation, while managing
+/// the conversion flow through specialized converters (`StructConverter`, `EnumConverter`, etc.).
 #[derive(Debug, Clone)]
 pub(crate) struct SchemaConverter {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
+  struct_converter: StructConverter,
+  enum_converter: EnumConverter,
+  union_converter: UnionConverter,
+  discriminator_converter: DiscriminatorConverter,
 }
 
 impl SchemaConverter {
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
-      context: context.clone(),
       type_resolver: TypeResolver::new(context.clone()),
+      struct_converter: StructConverter::new(context.clone()),
+      enum_converter: EnumConverter::new(context.clone()),
+      union_converter: UnionConverter::new(context.clone()),
+      discriminator_converter: DiscriminatorConverter::new(context.clone()),
+      context: context.clone(),
     }
   }
 
@@ -168,16 +189,115 @@ impl SchemaConverter {
     &self.context
   }
 
-  /// Converts a schema definition into Rust types.
-  ///
-  /// Handles `allOf`, `oneOf`, `anyOf`, enums, and objects.
-  pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<Vec<RustType>> {
-    self.type_resolver.convert_schema(name, schema)
-  }
-
   /// Checks if a name corresponds to a known schema in the graph.
   pub(crate) fn contains(&self, name: &str) -> bool {
     self.context.graph().contains(name)
+  }
+
+  /// Converts a schema definition into Rust types.
+  ///
+  /// Handles `allOf`, `oneOf`, `anyOf`, enums, and objects.
+  pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> Result<Vec<RustType>> {
+    if schema.has_intersection() {
+      return self.struct_converter.convert_all_of_schema(name);
+    }
+
+    if let Some((_, kind)) = schema.union_variants_with_kind() {
+      if schema.discriminator.is_none() && self.type_resolver.is_wrapper_union(schema)? {
+        return Ok(vec![]);
+      }
+
+      if let Some(flattened) = self.type_resolver.try_flatten_nested_union(schema)? {
+        return self
+          .union_converter
+          .convert_union(name, &flattened, UnionKind::from_schema(&flattened))
+          .map(ConversionOutput::into_vec);
+      }
+
+      return self
+        .union_converter
+        .convert_union(name, schema, kind)
+        .map(ConversionOutput::into_vec);
+    }
+
+    if !schema.enum_values.is_empty() {
+      return Ok(vec![self.enum_converter.convert_value_enum(name, schema)]);
+    }
+
+    if !schema.properties.is_empty() || schema.additional_properties.is_some() {
+      let result = self.struct_converter.convert_struct(name, schema, None)?;
+      return self.finalize_struct_types(name, schema, result.result, result.inline_types);
+    }
+
+    if let Some(output) = self.try_array_alias(name, schema)? {
+      let alias = RustType::TypeAlias(TypeAliasDef {
+        name: TypeAliasToken::from_raw(name),
+        docs: Documentation::from_optional(schema.description.as_ref()),
+        target: output.result,
+      });
+      let mut result = vec![alias];
+      result.extend(output.inline_types);
+      return Ok(result);
+    }
+
+    let type_ref = self.type_resolver.resolve_type(schema)?;
+    Ok(vec![RustType::TypeAlias(TypeAliasDef {
+      name: TypeAliasToken::from_raw(name),
+      docs: Documentation::from_optional(schema.description.as_ref()),
+      target: type_ref,
+    })])
+  }
+
+  /// Builds a discriminated enum from a base schema with discriminator mappings.
+  fn discriminated_enum(&self, name: &str, schema: &ObjectSchema, fallback_type: &str) -> Result<RustType> {
+    self
+      .discriminator_converter
+      .build_base_discriminated_enum(name, schema, fallback_type)
+  }
+
+  /// Finalizes struct conversion by optionally adding a discriminated enum wrapper.
+  pub(crate) fn finalize_struct_types(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    main_type: RustType,
+    inline_types: Vec<RustType>,
+  ) -> Result<Vec<RustType>> {
+    let discriminated_enum = schema
+      .is_discriminated_base_type()
+      .then(|| {
+        let base_struct_name = match &main_type {
+          RustType::Struct(def) => def.name.as_str().to_string(),
+          _ => format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)),
+        };
+        self.discriminated_enum(name, schema, &base_struct_name)
+      })
+      .transpose()?;
+
+    Ok(
+      discriminated_enum
+        .into_iter()
+        .chain(std::iter::once(main_type))
+        .chain(inline_types)
+        .collect(),
+    )
+  }
+
+  fn try_array_alias(&self, name: &str, schema: &ObjectSchema) -> Result<Option<ConversionOutput<TypeRef>>> {
+    if !schema.is_array() && !schema.is_nullable_array() {
+      return Ok(None);
+    }
+
+    if let Some(output) = self.type_resolver.try_inline_array(name, name, schema)? {
+      let type_ref = if schema.is_nullable_array() {
+        output.result.with_option()
+      } else {
+        output.result
+      };
+      return Ok(Some(ConversionOutput::with_inline_types(type_ref, output.inline_types)));
+    }
+
+    Ok(None)
   }
 }
 

@@ -435,7 +435,7 @@ impl Orchestrator {
     let mut warnings = vec![];
     let mut usage_recorder = TypeUsageRecorder::new();
 
-    let operation_converter = OperationConverter::new(context.clone(), schema_converter);
+    let operation_converter = OperationConverter::new(context.clone(), schema_converter.clone());
 
     for entry in self.operation_registry.operations() {
       match operation_converter.convert(entry, &mut usage_recorder) {

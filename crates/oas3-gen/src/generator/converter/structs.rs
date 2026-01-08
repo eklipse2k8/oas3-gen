@@ -2,10 +2,7 @@ use std::rc::Rc;
 
 use oas3::spec::ObjectSchema;
 
-use super::{
-  ConversionOutput, SchemaExt, discriminator::DiscriminatorConverter, fields::FieldConverter,
-  type_resolver::TypeResolver,
-};
+use super::{ConversionOutput, SchemaExt, discriminator::DiscriminatorConverter, fields::FieldConverter};
 use crate::generator::{
   ast::{Documentation, RustType, StructDef, StructKind, StructToken},
   converter::ConverterContext,
@@ -15,27 +12,24 @@ use crate::generator::{
 #[derive(Clone, Debug)]
 pub(crate) struct StructConverter {
   context: Rc<ConverterContext>,
-  type_resolver: TypeResolver,
   field_converter: FieldConverter,
   discriminator_converter: DiscriminatorConverter,
 }
 
 impl StructConverter {
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
-    let type_resolver = TypeResolver::new(context.clone());
     let field_converter = FieldConverter::new(&context);
     let discriminator_converter = DiscriminatorConverter::new(context.clone());
     Self {
       context,
-      type_resolver,
       field_converter,
       discriminator_converter,
     }
   }
 
-  fn struct_name(name: &str, schema: &ObjectSchema) -> StructToken {
+  pub(crate) fn struct_name(name: &str, schema: &ObjectSchema) -> StructToken {
     if schema.is_discriminated_base_type() {
-      StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)))
+      StructToken::from(format!("{}{}", to_rust_type_name(name), DISCRIMINATED_BASE_SUFFIX))
     } else {
       StructToken::from_raw(name)
     }
@@ -141,35 +135,6 @@ impl StructConverter {
     Ok(result)
   }
 
-  pub(crate) fn finalize_struct_types(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    main_type: RustType,
-    inline_types: Vec<RustType>,
-  ) -> anyhow::Result<Vec<RustType>> {
-    let discriminated_enum = schema
-      .is_discriminated_base_type()
-      .then(|| {
-        let base_struct_name = match &main_type {
-          RustType::Struct(def) => def.name.clone(),
-          _ => StructToken::from(format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name))),
-        };
-        self
-          .type_resolver
-          .discriminated_enum(name, schema, base_struct_name.as_str())
-      })
-      .transpose()?;
-
-    Ok(
-      discriminated_enum
-        .into_iter()
-        .chain(std::iter::once(main_type))
-        .chain(inline_types)
-        .collect(),
-    )
-  }
-
   pub(crate) fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
     let graph = self.context.graph();
 
@@ -193,5 +158,34 @@ impl StructConverter {
       StructKind::Schema,
     )?;
     self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)
+  }
+
+  fn finalize_struct_types(
+    &self,
+    name: &str,
+    schema: &ObjectSchema,
+    main_type: RustType,
+    inline_types: Vec<RustType>,
+  ) -> anyhow::Result<Vec<RustType>> {
+    let discriminated_enum = schema
+      .is_discriminated_base_type()
+      .then(|| {
+        let base_struct_name = match &main_type {
+          RustType::Struct(def) => def.name.as_str().to_string(),
+          _ => format!("{}{DISCRIMINATED_BASE_SUFFIX}", to_rust_type_name(name)),
+        };
+        self
+          .discriminator_converter
+          .build_base_discriminated_enum(name, schema, &base_struct_name)
+      })
+      .transpose()?;
+
+    Ok(
+      discriminated_enum
+        .into_iter()
+        .chain(std::iter::once(main_type))
+        .chain(inline_types)
+        .collect(),
+    )
   }
 }

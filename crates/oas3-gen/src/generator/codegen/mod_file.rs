@@ -1,7 +1,10 @@
 use quote::quote;
 
 use super::Visibility;
-use crate::generator::ast::{ClientDef, LintConfig};
+use crate::generator::{
+  ast::{ClientDef, LintConfig},
+  codegen::generate_source,
+};
 
 pub struct ModFileGenerator<'a> {
   metadata: &'a ClientDef,
@@ -25,6 +28,6 @@ impl<'a> ModFileGenerator<'a> {
     };
 
     let lint_config = LintConfig::default();
-    super::generate_source(&code, self.metadata, Some(&lint_config), source_path, gen_version)
+    generate_source(&code, self.metadata, Some(&lint_config), source_path, gen_version)
   }
 }

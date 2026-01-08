@@ -101,9 +101,6 @@ pub(crate) trait SchemaExt {
   /// Returns true if the schema has allOf composition.
   fn has_intersection(&self) -> bool;
 
-  /// Returns true if the schema has a const value defined.
-  fn has_const_value(&self) -> bool;
-
   /// Returns true if the schema requires a dedicated type definition.
   /// This includes schemas with enum values, oneOf/anyOf unions, or typed object properties.
   fn requires_type_definition(&self) -> bool;
@@ -112,9 +109,6 @@ pub(crate) trait SchemaExt {
   /// A relaxed enum has both freeform string variants and constrained string variants,
   /// allowing APIs to accept known values plus arbitrary strings for forward compatibility.
   fn has_relaxed_anyof_enum(&self) -> bool;
-
-  /// Returns true if the schema is a freeform string (string type with no const or enum constraints).
-  fn is_freeform_string(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -264,20 +258,12 @@ impl SchemaExt for ObjectSchema {
     !self.all_of.is_empty()
   }
 
-  fn has_const_value(&self) -> bool {
-    self.const_value.is_some()
-  }
-
   fn requires_type_definition(&self) -> bool {
     self.has_enum_values() || self.has_union() || (!self.properties.is_empty() && self.additional_properties.is_none())
   }
 
   fn has_relaxed_anyof_enum(&self) -> bool {
     !self.any_of.is_empty() && has_mixed_string_variants(self.any_of.iter())
-  }
-
-  fn is_freeform_string(&self) -> bool {
-    !self.has_const_value() && !self.has_enum_values() && self.is_string()
   }
 }
 

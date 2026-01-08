@@ -3,7 +3,7 @@ use std::{collections::HashSet, rc::Rc};
 use indexmap::IndexMap;
 use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
 
-use super::{ConverterContext, TypeResolver, TypeUsageRecorder};
+use super::{ConverterContext, TypeResolver, TypeUsageRecorder, inline_resolver::InlineTypeResolver};
 use crate::generator::{
   ast::{
     ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
@@ -32,6 +32,7 @@ pub(crate) struct ResponseMetadata {
 #[derive(Debug, Clone)]
 pub(crate) struct ResponseConverter {
   type_resolver: TypeResolver,
+  inline_resolver: InlineTypeResolver,
   context: Rc<ConverterContext>,
 }
 
@@ -39,7 +40,12 @@ impl ResponseConverter {
   /// Creates a new response converter.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let type_resolver = TypeResolver::new(context.clone());
-    Self { type_resolver, context }
+    let inline_resolver = InlineTypeResolver::new(context.clone());
+    Self {
+      type_resolver,
+      inline_resolver,
+      context,
+    }
   }
 
   /// Builds a response enum for an operation.
@@ -191,7 +197,7 @@ impl ResponseConverter {
     }
 
     let base_name = schema.infer_name_from_context(path, status_code.as_str());
-    let Some(output) = self.type_resolver.try_inline_schema(schema, &base_name)? else {
+    let Some(output) = self.inline_resolver.try_inline_schema(schema, &base_name)? else {
       return Ok(None);
     };
 

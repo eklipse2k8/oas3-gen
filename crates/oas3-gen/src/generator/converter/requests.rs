@@ -3,7 +3,7 @@ use std::rc::Rc;
 use oas3::spec::ObjectOrReference;
 
 use super::{
-  TypeResolver,
+  inline_resolver::InlineTypeResolver,
   methods::MethodGenerator,
   parameters::{ConvertedParams, ParameterConverter},
 };
@@ -132,6 +132,7 @@ impl BodyInfo {
       return Ok(Self::empty(!is_required));
     };
 
+    let inline_resolver = InlineTypeResolver::new(context.clone());
     let (generated_types, type_name) = match schema_ref {
       ObjectOrReference::Ref { ref_path, .. } => {
         let Some(name) = SchemaRegistry::parse_ref(ref_path) else {
@@ -141,8 +142,7 @@ impl BodyInfo {
       }
       ObjectOrReference::Object(schema) => {
         let base_name = schema.infer_name_from_context(&entry.path, REQUEST_BODY_SUFFIX);
-        let type_resolver = TypeResolver::new(context.clone());
-        let Some(output) = type_resolver.try_inline_schema(schema, &base_name)? else {
+        let Some(output) = inline_resolver.try_inline_schema(schema, &base_name)? else {
           return Ok(Self::empty(!is_required));
         };
         (output.inline_types, output.result)

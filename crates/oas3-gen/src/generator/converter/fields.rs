@@ -15,6 +15,7 @@ use crate::generator::{
     ValidationAttribute,
   },
   converter::ConverterContext,
+  naming::inference::InferenceExt,
   schema_registry::DiscriminatorMapping,
 };
 
@@ -259,7 +260,7 @@ impl FieldConverter {
       return attrs;
     }
 
-    if schema.is_string() && schema.enum_values.is_empty() {
+    if schema.is_freeform_string() {
       let has_non_string_format = schema.format.as_ref().is_some_and(|f| Self::is_non_string_format(f));
 
       if !has_non_string_format {
@@ -369,7 +370,7 @@ impl FieldConverter {
     if self.odata_support
       && prop_name.starts_with("@odata.")
       && parent_schema.discriminator.is_none()
-      && parent_schema.all_of.is_empty()
+      && !parent_schema.has_intersection()
     {
       return true;
     }

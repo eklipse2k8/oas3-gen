@@ -21,7 +21,7 @@ use crate::generator::{
   naming::{
     constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
     identifiers::{ensure_unique, to_rust_type_name},
-    inference::{NormalizedVariant, derive_method_names},
+    inference::{InferenceExt, NormalizedVariant, derive_method_names},
   },
 };
 

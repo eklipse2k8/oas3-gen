@@ -4,10 +4,11 @@ use std::{
 };
 
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet, Spec};
 
 use crate::generator::{
   ast::{EnumVariantToken, VariantDef},
+  converter::{SchemaExt, union_types::UnionKind},
   naming::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX, VARIANT_KIND_SUFFIX},
     identifiers::{sanitize, split_pascal_case, to_rust_type_name},
@@ -23,6 +24,31 @@ pub(crate) trait InferenceExt {
   /// schema.any_of = [A, B], schema.one_of = [C] => yields A, B, C
   /// ```
   fn union_variants(&self) -> impl Iterator<Item = &ObjectOrReference<ObjectSchema>>;
+
+  /// Returns the union variants slice and kind, or None if not a union.
+  ///
+  /// This is the preferred method when you need both the variants and the union kind
+  /// (oneOf vs anyOf) together, avoiding duplicate logic.
+  fn union_variants_with_kind(&self) -> Option<(&[ObjectOrReference<ObjectSchema>], UnionKind)>;
+
+  /// Counts non-null variants in a union schema.
+  ///
+  /// A variant is considered null if it resolves to a null-only type or a nullable object
+  /// placeholder (e.g., `{type: "null"}` or `{type: ["object", "null"]}` with no properties).
+  fn count_non_null_variants(&self, spec: &Spec) -> usize;
+
+  /// Returns true if any variant in the union is a null type.
+  fn has_null_variant(&self, spec: &Spec) -> bool;
+
+  /// Returns the first non-null variant in a union, if present.
+  fn find_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>>;
+
+  /// Returns the single non-null variant if this union has exactly one.
+  /// Returns None if there are 0 or 2+ non-null variants.
+  fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>>;
+
+  /// Returns true if this is a single-variant union where the variant is inline (not a $ref).
+  fn has_inline_single_variant(&self, spec: &Spec) -> bool;
 
   /// Returns the single `SchemaType` if exactly one is defined, or the non-null type
   /// from a two-type nullable set (e.g., `[string, null]` -> `string`).
@@ -99,6 +125,51 @@ pub(crate) trait InferenceExt {
 impl InferenceExt for ObjectSchema {
   fn union_variants(&self) -> impl Iterator<Item = &ObjectOrReference<ObjectSchema>> {
     self.any_of.iter().chain(&self.one_of)
+  }
+
+  fn union_variants_with_kind(&self) -> Option<(&[ObjectOrReference<ObjectSchema>], UnionKind)> {
+    let kind = UnionKind::from_schema(self);
+    let variants = match kind {
+      UnionKind::OneOf => &self.one_of,
+      UnionKind::AnyOf => &self.any_of,
+    };
+    if variants.is_empty() {
+      None
+    } else {
+      Some((variants, kind))
+    }
+  }
+
+  fn count_non_null_variants(&self, spec: &Spec) -> usize {
+    self
+      .union_variants()
+      .filter(|v| v.resolve(spec).map(|s| !s.is_nullable_object()).unwrap_or(true))
+      .count()
+  }
+
+  fn has_null_variant(&self, spec: &Spec) -> bool {
+    self
+      .union_variants()
+      .any(|v| v.resolve(spec).is_ok_and(|s| s.is_nullable_object()))
+  }
+
+  fn find_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>> {
+    self
+      .union_variants()
+      .find(|v| v.resolve(spec).is_ok_and(|s| !s.is_nullable_object()))
+  }
+
+  fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>> {
+    if self.count_non_null_variants(spec) != 1 {
+      return None;
+    }
+    self.find_non_null_variant(spec)
+  }
+
+  fn has_inline_single_variant(&self, spec: &Spec) -> bool {
+    self
+      .single_non_null_variant(spec)
+      .is_some_and(|v| RefCollector::parse_schema_ref(v).is_none())
   }
 
   fn single_type_or_nullable(&self) -> Option<SchemaType> {

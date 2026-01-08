@@ -17,7 +17,7 @@ use crate::generator::{
     StructMethodKind, TypeRef, ValidationAttribute,
     tokens::{ConstToken, EnumToken, EnumVariantToken},
   },
-  codegen::headers::HeaderMapGenerator,
+  codegen::{attributes::generate_derives_from_slice, headers::HeaderMapGenerator},
 };
 
 pub(crate) struct StructGenerator<'a> {
@@ -79,7 +79,7 @@ impl Definition<'_> {
     let docs = &self.def.docs;
     let vis = self.vis;
 
-    let derives = super::attributes::generate_derives_from_slice(&self.def.derives());
+    let derives = generate_derives_from_slice(&self.def.derives());
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
     let fields: Vec<TokenStream> = self.def.fields.iter().map(|f| self.field(f)).collect();

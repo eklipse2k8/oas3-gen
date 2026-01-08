@@ -25,14 +25,14 @@ pub(crate) struct ConversionResult {
 /// Coordinates [`RequestConverter`] and [`ResponseConverter`] to transform
 /// operation definitions into request/response type definitions.
 #[derive(Debug, Clone)]
-pub(crate) struct OperationConverter<'a> {
+pub(crate) struct OperationConverter {
   context: Rc<ConverterContext>,
-  schema_converter: &'a SchemaConverter,
+  schema_converter: SchemaConverter,
 }
 
-impl<'a> OperationConverter<'a> {
+impl OperationConverter {
   /// Creates a new operation converter.
-  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: &'a SchemaConverter) -> Self {
+  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
     Self {
       context,
       schema_converter,

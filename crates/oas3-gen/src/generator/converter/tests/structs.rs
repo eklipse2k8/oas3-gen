@@ -4,14 +4,13 @@ use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, 
 
 use crate::{
   generator::{
-    ast::{
-      Documentation, FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValidationAttribute,
-    },
-    converter::{
-      SchemaConverter, discriminator::DiscriminatorConverter, fields::FieldConverter, type_resolver::TypeResolver,
-    },
+    ast::{FieldDef, FieldNameToken, RustType, SerdeAttribute, TypeRef, ValidationAttribute},
+    converter::{SchemaConverter, discriminator::DiscriminatorConverter, fields::FieldConverter},
   },
-  tests::common::{create_test_context, create_test_graph, default_config},
+  tests::common::{
+    create_test_context, create_test_graph, default_config, make_docs, make_field, make_integer_type_ref,
+    make_string_type_ref,
+  },
 };
 
 #[test]
@@ -309,15 +308,6 @@ fn test_discriminator_handler_detect_parent() {
   assert_eq!(info.parent_name, "Parent");
 }
 
-fn make_field(name: &str, deprecated: bool) -> FieldDef {
-  FieldDef::builder()
-    .name(FieldNameToken::from_raw(name))
-    .rust_type(TypeRef::new(RustPrimitive::String))
-    .docs(make_docs())
-    .deprecated(deprecated)
-    .build()
-}
-
 #[test]
 fn test_deduplicate_field_names_no_duplicates() {
   let fields = vec![
@@ -401,18 +391,6 @@ fn test_deduplicate_field_names_multiple_groups() {
   assert!(names.contains(&"foo_2"));
   assert!(names.contains(&"bar"));
   assert!(!fields.iter().any(|f| f.name == "bar" && f.deprecated));
-}
-
-fn make_docs() -> Documentation {
-  vec!["Some docs".to_string()].into()
-}
-
-fn make_string_type_ref() -> TypeRef {
-  TypeRef::new(RustPrimitive::String)
-}
-
-fn make_integer_type_ref() -> TypeRef {
-  TypeRef::new(RustPrimitive::I64)
 }
 
 fn make_base_field(type_ref: TypeRef) -> FieldDef {
@@ -670,9 +648,9 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
-  let type_resolver = TypeResolver::new(context);
+  let schema_converter = SchemaConverter::new(&context);
 
-  let result = type_resolver.discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
+  let result = schema_converter.discriminated_enum("BaseEvent", &base_schema, "BaseEventBase")?;
 
   let RustType::DiscriminatedEnum(enum_def) = result else {
     panic!("Expected DiscriminatedEnum");

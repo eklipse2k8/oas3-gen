@@ -5,15 +5,18 @@ use inflections::Inflect;
 use oas3::spec::ObjectSchema;
 
 use super::{
-  ConversionOutput, SchemaExt,
+  ConversionOutput, SchemaExt, TypeResolver,
   structs::StructConverter,
   union_types::UnionKind,
   unions::{EnumConverter, UnionConverter},
 };
 use crate::generator::{
   ast::{RustType, TypeRef},
-  converter::ConverterContext,
-  naming::identifiers::{strip_parent_prefix, to_rust_type_name},
+  converter::{ConverterContext, SchemaConverter, cache::SharedSchemaCache},
+  naming::{
+    identifiers::{strip_parent_prefix, to_rust_type_name},
+    inference::InferenceExt,
+  },
 };
 
 #[derive(Debug, Clone)]
@@ -125,7 +128,31 @@ impl InlineTypeResolver {
     Ok(result)
   }
 
-  pub(crate) fn resolve_inline_schema<F>(
+  pub(crate) fn try_inline_schema(
+    &self,
+    schema: &ObjectSchema,
+    base_name: &str,
+  ) -> Result<Option<ConversionOutput<String>>> {
+    let schema_converter = SchemaConverter::new(&self.context);
+    let result = self.resolve_inline_schema_with_fn(schema, base_name, |name, effective| {
+      schema_converter.convert_schema(name, effective)
+    })?;
+
+    if result.is_some() {
+      return Ok(result);
+    }
+
+    let type_resolver = TypeResolver::new(self.context.clone());
+    if schema.union_variants_with_kind().is_some()
+      && let Some(t) = type_resolver.try_nullable_union(schema)?
+    {
+      return Ok(Some(ConversionOutput::new(t.to_rust_type())));
+    }
+
+    Ok(None)
+  }
+
+  pub(crate) fn resolve_inline_schema_with_fn<F>(
     &self,
     schema: &ObjectSchema,
     base_name: &str,
@@ -178,7 +205,7 @@ impl InlineTypeResolver {
   ) -> Result<ConversionOutput<TypeRef>>
   where
     F: FnOnce(&str) -> Result<ConversionOutput<RustType>>,
-    C: FnOnce(&super::cache::SharedSchemaCache) -> Option<String>,
+    C: FnOnce(&SharedSchemaCache) -> Option<String>,
   {
     {
       let cache = self.context.cache.borrow();

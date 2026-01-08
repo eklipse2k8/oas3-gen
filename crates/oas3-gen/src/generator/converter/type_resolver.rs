@@ -5,16 +5,11 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
-  ConversionOutput, SchemaExt,
-  common::extract_variant_references,
-  discriminator::DiscriminatorConverter,
-  inline_resolver::InlineTypeResolver,
-  structs::StructConverter,
+  ConversionOutput, SchemaExt, common::extract_variant_references, inline_resolver::InlineTypeResolver,
   union_types::UnionKind,
-  unions::{EnumConverter, UnionConverter},
 };
 use crate::generator::{
-  ast::{Documentation, RustPrimitive, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
+  ast::{RustPrimitive, TypeRef},
   converter::ConverterContext,
   naming::{
     constants::VARIANT_KIND_SUFFIX,
@@ -25,6 +20,10 @@ use crate::generator::{
 };
 
 /// Resolves OpenAPI schemas into Rust type references.
+///
+/// This is a read-only component that maps OpenAPI schemas to Rust `TypeRef`
+/// and provides navigation through the schema graph. It does not produce
+/// `RustType` definitions - that is handled by `SchemaConverter`.
 #[derive(Clone, Debug)]
 pub(crate) struct TypeResolver {
   context: Rc<ConverterContext>,
@@ -33,9 +32,10 @@ pub(crate) struct TypeResolver {
 
 impl TypeResolver {
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+    let inline_resolver = InlineTypeResolver::new(context.clone());
     Self {
-      inline_resolver: InlineTypeResolver::new(context.clone()),
       context,
+      inline_resolver,
     }
   }
 
@@ -43,11 +43,13 @@ impl TypeResolver {
     self.context.graph().spec()
   }
 
-  fn resolve(&self, schema_ref: &ObjectOrReference<ObjectSchema>) -> Result<ObjectSchema> {
+  /// Resolves a schema reference to its underlying schema.
+  pub(crate) fn resolve(&self, schema_ref: &ObjectOrReference<ObjectSchema>) -> Result<ObjectSchema> {
     schema_ref.resolve(self.spec()).context("Schema resolution failed")
   }
 
-  fn type_ref(&self, schema_name: &str) -> TypeRef {
+  /// Creates a type reference for a named schema, applying boxing if cyclic.
+  pub(crate) fn type_ref(&self, schema_name: &str) -> TypeRef {
     let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
     if self.context.graph().is_cyclic(schema_name) {
       type_ref = type_ref.with_boxed();
@@ -55,48 +57,7 @@ impl TypeResolver {
     type_ref
   }
 
-  fn union_variants(schema: &ObjectSchema) -> Option<(&[ObjectOrReference<ObjectSchema>], UnionKind)> {
-    let variants = if !schema.one_of.is_empty() {
-      &schema.one_of
-    } else if !schema.any_of.is_empty() {
-      &schema.any_of
-    } else {
-      return None;
-    };
-    Some((variants, UnionKind::from_schema(schema)))
-  }
-
-  fn count_non_null(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> usize {
-    variants
-      .iter()
-      .filter(|v| {
-        self
-          .resolve(v)
-          .map(|s| !s.is_null() && !s.is_nullable_object())
-          .unwrap_or(true)
-      })
-      .count()
-  }
-
-  fn find_non_null_variant<'a>(
-    &self,
-    variants: &'a [ObjectOrReference<ObjectSchema>],
-  ) -> Result<Option<&'a ObjectOrReference<ObjectSchema>>> {
-    variants
-      .iter()
-      .find(|v| self.resolve(v).is_ok_and(|s| !s.is_nullable_object()))
-      .map_or(Ok(None), |v| Ok(Some(v)))
-  }
-
-  fn has_null_variant(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<bool> {
-    for variant in variants {
-      if self.resolve(variant)?.is_nullable_object() {
-        return Ok(true);
-      }
-    }
-    Ok(false)
-  }
-
+  /// Resolves a schema to its Rust type reference.
   pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
     if let Some(type_ref) = self.try_type_ref_by_title(schema) {
       return Ok(type_ref);
@@ -125,6 +86,7 @@ impl TypeResolver {
     Ok(TypeRef::new(RustPrimitive::Value))
   }
 
+  /// Resolves a property schema to its Rust type reference with inline type tracking.
   pub(crate) fn resolve_property(
     &self,
     parent_name: &str,
@@ -143,7 +105,9 @@ impl TypeResolver {
     }
 
     if schema.is_inline_object() {
-      return self.inline_struct(parent_name, property_name, schema);
+      return self
+        .inline_resolver
+        .resolve_inline_struct(parent_name, property_name, schema);
     }
 
     if schema.has_enum_values() {
@@ -171,11 +135,11 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.resolve_type(schema)?));
     }
 
-    let Some((variants, _)) = Self::union_variants(schema) else {
+    let Some((variants, _)) = schema.union_variants_with_kind() else {
       return Ok(ConversionOutput::new(self.type_ref(&ref_name)));
     };
 
-    if self.is_wrapper_union(variants)?
+    if self.is_wrapper_union(schema)?
       && let Some(type_ref) = self.try_union(variants)?
     {
       return Ok(ConversionOutput::new(type_ref));
@@ -200,17 +164,6 @@ impl TypeResolver {
       .resolve_inline_enum(parent_name, property_name, schema, &enum_values)
   }
 
-  fn inline_struct(
-    &self,
-    parent_name: &str,
-    property_name: &str,
-    schema: &ObjectSchema,
-  ) -> Result<ConversionOutput<TypeRef>> {
-    self
-      .inline_resolver
-      .resolve_inline_struct(parent_name, property_name, schema)
-  }
-
   pub(crate) fn inline_struct_from_schema(
     &self,
     schema: &ObjectSchema,
@@ -225,9 +178,9 @@ impl TypeResolver {
     property_name: &str,
     schema: &ObjectSchema,
   ) -> Result<ConversionOutput<TypeRef>> {
-    let (variants, _) = Self::union_variants(schema).unwrap();
+    let (variants, _) = schema.union_variants_with_kind().unwrap();
 
-    if let Some(type_ref) = self.try_nullable_union(variants)? {
+    if let Some(type_ref) = self.try_nullable_union(schema)? {
       return Ok(ConversionOutput::new(type_ref));
     }
 
@@ -276,7 +229,7 @@ impl TypeResolver {
       let base = format!("{parent_name}{}", strip_parent_prefix(parent_name, &singular));
       self.inline_struct_from_schema(&items, &base)?
     } else if items.has_union() {
-      let (variants, _) = Self::union_variants(&items).unwrap();
+      let (variants, _) = items.union_variants_with_kind().unwrap();
       let kind_name = format!("{singular}{VARIANT_KIND_SUFFIX}");
       let name = CommonVariantName::union_name_or(variants, &kind_name, || kind_name.clone());
 
@@ -319,19 +272,21 @@ impl TypeResolver {
     self.context.graph().find_union(refs).cloned()
   }
 
-  fn try_nullable_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
+  pub(crate) fn try_nullable_union(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
+    let Some((variants, _)) = schema.union_variants_with_kind() else {
+      return Ok(None);
+    };
+
     if variants.len() != 2 {
       return Ok(None);
     }
 
-    let non_null = self.find_non_null_variant(variants)?;
-    let has_null = self.has_null_variant(variants)?;
-
-    if !has_null {
+    let spec = self.spec();
+    if !schema.has_null_variant(spec) {
       return Ok(None);
     }
 
-    let Some(variant) = non_null else {
+    let Some(variant) = schema.find_non_null_variant(spec) else {
       return Ok(None);
     };
 
@@ -366,7 +321,11 @@ impl TypeResolver {
       return Ok(Some(self.type_ref(&name)));
     }
 
-    if let Some(nullable) = self.try_nullable_union(variants)? {
+    let temp_schema = ObjectSchema {
+      one_of: variants.to_vec(),
+      ..Default::default()
+    };
+    if let Some(nullable) = self.try_nullable_union(&temp_schema)? {
       return Ok(Some(nullable));
     }
 
@@ -522,154 +481,41 @@ impl TypeResolver {
     Ok(type_ref)
   }
 
-  pub(crate) fn discriminated_enum(&self, name: &str, schema: &ObjectSchema, fallback_type: &str) -> Result<RustType> {
-    DiscriminatorConverter::new(self.context.clone()).build_base_discriminated_enum(name, schema, fallback_type)
-  }
+  pub(crate) fn is_wrapper_union(&self, schema: &ObjectSchema) -> Result<bool> {
+    let spec = self.spec();
 
-  pub(crate) fn try_inline_schema(
-    &self,
-    schema: &ObjectSchema,
-    base_name: &str,
-  ) -> Result<Option<ConversionOutput<String>>> {
-    let result = self
-      .inline_resolver
-      .resolve_inline_schema(schema, base_name, |name, effective| {
-        self.convert_schema(name, effective)
-      })?;
-
-    if result.is_some() {
-      return Ok(result);
-    }
-
-    if let Some((v, _)) = Self::union_variants(schema)
-      && let Some(t) = self.try_nullable_union(v)?
-    {
-      return Ok(Some(ConversionOutput::new(t.to_rust_type())));
-    }
-
-    Ok(None)
-  }
-
-  pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> Result<Vec<RustType>> {
-    let struct_conv = StructConverter::new(self.context.clone());
-    let enum_conv = EnumConverter::new(self.context.clone());
-    let union_conv = UnionConverter::new(self.context.clone());
-
-    if schema.has_intersection() {
-      return struct_conv.convert_all_of_schema(name);
-    }
-
-    if let Some((variants, kind)) = Self::union_variants(schema) {
-      if schema.discriminator.is_none() && self.is_wrapper_union(variants)? {
-        return Ok(vec![]);
-      }
-
-      if let Some(flattened) = self.try_flatten_nested_union(schema, variants)? {
-        return union_conv
-          .convert_union(name, &flattened, UnionKind::from_schema(&flattened))
-          .map(ConversionOutput::into_vec);
-      }
-
-      return union_conv
-        .convert_union(name, schema, kind)
-        .map(ConversionOutput::into_vec);
-    }
-
-    if !schema.enum_values.is_empty() {
-      return Ok(vec![enum_conv.convert_value_enum(name, schema)]);
-    }
-
-    if !schema.properties.is_empty() || schema.additional_properties.is_some() {
-      let result = struct_conv.convert_struct(name, schema, None)?;
-      return struct_conv.finalize_struct_types(name, schema, result.result, result.inline_types);
-    }
-
-    if let Some(output) = self.try_array_alias(name, schema)? {
-      let alias = RustType::TypeAlias(TypeAliasDef {
-        name: TypeAliasToken::from_raw(name),
-        docs: Documentation::from_optional(schema.description.as_ref()),
-        target: output.result,
-      });
-      let mut result = vec![alias];
-      result.extend(output.inline_types);
-      return Ok(result);
-    }
-
-    let type_ref = self.resolve_type(schema)?;
-    Ok(vec![RustType::TypeAlias(TypeAliasDef {
-      name: TypeAliasToken::from_raw(name),
-      docs: Documentation::from_optional(schema.description.as_ref()),
-      target: type_ref,
-    })])
-  }
-
-  fn try_array_alias(&self, name: &str, schema: &ObjectSchema) -> Result<Option<ConversionOutput<TypeRef>>> {
-    if !schema.is_array() && !schema.is_nullable_array() {
-      return Ok(None);
-    }
-
-    if let Some(output) = self.try_inline_array(name, name, schema)? {
-      let type_ref = if schema.is_nullable_array() {
-        output.result.with_option()
-      } else {
-        output.result
-      };
-      return Ok(Some(ConversionOutput::with_inline_types(type_ref, output.inline_types)));
-    }
-
-    Ok(None)
-  }
-
-  fn is_wrapper_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<bool> {
-    if self.count_non_null(variants) != 1 {
-      return Ok(false);
-    }
-
-    let Some(variant) = self.find_non_null_variant(variants)? else {
+    let Some(variant) = schema.single_non_null_variant(spec) else {
       return Ok(false);
     };
-
-    let resolved = self.resolve(variant)?;
-
-    if resolved.has_union() {
-      return Ok(false);
-    }
 
     if RefCollector::parse_schema_ref(variant).is_some() {
       return Ok(true);
     }
 
-    if resolved.additional_properties.is_some() {
+    let resolved = self.resolve(variant)?;
+
+    if resolved.has_union() || resolved.additional_properties.is_some() {
       return Ok(false);
     }
 
     Ok(resolved.is_primitive())
   }
 
-  fn try_flatten_nested_union(
-    &self,
-    outer: &ObjectSchema,
-    variants: &[ObjectOrReference<ObjectSchema>],
-  ) -> Result<Option<ObjectSchema>> {
-    if self.count_non_null(variants) != 1 {
+  pub(crate) fn try_flatten_nested_union(&self, outer: &ObjectSchema) -> Result<Option<ObjectSchema>> {
+    let spec = self.spec();
+
+    if !outer.has_inline_single_variant(spec) {
       return Ok(None);
     }
 
-    let Some(variant) = self.find_non_null_variant(variants)? else {
-      return Ok(None);
-    };
-
-    if RefCollector::parse_schema_ref(variant).is_some() {
-      return Ok(None);
-    }
-
+    let variant = outer.single_non_null_variant(spec).unwrap();
     let inner = self.resolve(variant)?;
 
     if !inner.has_union() {
       return Ok(None);
     }
 
-    let (inner_variants, _) = Self::union_variants(&inner).unwrap();
+    let (inner_variants, _) = inner.union_variants_with_kind().unwrap();
 
     Ok(Some(ObjectSchema {
       description: outer.description.clone().or_else(|| inner.description.clone()),
