@@ -3,13 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::{Value, json};
 
-use crate::generator::{
-  ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
-  naming::{
-    constants::{KNOWN_ENUM_VARIANT, REQUEST_BODY_SUFFIX},
-    inference::{InferenceExt, NormalizedVariant, derive_method_names, strip_common_affixes},
-    name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
+use crate::{
+  generator::{
+    ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
+    naming::{
+      constants::{KNOWN_ENUM_VARIANT, REQUEST_BODY_SUFFIX},
+      inference::{NormalizedVariant, derive_method_names, strip_common_affixes},
+      name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
+    },
   },
+  utils::SchemaExt,
 };
 
 fn make_string_schema() -> ObjectSchema {

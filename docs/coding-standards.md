@@ -163,6 +163,25 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
 - The underlying error is automatically chained; don't manually interpolate it into the message
 - Import `use anyhow::Context;` to access the `with_context()` or `context()` method on `Result` types
 
+### Extension Traits for External Types
+
+- Use extension traits to add methods to external library types without modifying them
+- Define trait in a dedicated module (e.g., `utils/schema_ext.rs` for `SchemaExt`)
+- Trait methods should be cohesive - group related functionality
+- Good: `trait SchemaExt { fn is_array(&self) -> bool; fn has_union(&self) -> bool; }`
+- Import the trait where needed: `use crate::utils::SchemaExt;`
+- Example: `SchemaExt` adds type predicates and inference methods to `oas3::spec::ObjectSchema`
+- Prefer extension traits over free functions when the operation is conceptually a method on the type
+
+### Focused Registries over Monolithic Caches
+
+- Split large cache structures into focused, single-responsibility registries
+- Each registry should manage one type of mapping or concern
+- Good: `NameRegistry` (name uniqueness), `SchemaIdentity` (schema-to-type), `EnumRegistry` (enum values-to-type)
+- Bad: `TypeIdentityCache` with mixed concerns (schema maps, enum maps, union maps, name tracking)
+- Benefits: clearer ownership, easier testing, simpler method signatures
+- Example: `SharedSchemaCache` composes `NameRegistry`, `SchemaIdentity`, `EnumRegistry`, `UnionRegistry`
+
 ### Type-Safe Enums for Configuration
 
 - Use typed enums instead of boolean flags for configuration options
@@ -201,9 +220,10 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
 
 1. Review pipeline architecture: Parse/Analyze -> Convert (AST) -> Generate (Rust source)
 2. Identify stage:
+   - utils/ for cross-cutting concerns (extension traits, text processing)
    - analyzer/ for schema analysis, validation, and type usage tracking
-   - naming/ for identifier generation and type name inference
+   - naming/ for identifier generation and variant naming
    - converter/ for OpenAPI to AST transformation
    - codegen/ for AST to Rust source code generation
 3. Locate module: enums, structs, operations, type_resolver, attributes, cache, etc.
-4. Check utilities for cross-cutting concerns: utils/text.rs, naming/identifiers.rs
+4. Check utilities for cross-cutting concerns: utils/schema_ext.rs, utils/text.rs, naming/identifiers.rs

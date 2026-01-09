@@ -284,13 +284,20 @@ fn test_cache_operations() {
     ..Default::default()
   });
 
-  let mut type_cache = SharedSchemaCache::new();
-  type_cache
-    .register_type(&schema1, "FirstEnum", vec![], enum1)
-    .expect("Should register first enum");
-  type_cache
-    .register_type(&schema2, "SecondEnum", vec![], enum2)
-    .expect("Should register second enum");
+  let type_cache = SharedSchemaCache::new();
+
+  let reg1 = type_cache
+    .prepare_registration(&schema1, "FirstEnum")
+    .expect("Should prepare first enum");
+  let named_enum1 = SharedSchemaCache::apply_name_to_type(enum1, &reg1.assigned_name);
+  let mut type_cache = type_cache;
+  type_cache.commit_registration(reg1, vec![], named_enum1);
+
+  let reg2 = type_cache
+    .prepare_registration(&schema2, "SecondEnum")
+    .expect("Should prepare second enum");
+  let named_enum2 = SharedSchemaCache::apply_name_to_type(enum2, &reg2.assigned_name);
+  type_cache.commit_registration(reg2, vec![], named_enum2);
 
   let types = type_cache.into_types();
   assert_eq!(types.len(), 2, "Should return all generated types");

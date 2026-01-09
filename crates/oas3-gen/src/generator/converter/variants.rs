@@ -2,11 +2,14 @@ use std::rc::Rc;
 
 use oas3::spec::ObjectSchema;
 
-use super::{ConversionOutput, SchemaExt, type_resolver::TypeResolver, union_types::UnionVariantSpec};
-use crate::generator::{
-  ast::{Documentation, EnumVariantToken, SerdeAttribute, TypeRef, VariantContent, VariantDef},
-  converter::ConverterContext,
-  naming::{identifiers::to_rust_type_name, inference::NormalizedVariant},
+use super::{ConversionOutput, type_resolver::TypeResolver, union_types::UnionVariantSpec};
+use crate::{
+  generator::{
+    ast::{Documentation, EnumVariantToken, SerdeAttribute, TypeRef, VariantContent, VariantDef},
+    converter::ConverterContext,
+    naming::{identifiers::to_rust_type_name, inference::NormalizedVariant},
+  },
+  utils::SchemaExt,
 };
 
 #[derive(Clone, Debug)]

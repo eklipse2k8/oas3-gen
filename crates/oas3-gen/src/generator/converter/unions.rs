@@ -4,21 +4,21 @@ use anyhow::Context;
 use oas3::spec::{ObjectOrReference, ObjectSchema};
 
 use super::{
-  ConversionOutput, SchemaExt,
+  ConversionOutput,
   methods::MethodGenerator,
   relaxed_enum::RelaxedEnumBuilder,
   union_types::{CollisionStrategy, EnumValueEntry, UnionKind, UnionVariantSpec},
   value_enums::ValueEnumBuilder,
   variants::VariantBuilder,
 };
-use crate::generator::{
-  ast::{Documentation, EnumVariantToken, RustType},
-  converter::{ConverterContext, discriminator::DiscriminatorConverter},
-  naming::{
-    identifiers::ensure_unique,
-    inference::{InferenceExt, strip_common_affixes},
+use crate::{
+  generator::{
+    ast::{Documentation, EnumVariantToken, RustType},
+    converter::{ConverterContext, discriminator::DiscriminatorConverter},
+    naming::{identifiers::ensure_unique, inference::strip_common_affixes},
+    schema_registry::RefCollector,
   },
-  schema_registry::RefCollector,
+  utils::SchemaExt,
 };
 
 #[derive(Clone, Debug)]

@@ -1362,7 +1362,7 @@ fn test_union_with_inline_struct_and_raw_name() -> anyhow::Result<()> {
   let result = converter.convert_schema("my-union-type", graph.get("my-union-type").unwrap())?;
 
   let binding = context.cache.borrow();
-  let generated = &binding.generated.generated_types;
+  let generated = &binding.types.types;
   let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
 
   let enum_def = all_types.iter().find_map(|t| match t {

@@ -8,17 +8,20 @@ use oas3::spec::{
 };
 use serde_json::Value;
 
-use super::{SchemaExt, TypeResolver, fields::FieldConverter};
-use crate::generator::{
-  ast::{
-    Documentation, FieldCollection as _, FieldDef, FieldNameToken, OuterAttr, ParameterLocation, ParsedPath, RustType,
-    StructDef, StructKind, StructToken, TypeRef, ValidationAttribute,
+use super::{TypeResolver, fields::FieldConverter};
+use crate::{
+  generator::{
+    ast::{
+      Documentation, FieldCollection as _, FieldDef, FieldNameToken, OuterAttr, ParameterLocation, ParsedPath,
+      RustType, StructDef, StructKind, StructToken, TypeRef, ValidationAttribute,
+    },
+    converter::ConverterContext,
+    naming::constants::{
+      HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD,
+      QUERY_PARAMS_SUFFIX,
+    },
   },
-  converter::ConverterContext,
-  naming::constants::{
-    HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD,
-    QUERY_PARAMS_SUFFIX,
-  },
+  utils::SchemaExt,
 };
 
 /// Resolved parameter type with validation and inline types.

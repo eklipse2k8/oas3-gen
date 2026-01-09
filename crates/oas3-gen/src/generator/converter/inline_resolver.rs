@@ -5,18 +5,18 @@ use inflections::Inflect;
 use oas3::spec::ObjectSchema;
 
 use super::{
-  ConversionOutput, SchemaExt, TypeResolver,
+  ConversionOutput, TypeResolver,
   structs::StructConverter,
   union_types::UnionKind,
   unions::{EnumConverter, UnionConverter},
 };
-use crate::generator::{
-  ast::{RustType, TypeRef},
-  converter::{ConverterContext, SchemaConverter, cache::SharedSchemaCache},
-  naming::{
-    identifiers::{strip_parent_prefix, to_rust_type_name},
-    inference::InferenceExt,
+use crate::{
+  generator::{
+    ast::{RustType, TypeRef},
+    converter::{ConverterContext, SchemaConverter, cache::SharedSchemaCache},
+    naming::identifiers::{strip_parent_prefix, to_rust_type_name},
   },
+  utils::SchemaExt,
 };
 
 #[derive(Debug, Clone)]
@@ -186,11 +186,14 @@ impl InlineTypeResolver {
     }
 
     let main_type = generated.last().cloned().unwrap();
-    let final_name = self
+    let registration = self.context.cache.borrow().prepare_registration(schema, &unique_name)?;
+    let named_type = SharedSchemaCache::apply_name_to_type(main_type, &registration.assigned_name);
+    let final_name = registration.assigned_name.clone();
+    self
       .context
       .cache
       .borrow_mut()
-      .register_type(schema, &unique_name, vec![], main_type)?;
+      .commit_registration(registration, vec![], named_type);
 
     Ok(Some(ConversionOutput::with_inline_types(final_name, generated)))
   }
@@ -225,12 +228,14 @@ impl InlineTypeResolver {
 
     let result = generator(&name)?;
 
-    let type_name =
-      self
-        .context
-        .cache
-        .borrow_mut()
-        .register_type(schema, &name, result.inline_types, result.result.clone())?;
+    let registration = self.context.cache.borrow().prepare_registration(schema, &name)?;
+    let named_type = SharedSchemaCache::apply_name_to_type(result.result.clone(), &registration.assigned_name);
+    let type_name = registration.assigned_name.clone();
+    self
+      .context
+      .cache
+      .borrow_mut()
+      .commit_registration(registration, result.inline_types, named_type);
 
     Ok(ConversionOutput::new(TypeRef::new(type_name)))
   }

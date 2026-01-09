@@ -8,21 +8,24 @@ use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
 use super::{
-  ConversionOutput, SchemaExt,
+  ConversionOutput,
   union_types::{CollisionStrategy, EnumValueEntry},
   value_enums::ValueEnumBuilder,
 };
-use crate::generator::{
-  ast::{
-    Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType,
-    SerdeAttribute, TypeRef, VariantContent, VariantDef,
+use crate::{
+  generator::{
+    ast::{
+      Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, RustPrimitive, RustType,
+      SerdeAttribute, TypeRef, VariantContent, VariantDef,
+    },
+    converter::ConverterContext,
+    naming::{
+      constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
+      identifiers::{ensure_unique, to_rust_type_name},
+      inference::{NormalizedVariant, derive_method_names},
+    },
   },
-  converter::ConverterContext,
-  naming::{
-    constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
-    identifiers::{ensure_unique, to_rust_type_name},
-    inference::{InferenceExt, NormalizedVariant, derive_method_names},
-  },
+  utils::SchemaExt,
 };
 
 #[derive(Clone, Debug)]

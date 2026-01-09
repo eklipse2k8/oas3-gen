@@ -8,15 +8,17 @@ use oas3::spec::{ObjectSchema, Schema};
 use regex::Regex;
 use string_cache::DefaultAtom;
 
-use super::{ConversionOutput, SchemaExt, type_resolver::TypeResolver};
-use crate::generator::{
-  ast::{
-    Documentation, FieldDef, FieldNameToken, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
-    ValidationAttribute,
+use super::{ConversionOutput, type_resolver::TypeResolver};
+use crate::{
+  generator::{
+    ast::{
+      Documentation, FieldDef, FieldNameToken, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+      ValidationAttribute,
+    },
+    converter::ConverterContext,
+    schema_registry::DiscriminatorMapping,
   },
-  converter::ConverterContext,
-  naming::inference::InferenceExt,
-  schema_registry::DiscriminatorMapping,
+  utils::SchemaExt,
 };
 
 #[derive(Clone, Debug)]

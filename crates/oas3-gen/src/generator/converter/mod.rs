@@ -26,23 +26,26 @@ use std::{
 };
 
 use anyhow::Result;
-pub(crate) use common::{ConversionOutput, SchemaExt};
+pub(crate) use common::ConversionOutput;
 use oas3::spec::ObjectSchema;
 pub(crate) use type_resolver::TypeResolver;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 
 use super::ast::RustType;
-use crate::generator::{
-  ast::{Documentation, TypeAliasDef, TypeAliasToken, TypeRef},
-  converter::{
-    cache::SharedSchemaCache,
-    discriminator::DiscriminatorConverter,
-    structs::StructConverter,
-    union_types::UnionKind,
-    unions::{EnumConverter, UnionConverter},
+use crate::{
+  generator::{
+    ast::{Documentation, TypeAliasDef, TypeAliasToken, TypeRef},
+    converter::{
+      cache::SharedSchemaCache,
+      discriminator::DiscriminatorConverter,
+      structs::StructConverter,
+      union_types::UnionKind,
+      unions::{EnumConverter, UnionConverter},
+    },
+    naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
+    schema_registry::SchemaRegistry,
   },
-  naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name, inference::InferenceExt},
-  schema_registry::SchemaRegistry,
+  utils::SchemaExt,
 };
 
 /// Policy for handling enum variant name collisions.

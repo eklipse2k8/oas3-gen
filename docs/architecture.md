@@ -42,6 +42,7 @@ crates/
 │       │       └── list.rs
 │       ├── utils/                 # Cross-cutting utilities
 │       │   ├── mod.rs
+│       │   ├── schema_ext.rs      # SchemaExt trait for schema queries and inference
 │       │   ├── spec.rs            # Spec loading utilities
 │       │   └── text.rs            # Text processing utilities
 │       ├── tests/                 # Integration test utilities
@@ -72,7 +73,7 @@ crates/
 │           │   ├── mod.rs
 │           │   ├── constants.rs   # Naming constants
 │           │   ├── identifiers.rs # Rust identifier generation
-│           │   ├── inference.rs   # Type name inference (InferenceExt trait)
+│           │   ├── inference.rs   # Variant prefix extraction and deduplication
 │           │   ├── name_index.rs  # Name indexing for conflict resolution
 │           │   ├── operations.rs  # Operation naming
 │           │   ├── responses.rs   # Response naming
@@ -102,8 +103,8 @@ crates/
 │           │       └── validation_attrs.rs
 │           ├── converter/         # OpenAPI -> AST conversion
 │           │   ├── mod.rs         # SchemaConverter, ConverterContext, CodegenConfig
-│           │   ├── cache.rs       # SharedSchemaCache for type deduplication
-│           │   ├── common.rs      # ConversionOutput<T> wrapper and inline type tracking
+│           │   ├── cache.rs       # Type deduplication with focused registries
+│           │   ├── common.rs      # ConversionOutput<T> wrapper for inline type tracking
 │           │   ├── discriminator.rs # Discriminator handling for oneOf
 │           │   ├── fields.rs      # Struct field conversion
 │           │   ├── hashing.rs     # Schema fingerprinting for deduplication
@@ -165,7 +166,7 @@ The generator follows a strict one-way data flow where each stage produces immut
 
 1. **Parse**: Load OpenAPI spec via `oas3` crate (JSON or YAML, auto-detected)
 2. **Registry Init**: Build `SchemaRegistry` (dependency graph, cycles, merged schemas, discriminators)
-3. **Name Inference**: `InferenceExt` trait infers type names from schema context
+3. **Schema Introspection**: `SchemaExt` trait provides type predicates, union queries, and name inference
 4. **Convert Schemas**: `SchemaConverter` with `ConverterContext` transforms schemas to `Vec<RustType>`
 5. **Convert Operations**: `OperationConverter` produces `Vec<OperationInfo>` + types + usage data
 6. **Analyze**: `TypeAnalyzer` propagates usage, updates serde modes, deduplicates response enums
@@ -177,13 +178,14 @@ Data flows forward only - no stage feeds back to earlier stages.
 
 - [orchestrator.rs](../crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator, combines all stages
 - [schema_registry.rs](../crates/oas3-gen/src/generator/schema_registry.rs): Dependency graph, cycle detection, merged schemas
+- [utils/schema_ext.rs](../crates/oas3-gen/src/utils/schema_ext.rs): SchemaExt trait for schema queries and inference
 - [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): SchemaConverter, ConverterContext, CodegenConfig
 - [converter/type_resolver.rs](../crates/oas3-gen/src/generator/converter/type_resolver.rs): Central OpenAPI to Rust type conversion
 - [converter/inline_resolver.rs](../crates/oas3-gen/src/generator/converter/inline_resolver.rs): Cache-aware inline type creation coordinator
-- [converter/cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): SharedSchemaCache for type deduplication
+- [converter/cache.rs](../crates/oas3-gen/src/generator/converter/cache.rs): Type deduplication with focused registries
 - [converter/unions.rs](../crates/oas3-gen/src/generator/converter/unions.rs): oneOf/anyOf to discriminated enums
 - [converter/variants.rs](../crates/oas3-gen/src/generator/converter/variants.rs): Union variant building (ref, inline, const)
-- [naming/inference.rs](../crates/oas3-gen/src/generator/naming/inference.rs): InferenceExt trait for name inference
+- [naming/inference.rs](../crates/oas3-gen/src/generator/naming/inference.rs): Variant prefix extraction helpers
 - [naming/identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization
 - [analyzer/mod.rs](../crates/oas3-gen/src/generator/analyzer/mod.rs): TypeAnalyzer, usage propagation, serde modes
 - [codegen/mod.rs](../crates/oas3-gen/src/generator/codegen/mod.rs): Code generation entry point

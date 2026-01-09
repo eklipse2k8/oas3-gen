@@ -2,11 +2,14 @@ use std::rc::Rc;
 
 use oas3::spec::ObjectSchema;
 
-use super::{ConversionOutput, SchemaExt, discriminator::DiscriminatorConverter, fields::FieldConverter};
-use crate::generator::{
-  ast::{Documentation, RustType, StructDef, StructKind, StructToken},
-  converter::ConverterContext,
-  naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
+use super::{ConversionOutput, discriminator::DiscriminatorConverter, fields::FieldConverter};
+use crate::{
+  generator::{
+    ast::{Documentation, RustType, StructDef, StructKind, StructToken},
+    converter::ConverterContext,
+    naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
+  },
+  utils::SchemaExt,
 };
 
 #[derive(Clone, Debug)]

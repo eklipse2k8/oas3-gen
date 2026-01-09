@@ -1,9 +1,12 @@
 use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
-use crate::generator::{
-  ast::{Documentation, RustPrimitive, TypeRef, ValidationAttribute},
-  converter::{SchemaExt, fields::FieldConverter},
+use crate::{
+  generator::{
+    ast::{Documentation, RustPrimitive, TypeRef, ValidationAttribute},
+    converter::fields::FieldConverter,
+  },
+  utils::SchemaExt,
 };
 
 fn create_string_schema() -> ObjectSchema {

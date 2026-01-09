@@ -7,16 +7,20 @@ use super::{
   methods::MethodGenerator,
   parameters::{ConvertedParams, ParameterConverter},
 };
-use crate::generator::{
-  ast::{Documentation, FieldDef, FieldNameToken, RustType, StructDef, StructKind, StructMethod, StructToken, TypeRef},
-  converter::ConverterContext,
-  naming::{
-    constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
-    identifiers::to_rust_type_name,
-    inference::InferenceExt,
+use crate::{
+  generator::{
+    ast::{
+      Documentation, FieldDef, FieldNameToken, RustType, StructDef, StructKind, StructMethod, StructToken, TypeRef,
+    },
+    converter::ConverterContext,
+    naming::{
+      constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
+      identifiers::to_rust_type_name,
+    },
+    operation_registry::OperationEntry,
+    schema_registry::SchemaRegistry,
   },
-  operation_registry::OperationEntry,
-  schema_registry::SchemaRegistry,
+  utils::SchemaExt,
 };
 
 #[derive(Debug, Clone)]

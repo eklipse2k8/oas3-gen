@@ -5,18 +5,20 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
-  ConversionOutput, SchemaExt, common::extract_variant_references, inline_resolver::InlineTypeResolver,
-  union_types::UnionKind,
+  ConversionOutput, common::extract_variant_references, inline_resolver::InlineTypeResolver, union_types::UnionKind,
 };
-use crate::generator::{
-  ast::{RustPrimitive, TypeRef},
-  converter::ConverterContext,
-  naming::{
-    constants::VARIANT_KIND_SUFFIX,
-    identifiers::{strip_parent_prefix, to_rust_type_name},
-    inference::{CommonVariantName, InferenceExt},
+use crate::{
+  generator::{
+    ast::{RustPrimitive, TypeRef},
+    converter::ConverterContext,
+    naming::{
+      constants::VARIANT_KIND_SUFFIX,
+      identifiers::{strip_parent_prefix, to_rust_type_name},
+      inference::CommonVariantName,
+    },
+    schema_registry::{RefCollector, SchemaRegistry},
   },
-  schema_registry::{RefCollector, SchemaRegistry},
+  utils::SchemaExt,
 };
 
 /// Resolves OpenAPI schemas into Rust type references.

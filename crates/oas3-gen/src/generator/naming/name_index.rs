@@ -3,13 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema};
 
-use super::{
-  identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name},
-  inference::InferenceExt,
-};
-use crate::generator::{
-  converter::{SchemaExt, hashing::CanonicalSchema},
-  naming::constants::KNOWN_ENUM_VARIANT,
+use super::identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name};
+use crate::{
+  generator::{converter::hashing::CanonicalSchema, naming::constants::KNOWN_ENUM_VARIANT},
+  utils::SchemaExt,
 };
 
 const RESERVED_TYPE_NAMES: &[&str] = &["Enum", "Struct", "Type", "Object"];

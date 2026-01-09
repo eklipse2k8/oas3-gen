@@ -67,12 +67,12 @@ The generator follows a strict one-way data flow where each stage produces immut
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STAGE 2: NAME INFERENCE (naming/)                                           │
+│ STAGE 2: SCHEMA INTROSPECTION & CACHING                                     │
 │ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
-│ │   InferenceExt      │───▶│ • Infers type names from schema context    │  │
-│ │ (naming/inference)  │    │ • Schema type inference                    │  │
-│ └─────────────────────┘    │ • Union variant inference                  │  │
-│           │                │ • Enum value extraction                    │  │
+│ │     SchemaExt       │───▶│ • Schema type predicates (is_array, etc.)  │  │
+│ │ (utils/schema_ext)  │    │ • Union variant queries                    │  │
+│ └─────────────────────┘    │ • Enum value extraction                    │  │
+│           │                │ • Name inference from context              │  │
 │           ▼                └────────────────────────────────────────────┘  │
 │ ┌─────────────────────┐                                                     │
 │ │ SharedSchemaCache   │───▶ Deduplicates types by schema hash              │
@@ -167,11 +167,12 @@ The generator follows a strict one-way data flow where each stage produces immut
 | ----------------------------------- | ------------------------------------------------------------------- |
 | `orchestrator.rs`                   | Pipeline coordinator, creates all stages, combines outputs          |
 | `schema_registry.rs`                | Schema storage, dependency graph, cycle detection, discriminator    |
+| `utils/schema_ext.rs`               | `SchemaExt` trait: schema query predicates and name inference       |
 | `converter/mod.rs`                  | `SchemaConverter`, `ConverterContext`, `CodegenConfig` policy enums |
 | `converter/type_resolver.rs`        | Central conversion logic: maps OpenAPI types to Rust `TypeRef`      |
 | `converter/inline_resolver.rs`      | Cache-aware inline type creation (structs, enums, unions)           |
-| `converter/cache.rs`                | Deduplicates types by schema hash during conversion                 |
-| `converter/common.rs`               | `ConversionOutput<T>` wrapper and inline type tracking              |
+| `converter/cache.rs`                | Type deduplication with focused registries (name, schema, enum, union) |
+| `converter/common.rs`               | `ConversionOutput<T>` wrapper for inline type tracking              |
 | `converter/hashing.rs`              | Schema hashing utilities for cache keying                           |
 | `converter/unions.rs`               | `UnionConverter` for oneOf/anyOf handling                           |
 | `converter/union_types.rs`          | Shared union types: `UnionKind`, `CollisionStrategy`, variant specs |
@@ -181,7 +182,7 @@ The generator follows a strict one-way data flow where each stage produces immut
 | `converter/relaxed_enum.rs`         | Builds anyOf enums with known values + freeform string              |
 | `converter/methods.rs`              | Generates helper constructor methods for enum variants              |
 | `converter/type_usage_recorder.rs`  | `TypeUsageRecorder` for tracking request/response type usage        |
-| `naming/inference.rs`               | `InferenceExt` trait for type/variant/enum name inference           |
+| `naming/inference.rs`               | Variant prefix extraction and name deduplication helpers            |
 | `naming/identifiers.rs`             | Identifier sanitization (reserved words, casing)                    |
 | `naming/name_index.rs`              | Name indexing for conflict resolution                               |
 | `naming/operations.rs`              | Operation-specific naming logic                                     |
@@ -199,13 +200,14 @@ The generator follows a strict one-way data flow where each stage produces immut
 
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs) - Pipeline coordinator
 - [schema_registry.rs](crates/oas3-gen/src/generator/schema_registry.rs) - Dependency graph and cycle detection
+- [utils/schema_ext.rs](crates/oas3-gen/src/utils/schema_ext.rs) - SchemaExt trait for schema queries and inference
 - [converter/mod.rs](crates/oas3-gen/src/generator/converter/mod.rs) - SchemaConverter and ConverterContext
 - [converter/type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs) - Central OpenAPI to Rust type conversion
 - [converter/inline_resolver.rs](crates/oas3-gen/src/generator/converter/inline_resolver.rs) - Cache-aware inline type creation
-- [converter/cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication cache
+- [converter/cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication with focused registries
 - [converter/unions.rs](crates/oas3-gen/src/generator/converter/unions.rs) - oneOf/anyOf conversion
 - [converter/variants.rs](crates/oas3-gen/src/generator/converter/variants.rs) - Union variant building
-- [naming/inference.rs](crates/oas3-gen/src/generator/naming/inference.rs) - Name inference from schema context
+- [naming/inference.rs](crates/oas3-gen/src/generator/naming/inference.rs) - Variant prefix extraction helpers
 - [naming/identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization
 - [analyzer/mod.rs](crates/oas3-gen/src/generator/analyzer/mod.rs) - TypeAnalyzer and serde mode computation
 - [codegen/mod.rs](crates/oas3-gen/src/generator/codegen/mod.rs) - Code generation entry point

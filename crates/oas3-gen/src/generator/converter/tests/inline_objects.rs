@@ -44,7 +44,7 @@ fn test_inline_object_generation() -> anyhow::Result<()> {
   let result = converter.convert_schema("Parent", graph.get("Parent").unwrap())?;
 
   let binding = context.cache.borrow();
-  let generated = &binding.generated.generated_types;
+  let generated = &binding.types.types;
   let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
 
   // Check for Parent struct
@@ -115,7 +115,7 @@ fn test_inline_object_without_type_field() -> anyhow::Result<()> {
   let result = converter.convert_schema("Resource", graph.get("Resource").unwrap())?;
 
   let binding = context.cache.borrow();
-  let generated = &binding.generated.generated_types;
+  let generated = &binding.types.types;
   let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
 
   // Check for Resource struct

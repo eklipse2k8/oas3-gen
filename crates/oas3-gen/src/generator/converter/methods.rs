@@ -3,17 +3,20 @@ use std::{
   rc::Rc,
 };
 
-use super::{SchemaExt, structs::StructConverter};
-use crate::generator::{
-  ast::{
-    BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
-    FieldNameToken, MethodNameToken, RustType, StructDef, StructMethod, StructMethodKind, TypeRef, VariantDef,
+use super::structs::StructConverter;
+use crate::{
+  generator::{
+    ast::{
+      BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
+      FieldNameToken, MethodNameToken, RustType, StructDef, StructMethod, StructMethodKind, TypeRef, VariantDef,
+    },
+    converter::ConverterContext,
+    naming::{
+      identifiers::{ensure_unique, to_rust_type_name},
+      inference::derive_method_names,
+    },
   },
-  converter::ConverterContext,
-  naming::{
-    identifiers::{ensure_unique, to_rust_type_name},
-    inference::derive_method_names,
-  },
+  utils::SchemaExt,
 };
 
 #[derive(Clone, Debug)]

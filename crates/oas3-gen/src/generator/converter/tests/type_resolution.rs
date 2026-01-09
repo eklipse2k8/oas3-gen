@@ -5,14 +5,13 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::RustType,
-    converter::{SchemaExt, type_resolver::TypeResolver},
-    naming::inference::extract_common_variant_prefix,
+    ast::RustType, converter::type_resolver::TypeResolver, naming::inference::extract_common_variant_prefix,
   },
   tests::common::{
     create_empty_test_graph, create_schema_converter, create_test_context, create_test_graph, default_config,
     make_object_schema_with_property, make_string_schema,
   },
+  utils::SchemaExt,
 };
 
 #[test]
@@ -421,7 +420,7 @@ fn test_array_with_union_items_inline_generation() {
     "oneOf array type mismatch"
   );
 
-  let generated_types = context.cache.borrow().generated.generated_types.clone();
+  let generated_types = context.cache.borrow().types.types.clone();
   assert_eq!(generated_types.len(), 1, "oneOf should generate one inline enum");
 
   let inline_type = &generated_types[0];
@@ -456,7 +455,7 @@ fn test_array_with_union_items_inline_generation() {
     "anyOf array type mismatch"
   );
 
-  let generated_types_after_anyof = &context.cache.borrow().generated.generated_types;
+  let generated_types_after_anyof = &context.cache.borrow().types.types;
   assert_eq!(
     generated_types_after_anyof.len(),
     2,
@@ -473,7 +472,7 @@ fn test_array_with_union_items_inline_generation() {
     .unwrap();
   assert_eq!(ref_result.result.to_rust_type(), "Vec<Item>", "ref array type mismatch");
 
-  let generated_types_after_ref = &context.cache.borrow().generated.generated_types;
+  let generated_types_after_ref = &context.cache.borrow().types.types;
   assert_eq!(
     generated_types_after_ref.len(),
     2,
@@ -680,7 +679,7 @@ fn test_union_naming_with_common_suffix() {
 
   assert_eq!(result.result.to_rust_type(), "BetaCitationKind");
 
-  let generated_types = &context.cache.borrow().generated.generated_types;
+  let generated_types = &context.cache.borrow().types.types;
   assert_eq!(generated_types.len(), 1);
   if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaCitationKind");
@@ -727,7 +726,7 @@ fn test_union_naming_without_common_suffix() {
 
   assert_eq!(result.result.to_rust_type(), "BetaToolKind");
 
-  let generated_types = &context.cache.borrow().generated.generated_types;
+  let generated_types = &context.cache.borrow().types.types;
   assert_eq!(generated_types.len(), 1);
   if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaToolKind");
@@ -787,7 +786,7 @@ fn test_array_union_naming_with_common_suffix() {
 
   assert_eq!(result.result.to_rust_type(), "Vec<BetaEventKind>");
 
-  let generated_types = context.cache.borrow().generated.generated_types.clone();
+  let generated_types = context.cache.borrow().types.types.clone();
   assert_eq!(generated_types.len(), 1);
   if let RustType::Enum(enum_def) = &generated_types[0] {
     assert_eq!(enum_def.name.as_str(), "BetaEventKind");

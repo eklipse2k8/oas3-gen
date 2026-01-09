@@ -9,13 +9,15 @@ use oas3::{
 };
 
 use super::orchestrator::GenerationWarning;
-use crate::generator::{
-  converter::SchemaExt,
-  naming::{
-    identifiers::to_rust_type_name,
-    name_index::{ScanResult, TypeNameIndex},
+use crate::{
+  generator::{
+    naming::{
+      identifiers::to_rust_type_name,
+      name_index::{ScanResult, TypeNameIndex},
+    },
+    operation_registry::OperationRegistry,
   },
-  operation_registry::OperationRegistry,
+  utils::SchemaExt,
 };
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";

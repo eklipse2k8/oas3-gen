@@ -4,20 +4,21 @@ use indexmap::IndexMap;
 use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
 
 use super::{ConverterContext, TypeResolver, TypeUsageRecorder, inline_resolver::InlineTypeResolver};
-use crate::generator::{
-  ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
-    ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler,
-    StructMethod, StructMethodKind, TypeRef,
+use crate::{
+  generator::{
+    ast::{
+      ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
+      ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler,
+      StructMethod, StructMethodKind, TypeRef,
+    },
+    naming::{
+      constants::{DEFAULT_MEDIA_TYPE, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
+      identifiers::to_rust_type_name,
+      responses as naming_responses,
+    },
+    schema_registry::SchemaRegistry,
   },
-  converter::SchemaExt as _,
-  naming::{
-    constants::{DEFAULT_MEDIA_TYPE, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
-    identifiers::to_rust_type_name,
-    inference::InferenceExt,
-    responses as naming_responses,
-  },
-  schema_registry::SchemaRegistry,
+  utils::SchemaExt as _,
 };
 
 #[derive(Debug, Clone, Default)]
