@@ -103,12 +103,6 @@ pub(crate) trait SchemaExt {
   /// (oneOf vs anyOf) together, avoiding duplicate logic.
   fn union_variants_with_kind(&self) -> Option<(&[ObjectOrReference<ObjectSchema>], UnionKind)>;
 
-  /// Counts non-null variants in a union schema.
-  ///
-  /// A variant is considered null if it resolves to a null-only type or a nullable object
-  /// placeholder (e.g., `{type: "null"}` or `{type: ["object", "null"]}` with no properties).
-  fn count_non_null_variants(&self, spec: &Spec) -> usize;
-
   /// Returns true if any variant in the union is a null type.
   fn has_null_variant(&self, spec: &Spec) -> bool;
 
@@ -366,30 +360,18 @@ impl SchemaExt for ObjectSchema {
     }
   }
 
-  fn count_non_null_variants(&self, spec: &Spec) -> usize {
-    self
-      .union_variants()
-      .filter(|v| v.resolve(spec).map(|s| !s.is_nullable_object()).unwrap_or(true))
-      .count()
-  }
-
   fn has_null_variant(&self, spec: &Spec) -> bool {
-    self
-      .union_variants()
-      .any(|v| v.resolve(spec).is_ok_and(|s| s.is_nullable_object()))
+    self.union_variants().any(|v| variant_is_nullable(v, spec))
   }
 
   fn find_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>> {
-    self
-      .union_variants()
-      .find(|v| v.resolve(spec).is_ok_and(|s| !s.is_nullable_object()))
+    self.union_variants().find(|v| !variant_is_nullable(v, spec))
   }
 
   fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>> {
-    if self.count_non_null_variants(spec) != 1 {
-      return None;
-    }
-    self.find_non_null_variant(spec)
+    let mut non_null_variants = self.union_variants().filter(|v| !variant_is_nullable(v, spec));
+    let first = non_null_variants.next()?;
+    non_null_variants.next().is_none().then_some(first)
   }
 
   fn has_inline_single_variant(&self, spec: &Spec) -> bool {
@@ -608,6 +590,10 @@ impl SchemaExt for ObjectSchema {
         }
       })
   }
+}
+
+fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spec: &Spec) -> bool {
+  variant.resolve(spec).is_ok_and(|schema| schema.is_nullable_object())
 }
 
 /// Checks if variants contain both freeform strings and constrained strings.

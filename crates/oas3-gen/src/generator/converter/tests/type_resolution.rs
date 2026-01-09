@@ -455,12 +455,14 @@ fn test_array_with_union_items_inline_generation() {
     "anyOf array type mismatch"
   );
 
-  let generated_types_after_anyof = &context.cache.borrow().types.types;
-  assert_eq!(
-    generated_types_after_anyof.len(),
-    2,
-    "anyOf should generate additional inline types"
-  );
+  {
+    let generated_types_after_anyof = &context.cache.borrow().types.types;
+    assert_eq!(
+      generated_types_after_anyof.len(),
+      2,
+      "anyOf should generate additional inline types"
+    );
+  }
 
   let ref_result = resolver
     .resolve_property(
@@ -472,12 +474,14 @@ fn test_array_with_union_items_inline_generation() {
     .unwrap();
   assert_eq!(ref_result.result.to_rust_type(), "Vec<Item>", "ref array type mismatch");
 
-  let generated_types_after_ref = &context.cache.borrow().types.types;
-  assert_eq!(
-    generated_types_after_ref.len(),
-    2,
-    "ref items should not generate additional inline types"
-  );
+  {
+    let generated_types_after_ref = &context.cache.borrow().types.types;
+    assert_eq!(
+      generated_types_after_ref.len(),
+      2,
+      "ref items should not generate additional inline types"
+    );
+  }
 }
 
 #[test]

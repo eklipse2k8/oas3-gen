@@ -5,7 +5,7 @@ use oas3::spec::ObjectSchema;
 use super::hashing::CanonicalSchema;
 use crate::{
   generator::{
-    ast::{EnumToken, RustType, StructDef, StructToken},
+    ast::{EnumToken, RustType, StructDef, StructToken, TypeRef},
     naming::identifiers::{ensure_unique, to_rust_type_name},
   },
   utils::SchemaExt,
@@ -161,6 +161,21 @@ impl StructIndex {
   }
 }
 
+#[derive(Default, Debug, Clone)]
+struct TypeRefRegistry {
+  resolved_types: BTreeMap<CanonicalSchema, TypeRef>,
+}
+
+impl TypeRefRegistry {
+  fn lookup(&self, canonical: &CanonicalSchema) -> Option<&TypeRef> {
+    self.resolved_types.get(canonical)
+  }
+
+  fn register(&mut self, canonical: CanonicalSchema, type_ref: TypeRef) {
+    self.resolved_types.insert(canonical, type_ref);
+  }
+}
+
 pub(crate) struct TypeRegistration {
   pub(crate) assigned_name: String,
   pub(crate) canonical: CanonicalSchema,
@@ -176,6 +191,7 @@ pub(crate) struct SharedSchemaCache {
   unions: UnionRegistry,
   pub(crate) types: TypeCollector,
   structs: StructIndex,
+  type_refs: TypeRefRegistry,
 }
 
 impl SharedSchemaCache {
@@ -187,6 +203,7 @@ impl SharedSchemaCache {
       unions: UnionRegistry::default(),
       types: TypeCollector::default(),
       structs: StructIndex::default(),
+      type_refs: TypeRefRegistry::default(),
     }
   }
 
@@ -347,6 +364,17 @@ impl SharedSchemaCache {
 
   pub(crate) fn get_struct_def(&self, type_name: &str) -> Option<&StructDef> {
     self.structs.get(type_name)
+  }
+
+  pub(crate) fn get_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<Option<TypeRef>> {
+    let canonical = CanonicalSchema::from_schema(schema)?;
+    Ok(self.type_refs.lookup(&canonical).cloned())
+  }
+
+  pub(crate) fn register_type_ref(&mut self, schema: &ObjectSchema, type_ref: TypeRef) -> anyhow::Result<()> {
+    let canonical = CanonicalSchema::from_schema(schema)?;
+    self.type_refs.register(canonical, type_ref);
+    Ok(())
   }
 
   /// Applies the assigned name to a RustType by updating its name field based on variant.

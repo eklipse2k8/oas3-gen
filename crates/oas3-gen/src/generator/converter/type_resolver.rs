@@ -61,6 +61,25 @@ impl TypeResolver {
 
   /// Resolves a schema to its Rust type reference.
   pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
+    let cached = self.context.cache.borrow().get_type_ref(schema)?;
+    if let Some(type_ref) = cached {
+      return Ok(type_ref);
+    }
+
+    let type_ref = self.resolve_type_uncached(schema)?;
+
+    if schema.is_primitive() {
+      let _ = self
+        .context
+        .cache
+        .borrow_mut()
+        .register_type_ref(schema, type_ref.clone());
+    }
+
+    Ok(type_ref)
+  }
+
+  fn resolve_type_uncached(&self, schema: &ObjectSchema) -> Result<TypeRef> {
     if let Some(type_ref) = self.try_type_ref_by_title(schema) {
       return Ok(type_ref);
     }
