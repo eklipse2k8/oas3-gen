@@ -41,6 +41,8 @@ pub use validation_attrs::{RegexKey, ValidationAttribute};
 pub struct FileHeaderNode {
   pub title: String,
   pub version: String,
+  pub source_path: String,
+  pub generator_version: String,
   pub description: Option<String>,
 }
 

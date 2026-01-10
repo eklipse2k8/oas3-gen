@@ -20,18 +20,18 @@ struct ResponseHandling {
   parse_body: TokenStream,
 }
 
-pub struct ClientGenerator<'a> {
-  def: &'a ClientRootNode,
-  operations: &'a [OperationInfo],
+pub struct ClientGenerator {
+  def: ClientRootNode,
+  operations: Vec<OperationInfo>,
   visibility: Visibility,
   use_types_import: bool,
 }
 
-impl<'a> ClientGenerator<'a> {
-  pub fn new(def: &'a ClientRootNode, operations: &'a [OperationInfo], visibility: Visibility) -> Self {
+impl ClientGenerator {
+  pub fn new(def: &ClientRootNode, operations: &[OperationInfo], visibility: Visibility) -> Self {
     Self {
-      def,
-      operations,
+      def: def.clone(),
+      operations: operations.to_vec(),
       visibility,
       use_types_import: false,
     }
@@ -83,7 +83,7 @@ impl<'a> ClientGenerator<'a> {
   }
 }
 
-impl ToTokens for ClientGenerator<'_> {
+impl ToTokens for ClientGenerator {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let client_ident = &self.def.name;
     let vis = self.visibility.to_tokens();

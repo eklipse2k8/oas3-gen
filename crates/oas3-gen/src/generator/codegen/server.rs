@@ -4,18 +4,19 @@ use quote::{ToTokens, quote};
 use super::Visibility;
 use crate::generator::ast::{ClientRootNode, OperationInfo};
 
-pub struct ServerGenerator<'a> {
-  metadata: &'a ClientRootNode,
-  operations: &'a [OperationInfo],
+#[allow(dead_code)]
+pub struct ServerGenerator {
+  metadata: ClientRootNode,
+  operations: Vec<OperationInfo>,
   visibility: Visibility,
   with_types_import: bool,
 }
 
-impl<'a> ServerGenerator<'a> {
-  pub fn new(metadata: &'a ClientRootNode, operations: &'a [OperationInfo], visibility: Visibility) -> Self {
+impl ServerGenerator {
+  pub fn new(metadata: &ClientRootNode, operations: &[OperationInfo], visibility: Visibility) -> Self {
     Self {
-      metadata,
-      operations,
+      metadata: metadata.clone(),
+      operations: operations.to_vec(),
       visibility,
       with_types_import: false,
     }
@@ -27,7 +28,7 @@ impl<'a> ServerGenerator<'a> {
   }
 }
 
-impl ToTokens for ServerGenerator<'_> {
+impl ToTokens for ServerGenerator {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let vis = self.visibility.to_tokens();
 

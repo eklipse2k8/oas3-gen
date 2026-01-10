@@ -1,151 +1,105 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, format_ident, quote};
 
 use super::{
   Visibility,
   attributes::{generate_deprecated_attr, generate_derives_from_slice, generate_outer_attrs, generate_serde_attrs},
 };
 use crate::generator::ast::{
-  DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, ResponseEnumDef, SerdeAttribute, SerdeMode,
-  VariantContent, VariantDef,
+  DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethod, EnumMethodKind, ResponseEnumDef,
+  SerdeAttribute, SerdeMode, VariantContent, VariantDef,
 };
 
-mod methods {
-  use proc_macro2::TokenStream;
-  use quote::{ToTokens, format_ident, quote};
+fn box_if_needed(boxed: bool, inner: TokenStream) -> TokenStream {
+  if boxed {
+    quote! { Box::new(#inner) }
+  } else {
+    inner
+  }
+}
 
-  use super::box_if_needed;
-  use crate::generator::ast::{EnumMethod, EnumMethodKind};
-
-  pub(super) fn emit(name: &impl ToTokens, vis: &TokenStream, methods: &[EnumMethod]) -> TokenStream {
-    if methods.is_empty() {
-      return quote! {};
-    }
-
-    let method_tokens = methods.iter().map(|m| emit_method(vis, m));
-
-    quote! {
-      impl #name {
-        #(#method_tokens)*
-      }
-    }
+fn emit_enum_methods(name: impl ToTokens, vis: &TokenStream, methods: &[EnumMethod]) -> TokenStream {
+  if methods.is_empty() {
+    return quote! {};
   }
 
-  fn emit_method(vis: &TokenStream, method: &EnumMethod) -> TokenStream {
-    let method_name = &method.name;
-    let docs = &method.docs;
+  let method_tokens = methods.iter().map(|m| emit_enum_method(vis, m));
 
-    match &method.kind {
-      EnumMethodKind::SimpleConstructor {
-        variant_name,
-        wrapped_type,
-      } => {
-        let inner_type = &wrapped_type.base_type;
-        let constructor = box_if_needed(wrapped_type.boxed, quote! { #inner_type::default() });
+  quote! {
+    impl #name {
+      #(#method_tokens)*
+    }
+  }
+}
 
-        quote! {
-          #docs
-          #vis fn #method_name() -> Self {
-            Self::#variant_name(#constructor)
-          }
+fn emit_enum_method(vis: &TokenStream, method: &EnumMethod) -> TokenStream {
+  let method_name = &method.name;
+  let docs = &method.docs;
+
+  match &method.kind {
+    EnumMethodKind::SimpleConstructor {
+      variant_name,
+      wrapped_type,
+    } => {
+      let inner_type = &wrapped_type.base_type;
+      let constructor = box_if_needed(wrapped_type.boxed, quote! { #inner_type::default() });
+
+      quote! {
+        #docs
+        #vis fn #method_name() -> Self {
+          Self::#variant_name(#constructor)
         }
       }
-      EnumMethodKind::ParameterizedConstructor {
-        variant_name,
-        wrapped_type,
-        param_name,
-        param_type,
-      } => {
-        let inner_type = &wrapped_type.base_type;
-        let param_ident = format_ident!("{param_name}");
+    }
+    EnumMethodKind::ParameterizedConstructor {
+      variant_name,
+      wrapped_type,
+      param_name,
+      param_type,
+    } => {
+      let inner_type = &wrapped_type.base_type;
+      let param_ident = format_ident!("{param_name}");
 
-        let constructor = box_if_needed(
-          wrapped_type.boxed,
-          quote! {
-            #inner_type {
-              #param_ident,
-              ..Default::default()
-            }
-          },
-        );
-
+      let constructor = box_if_needed(
+        wrapped_type.boxed,
         quote! {
-          #docs
-          #vis fn #method_name(#param_ident: #param_type) -> Self {
-            Self::#variant_name(#constructor)
+          #inner_type {
+            #param_ident,
+            ..Default::default()
           }
+        },
+      );
+
+      quote! {
+        #docs
+        #vis fn #method_name(#param_ident: #param_type) -> Self {
+          Self::#variant_name(#constructor)
         }
       }
-      EnumMethodKind::KnownValueConstructor {
-        known_type,
-        known_variant,
-      } => {
-        quote! {
-          #docs
-          #vis fn #method_name() -> Self {
-            Self::Known(#known_type::#known_variant)
-          }
+    }
+    EnumMethodKind::KnownValueConstructor {
+      known_type,
+      known_variant,
+    } => {
+      quote! {
+        #docs
+        #vis fn #method_name() -> Self {
+          Self::Known(#known_type::#known_variant)
         }
       }
     }
   }
 }
 
-/// Generates standard Rust enums that use serde's derive macros for serialization.
-///
-/// This handles two OpenAPI patterns:
-///
-/// **1. Simple string/value enums** - OpenAPI `enum` with string values:
-/// ```json
-/// {
-///   "Status": {
-///     "type": "string",
-///     "enum": ["pending", "active", "cancelled"]
-///   }
-/// }
-/// ```
-/// Generates:
-/// ```ignore
-/// #[derive(Serialize, Deserialize)]
-/// pub enum Status {
-///     Pending,
-///     Active,
-///     Cancelled,
-/// }
-/// ```
-///
-/// **2. Untagged unions** - OpenAPI `oneOf` without a discriminator:
-/// ```json
-/// {
-///   "StringOrNumber": {
-///     "oneOf": [
-///       { "type": "string" },
-///       { "type": "number" }
-///     ]
-///   }
-/// }
-/// ```
-/// Generates:
-/// ```ignore
-/// #[derive(Serialize, Deserialize)]
-/// #[serde(untagged)]
-/// pub enum StringOrNumber {
-///     String(String),
-///     Number(f64),
-/// }
-/// ```
-///
-/// Serde's derive macros handle serialization for these patterns. For case-insensitive
-/// enums, a custom `Deserialize` impl is generated instead of using the derive.
-pub(crate) struct EnumGenerator<'a> {
-  def: &'a EnumDef,
+pub(crate) struct EnumGenerator {
+  def: EnumDef,
   vis: TokenStream,
 }
 
-impl<'a> EnumGenerator<'a> {
-  pub fn new(def: &'a EnumDef, visibility: Visibility) -> Self {
+impl EnumGenerator {
+  pub fn new(def: &EnumDef, visibility: Visibility) -> Self {
     Self {
-      def,
+      def: def.clone(),
       vis: visibility.to_tokens(),
     }
   }
@@ -158,7 +112,7 @@ impl<'a> EnumGenerator<'a> {
 
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = self.emit_serde_attrs();
-    let methods = methods::emit(name, &self.vis, &self.def.methods);
+    let methods = emit_enum_methods(name, &self.vis, &self.def.methods);
     let variants = self.emit_variants();
 
     let vis = &self.vis;
@@ -314,66 +268,15 @@ impl<'a> EnumGenerator<'a> {
   }
 }
 
-/// Generates tagged union enums with custom `Serialize`/`Deserialize` implementations.
-///
-/// This handles OpenAPI `oneOf` schemas that specify a `discriminator` with explicit mapping:
-/// ```json
-/// {
-///   "Pet": {
-///     "oneOf": [
-///       { "$ref": "#/components/schemas/Dog" },
-///       { "$ref": "#/components/schemas/Cat" }
-///     ],
-///     "discriminator": {
-///       "propertyName": "petType",
-///       "mapping": {
-///         "dog": "#/components/schemas/Dog",
-///         "cat": "#/components/schemas/Cat"
-///       }
-///     }
-///   }
-/// }
-/// ```
-///
-/// Generates:
-/// ```ignore
-/// pub enum Pet {
-///     Dog(Dog),
-///     Cat(Cat),
-/// }
-///
-/// impl Pet {
-///     pub const DISCRIMINATOR_FIELD: &'static str = "petType";
-/// }
-///
-/// impl Serialize for Pet { /* delegates to inner type */ }
-/// impl Deserialize for Pet { /* reads petType, dispatches to variant */ }
-/// ```
-///
-/// **Why custom serde impls instead of `#[serde(tag = "...")]`?**
-///
-/// Serde's internally-tagged representation (`#[serde(tag = "petType")]`) requires the tag
-/// field to be added by serde during serialization. But in OpenAPI discriminator patterns,
-/// the discriminator field (`petType`) is defined as a property *inside* each variant's
-/// schema (Dog has `petType: "dog"`, Cat has `petType: "cat"`).
-///
-/// The custom impl:
-/// - **Deserialize**: Parses JSON as `serde_json::Value`, extracts the discriminator field,
-///   matches it to the correct variant, then deserializes the full value as that type.
-/// - **Serialize**: Delegates directly to the inner type's `Serialize`, which already
-///   includes the discriminator field.
-///
-/// An optional `fallback` variant captures unknown discriminator values for forward
-/// compatibility with API changes.
-pub(crate) struct DiscriminatedEnumGenerator<'a> {
-  def: &'a DiscriminatedEnumDef,
+pub(crate) struct DiscriminatedEnumGenerator {
+  def: DiscriminatedEnumDef,
   vis: TokenStream,
 }
 
-impl<'a> DiscriminatedEnumGenerator<'a> {
-  pub fn new(def: &'a DiscriminatedEnumDef, visibility: Visibility) -> Self {
+impl DiscriminatedEnumGenerator {
+  pub fn new(def: &DiscriminatedEnumDef, visibility: Visibility) -> Self {
     Self {
-      def,
+      def: def.clone(),
       vis: visibility.to_tokens(),
     }
   }
@@ -413,7 +316,7 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
     let default_impl = self.emit_default_impl();
     let serialize_impl = self.emit_serialize_impl();
     let deserialize_impl = self.emit_deserialize_impl();
-    let methods_impl = methods::emit(name, &self.vis, &self.def.methods);
+    let methods_impl = emit_enum_methods(name, &self.vis, &self.def.methods);
 
     quote! {
       #enum_def
@@ -531,50 +434,15 @@ impl<'a> DiscriminatedEnumGenerator<'a> {
   }
 }
 
-/// Generates response enums that represent the possible HTTP responses from an operation.
-///
-/// Each variant corresponds to a status code, optionally wrapping the response body type:
-/// ```json
-/// {
-///   "responses": {
-///     "200": {
-///       "description": "Success",
-///       "content": {
-///         "application/json": {
-///           "schema": { "$ref": "#/components/schemas/User" }
-///         }
-///       }
-///     },
-///     "404": {
-///       "description": "Not found"
-///     }
-///   }
-/// }
-/// ```
-///
-/// Generates:
-/// ```ignore
-/// #[derive(Clone, Debug)]
-/// pub enum GetUserResponse {
-///     /// 200: Success
-///     Ok200(User),
-///     /// 404: Not found
-///     NotFound404,
-/// }
-/// ```
-///
-/// These enums are used by generated client code to represent typed API responses.
-/// They intentionally don't derive `Serialize`/`Deserialize` since response parsing
-/// is handled by the client's `parse_response` method which inspects status codes.
-pub(crate) struct ResponseEnumGenerator<'a> {
-  def: &'a ResponseEnumDef,
+pub(crate) struct ResponseEnumGenerator {
+  def: ResponseEnumDef,
   vis: TokenStream,
 }
 
-impl<'a> ResponseEnumGenerator<'a> {
-  pub fn new(def: &'a ResponseEnumDef, visibility: Visibility) -> Self {
+impl ResponseEnumGenerator {
+  pub fn new(def: &ResponseEnumDef, visibility: Visibility) -> Self {
     Self {
-      def,
+      def: def.clone(),
       vis: visibility.to_tokens(),
     }
   }
@@ -611,13 +479,5 @@ impl<'a> ResponseEnumGenerator<'a> {
         #(#variants),*
       }
     }
-  }
-}
-
-fn box_if_needed(boxed: bool, inner: TokenStream) -> TokenStream {
-  if boxed {
-    quote! { Box::new(#inner) }
-  } else {
-    inner
   }
 }

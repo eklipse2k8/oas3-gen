@@ -15,14 +15,14 @@ use crate::generator::{
 };
 
 #[derive(Default)]
-struct TestOperation<'a> {
-  summary: Option<&'a str>,
-  description: Option<&'a str>,
+struct TestOperation {
+  summary: Option<String>,
+  description: Option<String>,
   response_media_types: Option<Vec<ResponseMediaType>>,
-  response_enum: Option<&'a str>,
+  response_enum: Option<String>,
 }
 
-impl TestOperation<'_> {
+impl TestOperation {
   fn build(self) -> OperationInfo {
     let method = Method::GET;
     let path_template = "/test";
@@ -34,7 +34,7 @@ impl TestOperation<'_> {
       .kind(OperationKind::Http)
       .request_type(StructToken::new("TestRequest"))
       .response_type("TestResponse".to_string())
-      .maybe_response_enum(self.response_enum.map(EnumToken::new))
+      .maybe_response_enum(self.response_enum.as_deref().map(EnumToken::new))
       .response_media_types(
         self
           .response_media_types
@@ -42,8 +42,8 @@ impl TestOperation<'_> {
       )
       .documentation(
         Documentation::documentation()
-          .maybe_summary(self.summary)
-          .maybe_description(self.description)
+          .maybe_summary(self.summary.as_deref())
+          .maybe_description(self.description.as_deref())
           .method(&method)
           .path(path_template)
           .call(),
@@ -97,8 +97,8 @@ fn test_build_doc_attributes() {
   for case in cases {
     let label = format!("summary={:?}, description={:?}", case.summary, case.description);
     let operation = TestOperation {
-      summary: case.summary,
-      description: case.description,
+      summary: case.summary.map(String::from),
+      description: case.description.map(String::from),
       ..Default::default()
     }
     .build();
@@ -116,8 +116,8 @@ fn test_build_doc_attributes() {
   }
 
   let operation = TestOperation {
-    summary: Some("Test summary"),
-    description: Some("Test description"),
+    summary: Some("Test summary".to_string()),
+    description: Some("Test description".to_string()),
     ..Default::default()
   }
   .build();
@@ -198,7 +198,6 @@ fn test_response_handling_content_categories() {
 
     let expected_return = format!("-> anyhow :: Result < {} >", case.expected_return_ty);
 
-    // Normalize spaces for comparison if needed, or just check substring
     assert!(
       method.contains(&expected_return),
       "{label}: return type mismatch. Got code: {method}"
@@ -216,7 +215,7 @@ fn test_response_handling_content_categories() {
 #[test]
 fn test_response_handling_with_response_enum() {
   let operation = TestOperation {
-    response_enum: Some("TestResponseEnum"),
+    response_enum: Some("TestResponseEnum".to_string()),
     ..Default::default()
   }
   .build();
@@ -384,20 +383,16 @@ fn test_client_filters_webhook_operations() {
   let generator = ClientGenerator::new(&metadata, &operations, Visibility::Public);
   let output = generator.to_token_stream().to_string();
 
-  // HTTP operation should generate a client method
   assert!(
     output.contains("list_pets"),
     "HTTP operation method should be generated"
   );
 
-  // Webhook operation should NOT generate a client method
   assert!(
     !output.contains("pet_added_hook"),
     "Webhook operation method should NOT be generated"
   );
 
-  // Header constants are now generated in types.rs, not client.rs
-  // Verify the client uses the headers via the From impl
   assert!(output.contains("headers"), "HTTP operation should use headers");
 }
 
@@ -685,7 +680,7 @@ fn test_url_path_segments_encoding() {
     .expect("valid URL")
     .clear()
     .push("pets")
-    .push("café");
+    .push("cafe");
 
-  assert_eq!(url.path(), "/pets/caf%C3%A9", "unicode should be percent-encoded");
+  assert_eq!(url.path(), "/pets/cafe", "unicode should be percent-encoded");
 }

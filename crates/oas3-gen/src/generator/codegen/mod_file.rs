@@ -12,24 +12,24 @@ pub enum ModFileKind {
   Server,
 }
 
-pub struct ModFileGenerator<'a> {
-  metadata: &'a ClientRootNode,
+pub struct ModFileGenerator {
+  metadata: ClientRootNode,
   visibility: Visibility,
   kind: ModFileKind,
 }
 
-impl<'a> ModFileGenerator<'a> {
-  pub fn new(metadata: &'a ClientRootNode, visibility: Visibility) -> Self {
+impl ModFileGenerator {
+  pub fn new(metadata: &ClientRootNode, visibility: Visibility) -> Self {
     Self {
-      metadata,
+      metadata: metadata.clone(),
       visibility,
       kind: ModFileKind::Client,
     }
   }
 
-  pub fn for_server(metadata: &'a ClientRootNode, visibility: Visibility) -> Self {
+  pub fn for_server(metadata: &ClientRootNode, visibility: Visibility) -> Self {
     Self {
-      metadata,
+      metadata: metadata.clone(),
       visibility,
       kind: ModFileKind::Server,
     }
@@ -56,6 +56,6 @@ impl<'a> ModFileGenerator<'a> {
     };
 
     let lint_config = LintConfig::default();
-    generate_source(&code, self.metadata, Some(&lint_config), source_path, gen_version)
+    generate_source(&code, &self.metadata, Some(&lint_config), source_path, gen_version)
   }
 }
