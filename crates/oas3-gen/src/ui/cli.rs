@@ -70,7 +70,7 @@ pub struct GenerateCommand {
   )]
   pub input: PathBuf,
 
-  /// Path for generated output (file for types/client, directory for client-mod)
+  /// Path for generated output (file for types/client, directory for client-mod/server-mod)
   #[arg(
     short,
     long,
@@ -182,6 +182,8 @@ pub enum GenerateMode {
   Client,
   #[value(name = "client-mod")]
   ClientMod,
+  #[value(name = "server-mod")]
+  ServerMod,
 }
 
 #[derive(ValueEnum, Clone, Debug, Default)]

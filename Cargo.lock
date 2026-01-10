@@ -1318,7 +1318,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -1359,7 +1359,7 @@ dependencies = [
 
 [[package]]
 name = "oas3-gen-support"
-version = "0.24.1"
+version = "0.25.0"
 dependencies = [
  "better_default",
  "bon",

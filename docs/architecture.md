@@ -86,6 +86,7 @@ crates/
 │           │   ├── mod.rs
 │           │   ├── types.rs       # Core AST types (RustType, StructDef, EnumDef, etc.)
 │           │   ├── client.rs      # Client AST definitions
+│           │   ├── server.rs      # Server AST definitions
 │           │   ├── tokens.rs      # Token stream utilities
 │           │   ├── derives.rs     # Derive macro selection
 │           │   ├── documentation.rs # Doc comment generation
@@ -140,6 +141,7 @@ crates/
 │               ├── mod.rs         # Entry point, deduplication, type ordering
 │               ├── attributes.rs  # Attribute generation
 │               ├── client.rs      # HTTP client generation (ClientGenerator)
+│               ├── server.rs      # HTTP server trait generation (ServerGenerator)
 │               ├── coercion.rs    # Type coercion logic
 │               ├── constants.rs   # Regex constant generation
 │               ├── enums.rs       # Enum, DiscriminatedEnum, ResponseEnum generation
@@ -190,7 +192,9 @@ Data flows forward only - no stage feeds back to earlier stages.
 - [analyzer/mod.rs](../crates/oas3-gen/src/generator/analyzer/mod.rs): TypeAnalyzer, usage propagation, serde modes
 - [codegen/mod.rs](../crates/oas3-gen/src/generator/codegen/mod.rs): Code generation entry point
 - [codegen/client.rs](../crates/oas3-gen/src/generator/codegen/client.rs): HTTP client generation
+- [codegen/server.rs](../crates/oas3-gen/src/generator/codegen/server.rs): HTTP server trait generation
 - [ast/mod.rs](../crates/oas3-gen/src/generator/ast/mod.rs): AST type definitions
+- [ast/server.rs](../crates/oas3-gen/src/generator/ast/server.rs): Server AST definitions
 - [operation_registry.rs](../crates/oas3-gen/src/generator/operation_registry.rs): HTTP operations and webhooks
 
 ## Key Dependencies
@@ -258,7 +262,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Runtime Support
 
-- **oas3-gen-support** (0.23.4): Workspace runtime library with macros and utilities
+- **oas3-gen-support** (0.25.0): Workspace runtime library with macros and utilities
 
 ### Development & Testing
 

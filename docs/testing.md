@@ -22,6 +22,9 @@ cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o
 
 # Rebuild intersection_union fixture (types.rs, client.rs, mod.rs)
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/intersection_union.json -o crates/oas3-gen/fixtures/intersection_union --all-schemas
+
+# Rebuild event_stream fixture (types.rs, client.rs, mod.rs)
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/event_stream.json -o crates/oas3-gen/fixtures/event_stream --all-schemas
 ```
 
 ## Code Coverage

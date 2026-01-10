@@ -88,6 +88,16 @@ pub enum ODataPolicy {
   Enabled,
 }
 
+/// Target for code generation (client vs server).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GenerationTarget {
+  /// Generate HTTP client code.
+  #[default]
+  Client,
+  /// Generate HTTP server code (axum).
+  Server,
+}
+
 /// Configuration for code generation.
 ///
 /// Uses typed enums instead of booleans to make intent explicit at call sites
@@ -98,6 +108,7 @@ pub(crate) struct CodegenConfig {
   pub enum_helpers: EnumHelperPolicy,
   pub enum_deserialize: EnumDeserializePolicy,
   pub odata: ODataPolicy,
+  pub target: GenerationTarget,
   pub customizations: HashMap<String, String>,
 }
 

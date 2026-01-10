@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::generator::{codegen::Visibility, orchestrator::Orchestrator};
+use crate::generator::{codegen::Visibility, converter::GenerationTarget, orchestrator::Orchestrator};
 
 #[test]
 fn test_implicit_dependency_via_union_fingerprint() {
@@ -20,6 +20,7 @@ fn test_implicit_dependency_via_union_fingerprint() {
     false,
     false,
     false,
+    GenerationTarget::default(),
     HashMap::new(),
   );
 

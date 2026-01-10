@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::generator::{
-  ast::{ClientDef, StructToken},
+  ast::{ClientRootNode, StructToken},
   codegen::Visibility,
+  converter::GenerationTarget,
   orchestrator::Orchestrator,
 };
 
@@ -17,6 +18,7 @@ fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
     false,
     false,
     false,
+    GenerationTarget::default(),
     HashMap::new(),
   )
 }
@@ -37,6 +39,7 @@ fn make_orchestrator_with_ops(
     false,
     false,
     false,
+    GenerationTarget::default(),
     HashMap::new(),
   )
 }
@@ -45,7 +48,7 @@ fn make_orchestrator_with_ops(
 fn test_metadata_and_header_generation() {
   let spec_json = include_str!("../../../fixtures/basic_api.json");
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
-  let metadata = ClientDef::builder()
+  let metadata = ClientRootNode::builder()
     .name(StructToken::new("BasicTestApiClient"))
     .info(&spec.info)
     .servers(&spec.servers)
@@ -248,6 +251,7 @@ fn make_orchestrator_with_customizations(
     false,
     false,
     false,
+    GenerationTarget::default(),
     customizations,
   )
 }

@@ -11,6 +11,7 @@ use crate::{
       ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler,
       StructMethod, StructMethodKind, TypeRef,
     },
+    converter::GenerationTarget,
     naming::{
       constants::{DEFAULT_MEDIA_TYPE, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
       identifiers::to_rust_type_name,
@@ -102,20 +103,35 @@ impl ResponseConverter {
     )
   }
 
-  pub(crate) fn build_parse_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
+  pub(crate) fn build_parse_method(&self, response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
     let (status_handlers, default_handler) = Self::build_status_handlers(variants);
 
-    StructMethod::builder()
-      .name(MethodNameToken::from_raw("parse_response"))
-      .docs(Documentation::from_lines([
-        "Parse the HTTP response into the response enum.",
-      ]))
-      .kind(StructMethodKind::ParseResponse {
-        response_enum: response_enum.clone(),
-        status_handlers,
-        default_handler,
-      })
-      .build()
+    // We could combine these into one variant, but we shouldn't generate both server and client code
+    // in the same generation.
+    match self.context.config.target {
+      GenerationTarget::Client => StructMethod::builder()
+        .name(MethodNameToken::from_raw("parse_response"))
+        .docs(Documentation::from_lines([
+          "Parse the HTTP response into the response enum.",
+        ]))
+        .kind(StructMethodKind::ParseResponse {
+          response_enum: response_enum.clone(),
+          status_handlers,
+          default_handler,
+        })
+        .build(),
+      GenerationTarget::Server => StructMethod::builder()
+        .name(MethodNameToken::from_raw("parse_response"))
+        .docs(Documentation::from_lines([
+          "Server code does not need to parse responses.",
+        ]))
+        .kind(StructMethodKind::IntoAxumResponse {
+          response_enum: response_enum.clone(),
+          status_handlers,
+          default_handler,
+        })
+        .build(),
+    }
   }
 
   /// Extracts response metadata for operation info.

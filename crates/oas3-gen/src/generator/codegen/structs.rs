@@ -206,6 +206,19 @@ impl ImplBlock<'_> {
         &method.docs,
       )
       .emit(),
+      StructMethodKind::IntoAxumResponse {
+        response_enum,
+        status_handlers,
+        default_handler,
+      } => parse_response::Generator::new(
+        response_enum,
+        status_handlers,
+        default_handler.as_ref(),
+        self.vis,
+        &method.name,
+        &method.docs,
+      )
+      .emit(),
       StructMethodKind::Builder { fields, nested_structs } => {
         builder::Generator::new(fields, nested_structs, self.vis, &method.docs).emit()
       }

@@ -19,7 +19,8 @@ cargo test                     # Test
 cargo run -- generate types -i spec.json -o types.rs        # Generate types (JSON)
 cargo run -- generate types -i spec.yaml -o types.rs        # Generate types (YAML)
 cargo run -- generate client -i spec.json -o client.rs      # Generate client
-cargo run -- generate client-mod -i spec.json -o output/    # Generate modular output (types.rs, client.rs, mod.rs)
+cargo run -- generate client-mod -i spec.json -o output/    # Generate modular client (types.rs, client.rs, mod.rs)
+cargo run -- generate server-mod -i spec.json -o output/    # Generate modular server (types.rs, server.rs, mod.rs)
 ```
 
 ## Essential Rules
@@ -193,8 +194,10 @@ The generator follows a strict one-way data flow where each stage produces immut
 | `codegen/structs.rs`                | Struct code generation with derives and serde attrs                 |
 | `codegen/enums.rs`                  | Enum code generation with case-insensitive deser support            |
 | `codegen/client.rs`                 | HTTP client code generation                                         |
+| `codegen/server.rs`                 | HTTP server trait generation (axum)                                 |
 | `codegen/mod_file.rs`               | Modular output file generation (mod.rs)                             |
 | `ast/mod.rs`                        | AST types: `RustType`, `StructDef`, `EnumDef`, `TypeRef`, etc.      |
+| `ast/server.rs`                     | Server AST definitions (`ServerRootNode`)                           |
 
 ## Key Files
 
@@ -212,7 +215,9 @@ The generator follows a strict one-way data flow where each stage produces immut
 - [analyzer/mod.rs](crates/oas3-gen/src/generator/analyzer/mod.rs) - TypeAnalyzer and serde mode computation
 - [codegen/mod.rs](crates/oas3-gen/src/generator/codegen/mod.rs) - Code generation entry point
 - [codegen/client.rs](crates/oas3-gen/src/generator/codegen/client.rs) - HTTP client generation
+- [codegen/server.rs](crates/oas3-gen/src/generator/codegen/server.rs) - HTTP server trait generation
 - [ast/mod.rs](crates/oas3-gen/src/generator/ast/mod.rs) - AST type definitions
+- [ast/server.rs](crates/oas3-gen/src/generator/ast/server.rs) - Server AST definitions
 - [operation_registry.rs](crates/oas3-gen/src/generator/operation_registry.rs) - HTTP operations and webhooks
 
 ## Collection Types (Critical)

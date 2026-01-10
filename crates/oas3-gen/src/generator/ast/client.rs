@@ -5,7 +5,7 @@ use crate::generator::ast::StructToken;
 const DEFAULT_BASE_URL: &str = "https://example.com/";
 
 #[derive(Debug, Clone, Default)]
-pub struct ClientDef {
+pub struct ClientRootNode {
   pub name: StructToken,
   pub title: String,
   pub version: String,
@@ -14,7 +14,7 @@ pub struct ClientDef {
 }
 
 #[bon::bon]
-impl ClientDef {
+impl ClientRootNode {
   #[builder]
   pub fn new(name: StructToken, info: &Info, servers: &[Server]) -> Self {
     Self {

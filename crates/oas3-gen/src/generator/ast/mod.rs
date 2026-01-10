@@ -6,6 +6,7 @@ pub mod lints;
 mod outer_attrs;
 mod parsed_path;
 pub(super) mod serde_attrs;
+mod server;
 mod status_codes;
 pub mod tokens;
 pub(super) mod types;
@@ -16,7 +17,7 @@ mod tests;
 
 use std::collections::BTreeSet;
 
-pub use client::ClientDef;
+pub use client::ClientRootNode;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
@@ -35,8 +36,16 @@ pub use tokens::{
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
+/// Node used to generate file header
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
+pub struct FileHeaderNode {
+  pub title: String,
+  pub version: String,
+  pub description: Option<String>,
+}
+
 /// Discriminated enum variant mapping
-#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
 pub struct DiscriminatedVariant {
   #[builder(default)]
   pub discriminator_values: Vec<String>,
@@ -418,11 +427,19 @@ pub struct StructMethod {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructMethodKind {
+  /// Method to parse a reqwest response into the struct
   ParseResponse {
     response_enum: EnumToken,
     status_handlers: Vec<StatusHandler>,
     default_handler: Option<ResponseVariantCategory>,
   },
+  /// Method to convert the struct into an axum response
+  IntoAxumResponse {
+    response_enum: EnumToken,
+    status_handlers: Vec<StatusHandler>,
+    default_handler: Option<ResponseVariantCategory>,
+  },
+  /// Method that wraps bon::Builder for constructing the struct
   Builder {
     fields: Vec<BuilderField>,
     nested_structs: Vec<BuilderNestedStruct>,

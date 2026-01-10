@@ -5,7 +5,7 @@ use quote::{ToTokens, quote};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
-use crate::generator::ast::{DefaultAtom, StructToken};
+use crate::generator::ast::{DefaultAtom, FileHeaderNode, StructToken};
 
 static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
   CustomFormat::builder()
@@ -19,8 +19,14 @@ pub(crate) fn format_number_with_underscores<T: ToFormattedString>(value: &T) ->
   value.to_formatted_string(&*UNDERSCORE_FORMAT)
 }
 
+/// Contains AST nodes related to types code generation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct TypesRootNode {
+  pub header: FileHeaderNode,
+}
+
 /// Type reference with wrapper support (Box, Option, Vec)
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct TypeRef {
   pub base_type: RustPrimitive,
@@ -161,7 +167,7 @@ impl From<&serde_json::Value> for TypeRef {
 }
 
 /// Rust primitive and standard library types
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, strum::Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, strum::Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum RustPrimitive {
   #[serde(rename = "i8")]

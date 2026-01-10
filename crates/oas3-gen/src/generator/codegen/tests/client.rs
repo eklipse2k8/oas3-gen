@@ -4,8 +4,9 @@ use reqwest::Url;
 
 use crate::generator::{
   ast::{
-    ClientDef, ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody,
-    OperationInfo, OperationKind, ParameterLocation, ParsedPath, PathSegment, ResponseMediaType, StructToken, TypeRef,
+    ClientRootNode, ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, MultipartFieldInfo,
+    OperationBody, OperationInfo, OperationKind, ParameterLocation, ParsedPath, PathSegment, ResponseMediaType,
+    StructToken, TypeRef,
   },
   codegen::{
     Visibility,
@@ -372,7 +373,7 @@ fn test_client_filters_webhook_operations() {
   };
 
   let operations = vec![http_operation, webhook_operation];
-  let metadata = ClientDef {
+  let metadata = ClientRootNode {
     name: StructToken::new("PetStoreClient"),
     title: "PetStore".to_string(),
     base_url: "https://api.example.com".to_string(),

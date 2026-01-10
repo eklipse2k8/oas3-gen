@@ -87,9 +87,11 @@ impl OperationConverter {
       .response_converter
       .build_enum(&response_name, &entry.operation, &entry.path);
 
-    let parse_method = response_def
-      .as_ref()
-      .map(|def| ResponseConverter::build_parse_method(&EnumToken::new(def.name.to_string()), &def.variants));
+    let parse_method = response_def.as_ref().map(|def| {
+      self
+        .response_converter
+        .build_parse_method(&EnumToken::new(def.name.to_string()), &def.variants)
+    });
 
     (response_def, parse_method)
   }

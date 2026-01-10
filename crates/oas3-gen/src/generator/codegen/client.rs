@@ -6,7 +6,7 @@ use syn::LitStr;
 
 use super::Visibility;
 use crate::generator::ast::{
-  ClientDef, ContentCategory, FieldNameToken, MultipartFieldInfo, OperationBody, OperationInfo, OperationKind,
+  ClientRootNode, ContentCategory, FieldNameToken, MultipartFieldInfo, OperationBody, OperationInfo, OperationKind,
   ParameterLocation, StructToken, TypeRef,
 };
 
@@ -21,14 +21,14 @@ struct ResponseHandling {
 }
 
 pub struct ClientGenerator<'a> {
-  def: &'a ClientDef,
+  def: &'a ClientRootNode,
   operations: &'a [OperationInfo],
   visibility: Visibility,
   use_types_import: bool,
 }
 
 impl<'a> ClientGenerator<'a> {
-  pub fn new(def: &'a ClientDef, operations: &'a [OperationInfo], visibility: Visibility) -> Self {
+  pub fn new(def: &'a ClientRootNode, operations: &'a [OperationInfo], visibility: Visibility) -> Self {
     Self {
       def,
       operations,

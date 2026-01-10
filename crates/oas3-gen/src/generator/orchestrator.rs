@@ -9,11 +9,11 @@ use strum::Display;
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::TypeAnalyzer,
-  ast::{ClientDef, OperationInfo, OperationKind, RustType, StructToken},
+  ast::{ClientRootNode, OperationInfo, OperationKind, RustType, StructToken},
   codegen::{SchemaCodeGenerator, Visibility},
   converter::{
-    CodegenConfig, ConverterContext, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy,
-    SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
+    CodegenConfig, ConverterContext, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationTarget,
+    ODataPolicy, SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
   },
   naming::identifiers::to_rust_type_name,
   operation_registry::OperationRegistry,
@@ -32,6 +32,7 @@ pub struct Orchestrator {
   preserve_case_variants: bool,
   case_insensitive_enums: bool,
   no_helpers: bool,
+  generation_target: GenerationTarget,
   customizations: HashMap<String, String>,
 }
 
@@ -63,6 +64,14 @@ struct GenerationArtifacts {
 pub struct ClientModOutput {
   pub types_code: String,
   pub client_code: String,
+  pub mod_code: String,
+  pub stats: GenerationStats,
+}
+
+#[derive(Debug)]
+pub struct ServerModOutput {
+  pub types_code: String,
+  pub server_code: String,
   pub mod_code: String,
   pub stats: GenerationStats,
 }
@@ -104,6 +113,7 @@ impl Orchestrator {
     preserve_case_variants: bool,
     case_insensitive_enums: bool,
     no_helpers: bool,
+    generation_target: GenerationTarget,
     customizations: HashMap<String, String>,
   ) -> Self {
     let operation_registry = OperationRegistry::with_filters(&spec, only_operations, excluded_operations);
@@ -116,6 +126,7 @@ impl Orchestrator {
       preserve_case_variants,
       case_insensitive_enums,
       no_helpers,
+      generation_target,
       customizations,
     }
   }
@@ -192,7 +203,28 @@ impl Orchestrator {
     })
   }
 
-  fn run_conversion_and_analysis(&self) -> (Vec<RustType>, Vec<OperationInfo>, ClientDef, GenerationStats) {
+  pub fn generate_server_mod(&self, source_path: &str) -> anyhow::Result<ServerModOutput> {
+    let (rust_types, operations_info, client, stats) = self.run_conversion_and_analysis();
+
+    let codegen = SchemaCodeGenerator::new(
+      rust_types,
+      operations_info,
+      client,
+      self.visibility,
+      source_path.to_string(),
+      OAS3_GEN_VERSION.to_string(),
+    );
+    let output = codegen.generate_server_mod()?;
+
+    Ok(ServerModOutput {
+      types_code: output.types_code,
+      server_code: output.server_code,
+      mod_code: output.mod_code,
+      stats,
+    })
+  }
+
+  fn run_conversion_and_analysis(&self) -> (Vec<RustType>, Vec<OperationInfo>, ClientRootNode, GenerationStats) {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
       mut rust_types,
@@ -201,7 +233,7 @@ impl Orchestrator {
       stats,
     } = artifacts;
 
-    let client = ClientDef::builder()
+    let client = ClientRootNode::builder()
       .name(self.client_struct_name())
       .info(&self.spec.info)
       .servers(&self.spec.servers)
@@ -255,6 +287,7 @@ impl Orchestrator {
       } else {
         ODataPolicy::Disabled
       },
+      target: self.generation_target,
       customizations: self.customizations.clone(),
     };
 

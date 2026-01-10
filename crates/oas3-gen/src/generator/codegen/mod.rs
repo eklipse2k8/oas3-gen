@@ -7,10 +7,10 @@ use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use self::{client::ClientGenerator, mod_file::ModFileGenerator};
+use self::{client::ClientGenerator, mod_file::ModFileGenerator, server::ServerGenerator};
 use super::ast::{
-  ClientDef, LintConfig, OperationInfo, ParameterLocation, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind,
-  ValidationAttribute, tokens::ConstToken,
+  ClientRootNode, LintConfig, OperationInfo, ParameterLocation, RegexKey, RustType, SerdeImpl, StructKind,
+  StructMethodKind, ValidationAttribute, tokens::ConstToken,
 };
 use crate::generator::ast::constants::HttpHeaderRef;
 
@@ -21,6 +21,7 @@ pub mod constants;
 pub mod enums;
 pub(crate) mod headers;
 pub mod mod_file;
+pub mod server;
 pub mod structs;
 pub mod type_aliases;
 
@@ -53,7 +54,7 @@ pub fn format(code: &TokenStream) -> anyhow::Result<String> {
 pub fn generate_file(
   types: &[RustType],
   visibility: Visibility,
-  metadata: &ClientDef,
+  metadata: &ClientRootNode,
   lint_config: &LintConfig,
   source_path: &str,
   gen_version: &str,
@@ -64,7 +65,7 @@ pub fn generate_file(
 
 pub fn generate_source(
   code: &TokenStream,
-  metadata: &ClientDef,
+  metadata: &ClientRootNode,
   lint_config: Option<&LintConfig>,
   source_path: &str,
   gen_version: &str,
@@ -205,10 +206,17 @@ pub struct ClientModOutput {
   pub headers_generated: usize,
 }
 
+#[derive(Debug)]
+pub struct ServerModOutput {
+  pub types_code: String,
+  pub server_code: String,
+  pub mod_code: String,
+}
+
 pub struct SchemaCodeGenerator {
   rust_types: Rc<Vec<RustType>>,
   operations: Rc<Vec<OperationInfo>>,
-  client: Rc<ClientDef>,
+  client: Rc<ClientRootNode>,
   visibility: Visibility,
   source_path: String,
   gen_version: String,
@@ -218,7 +226,7 @@ impl SchemaCodeGenerator {
   pub fn new(
     rust_types: Vec<RustType>,
     operations: Vec<OperationInfo>,
-    client: ClientDef,
+    client: ClientRootNode,
     visibility: Visibility,
     source_path: String,
     gen_version: String,
@@ -283,6 +291,24 @@ impl SchemaCodeGenerator {
       mod_code,
       methods_generated: self.operations.len(),
       headers_generated: Self::count_unique_headers(&self.operations),
+    })
+  }
+
+  pub fn generate_server_mod(&self) -> anyhow::Result<ServerModOutput> {
+    let types_tokens = generate(&self.rust_types, self.visibility);
+    let types_code = generate_source(&types_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
+
+    let server_generator = ServerGenerator::new(&self.client, &self.operations, self.visibility).with_types_import();
+    let server_tokens = server_generator.into_token_stream();
+    let server_code = generate_source(&server_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
+
+    let mod_generator = ModFileGenerator::for_server(&self.client, self.visibility);
+    let mod_code = mod_generator.generate(&self.source_path, &self.gen_version)?;
+
+    Ok(ServerModOutput {
+      types_code,
+      server_code,
+      mod_code,
     })
   }
 
