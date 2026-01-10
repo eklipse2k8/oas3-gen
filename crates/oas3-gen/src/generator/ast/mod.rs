@@ -330,7 +330,7 @@ impl ResponseMediaType {
   }
 }
 
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct MultipartFieldInfo {
   pub name: FieldNameToken,
   #[builder(default)]
@@ -341,7 +341,7 @@ pub struct MultipartFieldInfo {
   pub requires_json: bool,
 }
 
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct OperationBody {
   pub field_name: FieldNameToken,
   pub body_type: Option<TypeRef>,
