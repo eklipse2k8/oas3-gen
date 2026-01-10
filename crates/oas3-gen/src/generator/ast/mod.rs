@@ -188,19 +188,6 @@ impl RustType {
   }
 }
 
-pub trait RustTypeCollection {
-  fn find_struct(&self, name: &StructToken) -> Option<&StructDef>;
-}
-
-impl RustTypeCollection for [RustType] {
-  fn find_struct(&self, name: &StructToken) -> Option<&StructDef> {
-    self.iter().find_map(|t| match t {
-      RustType::Struct(s) if &s.name == name => Some(s),
-      _ => None,
-    })
-  }
-}
-
 /// Metadata about an API operation (for tracking, not direct code generation)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationKind {
@@ -216,13 +203,7 @@ pub struct OperationInfo {
   pub operation_id: String,
   pub method: Method,
   pub path: ParsedPath,
-  #[builder(into)]
-  pub path_template: String,
   pub kind: OperationKind,
-  #[builder(into)]
-  pub summary: Option<String>,
-  #[builder(into)]
-  pub description: Option<String>,
   pub request_type: Option<StructToken>,
   pub response_type: Option<String>,
   pub response_enum: Option<EnumToken>,
@@ -233,6 +214,8 @@ pub struct OperationInfo {
   #[builder(default)]
   pub parameters: Vec<FieldDef>,
   pub body: Option<OperationBody>,
+  #[builder(default)]
+  pub documentation: Documentation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -348,10 +331,24 @@ impl ResponseMediaType {
 }
 
 #[derive(Debug, Clone, Default, bon::Builder)]
+pub struct MultipartFieldInfo {
+  pub name: FieldNameToken,
+  #[builder(default)]
+  pub nullable: bool,
+  #[builder(default)]
+  pub is_bytes: bool,
+  #[builder(default)]
+  pub requires_json: bool,
+}
+
+#[derive(Debug, Clone, Default, bon::Builder)]
 pub struct OperationBody {
   pub field_name: FieldNameToken,
+  #[builder(default)]
   pub optional: bool,
+  #[builder(default)]
   pub content_category: ContentCategory,
+  pub multipart_fields: Option<Vec<MultipartFieldInfo>>,
 }
 
 /// Semantic kind of a struct to determine code generation behavior
@@ -570,23 +567,11 @@ impl FieldDef {
 }
 
 pub trait FieldCollection: Send + Sync {
-  type Token;
-
-  /// Find the element matching `name` token
-  #[must_use]
-  fn find_name(&self, name: &FieldNameToken) -> Option<&Self::Token>;
-
   #[must_use]
   fn has_serde_as(&self) -> bool;
 }
 
 impl FieldCollection for [FieldDef] {
-  type Token = FieldDef;
-
-  fn find_name(&self, name: &FieldNameToken) -> Option<&Self::Token> {
-    self.iter().find(|t| t.name == *name)
-  }
-
   fn has_serde_as(&self) -> bool {
     self.iter().any(|t| t.serde_as_attr.is_some())
   }

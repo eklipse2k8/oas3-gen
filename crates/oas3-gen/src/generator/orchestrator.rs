@@ -1,17 +1,16 @@
 use std::{
-  collections::{BTreeSet, HashMap, HashSet},
+  collections::{HashMap, HashSet},
   rc::Rc,
   sync::Arc,
 };
 
-use quote::ToTokens;
 use strum::Display;
 
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
   analyzer::TypeAnalyzer,
-  ast::{ClientDef, LintConfig, OperationInfo, OperationKind, ParameterLocation, RustType, StructToken},
-  codegen::{self, Visibility, client::ClientGenerator, mod_file::ModFileGenerator},
+  ast::{ClientDef, OperationInfo, OperationKind, RustType, StructToken},
+  codegen::{SchemaCodeGenerator, Visibility},
   converter::{
     CodegenConfig, ConverterContext, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, ODataPolicy,
     SchemaConverter, TypeUsageRecorder, operations::OperationConverter,
@@ -135,79 +134,71 @@ impl Orchestrator {
   }
 
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let artifacts = self.collect_generation_artifacts();
-    let GenerationArtifacts {
-      mut rust_types,
-      mut operations_info,
-      mut stats,
-      usage_recorder,
-    } = artifacts;
+    let (rust_types, operations_info, client, mut stats) = self.run_conversion_and_analysis();
 
-    let seed_map = usage_recorder.into_usage_map();
-    let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    analyzer.analyze();
+    let codegen = SchemaCodeGenerator::new(
+      rust_types,
+      operations_info,
+      client,
+      self.visibility,
+      source_path.to_string(),
+      OAS3_GEN_VERSION.to_string(),
+    );
+    let output = codegen.generate_client()?;
 
-    stats.client_methods_generated = Some(operations_info.len());
-    stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
+    stats.client_methods_generated = Some(output.methods_generated);
+    stats.client_headers_generated = Some(output.headers_generated);
 
-    let client = ClientDef::builder()
-      .name(self.client_struct_name())
-      .info(&self.spec.info)
-      .servers(&self.spec.servers)
-      .build();
-
-    let client_generator = ClientGenerator::new(&client, &operations_info, &rust_types, self.visibility);
-    let client_tokens = client_generator.into_token_stream();
-    let lint_config = LintConfig::default();
-
-    let final_code = codegen::generate_source(
-      &client_tokens,
-      &client,
-      Some(&lint_config),
-      source_path,
-      OAS3_GEN_VERSION,
-    )?;
-    Ok((final_code, stats))
+    Ok((output.code, stats))
   }
 
   pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<(String, GenerationStats)> {
-    let artifacts = self.collect_generation_artifacts();
-    let GenerationArtifacts {
-      mut rust_types,
-      mut operations_info,
-      usage_recorder,
-      stats,
-    } = artifacts;
+    let (rust_types, operations_info, client, stats) = self.run_conversion_and_analysis();
 
-    let lint_config = LintConfig::default();
-    let client = ClientDef::builder()
-      .name(self.client_struct_name())
-      .info(&self.spec.info)
-      .servers(&self.spec.servers)
-      .build();
-
-    let seed_map = usage_recorder.into_usage_map();
-    let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    analyzer.analyze();
-
-    let final_code = codegen::generate_file(
-      &rust_types,
+    let codegen = SchemaCodeGenerator::new(
+      rust_types,
+      operations_info,
+      client,
       self.visibility,
-      &client,
-      &lint_config,
-      source_path,
-      OAS3_GEN_VERSION,
-    )?;
-    Ok((final_code, stats))
+      source_path.to_string(),
+      OAS3_GEN_VERSION.to_string(),
+    );
+    let output = codegen.generate_types()?;
+
+    Ok((output.code, stats))
   }
 
   pub fn generate_client_mod(&self, source_path: &str) -> anyhow::Result<ClientModOutput> {
+    let (rust_types, operations_info, client, mut stats) = self.run_conversion_and_analysis();
+
+    let codegen = SchemaCodeGenerator::new(
+      rust_types,
+      operations_info,
+      client,
+      self.visibility,
+      source_path.to_string(),
+      OAS3_GEN_VERSION.to_string(),
+    );
+    let output = codegen.generate_client_mod()?;
+
+    stats.client_methods_generated = Some(output.methods_generated);
+    stats.client_headers_generated = Some(output.headers_generated);
+
+    Ok(ClientModOutput {
+      types_code: output.types_code,
+      client_code: output.client_code,
+      mod_code: output.mod_code,
+      stats,
+    })
+  }
+
+  fn run_conversion_and_analysis(&self) -> (Vec<RustType>, Vec<OperationInfo>, ClientDef, GenerationStats) {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
       mut rust_types,
       mut operations_info,
       usage_recorder,
-      mut stats,
+      stats,
     } = artifacts;
 
     let client = ClientDef::builder()
@@ -220,26 +211,7 @@ impl Orchestrator {
     let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
     analyzer.analyze();
 
-    let types_tokens = codegen::generate(&rust_types, self.visibility);
-    let types_code = codegen::generate_source(&types_tokens, &client, None, source_path, OAS3_GEN_VERSION)?;
-
-    stats.client_methods_generated = Some(operations_info.len());
-    stats.client_headers_generated = Some(Self::count_unique_headers(&operations_info));
-
-    let client_generator =
-      ClientGenerator::new(&client, &operations_info, &rust_types, self.visibility).with_types_import();
-    let client_tokens = client_generator.into_token_stream();
-    let client_code = codegen::generate_source(&client_tokens, &client, None, source_path, OAS3_GEN_VERSION)?;
-
-    let mod_generator = ModFileGenerator::new(&client, self.visibility);
-    let mod_code = mod_generator.generate(source_path, OAS3_GEN_VERSION)?;
-
-    Ok(ClientModOutput {
-      types_code,
-      client_code,
-      mod_code,
-      stats,
-    })
+    (rust_types, operations_info, client, stats)
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
@@ -407,17 +379,6 @@ impl Orchestrator {
       }
     }
     (rust_types, warnings)
-  }
-
-  fn count_unique_headers(operations: &[OperationInfo]) -> usize {
-    operations
-      .iter()
-      .flat_map(|op| &op.parameters)
-      .filter(|param| matches!(param.parameter_location, Some(ParameterLocation::Header)))
-      .filter_map(|param| param.original_name.as_deref())
-      .map(str::to_ascii_lowercase)
-      .collect::<BTreeSet<_>>()
-      .len()
   }
 
   fn convert_all_operations(

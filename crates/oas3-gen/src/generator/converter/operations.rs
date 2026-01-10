@@ -6,7 +6,10 @@ use super::{
   responses::ResponseConverter,
 };
 use crate::generator::{
-  ast::{ContentCategory, EnumToken, OperationBody, OperationInfo, ParsedPath, ResponseEnumDef, RustType, StructToken},
+  ast::{
+    ContentCategory, Documentation, EnumToken, MultipartFieldInfo, OperationBody, OperationInfo, ParsedPath,
+    ResponseEnumDef, RustPrimitive, RustType, StructToken,
+  },
   naming::{
     identifiers::to_rust_type_name,
     operations::{generate_unique_request_name, generate_unique_response_name},
@@ -81,6 +84,13 @@ impl OperationConverter {
 
     let response_metadata = response_converter.extract_metadata(&entry.operation, usage);
 
+    let documentation = Documentation::documentation()
+      .maybe_summary(entry.operation.summary.as_deref())
+      .maybe_description(entry.operation.description.as_deref())
+      .method(&entry.method)
+      .path(&entry.path)
+      .call();
+
     let operation_info = OperationInfo::builder()
       .stable_id(&entry.stable_id)
       .operation_id(
@@ -92,10 +102,7 @@ impl OperationConverter {
       )
       .method(entry.method.clone())
       .path(ParsedPath::parse(&entry.path, &parameters)?)
-      .path_template(&entry.path)
       .kind(entry.kind)
-      .maybe_summary(entry.operation.summary.clone())
-      .maybe_description(entry.operation.description.clone())
       .maybe_request_type(request_type)
       .maybe_response_type(response_metadata.type_name)
       .maybe_response_enum(response_enum_token)
@@ -103,6 +110,7 @@ impl OperationConverter {
       .warnings(warnings)
       .parameters(parameters)
       .maybe_body(Self::extract_body(&body_info))
+      .documentation(documentation)
       .build();
 
     Ok(ConversionResult { types, operation_info })
@@ -155,10 +163,44 @@ impl OperationConverter {
       .as_deref()
       .map_or(ContentCategory::Json, ContentCategory::from_content_type);
 
+    let multipart_fields = if category == ContentCategory::Multipart {
+      Self::resolve_multipart_fields(body_info)
+    } else {
+      None
+    };
+
     Some(OperationBody {
       field_name: field_name.clone(),
       optional: body_info.optional,
       content_category: category,
+      multipart_fields,
     })
+  }
+
+  fn resolve_multipart_fields(body_info: &BodyInfo) -> Option<Vec<MultipartFieldInfo>> {
+    let body_type = body_info.body_type.as_ref()?;
+    let body_type_name = body_type.unboxed_base_type_name();
+
+    let struct_def = body_info.generated_types.iter().find_map(|t| {
+      if let RustType::Struct(def) = t
+        && def.name.as_str() == body_type_name
+      {
+        return Some(def);
+      }
+      None
+    })?;
+
+    let fields = struct_def
+      .fields
+      .iter()
+      .map(|f| MultipartFieldInfo {
+        name: f.name.clone(),
+        nullable: f.rust_type.nullable,
+        is_bytes: matches!(f.rust_type.base_type, RustPrimitive::Bytes),
+        requires_json: f.rust_type.requires_json_serialization(),
+      })
+      .collect();
+
+    Some(fields)
   }
 }

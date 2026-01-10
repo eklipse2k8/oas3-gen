@@ -1,12 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  rc::Rc,
+};
 
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
+use self::{client::ClientGenerator, mod_file::ModFileGenerator};
 use super::ast::{
-  ClientDef, LintConfig, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind, ValidationAttribute,
-  tokens::ConstToken,
+  ClientDef, LintConfig, OperationInfo, ParameterLocation, RegexKey, RustType, SerdeImpl, StructKind, StructMethodKind,
+  ValidationAttribute, tokens::ConstToken,
 };
 use crate::generator::ast::constants::HttpHeaderRef;
 
@@ -177,5 +181,119 @@ fn generate_type(
     RustType::TypeAlias(def) => type_aliases::generate_type_alias(def, visibility),
     RustType::DiscriminatedEnum(def) => enums::DiscriminatedEnumGenerator::new(def, visibility).generate(),
     RustType::ResponseEnum(def) => enums::ResponseEnumGenerator::new(def, visibility).generate(),
+  }
+}
+
+#[derive(Debug)]
+pub struct TypesOutput {
+  pub code: String,
+}
+
+#[derive(Debug)]
+pub struct ClientOutput {
+  pub code: String,
+  pub methods_generated: usize,
+  pub headers_generated: usize,
+}
+
+#[derive(Debug)]
+pub struct ClientModOutput {
+  pub types_code: String,
+  pub client_code: String,
+  pub mod_code: String,
+  pub methods_generated: usize,
+  pub headers_generated: usize,
+}
+
+pub struct SchemaCodeGenerator {
+  rust_types: Rc<Vec<RustType>>,
+  operations: Rc<Vec<OperationInfo>>,
+  client: Rc<ClientDef>,
+  visibility: Visibility,
+  source_path: String,
+  gen_version: String,
+}
+
+impl SchemaCodeGenerator {
+  pub fn new(
+    rust_types: Vec<RustType>,
+    operations: Vec<OperationInfo>,
+    client: ClientDef,
+    visibility: Visibility,
+    source_path: String,
+    gen_version: String,
+  ) -> Self {
+    Self {
+      rust_types: Rc::new(rust_types),
+      operations: Rc::new(operations),
+      client: Rc::new(client),
+      visibility,
+      source_path,
+      gen_version,
+    }
+  }
+
+  pub fn generate_types(&self) -> anyhow::Result<TypesOutput> {
+    let lint_config = LintConfig::default();
+    let code = generate_file(
+      &self.rust_types,
+      self.visibility,
+      &self.client,
+      &lint_config,
+      &self.source_path,
+      &self.gen_version,
+    )?;
+    Ok(TypesOutput { code })
+  }
+
+  pub fn generate_client(&self) -> anyhow::Result<ClientOutput> {
+    let client_generator = ClientGenerator::new(&self.client, &self.operations, self.visibility);
+    let client_tokens = client_generator.into_token_stream();
+    let lint_config = LintConfig::default();
+
+    let code = generate_source(
+      &client_tokens,
+      &self.client,
+      Some(&lint_config),
+      &self.source_path,
+      &self.gen_version,
+    )?;
+
+    Ok(ClientOutput {
+      code,
+      methods_generated: self.operations.len(),
+      headers_generated: Self::count_unique_headers(&self.operations),
+    })
+  }
+
+  pub fn generate_client_mod(&self) -> anyhow::Result<ClientModOutput> {
+    let types_tokens = generate(&self.rust_types, self.visibility);
+    let types_code = generate_source(&types_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
+
+    let client_generator = ClientGenerator::new(&self.client, &self.operations, self.visibility).with_types_import();
+    let client_tokens = client_generator.into_token_stream();
+    let client_code = generate_source(&client_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
+
+    let mod_generator = ModFileGenerator::new(&self.client, self.visibility);
+    let mod_code = mod_generator.generate(&self.source_path, &self.gen_version)?;
+
+    Ok(ClientModOutput {
+      types_code,
+      client_code,
+      mod_code,
+      methods_generated: self.operations.len(),
+      headers_generated: Self::count_unique_headers(&self.operations),
+    })
+  }
+
+  fn count_unique_headers(operations: &[OperationInfo]) -> usize {
+    operations
+      .iter()
+      .flat_map(|op| &op.parameters)
+      .filter(|param| matches!(param.parameter_location, Some(ParameterLocation::Header)))
+      .filter_map(|param| param.original_name.as_deref())
+      .map(str::to_ascii_lowercase)
+      .collect::<BTreeSet<_>>()
+      .len()
   }
 }

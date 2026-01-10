@@ -116,4 +116,28 @@ impl SwaggerPetstoreClient {
       .await?;
     ShowPetByIdRequest::parse_response(response).await
   }
+  ///Upload pet image and update name
+  ///
+  ///POST /pets/{petId}/upload
+  pub async fn upload_pet_image(&self, request: UploadPetImageRequest) -> anyhow::Result<ShowPetByIdResponse> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("pets")
+      .push(&request.path.pet_id.clone())
+      .push("upload");
+    let mut req_builder = self.client.post(url);
+    let body = &request.body;
+    let mut form = reqwest::multipart::Form::new();
+    form = form.part(
+      "image",
+      reqwest::multipart::Part::bytes(std::borrow::Cow::from(body.image.clone())),
+    );
+    form = form.part("name", reqwest::multipart::Part::text(body.name.clone()));
+    req_builder = req_builder.multipart(form);
+    let response = req_builder.send().await?;
+    UploadPetImageRequest::parse_response(response).await
+  }
 }

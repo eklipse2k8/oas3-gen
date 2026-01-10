@@ -329,3 +329,50 @@ pub enum ShowPetByIdResponse {
   ///default: unexpected error
   Unknown(Error),
 }
+///Upload pet image and update name
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct UploadPetImageRequest {
+  #[validate(nested)]
+  pub path: UploadPetImageRequestPath,
+  #[validate(nested)]
+  pub body: UploadRequestBody,
+}
+#[bon::bon]
+impl UploadPetImageRequest {
+  ///Create a new request with the given parameters.
+  #[builder]
+  pub fn new(pet_id: String, body: UploadRequestBody) -> anyhow::Result<Self> {
+    let request = Self {
+      path: UploadPetImageRequestPath { pet_id },
+      body,
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
+impl UploadPetImageRequest {
+  ///Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ShowPetByIdResponse> {
+    let status = req.status();
+    if status.is_success() {
+      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+      return Ok(ShowPetByIdResponse::Ok(data));
+    }
+    let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+    Ok(ShowPetByIdResponse::Unknown(data))
+  }
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct UploadPetImageRequestPath {
+  ///The id of the pet to update
+  #[validate(length(min = 1u64))]
+  pub pet_id: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+pub struct UploadRequestBody {
+  ///The pet's image file
+  pub image: Vec<u8>,
+  ///The pet's name
+  #[validate(length(min = 1u64))]
+  pub name: String,
+}
