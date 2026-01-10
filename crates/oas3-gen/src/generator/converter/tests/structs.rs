@@ -1,20 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use crate::{
   generator::{
-    ast::{FieldDef, FieldNameToken, RustType, SerdeAttribute, TypeRef, ValidationAttribute},
-    converter::{SchemaConverter, discriminator::DiscriminatorConverter, fields::FieldConverter},
+    ast::{RustType, SerdeAttribute},
+    converter::{SchemaConverter, discriminator::DiscriminatorConverter},
   },
-  tests::common::{
-    create_test_context, create_test_graph, default_config, make_docs, make_field, make_integer_type_ref,
-    make_string_type_ref,
-  },
+  tests::common::{create_test_context, create_test_graph, default_config},
 };
 
 #[test]
-fn test_discriminated_base_struct_renamed() -> anyhow::Result<()> {
+fn discriminated_base_struct_renamed() -> anyhow::Result<()> {
   let mut entity_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     additional_properties: Some(Schema::Boolean(BooleanSchema(false))),
@@ -61,7 +58,7 @@ fn test_discriminated_base_struct_renamed() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
+fn discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
   let mut message_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     additional_properties: Some(Schema::Boolean(BooleanSchema(false))),
@@ -132,7 +129,7 @@ fn test_discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
+fn discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
   let mut entity_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
@@ -189,88 +186,7 @@ fn test_discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_schema_merger_merge_child_with_parent() {
-  let mut parent = ObjectSchema::default();
-  parent.properties.insert(
-    "parent_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  parent.required.push("parent_prop".to_string());
-
-  let mut child = ObjectSchema::default();
-  child.properties.insert(
-    "child_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-  child.all_of.push(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Parent".to_string(),
-    summary: None,
-    description: None,
-  });
-
-  let mut graph_map = BTreeMap::new();
-  graph_map.insert("Parent".to_string(), parent.clone());
-  graph_map.insert("Child".to_string(), child.clone());
-
-  let graph = create_test_graph(graph_map);
-  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
-
-  assert!(merged_schema.schema.properties.contains_key("parent_prop"));
-  assert!(merged_schema.schema.properties.contains_key("child_prop"));
-  assert!(merged_schema.schema.required.contains(&"parent_prop".to_string()));
-
-  let effective_schema = graph.resolved("Child").unwrap();
-  assert_eq!(effective_schema.properties.len(), merged_schema.schema.properties.len());
-}
-
-#[test]
-fn test_schema_merger_conflict_resolution() {
-  let mut parent = ObjectSchema::default();
-  parent.properties.insert(
-    "prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-
-  let mut child = ObjectSchema::default();
-  child.properties.insert(
-    "prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-  child.all_of.push(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Parent".to_string(),
-    summary: None,
-    description: None,
-  });
-
-  let mut graph_map = BTreeMap::new();
-  graph_map.insert("Parent".to_string(), parent.clone());
-  graph_map.insert("Child".to_string(), child.clone());
-
-  let graph = create_test_graph(graph_map);
-  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
-
-  let prop = merged_schema.schema.properties.get("prop").unwrap();
-  if let ObjectOrReference::Object(schema) = prop {
-    assert_eq!(schema.schema_type, Some(SchemaTypeSet::Single(SchemaType::Integer)));
-  } else {
-    panic!("Expected Object schema");
-  }
-}
-
-#[test]
-fn test_discriminator_handler_detect_parent() {
+fn discriminator_handler_detect_parent() {
   let mut parent_schema = ObjectSchema::default();
   parent_schema.properties.insert(
     "type".to_string(),
@@ -294,11 +210,10 @@ fn test_discriminator_handler_detect_parent() {
     description: None,
   });
 
-  let mut graph_map = BTreeMap::new();
-  graph_map.insert("Parent".to_string(), parent_schema);
-  graph_map.insert("Child".to_string(), child_schema.clone());
-
-  let graph = create_test_graph(graph_map);
+  let graph = create_test_graph(BTreeMap::from([
+    ("Parent".to_string(), parent_schema),
+    ("Child".to_string(), child_schema),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let handler = DiscriminatorConverter::new(context);
 
@@ -309,145 +224,7 @@ fn test_discriminator_handler_detect_parent() {
 }
 
 #[test]
-fn test_deduplicate_field_names_no_duplicates() {
-  let fields = vec![
-    make_field("foo", false),
-    make_field("bar", false),
-    make_field("baz", false),
-  ];
-
-  let fields = FieldConverter::deduplicate_names(fields);
-
-  assert_eq!(fields.len(), 3);
-  assert_eq!(fields[0].name.as_str(), "foo");
-  assert_eq!(fields[1].name.as_str(), "bar");
-  assert_eq!(fields[2].name.as_str(), "baz");
-}
-
-#[test]
-fn test_deduplicate_field_names_empty() {
-  let fields: Vec<FieldDef> = vec![];
-  let fields = FieldConverter::deduplicate_names(fields);
-  assert!(fields.is_empty());
-}
-
-#[test]
-fn test_deduplicate_field_names_all_non_deprecated_renamed() {
-  let fields = vec![
-    make_field("foo", false),
-    make_field("foo", false),
-    make_field("foo", false),
-  ];
-
-  let fields = FieldConverter::deduplicate_names(fields);
-
-  assert_eq!(fields.len(), 3);
-  assert_eq!(fields[0].name.as_str(), "foo");
-  assert_eq!(fields[1].name.as_str(), "foo_2");
-  assert_eq!(fields[2].name.as_str(), "foo_3");
-}
-
-#[test]
-fn test_deduplicate_field_names_deprecated_removed_when_mixed() {
-  let fields = vec![
-    make_field("foo", true),
-    make_field("foo", false),
-    make_field("bar", false),
-  ];
-
-  let fields = FieldConverter::deduplicate_names(fields);
-
-  assert_eq!(fields.len(), 2);
-  assert_eq!(fields[0].name.as_str(), "foo");
-  assert!(!fields[0].deprecated);
-  assert_eq!(fields[1].name.as_str(), "bar");
-}
-
-#[test]
-fn test_deduplicate_field_names_all_deprecated_renamed() {
-  let fields = vec![make_field("foo", true), make_field("foo", true)];
-
-  let fields = FieldConverter::deduplicate_names(fields);
-
-  assert_eq!(fields.len(), 2);
-  assert_eq!(fields[0].name.as_str(), "foo");
-  assert_eq!(fields[1].name.as_str(), "foo_2");
-}
-
-#[test]
-fn test_deduplicate_field_names_multiple_groups() {
-  let fields = vec![
-    make_field("foo", false),
-    make_field("bar", true),
-    make_field("foo", false),
-    make_field("bar", false),
-  ];
-
-  let fields = FieldConverter::deduplicate_names(fields);
-
-  assert_eq!(fields.len(), 3);
-  let names: Vec<_> = fields.iter().map(|f| f.name.as_str()).collect();
-  assert!(names.contains(&"foo"));
-  assert!(names.contains(&"foo_2"));
-  assert!(names.contains(&"bar"));
-  assert!(!fields.iter().any(|f| f.name == "bar" && f.deprecated));
-}
-
-fn make_base_field(type_ref: TypeRef) -> FieldDef {
-  FieldDef::builder()
-    .name(FieldNameToken::from_raw("test_field"))
-    .docs(make_docs())
-    .rust_type(type_ref)
-    .serde_attrs(BTreeSet::from([SerdeAttribute::Rename("original".to_string())]))
-    .validation_attrs(vec![ValidationAttribute::Email])
-    .build()
-}
-
-#[test]
-fn test_with_discriminator_behavior_child_discriminator_hides_and_sets_value() {
-  let field = make_base_field(make_string_type_ref());
-  let result = field.with_discriminator_behavior(Some("child_type"), false);
-
-  assert!(result.docs.is_empty(), "docs should be cleared");
-  assert!(result.validation_attrs.is_empty(), "validation should be cleared");
-  assert_eq!(
-    result.default_value,
-    Some(serde_json::Value::String("child_type".to_string()))
-  );
-  assert!(result.serde_attrs.contains(&SerdeAttribute::SkipDeserializing));
-  assert!(result.serde_attrs.contains(&SerdeAttribute::Default));
-  assert!(result.doc_hidden);
-}
-
-#[test]
-fn test_with_discriminator_behavior_base_hides_and_skips_string() {
-  let field = make_base_field(make_string_type_ref());
-  let result = field.with_discriminator_behavior(None, true);
-
-  assert!(result.docs.is_empty(), "docs should be cleared");
-  assert!(result.validation_attrs.is_empty(), "validation should be cleared");
-  assert_eq!(result.default_value, Some(serde_json::Value::String(String::new())));
-  assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
-  assert!(
-    !result
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("original".to_string()))
-  );
-  assert!(result.doc_hidden);
-}
-
-#[test]
-fn test_with_discriminator_behavior_base_non_string_no_default() {
-  let field = make_base_field(make_integer_type_ref());
-  let result = field.with_discriminator_behavior(None, true);
-
-  assert!(result.default_value.is_none(), "non-string type should not get default");
-  assert!(result.serde_attrs.contains(&SerdeAttribute::Skip));
-  assert!(result.doc_hidden);
-}
-
-#[test]
-fn test_discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
+fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
   let mut parent_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
@@ -509,108 +286,7 @@ fn test_discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<
 }
 
 #[test]
-fn test_schema_merger_merge_all_of() {
-  let mut base_schema = ObjectSchema::default();
-  base_schema.properties.insert(
-    "base_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  base_schema.required.push("base_prop".to_string());
-
-  let mut mixin_schema = ObjectSchema::default();
-  mixin_schema.properties.insert(
-    "mixin_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-
-  let mut composite_schema = ObjectSchema::default();
-  composite_schema.all_of.push(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Base".to_string(),
-    summary: None,
-    description: None,
-  });
-  composite_schema.all_of.push(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Mixin".to_string(),
-    summary: None,
-    description: None,
-  });
-  composite_schema.properties.insert(
-    "own_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-      ..Default::default()
-    }),
-  );
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("Base".to_string(), base_schema),
-    ("Mixin".to_string(), mixin_schema),
-    ("Composite".to_string(), composite_schema.clone()),
-  ]));
-
-  let merged_schema = graph
-    .merged("Composite")
-    .expect("merged schema should exist for Composite");
-
-  assert!(merged_schema.schema.properties.contains_key("base_prop"));
-  assert!(merged_schema.schema.properties.contains_key("mixin_prop"));
-  assert!(merged_schema.schema.properties.contains_key("own_prop"));
-  assert!(merged_schema.schema.required.contains(&"base_prop".to_string()));
-}
-
-#[test]
-fn test_schema_merger_preserves_discriminator() {
-  let mut parent_schema = ObjectSchema::default();
-  parent_schema.properties.insert(
-    "type".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  parent_schema.discriminator = Some(Discriminator {
-    property_name: "type".to_string(),
-    mapping: Some(BTreeMap::from([(
-      "child".to_string(),
-      "#/components/schemas/Child".to_string(),
-    )])),
-  });
-
-  let mut child_schema = ObjectSchema::default();
-  child_schema.all_of.push(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Parent".to_string(),
-    summary: None,
-    description: None,
-  });
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("Parent".to_string(), parent_schema.clone()),
-    ("Child".to_string(), child_schema.clone()),
-  ]));
-
-  let merged_schema = graph.merged("Child").expect("merged schema should exist for Child");
-
-  assert_eq!(merged_schema.discriminator_parent.as_deref(), Some("Parent"));
-  assert!(merged_schema.schema.discriminator.is_some());
-  assert_eq!(
-    merged_schema
-      .schema
-      .discriminator
-      .as_ref()
-      .expect("discriminator should exist")
-      .property_name,
-    "type"
-  );
-}
-
-#[test]
-fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Result<()> {
+fn discriminator_deduplicates_same_schema_mappings() -> anyhow::Result<()> {
   let base_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
@@ -676,7 +352,7 @@ fn test_discriminator_handler_deduplicates_same_schema_mappings() -> anyhow::Res
 }
 
 #[test]
-fn test_discriminator_mappings_returns_alphabetical_order() {
+fn discriminator_mappings_alphabetical_order() {
   let base_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(

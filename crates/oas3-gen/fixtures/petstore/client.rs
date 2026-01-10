@@ -48,7 +48,7 @@ impl SwaggerPetstoreClient {
   }
   ///List all cats
   ///
-  ///GET /cats
+  ///* Path: `GET /cats`
   pub async fn list_cats(&self, request: ListCatsRequest) -> anyhow::Result<ListCatsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
@@ -67,7 +67,7 @@ impl SwaggerPetstoreClient {
   }
   ///List all pets
   ///
-  ///GET /pets
+  ///* Path: `GET /pets`
   pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ListPetsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
@@ -86,7 +86,7 @@ impl SwaggerPetstoreClient {
   }
   ///Create a pet
   ///
-  ///POST /pets
+  ///* Path: `POST /pets`
   pub async fn create_pets(&self, request: CreatePetsRequest) -> anyhow::Result<CreatePetsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
@@ -99,7 +99,7 @@ impl SwaggerPetstoreClient {
   }
   ///Info for a specific pet
   ///
-  ///GET /pets/{petId}
+  ///* Path: `GET /pets/{petId}`
   pub async fn show_pet_by_id(&self, request: ShowPetByIdRequest) -> anyhow::Result<ShowPetByIdResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
@@ -118,7 +118,7 @@ impl SwaggerPetstoreClient {
   }
   ///Upload pet image and update name
   ///
-  ///POST /pets/{petId}/upload
+  ///* Path: `POST /pets/{petId}/upload`
   pub async fn upload_pet_image(&self, request: UploadPetImageRequest) -> anyhow::Result<ShowPetByIdResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();

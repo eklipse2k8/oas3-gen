@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::generator::{
   ast::{
-    ContentCategory, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken, ResponseMediaType,
-    ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustType, StatusCodeToken, StatusHandler,
-    StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken,
+    ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustType, StatusCodeToken,
+    StatusHandler, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
   },
   codegen::{self, Visibility, structs},
 };
@@ -12,7 +12,7 @@ use crate::generator::{
 fn base_struct(kind: StructKind) -> StructDef {
   StructDef {
     name: StructToken::new("Sample"),
-    docs: vec!["Sample struct".to_string()].into(),
+    docs: Documentation::from_lines(["Sample struct"]),
     fields: vec![
       FieldDef::builder()
         .name(FieldNameToken::new("field"))
@@ -41,7 +41,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
 
   def.methods.push(StructMethod {
     name: MethodNameToken::new("parse_response"),
-    docs: vec!["Parse response".to_string()].into(),
+    docs: Documentation::from_lines(["Parse response"]),
     kind: StructMethodKind::ParseResponse {
       response_enum: EnumToken::new("ResponseEnum"),
       status_handlers: vec![StatusHandler {
@@ -208,7 +208,7 @@ fn test_serde_import_generation() {
 fn test_header_params_struct_generates_try_from_header_map() {
   let def = StructDef {
     name: StructToken::new("RequestHeader"),
-    docs: vec!["Header parameters".to_string()].into(),
+    docs: Documentation::from_lines(["Header parameters"]),
     fields: vec![
       FieldDef::builder()
         .name(FieldNameToken::new("x_api_key"))
@@ -266,7 +266,7 @@ fn test_header_params_with_primitive_types() {
 
   let def = StructDef {
     name: StructToken::new("IntHeader"),
-    docs: vec![].into(),
+    docs: Documentation::default(),
     fields: vec![
       FieldDef::builder()
         .name(FieldNameToken::new("x_count"))

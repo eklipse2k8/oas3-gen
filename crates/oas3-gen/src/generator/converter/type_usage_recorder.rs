@@ -20,6 +20,15 @@ impl UsageFlags {
   fn into_tuple(self) -> (bool, bool) {
     (self.request, self.response)
   }
+
+  fn merge(&mut self, other: UsageFlags) {
+    if other.request {
+      self.request = true;
+    }
+    if other.response {
+      self.response = true;
+    }
+  }
 }
 
 /// Records which Rust types are used as requests or responses.
@@ -91,6 +100,13 @@ impl TypeUsageRecorder {
   pub(crate) fn mark_response_type_ref(&mut self, type_ref: &TypeRef) {
     if let RustPrimitive::Custom(name) = &type_ref.base_type {
       self.mark_response(name.as_ref());
+    }
+  }
+
+  /// Merges another recorder into this one.
+  pub(crate) fn merge(&mut self, other: TypeUsageRecorder) {
+    for (token, flags) in other.entries {
+      self.entries.entry(token).or_default().merge(flags);
     }
   }
 }

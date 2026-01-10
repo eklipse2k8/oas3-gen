@@ -27,6 +27,12 @@ pub(crate) struct ResponseMetadata {
   pub(crate) media_types: Vec<ResponseMediaType>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ResponseMetadataOutput {
+  pub(crate) metadata: ResponseMetadata,
+  pub(crate) usage: TypeUsageRecorder,
+}
+
 /// Converts OpenAPI responses into Rust enum definitions.
 ///
 /// Handles status codes, media types, and schema resolution for each response.
@@ -114,8 +120,8 @@ impl ResponseConverter {
 
   /// Extracts response metadata for operation info.
   ///
-  /// Gathers type names and media types, marking them for usage tracking.
-  pub(crate) fn extract_metadata(&self, operation: &Operation, usage: &mut TypeUsageRecorder) -> ResponseMetadata {
+  /// Gathers type names and media types, returning usage data.
+  pub(crate) fn extract_metadata(&self, operation: &Operation) -> ResponseMetadataOutput {
     let spec = self.context.graph().spec();
     let type_name = naming_responses::extract_response_type_name(spec, operation);
     let response_types = naming_responses::extract_all_response_types(spec, operation);
@@ -127,13 +133,17 @@ impl ResponseConverter {
         .collect(),
     );
 
+    let mut usage = TypeUsageRecorder::new();
     if let Some(ref name) = type_name {
       usage.mark_response(name);
     }
     usage.mark_response_iter(&response_types.success);
     usage.mark_response_iter(&response_types.error);
 
-    ResponseMetadata { type_name, media_types }
+    ResponseMetadataOutput {
+      metadata: ResponseMetadata { type_name, media_types },
+      usage,
+    }
   }
 
   fn extract_media_types(

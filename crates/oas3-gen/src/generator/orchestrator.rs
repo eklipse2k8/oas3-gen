@@ -394,12 +394,11 @@ impl Orchestrator {
     let mut rust_types = vec![];
     let mut operations_info = vec![];
     let mut warnings = vec![];
-    let mut usage_recorder = TypeUsageRecorder::new();
 
     let operation_converter = OperationConverter::new(context.clone(), schema_converter.clone());
 
     for entry in self.operation_registry.operations() {
-      match operation_converter.convert(entry, &mut usage_recorder) {
+      match operation_converter.convert(entry) {
         Ok(result) => {
           warnings.extend(
             result
@@ -424,6 +423,6 @@ impl Orchestrator {
       }
     }
 
-    (rust_types, operations_info, warnings, usage_recorder)
+    (rust_types, operations_info, warnings, context.take_type_usage())
   }
 }

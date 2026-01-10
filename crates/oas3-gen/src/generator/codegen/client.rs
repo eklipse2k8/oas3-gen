@@ -7,7 +7,7 @@ use syn::LitStr;
 use super::Visibility;
 use crate::generator::ast::{
   ClientDef, ContentCategory, FieldNameToken, MultipartFieldInfo, OperationBody, OperationInfo, OperationKind,
-  ParameterLocation, StructToken,
+  ParameterLocation, StructToken, TypeRef,
 };
 
 pub(super) struct BodyResult {
@@ -296,7 +296,7 @@ pub(super) fn generate_multipart(body: &OperationBody) -> BodyResult {
   let logic = body
     .multipart_fields
     .as_ref()
-    .map_or_else(multipart_fallback, |fields| multipart_strict(fields));
+    .map_or_else(|| multipart_fallback(body.body_type.as_ref()), |f| multipart_strict(f));
   let field = &body.field_name;
 
   let tokens = if body.optional {
@@ -349,9 +349,17 @@ fn multipart_strict(fields: &[MultipartFieldInfo]) -> TokenStream {
   }
 }
 
-fn multipart_fallback() -> TokenStream {
+fn multipart_fallback(body_type: Option<&TypeRef>) -> TokenStream {
+  let type_annotation = body_type.map_or_else(
+    || quote! {},
+    |ty| {
+      let ty_tokens = ty.to_token_stream();
+      quote! { ::<#ty_tokens> }
+    },
+  );
+
   quote! {
-    let json_value = serde_json::to_value(body)?;
+    let json_value = serde_json::to_value #type_annotation (body)?;
     let mut form = reqwest::multipart::Form::new();
     if let serde_json::Value::Object(map) = json_value {
       for (key, value) in map {

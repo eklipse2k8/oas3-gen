@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{Components, Discriminator, ObjectOrReference, ObjectSchema, Spec};
+use oas3::spec::{
+  BooleanSchema, Components, Discriminator, Info, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet,
+  Spec,
+};
 
 use crate::generator::schema_registry::{RefCollector, SchemaRegistry};
 
@@ -9,7 +12,7 @@ const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 fn create_test_spec_with_schemas(schemas: BTreeMap<String, ObjectOrReference<ObjectSchema>>) -> Spec {
   Spec {
     openapi: "3.0.0".to_string(),
-    info: oas3::spec::Info {
+    info: Info {
       title: "Test".to_string(),
       summary: None,
       version: "1.0.0".to_string(),
@@ -251,24 +254,24 @@ fn test_schema_graph_integration() {
 #[test]
 fn test_schema_registry_merges_all_of_properties_and_required() {
   let mut parent = make_simple_schema();
-  parent.schema_type = Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object));
+  parent.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
   parent.required.push("id".to_string());
   parent.properties.insert(
     "id".to_string(),
     ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Integer)),
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       ..Default::default()
     }),
   );
-  parent.additional_properties = Some(oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true)));
+  parent.additional_properties = Some(Schema::Boolean(BooleanSchema(true)));
 
   let mut child = make_simple_schema();
-  child.schema_type = Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Object));
+  child.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
   child.required.push("name".to_string());
   child.properties.insert(
     "name".to_string(),
     ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::String)),
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }),
   );
@@ -298,7 +301,7 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
   parent_schema.properties.insert(
     "kind".to_string(),
     ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::String)),
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }),
   );
@@ -314,7 +317,7 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
   child_schema.properties.insert(
     "child_prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(oas3::spec::SchemaTypeSet::Single(oas3::spec::SchemaType::Integer)),
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       ..Default::default()
     }),
   );
@@ -341,4 +344,173 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
 
   let effective = graph.resolved("Child").unwrap();
   assert_eq!(effective.properties.len(), merged_child.schema.properties.len());
+}
+
+#[test]
+fn schema_merger_merge_child_with_parent() {
+  let mut parent = make_simple_schema();
+  parent.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  parent.properties.insert(
+    "parent_prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+  parent.required.push("parent_prop".to_string());
+
+  let mut child = make_simple_schema();
+  child.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  child.properties.insert(
+    "child_prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+      ..Default::default()
+    }),
+  );
+  child.all_of.push(make_ref("Parent"));
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Parent".to_string(), ObjectOrReference::Object(parent)),
+    ("Child".to_string(), ObjectOrReference::Object(child)),
+  ]));
+
+  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  graph.build_dependencies();
+  graph.detect_cycles();
+
+  let merged = graph.merged("Child").expect("merged schema should exist for Child");
+
+  assert!(
+    merged.schema.properties.contains_key("parent_prop"),
+    "should have parent_prop"
+  );
+  assert!(
+    merged.schema.properties.contains_key("child_prop"),
+    "should have child_prop"
+  );
+  assert!(
+    merged.schema.required.contains(&"parent_prop".to_string()),
+    "parent_prop should be required"
+  );
+
+  let effective = graph.resolved("Child").unwrap();
+  assert_eq!(
+    effective.properties.len(),
+    merged.schema.properties.len(),
+    "resolved should match merged"
+  );
+}
+
+#[test]
+fn schema_merger_conflict_resolution() {
+  let mut parent = make_simple_schema();
+  parent.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  parent.properties.insert(
+    "prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+
+  let mut child = make_simple_schema();
+  child.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  child.properties.insert(
+    "prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+      ..Default::default()
+    }),
+  );
+  child.all_of.push(make_ref("Parent"));
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Parent".to_string(), ObjectOrReference::Object(parent)),
+    ("Child".to_string(), ObjectOrReference::Object(child)),
+  ]));
+
+  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  graph.build_dependencies();
+  graph.detect_cycles();
+
+  let merged = graph.merged("Child").expect("merged schema should exist for Child");
+
+  let prop = merged.schema.properties.get("prop").unwrap();
+  if let ObjectOrReference::Object(schema) = prop {
+    assert_eq!(
+      schema.schema_type,
+      Some(SchemaTypeSet::Single(SchemaType::Integer)),
+      "child property should override parent"
+    );
+  } else {
+    panic!("Expected Object schema");
+  }
+}
+
+#[test]
+fn schema_merger_merge_multiple_all_of() {
+  let mut base = make_simple_schema();
+  base.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  base.properties.insert(
+    "base_prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+  base.required.push("base_prop".to_string());
+
+  let mut mixin = make_simple_schema();
+  mixin.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  mixin.properties.insert(
+    "mixin_prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+      ..Default::default()
+    }),
+  );
+
+  let mut composite = make_simple_schema();
+  composite.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  composite.all_of.push(make_ref("Base"));
+  composite.all_of.push(make_ref("Mixin"));
+  composite.properties.insert(
+    "own_prop".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
+      ..Default::default()
+    }),
+  );
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Base".to_string(), ObjectOrReference::Object(base)),
+    ("Mixin".to_string(), ObjectOrReference::Object(mixin)),
+    ("Composite".to_string(), ObjectOrReference::Object(composite)),
+  ]));
+
+  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  graph.build_dependencies();
+  graph.detect_cycles();
+
+  let merged = graph
+    .merged("Composite")
+    .expect("merged schema should exist for Composite");
+
+  assert!(
+    merged.schema.properties.contains_key("base_prop"),
+    "should have base_prop"
+  );
+  assert!(
+    merged.schema.properties.contains_key("mixin_prop"),
+    "should have mixin_prop"
+  );
+  assert!(
+    merged.schema.properties.contains_key("own_prop"),
+    "should have own_prop"
+  );
+  assert!(
+    merged.schema.required.contains(&"base_prop".to_string()),
+    "base_prop should be required"
+  );
 }

@@ -1,8 +1,8 @@
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
-    OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
-    StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
+    DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
+    EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute,
+    SerdeMode, StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -176,11 +176,7 @@ fn test_tuple_enum_no_display_impl() {
 fn test_enum_with_docs() {
   let def = EnumDef {
     name: EnumToken::new("Status"),
-    docs: vec![
-      "Represents the status of an item.".to_string(),
-      "Can be active or inactive.".to_string(),
-    ]
-    .into(),
+    docs: Documentation::from_lines(["Represents the status of an item.", "Can be active or inactive."]),
     variants: vec![make_unit_variant("Active"), make_unit_variant("Inactive")],
     discriminator: None,
     serde_attrs: vec![],
@@ -556,7 +552,7 @@ fn test_enum_constructor_methods() {
         variant_name: "Json".into(),
         wrapped_type: TypeRef::new("JsonPayload"),
       },
-      vec!["Creates an empty JSON body.".to_string()],
+      Documentation::from_lines(["Creates an empty JSON body."]),
     )],
     ..Default::default()
   };
@@ -596,7 +592,7 @@ fn test_enum_constructor_methods() {
         param_name: "name".to_string(),
         param_type: TypeRef::new("String"),
       },
-      vec!["Creates a request with the given name.".to_string()],
+      Documentation::from_lines(["Creates a request with the given name."]),
     )],
     ..Default::default()
   };
@@ -636,7 +632,7 @@ fn test_enum_constructor_methods_without_docs() {
         variant_name: "Json".into(),
         wrapped_type: TypeRef::new("JsonPayload"),
       },
-      vec![],
+      Documentation::default(),
     )],
     ..Default::default()
   };
@@ -678,7 +674,7 @@ fn test_known_value_constructor_methods() {
           known_type: EnumToken::new("ModelOptionKnown"),
           known_variant: EnumVariantToken::new("Gemini25Pro"),
         },
-        vec!["Our best model.".to_string()],
+        Documentation::from_lines(["Our best model."]),
       ),
       EnumMethod::new(
         "gemini_25_flash",
@@ -686,7 +682,7 @@ fn test_known_value_constructor_methods() {
           known_type: EnumToken::new("ModelOptionKnown"),
           known_variant: EnumVariantToken::new("Gemini25Flash"),
         },
-        vec![],
+        Documentation::default(),
       ),
     ],
     ..Default::default()
@@ -712,7 +708,7 @@ fn test_known_value_constructor_methods() {
 fn test_discriminated_enum() {
   let without_fallback = DiscriminatedEnumDef::builder()
     .name("Pet".into())
-    .docs(vec!["A pet can be a dog or cat.".to_string()].into())
+    .docs(Documentation::from_lines(["A pet can be a dog or cat."]))
     .discriminator_field("petType".to_string())
     .variants(vec![
       DiscriminatedVariant::builder()
@@ -866,7 +862,7 @@ fn test_discriminated_enum_deserialize_only() {
 fn test_response_enum_generation() {
   let def = ResponseEnumDef {
     name: EnumToken::new("GetUserResponse"),
-    docs: vec!["Response for GET /users/{id}".to_string()].into(),
+    docs: Documentation::from_lines(["Response for GET /users/{id}"]),
     variants: vec![
       ResponseVariant::builder()
         .status_code(StatusCodeToken::Ok200)

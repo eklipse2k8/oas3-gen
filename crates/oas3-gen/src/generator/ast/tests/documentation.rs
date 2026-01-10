@@ -29,42 +29,40 @@ fn multi_line_documentation() {
 }
 
 #[test]
-fn from_raw_handles_newlines() {
-  let doc = Documentation::from_raw("Line 1\nLine 2");
-  assert_eq!(doc.lines(), &["Line 1", "Line 2"]);
-}
-
-#[test]
-fn from_raw_handles_escaped_newlines() {
-  let doc = Documentation::from_raw("Line 1\\nLine 2");
-  assert_eq!(doc.lines(), &["Line 1", "Line 2"]);
-}
-
-#[test]
 fn from_optional_none_produces_empty() {
   let doc = Documentation::from_optional(None);
-  assert!(doc.is_empty());
+  let tokens = quote! { #doc };
+  assert!(tokens.is_empty());
 }
 
 #[test]
 fn from_optional_some_processes_text() {
   let text = "Test".to_string();
   let doc = Documentation::from_optional(Some(&text));
-  assert_eq!(doc.lines(), &["Test"]);
+  let expected = quote! { #[doc = "Test"] };
+  assert_eq!(quote! { #doc }.to_string(), expected.to_string());
+}
+
+#[test]
+fn from_optional_handles_escaped_newlines() {
+  let text = "Line 1\\nLine 2".to_string();
+  let doc = Documentation::from_optional(Some(&text));
+  let expected = quote! {
+    #[doc = "Line 1"]
+    #[doc = "Line 2"]
+  };
+  assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
 
 #[test]
 fn push_adds_line() {
   let mut doc = Documentation::from_lines(["First"]);
   doc.push("Second");
-  assert_eq!(doc.lines(), &["First", "Second"]);
-}
-
-#[test]
-fn extend_adds_lines() {
-  let mut doc = Documentation::from_lines(["First"]);
-  doc.extend(["Second", "Third"]);
-  assert_eq!(doc.lines(), &["First", "Second", "Third"]);
+  let expected = quote! {
+    #[doc = "First"]
+    #[doc = "Second"]
+  };
+  assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
 
 #[cfg(feature = "mdformat")]

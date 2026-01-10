@@ -624,6 +624,22 @@ fn test_multipart_with_json_serialization() {
 }
 
 #[test]
+fn test_multipart_fallback_with_body_type() {
+  let body = OperationBody::builder()
+    .field_name(FieldNameToken::new("body"))
+    .body_type(TypeRef::new("UploadRequest"))
+    .content_category(ContentCategory::Multipart)
+    .build();
+
+  let code = generate_multipart(&body).tokens.to_string();
+
+  assert!(
+    code.contains("serde_json :: to_value :: < UploadRequest >"),
+    "fallback with body_type should include type annotation: {code}"
+  );
+}
+
+#[test]
 fn test_url_path_segments_encoding() {
   let mut url = Url::parse("http://example.com").unwrap();
 

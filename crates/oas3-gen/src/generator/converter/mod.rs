@@ -132,6 +132,7 @@ pub(crate) struct ConverterContext {
   pub(crate) graph: Arc<SchemaRegistry>,
   pub(crate) config: CodegenConfig,
   pub(crate) cache: RefCell<SharedSchemaCache>,
+  pub(crate) type_usage: RefCell<TypeUsageRecorder>,
   pub(crate) reachable_schemas: Option<Arc<BTreeSet<String>>>,
 }
 
@@ -146,18 +147,45 @@ impl ConverterContext {
       graph,
       config,
       cache: RefCell::new(cache),
+      type_usage: RefCell::new(TypeUsageRecorder::new()),
       reachable_schemas,
     }
   }
 
-  /// Borrows the schema registry graph.
   pub(crate) fn graph(&self) -> &SchemaRegistry {
     &self.graph
   }
 
-  /// Borrows the configuration.
   pub(crate) fn config(&self) -> &CodegenConfig {
     &self.config
+  }
+
+  pub(crate) fn take_type_usage(&self) -> TypeUsageRecorder {
+    self.type_usage.take()
+  }
+
+  pub(crate) fn mark_request(&self, type_name: impl Into<super::ast::EnumToken>) {
+    self.type_usage.borrow_mut().mark_request(type_name);
+  }
+
+  pub(crate) fn mark_response(&self, type_name: impl Into<super::ast::EnumToken>) {
+    self.type_usage.borrow_mut().mark_response(type_name);
+  }
+
+  pub(crate) fn mark_request_iter<I, T>(&self, types: I)
+  where
+    I: IntoIterator<Item = T>,
+    T: Into<super::ast::EnumToken>,
+  {
+    self.type_usage.borrow_mut().mark_request_iter(types);
+  }
+
+  pub(crate) fn mark_response_type_ref(&self, type_ref: &TypeRef) {
+    self.type_usage.borrow_mut().mark_response_type_ref(type_ref);
+  }
+
+  pub(crate) fn merge_usage(&self, other: TypeUsageRecorder) {
+    self.type_usage.borrow_mut().merge(other);
   }
 }
 

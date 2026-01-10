@@ -1,5 +1,5 @@
 use crate::generator::{
-  ast::{RustPrimitive, TypeAliasDef, TypeAliasToken, TypeRef},
+  ast::{Documentation, RustPrimitive, TypeAliasDef, TypeAliasToken, TypeRef},
   codegen::{Visibility, type_aliases::generate_type_alias},
 };
 
@@ -52,11 +52,7 @@ fn test_basic_type_aliases() {
 fn test_type_alias_with_docs() {
   let def = TypeAliasDef {
     name: TypeAliasToken::new("UserId"),
-    docs: vec![
-      "Unique identifier for a user.".to_string(),
-      "Format: UUID string.".to_string(),
-    ]
-    .into(),
+    docs: Documentation::from_lines(["Unique identifier for a user.", "Format: UUID string."]),
     target: TypeRef::new(RustPrimitive::String),
   };
 
@@ -147,7 +143,7 @@ fn test_type_alias_with_wrapper_types() {
 fn test_type_alias_custom_types() {
   let def = TypeAliasDef {
     name: TypeAliasToken::new("PetList"),
-    docs: vec!["List of pets from the API.".to_string()].into(),
+    docs: Documentation::from_lines(["List of pets from the API."]),
     target: TypeRef::new(RustPrimitive::Custom("Vec<Pet>".into())),
   };
 

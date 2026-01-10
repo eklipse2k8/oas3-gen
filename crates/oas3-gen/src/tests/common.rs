@@ -83,15 +83,7 @@ pub(crate) fn create_empty_test_graph() -> Arc<SchemaRegistry> {
 }
 
 pub(crate) fn make_docs() -> Documentation {
-  vec!["Some docs".to_string()].into()
-}
-
-pub(crate) fn make_string_type_ref() -> TypeRef {
-  TypeRef::new(RustPrimitive::String)
-}
-
-pub(crate) fn make_integer_type_ref() -> TypeRef {
-  TypeRef::new(RustPrimitive::I64)
+  Documentation::from_lines(["Some docs"])
 }
 
 pub(crate) fn make_field(name: &str, deprecated: bool) -> FieldDef {

@@ -5,9 +5,9 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaType
 use crate::{
   generator::{
     ast::{OuterAttr, RustPrimitive, RustType, SerdeAsFieldAttr},
-    converter::{CodegenConfig, SchemaConverter},
+    converter::{CodegenConfig, SchemaConverter, fields::FieldConverter},
   },
-  tests::common::{create_test_context, create_test_graph},
+  tests::common::{create_test_context, create_test_graph, make_field},
 };
 
 fn config_with_customizations(customizations: HashMap<String, String>) -> CodegenConfig {
@@ -323,6 +323,60 @@ fn test_no_serde_as_attr_without_customization() -> anyhow::Result<()> {
   );
 
   Ok(())
+}
+
+#[test]
+fn field_name_deduplication() {
+  struct Case {
+    name: &'static str,
+    fields: Vec<(&'static str, bool)>,
+    expected_names: Vec<&'static str>,
+  }
+
+  let cases = [
+    Case {
+      name: "no duplicates",
+      fields: vec![("foo", false), ("bar", false), ("baz", false)],
+      expected_names: vec!["foo", "bar", "baz"],
+    },
+    Case {
+      name: "empty input",
+      fields: vec![],
+      expected_names: vec![],
+    },
+    Case {
+      name: "all non-deprecated renamed with suffix",
+      fields: vec![("foo", false), ("foo", false), ("foo", false)],
+      expected_names: vec!["foo", "foo_2", "foo_3"],
+    },
+    Case {
+      name: "deprecated removed when mixed with non-deprecated",
+      fields: vec![("foo", true), ("foo", false), ("bar", false)],
+      expected_names: vec!["foo", "bar"],
+    },
+    Case {
+      name: "all deprecated renamed with suffix",
+      fields: vec![("foo", true), ("foo", true)],
+      expected_names: vec!["foo", "foo_2"],
+    },
+    Case {
+      name: "multiple groups",
+      fields: vec![("foo", false), ("bar", true), ("foo", false), ("bar", false)],
+      expected_names: vec!["foo", "foo_2", "bar"],
+    },
+  ];
+
+  for case in cases {
+    let fields = case.fields.iter().map(|(n, d)| make_field(n, *d)).collect();
+    let result = FieldConverter::deduplicate_names(fields);
+    let names: Vec<_> = result.iter().map(|f| f.name.as_str()).collect();
+
+    assert_eq!(names.len(), case.expected_names.len(), "{}: length mismatch", case.name);
+
+    for expected in &case.expected_names {
+      assert!(names.contains(expected), "{}: missing '{}'", case.name, expected);
+    }
+  }
 }
 
 #[test]

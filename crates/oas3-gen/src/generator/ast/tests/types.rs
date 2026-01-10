@@ -1,7 +1,21 @@
+use std::collections::BTreeSet;
+
+use quote::quote;
+
 use crate::generator::ast::{
-  RustPrimitive, TypeRef,
+  Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAttribute, TypeRef, ValidationAttribute,
   types::{parse_date_parts, parse_time_parts},
 };
+
+fn base_field(type_ref: TypeRef) -> FieldDef {
+  FieldDef::builder()
+    .name(FieldNameToken::from_raw("test_field"))
+    .docs(Documentation::from_lines(["Some docs"]))
+    .rust_type(type_ref)
+    .serde_attrs(BTreeSet::from([SerdeAttribute::Rename("original".to_string())]))
+    .validation_attrs(vec![ValidationAttribute::Email])
+    .build()
+}
 
 #[test]
 fn test_rust_primitive_from_str() {
@@ -314,5 +328,98 @@ fn test_complete_header_example_flow() {
     let with_to_string = format!("{formatted}.to_string()");
     let with_some = format!("Some({with_to_string})");
     assert!(with_some.starts_with("Some("), "wrapping failed for {example:?}");
+  }
+}
+
+#[test]
+fn discriminator_behavior() {
+  struct Case {
+    name: &'static str,
+    type_ref: TypeRef,
+    discriminator_value: Option<&'static str>,
+    is_base: bool,
+    expect_doc_hidden: bool,
+    expect_skip_deserializing: bool,
+    expect_skip: bool,
+    expect_default: bool,
+    expected_default_value: Option<serde_json::Value>,
+  }
+
+  let cases = [
+    Case {
+      name: "child discriminator hides and sets value",
+      type_ref: TypeRef::new(RustPrimitive::String),
+      discriminator_value: Some("child_type"),
+      is_base: false,
+      expect_doc_hidden: true,
+      expect_skip_deserializing: true,
+      expect_skip: false,
+      expect_default: true,
+      expected_default_value: Some(serde_json::Value::String("child_type".to_string())),
+    },
+    Case {
+      name: "base hides and skips string",
+      type_ref: TypeRef::new(RustPrimitive::String),
+      discriminator_value: None,
+      is_base: true,
+      expect_doc_hidden: true,
+      expect_skip_deserializing: false,
+      expect_skip: true,
+      expect_default: false,
+      expected_default_value: Some(serde_json::Value::String(String::new())),
+    },
+    Case {
+      name: "base non-string no default",
+      type_ref: TypeRef::new(RustPrimitive::I64),
+      discriminator_value: None,
+      is_base: true,
+      expect_doc_hidden: true,
+      expect_skip_deserializing: false,
+      expect_skip: true,
+      expect_default: false,
+      expected_default_value: None,
+    },
+  ];
+
+  for case in cases {
+    let field = base_field(case.type_ref);
+    let result = field.with_discriminator_behavior(case.discriminator_value, case.is_base);
+
+    let docs = &result.docs;
+    assert!(quote! { #docs }.is_empty(), "{}: docs should be cleared", case.name);
+    assert!(
+      result.validation_attrs.is_empty(),
+      "{}: validation should be cleared",
+      case.name
+    );
+    assert_eq!(
+      result.doc_hidden, case.expect_doc_hidden,
+      "{}: doc_hidden mismatch",
+      case.name
+    );
+
+    assert_eq!(
+      result.serde_attrs.contains(&SerdeAttribute::SkipDeserializing),
+      case.expect_skip_deserializing,
+      "{}: SkipDeserializing mismatch",
+      case.name
+    );
+    assert_eq!(
+      result.serde_attrs.contains(&SerdeAttribute::Skip),
+      case.expect_skip,
+      "{}: Skip mismatch",
+      case.name
+    );
+    assert_eq!(
+      result.serde_attrs.contains(&SerdeAttribute::Default),
+      case.expect_default,
+      "{}: Default mismatch",
+      case.name
+    );
+    assert_eq!(
+      result.default_value, case.expected_default_value,
+      "{}: default_value mismatch",
+      case.name
+    );
   }
 }

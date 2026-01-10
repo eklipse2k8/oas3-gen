@@ -42,8 +42,7 @@ impl Documentation {
     }
 
     if let Some(p) = path {
-      docs.push("## Endpoint".to_string());
-      docs.push(format!("{} {}", method.as_str(), p));
+      docs.push(format!("* Path: `{} {}`", method.as_str(), p));
     }
     docs
   }
@@ -51,16 +50,13 @@ impl Documentation {
 
 impl Documentation {
   #[must_use]
-  pub fn from_raw(input: &str) -> Self {
-    let formatted = Self::process_doc_text(input);
-    Self {
-      lines: formatted.lines().map(String::from).collect(),
-    }
-  }
-
-  #[must_use]
   pub fn from_optional(desc: Option<&String>) -> Self {
-    desc.map_or_else(Self::default, |d| Self::from_raw(d))
+    desc.map_or_else(Self::default, |d| {
+      let formatted = Self::process_doc_text(d);
+      Self {
+        lines: formatted.lines().map(String::from).collect(),
+      }
+    })
   }
 
   #[must_use]
@@ -70,22 +66,8 @@ impl Documentation {
     }
   }
 
-  #[must_use]
-  pub fn is_empty(&self) -> bool {
-    self.lines.is_empty()
-  }
-
-  #[must_use]
-  pub fn lines(&self) -> &[String] {
-    &self.lines
-  }
-
   pub fn push(&mut self, line: impl Into<String>) {
     self.lines.push(line.into());
-  }
-
-  pub fn extend(&mut self, lines: impl IntoIterator<Item = impl Into<String>>) {
-    self.lines.extend(lines.into_iter().map(Into::into));
   }
 
   pub fn clear(&mut self) {
@@ -153,36 +135,6 @@ impl ToTokens for Documentation {
     }
     let doc_lines: Vec<TokenStream> = self.lines.iter().map(|line| quote! { #[doc = #line] }).collect();
     quote! { #(#doc_lines)* }.to_tokens(tokens);
-  }
-}
-
-impl From<&str> for Documentation {
-  fn from(s: &str) -> Self {
-    Self::from_raw(s)
-  }
-}
-
-impl From<String> for Documentation {
-  fn from(s: String) -> Self {
-    Self::from_raw(&s)
-  }
-}
-
-impl From<Option<&String>> for Documentation {
-  fn from(s: Option<&String>) -> Self {
-    Self::from_optional(s)
-  }
-}
-
-impl<S: Into<String>> FromIterator<S> for Documentation {
-  fn from_iter<I: IntoIterator<Item = S>>(iter: I) -> Self {
-    Self::from_lines(iter)
-  }
-}
-
-impl From<Vec<String>> for Documentation {
-  fn from(lines: Vec<String>) -> Self {
-    Self { lines }
   }
 }
 

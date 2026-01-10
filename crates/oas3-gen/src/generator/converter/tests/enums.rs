@@ -4,7 +4,7 @@ use std::{
   sync::Arc,
 };
 
-use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
+use oas3::spec::{Discriminator, Info, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::{
@@ -588,7 +588,7 @@ fn test_preserve_strategy_with_multiple_collisions() {
 fn test_relaxed_enum_detects_freeform_pattern() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
-    info: oas3::spec::Info {
+    info: Info {
       title: "Test".to_string(),
       summary: None,
       version: "1.0.0".to_string(),
@@ -668,7 +668,7 @@ fn test_relaxed_enum_detects_freeform_pattern() {
 fn test_relaxed_enum_rejects_no_freeform() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
-    info: oas3::spec::Info {
+    info: Info {
       title: "Test".to_string(),
       summary: None,
       version: "1.0.0".to_string(),
@@ -1211,7 +1211,7 @@ fn test_discriminator_deduplicates_same_type_mappings() -> anyhow::Result<()> {
 fn test_union_with_hyphenated_raw_name_converts_correctly() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
-    info: oas3::spec::Info {
+    info: Info {
       title: "Test".to_string(),
       summary: None,
       version: "1.0.0".to_string(),
@@ -1276,7 +1276,7 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
 fn test_union_with_underscored_raw_name_converts_correctly() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
-    info: oas3::spec::Info {
+    info: Info {
       title: "Test".to_string(),
       summary: None,
       version: "1.0.0".to_string(),
@@ -1395,7 +1395,7 @@ fn test_union_with_inline_struct_and_raw_name() -> anyhow::Result<()> {
 fn test_already_pascalcase_name_not_double_converted() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
-    info: oas3::spec::Info {
+    info: Info {
       title: "Test".to_string(),
       summary: None,
       version: "1.0.0".to_string(),
@@ -1460,7 +1460,7 @@ fn test_already_pascalcase_name_not_double_converted() {
 fn test_relaxed_enum_with_raw_name() {
   let spec = oas3::Spec {
     openapi: "3.1.0".to_string(),
-    info: oas3::spec::Info {
+    info: Info {
       title: "Test".to_string(),
       summary: None,
       version: "1.0.0".to_string(),

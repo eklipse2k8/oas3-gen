@@ -344,6 +344,7 @@ pub struct MultipartFieldInfo {
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct OperationBody {
   pub field_name: FieldNameToken,
+  pub body_type: Option<TypeRef>,
   #[builder(default)]
   pub optional: bool,
   #[builder(default)]

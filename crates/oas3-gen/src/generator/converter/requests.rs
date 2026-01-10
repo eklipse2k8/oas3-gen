@@ -10,7 +10,8 @@ use super::{
 use crate::{
   generator::{
     ast::{
-      Documentation, FieldDef, FieldNameToken, RustType, StructDef, StructKind, StructMethod, StructToken, TypeRef,
+      ContentCategory, Documentation, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody, RustPrimitive,
+      RustType, StructDef, StructKind, StructMethod, StructToken, TypeRef,
     },
     converter::ConverterContext,
     naming::{
@@ -111,7 +112,8 @@ pub(crate) struct BodyInfo {
   pub(crate) body_type: Option<TypeRef>,
   pub(crate) description: Option<String>,
   pub(crate) optional: bool,
-  pub(crate) content_type: Option<String>,
+  pub(crate) content_category: ContentCategory,
+  pub(crate) multipart_fields: Option<Vec<MultipartFieldInfo>>,
 }
 
 impl BodyInfo {
@@ -154,6 +156,8 @@ impl BodyInfo {
     };
 
     let body_type = TypeRef::new(&type_name);
+    let content_category = ContentCategory::from_content_type(content_type);
+    let multipart_fields = Self::resolve_multipart_fields(content_category, &body_type, &generated_types);
 
     Ok(Self {
       generated_types,
@@ -162,8 +166,43 @@ impl BodyInfo {
       body_type: Some(body_type),
       description: body.description.clone(),
       optional: !is_required,
-      content_type: Some(content_type.clone()),
+      content_category,
+      multipart_fields,
     })
+  }
+
+  fn resolve_multipart_fields(
+    category: ContentCategory,
+    body_type: &TypeRef,
+    generated_types: &[RustType],
+  ) -> Option<Vec<MultipartFieldInfo>> {
+    if category != ContentCategory::Multipart {
+      return None;
+    }
+
+    let body_type_name = body_type.unboxed_base_type_name();
+
+    let struct_def = generated_types.iter().find_map(|t| {
+      if let RustType::Struct(def) = t
+        && def.name.as_str() == body_type_name
+      {
+        return Some(def);
+      }
+      None
+    })?;
+
+    let fields = struct_def
+      .fields
+      .iter()
+      .map(|f| MultipartFieldInfo {
+        name: f.name.clone(),
+        nullable: f.rust_type.nullable,
+        is_bytes: matches!(f.rust_type.base_type, RustPrimitive::Bytes),
+        requires_json: f.rust_type.requires_json_serialization(),
+      })
+      .collect();
+
+    Some(fields)
   }
 
   pub(crate) fn create_field(&self) -> Option<FieldDef> {
@@ -179,6 +218,20 @@ impl BodyInfo {
         .name(FieldNameToken::from_raw(BODY_FIELD_NAME))
         .docs(Documentation::from_optional(self.description.as_ref()))
         .rust_type(rust_type)
+        .build(),
+    )
+  }
+
+  pub(crate) fn to_operation_body(&self) -> Option<OperationBody> {
+    let field_name = self.field_name.as_ref()?;
+
+    Some(
+      OperationBody::builder()
+        .field_name(field_name.clone())
+        .maybe_body_type(self.body_type.clone())
+        .optional(self.optional)
+        .content_category(self.content_category)
+        .maybe_multipart_fields(self.multipart_fields.clone())
         .build(),
     )
   }
