@@ -89,6 +89,7 @@ Follow Rust standard library conventions and Rust 2024 idioms:
 - **Type aliases for complex types**: Use `type Foo = (Vec<A>, Vec<B>)` to document tuple semantics
 - **Early returns**: Return early on error/empty cases to reduce nesting
 - **Method chaining**: Keep transformations flowing left-to-right in single expressions
+- **Anonymous trait imports at module level**: When importing a trait solely for method resolution (e.g., `use quote::ToTokens as _;`), place the import at module level, never inline within functions
 
 ### State Management
 

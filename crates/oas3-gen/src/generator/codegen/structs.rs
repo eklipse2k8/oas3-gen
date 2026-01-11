@@ -1,13 +1,10 @@
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  rc::Rc,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::{
-  CodeGenerationContext, Visibility,
+  Visibility,
   attributes::{
     generate_deprecated_attr, generate_doc_hidden_attr, generate_docs_for_field, generate_field_default_attr,
     generate_outer_attrs, generate_serde_as_attr, generate_serde_attrs, generate_validation_attrs,
@@ -15,57 +12,80 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, FieldDef, MethodKind, RegexKey,
-    ResponseStatusCategory, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler, StructDef,
-    StructKind, StructMethod, TypeRef, ValidationAttribute,
+    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, Documentation, FieldDef, MethodKind,
+    MethodNameToken, RegexKey, ResponseStatusCategory, ResponseVariantCategory, RustPrimitive, StatusCodeToken,
+    StatusHandler, StructDef, StructKind, StructMethod, TypeRef, ValidationAttribute,
     tokens::{ConstToken, EnumToken, EnumVariantToken},
   },
   codegen::{attributes::generate_derives_from_slice, headers::HeaderMapGenerator},
 };
 
-pub(crate) struct StructGenerator {
+#[derive(Clone, Debug)]
+pub(crate) struct StructFragment {
   def: StructDef,
   regex_lookup: BTreeMap<RegexKey, ConstToken>,
-  vis: TokenStream,
+  visibility: Visibility,
 }
 
-impl StructGenerator {
-  pub(crate) fn new(
-    _context: &Rc<CodeGenerationContext>,
-    def: &StructDef,
-    regex_lookup: &BTreeMap<RegexKey, ConstToken>,
-    visibility: Visibility,
-  ) -> Self {
+impl StructFragment {
+  pub(crate) fn new(def: StructDef, regex_lookup: BTreeMap<RegexKey, ConstToken>, visibility: Visibility) -> Self {
     Self {
-      def: def.clone(),
-      regex_lookup: regex_lookup.clone(),
-      vis: visibility.to_tokens(),
+      def,
+      regex_lookup,
+      visibility,
     }
   }
+}
 
-  pub(crate) fn emit(&self) -> TokenStream {
-    let definition = self.emit_definition();
-    let impl_block = self.emit_impl_block();
+impl ToTokens for StructFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let definition = StructDefinitionFragment::new(self.def.clone(), self.regex_lookup.clone(), self.visibility);
+    let impl_block = StructImplBlockFragment::new(self.def.clone(), self.visibility);
     let header_map_impl = HeaderMapGenerator::new(&self.def).emit();
 
-    quote! {
+    tokens.extend(quote! {
       #definition
       #impl_block
       #header_map_impl
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StructDefinitionFragment {
+  def: StructDef,
+  regex_lookup: BTreeMap<RegexKey, ConstToken>,
+  visibility: Visibility,
+}
+
+impl StructDefinitionFragment {
+  pub(crate) fn new(def: StructDef, regex_lookup: BTreeMap<RegexKey, ConstToken>, visibility: Visibility) -> Self {
+    Self {
+      def,
+      regex_lookup,
+      visibility,
     }
   }
+}
 
-  fn emit_definition(&self) -> TokenStream {
+impl ToTokens for StructDefinitionFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.def.name;
     let docs = &self.def.docs;
-    let vis = &self.vis;
+    let vis = &self.visibility;
 
     let derives = generate_derives_from_slice(&self.def.derives());
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
-    let fields: Vec<TokenStream> = self.def.fields.iter().map(|f| self.emit_field(f)).collect();
 
-    quote! {
+    let fields: Vec<StructFieldFragment> = self
+      .def
+      .fields
+      .iter()
+      .map(|f| StructFieldFragment::new(f.clone(), self.def.clone(), self.regex_lookup.clone(), self.visibility))
+      .collect();
+
+    tokens.extend(quote! {
       #docs
       #outer_attrs
       #derives
@@ -73,47 +93,41 @@ impl StructGenerator {
       #vis struct #name {
         #(#fields),*
       }
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StructFieldFragment {
+  field: FieldDef,
+  struct_def: StructDef,
+  regex_lookup: BTreeMap<RegexKey, ConstToken>,
+  visibility: Visibility,
+}
+
+impl StructFieldFragment {
+  pub(crate) fn new(
+    field: FieldDef,
+    struct_def: StructDef,
+    regex_lookup: BTreeMap<RegexKey, ConstToken>,
+    visibility: Visibility,
+  ) -> Self {
+    Self {
+      field,
+      struct_def,
+      regex_lookup,
+      visibility,
     }
   }
 
-  fn emit_field(&self, field: &FieldDef) -> TokenStream {
-    let name = &field.name;
-    let docs = generate_docs_for_field(field);
-    let vis = &self.vis;
-    let type_tokens = &field.rust_type;
-
-    let (serde_as, serde_attrs) = if matches!(self.def.kind, StructKind::HeaderParams | StructKind::PathParams) {
-      (quote! {}, quote! {})
-    } else {
-      (
-        generate_serde_as_attr(field.serde_as_attr.as_ref()),
-        generate_serde_attrs(&field.serde_attrs),
-      )
-    };
-    let validation = self.emit_validation(field);
-    let deprecated = generate_deprecated_attr(field.deprecated);
-    let default_val = generate_field_default_attr(field);
-    let doc_hidden = generate_doc_hidden_attr(field.doc_hidden);
-
-    quote! {
-      #doc_hidden
-      #docs
-      #deprecated
-      #serde_as
-      #serde_attrs
-      #validation
-      #default_val
-      #vis #name: #type_tokens
-    }
-  }
-
-  fn emit_validation(&self, field: &FieldDef) -> TokenStream {
-    let attrs: Vec<ValidationAttribute> = field
+  fn validation_attrs(&self) -> TokenStream {
+    let attrs: Vec<ValidationAttribute> = self
+      .field
       .validation_attrs
       .iter()
       .map(|attr| match attr {
         ValidationAttribute::Regex(_) => {
-          let key = RegexKey::for_struct(&self.def.name, field.name.as_str());
+          let key = RegexKey::for_struct(&self.struct_def.name, self.field.name.as_str());
           self.regex_lookup.get(&key).map_or_else(
             || attr.clone(),
             |const_token| ValidationAttribute::Regex(const_token.to_string()),
@@ -125,10 +139,58 @@ impl StructGenerator {
 
     generate_validation_attrs(&attrs)
   }
+}
 
-  fn emit_impl_block(&self) -> TokenStream {
+impl ToTokens for StructFieldFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = &self.field.name;
+    let docs = generate_docs_for_field(&self.field);
+    let vis = &self.visibility;
+    let type_tokens = &self.field.rust_type;
+
+    let (serde_as, serde_attrs) = if matches!(self.struct_def.kind, StructKind::HeaderParams | StructKind::PathParams) {
+      (quote! {}, quote! {})
+    } else {
+      (
+        generate_serde_as_attr(self.field.serde_as_attr.as_ref()),
+        generate_serde_attrs(&self.field.serde_attrs),
+      )
+    };
+
+    let validation = self.validation_attrs();
+    let deprecated = generate_deprecated_attr(self.field.deprecated);
+    let default_val = generate_field_default_attr(&self.field);
+    let doc_hidden = generate_doc_hidden_attr(self.field.doc_hidden);
+
+    tokens.extend(quote! {
+      #doc_hidden
+      #docs
+      #deprecated
+      #serde_as
+      #serde_attrs
+      #validation
+      #default_val
+      #vis #name: #type_tokens
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StructImplBlockFragment {
+  def: StructDef,
+  visibility: Visibility,
+}
+
+impl StructImplBlockFragment {
+  pub(crate) fn new(def: StructDef, visibility: Visibility) -> Self {
+    Self { def, visibility }
+  }
+}
+
+impl ToTokens for StructImplBlockFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
     if self.def.methods.is_empty() {
-      return quote! {};
+      return;
     }
 
     let name = &self.def.name;
@@ -138,301 +200,530 @@ impl StructGenerator {
       .iter()
       .partition(|m| matches!(m.kind, MethodKind::Builder { .. }));
 
-    let mut result = quote! {};
-
     if !builder_methods.is_empty() {
-      let methods: Vec<TokenStream> = builder_methods.iter().map(|m| self.emit_method(m)).collect();
-      result = quote! {
-        #result
+      let methods: Vec<TokenStream> = builder_methods
+        .into_iter()
+        .map(|m| StructMethodFragment::new(m.clone(), self.visibility).into_token_stream())
+        .collect();
+
+      tokens.extend(quote! {
         #[bon::bon]
         impl #name {
           #(#methods)*
         }
-      };
+      });
     }
 
     if !other_methods.is_empty() {
-      let methods: Vec<TokenStream> = other_methods.iter().map(|m| self.emit_method(m)).collect();
-      result = quote! {
-        #result
+      let methods: Vec<TokenStream> = other_methods
+        .into_iter()
+        .map(|m| StructMethodFragment::new(m.clone(), self.visibility).into_token_stream())
+        .collect();
+
+      tokens.extend(quote! {
         impl #name {
           #(#methods)*
         }
-      };
+      });
     }
-
-    result
   }
+}
 
-  fn emit_method(&self, method: &StructMethod) -> TokenStream {
-    match &method.kind {
+#[derive(Clone, Debug)]
+pub(crate) struct StructMethodFragment {
+  method: StructMethod,
+  visibility: Visibility,
+}
+
+impl StructMethodFragment {
+  pub(crate) fn new(method: StructMethod, visibility: Visibility) -> Self {
+    Self { method, visibility }
+  }
+}
+
+impl ToTokens for StructMethodFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let ts = match &self.method.kind {
       MethodKind::ParseResponse {
         response_enum,
         status_handlers,
         default_handler,
-      } => emit_parse_response(
-        response_enum,
-        status_handlers,
-        default_handler.as_ref(),
-        &self.vis,
-        method.name.clone(),
-        method.docs.clone(),
-      ),
-      MethodKind::IntoAxumResponse {
-        response_enum: _,
-        status_handlers: _,
-        default_handler: _,
-      } => quote! {},
-      MethodKind::Builder { fields, nested_structs } => {
-        emit_builder(fields, nested_structs, &self.vis, method.docs.clone())
+      } => ParseResponseMethodFragment::new(
+        response_enum.clone(),
+        status_handlers.clone(),
+        default_handler.clone(),
+        self.visibility,
+        self.method.name.clone(),
+        self.method.docs.clone(),
+      )
+      .into_token_stream(),
+      MethodKind::IntoAxumResponse { .. } => quote! {},
+      MethodKind::Builder { fields, nested_structs } => BuilderMethodFragment::new(
+        fields.clone(),
+        nested_structs.clone(),
+        self.visibility,
+        self.method.docs.clone(),
+      )
+      .into_token_stream(),
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ParseResponseMethodFragment {
+  response_enum: EnumToken,
+  status_handlers: Vec<StatusHandler>,
+  default_handler: Option<ResponseVariantCategory>,
+  visibility: Visibility,
+  method_name: MethodNameToken,
+  docs: Documentation,
+}
+
+impl ParseResponseMethodFragment {
+  pub(crate) fn new(
+    response_enum: EnumToken,
+    status_handlers: Vec<StatusHandler>,
+    default_handler: Option<ResponseVariantCategory>,
+    visibility: Visibility,
+    method_name: MethodNameToken,
+    docs: Documentation,
+  ) -> Self {
+    Self {
+      response_enum,
+      status_handlers,
+      default_handler,
+      visibility,
+      method_name,
+      docs,
+    }
+  }
+}
+
+impl ToTokens for ParseResponseMethodFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let status_checks: Vec<StatusCheckFragment> = self
+      .status_handlers
+      .iter()
+      .map(|h| StatusCheckFragment::new(h.clone(), self.response_enum.clone()))
+      .collect();
+
+    let fallback = FallbackFragment::new(self.response_enum.clone(), self.default_handler.clone());
+    let status_decl = if status_checks.is_empty() {
+      quote! {}
+    } else {
+      quote! { let status = req.status(); }
+    };
+
+    let vis = &self.visibility;
+    let method_name = &self.method_name;
+    let docs = &self.docs;
+    let response_enum = &self.response_enum;
+
+    tokens.extend(quote! {
+      #docs
+      #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
+        #status_decl
+        #(#status_checks)*
+        #fallback
       }
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StatusCheckFragment {
+  handler: StatusHandler,
+  response_enum: EnumToken,
+}
+
+impl StatusCheckFragment {
+  pub(crate) fn new(handler: StatusHandler, response_enum: EnumToken) -> Self {
+    Self { handler, response_enum }
+  }
+}
+
+impl ToTokens for StatusCheckFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let cond = StatusConditionFragment::new(self.handler.status_code);
+    let body = ResponseDispatchFragment::new(self.handler.dispatch.clone(), self.response_enum.clone());
+
+    tokens.extend(quote! {
+      if #cond {
+        #body
+      }
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StatusConditionFragment {
+  status_code: StatusCodeToken,
+}
+
+impl StatusConditionFragment {
+  pub(crate) fn new(status_code: StatusCodeToken) -> Self {
+    Self { status_code }
+  }
+}
+
+impl ToTokens for StatusConditionFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let ts = match self.status_code {
+      c if c.is_success() => quote! { status.is_success() },
+      c if c.is_default() => quote! { true },
+      StatusCodeToken::Informational1XX => quote! { status.is_informational() },
+      StatusCodeToken::Redirection3XX => quote! { status.is_redirection() },
+      StatusCodeToken::ClientError4XX => quote! { status.is_client_error() },
+      StatusCodeToken::ServerError5XX => quote! { status.is_server_error() },
+      other => other
+        .code()
+        .map_or_else(|| quote! { false }, |code| quote! { status.as_u16() == #code }),
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ResponseDispatchFragment {
+  dispatch: ResponseStatusCategory,
+  response_enum: EnumToken,
+}
+
+impl ResponseDispatchFragment {
+  pub(crate) fn new(dispatch: ResponseStatusCategory, response_enum: EnumToken) -> Self {
+    Self {
+      dispatch,
+      response_enum,
     }
   }
 }
 
-fn emit_parse_response(
-  response_enum: &EnumToken,
-  status_handlers: &[StatusHandler],
-  default_handler: Option<&ResponseVariantCategory>,
-  vis: &TokenStream,
-  method_name: impl ToTokens,
-  docs: impl ToTokens,
-) -> TokenStream {
-  let status_checks: Vec<TokenStream> = status_handlers
-    .iter()
-    .map(|h| emit_status_block(h, response_enum))
-    .collect();
+impl ToTokens for ResponseDispatchFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let ts = match &self.dispatch {
+      ResponseStatusCategory::Single(case) => {
+        ResponseCaseFragment::new(case.clone(), self.response_enum.clone()).into_token_stream()
+      }
+      ResponseStatusCategory::ContentDispatch { streams, variants } => {
+        ContentDispatchFragment::new(streams.clone(), variants.clone(), self.response_enum.clone()).into_token_stream()
+      }
+    };
 
-  let fallback = emit_fallback(response_enum, default_handler);
-  let status_decl = if status_checks.is_empty() {
-    quote! {}
-  } else {
-    quote! { let status = req.status(); }
-  };
+    tokens.extend(ts);
+  }
+}
 
-  quote! {
-    #docs
-    #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
-      #status_decl
-      #(#status_checks)*
-      #fallback
+#[derive(Clone, Debug)]
+pub(crate) struct ContentDispatchFragment {
+  event_streams: Vec<ResponseVariantCategory>,
+  others: Vec<ResponseVariantCategory>,
+  response_enum: EnumToken,
+}
+
+impl ContentDispatchFragment {
+  pub(crate) fn new(
+    event_streams: Vec<ResponseVariantCategory>,
+    others: Vec<ResponseVariantCategory>,
+    response_enum: EnumToken,
+  ) -> Self {
+    Self {
+      event_streams,
+      others,
+      response_enum,
     }
   }
 }
 
-fn emit_status_block(handler: &StatusHandler, response_enum: &EnumToken) -> TokenStream {
-  let cond = emit_condition(handler.status_code);
-  let body = emit_dispatch(&handler.dispatch, response_enum);
+impl ToTokens for ContentDispatchFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let content_type_header = quote! {
+      let content_type_str = req.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+    };
 
-  quote! {
-    if #cond {
-      #body
-    }
-  }
-}
-
-fn emit_dispatch(dispatch: &ResponseStatusCategory, response_enum: &EnumToken) -> TokenStream {
-  match dispatch {
-    ResponseStatusCategory::Single(case) => emit_dispatch_case(case, response_enum),
-    ResponseStatusCategory::ContentDispatch {
-      streams: event_streams,
-      variants: others,
-    } => emit_content_dispatch(event_streams, others, response_enum),
-  }
-}
-
-fn emit_content_dispatch(
-  event_streams: &[ResponseVariantCategory],
-  others: &[ResponseVariantCategory],
-  response_enum: &EnumToken,
-) -> TokenStream {
-  let content_type_header = quote! {
-    let content_type_str = req.headers()
-      .get(reqwest::header::CONTENT_TYPE)
-      .and_then(|v| v.to_str().ok())
-      .unwrap_or("application/json");
-  };
-
-  let stream_checks: Vec<TokenStream> = event_streams
-    .iter()
-    .map(|case| {
-      let block = emit_dispatch_case(case, response_enum);
-      quote! {
-        if content_type_str.contains("event-stream") {
-          #block
+    let stream_checks: Vec<TokenStream> = self
+      .event_streams
+      .iter()
+      .map(|case| {
+        let block = ResponseCaseFragment::new(case.clone(), self.response_enum.clone());
+        quote! {
+          if content_type_str.contains("event-stream") {
+            #block
+          }
         }
-      }
-    })
-    .collect();
+      })
+      .collect();
 
-  let other_checks: Vec<TokenStream> = others
-    .iter()
-    .map(|case| {
-      let check = emit_content_check(case.category);
-      let block = emit_dispatch_case(case, response_enum);
-      quote! {
-        if #check {
-          #block
+    let other_checks: Vec<TokenStream> = self
+      .others
+      .iter()
+      .map(|case| {
+        let check = ContentCheckFragment::new(case.category);
+        let block = ResponseCaseFragment::new(case.clone(), self.response_enum.clone());
+        quote! {
+          if #check {
+            #block
+          }
         }
+      })
+      .collect();
+
+    tokens.extend(quote! {
+      #content_type_header
+      #(#stream_checks)*
+      #(#other_checks)*
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ContentCheckFragment {
+  category: ContentCategory,
+}
+
+impl ContentCheckFragment {
+  pub(crate) fn new(category: ContentCategory) -> Self {
+    Self { category }
+  }
+}
+
+impl ToTokens for ContentCheckFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let ts = match self.category {
+      ContentCategory::Json => quote! { content_type_str.contains("json") },
+      ContentCategory::Xml => quote! { content_type_str.contains("xml") },
+      ContentCategory::Text => quote! { content_type_str.starts_with("text/") && !content_type_str.contains("xml") },
+      ContentCategory::Binary => {
+        quote! { content_type_str.starts_with("application/octet-stream") || content_type_str.starts_with("image/") || content_type_str.starts_with("audio/") || content_type_str.starts_with("video/") }
       }
-    })
-    .collect();
+      ContentCategory::EventStream => quote! { content_type_str.contains("event-stream") },
+      ContentCategory::FormUrlEncoded => quote! { content_type_str.contains("x-www-form-urlencoded") },
+      ContentCategory::Multipart => quote! { content_type_str.contains("multipart") },
+    };
 
-  quote! {
-    #content_type_header
-    #(#stream_checks)*
-    #(#other_checks)*
+    tokens.extend(ts);
   }
 }
 
-fn emit_dispatch_case(case: &ResponseVariantCategory, response_enum: &EnumToken) -> TokenStream {
-  let variant_name = &case.variant.variant_name;
+#[derive(Clone, Debug)]
+pub(crate) struct ResponseCaseFragment {
+  case: ResponseVariantCategory,
+  response_enum: EnumToken,
+}
 
-  match case.variant.schema_type.as_ref() {
-    Some(ty) => {
-      let data = emit_extraction(ty, case.category);
-      quote! {
-        let data = #data;
-        return Ok(#response_enum::#variant_name(data));
-      }
-    }
-    None => {
-      quote! {
-        let _ = req.bytes().await?;
-        return Ok(#response_enum::#variant_name);
-      }
-    }
+impl ResponseCaseFragment {
+  pub(crate) fn new(case: ResponseVariantCategory, response_enum: EnumToken) -> Self {
+    Self { case, response_enum }
   }
 }
 
-fn emit_fallback(response_enum: &EnumToken, default_handler: Option<&ResponseVariantCategory>) -> TokenStream {
-  if let Some(case) = default_handler {
-    emit_dispatch_case(case, response_enum)
-  } else {
-    let unknown_variant = EnumVariantToken::from("Unknown");
-    quote! {
-      let _ = req.bytes().await?;
-      Ok(#response_enum::#unknown_variant)
-    }
-  }
-}
+impl ToTokens for ResponseCaseFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let variant_name = &self.case.variant.variant_name;
+    let response_enum = &self.response_enum;
 
-fn emit_condition(code: StatusCodeToken) -> TokenStream {
-  match code {
-    c if c.is_success() => quote! { status.is_success() },
-    c if c.is_default() => quote! { true },
-    StatusCodeToken::Informational1XX => quote! { status.is_informational() },
-    StatusCodeToken::Redirection3XX => quote! { status.is_redirection() },
-    StatusCodeToken::ClientError4XX => quote! { status.is_client_error() },
-    StatusCodeToken::ServerError5XX => quote! { status.is_server_error() },
-    other => other
-      .code()
-      .map_or_else(|| quote! { false }, |code| quote! { status.as_u16() == #code }),
-  }
-}
-
-fn emit_content_check(category: ContentCategory) -> TokenStream {
-  match category {
-    ContentCategory::Json => quote! { content_type_str.contains("json") },
-    ContentCategory::Xml => quote! { content_type_str.contains("xml") },
-    ContentCategory::Text => quote! { content_type_str.starts_with("text/") && !content_type_str.contains("xml") },
-    ContentCategory::Binary => {
-      quote! { content_type_str.starts_with("application/octet-stream") || content_type_str.starts_with("image/") || content_type_str.starts_with("audio/") || content_type_str.starts_with("video/") }
-    }
-    ContentCategory::EventStream => quote! { content_type_str.contains("event-stream") },
-    ContentCategory::FormUrlEncoded => quote! { content_type_str.contains("x-www-form-urlencoded") },
-    ContentCategory::Multipart => quote! { content_type_str.contains("multipart") },
-  }
-}
-
-fn emit_extraction(schema_type: &TypeRef, category: ContentCategory) -> TokenStream {
-  match category {
-    ContentCategory::Text => {
-      if schema_type.is_string_like() {
-        quote! { req.text().await? }
-      } else if matches!(schema_type.base_type, RustPrimitive::Custom(_)) {
-        quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
-      } else {
-        quote! { req.text().await?.parse::<#schema_type>()? }
-      }
-    }
-    ContentCategory::Binary => {
-      quote! { req.bytes().await?.to_vec() }
-    }
-    ContentCategory::EventStream => {
-      quote! { <#schema_type>::from_response(req) }
-    }
-    ContentCategory::Xml => {
-      quote! { oas3_gen_support::Diagnostics::<#schema_type>::xml_with_diagnostics(req).await? }
-    }
-    _ => quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? },
-  }
-}
-
-fn emit_builder(
-  fields: &[BuilderField],
-  nested_structs: &[BuilderNestedStruct],
-  vis: &TokenStream,
-  docs: impl ToTokens,
-) -> TokenStream {
-  let params: Vec<TokenStream> = fields
-    .iter()
-    .map(|f| {
-      let name = &f.name;
-      let ty = &f.rust_type;
-      quote! { #name: #ty }
-    })
-    .collect();
-
-  let construction = emit_builder_construction(fields, nested_structs);
-
-  quote! {
-    #docs
-    #[builder]
-    #vis fn new(#(#params),*) -> anyhow::Result<Self> {
-      let request = #construction;
-      request.validate()?;
-      Ok(request)
-    }
-  }
-}
-
-fn emit_builder_construction(fields: &[BuilderField], nested_structs: &[BuilderNestedStruct]) -> TokenStream {
-  let nested_map = nested_structs
-    .iter()
-    .map(|ns| (ns.field_name.as_str(), ns))
-    .collect::<BTreeMap<_, _>>();
-
-  let mut processed_nested = BTreeSet::new();
-  let mut assignments = vec![];
-
-  for field in fields {
-    match &field.owner_field {
-      Some(owner) => {
-        let owner_name = owner.as_str();
-        if let Some(nested) = nested_map.get(owner_name)
-          && processed_nested.insert(owner_name)
-        {
-          let field_name = &nested.field_name;
-          let struct_name = &nested.struct_name;
-          let inner_fields: Vec<TokenStream> = nested
-            .field_names
-            .iter()
-            .map(quote::ToTokens::to_token_stream)
-            .collect();
-
-          assignments.push(quote! {
-            #field_name: #struct_name { #(#inner_fields),* }
-          });
+    let ts = match self.case.variant.schema_type.as_ref() {
+      Some(ty) => {
+        let data = ResponseExtractionFragment::new(ty.clone(), self.case.category);
+        quote! {
+          let data = #data;
+          return Ok(#response_enum::#variant_name(data));
         }
       }
       None => {
-        assignments.push(field.name.to_token_stream());
+        quote! {
+          let _ = req.bytes().await?;
+          return Ok(#response_enum::#variant_name);
+        }
       }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ResponseExtractionFragment {
+  schema_type: TypeRef,
+  category: ContentCategory,
+}
+
+impl ResponseExtractionFragment {
+  pub(crate) fn new(schema_type: TypeRef, category: ContentCategory) -> Self {
+    Self { schema_type, category }
+  }
+}
+
+impl ToTokens for ResponseExtractionFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let schema_type = &self.schema_type;
+
+    let ts = match self.category {
+      ContentCategory::Text => {
+        if self.schema_type.is_string_like() {
+          quote! { req.text().await? }
+        } else if matches!(self.schema_type.base_type, RustPrimitive::Custom(_)) {
+          quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
+        } else {
+          quote! { req.text().await?.parse::<#schema_type>()? }
+        }
+      }
+      ContentCategory::Binary => {
+        quote! { req.bytes().await?.to_vec() }
+      }
+      ContentCategory::EventStream => {
+        quote! { <#schema_type>::from_response(req) }
+      }
+      ContentCategory::Xml => {
+        quote! { oas3_gen_support::Diagnostics::<#schema_type>::xml_with_diagnostics(req).await? }
+      }
+      _ => quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? },
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FallbackFragment {
+  response_enum: EnumToken,
+  default_handler: Option<ResponseVariantCategory>,
+}
+
+impl FallbackFragment {
+  pub(crate) fn new(response_enum: EnumToken, default_handler: Option<ResponseVariantCategory>) -> Self {
+    Self {
+      response_enum,
+      default_handler,
     }
   }
+}
 
-  quote! {
-    Self { #(#assignments),* }
+impl ToTokens for FallbackFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let ts = if let Some(case) = &self.default_handler {
+      ResponseCaseFragment::new(case.clone(), self.response_enum.clone()).into_token_stream()
+    } else {
+      let response_enum = &self.response_enum;
+      let unknown_variant = EnumVariantToken::from("Unknown");
+      quote! {
+        let _ = req.bytes().await?;
+        Ok(#response_enum::#unknown_variant)
+      }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BuilderMethodFragment {
+  fields: Vec<BuilderField>,
+  nested_structs: Vec<BuilderNestedStruct>,
+  visibility: Visibility,
+  docs: Documentation,
+}
+
+impl BuilderMethodFragment {
+  pub(crate) fn new(
+    fields: Vec<BuilderField>,
+    nested_structs: Vec<BuilderNestedStruct>,
+    visibility: Visibility,
+    docs: Documentation,
+  ) -> Self {
+    Self {
+      fields,
+      nested_structs,
+      visibility,
+      docs,
+    }
+  }
+}
+
+impl ToTokens for BuilderMethodFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let params: Vec<TokenStream> = self
+      .fields
+      .iter()
+      .map(|f| {
+        let name = &f.name;
+        let ty = &f.rust_type;
+        quote! { #name: #ty }
+      })
+      .collect();
+
+    let construction = BuilderConstructionFragment::new(self.fields.clone(), self.nested_structs.clone());
+    let vis = &self.visibility;
+    let docs = &self.docs;
+
+    tokens.extend(quote! {
+      #docs
+      #[builder]
+      #vis fn new(#(#params),*) -> anyhow::Result<Self> {
+        let request = #construction;
+        request.validate()?;
+        Ok(request)
+      }
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BuilderConstructionFragment {
+  fields: Vec<BuilderField>,
+  nested_structs: Vec<BuilderNestedStruct>,
+}
+
+impl BuilderConstructionFragment {
+  pub(crate) fn new(fields: Vec<BuilderField>, nested_structs: Vec<BuilderNestedStruct>) -> Self {
+    Self { fields, nested_structs }
+  }
+}
+
+impl ToTokens for BuilderConstructionFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let nested_map = self
+      .nested_structs
+      .iter()
+      .map(|ns| (ns.field_name.as_str(), ns))
+      .collect::<BTreeMap<_, _>>();
+
+    let mut processed_nested = BTreeSet::new();
+    let mut assignments = vec![];
+
+    for field in &self.fields {
+      match &field.owner_field {
+        Some(owner) => {
+          let owner_name = owner.as_str();
+          if let Some(nested) = nested_map.get(owner_name)
+            && processed_nested.insert(owner_name)
+          {
+            let field_name = &nested.field_name;
+            let struct_name = &nested.struct_name;
+            let inner_fields: Vec<TokenStream> = nested
+              .field_names
+              .iter()
+              .map(quote::ToTokens::to_token_stream)
+              .collect();
+
+            assignments.push(quote! {
+              #field_name: #struct_name { #(#inner_fields),* }
+            });
+          }
+        }
+        None => {
+          assignments.push(field.name.to_token_stream());
+        }
+      }
+    }
+
+    tokens.extend(quote! {
+      Self { #(#assignments),* }
+    });
   }
 }

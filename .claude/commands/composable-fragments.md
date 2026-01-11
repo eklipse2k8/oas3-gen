@@ -12,6 +12,7 @@ Before making any changes, read and understand:
 2. **docs/architecture.md** - Directory structure and module organization
 3. **docs/coding-standards.md** - Naming conventions, patterns, and style rules
 4. **docs/testing.md** - Fixtures
+5. **docs/code-fragments.md** - Complete reference of existing codegen fragments
 
 All changes must adhere to these project standards.
 
@@ -22,18 +23,30 @@ All changes must adhere to these project standards.
 Before making changes:
 
 1. **Read the target file(s)** specified in TARGET
-2. **Identify the AST types** being consumed (from the `ast/` module)
-3. **Trace the code generation flow** to understand how generators produce `TokenStream` output
-4. **Map the existing structure**:
+2. **Read docs/code-fragments.md** to understand ALL existing fragments
+3. **Identify the AST types** being consumed (from the `ast/` module)
+4. **Trace the code generation flow** to understand how generators produce `TokenStream` output
+5. **Map the existing structure**:
    - Which generators exist?
    - What code do they emit?
+   - Which existing fragments can be reused?
    - Which parts are repeated or could be shared?
+
+**CRITICAL: Fragment Reuse Rule**
+You MUST reuse existing fragments from `docs/code-fragments.md` whenever possible. Only create a new fragment when:
+- No existing fragment handles the required code generation pattern
+- The existing fragment cannot be composed or parameterized to achieve the goal
+- The pattern is fundamentally different from all existing fragments
+
+Before creating any new fragment, explicitly state:
+1. Which existing fragments you considered
+2. Why none of them can be used or composed to achieve the goal
 
 ---
 
 ## Phase 2: Decomposition Strategy
 
-Break apart generators into their smallest composable Fragment types following these principles:
+**First, identify which existing fragments can be reused** from `docs/code-fragments.md`. Then break apart generators into their smallest composable Fragment types following these principles:
 
 ### 2.1 Fragment Design Rules
 
@@ -202,11 +215,13 @@ Present your work as:
 
 1. **Analysis**: Summary of existing structure and identified decomposition points
 
-2. **Fragment Inventory**: List of new Fragment types to create with their responsibilities
+2. **Existing Fragment Reuse**: List of existing fragments from `docs/code-fragments.md` that will be reused
 
-3. **Implementation**: The refactored code with all new Fragment types
+3. **Fragment Inventory**: List of new Fragment types to create with their responsibilities. For each new fragment, explain why no existing fragment could be used.
 
-4. **Verification**: Results of test runs and clippy checks
+4. **Implementation**: The refactored code with all new Fragment types
+
+5. **Verification**: Results of test runs and clippy checks
 
 ---
 
@@ -270,6 +285,9 @@ RustType::TypeAlias(def) => TypeAliasFragment::new(def.clone(), self.visibility)
 ## Checklist
 
 - [ ] Read CLAUDE.md and coding standards before starting
+- [ ] Read docs/code-fragments.md to understand existing fragments
+- [ ] Existing fragments reused wherever possible
+- [ ] Justification provided for each new fragment (why existing fragments cannot be used)
 - [ ] All Fragment types own their data (no lifetimes)
 - [ ] All Fragment types implement `ToTokens`
 - [ ] Fragment names use the `Fragment` suffix
@@ -280,3 +298,4 @@ RustType::TypeAlias(def) => TypeAliasFragment::new(def.clone(), self.visibility)
 - [ ] Existing tests pass
 - [ ] No clippy warnings
 - [ ] No dead code remains
+- [ ] docs/code-fragments.md updated with any new fragments created

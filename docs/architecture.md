@@ -197,6 +197,14 @@ Data flows forward only - no stage feeds back to earlier stages.
 - [ast/server.rs](../crates/oas3-gen/src/generator/ast/server.rs): Server AST definitions
 - [operation_registry.rs](../crates/oas3-gen/src/generator/operation_registry.rs): HTTP operations and webhooks
 
+## Code Generation Fragments
+
+See [code-fragments.md](./code-fragments.md) for a complete reference of all code generation fragments in the `codegen/` module, including:
+- Fragment hierarchy and composition patterns
+- Struct, enum, and response enum fragments
+- Client and server generation fragments
+- Attribute and method generation helpers
+
 ## Key Dependencies
 
 All dependencies are managed at the workspace level in the root `Cargo.toml` and inherited by crates.

@@ -329,7 +329,9 @@ impl SchemaCodeGenerator {
 
   fn generate_type(&self, rust_type: &RustType, regex_lookup: &BTreeMap<RegexKey, ConstToken>) -> TokenStream {
     match rust_type {
-      RustType::Struct(def) => structs::StructGenerator::new(&self.context, def, regex_lookup, self.visibility).emit(),
+      RustType::Struct(def) => {
+        structs::StructFragment::new(def.clone(), regex_lookup.clone(), self.visibility).into_token_stream()
+      }
       RustType::Enum(def) => enums::EnumGenerator::new(&self.context, def, self.visibility).generate(),
       RustType::TypeAlias(def) => {
         type_aliases::TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream()

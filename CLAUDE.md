@@ -39,6 +39,7 @@ cargo run -- generate server-mod -i spec.json -o output/    # Generate modular s
 | [docs/testing.md](docs/testing.md) | Test requirements, fixtures, coverage, debugging |
 | [docs/architecture.md](docs/architecture.md) | Pipeline stages, directory structure, dependencies |
 | [docs/subagents.md](docs/subagents.md) | Specialized subagents for performance, review, testing, CLI, docs |
+| [docs/code-fragments.md](docs/code-fragments.md) | Complete reference of codegen fragments and composition patterns |
 
 ## One-Way Data Flow Pipeline
 
