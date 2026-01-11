@@ -46,11 +46,11 @@ impl EventStreamApiClient {
     let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
     Ok(Self { client, base_url: url })
   }
-  ///Stream events
+  /// Stream events
   ///
-  ///Returns a stream of server-sent events
+  /// Returns a stream of server-sent events
   ///
-  ///* Path: `GET /events`
+  /// * Path: `GET /events`
   pub async fn events(&self, request: EventsRequest) -> anyhow::Result<EventsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
@@ -61,11 +61,11 @@ impl EventStreamApiClient {
     let response = self.client.get(url).send().await?;
     EventsRequest::parse_response(response).await
   }
-  ///Stream typed events
+  /// Stream typed events
   ///
-  ///Returns a stream of typed server-sent events with query parameters
+  /// Returns a stream of typed server-sent events with query parameters
   ///
-  ///* Path: `GET /events/typed`
+  /// * Path: `GET /events/typed`
   pub async fn typed_events(&self, request: TypedEventsRequest) -> anyhow::Result<TypedEventsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();

@@ -534,7 +534,7 @@ impl ResponseEnumGenerator {
     let variant_name = &variant.variant_name;
     let status_code = emit_status_code(variant.status_code);
 
-    if let Some(_) = &variant.schema_type {
+    if variant.schema_type.is_some() {
       quote! {
         Self::#variant_name(data) => (#status_code, axum::Json(data)).into_response(),
       }

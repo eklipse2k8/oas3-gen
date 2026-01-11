@@ -199,11 +199,11 @@ fn test_enum_with_docs() {
     .to_string();
 
   assert!(
-    code.contains("# [doc = \"Represents the status of an item.\"]"),
+    code.contains("# [doc = \" Represents the status of an item.\"]"),
     "should have first doc line"
   );
   assert!(
-    code.contains("# [doc = \"Can be active or inactive.\"]"),
+    code.contains("# [doc = \" Can be active or inactive.\"]"),
     "should have second doc line"
   );
 }

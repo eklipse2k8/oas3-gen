@@ -13,7 +13,7 @@ fn empty_documentation_produces_no_tokens() {
 fn single_line_documentation() {
   let doc = Documentation::from_lines(["Test documentation"]);
   let tokens = quote! { #doc };
-  let expected = quote! { #[doc = "Test documentation"] };
+  let expected = quote! { #[doc = " Test documentation"] };
   assert_eq!(tokens.to_string(), expected.to_string());
 }
 
@@ -22,8 +22,8 @@ fn multi_line_documentation() {
   let doc = Documentation::from_lines(["Line 1", "Line 2"]);
   let tokens = quote! { #doc };
   let expected = quote! {
-    #[doc = "Line 1"]
-    #[doc = "Line 2"]
+    #[doc = " Line 1"]
+    #[doc = " Line 2"]
   };
   assert_eq!(tokens.to_string(), expected.to_string());
 }
@@ -39,7 +39,7 @@ fn from_optional_none_produces_empty() {
 fn from_optional_some_processes_text() {
   let text = "Test".to_string();
   let doc = Documentation::from_optional(Some(&text));
-  let expected = quote! { #[doc = "Test"] };
+  let expected = quote! { #[doc = " Test"] };
   assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
 
@@ -48,8 +48,8 @@ fn from_optional_handles_escaped_newlines() {
   let text = "Line 1\\nLine 2".to_string();
   let doc = Documentation::from_optional(Some(&text));
   let expected = quote! {
-    #[doc = "Line 1"]
-    #[doc = "Line 2"]
+    #[doc = " Line 1"]
+    #[doc = " Line 2"]
   };
   assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
@@ -59,8 +59,8 @@ fn push_adds_line() {
   let mut doc = Documentation::from_lines(["First"]);
   doc.push("Second");
   let expected = quote! {
-    #[doc = "First"]
-    #[doc = "Second"]
+    #[doc = " First"]
+    #[doc = " Second"]
   };
   assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }

@@ -102,7 +102,7 @@ fn generate_source(
   source_path: &str,
   gen_version: &str,
 ) -> anyhow::Result<String> {
-  let lints = lint_config.map_or_else(|| GlobalLintsNode::builder().build(), |cfg| cfg.clone());
+  let lints = lint_config.map_or_else(|| GlobalLintsNode::builder().build(), std::clone::Clone::clone);
   let header_node = FileHeaderNode::builder()
     .title(metadata.title.clone())
     .version(metadata.version.clone())

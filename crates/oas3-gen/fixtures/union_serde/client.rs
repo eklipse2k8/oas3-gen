@@ -46,9 +46,9 @@ impl UnionSerializationTestApiClient {
     let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
     Ok(Self { client, base_url: url })
   }
-  ///Send content blocks
+  /// Send content blocks
   ///
-  ///* Path: `POST /content`
+  /// * Path: `POST /content`
   pub async fn send_content(&self, request: SendContentRequest) -> anyhow::Result<SendContentResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
@@ -59,9 +59,9 @@ impl UnionSerializationTestApiClient {
     let response = self.client.post(url).json(&request.body).send().await?;
     SendContentRequest::parse_response(response).await
   }
-  ///Get events with discriminated union
+  /// Get events with discriminated union
   ///
-  ///* Path: `GET /events`
+  /// * Path: `GET /events`
   pub async fn get_events(&self, request: GetEventsRequest) -> anyhow::Result<GetEventsResponse> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();

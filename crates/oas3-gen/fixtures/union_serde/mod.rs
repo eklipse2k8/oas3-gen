@@ -9,7 +9,6 @@
 #![allow(clippy::unnecessary_wraps)]
 #![allow(clippy::unused_self)]
 #![allow(dead_code)]
-
 //!
 //! AUTO-GENERATED CODE - DO NOT EDIT!
 //!
