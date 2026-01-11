@@ -8,9 +8,9 @@ use crossterm::style::Stylize;
 
 use crate::{
   generator::{
-    codegen::Visibility,
+    codegen::{GeneratedFileType, Visibility},
     converter::GenerationTarget,
-    orchestrator::{ClientModOutput, GenerationStats, Orchestrator, ServerModOutput},
+    orchestrator::{GeneratedFinalOutput, GenerationStats, Orchestrator},
   },
   ui::{Colors, EnumCaseMode, GenerateCommand, GenerateMode},
   utils::spec::SpecLoader,
@@ -80,19 +80,41 @@ impl GenerateConfig {
     Ok(())
   }
 
-  async fn write_module_output(&self, output: ClientModOutput) -> anyhow::Result<()> {
+  async fn write_module_output(&self, output: &GeneratedFinalOutput) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&self.output).await?;
-    tokio::fs::write(self.output.join("types.rs"), output.types_code).await?;
-    tokio::fs::write(self.output.join("client.rs"), output.client_code).await?;
-    tokio::fs::write(self.output.join("mod.rs"), output.mod_code).await?;
+    let types_code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
+    let client_code = output
+      .code
+      .code(&GeneratedFileType::Client)
+      .cloned()
+      .unwrap_or_default();
+    let mod_code = output
+      .code
+      .code(&GeneratedFileType::Module)
+      .cloned()
+      .unwrap_or_default();
+    tokio::fs::write(self.output.join("types.rs"), types_code).await?;
+    tokio::fs::write(self.output.join("client.rs"), client_code).await?;
+    tokio::fs::write(self.output.join("mod.rs"), mod_code).await?;
     Ok(())
   }
 
-  async fn write_server_module_output(&self, output: ServerModOutput) -> anyhow::Result<()> {
+  async fn write_server_module_output(&self, output: &GeneratedFinalOutput) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&self.output).await?;
-    tokio::fs::write(self.output.join("types.rs"), output.types_code).await?;
-    tokio::fs::write(self.output.join("server.rs"), output.server_code).await?;
-    tokio::fs::write(self.output.join("mod.rs"), output.mod_code).await?;
+    let types_code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
+    let server_code = output
+      .code
+      .code(&GeneratedFileType::Server)
+      .cloned()
+      .unwrap_or_default();
+    let mod_code = output
+      .code
+      .code(&GeneratedFileType::Module)
+      .cloned()
+      .unwrap_or_default();
+    tokio::fs::write(self.output.join("types.rs"), types_code).await?;
+    tokio::fs::write(self.output.join("server.rs"), server_code).await?;
+    tokio::fs::write(self.output.join("mod.rs"), mod_code).await?;
     Ok(())
   }
 }
@@ -374,28 +396,34 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
 
   match config.mode {
     GenerateMode::Types => {
-      let (code, stats) = orchestrator.generate_with_header(&source_path)?;
-      logger.print_statistics(&stats);
+      let output = orchestrator.generate_with_header(&source_path)?;
+      logger.print_statistics(&output.stats);
       logger.log_writing();
+      let code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
       config.write_output(code).await?;
     }
     GenerateMode::Client => {
-      let (code, stats) = orchestrator.generate_client_with_header(&source_path)?;
-      logger.print_statistics(&stats);
+      let output = orchestrator.generate_client_with_header(&source_path)?;
+      logger.print_statistics(&output.stats);
       logger.log_writing();
+      let code = output
+        .code
+        .code(&GeneratedFileType::Client)
+        .cloned()
+        .unwrap_or_default();
       config.write_output(code).await?;
     }
     GenerateMode::ClientMod => {
       let output = orchestrator.generate_client_mod(&source_path)?;
       logger.print_statistics(&output.stats);
       logger.log_writing();
-      config.write_module_output(output).await?;
+      config.write_module_output(&output).await?;
     }
     GenerateMode::ServerMod => {
       let output = orchestrator.generate_server_mod(&source_path)?;
       logger.print_statistics(&output.stats);
       logger.log_writing();
-      config.write_server_module_output(output).await?;
+      config.write_server_module_output(&output).await?;
     }
   }
 

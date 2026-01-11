@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use self::dependency_graph::DependencyGraph;
 use crate::generator::ast::{
-  ContentCategory, DefaultAtom, DerivesProvider, EnumToken, OperationInfo, OuterAttr, RustPrimitive, RustType,
-  SerdeImpl, SerdeMode, StatusCodeToken, StructKind, StructMethodKind, TypeRef, ValidationAttribute,
+  ContentCategory, DefaultAtom, DerivesProvider, EnumToken, MethodKind, OperationInfo, OuterAttr, RustPrimitive,
+  RustType, SerdeImpl, SerdeMode, StatusCodeToken, StructKind, TypeRef, ValidationAttribute,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,7 +214,7 @@ impl<'a> TypeAnalyzer<'a> {
         continue;
       };
       for method in &mut def.methods {
-        if let StructMethodKind::ParseResponse { response_enum, .. } = &mut method.kind
+        if let MethodKind::ParseResponse { response_enum, .. } = &mut method.kind
           && let Some(new_name) = replacements.get(&response_enum.to_string())
         {
           *response_enum = EnumToken::new(new_name);

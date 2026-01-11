@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::generator::{codegen::Visibility, converter::GenerationTarget, orchestrator::Orchestrator};
+use crate::generator::{
+  codegen::{GeneratedFileType, Visibility},
+  converter::GenerationTarget,
+  orchestrator::Orchestrator,
+};
 
 #[test]
 fn test_implicit_dependency_via_union_fingerprint() {
@@ -24,7 +28,8 @@ fn test_implicit_dependency_via_union_fingerprint() {
     HashMap::new(),
   );
 
-  let (code, _) = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   // Verify that ImplicitlyRequiredUnion was generated
   assert!(

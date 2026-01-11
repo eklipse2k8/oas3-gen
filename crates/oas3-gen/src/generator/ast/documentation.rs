@@ -6,9 +6,10 @@ use quote::{ToTokens, quote};
 #[cfg(feature = "mdformat")]
 use tokio::{process::Command, runtime::Handle};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Documentation {
   lines: Vec<String>,
+  top_level: bool,
 }
 
 #[bon::bon]
@@ -17,10 +18,14 @@ impl Documentation {
   pub(crate) fn documentation(
     summary: Option<&str>,
     description: Option<&str>,
-    method: &http::Method,
+    method: Option<&http::Method>,
     path: Option<&str>,
+    #[builder(default)] top_level: bool,
   ) -> Self {
-    let mut docs = Self::default();
+    let mut docs = Documentation {
+      lines: vec![],
+      top_level,
+    };
 
     if let Some(s) = summary {
       for line in s.lines().filter(|l| !l.trim().is_empty()) {
@@ -41,7 +46,9 @@ impl Documentation {
       docs.push(String::new());
     }
 
-    if let Some(p) = path {
+    if let Some(p) = path
+      && let Some(method) = method
+    {
       docs.push(format!("* Path: `{} {}`", method.as_str(), p));
     }
     docs
@@ -55,6 +62,7 @@ impl Documentation {
       let formatted = Self::process_doc_text(d);
       Self {
         lines: formatted.lines().map(String::from).collect(),
+        top_level: false,
       }
     })
   }
@@ -63,7 +71,15 @@ impl Documentation {
   pub fn from_lines(lines: impl IntoIterator<Item = impl Into<String>>) -> Self {
     Self {
       lines: lines.into_iter().map(Into::into).collect(),
+      top_level: false,
     }
+  }
+
+  #[must_use]
+  pub fn with_top_level(self, top: bool) -> Self {
+    let mut doc = self;
+    doc.top_level = top;
+    doc
   }
 
   pub fn push(&mut self, line: impl Into<String>) {
@@ -133,7 +149,18 @@ impl ToTokens for Documentation {
     if self.lines.is_empty() {
       return;
     }
-    let doc_lines: Vec<TokenStream> = self.lines.iter().map(|line| quote! { #[doc = #line] }).collect();
+    let doc_lines: Vec<TokenStream> = self
+      .lines
+      .iter()
+      .map(|line| {
+        let line = format!(" {line}");
+        if self.top_level {
+          quote! { #![doc = #line] }
+        } else {
+          quote! { #[doc = #line] }
+        }
+      })
+      .collect();
     quote! { #(#doc_lines)* }.to_tokens(tokens);
   }
 }

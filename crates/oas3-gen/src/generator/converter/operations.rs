@@ -7,7 +7,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    Documentation, EnumToken, FieldDef, OperationInfo, ParsedPath, ResponseEnumDef, RustType, StructMethod, StructToken,
+    Documentation, EnumToken, FieldDef, OperationInfo, ParameterLocation, ParsedPath, ResponseEnumDef, RustType,
+    StructMethod, StructToken,
   },
   naming::{
     identifiers::to_rust_type_name,
@@ -62,6 +63,8 @@ impl OperationConverter {
 
     let warnings = request_output.warnings.clone();
     let parameters = request_output.parameter_fields.clone();
+
+    self.record_stats(&parameters);
 
     let (request_types, request_type) = self.request_types(request_output, response_def.is_some());
     let (response_types, response_enum_token) = self.response_types(response_def, request_type.as_ref());
@@ -146,6 +149,18 @@ impl OperationConverter {
 
     let token = EnumToken::new(def.name.to_string());
     (vec![RustType::ResponseEnum(def)], Some(token))
+  }
+
+  fn record_stats(&self, parameters: &[FieldDef]) {
+    self.context.record_method();
+
+    for param in parameters {
+      if matches!(param.parameter_location, Some(ParameterLocation::Header))
+        && let Some(original_name) = param.original_name.as_deref()
+      {
+        self.context.record_header(original_name);
+      }
+    }
   }
 
   fn collect_types(body_info: &BodyInfo, request_types: Vec<RustType>, response_types: Vec<RustType>) -> Vec<RustType> {

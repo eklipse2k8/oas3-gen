@@ -8,7 +8,7 @@ use crate::{
   generator::{
     ast::{
       BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
-      FieldNameToken, MethodNameToken, RustType, StructDef, StructMethod, StructMethodKind, TypeRef, VariantDef,
+      FieldNameToken, MethodKind, MethodNameToken, RustType, StructDef, StructMethod, TypeRef, VariantDef,
     },
     converter::ConverterContext,
     naming::{
@@ -204,7 +204,7 @@ impl MethodGenerator {
         .docs(Documentation::from_lines([
           "Create a new request with the given parameters.",
         ]))
-        .kind(StructMethodKind::Builder {
+        .kind(MethodKind::Builder {
           fields,
           nested_structs: nested,
         })

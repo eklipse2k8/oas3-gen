@@ -7,9 +7,9 @@ use super::{ConverterContext, TypeResolver, TypeUsageRecorder, inline_resolver::
 use crate::{
   generator::{
     ast::{
-      ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
-      ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler,
-      StructMethod, StructMethodKind, TypeRef,
+      ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodKind, MethodNameToken, ResponseEnumDef,
+      ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive,
+      StatusCodeToken, StatusHandler, StructMethod, TypeRef,
     },
     converter::GenerationTarget,
     naming::{
@@ -114,7 +114,7 @@ impl ResponseConverter {
         .docs(Documentation::from_lines([
           "Parse the HTTP response into the response enum.",
         ]))
-        .kind(StructMethodKind::ParseResponse {
+        .kind(MethodKind::ParseResponse {
           response_enum: response_enum.clone(),
           status_handlers,
           default_handler,
@@ -125,7 +125,7 @@ impl ResponseConverter {
         .docs(Documentation::from_lines([
           "Server code does not need to parse responses.",
         ]))
-        .kind(StructMethodKind::IntoAxumResponse {
+        .kind(MethodKind::IntoAxumResponse {
           response_enum: response_enum.clone(),
           status_handlers,
           default_handler,

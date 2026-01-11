@@ -1,10 +1,16 @@
+use std::rc::Rc;
+
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::{Visibility, coercion};
+use super::{CodeGenerationContext, Visibility, coercion};
 use crate::generator::ast::TypeAliasDef;
 
-pub(crate) fn generate_type_alias(def: &TypeAliasDef, visibility: Visibility) -> TokenStream {
+pub(crate) fn generate_type_alias(
+  _context: &Rc<CodeGenerationContext>,
+  def: &TypeAliasDef,
+  visibility: Visibility,
+) -> TokenStream {
   let name = &def.name;
   let docs = &def.docs;
   let vis = visibility.to_tokens();

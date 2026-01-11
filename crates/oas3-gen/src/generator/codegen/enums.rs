@@ -1,13 +1,18 @@
+use std::rc::Rc;
+
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 
 use super::{
-  Visibility,
+  CodeGenerationContext, Visibility,
   attributes::{generate_deprecated_attr, generate_derives_from_slice, generate_outer_attrs, generate_serde_attrs},
 };
-use crate::generator::ast::{
-  DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethod, EnumMethodKind, ResponseEnumDef,
-  SerdeAttribute, SerdeMode, VariantContent, VariantDef,
+use crate::generator::{
+  ast::{
+    DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethod, EnumMethodKind, ResponseEnumDef,
+    ResponseVariant, SerdeAttribute, SerdeMode, StatusCodeToken, VariantContent, VariantDef,
+  },
+  converter::GenerationTarget,
 };
 
 fn box_if_needed(boxed: bool, inner: TokenStream) -> TokenStream {
@@ -91,13 +96,14 @@ fn emit_enum_method(vis: &TokenStream, method: &EnumMethod) -> TokenStream {
   }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct EnumGenerator {
   def: EnumDef,
   vis: TokenStream,
 }
 
 impl EnumGenerator {
-  pub fn new(def: &EnumDef, visibility: Visibility) -> Self {
+  pub fn new(_context: &Rc<CodeGenerationContext>, def: &EnumDef, visibility: Visibility) -> Self {
     Self {
       def: def.clone(),
       vis: visibility.to_tokens(),
@@ -268,13 +274,14 @@ impl EnumGenerator {
   }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct DiscriminatedEnumGenerator {
   def: DiscriminatedEnumDef,
   vis: TokenStream,
 }
 
 impl DiscriminatedEnumGenerator {
-  pub fn new(def: &DiscriminatedEnumDef, visibility: Visibility) -> Self {
+  pub fn new(_context: &Rc<CodeGenerationContext>, def: &DiscriminatedEnumDef, visibility: Visibility) -> Self {
     Self {
       def: def.clone(),
       vis: visibility.to_tokens(),
@@ -434,14 +441,17 @@ impl DiscriminatedEnumGenerator {
   }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct ResponseEnumGenerator {
+  context: Rc<CodeGenerationContext>,
   def: ResponseEnumDef,
   vis: TokenStream,
 }
 
 impl ResponseEnumGenerator {
-  pub fn new(def: &ResponseEnumDef, visibility: Visibility) -> Self {
+  pub fn new(context: &Rc<CodeGenerationContext>, def: &ResponseEnumDef, visibility: Visibility) -> Self {
     Self {
+      context: context.clone(),
       def: def.clone(),
       vis: visibility.to_tokens(),
     }
@@ -471,12 +481,90 @@ impl ResponseEnumGenerator {
 
     let derives = generate_derives_from_slice(&self.def.derives());
 
+    let into_response_impl = if self.context.config.target == GenerationTarget::Server {
+      self.emit_into_response_impl()
+    } else {
+      quote! {}
+    };
+
     let vis = &self.vis;
     quote! {
       #docs
       #derives
       #vis enum #name {
         #(#variants),*
+      }
+      #into_response_impl
+    }
+  }
+
+  fn emit_into_response_impl(&self) -> TokenStream {
+    self
+      .def
+      .try_from
+      .iter()
+      .map(|_| {
+        let name = &self.def.name;
+        let match_arms: Vec<TokenStream> = self.def.variants.iter().map(Self::emit_response_arm).collect();
+
+        quote! {
+          impl core::convert::TryFrom<&#name> for axum::response::IntoResponse {
+            type Error = http::header::InvalidHeaderValue;
+
+            fn try_from(value: &#name) -> core::result::Result<Self, Self::Error> {
+              match self {
+                #(#match_arms)*
+              }
+            }
+          }
+
+          impl core::convert::TryFrom<#name> for axum::response::IntoResponse {
+            type Error = http::header::InvalidHeaderValue;
+
+            fn try_from(value: #name) -> core::result::Result<Self, Self::Error> {
+              http::HeaderMap::try_from(&headers)
+            }
+          }
+        }
+      })
+      .collect()
+  }
+
+  fn emit_response_arm(variant: &ResponseVariant) -> TokenStream {
+    let variant_name = &variant.variant_name;
+    let status_code = emit_status_code(variant.status_code);
+
+    if let Some(_) = &variant.schema_type {
+      quote! {
+        Self::#variant_name(data) => (#status_code, axum::Json(data)).into_response(),
+      }
+    } else {
+      quote! {
+        Self::#variant_name => #status_code.into_response(),
+      }
+    }
+  }
+}
+
+fn emit_status_code(code: StatusCodeToken) -> TokenStream {
+  match code {
+    StatusCodeToken::Ok200 => quote! { axum::http::StatusCode::OK },
+    StatusCodeToken::Created201 => quote! { axum::http::StatusCode::CREATED },
+    StatusCodeToken::Accepted202 => quote! { axum::http::StatusCode::ACCEPTED },
+    StatusCodeToken::NoContent204 => quote! { axum::http::StatusCode::NO_CONTENT },
+    StatusCodeToken::BadRequest400 => quote! { axum::http::StatusCode::BAD_REQUEST },
+    StatusCodeToken::Unauthorized401 => quote! { axum::http::StatusCode::UNAUTHORIZED },
+    StatusCodeToken::Forbidden403 => quote! { axum::http::StatusCode::FORBIDDEN },
+    StatusCodeToken::NotFound404 => quote! { axum::http::StatusCode::NOT_FOUND },
+    StatusCodeToken::Conflict409 => quote! { axum::http::StatusCode::CONFLICT },
+    StatusCodeToken::UnprocessableEntity422 => quote! { axum::http::StatusCode::UNPROCESSABLE_ENTITY },
+    StatusCodeToken::InternalServerError500 => quote! { axum::http::StatusCode::INTERNAL_SERVER_ERROR },
+    StatusCodeToken::Default => quote! { axum::http::StatusCode::INTERNAL_SERVER_ERROR },
+    other => {
+      if let Some(code) = other.code() {
+        quote! { axum::http::StatusCode::from_u16(#code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR) }
+      } else {
+        quote! { axum::http::StatusCode::INTERNAL_SERVER_ERROR }
       }
     }
   }

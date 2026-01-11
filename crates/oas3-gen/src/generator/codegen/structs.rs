@@ -1,10 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  rc::Rc,
+};
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::{
-  Visibility,
+  CodeGenerationContext, Visibility,
   attributes::{
     generate_deprecated_attr, generate_doc_hidden_attr, generate_docs_for_field, generate_field_default_attr,
     generate_outer_attrs, generate_serde_as_attr, generate_serde_attrs, generate_validation_attrs,
@@ -12,9 +15,9 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, FieldDef, RegexKey, ResponseStatusCategory,
-    ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod,
-    StructMethodKind, TypeRef, ValidationAttribute,
+    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, FieldDef, MethodKind, RegexKey,
+    ResponseStatusCategory, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler, StructDef,
+    StructKind, StructMethod, TypeRef, ValidationAttribute,
     tokens::{ConstToken, EnumToken, EnumVariantToken},
   },
   codegen::{attributes::generate_derives_from_slice, headers::HeaderMapGenerator},
@@ -27,7 +30,12 @@ pub(crate) struct StructGenerator {
 }
 
 impl StructGenerator {
-  pub(crate) fn new(def: &StructDef, regex_lookup: &BTreeMap<RegexKey, ConstToken>, visibility: Visibility) -> Self {
+  pub(crate) fn new(
+    _context: &Rc<CodeGenerationContext>,
+    def: &StructDef,
+    regex_lookup: &BTreeMap<RegexKey, ConstToken>,
+    visibility: Visibility,
+  ) -> Self {
     Self {
       def: def.clone(),
       regex_lookup: regex_lookup.clone(),
@@ -128,7 +136,7 @@ impl StructGenerator {
       .def
       .methods
       .iter()
-      .partition(|m| matches!(m.kind, StructMethodKind::Builder { .. }));
+      .partition(|m| matches!(m.kind, MethodKind::Builder { .. }));
 
     let mut result = quote! {};
 
@@ -158,54 +166,44 @@ impl StructGenerator {
 
   fn emit_method(&self, method: &StructMethod) -> TokenStream {
     match &method.kind {
-      StructMethodKind::ParseResponse {
+      MethodKind::ParseResponse {
         response_enum,
         status_handlers,
         default_handler,
       } => emit_parse_response(
-        response_enum.clone(),
-        status_handlers.clone(),
-        default_handler.clone(),
-        self.vis.clone(),
-        method.name.clone(),
-        method.docs.clone(),
-      ),
-      StructMethodKind::IntoAxumResponse {
         response_enum,
         status_handlers,
-        default_handler,
-      } => emit_parse_response(
-        response_enum.clone(),
-        status_handlers.clone(),
-        default_handler.clone(),
-        self.vis.clone(),
+        default_handler.as_ref(),
+        &self.vis,
         method.name.clone(),
         method.docs.clone(),
       ),
-      StructMethodKind::Builder { fields, nested_structs } => emit_builder(
-        fields.clone(),
-        nested_structs.clone(),
-        self.vis.clone(),
-        method.docs.clone(),
-      ),
+      MethodKind::IntoAxumResponse {
+        response_enum: _,
+        status_handlers: _,
+        default_handler: _,
+      } => quote! {},
+      MethodKind::Builder { fields, nested_structs } => {
+        emit_builder(fields, nested_structs, &self.vis, method.docs.clone())
+      }
     }
   }
 }
 
 fn emit_parse_response(
-  response_enum: EnumToken,
-  status_handlers: Vec<StatusHandler>,
-  default_handler: Option<ResponseVariantCategory>,
-  vis: TokenStream,
+  response_enum: &EnumToken,
+  status_handlers: &[StatusHandler],
+  default_handler: Option<&ResponseVariantCategory>,
+  vis: &TokenStream,
   method_name: impl ToTokens,
   docs: impl ToTokens,
 ) -> TokenStream {
   let status_checks: Vec<TokenStream> = status_handlers
     .iter()
-    .map(|h| emit_status_block(h, &response_enum))
+    .map(|h| emit_status_block(h, response_enum))
     .collect();
 
-  let fallback = emit_fallback(&response_enum, default_handler.as_ref());
+  let fallback = emit_fallback(response_enum, default_handler);
   let status_decl = if status_checks.is_empty() {
     quote! {}
   } else {
@@ -372,9 +370,9 @@ fn emit_extraction(schema_type: &TypeRef, category: ContentCategory) -> TokenStr
 }
 
 fn emit_builder(
-  fields: Vec<BuilderField>,
-  nested_structs: Vec<BuilderNestedStruct>,
-  vis: TokenStream,
+  fields: &[BuilderField],
+  nested_structs: &[BuilderNestedStruct],
+  vis: &TokenStream,
   docs: impl ToTokens,
 ) -> TokenStream {
   let params: Vec<TokenStream> = fields
@@ -386,7 +384,7 @@ fn emit_builder(
     })
     .collect();
 
-  let construction = emit_builder_construction(&fields, &nested_structs);
+  let construction = emit_builder_construction(fields, nested_structs);
 
   quote! {
     #docs

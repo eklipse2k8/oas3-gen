@@ -2,7 +2,7 @@ use quote::quote;
 
 use super::Visibility;
 use crate::generator::{
-  ast::{ClientRootNode, LintConfig},
+  ast::{ClientRootNode, GlobalLintsNode},
   codegen::generate_source,
 };
 
@@ -55,7 +55,7 @@ impl ModFileGenerator {
       },
     };
 
-    let lint_config = LintConfig::default();
+    let lint_config = GlobalLintsNode::default();
     generate_source(&code, &self.metadata, Some(&lint_config), source_path, gen_version)
   }
 }

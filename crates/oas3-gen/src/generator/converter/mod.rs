@@ -198,6 +198,14 @@ impl ConverterContext {
   pub(crate) fn merge_usage(&self, other: TypeUsageRecorder) {
     self.type_usage.borrow_mut().merge(other);
   }
+
+  pub(crate) fn record_method(&self) {
+    self.type_usage.borrow_mut().record_method();
+  }
+
+  pub(crate) fn record_header(&self, header_name: &str) {
+    self.type_usage.borrow_mut().record_header(header_name);
+  }
 }
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.

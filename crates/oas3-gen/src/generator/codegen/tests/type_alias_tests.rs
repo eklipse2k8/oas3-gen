@@ -1,7 +1,13 @@
+use std::rc::Rc;
+
 use crate::generator::{
   ast::{Documentation, RustPrimitive, TypeAliasDef, TypeAliasToken, TypeRef},
-  codegen::{Visibility, type_aliases::generate_type_alias},
+  codegen::{CodeGenerationContext, Visibility, type_aliases::generate_type_alias},
 };
+
+fn default_context() -> Rc<CodeGenerationContext> {
+  Rc::new(CodeGenerationContext::default())
+}
 
 fn format_tokens(tokens: proc_macro2::TokenStream) -> String {
   prettyplease::unparse(&syn::parse2(tokens).unwrap())
@@ -38,7 +44,7 @@ fn test_basic_type_aliases() {
 
   for (def, expected_suffix) in cases {
     let name = def.name.clone();
-    let tokens = generate_type_alias(&def, Visibility::Public);
+    let tokens = generate_type_alias(&default_context(), &def, Visibility::Public);
     let code = format_tokens(tokens);
     assert!(code.contains("pub"), "missing pub visibility for {name}");
     assert!(
@@ -56,7 +62,7 @@ fn test_type_alias_with_docs() {
     target: TypeRef::new(RustPrimitive::String),
   };
 
-  let tokens = generate_type_alias(&def, Visibility::Public);
+  let tokens = generate_type_alias(&default_context(), &def, Visibility::Public);
   let code = format_tokens(tokens);
 
   assert!(
@@ -88,7 +94,7 @@ fn test_type_alias_visibility_levels() {
   ];
 
   for (visibility, expected_prefix) in cases {
-    let tokens = generate_type_alias(&def, visibility);
+    let tokens = generate_type_alias(&default_context(), &def, visibility);
     let code = format_tokens(tokens);
     assert!(
       code.contains(expected_prefix),
@@ -130,7 +136,7 @@ fn test_type_alias_with_wrapper_types() {
       target,
       ..Default::default()
     };
-    let tokens = generate_type_alias(&def, Visibility::Public);
+    let tokens = generate_type_alias(&default_context(), &def, Visibility::Public);
     let code = format_tokens(tokens);
     assert!(
       code.contains(expected_suffix),
@@ -147,7 +153,7 @@ fn test_type_alias_custom_types() {
     target: TypeRef::new(RustPrimitive::Custom("Vec<Pet>".into())),
   };
 
-  let tokens = generate_type_alias(&def, Visibility::Crate);
+  let tokens = generate_type_alias(&default_context(), &def, Visibility::Crate);
   let code = format_tokens(tokens);
 
   assert!(code.contains("pub(crate) type PetList = Vec<Pet>;"));

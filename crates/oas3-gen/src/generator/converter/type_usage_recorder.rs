@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::generator::ast::{EnumToken, RustPrimitive, TypeRef};
 
@@ -34,9 +34,12 @@ impl UsageFlags {
 /// Records which Rust types are used as requests or responses.
 ///
 /// Used for dependency analysis and filtering unused types.
+/// Also tracks generation statistics like methods and headers.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct TypeUsageRecorder {
   entries: BTreeMap<EnumToken, UsageFlags>,
+  methods_generated: usize,
+  unique_headers: BTreeSet<String>,
 }
 
 impl TypeUsageRecorder {
@@ -44,6 +47,8 @@ impl TypeUsageRecorder {
   pub(crate) fn new() -> Self {
     Self {
       entries: BTreeMap::new(),
+      methods_generated: 0,
+      unique_headers: BTreeSet::new(),
     }
   }
 
@@ -103,10 +108,32 @@ impl TypeUsageRecorder {
     }
   }
 
+  /// Increments the method count.
+  pub(crate) fn record_method(&mut self) {
+    self.methods_generated += 1;
+  }
+
+  /// Records a header name (normalized to lowercase for uniqueness).
+  pub(crate) fn record_header(&mut self, header_name: &str) {
+    self.unique_headers.insert(header_name.to_ascii_lowercase());
+  }
+
+  /// Returns the number of methods generated.
+  pub(crate) fn methods_generated(&self) -> usize {
+    self.methods_generated
+  }
+
+  /// Returns the number of unique headers.
+  pub(crate) fn headers_generated(&self) -> usize {
+    self.unique_headers.len()
+  }
+
   /// Merges another recorder into this one.
   pub(crate) fn merge(&mut self, other: TypeUsageRecorder) {
     for (token, flags) in other.entries {
       self.entries.entry(token).or_default().merge(flags);
     }
+    self.methods_generated += other.methods_generated;
+    self.unique_headers.extend(other.unique_headers);
   }
 }

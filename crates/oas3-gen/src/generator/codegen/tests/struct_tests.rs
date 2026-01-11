@@ -1,13 +1,17 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, rc::Rc};
 
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodNameToken,
-    ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustType, StatusCodeToken,
-    StatusHandler, StructDef, StructKind, StructMethod, StructMethodKind, StructToken, TypeRef, ValidationAttribute,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken,
+    ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, StatusCodeToken,
+    StatusHandler, StructDef, StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute,
   },
-  codegen::{self, Visibility, structs},
+  codegen::{CodeGenerationContext, Visibility, structs},
 };
+
+fn default_context() -> Rc<CodeGenerationContext> {
+  Rc::new(CodeGenerationContext::default())
+}
 
 fn base_struct(kind: StructKind) -> StructDef {
   StructDef {
@@ -42,7 +46,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
   def.methods.push(StructMethod {
     name: MethodNameToken::new("parse_response"),
     docs: Documentation::from_lines(["Parse response"]),
-    kind: StructMethodKind::ParseResponse {
+    kind: MethodKind::ParseResponse {
       response_enum: EnumToken::new("ResponseEnum"),
       status_handlers: vec![StatusHandler {
         status_code,
@@ -57,7 +61,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
 #[test]
 fn generates_struct_with_supplied_derives() {
   let def = base_struct(StructKind::Schema);
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(code.contains("derive"), "missing derive attribute");
   assert!(code.contains("Debug"), "missing Debug derive");
@@ -73,7 +77,7 @@ fn test_validation_attribute_generation() {
     if !has_validation {
       def.fields[0].validation_attrs.clear();
     }
-    let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+    let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
     let code = tokens.to_string();
     assert_eq!(
       code.contains("validate"),
@@ -92,7 +96,7 @@ fn renders_response_parser_method() {
       .media_types(vec![ResponseMediaType::new("application/json")])
       .build(),
   );
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(code.contains("fn parse_response"), "missing parse_response method");
   assert!(code.contains("ResponseEnum"), "missing ResponseEnum type");
@@ -121,7 +125,7 @@ fn test_text_response_parsing() {
         .maybe_schema_type(Some(st))
         .build(),
     );
-    let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+    let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
     let code = tokens.to_string();
     assert!(code.contains(expected_code), "missing expected code for {desc}");
     assert!(
@@ -144,7 +148,7 @@ fn renders_json_parser_for_custom_struct() {
       .schema_type(TypeRef::new("MyStruct"))
       .build(),
   );
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(
     code.contains("json_with_diagnostics"),
@@ -166,7 +170,7 @@ fn test_binary_response_parsing() {
       .schema_type(TypeRef::new("Vec<u8>"))
       .build(),
   );
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(
     code.contains("req . bytes () . await ? . to_vec ()"),
@@ -187,7 +191,7 @@ fn test_event_stream_response_generates_from_response() {
       .schema_type(TypeRef::new("oas3_gen_support::EventStream<StreamEvent>"))
       .build(),
   );
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(
     code.contains("from_response"),
@@ -196,9 +200,9 @@ fn test_event_stream_response_generates_from_response() {
 }
 
 #[test]
-fn test_serde_import_generation() {
+fn test_struct_generates_debug_and_clone() {
   let def = base_struct(StructKind::Schema);
-  let tokens = codegen::generate(&[RustType::Struct(def)], Visibility::Public);
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
   assert!(code.contains("Debug"), "missing Debug derive");
   assert!(code.contains("Clone"), "missing Clone derive");
@@ -225,7 +229,7 @@ fn test_header_params_struct_generates_try_from_header_map() {
     ..Default::default()
   };
 
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
 
   assert!(
@@ -251,7 +255,7 @@ fn test_header_params_struct_generates_try_from_header_map() {
 #[test]
 fn test_non_header_params_struct_does_not_generate_try_from_header_map() {
   let def = base_struct(StructKind::Schema);
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
 
   assert!(
@@ -278,7 +282,7 @@ fn test_header_params_with_primitive_types() {
     ..Default::default()
   };
 
-  let tokens = structs::StructGenerator::new(&def, &BTreeMap::new(), Visibility::Public).emit();
+  let tokens = structs::StructGenerator::new(&default_context(), &def, &BTreeMap::new(), Visibility::Public).emit();
   let code = tokens.to_string();
 
   assert!(

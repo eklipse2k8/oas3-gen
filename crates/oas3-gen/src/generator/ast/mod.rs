@@ -21,7 +21,7 @@ pub use client::ClientRootNode;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
-pub use lints::LintConfig;
+pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
 use oas3::spec::{ParameterIn, ParameterStyle};
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
@@ -43,7 +43,8 @@ pub struct FileHeaderNode {
   pub version: String,
   pub source_path: String,
   pub generator_version: String,
-  pub description: Option<String>,
+  pub description: Option<Documentation>,
+  pub lints: GlobalLintsNode,
 }
 
 /// Discriminated enum variant mapping
@@ -134,6 +135,12 @@ pub struct StatusHandler {
   pub dispatch: ResponseStatusCategory,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct ImplTryFromNode {
+  pub into: TypeRef,
+  pub methods: Vec<MethodKind>,
+}
+
 /// Response enum definition for operation responses
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct ResponseEnumDef {
@@ -143,6 +150,8 @@ pub struct ResponseEnumDef {
   #[builder(default)]
   pub variants: Vec<ResponseVariant>,
   pub request_type: Option<StructToken>,
+  #[builder(default)]
+  pub try_from: Vec<ImplTryFromNode>,
 }
 
 /// Top-level Rust type representation
@@ -424,11 +433,11 @@ impl StructDef {
 pub struct StructMethod {
   pub name: MethodNameToken,
   pub docs: Documentation,
-  pub kind: StructMethodKind,
+  pub kind: MethodKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StructMethodKind {
+pub enum MethodKind {
   /// Method to parse a reqwest response into the struct
   ParseResponse {
     response_enum: EnumToken,

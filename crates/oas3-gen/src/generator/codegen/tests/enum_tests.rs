@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
@@ -5,11 +7,15 @@ use crate::generator::{
     SerdeMode, StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
-    Visibility,
+    CodeGenerationContext, Visibility,
     enums::{DiscriminatedEnumGenerator, EnumGenerator, ResponseEnumGenerator},
   },
   naming::constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
 };
+
+fn default_context() -> Rc<CodeGenerationContext> {
+  Rc::new(CodeGenerationContext::default())
+}
 
 fn make_unit_variant(name: &str) -> VariantDef {
   VariantDef::builder()
@@ -43,7 +49,9 @@ fn test_basic_enum_generation() {
     ],
   );
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+    .generate()
+    .to_string();
 
   let assertions = [
     ("pub enum Color", "should have pub enum declaration"),
@@ -73,7 +81,7 @@ fn test_simple_enum_display_impl() {
     ],
   );
 
-  let code = EnumGenerator::new(&simple_def, Visibility::Public)
+  let code = EnumGenerator::new(&default_context(), &simple_def, Visibility::Public)
     .generate()
     .to_string();
 
@@ -121,7 +129,7 @@ fn test_simple_enum_display_impl_with_serde_rename() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&renamed_def, Visibility::Public)
+  let code = EnumGenerator::new(&default_context(), &renamed_def, Visibility::Public)
     .generate()
     .to_string();
 
@@ -162,7 +170,7 @@ fn test_tuple_enum_no_display_impl() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&tuple_def, Visibility::Public)
+  let code = EnumGenerator::new(&default_context(), &tuple_def, Visibility::Public)
     .generate()
     .to_string();
 
@@ -186,7 +194,9 @@ fn test_enum_with_docs() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+    .generate()
+    .to_string();
 
   assert!(
     code.contains("# [doc = \"Represents the status of an item.\"]"),
@@ -237,7 +247,9 @@ fn test_enum_tuple_variants() {
 
   for (case_name, variants, expected_content) in cases {
     let def = make_simple_enum("Value", variants);
-    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+    let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+      .generate()
+      .to_string();
 
     for (expected, msg) in expected_content {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
@@ -265,7 +277,7 @@ fn test_enum_variant_attributes() {
     ..Default::default()
   };
 
-  let deprecated_code = EnumGenerator::new(&deprecated_def, Visibility::Public)
+  let deprecated_code = EnumGenerator::new(&default_context(), &deprecated_def, Visibility::Public)
     .generate()
     .to_string();
   assert!(
@@ -284,7 +296,7 @@ fn test_enum_variant_attributes() {
     ..Default::default()
   };
 
-  let outer_attrs_code = EnumGenerator::new(&outer_attrs_def, Visibility::Public)
+  let outer_attrs_code = EnumGenerator::new(&default_context(), &outer_attrs_def, Visibility::Public)
     .generate()
     .to_string();
   assert!(
@@ -359,7 +371,9 @@ fn test_enum_serde_attributes() {
   ];
 
   for (case_name, def, expected_attrs) in cases {
-    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+    let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+      .generate()
+      .to_string();
     for (expected, msg) in expected_attrs {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
     }
@@ -390,7 +404,7 @@ fn test_case_insensitive_enum() {
     ..Default::default()
   };
 
-  let tokens = EnumGenerator::new(&base_def, Visibility::Public).generate();
+  let tokens = EnumGenerator::new(&default_context(), &base_def, Visibility::Public).generate();
   let code = tokens.to_string();
 
   let parts: Vec<&str> = code.split("enum Status").collect();
@@ -431,7 +445,7 @@ fn test_case_insensitive_enum() {
     ..Default::default()
   };
 
-  let fallback_code = EnumGenerator::new(&fallback_def, Visibility::Public)
+  let fallback_code = EnumGenerator::new(&default_context(), &fallback_def, Visibility::Public)
     .generate()
     .to_string();
   assert!(
@@ -461,7 +475,9 @@ fn test_case_insensitive_enum_deserialize_only() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+    .generate()
+    .to_string();
 
   let parts: Vec<&str> = code.split("pub enum Status").collect();
   assert_eq!(parts.len(), 2, "should split into derives and enum parts");
@@ -520,7 +536,9 @@ fn test_enum_visibility() {
       Visibility::Public => "Public",
     };
     let def = make_simple_enum(name, vec![make_unit_variant("A"), make_unit_variant("B")]);
-    let code = EnumGenerator::new(&def, visibility).generate().to_string();
+    let code = EnumGenerator::new(&default_context(), &def, visibility)
+      .generate()
+      .to_string();
 
     if should_contain {
       assert!(code.contains(pattern), "should have {msg}");
@@ -557,7 +575,7 @@ fn test_enum_constructor_methods() {
     ..Default::default()
   };
 
-  let simple_code = EnumGenerator::new(&simple_def, Visibility::Public)
+  let simple_code = EnumGenerator::new(&default_context(), &simple_def, Visibility::Public)
     .generate()
     .to_string();
   assert!(simple_code.contains("impl RequestBody"), "should have impl block");
@@ -597,7 +615,7 @@ fn test_enum_constructor_methods() {
     ..Default::default()
   };
 
-  let param_code = EnumGenerator::new(&param_def, Visibility::Public)
+  let param_code = EnumGenerator::new(&default_context(), &param_def, Visibility::Public)
     .generate()
     .to_string();
   assert!(
@@ -637,7 +655,9 @@ fn test_enum_constructor_methods_without_docs() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(code.contains("pub fn json () -> Self"), "should have json constructor");
   assert!(
     !code.contains("Creates a `"),
@@ -688,7 +708,9 @@ fn test_known_value_constructor_methods() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+    .generate()
+    .to_string();
   assert!(
     code.contains("pub fn gemini_25_pro () -> Self"),
     "should have gemini_25_pro constructor"
@@ -725,7 +747,7 @@ fn test_discriminated_enum() {
     .serde_mode(SerdeMode::Both)
     .build();
 
-  let code = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
+  let code = DiscriminatedEnumGenerator::new(&default_context(), &without_fallback, Visibility::Public)
     .generate()
     .to_string();
   let assertions_without = [
@@ -778,7 +800,7 @@ fn test_discriminated_enum() {
     .serde_mode(SerdeMode::Both)
     .build();
 
-  let code_with = DiscriminatedEnumGenerator::new(&with_fallback, Visibility::Public)
+  let code_with = DiscriminatedEnumGenerator::new(&default_context(), &with_fallback, Visibility::Public)
     .generate()
     .to_string();
   let fallback_assertions = [
@@ -816,7 +838,7 @@ fn test_discriminated_enum_serialize_only() {
     .serde_mode(SerdeMode::SerializeOnly)
     .build();
 
-  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
+  let code = DiscriminatedEnumGenerator::new(&default_context(), &def, Visibility::Public)
     .generate()
     .to_string();
   assert!(
@@ -845,7 +867,7 @@ fn test_discriminated_enum_deserialize_only() {
     .serde_mode(SerdeMode::DeserializeOnly)
     .build();
 
-  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
+  let code = DiscriminatedEnumGenerator::new(&default_context(), &def, Visibility::Public)
     .generate()
     .to_string();
   assert!(
@@ -891,9 +913,10 @@ fn test_response_enum_generation() {
         .build(),
     ],
     request_type: Some(StructToken::new("GetUserRequest")),
+    try_from: vec![],
   };
 
-  let code = ResponseEnumGenerator::new(&def, Visibility::Public)
+  let code = ResponseEnumGenerator::new(&default_context(), &def, Visibility::Public)
     .generate()
     .to_string();
 
@@ -939,7 +962,9 @@ fn test_relaxed_wrapper_enum_generates_display() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+    .generate()
+    .to_string();
 
   let assertions = [
     (
@@ -979,7 +1004,9 @@ fn test_non_simple_enum_without_generate_display_has_no_display() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumGenerator::new(&default_context(), &def, Visibility::Public)
+    .generate()
+    .to_string();
 
   assert!(
     !code.contains("impl core :: fmt :: Display"),
