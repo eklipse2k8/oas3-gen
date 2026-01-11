@@ -1,63 +1,102 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{ToTokens, quote};
 
 use crate::generator::ast::{RegexKey, RustType, ValidationAttribute, constants::HttpHeaderRef, tokens::ConstToken};
 
-pub(crate) fn generate_regex_constants(types: &[RustType]) -> (TokenStream, BTreeMap<RegexKey, ConstToken>) {
-  let mut const_defs: BTreeMap<ConstToken, String> = BTreeMap::new();
-  let mut lookup: BTreeMap<RegexKey, ConstToken> = BTreeMap::new();
-  let mut pattern_to_const: BTreeMap<String, ConstToken> = BTreeMap::new();
+#[derive(Clone, Debug)]
+pub(crate) struct RegexConstantFragment {
+  const_token: ConstToken,
+  pattern: String,
+}
 
-  for rust_type in types {
-    let RustType::Struct(def) = rust_type else {
-      continue;
-    };
+impl RegexConstantFragment {
+  pub(crate) fn new(const_token: ConstToken, pattern: String) -> Self {
+    Self { const_token, pattern }
+  }
+}
 
-    for field in &def.fields {
-      let Some(pattern) = field.validation_attrs.iter().find_map(|attr| match attr {
-        ValidationAttribute::Regex(p) => Some(p),
-        _ => None,
-      }) else {
+impl ToTokens for RegexConstantFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let const_token = &self.const_token;
+    let pattern = &self.pattern;
+    tokens.extend(quote! {
+      static #const_token: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(#pattern).expect("invalid regex"));
+    });
+  }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RegexConstantsResult {
+  fragments: Vec<RegexConstantFragment>,
+  pub lookup: BTreeMap<RegexKey, ConstToken>,
+}
+
+impl RegexConstantsResult {
+  pub(crate) fn from_types(types: &[RustType]) -> Self {
+    let mut const_defs: BTreeMap<ConstToken, String> = BTreeMap::new();
+    let mut lookup: BTreeMap<RegexKey, ConstToken> = BTreeMap::new();
+    let mut pattern_to_const: BTreeMap<String, ConstToken> = BTreeMap::new();
+
+    for rust_type in types {
+      let RustType::Struct(def) = rust_type else {
         continue;
       };
 
-      let key = RegexKey::for_struct(&def.name, field.name.as_str());
-      let const_token = match pattern_to_const.entry(pattern.clone()) {
-        Entry::Occupied(entry) => entry.get().clone(),
-        Entry::Vacant(entry) => {
-          let token = ConstToken::from(&key);
-          const_defs.insert(token.clone(), pattern.clone());
-          entry.insert(token.clone());
-          token
-        }
-      };
-      lookup.insert(key, const_token);
-    }
-  }
+      for field in &def.fields {
+        let Some(pattern) = field.validation_attrs.iter().find_map(|attr| match attr {
+          ValidationAttribute::Regex(p) => Some(p),
+          _ => None,
+        }) else {
+          continue;
+        };
 
-  if const_defs.is_empty() {
-    return (quote! {}, lookup);
-  }
-
-  let regex_defs: Vec<TokenStream> = const_defs
-    .into_iter()
-    .map(|(const_token, pattern)| {
-      quote! {
-        static #const_token: std::sync::LazyLock<regex::Regex> =
-          std::sync::LazyLock::new(|| regex::Regex::new(#pattern).expect("invalid regex"));
+        let key = RegexKey::for_struct(&def.name, field.name.as_str());
+        let const_token = match pattern_to_const.entry(pattern.clone()) {
+          Entry::Occupied(entry) => entry.get().clone(),
+          Entry::Vacant(entry) => {
+            let token = ConstToken::from(&key);
+            const_defs.insert(token.clone(), pattern.clone());
+            entry.insert(token.clone());
+            token
+          }
+        };
+        lookup.insert(key, const_token);
       }
-    })
-    .collect();
+    }
 
-  (quote! { #(#regex_defs)* }, lookup)
+    let fragments = const_defs
+      .into_iter()
+      .map(|(const_token, pattern)| RegexConstantFragment::new(const_token, pattern))
+      .collect();
+
+    Self { fragments, lookup }
+  }
 }
 
-pub(crate) fn generate_header_constants(headers: &[HttpHeaderRef]) -> TokenStream {
-  if headers.is_empty() {
-    return quote! {};
+impl ToTokens for RegexConstantsResult {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    for fragment in &self.fragments {
+      fragment.to_tokens(tokens);
+    }
   }
-  let const_tokens = headers.iter().map(|token| quote! { #token }).collect::<Vec<_>>();
-  quote! { #(#const_tokens)* }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct HeaderConstantsFragment(Vec<HttpHeaderRef>);
+
+impl HeaderConstantsFragment {
+  pub(crate) fn new(headers: impl Into<Vec<HttpHeaderRef>>) -> Self {
+    Self(headers.into())
+  }
+}
+
+impl ToTokens for HeaderConstantsFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    for header in &self.0 {
+      header.to_tokens(tokens);
+    }
+  }
 }

@@ -166,25 +166,59 @@ Identify and create Fragments for these common patterns:
 
 ## Phase 5: Verification
 
-After refactoring:
+**IMPORTANT**: Use a subagent to execute Phase 5 verification. The subagent ensures all steps are completed in order and reports any concerns back to you.
 
-1. **Run tests**: `cargo test` - all existing tests must pass
+Launch a @zen-light subagent with the following prompt:
 
-2. **Rebuild fixtures**: Regenerate fixture files
+```
+You are a verification agent for a Rust code generation refactoring task. Execute each step IN ORDER and report results back.
 
-3. **Run clippy with autofix**: 
-   ```bash
-   cargo clippy --fix --all --tests --allow-dirty -- -W clippy::pedantic
-   ```
+## Verification Steps (execute sequentially, except where noted)
 
-4. **Format code**:
-   ```bash
-   cargo +nightly fmt --all
-   ```
+### Step 1: Run tests
+Run `cargo test` and verify all tests pass.
+- If tests fail, report the failures and STOP.
+- If tests pass, report the count and proceed.
 
-5. **Verify fixtures unchanged**: Run `git diff --stat crates/oas3-gen/fixtures/` to confirm no functional changes (formatting-only differences are acceptable if fixtures were not previously formatted)
+### Step 2: Rebuild fixtures (run in parallel)
+Read docs/testing.md to find the "Rebuilding Fixtures" section with the list of fixture rebuild commands.
+Run ALL fixture rebuild commands from that file IN PARALLEL.
+- This is the single source of truth for which fixtures exist.
+- Do not hardcode fixture names; always read from docs/testing.md.
 
-6. **Check for dead code**: Ensure no unused types or functions remain
+### Step 3: Run clippy with autofix
+Run `cargo clippy --fix --all --tests --allow-dirty -- -W clippy::pedantic`
+- Report any warnings that could not be auto-fixed.
+
+### Step 4: Format code
+Run `cargo +nightly fmt --all`
+
+### Step 5: Verify fixtures unchanged
+Run `git diff --stat crates/oas3-gen/fixtures/`
+- If there are NO changes, report success.
+- If there ARE changes, run `git diff crates/oas3-gen/fixtures/ | head -100` to show sample changes.
+- Formatting-only differences (indentation changes) are acceptable if fixtures were not previously formatted.
+- Functional changes (different code being generated) are a CONCERN that must be reported.
+
+### Step 6: Check for dead code
+Run `cargo build 2>&1 | grep -E "(dead_code|unused)"` and `cargo clippy --all 2>&1 | grep -E "(dead_code|unused)"`
+- Report any dead code warnings.
+
+## Final Report
+
+After completing all steps, provide a summary:
+1. Test results (pass/fail count)
+2. Fixture rebuild status
+3. Clippy status (warnings remaining)
+4. Formatting status
+5. Fixture diff status (unchanged/formatting-only/functional changes)
+6. Dead code status
+7. **CONCERNS**: List any issues that need attention from the main agent
+
+If any step fails or raises concerns, clearly state what the main agent needs to address.
+```
+
+Wait for the subagent to complete and review its report. If concerns are raised, address them before proceeding to Phase 6.
 
 ---
 

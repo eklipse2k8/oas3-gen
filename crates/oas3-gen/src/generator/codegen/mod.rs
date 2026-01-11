@@ -286,8 +286,8 @@ impl SchemaCodeGenerator {
   }
 
   fn generate_types_tokens(&self) -> TokenStream {
-    let (regex_consts, regex_lookup) = constants::generate_regex_constants(&self.rust_types);
-    let header_consts = constants::generate_header_constants(&self.header_refs);
+    let regex_result = constants::RegexConstantsResult::from_types(&self.rust_types);
+    let header_consts = constants::HeaderConstantsFragment::new((*self.header_refs).clone());
 
     let mut needs_serialize = false;
     let mut needs_deserialize = false;
@@ -300,7 +300,7 @@ impl SchemaCodeGenerator {
       needs_validate |= matches!(ty, RustType::Struct(def) if def.fields.iter().any(|f| f.validation_attrs.contains(&ValidationAttribute::Nested)));
       needs_validate |=
         matches!(ty, RustType::Struct(def) if def.methods.iter().any(|m| matches!(m.kind, MethodKind::Builder { .. })));
-      type_tokens.push(self.generate_type(ty, &regex_lookup));
+      type_tokens.push(self.generate_type(ty, &regex_result.lookup));
     }
 
     let serde_use = match (needs_serialize, needs_deserialize) {
@@ -320,7 +320,7 @@ impl SchemaCodeGenerator {
       #serde_use
       #validator_use
 
-      #regex_consts
+      #regex_result
       #header_consts
 
       #(#type_tokens)*

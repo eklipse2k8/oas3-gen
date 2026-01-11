@@ -155,12 +155,13 @@ OperationInfo      ───▶    ClientGenerator         ───▶   impl C
 |----------|------|---------|
 | `HttpStatusCode` | `http.rs:8` | `StatusCodeToken` to `http::StatusCode` |
 
-### Constant Generation
+### Constant Generation Fragments
 
-| Function | File | Purpose |
+| Fragment | File | Purpose |
 |----------|------|---------|
-| `generate_regex_constants` | `constants.rs:8` | Static `LazyLock<Regex>` constants |
-| `generate_header_constants` | `constants.rs:57` | HTTP header name constants |
+| `RegexConstantFragment` | `constants.rs:8` | Single `static REGEX_*: LazyLock<Regex>` constant |
+| `RegexConstantsResult` | `constants.rs:31` | Collection of regex constants with lookup map |
+| `HeaderConstantsFragment` | `constants.rs:87` | Collection of HTTP header name constants |
 
 ### Type Coercion
 
