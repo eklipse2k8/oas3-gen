@@ -1120,7 +1120,6 @@ fn test_enum_helper_skips_without_default_trait() {
         ))]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,

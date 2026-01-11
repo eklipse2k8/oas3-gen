@@ -28,7 +28,6 @@ fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
   EnumDef {
     name: EnumToken::new(name),
     variants,
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -120,7 +119,6 @@ fn test_simple_enum_display_impl_with_serde_rename() {
         .serde_attrs(vec![SerdeAttribute::Rename("completed".to_string())])
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -162,7 +160,6 @@ fn test_tuple_enum_no_display_impl() {
         .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -186,7 +183,6 @@ fn test_enum_with_docs() {
     name: EnumToken::new("Status"),
     docs: Documentation::from_lines(["Represents the status of an item.", "Can be active or inactive."]),
     variants: vec![make_unit_variant("Active"), make_unit_variant("Inactive")],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -269,7 +265,6 @@ fn test_enum_variant_attributes() {
         .build(),
       make_unit_variant("V2"),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -288,7 +283,6 @@ fn test_enum_variant_attributes() {
   let outer_attrs_def = EnumDef {
     name: EnumToken::new("Flagged"),
     variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![OuterAttr::SkipSerializingNone],
     case_insensitive: false,
@@ -324,7 +318,6 @@ fn test_enum_serde_attributes() {
             .serde_attrs(vec![SerdeAttribute::Rename("completed".to_string())])
             .build(),
         ],
-        discriminator: None,
         serde_attrs: vec![],
         outer_attrs: vec![],
         case_insensitive: false,
@@ -337,29 +330,10 @@ fn test_enum_serde_attributes() {
       ],
     ),
     (
-      "discriminator tag",
-      EnumDef {
-        name: EnumToken::new("Event"),
-        variants: vec![
-          make_unit_variant("Created"),
-          make_unit_variant("Updated"),
-          make_unit_variant("Deleted"),
-        ],
-        discriminator: Some("eventType".to_string()),
-        serde_attrs: vec![],
-        outer_attrs: vec![],
-        case_insensitive: false,
-        methods: vec![],
-        ..Default::default()
-      },
-      vec![("# [serde (tag = \"eventType\")]", "serde tag attribute")],
-    ),
-    (
       "untagged",
       EnumDef {
         name: EnumToken::new("AnyValue"),
         variants: vec![make_unit_variant("StringVal"), make_unit_variant("NumberVal")],
-        discriminator: None,
         serde_attrs: vec![SerdeAttribute::Untagged],
         outer_attrs: vec![],
         case_insensitive: false,
@@ -396,7 +370,6 @@ fn test_case_insensitive_enum() {
         .serde_attrs(vec![SerdeAttribute::Rename("in-progress".to_string())])
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
@@ -437,7 +410,6 @@ fn test_case_insensitive_enum() {
       make_unit_variant("Low"),
       make_unit_variant("Unknown"),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
@@ -560,7 +532,6 @@ fn test_enum_constructor_methods() {
         ))]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -598,7 +569,6 @@ fn test_enum_constructor_methods() {
         ))]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -640,7 +610,6 @@ fn test_enum_constructor_methods_without_docs() {
         ))]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -683,7 +652,6 @@ fn test_known_value_constructor_methods() {
         .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,

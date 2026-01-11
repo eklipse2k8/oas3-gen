@@ -265,7 +265,6 @@ fn test_cache_operations() {
   let enum1 = RustType::Enum(EnumDef {
     name: EnumToken::new("FirstEnum"),
     variants: vec![],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -276,7 +275,6 @@ fn test_cache_operations() {
   let enum2 = RustType::Enum(EnumDef {
     name: EnumToken::new("SecondEnum"),
     variants: vec![],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,

@@ -14,7 +14,6 @@ pub enum SerdeAttribute {
   Rename(String),
   Skip,
   SkipDeserializing,
-  Tag(String),
   Untagged,
 }
 
@@ -28,7 +27,6 @@ impl ToTokens for SerdeAttribute {
       Self::Rename(name) => quote! { rename = #name },
       Self::Skip => quote! { skip },
       Self::SkipDeserializing => quote! { skip_deserializing },
-      Self::Tag(field) => quote! { tag = #field },
       Self::Untagged => quote! { untagged },
     };
     tokens.extend(attr);

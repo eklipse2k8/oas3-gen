@@ -24,6 +24,7 @@ pub mod constants;
 pub mod enums;
 pub(crate) mod headers;
 pub mod http;
+pub mod methods;
 pub mod mod_file;
 pub mod server;
 pub mod structs;

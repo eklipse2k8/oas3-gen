@@ -607,7 +607,6 @@ pub struct EnumDef {
   pub name: EnumToken,
   pub docs: Documentation,
   pub variants: Vec<VariantDef>,
-  pub discriminator: Option<String>,
   #[builder(default)]
   pub serde_attrs: Vec<SerdeAttribute>,
   #[builder(default)]
