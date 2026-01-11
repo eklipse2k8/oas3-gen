@@ -5,6 +5,18 @@ You are a Rust code generation architecture expert. Your task is to refactor cod
 
 ---
 
+## Prerequisites
+
+Before making any changes, read and understand:
+1. **CLAUDE.md** - Project guidelines and architecture overview
+2. **docs/architecture.md** - Directory structure and module organization
+3. **docs/coding-standards.md** - Naming conventions, patterns, and style rules
+4. **docs/testing.md** - Fixtures
+
+All changes must adhere to these project standards.
+
+---
+
 ## Phase 1: Analysis
 
 Before making changes:
@@ -21,12 +33,13 @@ Before making changes:
 
 ## Phase 2: Decomposition Strategy
 
-Break apart large generators into composable Fragment types following these principles:
+Break apart generators into their smallest composable Fragment types following these principles:
 
 ### 2.1 Fragment Design Rules
 
 **Ownership**: Fragments MUST own their data (no lifetime parameters)
-- Clone data from AST types into Fragment fields
+- Store AST types directly when possible (avoid expanding into individual fields)
+- Only expand parameters when the AST type cannot be stored directly
 - Fragments are immutable after construction
 
 **Single Responsibility**: Each Fragment renders ONE logical piece of code
@@ -65,38 +78,28 @@ Each Fragment should follow this structure:
 ```rust
 #[derive(Clone, Debug)]
 pub(crate) struct SomeFragment {
-  // Owned data extracted from AST
-  name: SomeToken,
-  field: String,
-  // Pre-computed TokenStreams for complex attributes
-  attrs: TokenStream,
+  // Store AST types directly when possible
+  def: SomeAstDef,
+  // Additional context not in the AST
+  visibility: Visibility,
 }
 
 impl SomeFragment {
-  pub(crate) fn new(ast_type: AstType) -> Self {
-    // Extract and transform data from AST
-    Self {
-      name: ast_type.name,
-      field: ast_type.field,
-      attrs: compute_attrs(&ast_type),
-    }
+  pub(crate) fn new(def: SomeAstDef, visibility: Visibility) -> Self {
+    Self { def, visibility }
   }
 }
 
 impl ToTokens for SomeFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = &self.name;
-    let field = &self.field;
-    let attrs = &self.attrs;
+    let name = &self.def.name;
+    let docs = &self.def.docs;
+    let vis = &self.visibility;
     
-    let ts = quote! {
-      #attrs
-      struct #name {
-        #field
-      }
-    };
-    
-    tokens.extend(ts);
+    tokens.extend(quote! {
+      #docs
+      #vis struct #name { }
+    });
   }
 }
 ```
@@ -153,9 +156,43 @@ Identify and create Fragments for these common patterns:
 After refactoring:
 
 1. **Run tests**: `cargo test` - all existing tests must pass
-2. **Run clippy**: `cargo clippy --all -- -W clippy::pedantic` - no warnings
-3. **Rebuild fixtures**: Regenerate any fixture files to verify output unchanged
-4. **Check for dead code**: Ensure no unused types or functions remain
+
+2. **Rebuild fixtures**: Regenerate fixture files
+
+3. **Run clippy with autofix**: 
+   ```bash
+   cargo clippy --fix --all --tests --allow-dirty -- -W clippy::pedantic
+   ```
+
+4. **Format code**:
+   ```bash
+   cargo +nightly fmt --all
+   ```
+
+5. **Verify fixtures unchanged**: Run `git diff --stat crates/oas3-gen/fixtures/` to confirm no functional changes (formatting-only differences are acceptable if fixtures were not previously formatted)
+
+6. **Check for dead code**: Ensure no unused types or functions remain
+
+---
+
+## Phase 6: Remove Indirection
+
+As a final pass, once all changes have been made and tests pass:
+
+1. **Remove wrapper functions**: Delete any functions that simply delegate to Fragment
+2. **Update all call sites**: Change call sites to use Fragment directly
+3. **Verify again**: Run tests and clippy one more time
+
+---
+
+## Test Organization
+
+**Do NOT write inline tests** in the module file. Keep all tests in the `tests/` folder following the existing project architecture:
+
+- Module: `codegen/type_aliases.rs`
+- Tests: `codegen/tests/type_alias_tests.rs`
+
+Update the `tests/mod.rs` to include any new test modules.
 
 ---
 
@@ -177,68 +214,69 @@ Present your work as:
 
 Before (monolithic):
 ```rust
-impl EnumGenerator {
-  fn generate(&self) -> TokenStream {
-    let variants = self.def.variants.iter().map(|v| {
-      let name = &v.name;
-      let attrs = generate_attrs(&v.attrs);
-      quote! { #attrs #name }
-    });
-    
-    quote! {
-      enum #name { #(#variants),* }
-    }
+pub(crate) fn generate_type_alias(
+  _context: &Rc<CodeGenerationContext>,
+  def: &TypeAliasDef,
+  visibility: Visibility,
+) -> TokenStream {
+  let name = &def.name;
+  let docs = &def.docs;
+  let vis = visibility.to_tokens();
+  let target = coercion::parse_type_string(&def.target.to_rust_type());
+
+  quote! {
+    #docs
+    #vis type #name = #target;
   }
 }
 ```
 
-After (composable):
+After (composable, no indirection):
 ```rust
 #[derive(Clone, Debug)]
-pub(crate) struct EnumVariantFragment {
-  name: EnumVariantToken,
-  attrs: TokenStream,
+pub(crate) struct TypeAliasFragment {
+  def: TypeAliasDef,
+  visibility: Visibility,
 }
 
-impl EnumVariantFragment {
-  pub(crate) fn new(variant: VariantDef) -> Self {
-    Self {
-      name: variant.name,
-      attrs: generate_attrs(&variant.attrs),
-    }
+impl TypeAliasFragment {
+  pub(crate) fn new(def: TypeAliasDef, visibility: Visibility) -> Self {
+    Self { def, visibility }
   }
 }
 
-impl ToTokens for EnumVariantFragment {
+impl ToTokens for TypeAliasFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = &self.name;
-    let attrs = &self.attrs;
-    tokens.extend(quote! { #attrs #name });
-  }
-}
+    let name = &self.def.name;
+    let docs = &self.def.docs;
+    let target = &self.def.target;
+    let vis = &self.visibility;
 
-impl EnumGenerator {
-  fn generate(&self) -> TokenStream {
-    let variants: Vec<_> = self.def.variants.iter()
-      .map(|v| EnumVariantFragment::new(v.clone()))
-      .collect();
-    let variants = EnumVariants::new(variants);
-    
-    quote! {
-      enum #name { #variants }
-    }
+    tokens.extend(quote! {
+      #docs
+      #vis type #name = #target;
+    });
   }
 }
+```
+
+Call site (direct usage, no wrapper):
+```rust
+RustType::TypeAlias(def) => TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream(),
 ```
 
 ---
 
 ## Checklist
 
+- [ ] Read CLAUDE.md and coding standards before starting
 - [ ] All Fragment types own their data (no lifetimes)
 - [ ] All Fragment types implement `ToTokens`
 - [ ] Fragment names use the `Fragment` suffix
+- [ ] AST types stored directly (not expanded into fields) when possible
 - [ ] Generic containers used where patterns repeat
+- [ ] No inline tests - all tests in tests/ folder
+- [ ] No wrapper functions - call sites use Fragment directly
 - [ ] Existing tests pass
 - [ ] No clippy warnings
 - [ ] No dead code remains

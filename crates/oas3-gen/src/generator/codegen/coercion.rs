@@ -18,10 +18,6 @@ pub(crate) fn json_to_rust_literal(value: &serde_json::Value, rust_type: &TypeRe
   }
 }
 
-pub(crate) fn parse_type_string(type_str: &str) -> TokenStream {
-  type_str.parse().unwrap_or_else(|_| quote! { serde_json::Value })
-}
-
 fn typed_literal(value: impl std::fmt::Display, type_suffix: &str) -> TokenStream {
   format!("{value}{type_suffix}")
     .parse()

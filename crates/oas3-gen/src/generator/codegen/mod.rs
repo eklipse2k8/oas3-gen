@@ -331,7 +331,9 @@ impl SchemaCodeGenerator {
     match rust_type {
       RustType::Struct(def) => structs::StructGenerator::new(&self.context, def, regex_lookup, self.visibility).emit(),
       RustType::Enum(def) => enums::EnumGenerator::new(&self.context, def, self.visibility).generate(),
-      RustType::TypeAlias(def) => type_aliases::generate_type_alias(&self.context, def, self.visibility),
+      RustType::TypeAlias(def) => {
+        type_aliases::TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream()
+      }
       RustType::DiscriminatedEnum(def) => {
         enums::DiscriminatedEnumGenerator::new(&self.context, def, self.visibility).generate()
       }
