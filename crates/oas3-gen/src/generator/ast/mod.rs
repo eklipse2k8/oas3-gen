@@ -65,6 +65,9 @@ pub enum SerdeMode {
   DeserializeOnly,
 }
 
+pub type EnumMethod = MethodNode<EnumMethodKind>;
+pub type StructMethod = MethodNode<MethodKind>;
+
 /// Discriminated enum definition (uses macro for custom ser/de)
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct DiscriminatedEnumDef {
@@ -428,14 +431,6 @@ impl StructDef {
   }
 }
 
-/// Associated method definition for a struct
-#[derive(Debug, Clone, PartialEq, Eq, bon::Builder)]
-pub struct StructMethod {
-  pub name: MethodNameToken,
-  pub docs: Documentation,
-  pub kind: MethodKind,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MethodKind {
   /// Method to parse a reqwest response into the struct
@@ -474,13 +469,13 @@ pub struct BuilderNestedStruct {
 
 /// Associated method definition for an enum
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
-pub struct EnumMethod {
+pub struct MethodNode<Kind> {
   pub name: MethodNameToken,
   pub docs: Documentation,
-  pub kind: EnumMethodKind,
+  pub kind: Kind,
 }
 
-impl EnumMethod {
+impl MethodNode<EnumMethodKind> {
   pub fn new(name: impl Into<MethodNameToken>, kind: EnumMethodKind, docs: impl Into<Documentation>) -> Self {
     Self {
       name: name.into(),

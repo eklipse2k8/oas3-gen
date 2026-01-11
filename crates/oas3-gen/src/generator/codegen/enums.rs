@@ -1,17 +1,18 @@
 use std::rc::Rc;
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, format_ident, quote};
+use quote::{ToTokens, TokenStreamExt as _, format_ident, quote};
 
 use super::{
   CodeGenerationContext, Visibility,
-  attributes::{generate_deprecated_attr, generate_derives_from_slice, generate_outer_attrs, generate_serde_attrs},
+  attributes::{generate_deprecated_attr, generate_outer_attrs, generate_serde_attrs},
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumMethod, EnumMethodKind, ResponseEnumDef,
-    ResponseVariant, SerdeAttribute, SerdeMode, StatusCodeToken, VariantContent, VariantDef,
+    DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
+    ResponseEnumDef, ResponseVariant, SerdeAttribute, SerdeMode, VariantContent, VariantDef,
   },
+  codegen::{attributes::DeriveAttribute, server::AxumIntoResponse},
   converter::GenerationTarget,
 };
 
@@ -23,7 +24,7 @@ fn box_if_needed(boxed: bool, inner: TokenStream) -> TokenStream {
   }
 }
 
-fn emit_enum_methods(name: impl ToTokens, vis: &TokenStream, methods: &[EnumMethod]) -> TokenStream {
+fn emit_enum_methods(name: impl ToTokens, vis: Visibility, methods: &[EnumMethod]) -> TokenStream {
   if methods.is_empty() {
     return quote! {};
   }
@@ -37,7 +38,7 @@ fn emit_enum_methods(name: impl ToTokens, vis: &TokenStream, methods: &[EnumMeth
   }
 }
 
-fn emit_enum_method(vis: &TokenStream, method: &EnumMethod) -> TokenStream {
+fn emit_enum_method(vis: Visibility, method: &EnumMethod) -> TokenStream {
   let method_name = &method.name;
   let docs = &method.docs;
 
@@ -99,14 +100,14 @@ fn emit_enum_method(vis: &TokenStream, method: &EnumMethod) -> TokenStream {
 #[derive(Clone, Debug)]
 pub(crate) struct EnumGenerator {
   def: EnumDef,
-  vis: TokenStream,
+  vis: Visibility,
 }
 
 impl EnumGenerator {
   pub fn new(_context: &Rc<CodeGenerationContext>, def: &EnumDef, visibility: Visibility) -> Self {
     Self {
       def: def.clone(),
-      vis: visibility.to_tokens(),
+      vis: visibility,
     }
   }
 
@@ -114,11 +115,11 @@ impl EnumGenerator {
     let name = &self.def.name;
     let docs = &self.def.docs;
 
-    let derives = generate_derives_from_slice(&self.def.derives());
+    let derives = DeriveAttribute::new(self.def.derives());
 
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = self.emit_serde_attrs();
-    let methods = emit_enum_methods(name, &self.vis, &self.def.methods);
+    let methods = emit_enum_methods(name, self.vis, &self.def.methods);
     let variants = self.emit_variants();
 
     let vis = &self.vis;
@@ -277,14 +278,14 @@ impl EnumGenerator {
 #[derive(Clone, Debug)]
 pub(crate) struct DiscriminatedEnumGenerator {
   def: DiscriminatedEnumDef,
-  vis: TokenStream,
+  vis: Visibility,
 }
 
 impl DiscriminatedEnumGenerator {
   pub fn new(_context: &Rc<CodeGenerationContext>, def: &DiscriminatedEnumDef, visibility: Visibility) -> Self {
     Self {
       def: def.clone(),
-      vis: visibility.to_tokens(),
+      vis: visibility,
     }
   }
 
@@ -293,24 +294,21 @@ impl DiscriminatedEnumGenerator {
     let disc_field = &self.def.discriminator_field;
     let docs = &self.def.docs;
 
-    let variants: Vec<TokenStream> = self
+    let variants = self
       .def
       .all_variants()
-      .map(|v| {
-        let variant_name = &v.variant_name;
-        let type_name = &v.type_name;
-        quote! { #variant_name(#type_name) }
-      })
-      .collect();
+      .map(|v| EnumDiscriminantVariant::new(v.clone()))
+      .collect::<Vec<_>>();
 
-    let derives = generate_derives_from_slice(&self.def.derives());
+    let variants = EnumVariants::new(variants);
+    let derives = DeriveAttribute::new(self.def.derives());
 
     let vis = &self.vis;
     let enum_def = quote! {
       #docs
       #derives
       #vis enum #name {
-        #(#variants),*
+        #variants
       }
     };
 
@@ -323,7 +321,7 @@ impl DiscriminatedEnumGenerator {
     let default_impl = self.emit_default_impl();
     let serialize_impl = self.emit_serialize_impl();
     let deserialize_impl = self.emit_deserialize_impl();
-    let methods_impl = emit_enum_methods(name, &self.vis, &self.def.methods);
+    let methods_impl = emit_enum_methods(name, self.vis, &self.def.methods);
 
     quote! {
       #enum_def
@@ -445,7 +443,7 @@ impl DiscriminatedEnumGenerator {
 pub(crate) struct ResponseEnumGenerator {
   context: Rc<CodeGenerationContext>,
   def: ResponseEnumDef,
-  vis: TokenStream,
+  vis: Visibility,
 }
 
 impl ResponseEnumGenerator {
@@ -453,119 +451,126 @@ impl ResponseEnumGenerator {
     Self {
       context: context.clone(),
       def: def.clone(),
-      vis: visibility.to_tokens(),
+      vis: visibility,
     }
   }
 
   pub fn generate(&self) -> TokenStream {
-    let name = &self.def.name;
-    let docs = &self.def.docs;
-
-    let variants: Vec<TokenStream> = self
-      .def
-      .variants
-      .iter()
-      .map(|v| {
-        let variant_name = &v.variant_name;
-        let doc_line = v.doc_line();
-        let content = v.schema_type.as_ref().map(|schema| {
-          quote! { (#schema) }
-        });
-
-        quote! {
-          #[doc = #doc_line]
-          #variant_name #content
-        }
-      })
-      .collect();
-
-    let derives = generate_derives_from_slice(&self.def.derives());
-
+    let response = ResponseEnum::new(self.vis, self.def.clone());
     let into_response_impl = if self.context.config.target == GenerationTarget::Server {
-      self.emit_into_response_impl()
+      AxumIntoResponse::new(self.def.clone()).to_token_stream()
     } else {
       quote! {}
     };
 
-    let vis = &self.vis;
     quote! {
-      #docs
-      #derives
-      #vis enum #name {
-        #(#variants),*
-      }
+      #response
       #into_response_impl
-    }
-  }
-
-  fn emit_into_response_impl(&self) -> TokenStream {
-    self
-      .def
-      .try_from
-      .iter()
-      .map(|_| {
-        let name = &self.def.name;
-        let match_arms: Vec<TokenStream> = self.def.variants.iter().map(Self::emit_response_arm).collect();
-
-        quote! {
-          impl core::convert::TryFrom<&#name> for axum::response::IntoResponse {
-            type Error = http::header::InvalidHeaderValue;
-
-            fn try_from(value: &#name) -> core::result::Result<Self, Self::Error> {
-              match self {
-                #(#match_arms)*
-              }
-            }
-          }
-
-          impl core::convert::TryFrom<#name> for axum::response::IntoResponse {
-            type Error = http::header::InvalidHeaderValue;
-
-            fn try_from(value: #name) -> core::result::Result<Self, Self::Error> {
-              http::HeaderMap::try_from(&headers)
-            }
-          }
-        }
-      })
-      .collect()
-  }
-
-  fn emit_response_arm(variant: &ResponseVariant) -> TokenStream {
-    let variant_name = &variant.variant_name;
-    let status_code = emit_status_code(variant.status_code);
-
-    if variant.schema_type.is_some() {
-      quote! {
-        Self::#variant_name(data) => (#status_code, axum::Json(data)).into_response(),
-      }
-    } else {
-      quote! {
-        Self::#variant_name => #status_code.into_response(),
-      }
     }
   }
 }
 
-fn emit_status_code(code: StatusCodeToken) -> TokenStream {
-  match code {
-    StatusCodeToken::Ok200 => quote! { axum::http::StatusCode::OK },
-    StatusCodeToken::Created201 => quote! { axum::http::StatusCode::CREATED },
-    StatusCodeToken::Accepted202 => quote! { axum::http::StatusCode::ACCEPTED },
-    StatusCodeToken::NoContent204 => quote! { axum::http::StatusCode::NO_CONTENT },
-    StatusCodeToken::BadRequest400 => quote! { axum::http::StatusCode::BAD_REQUEST },
-    StatusCodeToken::Unauthorized401 => quote! { axum::http::StatusCode::UNAUTHORIZED },
-    StatusCodeToken::Forbidden403 => quote! { axum::http::StatusCode::FORBIDDEN },
-    StatusCodeToken::NotFound404 => quote! { axum::http::StatusCode::NOT_FOUND },
-    StatusCodeToken::Conflict409 => quote! { axum::http::StatusCode::CONFLICT },
-    StatusCodeToken::UnprocessableEntity422 => quote! { axum::http::StatusCode::UNPROCESSABLE_ENTITY },
-    StatusCodeToken::InternalServerError500 => quote! { axum::http::StatusCode::INTERNAL_SERVER_ERROR },
-    StatusCodeToken::Default => quote! { axum::http::StatusCode::INTERNAL_SERVER_ERROR },
-    other => {
-      if let Some(code) = other.code() {
-        quote! { axum::http::StatusCode::from_u16(#code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR) }
-      } else {
-        quote! { axum::http::StatusCode::INTERNAL_SERVER_ERROR }
+#[derive(Clone, Debug)]
+pub struct ResponseEnum(Visibility, ResponseEnumDef);
+
+impl ResponseEnum {
+  pub(crate) fn new(vis: Visibility, def: ResponseEnumDef) -> Self {
+    Self(vis, def)
+  }
+
+  fn variants(&self) -> Vec<EnumResponseVariant> {
+    self
+      .1
+      .variants
+      .iter()
+      .map(|v| EnumResponseVariant::new(v.clone()))
+      .collect()
+  }
+}
+
+impl ToTokens for ResponseEnum {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = &self.1.name;
+    let docs = &self.1.docs;
+    let variants = EnumVariants::new(self.variants());
+    let derives = DeriveAttribute::new(self.1.derives());
+    let vis = &self.0;
+
+    let ts = quote! {
+      #docs
+      #derives
+      #vis enum #name {
+        #variants
       }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumVariants<T>(Vec<T>);
+
+impl<T: ToTokens> EnumVariants<T> {
+  pub fn new(variants: Vec<T>) -> Self {
+    Self(variants)
+  }
+}
+
+impl<T: ToTokens> ToTokens for EnumVariants<T> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    if self.0.is_empty() {
+      return;
     }
+
+    let variants = &self.0;
+    tokens.append_all(quote! { #(#variants),* });
+  }
+}
+
+/// Wrapper to convert `DiscriminatedVariant` to Enum variant
+#[derive(Clone, Debug)]
+pub(crate) struct EnumDiscriminantVariant(DiscriminatedVariant);
+
+impl EnumDiscriminantVariant {
+  pub(crate) fn new(variant: DiscriminatedVariant) -> Self {
+    Self(variant)
+  }
+}
+
+impl ToTokens for EnumDiscriminantVariant {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let variant_name = &self.0.variant_name;
+    let type_name = &self.0.type_name;
+    let ts = quote! { #variant_name(#type_name) };
+
+    tokens.extend(ts);
+  }
+}
+
+/// Wrapper to convert `ResponseVariant` to Enum variant
+#[derive(Clone, Debug)]
+pub(crate) struct EnumResponseVariant(ResponseVariant);
+
+impl EnumResponseVariant {
+  pub(crate) fn new(variant: ResponseVariant) -> Self {
+    Self(variant)
+  }
+}
+
+impl ToTokens for EnumResponseVariant {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let variant_name = &self.0.variant_name;
+    let doc_line = self.0.doc_line();
+    let content = self.0.schema_type.as_ref().map(|schema| {
+      quote! { (#schema) }
+    });
+
+    let ts = quote! {
+      #[doc = #doc_line]
+      #variant_name #content
+    };
+
+    tokens.extend(ts);
   }
 }

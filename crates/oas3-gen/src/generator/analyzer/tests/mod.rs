@@ -14,11 +14,11 @@ pub(super) fn build_type_usage_map(
   TypeAnalyzer::build_usage_map(seed_usage, types, &dep_graph)
 }
 
-pub(super) fn add_nested_validation_attrs(types: &mut Vec<RustType>) {
-  let mut operations = vec![];
+pub(super) fn add_nested_validation_attrs(types: Vec<RustType>) -> Vec<RustType> {
+  let operations = vec![];
   let seed = BTreeMap::new();
-  let mut analyzer = TypeAnalyzer::new(types, &mut operations, seed);
-  analyzer.add_nested_validation_attrs();
+  let analyzer = TypeAnalyzer::new(types, operations, seed);
+  analyzer.analyze().types
 }
 
 pub(super) fn update_derives_from_usage(types: &mut [RustType], usage_map: &BTreeMap<EnumToken, TypeUsage>) {

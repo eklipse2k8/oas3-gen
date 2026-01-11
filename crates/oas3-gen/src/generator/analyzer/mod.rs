@@ -1,12 +1,18 @@
 mod dependency_graph;
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
 
 use self::dependency_graph::DependencyGraph;
 use crate::generator::ast::{
   ContentCategory, DefaultAtom, DerivesProvider, EnumToken, MethodKind, OperationInfo, OuterAttr, RustPrimitive,
-  RustType, SerdeImpl, SerdeMode, StatusCodeToken, StructKind, TypeRef, ValidationAttribute,
+  RustType, SerdeImpl, SerdeMode, StatusCodeToken, StructKind, TypeRef, ValidationAttribute, constants::HttpHeaderRef,
 };
+
+pub struct AnalysisOutput {
+  pub types: Vec<RustType>,
+  pub operations: Vec<OperationInfo>,
+  pub header_refs: Vec<HttpHeaderRef>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeUsage {
@@ -33,20 +39,20 @@ impl TypeUsage {
   }
 }
 
-pub(crate) struct TypeAnalyzer<'a> {
-  types: &'a mut Vec<RustType>,
-  operations: &'a mut [OperationInfo],
+pub(crate) struct TypeAnalyzer {
+  types: Vec<RustType>,
+  operations: Vec<OperationInfo>,
   usage_map: BTreeMap<EnumToken, TypeUsage>,
 }
 
-impl<'a> TypeAnalyzer<'a> {
+impl TypeAnalyzer {
   pub(crate) fn new(
-    types: &'a mut Vec<RustType>,
-    operations: &'a mut [OperationInfo],
+    types: Vec<RustType>,
+    operations: Vec<OperationInfo>,
     seed_usage: BTreeMap<EnumToken, (bool, bool)>,
   ) -> Self {
-    let dependency_graph = DependencyGraph::build(types);
-    let usage_map = Self::build_usage_map(seed_usage, types, &dependency_graph);
+    let dependency_graph = DependencyGraph::build(&types);
+    let usage_map = Self::build_usage_map(seed_usage, &types, &dependency_graph);
 
     Self {
       types,
@@ -55,10 +61,57 @@ impl<'a> TypeAnalyzer<'a> {
     }
   }
 
-  pub(crate) fn analyze(mut self) {
+  pub(crate) fn analyze(mut self) -> AnalysisOutput {
     self.deduplicate_response_enums();
     self.add_nested_validation_attrs();
     self.update_serde_modes();
+
+    let header_refs = self.extract_header_refs();
+    let types = self.sort_and_dedup_types();
+
+    AnalysisOutput {
+      types,
+      operations: self.operations,
+      header_refs,
+    }
+  }
+
+  fn sort_and_dedup_types(&self) -> Vec<RustType> {
+    let mut map = BTreeMap::new();
+
+    for t in &self.types {
+      let name = t.type_name().to_string();
+      let priority = t.type_priority();
+
+      match map.entry(name) {
+        Entry::Vacant(e) => {
+          e.insert(t.clone());
+        }
+        Entry::Occupied(mut e) => {
+          if priority > e.get().type_priority() {
+            e.insert(t.clone());
+          }
+        }
+      }
+    }
+
+    map.into_values().collect()
+  }
+
+  fn extract_header_refs(&self) -> Vec<HttpHeaderRef> {
+    self
+      .types
+      .iter()
+      .filter_map(|t| match t {
+        RustType::Struct(def) if def.kind == StructKind::HeaderParams => Some(def),
+        _ => None,
+      })
+      .flat_map(|def| &def.fields)
+      .filter_map(|field| field.original_name.as_deref())
+      .collect::<BTreeSet<_>>()
+      .into_iter()
+      .map(HttpHeaderRef::from)
+      .collect()
   }
 
   fn build_usage_map(
@@ -201,7 +254,7 @@ impl<'a> TypeAnalyzer<'a> {
       self.types.remove(idx);
     }
 
-    for op in self.operations.iter_mut() {
+    for op in &mut self.operations {
       if let Some(ref current) = op.response_enum
         && let Some(new_name) = replacements.get(&current.to_string())
       {
@@ -209,7 +262,7 @@ impl<'a> TypeAnalyzer<'a> {
       }
     }
 
-    for rt in self.types.iter_mut() {
+    for rt in &mut self.types {
       let RustType::Struct(def) = rt else {
         continue;
       };
@@ -237,7 +290,7 @@ impl<'a> TypeAnalyzer<'a> {
     while changed {
       changed = false;
 
-      for rust_type in self.types.iter_mut() {
+      for rust_type in &mut self.types {
         let RustType::Struct(def) = rust_type else {
           continue;
         };
@@ -275,7 +328,7 @@ impl<'a> TypeAnalyzer<'a> {
   }
 
   fn update_serde_modes(&mut self) {
-    for rust_type in self.types.iter_mut() {
+    for rust_type in &mut self.types {
       match rust_type {
         RustType::Struct(def) => {
           let key: EnumToken = def.name.as_str().into();

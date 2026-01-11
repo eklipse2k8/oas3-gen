@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
+use quote::{ToTokens, TokenStreamExt as _, quote};
 
 use super::coercion;
 use crate::generator::ast::{
@@ -27,6 +29,26 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Documentation {
   }
 
   docs
+}
+
+#[derive(Clone, Debug)]
+pub struct DeriveAttribute<T>(BTreeSet<T>);
+
+impl<T: ToTokens> DeriveAttribute<T> {
+  pub fn new(derives: BTreeSet<T>) -> Self {
+    Self(derives)
+  }
+}
+
+impl<T: ToTokens> ToTokens for DeriveAttribute<T> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    if self.0.is_empty() {
+      return;
+    }
+
+    let derives = &self.0;
+    tokens.append_all(quote! { #[derive(#(#derives),*)] });
+  }
 }
 
 pub(crate) fn generate_derives_from_slice<'a>(derives: impl IntoIterator<Item = &'a DeriveTrait>) -> TokenStream {

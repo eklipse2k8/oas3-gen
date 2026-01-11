@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet, HashMap},
+  collections::{BTreeMap, HashMap},
   rc::Rc,
 };
 
@@ -9,8 +9,8 @@ use quote::{ToTokens, quote};
 
 use self::{client::ClientGenerator, mod_file::ModFileGenerator, server::ServerGenerator};
 use super::ast::{
-  ClientRootNode, GlobalLintsNode, MethodKind, OperationInfo, RegexKey, RustType, SerdeImpl, StructKind,
-  ValidationAttribute, tokens::ConstToken,
+  ClientRootNode, GlobalLintsNode, MethodKind, OperationInfo, RegexKey, RustType, SerdeImpl, ValidationAttribute,
+  tokens::ConstToken,
 };
 use crate::generator::{
   ast::{Documentation, FileHeaderNode, constants::HttpHeaderRef},
@@ -23,6 +23,7 @@ pub mod coercion;
 pub mod constants;
 pub mod enums;
 pub(crate) mod headers;
+pub mod http;
 pub mod mod_file;
 pub mod server;
 pub mod structs;
@@ -37,6 +38,17 @@ pub enum Visibility {
   Public,
   Crate,
   File,
+}
+
+impl ToTokens for Visibility {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let ts = match self {
+      Visibility::Public => quote! { pub },
+      Visibility::Crate => quote! { pub(crate) },
+      Visibility::File => quote! {},
+    };
+    tokens.extend(ts);
+  }
 }
 
 impl Visibility {
@@ -117,37 +129,6 @@ fn generate_source(
   Ok(format!("{header_formatted}\n{code_formatted}\n"))
 }
 
-fn sort_and_dedup_types(types: &[RustType]) -> Vec<RustType> {
-  let mut types = types.to_vec();
-
-  // Sort by name (primary), then priority (secondary, lower = better)
-  types.sort_by(|a, b| {
-    a.type_name()
-      .cmp(&b.type_name())
-      .then_with(|| a.type_priority().cmp(&b.type_priority()))
-  });
-
-  // Dedup keeps first of each name group (which has better priority)
-  types.dedup_by(|a, b| a.type_name() == b.type_name());
-
-  types
-}
-
-fn unique_header_tokens(types: &[RustType]) -> Vec<HttpHeaderRef> {
-  types
-    .iter()
-    .filter_map(|t| match t {
-      RustType::Struct(def) if def.kind == StructKind::HeaderParams => Some(def),
-      _ => None,
-    })
-    .flat_map(|def| &def.fields)
-    .filter_map(|field| field.original_name.as_ref())
-    .collect::<BTreeSet<_>>()
-    .into_iter()
-    .map(|name| HttpHeaderRef::from(name.as_str()))
-    .collect()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GeneratedFileType {
   Client,
@@ -204,17 +185,21 @@ pub struct SchemaCodeGenerator {
   context: Rc<CodeGenerationContext>,
   rust_types: Rc<Vec<RustType>>,
   operations: Rc<Vec<OperationInfo>>,
+  header_refs: Rc<Vec<HttpHeaderRef>>,
   client: Rc<ClientRootNode>,
   visibility: Visibility,
   source_path: String,
   gen_version: String,
 }
 
+#[bon::bon]
 impl SchemaCodeGenerator {
+  #[builder]
   pub fn new(
     config: CodegenConfig,
     rust_types: Vec<RustType>,
     operations: Vec<OperationInfo>,
+    header_refs: Vec<HttpHeaderRef>,
     client: ClientRootNode,
     visibility: Visibility,
     source_path: String,
@@ -224,13 +209,16 @@ impl SchemaCodeGenerator {
       context: Rc::new(CodeGenerationContext::new(config)),
       rust_types: Rc::new(rust_types),
       operations: Rc::new(operations),
+      header_refs: Rc::new(header_refs),
       client: Rc::new(client),
       visibility,
       source_path,
       gen_version,
     }
   }
+}
 
+impl SchemaCodeGenerator {
   pub fn generate_types(&self) -> anyhow::Result<GeneratedResult> {
     let lint_config = GlobalLintsNode::default();
     let code_tokens = self.generate_types_tokens();
@@ -297,16 +285,15 @@ impl SchemaCodeGenerator {
   }
 
   fn generate_types_tokens(&self) -> TokenStream {
-    let ordered = sort_and_dedup_types(&self.rust_types);
-    let (regex_consts, regex_lookup) = constants::generate_regex_constants(&ordered);
-    let header_consts = constants::generate_header_constants(&unique_header_tokens(&ordered));
+    let (regex_consts, regex_lookup) = constants::generate_regex_constants(&self.rust_types);
+    let header_consts = constants::generate_header_constants(&self.header_refs);
 
     let mut needs_serialize = false;
     let mut needs_deserialize = false;
     let mut needs_validate = false;
     let mut type_tokens = vec![];
 
-    for ty in &ordered {
+    for ty in self.rust_types.iter() {
       needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
       needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
       needs_validate |= matches!(ty, RustType::Struct(def) if def.fields.iter().any(|f| f.validation_attrs.contains(&ValidationAttribute::Nested)));

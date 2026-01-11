@@ -8,8 +8,8 @@ use strum::Display;
 
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
-  analyzer::TypeAnalyzer,
-  ast::{ClientRootNode, OperationInfo, OperationKind, RustType, StructToken},
+  analyzer::{AnalysisOutput, TypeAnalyzer},
+  ast::{ClientRootNode, OperationInfo, OperationKind, RustType, StructToken, constants::HttpHeaderRef},
   codegen::{GeneratedResult, SchemaCodeGenerator, Visibility},
   converter::{
     CodegenConfig, ConverterContext, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationTarget,
@@ -142,65 +142,73 @@ impl Orchestrator {
   }
 
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, client, stats) = self.run_conversion_and_analysis();
+    let (config, rust_types, operations_info, header_refs, client, stats) = self.run_conversion_and_analysis();
 
-    let codegen = SchemaCodeGenerator::new(
-      config,
-      rust_types,
-      operations_info,
-      client,
-      self.visibility,
-      source_path.to_string(),
-      OAS3_GEN_VERSION.to_string(),
-    );
+    let codegen = SchemaCodeGenerator::builder()
+      .config(config)
+      .rust_types(rust_types)
+      .operations(operations_info)
+      .header_refs(header_refs)
+      .client(client)
+      .visibility(self.visibility)
+      .source_path(source_path.to_string())
+      .gen_version(OAS3_GEN_VERSION.to_string())
+      .build();
+
     let output = codegen.generate_client()?;
     Ok(GeneratedFinalOutput::new(output, stats))
   }
 
   pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, client, stats) = self.run_conversion_and_analysis();
+    let (config, rust_types, operations_info, header_refs, client, stats) = self.run_conversion_and_analysis();
 
-    let codegen = SchemaCodeGenerator::new(
-      config,
-      rust_types,
-      operations_info,
-      client,
-      self.visibility,
-      source_path.to_string(),
-      OAS3_GEN_VERSION.to_string(),
-    );
+    let codegen = SchemaCodeGenerator::builder()
+      .config(config)
+      .rust_types(rust_types)
+      .operations(operations_info)
+      .header_refs(header_refs)
+      .client(client)
+      .visibility(self.visibility)
+      .source_path(source_path.to_string())
+      .gen_version(OAS3_GEN_VERSION.to_string())
+      .build();
+
     let output = codegen.generate_types()?;
     Ok(GeneratedFinalOutput::new(output, stats))
   }
 
   pub fn generate_client_mod(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, client, stats) = self.run_conversion_and_analysis();
+    let (config, rust_types, operations_info, header_refs, client, stats) = self.run_conversion_and_analysis();
 
-    let codegen = SchemaCodeGenerator::new(
-      config,
-      rust_types,
-      operations_info,
-      client,
-      self.visibility,
-      source_path.to_string(),
-      OAS3_GEN_VERSION.to_string(),
-    );
+    let codegen = SchemaCodeGenerator::builder()
+      .config(config)
+      .rust_types(rust_types)
+      .operations(operations_info)
+      .header_refs(header_refs)
+      .client(client)
+      .visibility(self.visibility)
+      .source_path(source_path.to_string())
+      .gen_version(OAS3_GEN_VERSION.to_string())
+      .build();
+
     let output = codegen.generate_client_mod()?;
     Ok(GeneratedFinalOutput::new(output, stats))
   }
 
   pub fn generate_server_mod(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, client, stats) = self.run_conversion_and_analysis();
+    let (config, rust_types, operations_info, header_refs, client, stats) = self.run_conversion_and_analysis();
 
-    let codegen = SchemaCodeGenerator::new(
-      config,
-      rust_types,
-      operations_info,
-      client,
-      self.visibility,
-      source_path.to_string(),
-      OAS3_GEN_VERSION.to_string(),
-    );
+    let codegen = SchemaCodeGenerator::builder()
+      .config(config)
+      .rust_types(rust_types)
+      .operations(operations_info)
+      .header_refs(header_refs)
+      .client(client)
+      .visibility(self.visibility)
+      .source_path(source_path.to_string())
+      .gen_version(OAS3_GEN_VERSION.to_string())
+      .build();
+
     let output = codegen.generate_server_mod()?;
     Ok(GeneratedFinalOutput::new(output, stats))
   }
@@ -211,13 +219,14 @@ impl Orchestrator {
     CodegenConfig,
     Vec<RustType>,
     Vec<OperationInfo>,
+    Vec<HttpHeaderRef>,
     ClientRootNode,
     GenerationStats,
   ) {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
-      mut rust_types,
-      mut operations_info,
+      rust_types,
+      operations_info,
       usage_recorder,
       stats,
       config,
@@ -230,10 +239,14 @@ impl Orchestrator {
       .build();
 
     let seed_map = usage_recorder.into_usage_map();
-    let analyzer = TypeAnalyzer::new(&mut rust_types, &mut operations_info, seed_map);
-    analyzer.analyze();
+    let analyzer = TypeAnalyzer::new(rust_types, operations_info, seed_map);
+    let AnalysisOutput {
+      types,
+      operations,
+      header_refs,
+    } = analyzer.analyze();
 
-    (config, rust_types, operations_info, client, stats)
+    (config, types, operations, header_refs, client, stats)
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {

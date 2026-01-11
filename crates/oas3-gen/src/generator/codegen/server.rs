@@ -2,7 +2,10 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::Visibility;
-use crate::generator::ast::{ClientRootNode, OperationInfo};
+use crate::generator::{
+  ast::{ClientRootNode, OperationInfo, ResponseEnumDef, ResponseVariant},
+  codegen::http::HttpStatusCode,
+};
 
 #[allow(dead_code)]
 pub struct ServerGenerator {
@@ -45,5 +48,68 @@ impl ToTokens for ServerGenerator {
     };
 
     tokens.extend(stub);
+  }
+}
+
+/// Wrapper to convert `ResponseEnumDef` to axum::IntoResponse impl tokens
+#[derive(Clone, Debug)]
+pub(crate) struct AxumIntoResponse(ResponseEnumDef);
+
+impl AxumIntoResponse {
+  pub(crate) fn new(def: ResponseEnumDef) -> Self {
+    Self(def)
+  }
+}
+
+impl ToTokens for AxumIntoResponse {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = &self.0.name;
+    let variants = self
+      .0
+      .variants
+      .iter()
+      .map(|v| AxumIntoResponseVariant::new(v.clone()))
+      .collect::<Vec<_>>();
+
+    let ts = quote! {
+      impl axum::response::IntoResponse for #name {
+        fn into_response(self) -> axum::response::Response {
+          match self {
+            #(#variants),*
+          }
+        }
+      }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+/// Wrapper to convert ResponseVariant to axum::Response tokens
+#[derive(Clone, Debug)]
+pub(crate) struct AxumIntoResponseVariant(ResponseVariant);
+
+impl AxumIntoResponseVariant {
+  pub(crate) fn new(variant: ResponseVariant) -> Self {
+    Self(variant)
+  }
+}
+
+impl ToTokens for AxumIntoResponseVariant {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let variant = &self.0.variant_name;
+    let status_code = HttpStatusCode::new(self.0.status_code);
+
+    let ts = if self.0.schema_type.is_some() {
+      quote! {
+        Self::#variant(data) => (#status_code, axum::Json(data)).into_response(),
+      }
+    } else {
+      quote! {
+        Self::#variant => #status_code.into_response(),
+      }
+    };
+
+    tokens.extend(ts);
   }
 }

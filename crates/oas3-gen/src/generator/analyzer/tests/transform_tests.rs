@@ -194,25 +194,33 @@ fn test_adds_nested_validation_attrs_transitively() {
     ..Default::default()
   };
 
-  let mut rust_types = vec![
+  let rust_types = vec![
     RustType::Struct(validated_inner),
     RustType::Struct(middle),
     RustType::Struct(outer),
   ];
 
-  add_nested_validation_attrs(&mut rust_types);
+  let rust_types = add_nested_validation_attrs(rust_types);
 
-  let RustType::Struct(middle) = &rust_types[1] else {
-    panic!("expected struct");
-  };
+  let middle = rust_types
+    .iter()
+    .find_map(|t| match t {
+      RustType::Struct(def) if def.name.as_str() == "Middle" => Some(def),
+      _ => None,
+    })
+    .expect("Middle struct not found");
   assert!(
     middle.fields[0].validation_attrs.contains(&ValidationAttribute::Nested),
     "missing nested validation on middle.inner"
   );
 
-  let RustType::Struct(outer) = &rust_types[2] else {
-    panic!("expected struct");
-  };
+  let outer = rust_types
+    .iter()
+    .find_map(|t| match t {
+      RustType::Struct(def) if def.name.as_str() == "Outer" => Some(def),
+      _ => None,
+    })
+    .expect("Outer struct not found");
   assert!(
     outer.fields[0].validation_attrs.contains(&ValidationAttribute::Nested),
     "missing nested validation on outer.middle"
@@ -245,12 +253,16 @@ fn test_does_not_add_nested_validation_for_unvalidated_structs() {
     ..Default::default()
   };
 
-  let mut rust_types = vec![RustType::Struct(unvalidated), RustType::Struct(outer)];
-  add_nested_validation_attrs(&mut rust_types);
+  let rust_types = vec![RustType::Struct(unvalidated), RustType::Struct(outer)];
+  let rust_types = add_nested_validation_attrs(rust_types);
 
-  let RustType::Struct(outer) = &rust_types[1] else {
-    panic!("expected struct");
-  };
+  let outer = rust_types
+    .iter()
+    .find_map(|t| match t {
+      RustType::Struct(def) if def.name.as_str() == "Outer" => Some(def),
+      _ => None,
+    })
+    .expect("Outer struct not found");
   assert!(
     outer.fields[0].validation_attrs.is_empty(),
     "unexpected nested validation for Outer.plain"
