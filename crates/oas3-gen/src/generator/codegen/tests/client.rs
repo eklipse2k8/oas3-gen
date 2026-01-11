@@ -10,7 +10,7 @@ use crate::generator::{
   },
   codegen::{
     Visibility,
-    client::{ClientGenerator, generate_method, generate_multipart},
+    client::{ClientFragment, ClientMethodFragment, MultipartFormFragment},
   },
 };
 
@@ -194,7 +194,10 @@ fn test_response_handling_content_categories() {
       ..Default::default()
     }
     .build();
-    let method = generate_method(&operation, Visibility::Public).unwrap().to_string();
+    let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+      .generate()
+      .unwrap()
+      .to_string();
 
     let expected_return = format!("-> anyhow :: Result < {} >", case.expected_return_ty);
 
@@ -219,7 +222,10 @@ fn test_response_handling_with_response_enum() {
     ..Default::default()
   }
   .build();
-  let method = generate_method(&operation, Visibility::Public).unwrap().to_string();
+  let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+    .generate()
+    .unwrap()
+    .to_string();
 
   assert!(
     method.contains("-> anyhow :: Result < TestResponseEnum >"),
@@ -238,7 +244,10 @@ fn test_event_stream_response_handling() {
     ..Default::default()
   }
   .build();
-  let method = generate_method(&operation, Visibility::Public).unwrap().to_string();
+  let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+    .generate()
+    .unwrap()
+    .to_string();
 
   assert!(method.contains("EventStream"), "return type should contain EventStream");
   assert!(
@@ -267,7 +276,9 @@ fn test_multipart_generation() {
     ])
     .build();
 
-  let strict_code = generate_multipart(&strict_body).tokens.to_string();
+  let strict_code = MultipartFormFragment::new(strict_body.clone())
+    .into_token_stream()
+    .to_string();
 
   assert!(
     strict_code.contains("Part :: bytes"),
@@ -295,7 +306,9 @@ fn test_multipart_generation() {
     .content_category(ContentCategory::Multipart)
     .build();
 
-  let fallback_code = generate_multipart(&fallback_body).tokens.to_string();
+  let fallback_code = MultipartFormFragment::new(fallback_body.clone())
+    .into_token_stream()
+    .to_string();
 
   assert!(
     fallback_code.contains("serde_json :: to_value"),
@@ -380,7 +393,7 @@ fn test_client_filters_webhook_operations() {
     description: None,
   };
 
-  let generator = ClientGenerator::new(&metadata, &operations, Visibility::Public);
+  let generator = ClientFragment::new(&metadata, &operations, Visibility::Public);
   let output = generator.to_token_stream().to_string();
 
   assert!(
@@ -523,7 +536,10 @@ fn test_multipart_method_generation_with_path_params() {
     .documentation(documentation)
     .build();
 
-  let generated = generate_method(&operation, Visibility::Public).unwrap().to_string();
+  let generated = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+    .generate()
+    .unwrap()
+    .to_string();
 
   assert!(
     generated.contains("upload_pet_image"),
@@ -574,7 +590,7 @@ fn test_multipart_with_nullable_fields() {
     ])
     .build();
 
-  let code = generate_multipart(&body).tokens.to_string();
+  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
 
   assert!(
     code.contains("if let Some (val)"),
@@ -606,7 +622,7 @@ fn test_multipart_with_json_serialization() {
     ])
     .build();
 
-  let code = generate_multipart(&body).tokens.to_string();
+  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
 
   assert!(
     code.contains("serde_json :: to_string"),
@@ -627,7 +643,7 @@ fn test_multipart_fallback_with_body_type() {
     .content_category(ContentCategory::Multipart)
     .build();
 
-  let code = generate_multipart(&body).tokens.to_string();
+  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
 
   assert!(
     code.contains("serde_json :: to_value :: < UploadRequest >"),

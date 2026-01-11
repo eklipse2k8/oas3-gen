@@ -1,17 +1,11 @@
-use std::{
-  collections::{BTreeMap, HashMap},
-  rc::Rc,
-};
+use std::{collections::HashMap, rc::Rc};
 
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use self::{client::ClientGenerator, mod_file::ModFileGenerator, server::ServerGenerator};
-use super::ast::{
-  ClientRootNode, GlobalLintsNode, MethodKind, OperationInfo, RegexKey, RustType, SerdeImpl, ValidationAttribute,
-  tokens::ConstToken,
-};
+use self::{client::ClientFragment, mod_file::ModFileFragment, server::ServerGenerator, types::TypesFragment};
+use super::ast::{ClientRootNode, GlobalLintsNode, OperationInfo, RustType};
 use crate::generator::{
   ast::{Documentation, FileHeaderNode, constants::HttpHeaderRef},
   converter::CodegenConfig,
@@ -29,6 +23,7 @@ pub mod mod_file;
 pub mod server;
 pub mod structs;
 pub mod type_aliases;
+pub mod types;
 
 #[cfg(test)]
 mod tests;
@@ -59,17 +54,6 @@ impl Visibility {
       Visibility::Crate => quote! { pub(crate) },
       Visibility::File => quote! {},
     }
-  }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CodeGenerationContext {
-  pub(crate) config: CodegenConfig,
-}
-
-impl CodeGenerationContext {
-  pub(crate) fn new(config: CodegenConfig) -> Self {
-    Self { config }
   }
 }
 
@@ -183,7 +167,7 @@ impl GeneratedResult {
 
 #[derive(Debug, Clone)]
 pub struct SchemaCodeGenerator {
-  context: Rc<CodeGenerationContext>,
+  config: CodegenConfig,
   rust_types: Rc<Vec<RustType>>,
   operations: Rc<Vec<OperationInfo>>,
   header_refs: Rc<Vec<HttpHeaderRef>>,
@@ -207,7 +191,7 @@ impl SchemaCodeGenerator {
     gen_version: String,
   ) -> Self {
     Self {
-      context: Rc::new(CodeGenerationContext::new(config)),
+      config,
       rust_types: Rc::new(rust_types),
       operations: Rc::new(operations),
       header_refs: Rc::new(header_refs),
@@ -220,126 +204,101 @@ impl SchemaCodeGenerator {
 }
 
 impl SchemaCodeGenerator {
+  /// Generates a standalone `types.rs` file containing all type definitions.
+  ///
+  /// Includes structs, enums, type aliases, and their serde/validation derives.
   pub fn generate_types(&self) -> anyhow::Result<GeneratedResult> {
-    let lint_config = GlobalLintsNode::default();
-    let code_tokens = self.generate_types_tokens();
-    let code = self.generate_file_with_lint(&code_tokens, &lint_config)?;
+    let code = self.format_tokens_with_lints(&self.types_fragment())?;
     Ok(GeneratedResult::types(code))
   }
 
+  /// Generates a standalone `client.rs` file with types and HTTP client combined.
+  ///
+  /// The client struct includes methods for each API operation.
   pub fn generate_client(&self) -> anyhow::Result<GeneratedResult> {
-    let client_generator = ClientGenerator::new(&self.client, &self.operations, self.visibility);
-    let client_tokens = client_generator.into_token_stream();
-    let lint_config = GlobalLintsNode::default();
-
-    let code = generate_source(
-      &client_tokens,
-      &self.client,
-      Some(&lint_config),
-      &self.source_path,
-      &self.gen_version,
-    )?;
-
+    let code = self.format_tokens_with_lints(&self.client_fragment(false))?;
     Ok(GeneratedResult::client(code))
   }
 
+  /// Generates a modular client with separate `mod.rs`, `client.rs`, and `types.rs` files.
+  ///
+  /// The client imports types from the sibling `types` module.
   pub fn generate_client_mod(&self) -> anyhow::Result<GeneratedResult> {
-    let types_tokens = self.generate_types_tokens();
-    let types_code = generate_source(&types_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
-
-    let client_generator = ClientGenerator::new(&self.client, &self.operations, self.visibility).with_types_import();
-    let client_tokens = client_generator.into_token_stream();
-    let client_code = generate_source(&client_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
-
-    let mod_generator = ModFileGenerator::new(&self.client, self.visibility);
-    let mod_code = mod_generator.generate(&self.source_path, &self.gen_version)?;
+    let types_code = self.format_tokens(&self.types_fragment())?;
+    let client_code = self.format_tokens(&self.client_fragment(true))?;
+    let mod_fragment = ModFileFragment::for_client(
+      (*self.client).clone(),
+      self.visibility,
+      self.source_path.clone(),
+      self.gen_version.clone(),
+    );
+    let mod_code = mod_fragment.generate()?;
 
     Ok(GeneratedResult::full_client(mod_code, client_code, types_code))
   }
 
+  /// Generates a modular server with separate `mod.rs`, `server.rs`, and `types.rs` files.
+  ///
+  /// The server trait imports types from the sibling `types` module.
   pub fn generate_server_mod(&self) -> anyhow::Result<GeneratedResult> {
-    let types_tokens = self.generate_types_tokens();
-    let types_code = generate_source(&types_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
-
-    let server_generator = ServerGenerator::new(&self.client, &self.operations, self.visibility).with_types_import();
-    let server_tokens = server_generator.into_token_stream();
-    let server_code = generate_source(&server_tokens, &self.client, None, &self.source_path, &self.gen_version)?;
-
-    let mod_generator = ModFileGenerator::for_server(&self.client, self.visibility);
-    let mod_code = mod_generator.generate(&self.source_path, &self.gen_version)?;
+    let types_code = self.format_tokens(&self.types_fragment())?;
+    let server_code = self.format_tokens(&self.server_fragment())?;
+    let mod_fragment = ModFileFragment::for_server(
+      (*self.client).clone(),
+      self.visibility,
+      self.source_path.clone(),
+      self.gen_version.clone(),
+    );
+    let mod_code = mod_fragment.generate()?;
 
     Ok(GeneratedResult::full_server(mod_code, server_code, types_code))
   }
 
-  fn generate_file_with_lint(
-    &self,
-    code_tokens: &TokenStream,
-    lint_config: &GlobalLintsNode,
-  ) -> anyhow::Result<String> {
+  /// Creates a types generator fragment for all Rust type definitions.
+  fn types_fragment(&self) -> TypesFragment {
+    TypesFragment::new(
+      self.rust_types.clone(),
+      self.header_refs.clone(),
+      self.visibility,
+      self.config.target,
+    )
+  }
+
+  /// Creates a client fragment for HTTP client code generation.
+  fn client_fragment(&self, with_types_import: bool) -> ClientFragment {
+    let fragment = ClientFragment::new(&self.client, &self.operations, self.visibility);
+    if with_types_import {
+      fragment.with_types_import()
+    } else {
+      fragment
+    }
+  }
+
+  /// Creates a server fragment for axum server trait generation.
+  fn server_fragment(&self) -> ServerGenerator {
+    ServerGenerator::new(&self.client, &self.operations, self.visibility).with_types_import()
+  }
+
+  /// Formats tokens into source code with a file header (no lint attributes).
+  fn format_tokens(&self, fragment: &impl ToTokens) -> anyhow::Result<String> {
     generate_source(
-      code_tokens,
+      &fragment.to_token_stream(),
       &self.client,
-      Some(lint_config),
+      None,
       &self.source_path,
       &self.gen_version,
     )
   }
 
-  fn generate_types_tokens(&self) -> TokenStream {
-    let regex_result = constants::RegexConstantsResult::from_types(&self.rust_types);
-    let header_consts = constants::HeaderConstantsFragment::new((*self.header_refs).clone());
-
-    let mut needs_serialize = false;
-    let mut needs_deserialize = false;
-    let mut needs_validate = false;
-    let mut type_tokens = vec![];
-
-    for ty in self.rust_types.iter() {
-      needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
-      needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
-      needs_validate |= matches!(ty, RustType::Struct(def) if def.fields.iter().any(|f| f.validation_attrs.contains(&ValidationAttribute::Nested)));
-      needs_validate |=
-        matches!(ty, RustType::Struct(def) if def.methods.iter().any(|m| matches!(m.kind, MethodKind::Builder { .. })));
-      type_tokens.push(self.generate_type(ty, &regex_result.lookup));
-    }
-
-    let serde_use = match (needs_serialize, needs_deserialize) {
-      (true, true) => quote! { use serde::{Deserialize, Serialize}; },
-      (true, false) => quote! { use serde::Serialize; },
-      (false, true) => quote! { use serde::Deserialize; },
-      (false, false) => quote! {},
-    };
-
-    let validator_use = if needs_validate {
-      quote! { use validator::Validate; }
-    } else {
-      quote! {}
-    };
-
-    quote! {
-      #serde_use
-      #validator_use
-
-      #regex_result
-      #header_consts
-
-      #(#type_tokens)*
-    }
-  }
-
-  fn generate_type(&self, rust_type: &RustType, regex_lookup: &BTreeMap<RegexKey, ConstToken>) -> TokenStream {
-    match rust_type {
-      RustType::Struct(def) => {
-        structs::StructFragment::new(def.clone(), regex_lookup.clone(), self.visibility).into_token_stream()
-      }
-      RustType::Enum(def) => enums::EnumGenerator::new(&self.context, def, self.visibility).generate(),
-      RustType::TypeAlias(def) => {
-        type_aliases::TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream()
-      }
-      RustType::DiscriminatedEnum(def) => {
-        enums::DiscriminatedEnumGenerator::new(&self.context, def, self.visibility).generate()
-      }
-      RustType::ResponseEnum(def) => enums::ResponseEnumGenerator::new(&self.context, def, self.visibility).generate(),
-    }
+  /// Formats tokens into source code with a file header and default lint configuration.
+  fn format_tokens_with_lints(&self, fragment: &impl ToTokens) -> anyhow::Result<String> {
+    let lints = GlobalLintsNode::default();
+    generate_source(
+      &fragment.to_token_stream(),
+      &self.client,
+      Some(&lints),
+      &self.source_path,
+      &self.gen_version,
+    )
   }
 }

@@ -1,4 +1,5 @@
-use quote::quote;
+use proc_macro2::TokenStream;
+use quote::{ToTokens, quote};
 
 use super::Visibility;
 use crate::generator::{
@@ -12,50 +13,82 @@ pub enum ModFileKind {
   Server,
 }
 
-pub struct ModFileGenerator {
+impl ModFileKind {
+  const fn secondary_module_name(self) -> &'static str {
+    match self {
+      Self::Client => "client",
+      Self::Server => "server",
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct ModFileFragment {
   metadata: ClientRootNode,
   visibility: Visibility,
   kind: ModFileKind,
+  source_path: String,
+  gen_version: String,
 }
 
-impl ModFileGenerator {
-  pub fn new(metadata: &ClientRootNode, visibility: Visibility) -> Self {
+impl ModFileFragment {
+  pub fn new(
+    metadata: ClientRootNode,
+    visibility: Visibility,
+    kind: ModFileKind,
+    source_path: String,
+    gen_version: String,
+  ) -> Self {
     Self {
-      metadata: metadata.clone(),
+      metadata,
       visibility,
-      kind: ModFileKind::Client,
+      kind,
+      source_path,
+      gen_version,
     }
   }
 
-  pub fn for_server(metadata: &ClientRootNode, visibility: Visibility) -> Self {
-    Self {
-      metadata: metadata.clone(),
-      visibility,
-      kind: ModFileKind::Server,
-    }
+  pub fn for_client(
+    metadata: ClientRootNode,
+    visibility: Visibility,
+    source_path: String,
+    gen_version: String,
+  ) -> Self {
+    Self::new(metadata, visibility, ModFileKind::Client, source_path, gen_version)
   }
 
-  pub fn generate(&self, source_path: &str, gen_version: &str) -> anyhow::Result<String> {
-    let vis = self.visibility.to_tokens();
+  pub fn for_server(
+    metadata: ClientRootNode,
+    visibility: Visibility,
+    source_path: String,
+    gen_version: String,
+  ) -> Self {
+    Self::new(metadata, visibility, ModFileKind::Server, source_path, gen_version)
+  }
 
-    let code = match self.kind {
-      ModFileKind::Client => quote! {
-        mod types;
-        mod client;
-
-        #vis use types::*;
-        #vis use client::*;
-      },
-      ModFileKind::Server => quote! {
-        mod types;
-        mod server;
-
-        #vis use types::*;
-        #vis use server::*;
-      },
-    };
-
+  pub fn generate(&self) -> anyhow::Result<String> {
     let lint_config = GlobalLintsNode::default();
-    generate_source(&code, &self.metadata, Some(&lint_config), source_path, gen_version)
+    generate_source(
+      &self.to_token_stream(),
+      &self.metadata,
+      Some(&lint_config),
+      &self.source_path,
+      &self.gen_version,
+    )
+  }
+}
+
+impl ToTokens for ModFileFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let vis = &self.visibility;
+    let secondary_mod = syn::Ident::new(self.kind.secondary_module_name(), proc_macro2::Span::call_site());
+
+    tokens.extend(quote! {
+      mod types;
+      mod #secondary_mod;
+
+      #vis use types::*;
+      #vis use #secondary_mod::*;
+    });
   }
 }

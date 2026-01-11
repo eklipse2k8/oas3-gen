@@ -1,10 +1,8 @@
-use std::rc::Rc;
-
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt as _, quote};
 
 use super::{
-  CodeGenerationContext, Visibility,
+  Visibility,
   attributes::{generate_deprecated_attr, generate_outer_attrs, generate_serde_attrs},
 };
 use crate::generator::{
@@ -18,7 +16,6 @@ use crate::generator::{
     methods::{FieldFunctionParameterFragment, HelperMethodFragment, HelperMethodParts, StructConstructorFragment},
     server::AxumIntoResponse,
   },
-  converter::GenerationTarget,
 };
 
 #[derive(Clone, Debug)]
@@ -371,20 +368,19 @@ impl ToTokens for CaseInsensitiveDeserializeImplFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct EnumGenerator {
+pub(crate) struct EnumFragment {
   def: EnumDef,
   vis: Visibility,
 }
 
-impl EnumGenerator {
-  pub fn new(_context: &Rc<CodeGenerationContext>, def: &EnumDef, visibility: Visibility) -> Self {
-    Self {
-      def: def.clone(),
-      vis: visibility,
-    }
+impl EnumFragment {
+  pub(crate) fn new(def: EnumDef, visibility: Visibility) -> Self {
+    Self { def, vis: visibility }
   }
+}
 
-  pub fn generate(&self) -> TokenStream {
+impl ToTokens for EnumFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.def.name;
     let docs = &self.def.docs;
 
@@ -427,7 +423,7 @@ impl EnumGenerator {
       quote! {}
     };
 
-    if self.def.case_insensitive {
+    let ts = if self.def.case_insensitive {
       let deserialize_impl = CaseInsensitiveDeserializeImplFragment::new(
         name.clone(),
         self.def.variants.clone(),
@@ -443,7 +439,9 @@ impl EnumGenerator {
         #enum_def
         #display_impl
       }
-    }
+    };
+
+    tokens.extend(ts);
   }
 }
 
@@ -681,20 +679,19 @@ impl ToTokens for DiscriminatorConstImplFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DiscriminatedEnumGenerator {
+pub(crate) struct DiscriminatedEnumFragment {
   def: DiscriminatedEnumDef,
   vis: Visibility,
 }
 
-impl DiscriminatedEnumGenerator {
-  pub fn new(_context: &Rc<CodeGenerationContext>, def: &DiscriminatedEnumDef, visibility: Visibility) -> Self {
-    Self {
-      def: def.clone(),
-      vis: visibility,
-    }
+impl DiscriminatedEnumFragment {
+  pub(crate) fn new(def: DiscriminatedEnumDef, visibility: Visibility) -> Self {
+    Self { def, vis: visibility }
   }
+}
 
-  pub fn generate(&self) -> TokenStream {
+impl ToTokens for DiscriminatedEnumFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.def.name;
     let docs = &self.def.docs;
 
@@ -738,45 +735,51 @@ impl DiscriminatedEnumGenerator {
 
     let methods_impl = EnumMethodsImplFragment::new(name.clone(), self.vis, self.def.methods.clone());
 
-    quote! {
+    let ts = quote! {
       #enum_def
       #discriminator_const
       #default_impl
       #serialize_impl
       #deserialize_impl
       #methods_impl
-    }
+    };
+
+    tokens.extend(ts);
   }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ResponseEnumGenerator {
-  context: Rc<CodeGenerationContext>,
+pub(crate) struct ResponseEnumWithAxumFragment {
   def: ResponseEnumDef,
   vis: Visibility,
+  generate_axum_impl: bool,
 }
 
-impl ResponseEnumGenerator {
-  pub fn new(context: &Rc<CodeGenerationContext>, def: &ResponseEnumDef, visibility: Visibility) -> Self {
+impl ResponseEnumWithAxumFragment {
+  pub(crate) fn new(def: ResponseEnumDef, visibility: Visibility, generate_axum_impl: bool) -> Self {
     Self {
-      context: context.clone(),
-      def: def.clone(),
+      def,
       vis: visibility,
+      generate_axum_impl,
     }
   }
+}
 
-  pub fn generate(&self) -> TokenStream {
+impl ToTokens for ResponseEnumWithAxumFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
     let response = ResponseEnumFragment::new(self.vis, self.def.clone());
-    let into_response_impl = if self.context.config.target == GenerationTarget::Server {
+    let into_response_impl = if self.generate_axum_impl {
       AxumIntoResponse::new(self.def.clone()).to_token_stream()
     } else {
       quote! {}
     };
 
-    quote! {
+    let ts = quote! {
       #response
       #into_response_impl
-    }
+    };
+
+    tokens.extend(ts);
   }
 }
 

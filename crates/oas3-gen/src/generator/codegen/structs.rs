@@ -17,7 +17,7 @@ use crate::generator::{
     StatusHandler, StructDef, StructKind, StructMethod, TypeRef, ValidationAttribute,
     tokens::{ConstToken, EnumToken, EnumVariantToken},
   },
-  codegen::{attributes::generate_derives_from_slice, headers::HeaderMapGenerator},
+  codegen::{attributes::generate_derives_from_slice, headers::HeaderMapFragment},
 };
 
 #[derive(Clone, Debug)]
@@ -41,12 +41,12 @@ impl ToTokens for StructFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let definition = StructDefinitionFragment::new(self.def.clone(), self.regex_lookup.clone(), self.visibility);
     let impl_block = StructImplBlockFragment::new(self.def.clone(), self.visibility);
-    let header_map_impl = HeaderMapGenerator::new(&self.def).emit();
+    let header_map = HeaderMapFragment::new(self.def.clone());
 
     tokens.extend(quote! {
       #definition
       #impl_block
-      #header_map_impl
+      #header_map
     });
   }
 }

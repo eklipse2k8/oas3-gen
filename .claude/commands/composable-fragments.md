@@ -157,7 +157,7 @@ Identify and create Fragments for these common patterns:
    - Enum definitions containing variant Fragments
 
 3. **Update generators**: Modify existing Generator types to use Fragments
-   - Replace inline `quote!` blocks with Fragment composition
+   - Replace inline "quote!" blocks with Fragment composition
    - Keep Generators as orchestrators that assemble Fragments
 
 4. **Remove dead code**: Delete replaced helper functions and inline code
@@ -166,9 +166,9 @@ Identify and create Fragments for these common patterns:
 
 ## Phase 5: Verification
 
-**IMPORTANT**: Use a subagent to execute Phase 5 verification. The subagent ensures all steps are completed in order and reports any concerns back to you.
+**IMPORTANT**: Use the Task tool to launch a `commander-agent` subagent to execute Phase 5 verification. The subagent ensures all steps are completed in order and reports any concerns back to you.
 
-Launch a @zen-light subagent with the following prompt:
+Launch the subagent with the following prompt:
 
 ```
 You are a verification agent for a Rust code generation refactoring task. Execute each step IN ORDER and report results back.
@@ -222,7 +222,9 @@ Wait for the subagent to complete and review its report. If concerns are raised,
 
 ---
 
-## Phase 6: Remove Indirection
+## Phase 6: Remove Indirection (MANDATORY)
+
+**DO NOT SKIP THIS PHASE.** Phase 6 must be completed after Phase 5 verification passes. This phase is critical to eliminate unnecessary indirection and ensure clean architecture.
 
 As a final pass, once all changes have been made and tests pass:
 
@@ -330,6 +332,7 @@ RustType::TypeAlias(def) => TypeAliasFragment::new(def.clone(), self.visibility)
 - [ ] No inline tests - all tests in tests/ folder
 - [ ] No wrapper functions - call sites use Fragment directly
 - [ ] Existing tests pass
+- [ ] **Phase 6 completed** - all wrapper functions removed, call sites use Fragments directly
 - [ ] No clippy warnings
 - [ ] No dead code remains
 - [ ] docs/code-fragments.md updated with any new fragments created

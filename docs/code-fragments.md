@@ -9,10 +9,11 @@ The codegen stage transforms AST types (from `ast/`) into Rust source code using
 ```text
 AST Types (ast/)           Fragments (codegen/)           Output
 ─────────────────          ──────────────────────         ──────────
+RustType           ───▶    TypeFragment            ───▶   (dispatches to specific fragment)
 StructDef          ───▶    StructFragment          ───▶   struct Foo { ... }
-EnumDef            ───▶    EnumGenerator           ───▶   enum Bar { ... }
-DiscriminatedEnumDef ─▶    DiscriminatedEnumGen.   ───▶   enum Baz { ... } + serde impls
-ResponseEnumDef    ───▶    ResponseEnumGenerator   ───▶   enum Response { ... }
+EnumDef            ───▶    EnumFragment            ───▶   enum Bar { ... }
+DiscriminatedEnumDef ─▶    DiscriminatedEnumFrag.  ───▶   enum Baz { ... } + serde impls
+ResponseEnumDef    ───▶    ResponseEnumWithAxum    ───▶   enum Response { ... }
 TypeAliasDef       ───▶    TypeAliasFragment       ───▶   type Alias = Target;
 OperationInfo      ───▶    ClientGenerator         ───▶   impl Client { async fn ... }
 ```
@@ -24,9 +25,11 @@ OperationInfo      ───▶    ClientGenerator         ───▶   impl C
 | Fragment | File | Purpose |
 |----------|------|---------|
 | `SchemaCodeGenerator` | `mod.rs:185` | Main orchestrator for all code generation |
+| `TypesFragment` | `types.rs:56` | Types file generation (imports, constants, types) |
+| `TypeFragment` | `types.rs:14` | Single `RustType` dispatch to specific fragment |
 | `ClientGenerator` | `client.rs:23` | HTTP client struct and method generation |
 | `ServerGenerator` | `server.rs:11` | HTTP server trait generation (axum) |
-| `ModFileGenerator` | `mod_file.rs:15` | Module file (`mod.rs`) generation |
+| `ModFileFragment` | `mod_file.rs:27` | Module file (`mod.rs`) generation with `mod` and `use` declarations |
 
 ### Struct Fragments
 
@@ -42,7 +45,7 @@ OperationInfo      ───▶    ClientGenerator         ───▶   impl C
 
 | Fragment | File | Purpose |
 |----------|------|---------|
-| `EnumGenerator` | `enums.rs:374` | Value enum with derives and optional case-insensitive deser |
+| `EnumFragment` | `enums.rs:373` | Value enum with derives and optional case-insensitive deser |
 | `EnumValueVariantFragment` | `enums.rs:163` | Single enum variant with docs, serde, default |
 | `EnumVariants<T>` | `enums.rs:826` | Generic container for comma-separated variants |
 | `EnumMethodsImplFragment` | `enums.rs:124` | Impl block with enum helper methods |
@@ -56,7 +59,7 @@ OperationInfo      ───▶    ClientGenerator         ───▶   impl C
 
 | Fragment | File | Purpose |
 |----------|------|---------|
-| `DiscriminatedEnumGenerator` | `enums.rs:683` | Tagged union with custom serde |
+| `DiscriminatedEnumFragment` | `enums.rs:683` | Tagged union with custom serde |
 | `DiscriminatedVariantFragment` | `enums.rs:450` | Single variant with type reference |
 | `DiscriminatorConstImplFragment` | `enums.rs:650` | `DISCRIMINATOR_FIELD` constant |
 | `DiscriminatedDefaultImplFragment` | `enums.rs:475` | Default trait implementation |
@@ -68,7 +71,7 @@ OperationInfo      ───▶    ClientGenerator         ───▶   impl C
 
 | Fragment | File | Purpose |
 |----------|------|---------|
-| `ResponseEnumGenerator` | `enums.rs:752` | HTTP response enum with optional axum impl |
+| `ResponseEnumWithAxumFragment` | `enums.rs:752` | HTTP response enum with optional axum impl |
 | `ResponseEnumFragment` | `enums.rs:783` | Response enum definition |
 | `ResponseVariantFragment` | `enums.rs:845` | Response variant with status doc |
 
@@ -121,17 +124,23 @@ OperationInfo      ───▶    ClientGenerator         ───▶   impl C
 
 | Fragment | File | Purpose |
 |----------|------|---------|
-| `ClientGenerator` | `client.rs:23` | Client struct, constructors, methods |
-| `generate_method` | `client.rs:133` | Single async client method |
-| `generate_http_init` | `client.rs:178` | HTTP method initialization |
-| `generate_url_construction` | `client.rs:193` | URL building from path segments |
-| `generate_query_params` | `client.rs:203` | `.query(&request.query)` chain |
-| `generate_header_params` | `client.rs:215` | `.headers(...)` chain |
-| `generate_body` | `client.rs:230` | Request body handling |
-| `generate_multipart` | `client.rs:295` | Multipart form construction |
-| `generate_response` | `client.rs:380` | Response parsing logic |
-| `BodyResult` | `client.rs:13` | Body generation result with conditional flag |
-| `ResponseHandling` | `client.rs:18` | Response type and parse logic |
+| `ClientGenerator` | `client.rs:692` | Entry point: Client struct, constructors, methods |
+| `ClientStructFragment` | `client.rs:591` | Client struct definition (`struct ApiClient { client, base_url }`) |
+| `ClientDefaultImplFragment` | `client.rs:620` | Default trait impl for client |
+| `ClientConstructorsFragment` | `client.rs:647` | `new()`, `with_base_url()`, `with_client()` methods |
+| `ClientMethodFragment` | `client.rs:535` | Single async operation method |
+| `HttpInitFragment` | `client.rs:14` | HTTP method initialization (`self.client.get(url)`) |
+| `UrlConstructionFragment` | `client.rs:404` | URL building from path segments |
+| `QueryParamsFragment` | `client.rs:81` | `.query(&request.query)` chain |
+| `HeaderParamsFragment` | `client.rs:103` | `.headers(...)` chain |
+| `RequestBodyFragment` | `client.rs:356` | Body handling dispatch by content type |
+| `SimpleBodyFragment` | `client.rs:283` | Simple body chains (json, form, text, binary) |
+| `XmlBodyFragment` | `client.rs:128` | XML body handling with Content-Type header |
+| `MultipartFormFragment` | `client.rs:235` | Multipart form construction |
+| `MultipartStrictFragment` | `client.rs:209` | Typed multipart fields |
+| `MultipartFallbackFragment` | `client.rs:166` | JSON serialization fallback for multipart |
+| `MultipartFieldFragment` | `client.rs:43` | Single multipart field addition |
+| `ResponseParsingFragment` | `client.rs:464` | Response handling dispatch by content type |
 
 ### Server Generation Fragments
 
@@ -145,9 +154,9 @@ OperationInfo      ───▶    ClientGenerator         ───▶   impl C
 
 | Fragment | File | Purpose |
 |----------|------|---------|
-| `HeaderMapGenerator` | `headers.rs:6` | `TryFrom<&Struct> for HeaderMap` impl |
-| `generate_field_insertion` | `headers.rs:56` | Single header field insertion |
-| `header_value_expr` | `headers.rs:82` | Header value expression |
+| `HeaderMapFragment` | `headers.rs:7` | `TryFrom<&Struct> for HeaderMap` impl |
+| `HeaderFieldInsertionFragment` | `headers.rs:52` | Single header field insertion |
+| `header_value_expr` | `headers.rs:89` | Header value expression (helper function) |
 
 ### HTTP Status Code Fragments
 
@@ -213,7 +222,32 @@ StructFragment
 │       │   └── FallbackFragment
 │       └── BuilderMethodFragment
 │           └── BuilderConstructionFragment
-└── HeaderMapGenerator
+└── HeaderMapFragment
+    └── HeaderFieldInsertionFragment (for each field)
+        └── header_value_expr
+```
+
+Similarly, `ClientGenerator` composes:
+
+```text
+ClientGenerator
+├── ClientStructFragment
+├── ClientDefaultImplFragment
+├── ClientConstructorsFragment
+└── ClientMethodFragment (for each HTTP operation)
+    ├── UrlConstructionFragment
+    │   └── ParsedPath (already implements ToTokens)
+    ├── HttpInitFragment
+    ├── QueryParamsFragment
+    ├── HeaderParamsFragment
+    ├── RequestBodyFragment
+    │   ├── SimpleBodyFragment (json, form, text, binary)
+    │   ├── XmlBodyFragment
+    │   └── MultipartFormFragment
+    │       ├── MultipartStrictFragment
+    │       │   └── MultipartFieldFragment (for each field)
+    │       └── MultipartFallbackFragment
+    └── ResponseParsingFragment
 ```
 
 ## ToTokens Trait Pattern
