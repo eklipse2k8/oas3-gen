@@ -7,4 +7,6 @@ mod intersection_union;
 #[cfg(test)]
 mod petstore;
 #[cfg(test)]
+mod petstore_server;
+#[cfg(test)]
 mod union_serde;

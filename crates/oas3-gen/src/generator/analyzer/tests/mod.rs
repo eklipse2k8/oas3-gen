@@ -4,7 +4,10 @@ mod type_usage_tests;
 use std::collections::BTreeMap;
 
 use super::{DependencyGraph, TypeAnalyzer, TypeUsage};
-use crate::generator::ast::{DerivesProvider, EnumToken, OuterAttr, RustType, SerdeImpl, StructKind};
+use crate::generator::{
+  ast::{DerivesProvider, EnumToken, OuterAttr, RustType, SerdeImpl, StructKind},
+  converter::GenerationTarget,
+};
 
 pub(super) fn build_type_usage_map(
   seed_usage: BTreeMap<EnumToken, (bool, bool)>,
@@ -17,18 +20,19 @@ pub(super) fn build_type_usage_map(
 pub(super) fn add_nested_validation_attrs(types: Vec<RustType>) -> Vec<RustType> {
   let operations = vec![];
   let seed = BTreeMap::new();
-  let analyzer = TypeAnalyzer::new(types, operations, seed);
+  let analyzer = TypeAnalyzer::new(types, operations, seed, GenerationTarget::default());
   analyzer.analyze().types
 }
 
 pub(super) fn update_derives_from_usage(types: &mut [RustType], usage_map: &BTreeMap<EnumToken, TypeUsage>) {
+  let target = GenerationTarget::default();
   for rust_type in types.iter_mut() {
     match rust_type {
       RustType::Struct(def) => {
         let key: EnumToken = def.name.as_str().into();
         let usage = usage_map.get(&key).copied().unwrap_or(TypeUsage::Bidirectional);
 
-        def.serde_mode = usage.to_serde_mode();
+        def.serde_mode = usage.to_serde_mode(target);
 
         if usage == TypeUsage::ResponseOnly {
           for field in &mut def.fields {
@@ -45,11 +49,11 @@ pub(super) fn update_derives_from_usage(types: &mut [RustType], usage_map: &BTre
       }
       RustType::Enum(def) => {
         let usage = usage_map.get(&def.name).copied().unwrap_or(TypeUsage::Bidirectional);
-        def.serde_mode = usage.to_serde_mode();
+        def.serde_mode = usage.to_serde_mode(target);
       }
       RustType::DiscriminatedEnum(def) => {
         let usage = usage_map.get(&def.name).copied().unwrap_or(TypeUsage::Bidirectional);
-        def.serde_mode = usage.to_serde_mode();
+        def.serde_mode = usage.to_serde_mode(target);
       }
       _ => {}
     }

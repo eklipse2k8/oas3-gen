@@ -42,6 +42,8 @@ oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.25.0" }
 # External Dependencies
 any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
+axum = { version = "0.8" }
+axum-core = { version = "0.5" }
 better_default = { version = "1.0" }
 blake3 = { version = "1.8", features = ["neon", "traits-preview"] }
 bon = { version = "3.8" }
@@ -55,7 +57,7 @@ fmmap = { version = "0.4", features = ["tokio"] }
 futures = { version = "0.3" }
 futures-core = { version = "0.3" }
 http = { version = "1.4" }
-indexmap = { version = "2.12", features = ["serde"] }
+indexmap = { version = "2.13", features = ["serde"] }
 inflections = { version = "1.1" }
 json-canon = { version = "0.1" }
 mediatype = { version = "0.21", features = ["serde"] }

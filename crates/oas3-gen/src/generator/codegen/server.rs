@@ -72,7 +72,7 @@ impl ToTokens for AxumIntoResponse {
       .collect::<Vec<_>>();
 
     let ts = quote! {
-      impl axum::response::IntoResponse for #name {
+      impl IntoResponse for #name {
         fn into_response(self) -> axum::response::Response {
           match self {
             #(#variants),*
@@ -102,11 +102,11 @@ impl ToTokens for AxumIntoResponseVariant {
 
     let ts = if self.0.schema_type.is_some() {
       quote! {
-        Self::#variant(data) => (#status_code, axum::Json(data)).into_response(),
+        Self::#variant(data) => (#status_code, axum::Json(data)).into_response()
       }
     } else {
       quote! {
-        Self::#variant => #status_code.into_response(),
+        Self::#variant => #status_code.into_response()
       }
     };
 

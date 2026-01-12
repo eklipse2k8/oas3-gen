@@ -239,7 +239,7 @@ impl Orchestrator {
       .build();
 
     let seed_map = usage_recorder.into_usage_map();
-    let analyzer = TypeAnalyzer::new(rust_types, operations_info, seed_map);
+    let analyzer = TypeAnalyzer::new(rust_types, operations_info, seed_map, config.target);
     let AnalysisOutput {
       types,
       operations,

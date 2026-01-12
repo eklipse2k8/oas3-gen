@@ -3,9 +3,13 @@ mod dependency_graph;
 use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
 
 use self::dependency_graph::DependencyGraph;
-use crate::generator::ast::{
-  ContentCategory, DefaultAtom, DerivesProvider, EnumToken, MethodKind, OperationInfo, OuterAttr, RustPrimitive,
-  RustType, SerdeImpl, SerdeMode, StatusCodeToken, StructKind, TypeRef, ValidationAttribute, constants::HttpHeaderRef,
+use crate::generator::{
+  ast::{
+    ContentCategory, DefaultAtom, DerivesProvider, EnumToken, MethodKind, OperationInfo, OuterAttr, RustPrimitive,
+    RustType, SerdeImpl, SerdeMode, StatusCodeToken, StructKind, TypeRef, ValidationAttribute,
+    constants::HttpHeaderRef,
+  },
+  converter::GenerationTarget,
 };
 
 pub struct AnalysisOutput {
@@ -30,11 +34,18 @@ impl TypeUsage {
     }
   }
 
-  fn to_serde_mode(self) -> SerdeMode {
-    match self {
-      Self::RequestOnly => SerdeMode::SerializeOnly,
-      Self::ResponseOnly => SerdeMode::DeserializeOnly,
-      Self::Bidirectional => SerdeMode::Both,
+  fn to_serde_mode(self, target: GenerationTarget) -> SerdeMode {
+    match target {
+      GenerationTarget::Client => match self {
+        Self::RequestOnly => SerdeMode::SerializeOnly,
+        Self::ResponseOnly => SerdeMode::DeserializeOnly,
+        Self::Bidirectional => SerdeMode::Both,
+      },
+      GenerationTarget::Server => match self {
+        Self::RequestOnly => SerdeMode::DeserializeOnly,
+        Self::ResponseOnly => SerdeMode::SerializeOnly,
+        Self::Bidirectional => SerdeMode::Both,
+      },
     }
   }
 }
@@ -43,6 +54,7 @@ pub(crate) struct TypeAnalyzer {
   types: Vec<RustType>,
   operations: Vec<OperationInfo>,
   usage_map: BTreeMap<EnumToken, TypeUsage>,
+  target: GenerationTarget,
 }
 
 impl TypeAnalyzer {
@@ -50,6 +62,7 @@ impl TypeAnalyzer {
     types: Vec<RustType>,
     operations: Vec<OperationInfo>,
     seed_usage: BTreeMap<EnumToken, (bool, bool)>,
+    target: GenerationTarget,
   ) -> Self {
     let dependency_graph = DependencyGraph::build(&types);
     let usage_map = Self::build_usage_map(seed_usage, &types, &dependency_graph);
@@ -58,6 +71,7 @@ impl TypeAnalyzer {
       types,
       operations,
       usage_map,
+      target,
     }
   }
 
@@ -334,7 +348,7 @@ impl TypeAnalyzer {
           let key: EnumToken = def.name.as_str().into();
           let usage = self.usage_map.get(&key).copied().unwrap_or(TypeUsage::Bidirectional);
 
-          def.serde_mode = usage.to_serde_mode();
+          def.serde_mode = usage.to_serde_mode(self.target);
 
           if usage == TypeUsage::ResponseOnly {
             for field in &mut def.fields {
@@ -355,7 +369,7 @@ impl TypeAnalyzer {
             .get(&def.name)
             .copied()
             .unwrap_or(TypeUsage::Bidirectional);
-          def.serde_mode = usage.to_serde_mode();
+          def.serde_mode = usage.to_serde_mode(self.target);
         }
         RustType::DiscriminatedEnum(def) => {
           let usage = self
@@ -363,7 +377,7 @@ impl TypeAnalyzer {
             .get(&def.name)
             .copied()
             .unwrap_or(TypeUsage::Bidirectional);
-          def.serde_mode = usage.to_serde_mode();
+          def.serde_mode = usage.to_serde_mode(self.target);
         }
         _ => {}
       }

@@ -55,12 +55,12 @@ impl DerivesProvider for StructDef {
         derives.insert(DeriveTrait::PartialEq);
         if self.is_serializable() == SerdeImpl::Derive {
           derives.insert(DeriveTrait::Serialize);
-          if self.has_validation_attrs() {
-            derives.insert(DeriveTrait::Validate);
-          }
         }
         if self.is_deserializable() == SerdeImpl::Derive {
           derives.insert(DeriveTrait::Deserialize);
+        }
+        if self.has_validation_attrs() {
+          derives.insert(DeriveTrait::Validate);
         }
       }
       StructKind::PathParams | StructKind::HeaderParams => {

@@ -112,9 +112,16 @@ impl ToTokens for TypesFragment {
       quote! {}
     };
 
+    let axum_use = if self.target == GenerationTarget::Server {
+      quote! { use axum::response::IntoResponse; }
+    } else {
+      quote! {}
+    };
+
     let ts = quote! {
       #serde_use
       #validator_use
+      #axum_use
 
       #regex_result
       #header_consts

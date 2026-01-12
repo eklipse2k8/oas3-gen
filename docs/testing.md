@@ -17,6 +17,9 @@ All code changes that affect code generation output require rebuilding the fixtu
 # Rebuild petstore fixture (types.rs, client.rs, mod.rs)
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore --all-schemas
 
+# Rebuild petstore_server fixture (types.rs, server.rs, mod.rs)
+cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore_server --all-schemas
+
 # Rebuild union_serde fixture (types.rs, client.rs, mod.rs)
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --all-schemas
 
