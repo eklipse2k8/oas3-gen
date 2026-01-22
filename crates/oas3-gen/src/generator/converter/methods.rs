@@ -3,6 +3,8 @@ use std::{
   rc::Rc,
 };
 
+use itertools::Itertools;
+
 use super::structs::StructConverter;
 use crate::{
   generator::{
@@ -97,7 +99,7 @@ impl MethodGenerator {
     let mut seen = BTreeSet::new();
     eligible
       .iter()
-      .zip(method_names)
+      .zip_eq(method_names)
       .map(|((variant_name, kind), base_name)| {
         let method_name = ensure_unique(&base_name, &seen);
         seen.insert(method_name.clone());

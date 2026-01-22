@@ -33,6 +33,7 @@ fmmap.workspace = true
 http.workspace = true
 indexmap.workspace = true
 inflections.workspace = true
+itertools.workspace = true
 json-canon.workspace = true
 mediatype.workspace = true
 num-format.workspace = true

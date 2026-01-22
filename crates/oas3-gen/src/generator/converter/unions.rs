@@ -125,15 +125,14 @@ impl UnionConverter {
 
     let variant_specs = self.collect_union_variant_specs(variants_src)?;
 
-    let (mut variants, inline_types) =
-      variant_specs
-        .into_iter()
-        .try_fold((vec![], vec![]), |(mut variants, mut inline_types), spec| {
-          let output = self.variant_builder.build_variant(name, &spec)?;
-          variants.push(output.result);
-          inline_types.extend(output.inline_types);
-          anyhow::Ok((variants, inline_types))
-        })?;
+    let (mut variants, inline_types): (Vec<_>, Vec<_>) = itertools::process_results(
+      variant_specs.into_iter().map(|spec| {
+        let output = self.variant_builder.build_variant(name, &spec)?;
+        anyhow::Ok((output.result, output.inline_types))
+      }),
+      |iter| iter.unzip(),
+    )?;
+    let inline_types: Vec<_> = inline_types.into_iter().flatten().collect();
 
     variants = strip_common_affixes(variants);
 

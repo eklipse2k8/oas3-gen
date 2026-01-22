@@ -141,11 +141,9 @@ impl OperationConverter {
     def.request_type = request_type.cloned();
 
     self.context.mark_response(def.name.clone());
-    def
-      .variants
-      .iter()
-      .filter_map(|v| v.schema_type.as_ref())
-      .for_each(|schema_type| self.context.mark_response_type_ref(schema_type));
+    for schema_type in def.variants.iter().filter_map(|v| v.schema_type.as_ref()) {
+      self.context.mark_response_type_ref(schema_type);
+    }
 
     let token = EnumToken::new(def.name.to_string());
     (vec![RustType::ResponseEnum(def)], Some(token))

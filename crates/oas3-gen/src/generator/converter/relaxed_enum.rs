@@ -4,6 +4,7 @@ use std::{
   string::ToString,
 };
 
+use itertools::izip;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
@@ -198,17 +199,14 @@ impl RelaxedEnumBuilder {
           .ok()
           .map(|n| EnumVariantToken::new(n.name))
       })
-      .collect::<Vec<EnumVariantToken>>();
+      .collect::<Vec<_>>();
 
     let variant_name_strings = variant_names.iter().map(ToString::to_string).collect::<Vec<String>>();
     let method_names = derive_method_names(wrapper_enum_name, &variant_name_strings);
 
     let mut seen = BTreeSet::new();
-    variant_names
-      .into_iter()
-      .zip(method_names)
-      .zip(entries.iter())
-      .map(|((variant, base_name), entry)| {
+    izip!(variant_names, method_names, entries)
+      .map(|(variant, base_name, entry)| {
         let method_name = ensure_unique(&base_name, &seen);
         seen.insert(method_name.clone());
         EnumMethod::new(

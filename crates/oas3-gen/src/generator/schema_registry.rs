@@ -128,10 +128,7 @@ impl<'a> RefCollector<'a> {
   }
 
   pub(crate) fn fingerprint(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
-    variants
-      .iter()
-      .filter_map(Self::parse_schema_ref)
-      .collect()
+    variants.iter().filter_map(Self::parse_schema_ref).collect()
   }
 }
 

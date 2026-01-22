@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::Context as _;
+use itertools::Itertools;
 use oas3::spec::{ObjectSchema, Schema};
 use regex::Regex;
 use string_cache::DefaultAtom;
@@ -52,10 +53,8 @@ impl FieldConverter {
       .and_then(|name| self.context.graph().mapping(name))
       .map(DiscriminatorMapping::as_tuple);
 
-    let conversions = schema
-      .properties
-      .iter()
-      .map(|(prop_name, prop_schema_ref)| {
+    let (fields, inline_types) = itertools::process_results(
+      schema.properties.iter().map(|(prop_name, prop_schema_ref)| {
         let prop_schema = prop_schema_ref
           .resolve(self.context.graph().spec())
           .context(format!("Schema resolution failed for property '{prop_name}'"))?;
@@ -73,11 +72,10 @@ impl FieldConverter {
           discriminator_mapping.as_ref(),
         );
 
-        Ok((field, resolved.inline_types))
-      })
-      .collect::<anyhow::Result<Vec<_>>>()?;
-
-    let (fields, inline_types): (Vec<_>, Vec<_>) = conversions.into_iter().unzip();
+        anyhow::Ok((field, resolved.inline_types))
+      }),
+      |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
+    )?;
     let inline_types = inline_types.into_iter().flatten().collect();
 
     Ok(ConversionOutput::with_inline_types(
@@ -419,7 +417,7 @@ impl FieldConverter {
             .enumerate()
             .skip(1)
             .map(|(suffix_num, &idx)| (idx, format!("{name}_{}", suffix_num + 1)))
-            .collect::<Vec<_>>()
+            .collect_vec()
         } else {
           vec![]
         }

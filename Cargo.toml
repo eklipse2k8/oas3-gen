@@ -59,6 +59,7 @@ futures-core = { version = "0.3" }
 http = { version = "1.4" }
 indexmap = { version = "2.13", features = ["serde"] }
 inflections = { version = "1.1" }
+itertools = { version = "0.14" }
 json-canon = { version = "0.1" }
 mediatype = { version = "0.21", features = ["serde"] }
 num-format = { version = "0.4" }

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
 
 use super::{ConverterContext, TypeResolver, TypeUsageRecorder, inline_resolver::InlineTypeResolver};
@@ -389,18 +390,14 @@ impl ResponseStatusCategory {
         default_category
           .into_iter()
           .chain(explicit_categories)
-          .map(move |category| (category, variant.variant_name.as_str(), (*variant).clone()))
+          .map(move |category| (category, *variant))
       })
-      .fold(
-        (HashSet::new(), vec![]),
-        |(mut seen, mut result), (category, name, variant)| {
-          if seen.insert((category, name)) {
-            result.push(ResponseVariantCategory { category, variant });
-          }
-          (seen, result)
-        },
-      )
-      .1;
+      .unique_by(|(category, variant)| (*category, variant.variant_name.as_str()))
+      .map(|(category, variant)| ResponseVariantCategory {
+        category,
+        variant: variant.clone(),
+      })
+      .collect_vec();
 
     let (streams, variants): (Vec<_>, Vec<_>) = all_categories
       .into_iter()
