@@ -8,7 +8,6 @@ use strum::Display;
 
 use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
-  analyzer::{AnalysisOutput, TypeAnalyzer},
   ast::{ClientRootNode, OperationInfo, OperationKind, RustType, StructToken, constants::HttpHeaderRef},
   codegen::{GeneratedResult, SchemaCodeGenerator, Visibility},
   converter::{
@@ -17,6 +16,7 @@ use crate::generator::{
   },
   naming::identifiers::to_rust_type_name,
   operation_registry::OperationRegistry,
+  postprocess::{PostprocessOutput, TypePostprocessor},
   schema_registry::SchemaRegistry,
 };
 
@@ -239,12 +239,12 @@ impl Orchestrator {
       .build();
 
     let seed_map = usage_recorder.into_usage_map();
-    let analyzer = TypeAnalyzer::new(rust_types, operations_info, seed_map, config.target);
-    let AnalysisOutput {
+    let postprocessor = TypePostprocessor::new(rust_types, operations_info, seed_map, config.target);
+    let PostprocessOutput {
       types,
       operations,
       header_refs,
-    } = analyzer.analyze();
+    } = postprocessor.postprocess();
 
     (config, types, operations, header_refs, client, stats)
   }

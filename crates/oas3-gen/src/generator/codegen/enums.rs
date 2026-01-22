@@ -178,7 +178,7 @@ impl EnumValueVariantFragment {
     let deprecated = generate_deprecated_attr(variant.deprecated);
     let default_attr = (idx == 0).then(|| quote! { #[default] });
     let content = variant.content.tuple_types().map(|types| {
-      let type_tokens: Vec<_> = types.iter().map(|t| quote! { #t }).collect();
+      let type_tokens = types.iter().map(|t| quote! { #t }).collect::<Vec<_>>();
       quote! { ( #(#type_tokens),* ) }
     });
 
@@ -329,7 +329,7 @@ impl ToTokens for CaseInsensitiveDeserializeImplFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.name;
 
-    let match_arms: Vec<TokenStream> = self
+    let match_arms = self
       .arms
       .iter()
       .map(|arm| {
@@ -339,7 +339,7 @@ impl ToTokens for CaseInsensitiveDeserializeImplFragment {
           #lower_val => Ok(#name::#variant_name),
         }
       })
-      .collect();
+      .collect::<Vec<TokenStream>>();
 
     let serde_names = &self.serde_names;
     let fallback_arm = if let Some(ref fb) = self.fallback_variant {
@@ -513,7 +513,7 @@ pub(crate) struct DiscriminatedSerializeImplFragment {
 
 impl DiscriminatedSerializeImplFragment {
   pub(crate) fn new(name: EnumToken, variants: Vec<DiscriminatedVariant>) -> Self {
-    let variant_names = variants.into_iter().map(|v| v.variant_name).collect();
+    let variant_names = variants.into_iter().map(|v| v.variant_name).collect::<Vec<_>>();
     Self { name, variant_names }
   }
 }
@@ -522,13 +522,13 @@ impl ToTokens for DiscriminatedSerializeImplFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.name;
 
-    let arms: Vec<TokenStream> = self
+    let arms = self
       .variant_names
       .iter()
       .map(|variant_name| {
         quote! { Self::#variant_name(v) => v.serialize(serializer) }
       })
-      .collect();
+      .collect::<Vec<TokenStream>>();
 
     let ts = quote! {
       impl serde::Serialize for #name {
@@ -608,7 +608,7 @@ impl ToTokens for DiscriminatedDeserializeImplFragment {
           }
         })
       })
-      .collect();
+      .collect::<Vec<TokenStream>>();
 
     let none_handling = if let Some(ref fb) = self.fallback_variant {
       quote! {
@@ -695,11 +695,11 @@ impl ToTokens for DiscriminatedEnumFragment {
     let name = &self.def.name;
     let docs = &self.def.docs;
 
-    let variants: Vec<DiscriminatedVariantFragment> = self
+    let variants = self
       .def
       .all_variants()
       .map(|v| DiscriminatedVariantFragment::new(v.clone()))
-      .collect();
+      .collect::<Vec<DiscriminatedVariantFragment>>();
     let variants = EnumVariants::new(variants);
 
     let derives = DeriveAttribute::new(self.def.derives());
@@ -721,8 +721,9 @@ impl ToTokens for DiscriminatedEnumFragment {
       .default_variant()
       .map(|v| DiscriminatedDefaultImplFragment::new(name.clone(), v.clone()));
 
-    let serialize_impl = (self.def.serde_mode != SerdeMode::DeserializeOnly)
-      .then(|| DiscriminatedSerializeImplFragment::new(name.clone(), self.def.all_variants().cloned().collect()));
+    let serialize_impl = (self.def.serde_mode != SerdeMode::DeserializeOnly).then(|| {
+      DiscriminatedSerializeImplFragment::new(name.clone(), self.def.all_variants().cloned().collect::<Vec<_>>())
+    });
 
     let deserialize_impl = (self.def.serde_mode != SerdeMode::SerializeOnly).then(|| {
       DiscriminatedDeserializeImplFragment::new(
@@ -801,7 +802,7 @@ impl ResponseEnumFragment {
       .iter()
       .cloned()
       .map(ResponseVariantFragment::new)
-      .collect()
+      .collect::<Vec<ResponseVariantFragment>>()
   }
 }
 

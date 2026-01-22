@@ -68,7 +68,9 @@ impl ResponseConverter {
       .iter()
       .filter_map(|(status_str, resp_ref)| {
         let response = resp_ref.resolve(spec).ok()?;
-        let status_code: StatusCodeToken = status_str.parse().unwrap_or(StatusCodeToken::Default);
+        let status_code = status_str
+          .parse::<StatusCodeToken>()
+          .unwrap_or(StatusCodeToken::Default);
         let media_types = Self::with_default_media_type(
           self
             .extract_media_types(&response, path, status_code)

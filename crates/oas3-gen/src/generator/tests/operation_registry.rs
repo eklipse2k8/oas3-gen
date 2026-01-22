@@ -124,7 +124,7 @@ fn test_operation_registry() {
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3, "expected 3 operations");
 
-    let mut entries: Vec<_> = registry.operations().collect();
+    let mut entries = registry.operations().collect::<Vec<_>>();
     entries.sort_by(|a, b| a.stable_id.cmp(&b.stable_id));
 
     let entry = &entries[1];
@@ -137,7 +137,10 @@ fn test_operation_registry() {
     assert_eq!(entry.method, Method::GET);
     assert_eq!(entry.path, "/users");
 
-    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let mut ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     ids.sort_unstable();
     assert_eq!(ids, vec!["create_post", "get_users_by_id", "list_users"]);
   }
@@ -153,7 +156,10 @@ fn test_operation_registry() {
 
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 5, "expected 5 operations for uniqueness test");
-    let ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     let unique_count = ids.iter().collect::<HashSet<_>>().len();
     assert_eq!(unique_count, 5, "all stable IDs should be unique");
   }
@@ -167,7 +173,10 @@ fn test_operation_registry() {
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 2, "both operations should be included with unique ids");
 
-    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let mut ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     ids.sort_unstable();
     assert_eq!(ids, vec!["users", "users_2"], "common prefix 'get' should be stripped");
   }
@@ -203,7 +212,10 @@ fn test_operation_registry() {
 
     assert_eq!(registry.len(), 2, "filtered registry should have 2 operations");
 
-    let ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     assert!(
       !ids.contains(&"list_users".to_string()),
       "list_users should be excluded"
@@ -255,7 +267,10 @@ fn test_operation_registry() {
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3, "all operations should be registered with unique ids");
 
-    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let mut ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     ids.sort_unstable();
     assert_eq!(
       ids,
@@ -286,7 +301,10 @@ fn test_operation_registry() {
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3);
 
-    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let mut ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     ids.sort_unstable();
     assert_eq!(ids, vec!["delete", "get", "list"], "common prefix should be stripped");
   }
@@ -301,7 +319,10 @@ fn test_operation_registry() {
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 3);
 
-    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let mut ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     ids.sort_unstable();
     assert_eq!(
       ids,
@@ -319,7 +340,10 @@ fn test_operation_registry() {
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 2);
 
-    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let mut ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     ids.sort_unstable();
     assert_eq!(
       ids,
@@ -337,7 +361,10 @@ fn test_operation_registry() {
     let registry = OperationRegistry::new(&spec);
     assert_eq!(registry.len(), 2);
 
-    let mut ids: Vec<String> = registry.operations().map(|entry| entry.stable_id.clone()).collect();
+    let mut ids = registry
+      .operations()
+      .map(|entry| entry.stable_id.clone())
+      .collect::<Vec<String>>();
     ids.sort_unstable();
     assert_eq!(
       ids,

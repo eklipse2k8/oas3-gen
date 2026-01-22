@@ -38,6 +38,7 @@ mediatype.workspace = true
 num-format.workspace = true
 oas3.workspace = true
 percent-encoding.workspace = true
+petgraph.workspace = true
 prettyplease.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true

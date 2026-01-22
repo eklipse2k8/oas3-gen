@@ -129,37 +129,37 @@ fn parse_empty_segment() {
 
 #[test]
 fn extract_template_params_simple() {
-  let params: Vec<_> = ParsedPath::extract_template_params("/projects/{projectKey}/repos/{repositorySlug}").collect();
+  let params = ParsedPath::extract_template_params("/projects/{projectKey}/repos/{repositorySlug}").collect::<Vec<_>>();
   assert_eq!(params, vec!["projectKey", "repositorySlug"]);
 }
 
 #[test]
 fn extract_template_params_none() {
-  let params: Vec<_> = ParsedPath::extract_template_params("/api/v1/status").collect();
+  let params = ParsedPath::extract_template_params("/api/v1/status").collect::<Vec<_>>();
   assert!(params.is_empty());
 }
 
 #[test]
 fn extract_template_params_single() {
-  let params: Vec<_> = ParsedPath::extract_template_params("/users/{id}").collect();
+  let params = ParsedPath::extract_template_params("/users/{id}").collect::<Vec<_>>();
   assert_eq!(params, vec!["id"]);
 }
 
 #[test]
 fn extract_template_params_adjacent() {
-  let params: Vec<_> = ParsedPath::extract_template_params("/{a}{b}/{c}").collect();
+  let params = ParsedPath::extract_template_params("/{a}{b}/{c}").collect::<Vec<_>>();
   assert_eq!(params, vec!["a", "b", "c"]);
 }
 
 #[test]
 fn extract_template_params_skips_empty() {
-  let params: Vec<_> = ParsedPath::extract_template_params("/foo/{}/bar/{id}").collect();
+  let params = ParsedPath::extract_template_params("/foo/{}/bar/{id}").collect::<Vec<_>>();
   assert_eq!(params, vec!["id"]);
 }
 
 #[test]
 fn extract_template_params_handles_unclosed() {
-  let params: Vec<_> = ParsedPath::extract_template_params("/foo/{unclosed").collect();
+  let params = ParsedPath::extract_template_params("/foo/{unclosed").collect::<Vec<_>>();
   assert!(params.is_empty());
 }
 

@@ -157,7 +157,7 @@ fn test_ensure_unique() {
   ];
 
   for (used_list, input, expected) in cases {
-    let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
+    let used = used_list.into_iter().map(String::from).collect::<BTreeSet<String>>();
     assert_eq!(
       ensure_unique(input, &used),
       expected,

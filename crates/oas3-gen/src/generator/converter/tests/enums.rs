@@ -117,11 +117,11 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
   assert_eq!(enum_def.name.to_string(), "TestUnion");
   assert_eq!(enum_def.discriminator_field, "type");
   assert_eq!(enum_def.variants.len(), 2);
-  let variant_values: BTreeSet<_> = enum_def
+  let variant_values = enum_def
     .variants
     .iter()
     .flat_map(|v| v.discriminator_values.iter().map(String::as_str))
-    .collect();
+    .collect::<BTreeSet<_>>();
   assert!(variant_values.contains("type_a"));
   assert!(variant_values.contains("type_b"));
   Ok(())
@@ -1099,7 +1099,7 @@ fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
   };
 
   assert_eq!(enum_def.methods.len(), 2);
-  let names: Vec<_> = enum_def.methods.iter().map(|m| m.name.clone()).collect();
+  let names = enum_def.methods.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
   assert!(names.contains(&MethodNameToken::from("active")));
   assert!(
     names.contains(&MethodNameToken::from("active2")) || names.iter().any(|n| n != &MethodNameToken::from("active"))
@@ -1362,7 +1362,7 @@ fn test_union_with_inline_struct_and_raw_name() -> anyhow::Result<()> {
 
   let binding = context.cache.borrow();
   let generated = &binding.types.types;
-  let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
+  let all_types = result.iter().chain(generated.iter()).collect::<Vec<&RustType>>();
 
   let enum_def = all_types.iter().find_map(|t| match t {
     RustType::Enum(e) => Some(e),
@@ -1592,7 +1592,11 @@ fn test_nested_anyof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
     "should have 2 variants (Auto and CustomCookingConfig), not a single Variant0 wrapper"
   );
 
-  let variant_names: Vec<String> = enum_def.variants.iter().map(|v| v.name.to_string()).collect();
+  let variant_names = enum_def
+    .variants
+    .iter()
+    .map(|v| v.name.to_string())
+    .collect::<Vec<String>>();
   assert!(
     variant_names.contains(&"Auto".to_string()),
     "should have Auto variant, got {variant_names:?}"
@@ -1673,7 +1677,11 @@ fn test_nested_oneof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
     "should have 2 variants (Default and OptionA), not a single Variant0 wrapper"
   );
 
-  let variant_names: Vec<String> = enum_def.variants.iter().map(|v| v.name.to_string()).collect();
+  let variant_names = enum_def
+    .variants
+    .iter()
+    .map(|v| v.name.to_string())
+    .collect::<Vec<String>>();
   assert!(
     variant_names.contains(&"Default".to_string()),
     "should have Default variant, got {variant_names:?}"

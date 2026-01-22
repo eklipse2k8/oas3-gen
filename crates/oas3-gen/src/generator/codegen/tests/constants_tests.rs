@@ -91,7 +91,7 @@ fn test_regex_constants_result_deduplicates_patterns() {
 
   assert_eq!(result.lookup.len(), 2, "both fields should be in lookup");
 
-  let const_names: std::collections::HashSet<_> = result.lookup.values().collect();
+  let const_names = result.lookup.values().collect::<std::collections::HashSet<_>>();
   assert_eq!(const_names.len(), 1, "both should reference same constant");
 
   let code = result.into_token_stream().to_string();

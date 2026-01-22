@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use super::build_type_usage_map;
 use crate::generator::{
-  analyzer::{DependencyGraph, TypeUsage},
   ast::{
     EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive,
     RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
     VariantContent, VariantDef, tokens::FieldNameToken,
   },
+  postprocess::{DependencyGraph, TypeUsage},
 };
 
 fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<EnumToken, (bool, bool)> {

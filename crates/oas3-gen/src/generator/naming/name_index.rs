@@ -156,7 +156,7 @@ pub fn compute_best_name(candidates: &NameCandidates, used_names: &BTreeSet<Stri
     return name.clone();
   }
 
-  let candidate_vec: Vec<&String> = candidates.iter().map(|(n, _)| n).collect();
+  let candidate_vec = candidates.iter().map(|(n, _)| n).collect::<Vec<&String>>();
 
   match candidate_vec.as_slice() {
     [] => "UnknownType".to_string(),
@@ -177,8 +177,11 @@ pub fn longest_common_suffix(strings: &[&String]) -> String {
     return String::new();
   };
 
-  let first_chars: Vec<char> = first.chars().collect();
-  let rest_chars: Vec<Vec<char>> = rest.iter().map(|s| s.chars().collect()).collect();
+  let first_chars = first.chars().collect::<Vec<char>>();
+  let rest_chars = rest
+    .iter()
+    .map(|s| s.chars().collect::<Vec<char>>())
+    .collect::<Vec<Vec<char>>>();
 
   let min_len = std::iter::once(first_chars.len())
     .chain(rest_chars.iter().map(Vec::len))

@@ -54,13 +54,19 @@ impl CommonVariantName {
 ///
 /// Returns `None` if fewer than 2 variants have references or no common prefix exists.
 pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<CommonVariantName> {
-  let ref_names: Vec<String> = variants.iter().filter_map(RefCollector::parse_schema_ref).collect();
+  let ref_names = variants
+    .iter()
+    .filter_map(RefCollector::parse_schema_ref)
+    .collect::<Vec<String>>();
 
   if ref_names.len() < 2 {
     return None;
   }
 
-  let segments: Vec<Vec<String>> = ref_names.iter().map(|n| split_pascal_case(n)).collect();
+  let segments = ref_names
+    .iter()
+    .map(|n| split_pascal_case(n))
+    .collect::<Vec<Vec<String>>>();
   let first = segments.first().filter(|s| !s.is_empty())?;
   let rest = &segments[1..];
 
@@ -245,20 +251,20 @@ pub fn strip_common_affixes(variants: Vec<VariantDef>) -> Vec<VariantDef> {
     return variants;
   }
 
-  let word_segments: Vec<Vec<String>> = variants
+  let word_segments = variants
     .iter()
     .map(|v| split_pascal_case(&v.name.to_string()))
-    .collect();
+    .collect::<Vec<Vec<String>>>();
   let first = &word_segments[0];
   let rest = &word_segments[1..];
 
   let common_prefix_len = common_prefix_len(first, rest);
   let common_suffix_len = common_suffix_len(first, rest);
 
-  let stripped_names: Vec<String> = word_segments
+  let stripped_names = word_segments
     .iter()
     .map(|segments| extract_middle_segments(segments, common_prefix_len, common_suffix_len, ""))
-    .collect();
+    .collect::<Vec<String>>();
 
   if !all_non_empty_and_unique(&stripped_names) {
     return variants;

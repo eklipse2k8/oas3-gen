@@ -398,7 +398,7 @@ fn array_with_union_items_inline_generation() {
     RustType::Enum(enum_def) => {
       assert_eq!(enum_def.name.as_str(), "ToolKind");
       assert_eq!(enum_def.variants.len(), 2);
-      let variant_names: Vec<_> = enum_def.variants.iter().map(|v| v.name.as_str()).collect();
+      let variant_names = enum_def.variants.iter().map(|v| v.name.as_str()).collect::<Vec<_>>();
       assert!(
         variant_names.contains(&"Tool"),
         "Missing Tool variant, found: {variant_names:?}"
@@ -977,14 +977,14 @@ fn try_flatten_nested_union() {
   let types = converter.convert_schema("NestedUnion", &nested_schema).unwrap();
   assert!(!types.is_empty(), "nested union should generate types");
 
-  let type_names: Vec<_> = types
+  let type_names = types
     .iter()
     .map(|t| match t {
       RustType::Enum(e) => e.name.as_str().to_string(),
       RustType::DiscriminatedEnum(e) => e.name.as_str().to_string(),
       _ => "other".to_string(),
     })
-    .collect();
+    .collect::<Vec<_>>();
   assert!(
     type_names.iter().any(|n| n == "NestedUnion"),
     "should generate NestedUnion type, got: {type_names:?}"

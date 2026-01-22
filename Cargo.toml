@@ -64,6 +64,7 @@ mediatype = { version = "0.21", features = ["serde"] }
 num-format = { version = "0.4" }
 oas3 = { version = "0.20", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
+petgraph = { version = "0.8" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }
 quick-xml = { version = ">=0.38", default-features = false }

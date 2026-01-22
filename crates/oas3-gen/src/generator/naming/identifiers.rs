@@ -58,7 +58,7 @@ pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
 
   let mut words = vec![];
   let mut current_word = String::new();
-  let chars: Vec<char> = name.chars().collect();
+  let chars = name.chars().collect::<Vec<char>>();
 
   for (i, &ch) in chars.iter().enumerate() {
     if ch.is_uppercase() && !current_word.is_empty() {
@@ -218,7 +218,7 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
 
   let mut ident = if appears_mixed_case {
     let ascii = any_ascii(name_without_minus);
-    let cleaned: String = ascii.chars().filter(char::is_ascii_alphanumeric).collect();
+    let cleaned = ascii.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
 
     if cleaned.is_empty() {
       cleaned

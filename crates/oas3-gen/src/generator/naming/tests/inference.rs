@@ -55,7 +55,7 @@ fn test_derive_method_names() {
   ];
 
   for (enum_name, variants, expected) in cases {
-    let variants_vec: Vec<String> = variants.into_iter().map(String::from).collect();
+    let variants_vec = variants.into_iter().map(String::from).collect::<Vec<String>>();
     assert_eq!(
       derive_method_names(enum_name, &variants_vec),
       expected,
@@ -76,7 +76,7 @@ fn test_longest_common_suffix() {
   ];
 
   for (inputs, expected) in cases {
-    let input_strings: Vec<String> = inputs.into_iter().map(String::from).collect();
+    let input_strings = inputs.into_iter().map(String::from).collect::<Vec<String>>();
     let refs: Vec<&String> = input_strings.iter().collect();
     assert_eq!(
       longest_common_suffix(&refs),
@@ -121,8 +121,11 @@ fn test_compute_best_name() {
   ];
 
   for (candidate_pairs, used_list, expected) in cases {
-    let candidates: BTreeSet<(String, bool)> = candidate_pairs.iter().map(|(s, b)| ((*s).to_string(), *b)).collect();
-    let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
+    let candidates = candidate_pairs
+      .iter()
+      .map(|(s, b)| ((*s).to_string(), *b))
+      .collect::<BTreeSet<(String, bool)>>();
+    let used = used_list.into_iter().map(String::from).collect::<BTreeSet<String>>();
     assert_eq!(
       compute_best_name(&candidates, &used),
       expected,
@@ -730,7 +733,7 @@ fn extract_common_variant_prefix_cases() {
   ];
 
   for case in cases {
-    let variants: Vec<ObjectOrReference<ObjectSchema>> = case
+    let variants = case
       .variants
       .iter()
       .map(|name| ObjectOrReference::Ref {
@@ -738,7 +741,7 @@ fn extract_common_variant_prefix_cases() {
         summary: None,
         description: None,
       })
-      .collect();
+      .collect::<Vec<ObjectOrReference<ObjectSchema>>>();
 
     let result = extract_common_variant_prefix(&variants);
 

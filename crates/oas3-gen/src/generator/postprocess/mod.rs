@@ -2,7 +2,7 @@ mod dependency_graph;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
 
-use self::dependency_graph::DependencyGraph;
+pub(crate) use self::dependency_graph::DependencyGraph;
 use crate::generator::{
   ast::{
     ContentCategory, DefaultAtom, DerivesProvider, EnumToken, MethodKind, OperationInfo, OuterAttr, RustPrimitive,
@@ -12,7 +12,7 @@ use crate::generator::{
   converter::GenerationTarget,
 };
 
-pub struct AnalysisOutput {
+pub struct PostprocessOutput {
   pub types: Vec<RustType>,
   pub operations: Vec<OperationInfo>,
   pub header_refs: Vec<HttpHeaderRef>,
@@ -50,14 +50,14 @@ impl TypeUsage {
   }
 }
 
-pub(crate) struct TypeAnalyzer {
+pub(crate) struct TypePostprocessor {
   types: Vec<RustType>,
   operations: Vec<OperationInfo>,
   usage_map: BTreeMap<EnumToken, TypeUsage>,
   target: GenerationTarget,
 }
 
-impl TypeAnalyzer {
+impl TypePostprocessor {
   pub(crate) fn new(
     types: Vec<RustType>,
     operations: Vec<OperationInfo>,
@@ -75,7 +75,7 @@ impl TypeAnalyzer {
     }
   }
 
-  pub(crate) fn analyze(mut self) -> AnalysisOutput {
+  pub(crate) fn postprocess(mut self) -> PostprocessOutput {
     self.deduplicate_response_enums();
     self.add_nested_validation_attrs();
     self.update_serde_modes();
@@ -83,7 +83,7 @@ impl TypeAnalyzer {
     let header_refs = self.extract_header_refs();
     let types = self.sort_and_dedup_types();
 
-    AnalysisOutput {
+    PostprocessOutput {
       types,
       operations: self.operations,
       header_refs,
@@ -151,22 +151,7 @@ impl TypeAnalyzer {
       .map(|(name, &(req, resp))| (name.clone(), req, resp))
       .collect();
 
-    while let Some((type_name, in_request, in_response)) = worklist.pop_front() {
-      if let Some(deps) = dep_graph.dependencies_of(&type_name.to_string()) {
-        for dep in deps {
-          let dep_token: EnumToken = dep.as_str().into();
-          let entry = usage_map.entry(dep_token.clone()).or_insert((false, false));
-          let old_value = *entry;
-
-          entry.0 |= in_request;
-          entry.1 |= in_response;
-
-          if *entry != old_value {
-            worklist.push_back((dep_token, entry.0, entry.1));
-          }
-        }
-      }
-    }
+    Self::drain_worklist(usage_map, dep_graph, &mut worklist);
 
     for rust_type in types {
       let type_name: EnumToken = rust_type.type_name().into();
@@ -176,19 +161,29 @@ impl TypeAnalyzer {
       }
     }
 
+    Self::drain_worklist(usage_map, dep_graph, &mut worklist);
+  }
+
+  fn drain_worklist(
+    usage_map: &mut BTreeMap<EnumToken, (bool, bool)>,
+    dep_graph: &DependencyGraph,
+    worklist: &mut VecDeque<(EnumToken, bool, bool)>,
+  ) {
     while let Some((type_name, in_request, in_response)) = worklist.pop_front() {
-      if let Some(deps) = dep_graph.dependencies_of(&type_name.to_string()) {
-        for dep in deps {
-          let dep_token: EnumToken = dep.as_str().into();
-          let entry = usage_map.entry(dep_token.clone()).or_insert((false, false));
-          let old_value = *entry;
+      let Some(deps) = dep_graph.dependencies_of(&type_name.to_string()) else {
+        continue;
+      };
 
-          entry.0 |= in_request;
-          entry.1 |= in_response;
+      for dep in deps {
+        let dep_token: EnumToken = dep.as_str().into();
+        let entry = usage_map.entry(dep_token.clone()).or_insert((false, false));
+        let old_value = *entry;
 
-          if *entry != old_value {
-            worklist.push_back((dep_token, entry.0, entry.1));
-          }
+        entry.0 |= in_request;
+        entry.1 |= in_response;
+
+        if *entry != old_value {
+          worklist.push_back((dep_token, entry.0, entry.1));
         }
       }
     }
@@ -335,20 +330,26 @@ impl TypeAnalyzer {
   }
 
   fn referenced_custom_atom(type_ref: &TypeRef) -> Option<DefaultAtom> {
-    match &type_ref.base_type {
-      RustPrimitive::Custom(atom) => Some(atom.clone()),
-      _ => None,
+    if let RustPrimitive::Custom(atom) = &type_ref.base_type {
+      Some(atom.clone())
+    } else {
+      None
     }
   }
 
   fn update_serde_modes(&mut self) {
+    let usage_map = &self.usage_map;
+    let target = self.target;
+
+    let get_usage = |name: &EnumToken| usage_map.get(name).copied().unwrap_or(TypeUsage::Bidirectional);
+
     for rust_type in &mut self.types {
       match rust_type {
         RustType::Struct(def) => {
           let key: EnumToken = def.name.as_str().into();
-          let usage = self.usage_map.get(&key).copied().unwrap_or(TypeUsage::Bidirectional);
+          let usage = get_usage(&key);
 
-          def.serde_mode = usage.to_serde_mode(self.target);
+          def.serde_mode = usage.to_serde_mode(target);
 
           if usage == TypeUsage::ResponseOnly {
             for field in &mut def.fields {
@@ -364,20 +365,10 @@ impl TypeAnalyzer {
           }
         }
         RustType::Enum(def) => {
-          let usage = self
-            .usage_map
-            .get(&def.name)
-            .copied()
-            .unwrap_or(TypeUsage::Bidirectional);
-          def.serde_mode = usage.to_serde_mode(self.target);
+          def.serde_mode = get_usage(&def.name).to_serde_mode(target);
         }
         RustType::DiscriminatedEnum(def) => {
-          let usage = self
-            .usage_map
-            .get(&def.name)
-            .copied()
-            .unwrap_or(TypeUsage::Bidirectional);
-          def.serde_mode = usage.to_serde_mode(self.target);
+          def.serde_mode = get_usage(&def.name).to_serde_mode(target);
         }
         _ => {}
       }

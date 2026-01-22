@@ -118,10 +118,10 @@ The generator follows a strict one-way data flow where each stage produces immut
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STAGE 5: TYPE ANALYSIS (TypeAnalyzer)                                       │
+│ STAGE 5: TYPE POSTPROCESSING (TypePostprocessor)                            │
 │ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
-│ │    TypeAnalyzer     │───▶│ • Builds DependencyGraph from types        │  │
-│ │  (analyzer/mod.rs)  │    │ • Propagates usage through dependencies    │  │
+│ │  TypePostprocessor  │───▶│ • Builds DependencyGraph from types        │  │
+│ │ (postprocess/mod.rs)│    │ • Propagates usage through dependencies    │  │
 │ └─────────────────────┘    │ • Updates SerdeMode per type:              │  │
 │                            │   - RequestOnly → SerializeOnly            │  │
 │                            │   - ResponseOnly → DeserializeOnly         │  │
@@ -189,8 +189,8 @@ The generator follows a strict one-way data flow where each stage produces immut
 | `naming/name_index.rs`              | Name indexing for conflict resolution                               |
 | `naming/operations.rs`              | Operation-specific naming logic                                     |
 | `naming/responses.rs`               | Response-specific naming logic                                      |
-| `analyzer/mod.rs`                   | `TypeAnalyzer`: usage propagation, serde modes, error schemas       |
-| `analyzer/dependency_graph.rs`      | Type dependency tracking for analysis                               |
+| `postprocess/mod.rs`                | `TypePostprocessor`: usage propagation, serde modes, error schemas  |
+| `postprocess/dependency_graph.rs`   | Type dependency tracking for postprocessing                         |
 | `codegen/mod.rs`                    | Entry point for Rust code generation                                |
 | `codegen/structs.rs`                | Struct code generation with derives and serde attrs                 |
 | `codegen/enums.rs`                  | Enum code generation with case-insensitive deser support            |
@@ -213,7 +213,7 @@ The generator follows a strict one-way data flow where each stage produces immut
 - [converter/variants.rs](crates/oas3-gen/src/generator/converter/variants.rs) - Union variant building
 - [naming/inference.rs](crates/oas3-gen/src/generator/naming/inference.rs) - Variant prefix extraction helpers
 - [naming/identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization
-- [analyzer/mod.rs](crates/oas3-gen/src/generator/analyzer/mod.rs) - TypeAnalyzer and serde mode computation
+- [postprocess/mod.rs](crates/oas3-gen/src/generator/postprocess/mod.rs) - TypePostprocessor and serde mode computation
 - [codegen/mod.rs](crates/oas3-gen/src/generator/codegen/mod.rs) - Code generation entry point
 - [codegen/client.rs](crates/oas3-gen/src/generator/codegen/client.rs) - HTTP client generation
 - [codegen/server.rs](crates/oas3-gen/src/generator/codegen/server.rs) - HTTP server trait generation

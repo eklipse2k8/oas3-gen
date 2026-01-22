@@ -129,10 +129,10 @@ impl RelaxedEnumBuilder {
   ) -> ConversionOutput<RustType> {
     let base_name = to_rust_type_name(name);
 
-    let mut cache_key_values: Vec<String> = known_values
+    let mut cache_key_values = known_values
       .iter()
       .filter_map(|e| e.value.as_str().map(String::from))
-      .collect();
+      .collect::<Vec<String>>();
     cache_key_values.sort();
 
     let (known_enum_name, inner_enum_type) = self.resolve_cached_known_enum(&base_name, known_values, cache_key_values);
@@ -191,16 +191,16 @@ impl RelaxedEnumBuilder {
   ) -> Vec<EnumMethod> {
     let known_type = EnumToken::new(known_type_name);
 
-    let variant_names: Vec<EnumVariantToken> = entries
+    let variant_names = entries
       .iter()
       .filter_map(|entry| {
         NormalizedVariant::try_from(&entry.value)
           .ok()
           .map(|n| EnumVariantToken::new(n.name))
       })
-      .collect();
+      .collect::<Vec<EnumVariantToken>>();
 
-    let variant_name_strings: Vec<String> = variant_names.iter().map(ToString::to_string).collect();
+    let variant_name_strings = variant_names.iter().map(ToString::to_string).collect::<Vec<String>>();
     let method_names = derive_method_names(wrapper_enum_name, &variant_name_strings);
 
     let mut seen = BTreeSet::new();

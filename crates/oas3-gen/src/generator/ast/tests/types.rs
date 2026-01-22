@@ -48,7 +48,7 @@ fn test_rust_primitive_from_str() {
   ];
 
   for (input, expected) in cases {
-    let parsed: RustPrimitive = input.parse().unwrap();
+    let parsed = input.parse::<RustPrimitive>().unwrap();
     assert_eq!(parsed, expected, "parsing '{input}' failed");
   }
 }
@@ -78,7 +78,7 @@ fn test_rust_primitive_display_and_default() {
 
   for primitive in primitives {
     let string = primitive.to_string();
-    let parsed: RustPrimitive = string.parse().unwrap();
+    let parsed = string.parse::<RustPrimitive>().unwrap();
     assert_eq!(parsed, primitive, "round-trip failed for {primitive:?}");
   }
 }

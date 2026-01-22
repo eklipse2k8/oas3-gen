@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use super::{add_nested_validation_attrs, update_derives_from_usage};
+use super::postprocess_types_with_usage;
 use crate::generator::{
-  analyzer::TypeUsage,
   ast::{
     DeriveTrait, DerivesProvider, EnumDef, EnumToken, EnumVariantToken, FieldDef, OuterAttr, RustType, StructDef,
     StructKind, StructToken, TypeRef, ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
   },
+  postprocess::TypeUsage,
 };
 
 fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {
@@ -47,23 +47,29 @@ fn create_enum(name: &str) -> EnumDef {
   }
 }
 
+fn usage_flags(usage: TypeUsage) -> (bool, bool) {
+  match usage {
+    TypeUsage::RequestOnly => (true, false),
+    TypeUsage::ResponseOnly => (false, true),
+    TypeUsage::Bidirectional => (true, true),
+  }
+}
+
 fn process_struct_helper(def: StructDef, usage: TypeUsage) -> StructDef {
-  let mut usage_map = BTreeMap::new();
-  usage_map.insert(EnumToken::from(&def.name), usage);
-  let mut rust_types = vec![RustType::Struct(def)];
-  update_derives_from_usage(&mut rust_types, &usage_map);
-  match rust_types.into_iter().next().unwrap() {
+  let name = EnumToken::from(&def.name);
+  let seeds = BTreeMap::from([(name, usage_flags(usage))]);
+  let types = postprocess_types_with_usage(vec![RustType::Struct(def)], seeds);
+  match types.into_iter().next().unwrap() {
     RustType::Struct(d) => d,
     _ => panic!("Expected Struct"),
   }
 }
 
 fn process_enum_helper(def: EnumDef, usage: TypeUsage) -> EnumDef {
-  let mut usage_map = BTreeMap::new();
-  usage_map.insert(def.name.clone(), usage);
-  let mut rust_types = vec![RustType::Enum(def)];
-  update_derives_from_usage(&mut rust_types, &usage_map);
-  match rust_types.into_iter().next().unwrap() {
+  let name = def.name.clone();
+  let seeds = BTreeMap::from([(name, usage_flags(usage))]);
+  let types = postprocess_types_with_usage(vec![RustType::Enum(def)], seeds);
+  match types.into_iter().next().unwrap() {
     RustType::Enum(d) => d,
     _ => panic!("Expected Enum"),
   }
@@ -200,7 +206,7 @@ fn test_adds_nested_validation_attrs_transitively() {
     RustType::Struct(outer),
   ];
 
-  let rust_types = add_nested_validation_attrs(rust_types);
+  let rust_types = postprocess_types_with_usage(rust_types, BTreeMap::new());
 
   let middle = rust_types
     .iter()
@@ -254,7 +260,7 @@ fn test_does_not_add_nested_validation_for_unvalidated_structs() {
   };
 
   let rust_types = vec![RustType::Struct(unvalidated), RustType::Struct(outer)];
-  let rust_types = add_nested_validation_attrs(rust_types);
+  let rust_types = postprocess_types_with_usage(rust_types, BTreeMap::new());
 
   let outer = rust_types
     .iter()

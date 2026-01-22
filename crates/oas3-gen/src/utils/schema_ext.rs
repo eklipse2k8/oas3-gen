@@ -405,7 +405,7 @@ impl SchemaExt for ObjectSchema {
       return Some(values);
     }
 
-    let variants: Vec<_> = self.union_variants().collect();
+    let variants = self.union_variants().collect::<Vec<_>>();
     if variants.is_empty() {
       return None;
     }
@@ -430,11 +430,11 @@ impl SchemaExt for ObjectSchema {
       return None;
     }
 
-    let mut values: Vec<_> = self
+    let mut values = self
       .enum_values
       .iter()
       .filter_map(|v| v.as_str().map(String::from))
-      .collect();
+      .collect::<Vec<_>>();
 
     if values.is_empty() {
       return None;
@@ -573,10 +573,10 @@ impl SchemaExt for ObjectSchema {
       return with_suffix(&singular);
     }
 
-    let segments: Vec<_> = path
+    let segments = path
       .split('/')
       .filter(|s| !s.is_empty() && !s.starts_with('{'))
-      .collect();
+      .collect::<Vec<_>>();
 
     segments
       .last()

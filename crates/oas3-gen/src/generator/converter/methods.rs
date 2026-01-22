@@ -42,13 +42,13 @@ impl MethodGenerator {
   ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
 
-    let mut struct_cache: BTreeMap<String, StructDef> = inline_types
+    let mut struct_cache = inline_types
       .iter()
       .filter_map(|t| match t {
         RustType::Struct(s) => Some((s.name.to_string(), s.clone())),
         _ => None,
       })
-      .collect();
+      .collect::<BTreeMap<String, StructDef>>();
 
     let eligible = self.collect_eligible_variants(variants, &mut struct_cache);
 
@@ -88,7 +88,10 @@ impl MethodGenerator {
     eligible: &[(EnumVariantToken, EnumMethodKind)],
     variants: &[VariantDef],
   ) -> Vec<EnumMethod> {
-    let variant_names: Vec<String> = eligible.iter().map(|(name, _)| name.to_string()).collect();
+    let variant_names = eligible
+      .iter()
+      .map(|(name, _)| name.to_string())
+      .collect::<Vec<String>>();
     let method_names = derive_method_names(enum_name, &variant_names);
 
     let mut seen = BTreeSet::new();
@@ -118,8 +121,8 @@ impl MethodGenerator {
       return None;
     }
 
-    let required_fields: Vec<_> = struct_def.required_fields().collect();
-    let user_fields: Vec<_> = struct_def.user_fields().collect();
+    let required_fields = struct_def.required_fields().collect::<Vec<_>>();
+    let user_fields = struct_def.user_fields().collect::<Vec<_>>();
 
     match required_fields.len() {
       0 => {
@@ -225,14 +228,14 @@ impl MethodGenerator {
     let nested_info = BuilderNestedStruct::builder()
       .field_name(field.name.clone())
       .struct_name(nested.name.clone())
-      .field_names(nested.fields.iter().map(|f| f.name.clone()).collect())
+      .field_names(nested.fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
       .build();
 
     let flattened_fields = nested
       .fields
       .iter()
       .map(|nested_field| BuilderField::from_nested(nested_field, &field.name))
-      .collect();
+      .collect::<Vec<_>>();
 
     (flattened_fields, Some(nested_info))
   }

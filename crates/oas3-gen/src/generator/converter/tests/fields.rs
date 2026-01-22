@@ -367,9 +367,9 @@ fn field_name_deduplication() {
   ];
 
   for case in cases {
-    let fields = case.fields.iter().map(|(n, d)| make_field(n, *d)).collect();
+    let fields = case.fields.iter().map(|(n, d)| make_field(n, *d)).collect::<Vec<_>>();
     let result = FieldConverter::deduplicate_names(fields);
-    let names: Vec<_> = result.iter().map(|f| f.name.as_str()).collect();
+    let names = result.iter().map(|f| f.name.as_str()).collect::<Vec<_>>();
 
     assert_eq!(names.len(), case.expected_names.len(), "{}: length mismatch", case.name);
 

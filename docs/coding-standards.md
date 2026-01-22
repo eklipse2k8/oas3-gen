@@ -222,7 +222,7 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
 1. Review pipeline architecture: Parse/Analyze -> Convert (AST) -> Generate (Rust source)
 2. Identify stage:
    - utils/ for cross-cutting concerns (extension traits, text processing)
-   - analyzer/ for schema analysis, validation, and type usage tracking
+   - postprocess/ for type postprocessing, validation, and serde mode optimization
    - naming/ for identifier generation and variant naming
    - converter/ for OpenAPI to AST transformation
    - codegen/ for AST to Rust source code generation

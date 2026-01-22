@@ -142,7 +142,10 @@ impl TypeRef {
       unique_items: false,
     };
 
-    let formatted_items: Vec<String> = items.iter().map(|item| element_type.format_example(item)).collect();
+    let formatted_items = items
+      .iter()
+      .map(|item| element_type.format_example(item))
+      .collect::<Vec<String>>();
 
     format!("vec![{}]", formatted_items.join(", "))
   }
@@ -278,7 +281,10 @@ impl RustPrimitive {
       }
       serde_json::Value::Null => String::new(),
       serde_json::Value::Array(items) => {
-        let formatted_items: Vec<String> = items.iter().map(|item| self.format_value(item)).collect();
+        let formatted_items = items
+          .iter()
+          .map(|item| self.format_value(item))
+          .collect::<Vec<String>>();
         format!("vec![{}]", formatted_items.join(", "))
       }
       serde_json::Value::Object(_) => serde_json::to_string(value).unwrap_or_else(|_| "...".to_string()),
@@ -452,7 +458,7 @@ fn format_time_constructor(time_str: &str) -> String {
 }
 
 pub(crate) fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
-  let parts: Vec<&str> = date_str.split('-').collect();
+  let parts = date_str.split('-').collect::<Vec<&str>>();
   if parts.len() == 3 {
     let year = parts[0].parse().ok()?;
     let month = parts[1].parse().ok()?;
@@ -464,10 +470,10 @@ pub(crate) fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
 }
 
 pub(crate) fn parse_time_parts(time_str: &str) -> Option<(u32, u32, u32)> {
-  let parts: Vec<&str> = time_str.split(':').collect();
+  let parts = time_str.split(':').collect::<Vec<&str>>();
   if parts.len() >= 2 {
-    let hour: u32 = parts[0].parse().ok()?;
-    let minute: u32 = parts[1].parse().ok()?;
+    let hour = parts[0].parse::<u32>().ok()?;
+    let minute = parts[1].parse::<u32>().ok()?;
     let second: u32 = if parts.len() >= 3 {
       parts[2].split('.').next()?.parse().ok()?
     } else {
