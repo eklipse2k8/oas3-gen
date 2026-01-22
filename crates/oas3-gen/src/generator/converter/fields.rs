@@ -228,13 +228,7 @@ impl FieldConverter {
       .default
       .clone()
       .or_else(|| schema.const_value.clone())
-      .or_else(|| {
-        if schema.enum_values.len() == 1 {
-          schema.enum_values.first().cloned()
-        } else {
-          None
-        }
-      })
+      .or_else(|| schema.enum_values.iter().exactly_one().ok().cloned())
   }
 
   pub(crate) fn extract_all_validation(

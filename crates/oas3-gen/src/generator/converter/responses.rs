@@ -1,4 +1,4 @@
-use std::{collections::HashSet, rc::Rc};
+use std::rc::Rc;
 
 use indexmap::IndexMap;
 use itertools::Itertools;
@@ -355,12 +355,7 @@ impl ResponseStatusCategory {
   #[must_use]
   pub fn from_variants(variants: &[&ResponseVariant]) -> Self {
     if let [variant] = variants {
-      let unique_categories = variant
-        .media_types
-        .iter()
-        .map(|m| m.category)
-        .collect::<HashSet<_>>()
-        .len();
+      let unique_categories = variant.media_types.iter().map(|m| m.category).unique().count();
 
       if unique_categories <= 1 {
         return Self::Single(

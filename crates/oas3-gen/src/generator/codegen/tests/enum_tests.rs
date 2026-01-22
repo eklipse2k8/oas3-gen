@@ -8,7 +8,7 @@ use crate::generator::{
   },
   codegen::{
     Visibility,
-    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumWithAxumFragment},
+    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment},
   },
   naming::constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
 };
@@ -880,7 +880,7 @@ fn test_response_enum_generation() {
     try_from: vec![],
   };
 
-  let code = ResponseEnumWithAxumFragment::new(def, Visibility::Public, false)
+  let code = ResponseEnumFragment::new(Visibility::Public, def)
     .into_token_stream()
     .to_string();
 

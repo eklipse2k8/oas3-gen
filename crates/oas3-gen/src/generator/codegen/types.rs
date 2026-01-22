@@ -3,9 +3,16 @@ use std::{collections::BTreeMap, rc::Rc};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::{Visibility, constants, enums, structs, type_aliases};
 use crate::generator::{
   ast::{MethodKind, RegexKey, RustType, SerdeImpl, ValidationAttribute, constants::HttpHeaderRef, tokens::ConstToken},
+  codegen::{
+    Visibility,
+    constants::{HeaderConstantsFragment, RegexConstantsResult},
+    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment},
+    server::AxumResponseEnumFragment,
+    structs::StructFragment,
+    type_aliases::TypeAliasFragment,
+  },
   converter::GenerationTarget,
 };
 
@@ -37,19 +44,17 @@ impl ToTokens for TypeFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let ts = match &self.rust_type {
       RustType::Struct(def) => {
-        structs::StructFragment::new(def.clone(), self.regex_lookup.clone(), self.visibility).into_token_stream()
+        StructFragment::new(def.clone(), self.regex_lookup.clone(), self.visibility).into_token_stream()
       }
-      RustType::Enum(def) => enums::EnumFragment::new(def.clone(), self.visibility).into_token_stream(),
-      RustType::TypeAlias(def) => {
-        type_aliases::TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream()
-      }
+      RustType::Enum(def) => EnumFragment::new(def.clone(), self.visibility).into_token_stream(),
+      RustType::TypeAlias(def) => TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream(),
       RustType::DiscriminatedEnum(def) => {
-        enums::DiscriminatedEnumFragment::new(def.clone(), self.visibility).into_token_stream()
+        DiscriminatedEnumFragment::new(def.clone(), self.visibility).into_token_stream()
       }
-      RustType::ResponseEnum(def) => {
-        let generate_axum = self.target == GenerationTarget::Server;
-        enums::ResponseEnumWithAxumFragment::new(def.clone(), self.visibility, generate_axum).into_token_stream()
-      }
+      RustType::ResponseEnum(def) => match self.target {
+        GenerationTarget::Server => AxumResponseEnumFragment::new(self.visibility, def.clone()).into_token_stream(),
+        GenerationTarget::Client => ResponseEnumFragment::new(self.visibility, def.clone()).into_token_stream(),
+      },
     };
     tokens.extend(ts);
   }
@@ -81,8 +86,8 @@ impl TypesFragment {
 
 impl ToTokens for TypesFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let regex_result = constants::RegexConstantsResult::from_types(&self.rust_types);
-    let header_consts = constants::HeaderConstantsFragment::new((*self.header_refs).clone());
+    let regex_result = RegexConstantsResult::from_types(&self.rust_types);
+    let header_consts = HeaderConstantsFragment::new((*self.header_refs).clone());
 
     let mut needs_serialize = false;
     let mut needs_deserialize = false;

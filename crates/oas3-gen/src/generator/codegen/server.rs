@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::Visibility;
+use super::{Visibility, enums::ResponseEnumFragment};
 use crate::generator::{
   ast::{ClientRootNode, OperationInfo, ResponseEnumDef, ResponseVariant},
   codegen::http::HttpStatusCode,
@@ -108,6 +108,32 @@ impl ToTokens for AxumIntoResponseVariant {
       quote! {
         Self::#variant => #status_code.into_response()
       }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AxumResponseEnumFragment {
+  vis: Visibility,
+  def: ResponseEnumDef,
+}
+
+impl AxumResponseEnumFragment {
+  pub(crate) fn new(vis: Visibility, def: ResponseEnumDef) -> Self {
+    Self { vis, def }
+  }
+}
+
+impl ToTokens for AxumResponseEnumFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let response = ResponseEnumFragment::new(self.vis, self.def.clone());
+    let into_response = AxumIntoResponse::new(self.def.clone());
+
+    let ts = quote! {
+      #response
+      #into_response
     };
 
     tokens.extend(ts);

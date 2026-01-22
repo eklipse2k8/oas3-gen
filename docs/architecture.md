@@ -216,12 +216,12 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **proc-macro2** (1.0): Token manipulation
 - **syn** (2.0): Rust syntax parser with full parsing support
 - **prettyplease** (0.2): Code formatter
-- **bon** (3.5): Builder pattern derive macros
+- **bon** (3.8): Builder pattern derive macros
 
 ### CLI & Terminal
 
 - **clap** (4.5): Argument parsing with derives and color support
-- **tokio** (1.48): Async runtime for multi-threaded I/O
+- **tokio** (1.49): Async runtime for multi-threaded I/O
 - **anyhow** (1.0): Error handling with context
 - **thiserror** (2.0): Custom error type derivation
 - **crossterm** (0.29): Terminal interaction
@@ -236,6 +236,8 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **serde_with** (3.15): Enhanced serde utilities and chrono support
 - **serde_path_to_error** (0.1): Detailed deserialization error paths
 - **json-canon** (0.1): Canonical JSON representation
+- **quick-xml** (>=0.38): XML parsing for content negotiation
+- **mediatype** (0.21): MIME type handling with serde support
 
 ### Validation & Patterns
 
@@ -247,7 +249,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **better_default** (1.0): Enhanced `#[default(value)]` attribute
 - **chrono** (>=0.4.42): Date/time types with serde support
 - **uuid** (1.19): UUID type support with serde
-- **indexmap** (2.12): Insertion-ordered maps with serde
+- **indexmap** (2.13): Insertion-ordered maps with serde
 - **http** (1.4): HTTP primitives and status codes
 
 ### String & Identifier Processing
@@ -259,14 +261,24 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **string_cache** (0.9): Interned strings for performance
 - **strum** (0.27): String enum derivations
 
+### Iterator & Collection Processing
+
+- **itertools** (0.14): Deterministic iteration (sorted, unique, dedup, merge)
+- **petgraph** (0.8): Graph data structures for dependency analysis
+
 ### Performance & Caching
 
 - **blake3** (1.8): Fast cryptographic hashing with NEON support
 - **fmmap** (0.4): Memory-mapped file I/O with tokio support
 
-### HTTP Client
+### HTTP Client & Server
 
-- **reqwest** (0.12): HTTP client for remote specs
+- **reqwest** (0.13): HTTP client for remote specs
+- **axum** (0.8): Web framework for generated server code
+- **axum-core** (0.5): Core axum types and traits
+- **futures** (0.3): Async primitives and combinators
+- **futures-core** (0.3): Core future traits
+- **eventsource-stream** (0.2): Server-sent events streaming
 
 ### Runtime Support
 
@@ -274,4 +286,4 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Development & Testing
 
-- **tempfile** (3.23): Temporary test files and directories
+- **tempfile** (3.24): Temporary test files and directories

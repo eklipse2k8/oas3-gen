@@ -14,7 +14,6 @@ use crate::generator::{
   codegen::{
     attributes::DeriveAttribute,
     methods::{FieldFunctionParameterFragment, HelperMethodFragment, HelperMethodParts, StructConstructorFragment},
-    server::AxumIntoResponse,
   },
 };
 
@@ -743,41 +742,6 @@ impl ToTokens for DiscriminatedEnumFragment {
       #serialize_impl
       #deserialize_impl
       #methods_impl
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ResponseEnumWithAxumFragment {
-  def: ResponseEnumDef,
-  vis: Visibility,
-  generate_axum_impl: bool,
-}
-
-impl ResponseEnumWithAxumFragment {
-  pub(crate) fn new(def: ResponseEnumDef, visibility: Visibility, generate_axum_impl: bool) -> Self {
-    Self {
-      def,
-      vis: visibility,
-      generate_axum_impl,
-    }
-  }
-}
-
-impl ToTokens for ResponseEnumWithAxumFragment {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let response = ResponseEnumFragment::new(self.vis, self.def.clone());
-    let into_response_impl = if self.generate_axum_impl {
-      AxumIntoResponse::new(self.def.clone()).to_token_stream()
-    } else {
-      quote! {}
-    };
-
-    let ts = quote! {
-      #response
-      #into_response_impl
     };
 
     tokens.extend(ts);
