@@ -1,13 +1,13 @@
-use std::collections::BTreeSet;
-
 use inflections::Inflect;
+use itertools::Itertools;
 use oas3::{
   Spec,
   spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
 };
 
 use crate::generator::{
-  converter::union_types::UnionKind,
+  ast::Documentation,
+  converter::union_types::{EnumValueEntry, UnionKind},
   naming::{
     constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
     identifiers::{sanitize, to_rust_type_name},
@@ -152,21 +152,6 @@ pub(crate) trait SchemaExt {
   /// alongside other variants that are constrained (enum values or const).
   fn is_relaxed_enum_pattern(&self) -> bool;
 
-  /// Extracts enum values from a schema, handling standard enums, oneOf/anyOf patterns,
-  /// and relaxed enum patterns (mixed freeform string and constants).
-  ///
-  /// Returns `None` if no valid enum values could be extracted.
-  fn extract_enum_values(&self) -> Option<Vec<String>>;
-
-  /// Extracts string values from a schema's direct `enum` field.
-  ///
-  /// # Example
-  /// ```text
-  /// { "enum": ["active", "pending", 123] } => Some(["active", "pending"])
-  /// { "type": "string" }                   => None
-  /// ```
-  fn extract_standard_enum_values(&self) -> Option<Vec<String>>;
-
   /// Infers a variant name for an inline schema in a union.
   fn infer_variant_name(&self, index: usize) -> String;
 
@@ -189,6 +174,18 @@ pub(crate) trait SchemaExt {
   ///
   /// Checks in order: title, single property name, path segments.
   fn infer_name_from_context(&self, path: &str, context: &str) -> String;
+
+  /// Extracts all enum value entries from the schema with proper metadata.
+  ///
+  /// Handles multiple patterns:
+  /// - Direct `enum` arrays: each value becomes an entry
+  /// - `const` values: single entry with schema's docs/deprecated
+  /// - oneOf/anyOf with const variants: per-variant metadata preserved
+  /// - Relaxed enum patterns: known values extracted from constrained variants
+  ///
+  /// Returns entries with documentation and deprecated status from the source schema
+  /// when available, enabling per-variant metadata in generated code.
+  fn extract_enum_entries(&self, spec: &Spec) -> Vec<EnumValueEntry>;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -410,50 +407,6 @@ impl SchemaExt for ObjectSchema {
     has_mixed_string_variants(self.union_variants())
   }
 
-  fn extract_enum_values(&self) -> Option<Vec<String>> {
-    if let Some(values) = self.extract_standard_enum_values() {
-      return Some(values);
-    }
-
-    let variants = self.union_variants().collect::<Vec<_>>();
-    if variants.is_empty() {
-      return None;
-    }
-
-    let has_freeform = variants
-      .iter()
-      .any(|v| matches!(v, ObjectOrReference::Object(s) if s.is_freeform_string()));
-
-    if has_freeform {
-      return extract_relaxed_enum_values(&variants);
-    }
-
-    if !self.one_of.is_empty() {
-      return extract_oneof_const_values(&self.one_of);
-    }
-
-    None
-  }
-
-  fn extract_standard_enum_values(&self) -> Option<Vec<String>> {
-    if self.enum_values.is_empty() {
-      return None;
-    }
-
-    let mut values = self
-      .enum_values
-      .iter()
-      .filter_map(|v| v.as_str().map(String::from))
-      .collect::<Vec<_>>();
-
-    if values.is_empty() {
-      return None;
-    }
-
-    values.sort();
-    Some(values)
-  }
-
   fn infer_variant_name(&self, index: usize) -> String {
     if !self.enum_values.is_empty() {
       return "Enum".to_string();
@@ -600,6 +553,65 @@ impl SchemaExt for ObjectSchema {
         }
       })
   }
+
+  fn extract_enum_entries(&self, spec: &Spec) -> Vec<EnumValueEntry> {
+    let base_docs = Documentation::from_optional(self.description.as_ref());
+    let deprecated = self.deprecated.unwrap_or(false);
+
+    if !self.enum_values.is_empty() {
+      return self
+        .enum_values
+        .iter()
+        .map(|value| EnumValueEntry {
+          value: value.clone(),
+          docs: base_docs.clone(),
+          deprecated,
+        })
+        .collect();
+    }
+
+    if let Some(const_val) = &self.const_value {
+      return vec![EnumValueEntry {
+        value: const_val.clone(),
+        docs: base_docs,
+        deprecated,
+      }];
+    }
+
+    self
+      .union_variants()
+      .filter_map(|v| v.resolve(spec).ok())
+      .flat_map(|s| extract_variant_entries(&s))
+      .unique_by(|e| e.value.clone())
+      .collect()
+  }
+}
+
+fn extract_variant_entries(schema: &ObjectSchema) -> Vec<EnumValueEntry> {
+  if schema.is_freeform_string() {
+    return vec![];
+  }
+
+  let docs = Documentation::from_optional(schema.description.as_ref());
+  let deprecated = schema.deprecated.unwrap_or(false);
+
+  if let Some(const_val) = &schema.const_value {
+    return vec![EnumValueEntry {
+      value: const_val.clone(),
+      docs,
+      deprecated,
+    }];
+  }
+
+  schema
+    .enum_values
+    .iter()
+    .map(|value| EnumValueEntry {
+      value: value.clone(),
+      docs: docs.clone(),
+      deprecated,
+    })
+    .collect()
 }
 
 fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spec: &Spec) -> bool {
@@ -638,68 +650,4 @@ pub(crate) fn has_mixed_string_variants<'a>(
   }
 
   false
-}
-
-/// Extracts all enum/const string values from relaxed enum variants.
-///
-/// Collects values from inline schemas' `enum` arrays and `const` fields,
-/// ignoring `$ref` variants and freeform strings.
-///
-/// # Example
-/// ```text
-/// anyOf: [{ type: string }, { const: "a" }, { enum: ["b", "c"] }]
-/// => Some(["a", "b", "c"])
-/// ```
-///
-fn extract_relaxed_enum_values(variants: &[&ObjectOrReference<ObjectSchema>]) -> Option<Vec<String>> {
-  let values: BTreeSet<_> = variants
-    .iter()
-    .filter_map(|variant| match variant {
-      ObjectOrReference::Object(s) => {
-        let enum_values = s.enum_values.iter().filter_map(|v| v.as_str().map(String::from));
-        let const_value = s.const_value.as_ref().and_then(|v| v.as_str().map(String::from));
-        Some(enum_values.chain(const_value))
-      }
-      ObjectOrReference::Ref { .. } => None,
-    })
-    .flatten()
-    .collect();
-
-  if values.is_empty() {
-    None
-  } else {
-    Some(values.into_iter().collect())
-  }
-}
-
-/// Extracts const values from a oneOf where all variants are const strings.
-///
-/// Returns `None` if any variant is a `$ref` or lacks a string const value.
-///
-/// # Example
-/// ```text
-/// oneOf: [{ const: "a" }, { const: "b" }] => Some(["a", "b"])
-/// oneOf: [{ const: "a" }, { $ref: "..." }] => None
-/// ```
-///
-/// # Complexity
-/// O(n log n) where n = number of oneOf variants (BTreeSet insertion).
-fn extract_oneof_const_values(one_of: &[ObjectOrReference<ObjectSchema>]) -> Option<Vec<String>> {
-  let mut const_values = BTreeSet::new();
-
-  for variant in one_of {
-    match variant {
-      ObjectOrReference::Object(s) => {
-        let const_str = s.const_value.as_ref().and_then(|v| v.as_str())?;
-        const_values.insert(const_str.to_string());
-      }
-      ObjectOrReference::Ref { .. } => return None,
-    }
-  }
-
-  if const_values.is_empty() {
-    None
-  } else {
-    Some(const_values.into_iter().collect())
-  }
 }

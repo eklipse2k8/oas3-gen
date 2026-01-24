@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
@@ -33,6 +34,16 @@ pub(crate) struct EnumValueEntry {
   pub(crate) value: Value,
   pub(crate) docs: Documentation,
   pub(crate) deprecated: bool,
+}
+
+impl EnumValueEntry {
+  pub(crate) fn cache_key(&self) -> Option<String> {
+    self.value.as_str().map(String::from)
+  }
+}
+
+pub(crate) fn entries_to_cache_key(entries: &[EnumValueEntry]) -> Vec<String> {
+  entries.iter().filter_map(EnumValueEntry::cache_key).sorted().collect()
 }
 
 #[derive(Clone, Debug)]

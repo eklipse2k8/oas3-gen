@@ -12,6 +12,7 @@ use crate::{
       name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
     },
   },
+  tests::common::create_test_spec,
   utils::SchemaExt,
 };
 
@@ -163,7 +164,8 @@ fn test_inline_type_scanner_known_suffix_patterns() {
     ("FormatType".to_string(), format_type),
   ]);
 
-  let index = TypeNameIndex::new(&schemas);
+  let spec = create_test_spec(BTreeMap::new());
+  let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
   let cases = [
@@ -213,7 +215,8 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
     ("ModelIdsShared".to_string(), model_ids_shared),
   ]);
 
-  let index = TypeNameIndex::new(&schemas);
+  let spec = create_test_spec(BTreeMap::new());
+  let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
   let status_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];

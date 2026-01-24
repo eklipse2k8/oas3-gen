@@ -23,26 +23,34 @@ impl ValueEnumBuilder {
     strategy: CollisionStrategy,
     docs: Documentation,
   ) -> RustType {
-    let mut variants: Vec<VariantDef> = vec![];
-    let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
-
-    for (i, entry) in entries.iter().enumerate() {
-      let Ok(normalized) = NormalizedVariant::try_from(&entry.value) else {
-        continue;
-      };
-
-      match seen_names.get(&normalized.name) {
-        Some(&existing_idx) if strategy == CollisionStrategy::Deduplicate => {
-          variants[existing_idx].add_alias(normalized.rename_value);
-        }
-        Some(_) => {
-          Self::handle_preserve_collision(&mut variants, &mut seen_names, &normalized, i, entry);
-        }
-        None => {
-          Self::add_new_variant(&mut variants, &mut seen_names, normalized, entry);
-        }
-      }
-    }
+    let (variants, _) = entries
+      .iter()
+      .enumerate()
+      .filter_map(|(i, entry)| {
+        NormalizedVariant::try_from(&entry.value)
+          .ok()
+          .map(|normalized| (i, entry, normalized))
+      })
+      .fold(
+        (vec![], BTreeMap::<String, usize>::new()),
+        |(mut variants, mut seen): (Vec<VariantDef>, BTreeMap<String, usize>), (i, entry, normalized)| {
+          match seen.get(&normalized.name).copied() {
+            Some(idx) if strategy == CollisionStrategy::Deduplicate => {
+              variants[idx].add_alias(normalized.rename_value);
+            }
+            Some(_) => {
+              let unique_name = format!("{}{i}", normalized.name);
+              seen.insert(unique_name.clone(), variants.len());
+              variants.push(Self::build_variant(unique_name, &normalized.rename_value, entry));
+            }
+            None => {
+              seen.insert(normalized.name.clone(), variants.len());
+              variants.push(Self::build_variant(normalized.name, &normalized.rename_value, entry));
+            }
+          }
+          (variants, seen)
+        },
+      );
 
     RustType::Enum(
       EnumDef::builder()
@@ -55,43 +63,13 @@ impl ValueEnumBuilder {
     )
   }
 
-  fn handle_preserve_collision(
-    variants: &mut Vec<VariantDef>,
-    seen_names: &mut BTreeMap<String, usize>,
-    normalized: &NormalizedVariant,
-    index: usize,
-    entry: &EnumValueEntry,
-  ) {
-    let unique_name = format!("{}{index}", normalized.name);
-    let idx = variants.len();
-    seen_names.insert(unique_name.clone(), idx);
-    variants.push(
-      VariantDef::builder()
-        .name(EnumVariantToken::from(unique_name))
-        .docs(entry.docs.clone())
-        .content(VariantContent::Unit)
-        .serde_attrs(vec![SerdeAttribute::Rename(normalized.rename_value.clone())])
-        .deprecated(entry.deprecated)
-        .build(),
-    );
-  }
-
-  fn add_new_variant(
-    variants: &mut Vec<VariantDef>,
-    seen_names: &mut BTreeMap<String, usize>,
-    normalized: NormalizedVariant,
-    entry: &EnumValueEntry,
-  ) {
-    let idx = variants.len();
-    seen_names.insert(normalized.name.clone(), idx);
-    variants.push(
-      VariantDef::builder()
-        .name(EnumVariantToken::from(normalized.name))
-        .docs(entry.docs.clone())
-        .content(VariantContent::Unit)
-        .serde_attrs(vec![SerdeAttribute::Rename(normalized.rename_value)])
-        .deprecated(entry.deprecated)
-        .build(),
-    );
+  fn build_variant(variant_name: String, rename_value: &str, entry: &EnumValueEntry) -> VariantDef {
+    VariantDef::builder()
+      .name(EnumVariantToken::from(variant_name))
+      .docs(entry.docs.clone())
+      .content(VariantContent::Unit)
+      .serde_attrs(vec![SerdeAttribute::Rename(rename_value.to_owned())])
+      .deprecated(entry.deprecated)
+      .build()
   }
 }

@@ -227,15 +227,6 @@ impl SharedSchemaCache {
     self.enums.lookup(values).map(String::from)
   }
 
-  /// Extracts enum values from schema and looks up cached name, skipping relaxed enum patterns.
-  pub(crate) fn lookup_enum_name(&self, schema: &ObjectSchema) -> Option<String> {
-    if schema.is_relaxed_enum_pattern() {
-      return None;
-    }
-    let values = schema.extract_enum_values()?;
-    self.get_enum_name(&values)
-  }
-
   pub(crate) fn is_enum_generated(&self, values: &[String]) -> bool {
     self.enums.is_registered(values)
   }
@@ -276,23 +267,28 @@ impl SharedSchemaCache {
   }
 
   /// Prepares type registration by checking for enum reuse, resolving name conflicts, and determining enum registration needs.
+  ///
+  /// The `enum_cache_key` should be provided for schemas that have enum values, computed via
+  /// `entries_to_cache_key(schema.extract_enum_entries(spec))`. This enables enum deduplication
+  /// across schemas with identical value sets.
   pub(crate) fn prepare_registration(
     &self,
     schema: &ObjectSchema,
     base_name: &str,
+    enum_cache_key: Option<Vec<String>>,
   ) -> anyhow::Result<TypeRegistration> {
     let canonical = CanonicalSchema::from_schema(schema)?;
 
     if !schema.is_relaxed_enum_pattern()
-      && let Some(values) = schema.extract_enum_values()
-      && let Some(existing_name) = self.enums.lookup(&values)
+      && let Some(ref values) = enum_cache_key
+      && let Some(existing_name) = self.enums.lookup(values)
     {
-      let should_register_enum = !self.enums.is_registered(&values);
+      let should_register_enum = !self.enums.is_registered(values);
       return Ok(TypeRegistration {
         assigned_name: existing_name.to_string(),
         canonical,
         should_register_enum,
-        enum_values: if should_register_enum { Some(values) } else { None },
+        enum_values: should_register_enum.then(|| values.clone()),
       });
     }
 
@@ -305,7 +301,7 @@ impl SharedSchemaCache {
 
     let (should_register_enum, enum_values) = if schema.has_relaxed_anyof_enum() {
       (false, None)
-    } else if let Some(values) = schema.extract_enum_values() {
+    } else if let Some(values) = enum_cache_key {
       (true, Some(values))
     } else {
       (false, None)

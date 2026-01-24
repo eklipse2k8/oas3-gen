@@ -5,7 +5,10 @@ use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
-  ConversionOutput, common::extract_variant_references, inline_resolver::InlineTypeResolver, union_types::UnionKind,
+  ConversionOutput,
+  common::extract_variant_references,
+  inline_resolver::InlineTypeResolver,
+  union_types::{UnionKind, entries_to_cache_key},
 };
 use crate::{
   generator::{
@@ -101,9 +104,11 @@ impl TypeResolver {
     if let Some(typ) = schema.single_type() {
       return self.primitive(typ, schema);
     }
+
     if let Some(non_null) = schema.non_null_type() {
       return Ok(self.primitive(non_null, schema)?.with_option());
     }
+
     if let Some(ref const_value) = schema.const_value {
       return Ok(const_value.into());
     }
@@ -183,7 +188,7 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.resolve_type(schema)?));
     }
 
-    let enum_values: Vec<String> = schema.extract_enum_values().unwrap_or_default();
+    let enum_values = entries_to_cache_key(&schema.extract_enum_entries(self.spec()));
     self
       .inline_resolver
       .resolve_inline_enum(parent_name, property_name, schema, &enum_values)
@@ -254,31 +259,38 @@ impl TypeResolver {
       let base = format!("{parent_name}{}", strip_parent_prefix(parent_name, &singular));
       self.inline_struct_from_schema(&items, &base)?
     } else if items.has_union() {
-      let (variants, _) = items.union_variants_with_kind().unwrap();
-      let kind_name = format!("{singular}{VARIANT_KIND_SUFFIX}");
-      let name = CommonVariantName::union_name_or(variants, &kind_name, || kind_name.clone());
-
-      let final_name = {
-        let cache = self.context.cache.borrow();
-        if cache.name_conflicts_with_different_schema(&name, &items)? {
-          cache.make_unique_name(&name)
-        } else {
-          name
-        }
-      };
-
-      self.union_type(&items, variants, &final_name)?
+      self.inline_union_array_item(&items, &singular)?
     } else if items.has_enum_values() {
       self.inline_enum(parent_name, &singular, &items)?
     } else {
       return Ok(None);
     };
 
-    let mut type_ref = result.result;
-    type_ref.boxed = false;
-    let vec_type = type_ref.with_vec().with_unique_items(unique);
+    let vec_type = TypeRef {
+      boxed: false,
+      ..result.result
+    }
+    .with_vec()
+    .with_unique_items(unique);
 
     Ok(Some(ConversionOutput::with_inline_types(vec_type, result.inline_types)))
+  }
+
+  fn inline_union_array_item(&self, items: &ObjectSchema, singular: &str) -> Result<ConversionOutput<TypeRef>> {
+    let (variants, _) = items.union_variants_with_kind().unwrap();
+    let kind_name = format!("{singular}{VARIANT_KIND_SUFFIX}");
+    let name = CommonVariantName::union_name_or(variants, &kind_name, || kind_name.clone());
+
+    let final_name = {
+      let cache = self.context.cache.borrow();
+      if cache.name_conflicts_with_different_schema(&name, items)? {
+        cache.make_unique_name(&name)
+      } else {
+        name
+      }
+    };
+
+    self.union_type(items, variants, &final_name)
   }
 
   fn try_type_ref_by_title(&self, schema: &ObjectSchema) -> Option<TypeRef> {
@@ -329,14 +341,10 @@ impl TypeResolver {
   }
 
   fn has_union_items(&self, schema: &ObjectSchema) -> bool {
-    schema
-      .items
-      .as_ref()
-      .and_then(|b| match b.as_ref() {
-        Schema::Object(o) => self.resolve(o).ok(),
-        Schema::Boolean(_) => None,
-      })
-      .is_some_and(|items| items.has_union())
+    let Some(Schema::Object(o)) = schema.items.as_ref().map(std::convert::AsRef::as_ref) else {
+      return false;
+    };
+    self.resolve(o).is_ok_and(|items| items.has_union())
   }
 
   pub(crate) fn try_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
@@ -398,8 +406,8 @@ impl TypeResolver {
       return Ok(Some(TypeRef::new(RustPrimitive::String)));
     }
 
-    if schema.one_of.len() == 1
-      && let Some(name) = RefCollector::parse_schema_ref(&schema.one_of[0])
+    if let [single_variant] = schema.one_of.as_slice()
+      && let Some(name) = RefCollector::parse_schema_ref(single_variant)
     {
       return Ok(Some(self.type_ref(&name)));
     }
@@ -490,23 +498,21 @@ impl TypeResolver {
   }
 
   fn array_item_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
-    let Some(items_ref) = schema.items.as_ref().and_then(|b| match b.as_ref() {
-      Schema::Object(o) => Some(o),
-      Schema::Boolean(_) => None,
-    }) else {
+    let Some(Schema::Object(items_ref)) = schema.items.as_ref().map(std::convert::AsRef::as_ref) else {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };
 
     let items = self.resolve(items_ref)?;
 
-    let mut type_ref = if let ObjectOrReference::Ref { ref_path, .. } = &**items_ref {
-      self.resolve_ref(ref_path, &items)?.result
-    } else {
-      self.resolve_type(&items)?
+    let type_ref = match &**items_ref {
+      ObjectOrReference::Ref { ref_path, .. } => self.resolve_ref(ref_path, &items)?.result,
+      ObjectOrReference::Object(_) => self.resolve_type(&items)?,
     };
 
-    type_ref.boxed = false;
-    Ok(type_ref)
+    Ok(TypeRef {
+      boxed: false,
+      ..type_ref
+    })
   }
 
   pub(crate) fn is_wrapper_union(&self, schema: &ObjectSchema) -> Result<bool> {
@@ -544,20 +550,14 @@ impl TypeResolver {
     }
 
     let (inner_variants, _) = inner.union_variants_with_kind().unwrap();
+    let variants_vec = inner_variants.to_vec();
+    let is_one_of = !inner.one_of.is_empty();
 
     Ok(Some(ObjectSchema {
       description: outer.description.clone().or_else(|| inner.description.clone()),
       discriminator: inner.discriminator.clone().or_else(|| outer.discriminator.clone()),
-      one_of: if inner.one_of.is_empty() {
-        vec![]
-      } else {
-        inner_variants.to_vec()
-      },
-      any_of: if inner.one_of.is_empty() {
-        inner_variants.to_vec()
-      } else {
-        vec![]
-      },
+      one_of: if is_one_of { variants_vec.clone() } else { vec![] },
+      any_of: if is_one_of { vec![] } else { variants_vec },
       ..Default::default()
     }))
   }

@@ -1,11 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema};
+use oas3::{
+  Spec,
+  spec::{ObjectOrReference, ObjectSchema},
+};
 
 use super::identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name};
 use crate::{
-  generator::{converter::hashing::CanonicalSchema, naming::constants::KNOWN_ENUM_VARIANT},
+  generator::{
+    converter::{hashing::CanonicalSchema, union_types::entries_to_cache_key},
+    naming::constants::KNOWN_ENUM_VARIANT,
+  },
   utils::SchemaExt,
 };
 
@@ -51,11 +57,12 @@ impl CandidateIndex {
 
 pub struct TypeNameIndex<'a> {
   schemas: &'a BTreeMap<String, ObjectSchema>,
+  spec: &'a Spec,
 }
 
 impl<'a> TypeNameIndex<'a> {
-  pub fn new(schemas: &'a BTreeMap<String, ObjectSchema>) -> Self {
-    Self { schemas }
+  pub fn new(schemas: &'a BTreeMap<String, ObjectSchema>, spec: &'a Spec) -> Self {
+    Self { schemas, spec }
   }
 
   pub fn scan_and_compute_names(&self) -> anyhow::Result<ScanResult> {
@@ -73,68 +80,70 @@ impl<'a> TypeNameIndex<'a> {
       .schemas
       .iter()
       .try_fold(CandidateIndex::default(), |acc, (name, schema)| {
-        let mut index = Self::collect_top_level_candidates(name, schema);
-        let inline = collect_inline_candidates(name, schema)?;
+        let mut index = self.collect_top_level_candidates(name, schema);
+        let inline = self.collect_inline_candidates(name, schema)?;
         index = index.merge(inline);
         Ok(acc.merge(index))
       })
   }
 
-  fn collect_top_level_candidates(schema_name: &str, schema: &ObjectSchema) -> CandidateIndex {
+  fn collect_top_level_candidates(&self, schema_name: &str, schema: &ObjectSchema) -> CandidateIndex {
     let mut index = CandidateIndex::default();
 
-    if schema.requires_type_definition()
-      && let Some(enum_values) = schema.extract_enum_values()
-    {
-      let mut rust_name = to_rust_type_name(schema_name);
-      if schema.has_relaxed_anyof_enum() {
-        rust_name.push_str(KNOWN_ENUM_VARIANT);
+    if schema.requires_type_definition() {
+      let entries = schema.extract_enum_entries(self.spec);
+      if !entries.is_empty() {
+        let mut rust_name = to_rust_type_name(schema_name);
+        if schema.has_relaxed_anyof_enum() {
+          rust_name.push_str(KNOWN_ENUM_VARIANT);
+        }
+        index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, true);
       }
-      index.add_enum_candidate(enum_values, rust_name, true);
     }
 
     index
   }
 
-  fn existing_rust_names(&self) -> BTreeSet<String> {
-    self.schemas.keys().map(|name| to_rust_type_name(name)).collect()
-  }
-}
+  fn collect_inline_candidates(&self, parent_name: &str, schema: &ObjectSchema) -> anyhow::Result<CandidateIndex> {
+    let mut index = CandidateIndex::default();
 
-fn collect_inline_candidates(parent_name: &str, schema: &ObjectSchema) -> anyhow::Result<CandidateIndex> {
-  let mut index = CandidateIndex::default();
+    for (prop_name, prop_schema_ref) in &schema.properties {
+      let ObjectOrReference::Object(prop_schema) = prop_schema_ref else {
+        continue;
+      };
 
-  for (prop_name, prop_schema_ref) in &schema.properties {
-    let ObjectOrReference::Object(prop_schema) = prop_schema_ref else {
-      continue;
-    };
+      let next_parent = format!("{parent_name}{}", prop_name.to_pascal_case());
 
-    let next_parent = format!("{parent_name}{}", prop_name.to_pascal_case());
+      if prop_schema.requires_type_definition() {
+        let canonical = CanonicalSchema::from_schema(prop_schema)?;
+        let rust_name = to_rust_type_name(&next_parent);
 
-    if prop_schema.requires_type_definition() {
-      let canonical = CanonicalSchema::from_schema(prop_schema)?;
-      let rust_name = to_rust_type_name(&next_parent);
+        index.add_schema_candidate(canonical, rust_name.clone(), false);
 
-      index.add_schema_candidate(canonical, rust_name.clone(), false);
+        let entries = prop_schema.extract_enum_entries(self.spec);
+        if !entries.is_empty() {
+          index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, false);
+        }
+      }
 
-      if let Some(values) = prop_schema.extract_enum_values() {
-        index.add_enum_candidate(values, rust_name, false);
+      if !prop_schema.properties.is_empty() {
+        index = index.merge(self.collect_inline_candidates(&next_parent, prop_schema)?);
       }
     }
 
-    if !prop_schema.properties.is_empty() {
-      index = index.merge(collect_inline_candidates(&next_parent, prop_schema)?);
+    for sub in schema.all_of.iter().filter_map(|r| match r {
+      ObjectOrReference::Object(s) => Some(s),
+      ObjectOrReference::Ref { .. } => None,
+    }) {
+      index = index.merge(self.collect_inline_candidates(parent_name, sub)?);
     }
+
+    Ok(index)
   }
 
-  for sub in schema.all_of.iter().filter_map(|r| match r {
-    ObjectOrReference::Object(s) => Some(s),
-    ObjectOrReference::Ref { .. } => None,
-  }) {
-    index = index.merge(collect_inline_candidates(parent_name, sub)?);
+  fn existing_rust_names(&self) -> BTreeSet<String> {
+    self.schemas.keys().map(|name| to_rust_type_name(name)).collect()
   }
-
-  Ok(index)
 }
 
 fn resolve_names<K: Ord>(

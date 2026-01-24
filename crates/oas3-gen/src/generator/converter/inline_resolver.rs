@@ -7,7 +7,7 @@ use oas3::spec::ObjectSchema;
 use super::{
   ConversionOutput, TypeResolver,
   structs::StructConverter,
-  union_types::UnionKind,
+  union_types::{UnionKind, entries_to_cache_key},
   unions::{EnumConverter, UnionConverter},
 };
 use crate::{
@@ -100,6 +100,11 @@ impl InlineTypeResolver {
 
     let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
 
+    let enum_cache_key = {
+      let entries = schema.extract_enum_entries(self.context.graph().spec());
+      (!schema.is_relaxed_enum_pattern() && !entries.is_empty()).then(|| entries_to_cache_key(&entries))
+    };
+
     {
       let cache = self.context.cache.borrow();
       if refs.len() >= 2
@@ -113,7 +118,7 @@ impl InlineTypeResolver {
       schema,
       base_name,
       None,
-      |cache| cache.lookup_enum_name(schema),
+      |cache| enum_cache_key.as_ref().and_then(|key| cache.get_enum_name(key)),
       |name| UnionConverter::new(self.context.clone()).convert_union(name, schema, kind),
     )?;
 
@@ -186,7 +191,15 @@ impl InlineTypeResolver {
     }
 
     let main_type = generated.last().cloned().unwrap();
-    let registration = self.context.cache.borrow().prepare_registration(schema, &unique_name)?;
+    let enum_cache_key = {
+      let entries = schema.extract_enum_entries(self.context.graph().spec());
+      (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+    };
+    let registration = self
+      .context
+      .cache
+      .borrow()
+      .prepare_registration(schema, &unique_name, enum_cache_key)?;
     let named_type = SharedSchemaCache::apply_name_to_type(main_type, &registration.assigned_name);
     let final_name = registration.assigned_name.clone();
     self
@@ -228,7 +241,15 @@ impl InlineTypeResolver {
 
     let result = generator(&name)?;
 
-    let registration = self.context.cache.borrow().prepare_registration(schema, &name)?;
+    let enum_cache_key = {
+      let entries = schema.extract_enum_entries(self.context.graph().spec());
+      (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+    };
+    let registration = self
+      .context
+      .cache
+      .borrow()
+      .prepare_registration(schema, &name, enum_cache_key)?;
     let named_type = SharedSchemaCache::apply_name_to_type(result.result.clone(), &registration.assigned_name);
     let type_name = registration.assigned_name.clone();
     self

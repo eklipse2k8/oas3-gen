@@ -7,13 +7,18 @@ use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType, VariantContent},
     converter::{
-      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
-      union_types::UnionKind, unions::UnionConverter,
+      SchemaConverter,
+      cache::SharedSchemaCache,
+      hashing::CanonicalSchema,
+      type_resolver::TypeResolver,
+      union_types::{UnionKind, entries_to_cache_key},
+      unions::UnionConverter,
     },
     naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
   tests::common::{create_test_context, create_test_graph, default_config},
+  utils::SchemaExt,
 };
 
 fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
@@ -22,6 +27,12 @@ fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
     enum_values: values.iter().map(|v| json!(v)).collect(),
     ..Default::default()
   }
+}
+
+fn make_enum_cache_key(schema: &ObjectSchema) -> Option<Vec<String>> {
+  let spec = crate::tests::common::create_test_spec(std::collections::BTreeMap::new());
+  let entries = schema.extract_enum_entries(&spec);
+  (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
 }
 
 fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
@@ -285,14 +296,14 @@ fn test_cache_operations() {
   let type_cache = SharedSchemaCache::new();
 
   let reg1 = type_cache
-    .prepare_registration(&schema1, "FirstEnum")
+    .prepare_registration(&schema1, "FirstEnum", make_enum_cache_key(&schema1))
     .expect("Should prepare first enum");
   let named_enum1 = SharedSchemaCache::apply_name_to_type(enum1, &reg1.assigned_name);
   let mut type_cache = type_cache;
   type_cache.commit_registration(reg1, vec![], named_enum1);
 
   let reg2 = type_cache
-    .prepare_registration(&schema2, "SecondEnum")
+    .prepare_registration(&schema2, "SecondEnum", make_enum_cache_key(&schema2))
     .expect("Should prepare second enum");
   let named_enum2 = SharedSchemaCache::apply_name_to_type(enum2, &reg2.assigned_name);
   type_cache.commit_registration(reg2, vec![], named_enum2);

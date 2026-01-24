@@ -7,7 +7,7 @@ use super::{
   ConversionOutput,
   methods::MethodGenerator,
   relaxed_enum::RelaxedEnumBuilder,
-  union_types::{CollisionStrategy, EnumValueEntry, UnionKind, UnionVariantSpec},
+  union_types::{CollisionStrategy, UnionKind, UnionVariantSpec, entries_to_cache_key},
   value_enums::ValueEnumBuilder,
   variants::VariantBuilder,
 };
@@ -43,16 +43,7 @@ impl EnumConverter {
       CollisionStrategy::Deduplicate
     };
 
-    let entries: Vec<EnumValueEntry> = schema
-      .enum_values
-      .iter()
-      .cloned()
-      .map(|value| EnumValueEntry {
-        value,
-        docs: Documentation::default(),
-        deprecated: false,
-      })
-      .collect();
+    let entries = schema.extract_enum_entries(self.context.graph().spec());
 
     self.value_enum_builder.build_enum_from_values(
       name,
@@ -99,14 +90,16 @@ impl UnionConverter {
 
     let output = self.collect_union_variants(name, schema, kind)?;
 
-    if let Some(values) = schema.extract_enum_values()
+    let entries = schema.extract_enum_entries(self.context.graph().spec());
+    if !entries.is_empty()
       && let RustType::Enum(e) = &output.result
     {
+      let cache_key = entries_to_cache_key(&entries);
       self
         .context
         .cache
         .borrow_mut()
-        .register_enum(values, e.name.to_string());
+        .register_enum(cache_key, e.name.to_string());
     }
 
     Ok(output)
@@ -125,14 +118,14 @@ impl UnionConverter {
 
     let variant_specs = self.collect_union_variant_specs(variants_src)?;
 
-    let (mut variants, inline_types): (Vec<_>, Vec<_>) = itertools::process_results(
+    let (mut variants, inline_types) = itertools::process_results(
       variant_specs.into_iter().map(|spec| {
         let output = self.variant_builder.build_variant(name, &spec)?;
         anyhow::Ok((output.result, output.inline_types))
       }),
-      |iter| iter.unzip(),
+      |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
     )?;
-    let inline_types: Vec<_> = inline_types.into_iter().flatten().collect();
+    let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
 
     variants = strip_common_affixes(variants);
 
@@ -142,18 +135,15 @@ impl UnionConverter {
       self.method_generator.build_constructors(&variants, &inline_types, name)
     };
 
-    let main_enum = if let Some(discriminated) =
-      DiscriminatorConverter::try_upgrade_to_discriminated(name, schema, &variants, methods.clone())
-    {
-      discriminated
-    } else {
-      RustType::untagged_enum()
-        .name(name)
-        .schema(schema)
-        .variants(variants)
-        .methods(methods)
-        .call()
-    };
+    let main_enum = DiscriminatorConverter::try_upgrade_to_discriminated(name, schema, &variants, methods.clone())
+      .unwrap_or_else(|| {
+        RustType::untagged_enum()
+          .name(name)
+          .schema(schema)
+          .variants(variants)
+          .methods(methods)
+          .call()
+      });
 
     Ok(ConversionOutput::with_inline_types(main_enum, inline_types))
   }

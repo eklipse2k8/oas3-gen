@@ -2,11 +2,10 @@ use std::{collections::BTreeSet, rc::Rc};
 
 use itertools::{Itertools, izip};
 use oas3::spec::ObjectSchema;
-use serde_json::Value;
 
 use super::{
   ConversionOutput, ConverterContext,
-  union_types::{CollisionStrategy, EnumValueEntry},
+  union_types::{CollisionStrategy, EnumValueEntry, entries_to_cache_key},
   value_enums::ValueEnumBuilder,
 };
 use crate::{
@@ -51,45 +50,17 @@ impl RelaxedEnumBuilder {
   fn collect_known_values(&self, schema: &ObjectSchema) -> Vec<EnumValueEntry> {
     let spec = self.context.graph().spec();
 
-    let resolved_variants = schema.any_of.iter().filter_map(|v| v.resolve(spec).ok()).collect_vec();
+    let has_freeform = schema
+      .any_of
+      .iter()
+      .filter_map(|v| v.resolve(spec).ok())
+      .any(|s| s.is_freeform_string());
 
-    if !resolved_variants.iter().any(ObjectSchema::is_freeform_string) {
+    if !has_freeform {
       return vec![];
     }
 
-    resolved_variants
-      .iter()
-      .flat_map(Self::extract_entries)
-      .unique_by(|entry| entry.value.as_str().map(String::from))
-      .collect()
-  }
-
-  fn extract_entries(schema: &ObjectSchema) -> Vec<EnumValueEntry> {
-    let docs = Documentation::from_optional(schema.description.as_ref());
-    let deprecated = schema.deprecated.unwrap_or(false);
-
-    if let Some(const_val) = schema.const_value.as_ref().and_then(Value::as_str) {
-      return vec![EnumValueEntry {
-        value: Value::String(const_val.to_owned()),
-        docs,
-        deprecated,
-      }];
-    }
-
-    if !schema.is_string() {
-      return vec![];
-    }
-
-    schema
-      .enum_values
-      .iter()
-      .filter_map(Value::as_str)
-      .map(|str_val| EnumValueEntry {
-        value: Value::String(str_val.to_owned()),
-        docs: docs.clone(),
-        deprecated,
-      })
-      .collect()
+    schema.extract_enum_entries(spec)
   }
 
   fn build_relaxed_enum_types(
@@ -99,7 +70,7 @@ impl RelaxedEnumBuilder {
     known_values: &[EnumValueEntry],
   ) -> ConversionOutput<RustType> {
     let base_name = to_rust_type_name(name);
-    let cache_key = Self::build_cache_key(known_values);
+    let cache_key = entries_to_cache_key(known_values);
 
     let (known_enum_name, inner_enum_type) = self.resolve_or_create_known_enum(&base_name, known_values, &cache_key);
 
@@ -113,33 +84,24 @@ impl RelaxedEnumBuilder {
     ConversionOutput::with_inline_types(outer_enum, inner_enum_type.into_iter().collect())
   }
 
-  fn build_cache_key(known_values: &[EnumValueEntry]) -> Vec<String> {
-    known_values
-      .iter()
-      .filter_map(|e| e.value.as_str().map(String::from))
-      .sorted()
-      .collect()
-  }
-
   fn resolve_or_create_known_enum(
     &self,
     base_name: &str,
     known_values: &[EnumValueEntry],
     cache_key: &[String],
   ) -> (String, Option<RustType>) {
-    let cache = self.context.cache.borrow();
-    if let Some(name) = cache.get_enum_name(cache_key) {
-      if cache.is_enum_generated(cache_key) {
-        return (name.clone(), None);
-      }
-      let name = name.clone();
-      drop(cache);
-      return self.create_known_enum(name, known_values, cache_key);
-    }
-    drop(cache);
+    let cached_result = {
+      let cache = self.context.cache.borrow();
+      cache
+        .get_enum_name(cache_key)
+        .map(|name| (name.clone(), cache.is_enum_generated(cache_key)))
+    };
 
-    let name = format!("{base_name}Known");
-    self.create_known_enum(name, known_values, cache_key)
+    match cached_result {
+      Some((name, true)) => (name, None),
+      Some((name, false)) => self.create_known_enum(name, known_values, cache_key),
+      None => self.create_known_enum(format!("{base_name}Known"), known_values, cache_key),
+    }
   }
 
   fn create_known_enum(

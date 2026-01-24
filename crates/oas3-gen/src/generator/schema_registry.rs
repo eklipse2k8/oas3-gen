@@ -660,7 +660,7 @@ impl SchemaRegistry {
   }
 
   pub(crate) fn scan_and_compute_names(&self) -> anyhow::Result<ScanResult> {
-    let index = TypeNameIndex::new(&self.schemas);
+    let index = TypeNameIndex::new(&self.schemas, &self.spec);
     index.scan_and_compute_names()
   }
 }
