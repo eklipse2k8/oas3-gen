@@ -2,6 +2,7 @@ mod client;
 pub mod constants;
 mod derives;
 mod documentation;
+pub mod fields;
 pub mod lints;
 mod outer_attrs;
 mod parsed_path;
@@ -15,15 +16,13 @@ pub(super) mod validation_attrs;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeSet;
-
 pub use client::ClientRootNode;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
-use oas3::spec::{ParameterIn, ParameterStyle};
+use oas3::spec::ParameterIn;
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
@@ -35,6 +34,8 @@ pub use tokens::{
 };
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
+
+pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
 
 /// Node used to generate file header
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
@@ -510,94 +511,6 @@ impl Default for EnumMethodKind {
       variant_name: EnumVariantToken::from_raw("Default"),
       wrapped_type: TypeRef::default(),
     }
-  }
-}
-
-/// Rust struct field definition
-#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
-pub struct FieldDef {
-  pub name: FieldNameToken,
-  #[builder(default)]
-  pub docs: Documentation,
-  pub rust_type: TypeRef,
-  #[builder(default)]
-  pub serde_attrs: BTreeSet<SerdeAttribute>,
-  pub serde_as_attr: Option<SerdeAsFieldAttr>,
-  #[builder(default)]
-  pub doc_hidden: bool,
-  #[builder(default)]
-  pub validation_attrs: Vec<ValidationAttribute>,
-  pub default_value: Option<serde_json::Value>,
-  pub example_value: Option<serde_json::Value>,
-  #[builder(into)]
-  pub parameter_location: Option<ParameterLocation>,
-  #[builder(default)]
-  pub deprecated: bool,
-  pub multiple_of: Option<serde_json::Number>,
-  #[builder(into)]
-  pub original_name: Option<String>,
-}
-
-impl FieldDef {
-  #[must_use]
-  pub fn is_required(&self) -> bool {
-    self.default_value.is_none() && !self.rust_type.nullable
-  }
-
-  #[must_use]
-  pub fn with_discriminator_behavior(mut self, discriminator_value: Option<&str>, is_base: bool) -> Self {
-    self.docs.clear();
-    self.validation_attrs.clear();
-    self.doc_hidden = true;
-
-    if let Some(value) = discriminator_value {
-      self.default_value = Some(serde_json::Value::String(value.to_string()));
-      self.serde_attrs.insert(SerdeAttribute::SkipDeserializing);
-      self.serde_attrs.insert(SerdeAttribute::Default);
-    } else if is_base {
-      self.serde_attrs.clear();
-      self.serde_attrs.insert(SerdeAttribute::Skip);
-      if self.rust_type.is_string_like() {
-        self.default_value = Some(serde_json::Value::String(String::new()));
-      }
-    }
-
-    self
-  }
-
-  #[must_use]
-  pub fn with_serde_attributes(mut self, explode: bool, style: Option<ParameterStyle>) -> Self {
-    if let Some(original) = &self.original_name
-      && self.name != original.as_str()
-    {
-      self.serde_attrs.insert(SerdeAttribute::Rename(original.clone()));
-    }
-
-    if self.rust_type.is_array && !explode {
-      let separator = match style {
-        Some(ParameterStyle::SpaceDelimited) => SerdeAsSeparator::Space,
-        Some(ParameterStyle::PipeDelimited) => SerdeAsSeparator::Pipe,
-        _ => SerdeAsSeparator::Comma,
-      };
-
-      self.serde_as_attr = Some(SerdeAsFieldAttr::SeparatedList {
-        separator,
-        optional: self.rust_type.nullable,
-      });
-    }
-
-    self
-  }
-}
-
-pub trait FieldCollection: Send + Sync {
-  #[must_use]
-  fn has_serde_as(&self) -> bool;
-}
-
-impl FieldCollection for [FieldDef] {
-  fn has_serde_as(&self) -> bool {
-    self.iter().any(|t| t.serde_as_attr.is_some())
   }
 }
 

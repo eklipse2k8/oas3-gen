@@ -77,6 +77,9 @@ pub(crate) trait SchemaExt {
   /// Returns true if the schema has enum values defined.
   fn has_enum_values(&self) -> bool;
 
+  /// Returns true if the schema has an inline enum (multiple enum values directly or in array items).
+  fn has_inline_enum(&self, spec: &Spec) -> bool;
+
   /// Returns true if the schema has allOf composition.
   fn has_intersection(&self) -> bool;
 
@@ -329,6 +332,13 @@ impl SchemaExt for ObjectSchema {
 
   fn has_enum_values(&self) -> bool {
     !self.enum_values.is_empty()
+  }
+
+  fn has_inline_enum(&self, spec: &Spec) -> bool {
+    self.enum_values.len() > 1
+      || self
+        .inline_array_items(spec)
+        .is_some_and(|items| items.enum_values.len() > 1)
   }
 
   fn has_intersection(&self) -> bool {

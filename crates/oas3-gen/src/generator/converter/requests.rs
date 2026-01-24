@@ -207,19 +207,12 @@ impl BodyInfo {
 
   pub(crate) fn create_field(&self) -> Option<FieldDef> {
     let type_ref = self.body_type.clone()?;
-    let rust_type = if self.optional {
-      type_ref.with_option()
-    } else {
-      type_ref
-    };
-
-    Some(
-      FieldDef::builder()
-        .name(FieldNameToken::from_raw(BODY_FIELD_NAME))
-        .docs(Documentation::from_optional(self.description.as_ref()))
-        .rust_type(rust_type)
-        .build(),
-    )
+    Some(FieldDef::body_field(
+      BODY_FIELD_NAME,
+      self.description.as_ref(),
+      type_ref,
+      self.optional,
+    ))
   }
 
   pub(crate) fn to_operation_body(&self) -> Option<OperationBody> {

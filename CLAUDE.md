@@ -30,6 +30,18 @@ cargo run -- generate server-mod -i spec.json -o output/    # Generate modular s
 3. **Run tests** before committing: `cargo test`
 4. **Rebuild fixtures** after code generation changes (see [testing.md](docs/testing.md))
 
+## REQUIRED: Read Before Writing Code
+
+**Before writing or modifying any code, you MUST read [docs/coding-standards.md](docs/coding-standards.md).** This document contains critical style requirements including:
+
+- Turbofish syntax for `.collect::<Vec<_>>()` (not type annotations)
+- `vec![]` over `Vec::new()`
+- Iterator chains and itertools usage patterns
+- Collection type selection (BTreeMap vs IndexMap vs HashMap)
+- State management patterns
+
+Failure to follow these standards will require rework.
+
 ## Detailed Documentation
 
 | Document | Contents |

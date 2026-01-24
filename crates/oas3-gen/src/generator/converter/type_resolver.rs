@@ -84,12 +84,16 @@ impl TypeResolver {
       return Ok(type_ref);
     }
 
-    if !schema.one_of.is_empty() {
-      if let Some(type_ref) = self.try_union(&schema.one_of)? {
-        return Ok(type_ref);
-      }
-    } else if schema.has_intersection()
-      && let Some(type_ref) = self.try_union(&schema.any_of)?
+    let union_variants = if !schema.one_of.is_empty() {
+      Some(&schema.one_of)
+    } else if schema.has_intersection() {
+      Some(&schema.any_of)
+    } else {
+      None
+    };
+
+    if let Some(variants) = union_variants
+      && let Some(type_ref) = self.try_union(variants)?
     {
       return Ok(type_ref);
     }
@@ -354,13 +358,11 @@ impl TypeResolver {
   }
 
   fn union_fallback(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
-    let mut ref_count = 0;
     let mut first_ref: Option<String> = None;
 
     for variant in variants {
       if let Some(name) = RefCollector::parse_schema_ref(variant) {
-        ref_count += 1;
-        if ref_count >= 2 {
+        if first_ref.is_some() {
           return Ok(None);
         }
         first_ref = Some(name);
@@ -375,69 +377,75 @@ impl TypeResolver {
         continue;
       }
 
-      if resolved.is_array() {
-        let item = self.array_item_type(&resolved)?;
-        let unique = resolved.unique_items.unwrap_or(false);
-        return Ok(Some(
-          TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique),
-        ));
-      }
-
-      if resolved.is_string() {
-        return Ok(Some(TypeRef::new(RustPrimitive::String)));
-      }
-
-      if resolved.one_of.len() == 1
-        && let Some(name) = RefCollector::parse_schema_ref(&resolved.one_of[0])
-      {
-        return Ok(Some(self.type_ref(&name)));
-      }
-
-      if let Some(ref title) = resolved.title
-        && self.context.graph().get(title).is_some()
-      {
-        return Ok(Some(self.type_ref(title)));
+      if let Some(type_ref) = self.try_simple_fallback_type(&resolved)? {
+        return Ok(Some(type_ref));
       }
     }
 
     Ok(first_ref.map(|name| self.type_ref(&name)))
   }
 
+  fn try_simple_fallback_type(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
+    if schema.is_array() {
+      let item = self.array_item_type(schema)?;
+      let unique = schema.unique_items.unwrap_or(false);
+      return Ok(Some(
+        TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique),
+      ));
+    }
+
+    if schema.is_string() {
+      return Ok(Some(TypeRef::new(RustPrimitive::String)));
+    }
+
+    if schema.one_of.len() == 1
+      && let Some(name) = RefCollector::parse_schema_ref(&schema.one_of[0])
+    {
+      return Ok(Some(self.type_ref(&name)));
+    }
+
+    if let Some(ref title) = schema.title
+      && self.context.graph().get(title).is_some()
+    {
+      return Ok(Some(self.type_ref(title)));
+    }
+
+    Ok(None)
+  }
+
   fn primitive(&self, typ: SchemaType, schema: &ObjectSchema) -> Result<TypeRef> {
-    let prim = match typ {
+    match typ {
       SchemaType::String | SchemaType::Number | SchemaType::Integer => {
-        let default = match typ {
-          SchemaType::String => RustPrimitive::String,
-          SchemaType::Number => RustPrimitive::F64,
-          SchemaType::Integer => RustPrimitive::I64,
-          _ => unreachable!(),
-        };
-        schema
-          .format
-          .as_ref()
-          .and_then(|f| RustPrimitive::from_format(f))
-          .unwrap_or(default)
+        Ok(TypeRef::new(Self::format_or_default(typ, schema)))
       }
-      SchemaType::Boolean => RustPrimitive::Bool,
+      SchemaType::Boolean => Ok(TypeRef::new(RustPrimitive::Bool)),
       SchemaType::Object => {
         if let Some(map) = self.try_map_type(schema)? {
           return Ok(map);
         }
-        RustPrimitive::Value
+        Ok(TypeRef::new(RustPrimitive::Value))
       }
-      SchemaType::Null => RustPrimitive::Unit,
+      SchemaType::Null => Ok(TypeRef::new(RustPrimitive::Unit).with_option()),
       SchemaType::Array => {
         let item = self.array_item_type(schema)?;
         let unique = schema.unique_items.unwrap_or(false);
-        return Ok(TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique));
+        Ok(TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique))
       }
-    };
-
-    let mut type_ref = TypeRef::new(prim);
-    if typ == SchemaType::Null {
-      type_ref = type_ref.with_option();
     }
-    Ok(type_ref)
+  }
+
+  fn format_or_default(typ: SchemaType, schema: &ObjectSchema) -> RustPrimitive {
+    let default = match typ {
+      SchemaType::String => RustPrimitive::String,
+      SchemaType::Number => RustPrimitive::F64,
+      SchemaType::Integer => RustPrimitive::I64,
+      _ => return RustPrimitive::Value,
+    };
+    schema
+      .format
+      .as_ref()
+      .and_then(|f| RustPrimitive::from_format(f))
+      .unwrap_or(default)
   }
 
   fn try_map_type(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
@@ -491,13 +499,12 @@ impl TypeResolver {
 
     let items = self.resolve(items_ref)?;
 
-    if let ObjectOrReference::Ref { ref_path, .. } = &**items_ref {
-      let mut type_ref = self.resolve_ref(ref_path, &items)?.result;
-      type_ref.boxed = false;
-      return Ok(type_ref);
-    }
+    let mut type_ref = if let ObjectOrReference::Ref { ref_path, .. } = &**items_ref {
+      self.resolve_ref(ref_path, &items)?.result
+    } else {
+      self.resolve_type(&items)?
+    };
 
-    let mut type_ref = self.resolve_type(&items)?;
     type_ref.boxed = false;
     Ok(type_ref)
   }

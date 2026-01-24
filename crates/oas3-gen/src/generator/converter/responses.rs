@@ -86,7 +86,7 @@ impl ResponseConverter {
         ))
       })
       .flatten()
-      .collect::<Vec<_>>();
+      .collect_vec();
 
     let variants = Self::with_default_variant(variants);
 

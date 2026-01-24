@@ -4,16 +4,16 @@ use std::{
 };
 
 use anyhow::Context as _;
-use itertools::Itertools;
-use oas3::spec::{ObjectSchema, Schema};
+use itertools::{Either, Itertools};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema};
 use regex::Regex;
 use string_cache::DefaultAtom;
 
-use super::{ConversionOutput, type_resolver::TypeResolver};
+use super::{ConversionOutput, RustType, type_resolver::TypeResolver};
 use crate::{
   generator::{
     ast::{
-      Documentation, FieldDef, FieldNameToken, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+      FieldDef, FieldNameToken, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
       ValidationAttribute,
     },
     converter::ConverterContext,
@@ -21,6 +21,14 @@ use crate::{
   },
   utils::SchemaExt,
 };
+
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedFieldData {
+  pub(crate) type_ref: TypeRef,
+  pub(crate) inline_types: Vec<RustType>,
+  pub(crate) validation_attrs: Vec<ValidationAttribute>,
+  pub(crate) schema: ObjectSchema,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct FieldConverter {
@@ -39,6 +47,42 @@ impl FieldConverter {
       odata_support: config.odata_support(),
       customizations: config.customizations.clone(),
     }
+  }
+
+  /// Resolves a schema reference and extracts type information with validation metadata.
+  ///
+  /// This centralizes the common pattern of:
+  /// 1. Resolving the schema reference
+  /// 2. Checking for inline enums (which require `resolve_property` for inline type creation)
+  /// 3. Resolving to a Rust type
+  /// 4. Extracting validation attributes and default values
+  pub(crate) fn resolve_with_metadata(
+    &self,
+    parent_name: &str,
+    prop_name: &str,
+    schema_ref: &ObjectOrReference<ObjectSchema>,
+    is_required: bool,
+  ) -> anyhow::Result<ResolvedFieldData> {
+    let spec = self.context.graph().spec();
+    let schema = schema_ref.resolve(spec)?;
+
+    let (type_ref, inline_types) = if schema.has_inline_enum(spec) {
+      let result = self
+        .type_resolver
+        .resolve_property(parent_name, prop_name, &schema, schema_ref)?;
+      (result.result, result.inline_types)
+    } else {
+      (self.type_resolver.resolve_type(&schema)?, vec![])
+    };
+
+    let validation_attrs = Self::extract_all_validation(prop_name, is_required, &schema, &type_ref);
+
+    Ok(ResolvedFieldData {
+      type_ref,
+      inline_types,
+      validation_attrs,
+      schema,
+    })
   }
 
   /// Collects fields from an object schema, applying deduplication and inline type extraction.
@@ -76,7 +120,7 @@ impl FieldConverter {
       }),
       |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
     )?;
-    let inline_types = inline_types.into_iter().flatten().collect();
+    let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
 
     Ok(ConversionOutput::with_inline_types(
       Self::deduplicate_names(fields),
@@ -96,19 +140,10 @@ impl FieldConverter {
       Schema::Boolean(b) if !b.0 => Ok((vec![SerdeAttribute::DenyUnknownFields], None)),
       Schema::Object(_) => {
         let value_type = self.type_resolver.additional_properties_type(additional)?;
-        let map_type = TypeRef::new(format!(
-          "std::collections::HashMap<String, {}>",
-          value_type.to_rust_type()
-        ));
-        let field = FieldDef::builder()
-          .name(FieldNameToken::from_raw("additional_properties"))
-          .docs(Documentation::from_lines([
-            "Additional properties not defined in the schema.",
-          ]))
-          .rust_type(map_type)
-          .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))
-          .build();
-        Ok((vec![], Some(field)))
+        Ok((
+          vec![],
+          Some(FieldDef::builder().additional_properties(&value_type).build()),
+        ))
       }
       Schema::Boolean(_) => Ok((vec![], None)),
     }
@@ -159,7 +194,6 @@ impl FieldConverter {
       resolved_type
     };
 
-    let docs = Documentation::from_optional(prop_schema.description.as_ref());
     let validation_attrs = Self::extract_all_validation(prop_name, is_required, prop_schema, &final_type);
     let default_value = Self::extract_default_value(prop_schema);
 
@@ -173,12 +207,10 @@ impl FieldConverter {
     let serde_as_attr = self.get_customization_for_type(&final_type);
 
     let field = FieldDef::builder()
-      .deprecated(prop_schema.deprecated.unwrap_or(false))
-      .docs(docs)
+      .schema(prop_schema)
       .maybe_default_value(default_value)
-      .maybe_multiple_of(prop_schema.multiple_of.clone())
       .maybe_serde_as_attr(serde_as_attr)
-      .name(FieldNameToken::from_raw(prop_name))
+      .name(rust_field_name)
       .rust_type(final_type)
       .serde_attrs(serde_attrs)
       .validation_attrs(validation_attrs)
@@ -212,6 +244,7 @@ impl FieldConverter {
     }
   }
 
+  #[cfg(test)]
   pub(crate) fn extract_parameter_metadata(
     prop_name: &str,
     is_required: bool,
@@ -248,7 +281,7 @@ impl FieldConverter {
     }
 
     if schema.is_numeric() {
-      if let Some(range_attr) = Self::build_range_validation_attr(schema, type_ref) {
+      if let Some(range_attr) = ValidationAttribute::range(schema, type_ref) {
         attrs.push(range_attr);
       }
       return attrs;
@@ -258,7 +291,7 @@ impl FieldConverter {
       let has_non_string_format = schema.format.as_ref().is_some_and(|f| Self::is_non_string_format(f));
 
       if !has_non_string_format {
-        if let Some(length_attr) = Self::build_length_attribute(schema.min_length, schema.max_length, is_required) {
+        if let Some(length_attr) = ValidationAttribute::length(schema.min_length, schema.max_length, is_required) {
           attrs.push(length_attr);
         }
 
@@ -276,7 +309,7 @@ impl FieldConverter {
     }
 
     if schema.is_array()
-      && let Some(length_attr) = Self::build_length_attribute(schema.min_items, schema.max_items, false)
+      && let Some(length_attr) = ValidationAttribute::length(schema.min_items, schema.max_items, false)
     {
       attrs.push(length_attr);
     }
@@ -296,51 +329,6 @@ impl FieldConverter {
       format,
       "date" | "date-time" | "duration" | "time" | "binary" | "byte" | "uuid"
     )
-  }
-
-  fn build_range_validation_attr(schema: &ObjectSchema, type_ref: &TypeRef) -> Option<ValidationAttribute> {
-    let exclusive_min = schema.exclusive_minimum.clone();
-    let exclusive_max = schema.exclusive_maximum.clone();
-    let min = schema.minimum.clone();
-    let max = schema.maximum.clone();
-
-    if exclusive_min.is_none() && exclusive_max.is_none() && min.is_none() && max.is_none() {
-      return None;
-    }
-
-    Some(ValidationAttribute::Range {
-      primitive: type_ref.base_type.clone(),
-      min,
-      max,
-      exclusive_min,
-      exclusive_max,
-    })
-  }
-
-  fn build_length_attribute(
-    min: Option<u64>,
-    max: Option<u64>,
-    is_required_non_empty: bool,
-  ) -> Option<ValidationAttribute> {
-    match (min, max) {
-      (Some(min), Some(max)) => Some(ValidationAttribute::Length {
-        min: Some(min),
-        max: Some(max),
-      }),
-      (Some(min), None) => Some(ValidationAttribute::Length {
-        min: Some(min),
-        max: None,
-      }),
-      (None, Some(max)) => Some(ValidationAttribute::Length {
-        min: None,
-        max: Some(max),
-      }),
-      (None, None) if is_required_non_empty => Some(ValidationAttribute::Length {
-        min: Some(1),
-        max: None,
-      }),
-      _ => None,
-    }
   }
 
   fn is_field_optional(
@@ -372,62 +360,48 @@ impl FieldConverter {
   }
 
   pub(crate) fn deduplicate_names(fields: Vec<FieldDef>) -> Vec<FieldDef> {
-    let indices_by_name =
-      fields
-        .iter()
-        .enumerate()
-        .fold(BTreeMap::<String, Vec<usize>>::new(), |mut acc, (i, field)| {
-          acc.entry(field.name.to_string()).or_default().push(i);
-          acc
-        });
-
-    let collisions = indices_by_name
+    let duplicate_names = fields
+      .iter()
+      .counts_by(|f| f.name.clone())
       .into_iter()
-      .filter(|(_, v)| v.len() > 1)
-      .collect::<BTreeMap<_, _>>();
+      .filter(|(_, value)| *value > 1)
+      .map(|(name, _)| name)
+      .collect::<BTreeSet<_>>();
 
-    if collisions.is_empty() {
+    if duplicate_names.is_empty() {
       return fields;
     }
 
-    let indices_to_remove = collisions
+    let (deprecated, non_deprecated): (BTreeSet<_>, BTreeSet<_>) = fields
       .iter()
-      .filter_map(|(_, indices)| {
-        let (deprecated, non_deprecated): (Vec<_>, Vec<_>) =
-          indices.iter().copied().partition(|&i| fields[i].deprecated);
-        (!deprecated.is_empty() && !non_deprecated.is_empty()).then_some(deprecated)
-      })
-      .flatten()
-      .collect::<BTreeSet<_>>();
-
-    let suffix_renames = collisions
-      .iter()
-      .flat_map(|(name, indices)| {
-        let (deprecated, non_deprecated): (Vec<_>, Vec<_>) =
-          indices.iter().copied().partition(|&i| fields[i].deprecated);
-        if deprecated.is_empty() || non_deprecated.is_empty() {
-          indices
-            .iter()
-            .enumerate()
-            .skip(1)
-            .map(|(suffix_num, &idx)| (idx, format!("{name}_{}", suffix_num + 1)))
-            .collect_vec()
+      .filter(|f| duplicate_names.contains(&f.name))
+      .partition_map(|f| {
+        let name = f.name.clone();
+        if f.deprecated {
+          Either::Left(name)
         } else {
-          vec![]
+          Either::Right(name)
         }
-      })
-      .collect::<BTreeMap<_, _>>();
+      });
+
+    let mut occurrence = BTreeMap::<FieldNameToken, usize>::new();
 
     fields
       .into_iter()
-      .enumerate()
-      .filter(|(i, _)| !indices_to_remove.contains(i))
-      .map(|(i, field)| match suffix_renames.get(&i) {
-        Some(new_name) => FieldDef {
-          name: FieldNameToken::new(new_name),
-          ..field
-        },
-        None => field,
+      .filter_map(|field| {
+        let name = field.name.clone();
+
+        if field.deprecated && deprecated.contains(&name) && non_deprecated.contains(&name) {
+          return None;
+        }
+
+        let n = *occurrence.entry(name.clone()).and_modify(|n| *n += 1).or_insert(1);
+
+        if n > 1 {
+          Some(field.renamed_to(&format!("{name}_{n}")))
+        } else {
+          Some(field)
+        }
       })
       .collect()
   }
