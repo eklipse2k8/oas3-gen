@@ -44,9 +44,9 @@ impl ToTokens for TypeFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let ts = match &self.rust_type {
       RustType::Struct(def) => {
-        StructFragment::new(def.clone(), self.regex_lookup.clone(), self.visibility).into_token_stream()
+        StructFragment::new(def.clone(), self.regex_lookup.clone(), self.visibility, self.target).into_token_stream()
       }
-      RustType::Enum(def) => EnumFragment::new(def.clone(), self.visibility).into_token_stream(),
+      RustType::Enum(def) => EnumFragment::new(def.clone(), self.visibility, self.target).into_token_stream(),
       RustType::TypeAlias(def) => TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream(),
       RustType::DiscriminatedEnum(def) => {
         DiscriminatedEnumFragment::new(def.clone(), self.visibility).into_token_stream()

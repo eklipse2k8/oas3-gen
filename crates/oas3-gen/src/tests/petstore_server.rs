@@ -159,17 +159,12 @@ fn test_pets_type_alias() {
 }
 
 #[test]
-fn test_query_serialization() {
-  let query = ListPetsRequestQuery { limit: Some(10) };
-  let serialized = serde_json::to_string(&query).expect("serialization should succeed");
-  assert!(
-    serialized.contains("10"),
-    "serialized output should contain limit value"
-  );
+fn test_query_deserialization() {
+  let query: ListPetsRequestQuery = serde_json::from_str(r#"{"limit": 10}"#).expect("deserialization should succeed");
+  assert_eq!(query.limit, Some(10), "limit should be deserialized");
 
-  let query_none = ListPetsRequestQuery { limit: None };
-  let serialized_none = serde_json::to_string(&query_none).expect("serialization should succeed");
-  assert_eq!(serialized_none, "{}", "None fields should be skipped");
+  let query_none: ListPetsRequestQuery = serde_json::from_str(r"{}").expect("deserialization should succeed");
+  assert_eq!(query_none.limit, None, "missing fields should be None");
 }
 
 #[test]

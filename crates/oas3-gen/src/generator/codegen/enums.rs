@@ -15,6 +15,7 @@ use crate::generator::{
     attributes::DeriveAttribute,
     methods::{FieldFunctionParameterFragment, HelperMethodFragment, HelperMethodParts, StructConstructorFragment},
   },
+  converter::GenerationTarget,
 };
 
 #[derive(Clone, Debug)]
@@ -282,6 +283,82 @@ impl ToTokens for DisplayImplFragment {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct FromStrImplArmFragment {
+  variant_name: EnumVariantToken,
+  serde_name: String,
+}
+
+impl FromStrImplArmFragment {
+  pub(crate) fn new(variant: VariantDef) -> Self {
+    let serde_name = variant.serde_name();
+    Self {
+      variant_name: variant.name,
+      serde_name,
+    }
+  }
+}
+
+impl ToTokens for FromStrImplArmFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let variant_name = &self.variant_name;
+    let serde_name = &self.serde_name;
+
+    let ts = quote! { #serde_name => Ok(Self::#variant_name), };
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FromStrImplFragment {
+  name: EnumToken,
+  arms: Vec<FromStrImplArmFragment>,
+  serde_names: Vec<String>,
+}
+
+impl FromStrImplFragment {
+  pub(crate) fn new(name: EnumToken, variants: Vec<VariantDef>) -> Self {
+    let (arms, serde_names): (Vec<_>, Vec<_>) = variants
+      .into_iter()
+      .filter(|v| matches!(v.content, VariantContent::Unit))
+      .map(|v| {
+        let serde_name = v.serde_name();
+        (FromStrImplArmFragment::new(v), serde_name)
+      })
+      .unzip();
+
+    Self {
+      name,
+      arms,
+      serde_names,
+    }
+  }
+}
+
+impl ToTokens for FromStrImplFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = &self.name;
+    let arms = &self.arms;
+    let serde_names = &self.serde_names;
+    let expected = serde_names.join(", ");
+
+    let ts = quote! {
+      impl core::str::FromStr for #name {
+        type Err = String;
+
+        fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+          match s {
+            #(#arms)*
+            _ => Err(format!("unknown variant '{}', expected one of: {}", s, #expected)),
+          }
+        }
+      }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct CaseInsensitiveDeserializeArmFragment {
   variant_name: EnumVariantToken,
   lower_val: String,
@@ -370,11 +447,16 @@ impl ToTokens for CaseInsensitiveDeserializeImplFragment {
 pub(crate) struct EnumFragment {
   def: EnumDef,
   vis: Visibility,
+  target: GenerationTarget,
 }
 
 impl EnumFragment {
-  pub(crate) fn new(def: EnumDef, visibility: Visibility) -> Self {
-    Self { def, vis: visibility }
+  pub(crate) fn new(def: EnumDef, visibility: Visibility, target: GenerationTarget) -> Self {
+    Self {
+      def,
+      vis: visibility,
+      target,
+    }
   }
 }
 
@@ -422,6 +504,13 @@ impl ToTokens for EnumFragment {
       quote! {}
     };
 
+    let from_str_impl = if self.def.generate_display && self.def.is_simple() && self.target == GenerationTarget::Server
+    {
+      FromStrImplFragment::new(name.clone(), self.def.variants.clone()).to_token_stream()
+    } else {
+      quote! {}
+    };
+
     let ts = if self.def.case_insensitive {
       let deserialize_impl = CaseInsensitiveDeserializeImplFragment::new(
         name.clone(),
@@ -431,12 +520,14 @@ impl ToTokens for EnumFragment {
       quote! {
         #enum_def
         #display_impl
+        #from_str_impl
         #deserialize_impl
       }
     } else {
       quote! {
         #enum_def
         #display_impl
+        #from_str_impl
       }
     };
 
@@ -720,11 +811,11 @@ impl ToTokens for DiscriminatedEnumFragment {
       .default_variant()
       .map(|v| DiscriminatedDefaultImplFragment::new(name.clone(), v.clone()));
 
-    let serialize_impl = (self.def.serde_mode != SerdeMode::DeserializeOnly).then(|| {
+    let serialize_impl = matches!(self.def.serde_mode, SerdeMode::SerializeOnly | SerdeMode::Both).then(|| {
       DiscriminatedSerializeImplFragment::new(name.clone(), self.def.all_variants().cloned().collect::<Vec<_>>())
     });
 
-    let deserialize_impl = (self.def.serde_mode != SerdeMode::SerializeOnly).then(|| {
+    let deserialize_impl = matches!(self.def.serde_mode, SerdeMode::DeserializeOnly | SerdeMode::Both).then(|| {
       DiscriminatedDeserializeImplFragment::new(
         name.clone(),
         self.def.discriminator_field.clone(),

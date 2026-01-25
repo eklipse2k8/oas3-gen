@@ -346,14 +346,17 @@ impl TypePostprocessor {
     for rust_type in &mut self.types {
       match rust_type {
         RustType::Struct(def) => {
-          let key: EnumToken = def.name.as_str().into();
-          let usage = get_usage(&key);
+          def.serde_mode = Self::struct_serde_mode(def.kind, target, || {
+            let key: EnumToken = def.name.as_str().into();
+            get_usage(&key).to_serde_mode(target)
+          });
 
-          def.serde_mode = usage.to_serde_mode(target);
-
-          if usage == TypeUsage::ResponseOnly {
-            for field in &mut def.fields {
-              field.validation_attrs.clear();
+          if def.kind == StructKind::Schema {
+            let key: EnumToken = def.name.as_str().into();
+            if get_usage(&key) == TypeUsage::ResponseOnly {
+              for field in &mut def.fields {
+                field.validation_attrs.clear();
+              }
             }
           }
 
@@ -372,6 +375,25 @@ impl TypePostprocessor {
         }
         _ => {}
       }
+    }
+  }
+
+  fn struct_serde_mode(
+    kind: StructKind,
+    target: GenerationTarget,
+    schema_mode: impl FnOnce() -> SerdeMode,
+  ) -> SerdeMode {
+    match kind {
+      StructKind::Schema => schema_mode(),
+      StructKind::OperationRequest | StructKind::HeaderParams => SerdeMode::None,
+      StructKind::PathParams => match target {
+        GenerationTarget::Server => SerdeMode::DeserializeOnly,
+        GenerationTarget::Client => SerdeMode::None,
+      },
+      StructKind::QueryParams => match target {
+        GenerationTarget::Server => SerdeMode::DeserializeOnly,
+        GenerationTarget::Client => SerdeMode::SerializeOnly,
+      },
     }
   }
 }

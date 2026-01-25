@@ -92,6 +92,23 @@ impl core::convert::TryFrom<ListCatsRequestHeader> for http::HeaderMap {
     http::HeaderMap::try_from(&headers)
   }
 }
+impl core::convert::TryFrom<&http::HeaderMap> for ListCatsRequestHeader {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Ok(Self {
+      x_sort_order: headers
+        .get(X_SORT_ORDER)
+        .and_then(|v| v.to_str().ok())
+        .map(|value| value.parse().unwrap_or_default()),
+    })
+  }
+}
+impl core::convert::TryFrom<http::HeaderMap> for ListCatsRequestHeader {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Self::try_from(&headers)
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum ListCatsRequestHeaderXSortOrder {
   #[serde(rename = "asc")]
@@ -108,8 +125,17 @@ impl core::fmt::Display for ListCatsRequestHeaderXSortOrder {
     }
   }
 }
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+impl core::str::FromStr for ListCatsRequestHeaderXSortOrder {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "asc" => Ok(Self::Asc),
+      "desc" => Ok(Self::Desc),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "asc, desc")),
+    }
+  }
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
 pub struct ListCatsRequestQuery {
   /// How many items to return at one time (max 100)
   #[validate(range(min = 1i32, max = 100i32))]
@@ -190,6 +216,27 @@ impl core::convert::TryFrom<ListPetsRequestHeader> for http::HeaderMap {
     http::HeaderMap::try_from(&headers)
   }
 }
+impl core::convert::TryFrom<&http::HeaderMap> for ListPetsRequestHeader {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Ok(Self {
+      x_sort_order: headers
+        .get(X_SORT_ORDER)
+        .and_then(|v| v.to_str().ok())
+        .map(|value| value.parse().unwrap_or_default()),
+      x_only: headers
+        .get(X_ONLY)
+        .and_then(|v| v.to_str().ok())
+        .map(|value| value.split(',').map(str::trim).filter_map(|s| s.parse().ok()).collect()),
+    })
+  }
+}
+impl core::convert::TryFrom<http::HeaderMap> for ListPetsRequestHeader {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Self::try_from(&headers)
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum ListPetsRequestHeaderXonly {
   #[serde(rename = "cat")]
@@ -212,8 +259,22 @@ impl core::fmt::Display for ListPetsRequestHeaderXonly {
     }
   }
 }
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+impl core::str::FromStr for ListPetsRequestHeaderXonly {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "cat" => Ok(Self::Cat),
+      "dog" => Ok(Self::Dog),
+      "fish" => Ok(Self::Fish),
+      "bird" => Ok(Self::Bird),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "cat, dog, fish, bird"
+      )),
+    }
+  }
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
 pub struct ListPetsRequestQuery {
   /// How many items to return at one time (max 100)
   #[validate(range(min = 1i32, max = 100i32))]
@@ -286,7 +347,25 @@ impl core::convert::TryFrom<ShowPetByIdRequestHeader> for http::HeaderMap {
     http::HeaderMap::try_from(&headers)
   }
 }
-#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+impl core::convert::TryFrom<&http::HeaderMap> for ShowPetByIdRequestHeader {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Ok(Self {
+      x_api_version: headers
+        .get(X_API_VERSION)
+        .and_then(|v| v.to_str().ok())
+        .map(std::string::ToString::to_string)
+        .unwrap_or_default(),
+    })
+  }
+}
+impl core::convert::TryFrom<http::HeaderMap> for ShowPetByIdRequestHeader {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Self::try_from(&headers)
+  }
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
 pub struct ShowPetByIdRequestPath {
   /// The id of the pet to retrieve
   #[validate(length(min = 1u64))]
@@ -330,7 +409,7 @@ impl UploadPetImageRequest {
   }
 }
 impl UploadPetImageRequest {}
-#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
 pub struct UploadPetImageRequestPath {
   /// The id of the pet to update
   #[validate(length(min = 1u64))]

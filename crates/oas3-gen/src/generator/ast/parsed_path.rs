@@ -20,7 +20,7 @@ pub enum PathParseError {
 
 impl std::error::Error for PathParseError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PathSegment {
   Literal(String),
   Param(FieldNameToken),
@@ -37,6 +37,7 @@ enum SegmentPart<'a> {
 }
 
 impl PathSegment {
+  #[cfg(test)]
   pub fn is_mixed(&self) -> bool {
     matches!(self, Self::Mixed { .. })
   }
@@ -178,7 +179,7 @@ impl ToTokens for PathSegment {
   }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct ParsedPath(pub Vec<PathSegment>);
 
 impl ParsedPath {
@@ -215,6 +216,7 @@ impl ParsedPath {
       })
   }
 
+  #[cfg(test)]
   pub fn has_mixed_segments(&self) -> bool {
     self.0.iter().any(PathSegment::is_mixed)
   }

@@ -7,8 +7,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    Documentation, EnumToken, FieldDef, MethodNameToken, OperationInfo, ParameterLocation, ParsedPath, ResponseEnumDef,
-    RustType, ServerRequestTraitDef, ServerTraitMethod, StructMethod, StructToken, TraitToken,
+    Documentation, EnumToken, FieldDef, HandlerBodyInfo, MethodNameToken, OperationInfo, ParameterLocation, ParsedPath,
+    ResponseEnumDef, RustType, ServerRequestTraitDef, ServerTraitMethod, StructMethod, StructToken, TraitToken,
   },
   naming::{
     identifiers::to_rust_type_name,
@@ -96,11 +96,33 @@ pub(crate) fn build_server_trait(operations: &[OperationInfo]) -> Option<ServerR
   let methods = operations
     .iter()
     .map(|info| {
+      let path_params_type = extract_nested_type(&info.parameters, ParameterLocation::Path, info.request_type.as_ref());
+      let query_params_type =
+        extract_nested_type(&info.parameters, ParameterLocation::Query, info.request_type.as_ref());
+      let header_params_type =
+        extract_nested_type(&info.parameters, ParameterLocation::Header, info.request_type.as_ref());
+
+      let body_info = info.body.as_ref().and_then(|body| {
+        body.body_type.as_ref().map(|body_type| {
+          HandlerBodyInfo::builder()
+            .body_type(body_type.clone())
+            .content_category(body.content_category)
+            .optional(body.optional)
+            .build()
+        })
+      });
+
       ServerTraitMethod::builder()
         .name(MethodNameToken::from_raw(&info.stable_id))
         .docs(info.documentation.clone())
         .maybe_request_type(info.request_type.clone())
         .maybe_response_type(info.response_enum.clone())
+        .http_method(info.method.clone())
+        .path(info.path.clone())
+        .maybe_path_params_type(path_params_type)
+        .maybe_query_params_type(query_params_type)
+        .maybe_header_params_type(header_params_type)
+        .maybe_body_info(body_info)
         .build()
     })
     .collect::<Vec<_>>();
@@ -111,6 +133,19 @@ pub(crate) fn build_server_trait(operations: &[OperationInfo]) -> Option<ServerR
       .methods(methods)
       .build(),
   )
+}
+
+fn extract_nested_type(
+  parameters: &[FieldDef],
+  location: ParameterLocation,
+  request_type: Option<&StructToken>,
+) -> Option<StructToken> {
+  let has_params = parameters.iter().any(|p| p.parameter_location == Some(location));
+  let suffix = location.suffix()?;
+
+  has_params
+    .then(|| request_type.map(|req| StructToken::new(format!("{req}{suffix}"))))
+    .flatten()
 }
 
 type ResponseDefinition = (Option<ResponseEnumDef>, Option<StructMethod>);

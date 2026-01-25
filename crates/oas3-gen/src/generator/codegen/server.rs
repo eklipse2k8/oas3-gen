@@ -1,9 +1,12 @@
+use std::collections::BTreeMap;
+
+use http::Method;
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
+use quote::{ToTokens, format_ident, quote};
 
 use super::{Visibility, enums::ResponseEnumFragment};
 use crate::generator::{
-  ast::{ResponseEnumDef, ResponseVariant, ServerRequestTraitDef, ServerTraitMethod},
+  ast::{ContentCategory, HandlerBodyInfo, ResponseEnumDef, ResponseVariant, ServerRequestTraitDef, ServerTraitMethod},
   codegen::http::HttpStatusCode,
 };
 
@@ -32,14 +35,36 @@ impl ToTokens for ServerGenerator {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let types_import = self.with_types_import.then(|| quote! { use super::types::*; });
 
-    let trait_def = self
-      .server_trait
-      .as_ref()
-      .map(|def| ServerTraitFragment::new(def.clone(), self.visibility));
+    let Some(def) = self.server_trait.as_ref() else {
+      return;
+    };
+
+    let trait_fragment = ServerTraitFragment::new(def.clone(), self.visibility);
+
+    let handlers = def
+      .methods
+      .iter()
+      .map(|m| HandlerFunctionFragment::new(m.clone(), self.visibility))
+      .collect::<Vec<_>>();
+
+    let router = RouterFragment::new(def.methods.clone(), self.visibility);
 
     tokens.extend(quote! {
+      use axum::{
+        Router,
+        extract::{Path, Query, State},
+        http::HeaderMap,
+        response::IntoResponse,
+        routing::{delete, get, head, options, patch, post, put, trace},
+      };
+
       #types_import
-      #trait_def
+
+      #trait_fragment
+
+      #(#handlers)*
+
+      #router
     });
   }
 }
@@ -63,7 +88,7 @@ impl ToTokens for ServerTraitFragment {
     let methods = self.def.methods.iter().cloned().map(ServerTraitMethodFragment);
 
     tokens.extend(quote! {
-      #vis trait #name {
+      #vis trait #name: Send + Sync {
         #(#methods)*
       }
     });
@@ -87,7 +112,7 @@ impl ToTokens for ServerTraitMethodFragment {
 
     tokens.extend(quote! {
       #docs
-      async fn #name(&self, #request_param) -> anyhow::Result<#return_type>;
+      fn #name(&self, #request_param) -> impl std::future::Future<Output = anyhow::Result<#return_type>> + Send;
     });
   }
 }
@@ -175,6 +200,280 @@ impl ToTokens for AxumResponseEnumFragment {
       #into_response
     };
 
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+struct HandlerFunctionFragment {
+  method: ServerTraitMethod,
+  vis: Visibility,
+}
+
+impl HandlerFunctionFragment {
+  fn new(method: ServerTraitMethod, vis: Visibility) -> Self {
+    Self { method, vis }
+  }
+}
+
+impl ToTokens for HandlerFunctionFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let vis = self.vis.to_tokens();
+    let fn_name = &self.method.name;
+    let trait_name = format_ident!("ApiServer");
+
+    let extractors = ExtractorsFragment::new(&self.method);
+    let request_construction = RequestConstructionFragment::new(&self.method);
+
+    let return_type = self
+      .method
+      .response_type
+      .as_ref()
+      .map_or_else(|| quote! { impl IntoResponse }, |resp| quote! { #resp });
+
+    let service_call = if self.method.request_type.is_some() {
+      quote! { service.#fn_name(request).await }
+    } else {
+      quote! { service.#fn_name().await }
+    };
+
+    let error_handling = quote! {
+      match result {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+          axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+          format!("Internal error: {e}")
+        ).into_response(),
+      }
+    };
+
+    tokens.extend(quote! {
+      #vis async fn #fn_name<S>(
+        #extractors
+      ) -> impl IntoResponse
+      where
+        S: #trait_name + Clone + Send + Sync + 'static,
+      {
+        #request_construction
+        let result: anyhow::Result<#return_type> = #service_call;
+        #error_handling
+      }
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+struct ExtractorsFragment<'a> {
+  method: &'a ServerTraitMethod,
+}
+
+impl<'a> ExtractorsFragment<'a> {
+  fn new(method: &'a ServerTraitMethod) -> Self {
+    Self { method }
+  }
+}
+
+impl ToTokens for ExtractorsFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let mut parts = vec![quote! { State(service): State<S> }];
+
+    if let Some(path_type) = &self.method.path_params_type {
+      parts.push(quote! { Path(path): Path<#path_type> });
+    }
+
+    if let Some(query_type) = &self.method.query_params_type {
+      parts.push(quote! { Query(query): Query<#query_type> });
+    }
+
+    if self.method.header_params_type.is_some() {
+      parts.push(quote! { headers: HeaderMap });
+    }
+
+    if let Some(body_info) = &self.method.body_info {
+      let body_extractor = BodyExtractorFragment::new(body_info);
+      parts.push(body_extractor.into_token_stream());
+    }
+
+    let ts = quote! { #(#parts),* };
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+struct BodyExtractorFragment<'a> {
+  body_info: &'a HandlerBodyInfo,
+}
+
+impl<'a> BodyExtractorFragment<'a> {
+  fn new(body_info: &'a HandlerBodyInfo) -> Self {
+    Self { body_info }
+  }
+}
+
+impl ToTokens for BodyExtractorFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let body_type = &self.body_info.body_type;
+
+    let ts = match self.body_info.content_category {
+      ContentCategory::Json | ContentCategory::Multipart => {
+        if self.body_info.optional {
+          quote! { body: Option<axum::Json<#body_type>> }
+        } else {
+          quote! { axum::Json(body): axum::Json<#body_type> }
+        }
+      }
+      ContentCategory::FormUrlEncoded => {
+        if self.body_info.optional {
+          quote! { body: Option<axum::extract::Form<#body_type>> }
+        } else {
+          quote! { axum::extract::Form(body): axum::extract::Form<#body_type> }
+        }
+      }
+      ContentCategory::Text | ContentCategory::EventStream | ContentCategory::Xml => {
+        if self.body_info.optional {
+          quote! { body: Option<String> }
+        } else {
+          quote! { body: String }
+        }
+      }
+      ContentCategory::Binary => {
+        if self.body_info.optional {
+          quote! { body: Option<axum::body::Bytes> }
+        } else {
+          quote! { body: axum::body::Bytes }
+        }
+      }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+#[derive(Clone, Debug)]
+struct RequestConstructionFragment<'a> {
+  method: &'a ServerTraitMethod,
+}
+
+impl<'a> RequestConstructionFragment<'a> {
+  fn new(method: &'a ServerTraitMethod) -> Self {
+    Self { method }
+  }
+}
+
+impl ToTokens for RequestConstructionFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let Some(request_type) = &self.method.request_type else {
+      return;
+    };
+
+    let mut field_assignments = vec![];
+
+    if self.method.path_params_type.is_some() {
+      field_assignments.push(quote! { path });
+    }
+
+    if self.method.query_params_type.is_some() {
+      field_assignments.push(quote! { query });
+    }
+
+    if self.method.header_params_type.is_some() {
+      field_assignments.push(quote! {
+        header: (&headers).try_into().unwrap_or_default()
+      });
+    }
+
+    if let Some(body_info) = &self.method.body_info {
+      let needs_unwrap = matches!(
+        body_info.content_category,
+        ContentCategory::Json | ContentCategory::FormUrlEncoded | ContentCategory::Multipart
+      );
+      let body_expr = if needs_unwrap && body_info.optional {
+        quote! { body: body.map(|b| b.0) }
+      } else {
+        quote! { body }
+      };
+      field_assignments.push(body_expr);
+    }
+
+    tokens.extend(quote! {
+      let request = #request_type {
+        #(#field_assignments),*
+      };
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+struct RouterFragment {
+  methods: Vec<ServerTraitMethod>,
+  vis: Visibility,
+}
+
+impl RouterFragment {
+  fn new(methods: Vec<ServerTraitMethod>, vis: Visibility) -> Self {
+    Self { methods, vis }
+  }
+}
+
+impl ToTokens for RouterFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let vis = self.vis.to_tokens();
+
+    let routes_by_path: BTreeMap<String, Vec<&ServerTraitMethod>> =
+      self.methods.iter().fold(BTreeMap::new(), |mut acc, method| {
+        let path = method.path.to_axum_path();
+        acc.entry(path).or_default().push(method);
+        acc
+      });
+
+    let route_definitions = routes_by_path.into_iter().map(|(path, methods)| {
+      let method_handlers = methods.iter().map(|m| {
+        let fn_name = &m.name;
+        let http_method = HttpMethodFragment::new(m.http_method.clone());
+        quote! { #http_method(#fn_name::<S>) }
+      });
+
+      let chained = method_handlers.reduce(|acc, handler| quote! { #acc.#handler });
+
+      quote! { .route(#path, #chained) }
+    });
+
+    tokens.extend(quote! {
+      #vis fn router<S>(service: S) -> Router
+      where
+        S: ApiServer + Clone + Send + Sync + 'static,
+      {
+        Router::new()
+          #(#route_definitions)*
+          .with_state(service)
+      }
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+struct HttpMethodFragment {
+  method: Method,
+}
+
+impl HttpMethodFragment {
+  fn new(method: Method) -> Self {
+    Self { method }
+  }
+}
+
+impl ToTokens for HttpMethodFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let ts = match self.method {
+      Method::POST => quote! { post },
+      Method::PUT => quote! { put },
+      Method::DELETE => quote! { delete },
+      Method::PATCH => quote! { patch },
+      Method::HEAD => quote! { head },
+      Method::OPTIONS => quote! { options },
+      Method::TRACE => quote! { trace },
+      _ => quote! { get },
+    };
     tokens.extend(ts);
   }
 }

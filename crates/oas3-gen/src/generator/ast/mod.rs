@@ -28,7 +28,7 @@ pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
 pub use serde_attrs::SerdeAttribute;
-pub use server::{ServerRequestTraitDef, ServerTraitMethod};
+pub use server::{HandlerBodyInfo, ServerRequestTraitDef, ServerTraitMethod};
 pub use status_codes::StatusCodeToken;
 pub use tokens::{
   DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TraitToken, TypeAliasToken,
@@ -58,13 +58,14 @@ pub struct DiscriminatedVariant {
   pub type_name: TypeRef,
 }
 
-/// Serde mode for discriminated enums
+/// Serde mode controlling which serde traits a type derives/implements
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SerdeMode {
   #[default]
   Both,
   SerializeOnly,
   DeserializeOnly,
+  None,
 }
 
 pub type EnumMethod = MethodNode<EnumMethodKind>;
@@ -250,6 +251,18 @@ pub enum ParameterLocation {
   Query,
   Header,
   Cookie,
+}
+
+impl ParameterLocation {
+  #[must_use]
+  pub const fn suffix(self) -> Option<&'static str> {
+    match self {
+      Self::Path => Some("Path"),
+      Self::Query => Some("Query"),
+      Self::Header => Some("Header"),
+      Self::Cookie => None,
+    }
+  }
 }
 
 impl From<ParameterIn> for ParameterLocation {

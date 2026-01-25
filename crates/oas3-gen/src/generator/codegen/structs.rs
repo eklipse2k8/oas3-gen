@@ -17,7 +17,11 @@ use crate::generator::{
     StatusHandler, StructDef, StructKind, StructMethod, TypeRef, ValidationAttribute,
     tokens::{ConstToken, EnumToken, EnumVariantToken},
   },
-  codegen::{attributes::generate_derives_from_slice, headers::HeaderMapFragment},
+  codegen::{
+    attributes::generate_derives_from_slice,
+    headers::{HeaderFromMapFragment, HeaderMapFragment},
+  },
+  converter::GenerationTarget,
 };
 
 #[derive(Clone, Debug)]
@@ -25,14 +29,21 @@ pub(crate) struct StructFragment {
   def: StructDef,
   regex_lookup: BTreeMap<RegexKey, ConstToken>,
   visibility: Visibility,
+  target: GenerationTarget,
 }
 
 impl StructFragment {
-  pub(crate) fn new(def: StructDef, regex_lookup: BTreeMap<RegexKey, ConstToken>, visibility: Visibility) -> Self {
+  pub(crate) fn new(
+    def: StructDef,
+    regex_lookup: BTreeMap<RegexKey, ConstToken>,
+    visibility: Visibility,
+    target: GenerationTarget,
+  ) -> Self {
     Self {
       def,
       regex_lookup,
       visibility,
+      target,
     }
   }
 }
@@ -48,6 +59,13 @@ impl ToTokens for StructFragment {
       #impl_block
       #header_map
     });
+
+    if self.target == GenerationTarget::Server {
+      let header_from_map = HeaderFromMapFragment::new(self.def.clone());
+      tokens.extend(quote! {
+        #header_from_map
+      });
+    }
   }
 }
 
