@@ -28,6 +28,7 @@ use std::{
 use anyhow::Result;
 pub(crate) use common::ConversionOutput;
 use oas3::spec::ObjectSchema;
+pub(crate) use operations::{OperationsProcessor, build_server_trait};
 pub(crate) use type_resolver::TypeResolver;
 pub(crate) use type_usage_recorder::TypeUsageRecorder;
 

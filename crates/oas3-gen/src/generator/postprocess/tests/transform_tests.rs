@@ -415,18 +415,28 @@ fn test_server_enum_bidirectional_gets_both() {
 
 #[test]
 fn test_client_vs_server_serde_inversion() {
-  let client_req = process_struct_helper(create_struct("ClientReq", StructKind::Schema, false), TypeUsage::RequestOnly);
-  let server_req = process_struct_for_server(create_struct("ServerReq", StructKind::Schema, false), TypeUsage::RequestOnly);
+  let client_req = process_struct_helper(
+    create_struct("ClientReq", StructKind::Schema, false),
+    TypeUsage::RequestOnly,
+  );
+  let server_req = process_struct_for_server(
+    create_struct("ServerReq", StructKind::Schema, false),
+    TypeUsage::RequestOnly,
+  );
 
   assert!(client_req.derives().contains(&DeriveTrait::Serialize));
   assert!(!client_req.derives().contains(&DeriveTrait::Deserialize));
   assert!(!server_req.derives().contains(&DeriveTrait::Serialize));
   assert!(server_req.derives().contains(&DeriveTrait::Deserialize));
 
-  let client_resp =
-    process_struct_helper(create_struct("ClientResp", StructKind::Schema, false), TypeUsage::ResponseOnly);
-  let server_resp =
-    process_struct_for_server(create_struct("ServerResp", StructKind::Schema, false), TypeUsage::ResponseOnly);
+  let client_resp = process_struct_helper(
+    create_struct("ClientResp", StructKind::Schema, false),
+    TypeUsage::ResponseOnly,
+  );
+  let server_resp = process_struct_for_server(
+    create_struct("ServerResp", StructKind::Schema, false),
+    TypeUsage::ResponseOnly,
+  );
 
   assert!(!client_resp.derives().contains(&DeriveTrait::Serialize));
   assert!(client_resp.derives().contains(&DeriveTrait::Deserialize));

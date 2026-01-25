@@ -1,26 +1,116 @@
 use std::rc::Rc;
 
 use super::{
-  ConverterContext, SchemaConverter,
+  ConverterContext, SchemaConverter, TypeUsageRecorder,
   requests::{BodyInfo, RequestConverter, RequestOutput},
   responses::ResponseConverter,
 };
 use crate::generator::{
   ast::{
-    Documentation, EnumToken, FieldDef, OperationInfo, ParameterLocation, ParsedPath, ResponseEnumDef, RustType,
-    StructMethod, StructToken,
+    Documentation, EnumToken, FieldDef, MethodNameToken, OperationInfo, ParameterLocation, ParsedPath, ResponseEnumDef,
+    RustType, ServerRequestTraitDef, ServerTraitMethod, StructMethod, StructToken, TraitToken,
   },
   naming::{
     identifiers::to_rust_type_name,
     operations::{generate_unique_request_name, generate_unique_response_name},
   },
   operation_registry::OperationEntry,
+  orchestrator::GenerationWarning,
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct ConversionResult {
   pub(crate) types: Vec<RustType>,
   pub(crate) operation_info: OperationInfo,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OperationsOutput {
+  pub(crate) types: Vec<RustType>,
+  pub(crate) operations: Vec<OperationInfo>,
+  pub(crate) warnings: Vec<GenerationWarning>,
+  pub(crate) usage_recorder: TypeUsageRecorder,
+}
+
+pub(crate) struct OperationsProcessor {
+  context: Rc<ConverterContext>,
+  schema_converter: SchemaConverter,
+}
+
+impl OperationsProcessor {
+  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
+    Self {
+      context,
+      schema_converter,
+    }
+  }
+
+  pub(crate) fn process_all<'a>(&self, entries: impl Iterator<Item = &'a OperationEntry>) -> OperationsOutput {
+    let mut rust_types = vec![];
+    let mut operations_info = vec![];
+    let mut warnings = vec![];
+
+    let operation_converter = OperationConverter::new(self.context.clone(), self.schema_converter.clone());
+
+    for entry in entries {
+      match operation_converter.convert(entry) {
+        Ok(result) => {
+          warnings.extend(
+            result
+              .operation_info
+              .warnings
+              .iter()
+              .map(|w| GenerationWarning::OperationSpecific {
+                operation_id: result.operation_info.operation_id.clone(),
+                message: w.clone(),
+              }),
+          );
+
+          rust_types.extend(result.types);
+          operations_info.push(result.operation_info);
+        }
+        Err(e) => {
+          warnings.push(GenerationWarning::OperationConversionFailed {
+            method: entry.method.to_string(),
+            path: entry.path.clone(),
+            error: e.to_string(),
+          });
+        }
+      }
+    }
+
+    OperationsOutput {
+      types: rust_types,
+      operations: operations_info,
+      warnings,
+      usage_recorder: self.context.take_type_usage(),
+    }
+  }
+}
+
+pub(crate) fn build_server_trait(operations: &[OperationInfo]) -> Option<ServerRequestTraitDef> {
+  if operations.is_empty() {
+    return None;
+  }
+
+  let methods = operations
+    .iter()
+    .map(|info| {
+      ServerTraitMethod::builder()
+        .name(MethodNameToken::from_raw(&info.stable_id))
+        .docs(info.documentation.clone())
+        .maybe_request_type(info.request_type.clone())
+        .maybe_response_type(info.response_enum.clone())
+        .build()
+    })
+    .collect::<Vec<_>>();
+
+  Some(
+    ServerRequestTraitDef::builder()
+      .name(TraitToken::new("ApiServer"))
+      .methods(methods)
+      .build(),
+  )
 }
 
 type ResponseDefinition = (Option<ResponseEnumDef>, Option<StructMethod>);

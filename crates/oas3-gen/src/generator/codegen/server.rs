@@ -3,23 +3,20 @@ use quote::{ToTokens, quote};
 
 use super::{Visibility, enums::ResponseEnumFragment};
 use crate::generator::{
-  ast::{ClientRootNode, OperationInfo, ResponseEnumDef, ResponseVariant},
+  ast::{ResponseEnumDef, ResponseVariant, ServerRequestTraitDef, ServerTraitMethod},
   codegen::http::HttpStatusCode,
 };
 
-#[allow(dead_code)]
 pub struct ServerGenerator {
-  metadata: ClientRootNode,
-  operations: Vec<OperationInfo>,
+  server_trait: Option<ServerRequestTraitDef>,
   visibility: Visibility,
   with_types_import: bool,
 }
 
 impl ServerGenerator {
-  pub fn new(metadata: &ClientRootNode, operations: &[OperationInfo], visibility: Visibility) -> Self {
+  pub fn new(server_trait: Option<ServerRequestTraitDef>, visibility: Visibility) -> Self {
     Self {
-      metadata: metadata.clone(),
-      operations: operations.to_vec(),
+      server_trait,
       visibility,
       with_types_import: false,
     }
@@ -33,25 +30,68 @@ impl ServerGenerator {
 
 impl ToTokens for ServerGenerator {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let vis = self.visibility.to_tokens();
+    let types_import = self.with_types_import.then(|| quote! { use super::types::*; });
 
-    let types_import = self.with_types_import.then(|| {
-      quote! { use super::types::*; }
-    });
+    let trait_def = self
+      .server_trait
+      .as_ref()
+      .map(|def| ServerTraitFragment::new(def.clone(), self.visibility));
 
-    let stub = quote! {
+    tokens.extend(quote! {
       #types_import
-
-      #vis trait ApiServer {
-        // TODO: Generate trait methods from operations
-      }
-    };
-
-    tokens.extend(stub);
+      #trait_def
+    });
   }
 }
 
-/// Wrapper to convert `ResponseEnumDef` to axum::IntoResponse impl tokens
+#[derive(Clone, Debug)]
+struct ServerTraitFragment {
+  def: ServerRequestTraitDef,
+  vis: Visibility,
+}
+
+impl ServerTraitFragment {
+  fn new(def: ServerRequestTraitDef, vis: Visibility) -> Self {
+    Self { def, vis }
+  }
+}
+
+impl ToTokens for ServerTraitFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let vis = self.vis.to_tokens();
+    let name = &self.def.name;
+    let methods = self.def.methods.iter().cloned().map(ServerTraitMethodFragment);
+
+    tokens.extend(quote! {
+      #vis trait #name {
+        #(#methods)*
+      }
+    });
+  }
+}
+
+#[derive(Clone, Debug)]
+struct ServerTraitMethodFragment(ServerTraitMethod);
+
+impl ToTokens for ServerTraitMethodFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = &self.0.name;
+    let docs = &self.0.docs;
+
+    let (request_param, return_type) = match (&self.0.request_type, &self.0.response_type) {
+      (Some(req), Some(resp)) => (quote! { request: #req }, quote! { #resp }),
+      (Some(req), None) => (quote! { request: #req }, quote! { () }),
+      (None, Some(resp)) => (quote! {}, quote! { #resp }),
+      (None, None) => (quote! {}, quote! { () }),
+    };
+
+    tokens.extend(quote! {
+      #docs
+      async fn #name(&self, #request_param) -> anyhow::Result<#return_type>;
+    });
+  }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct AxumIntoResponse(ResponseEnumDef);
 
@@ -85,7 +125,6 @@ impl ToTokens for AxumIntoResponse {
   }
 }
 
-/// Wrapper to convert ResponseVariant to axum::Response tokens
 #[derive(Clone, Debug)]
 pub(crate) struct AxumIntoResponseVariant(ResponseVariant);
 

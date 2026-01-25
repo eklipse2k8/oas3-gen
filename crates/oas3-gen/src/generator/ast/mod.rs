@@ -7,7 +7,7 @@ pub mod lints;
 mod outer_attrs;
 mod parsed_path;
 pub(super) mod serde_attrs;
-mod server;
+pub(crate) mod server;
 mod status_codes;
 pub mod tokens;
 pub(super) mod types;
@@ -28,9 +28,10 @@ pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
 pub use serde_attrs::SerdeAttribute;
+pub use server::{ServerRequestTraitDef, ServerTraitMethod};
 pub use status_codes::StatusCodeToken;
 pub use tokens::{
-  DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TypeAliasToken,
+  DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TraitToken, TypeAliasToken,
 };
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};

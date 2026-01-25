@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use self::{client::ClientFragment, mod_file::ModFileFragment, server::ServerGenerator, types::TypesFragment};
-use super::ast::{ClientRootNode, GlobalLintsNode, OperationInfo, RustType};
+use super::ast::{ClientRootNode, GlobalLintsNode, OperationInfo, RustType, ServerRequestTraitDef};
 use crate::generator::{
   ast::{Documentation, FileHeaderNode, constants::HttpHeaderRef},
   converter::CodegenConfig,
@@ -172,6 +172,7 @@ pub struct SchemaCodeGenerator {
   operations: Rc<Vec<OperationInfo>>,
   header_refs: Rc<Vec<HttpHeaderRef>>,
   client: Rc<ClientRootNode>,
+  server_trait: Option<ServerRequestTraitDef>,
   visibility: Visibility,
   source_path: String,
   gen_version: String,
@@ -186,6 +187,7 @@ impl SchemaCodeGenerator {
     operations: Vec<OperationInfo>,
     header_refs: Vec<HttpHeaderRef>,
     client: ClientRootNode,
+    server_trait: Option<ServerRequestTraitDef>,
     visibility: Visibility,
     source_path: String,
     gen_version: String,
@@ -196,6 +198,7 @@ impl SchemaCodeGenerator {
       operations: Rc::new(operations),
       header_refs: Rc::new(header_refs),
       client: Rc::new(client),
+      server_trait,
       visibility,
       source_path,
       gen_version,
@@ -276,7 +279,7 @@ impl SchemaCodeGenerator {
 
   /// Creates a server fragment for axum server trait generation.
   fn server_fragment(&self) -> ServerGenerator {
-    ServerGenerator::new(&self.client, &self.operations, self.visibility).with_types_import()
+    ServerGenerator::new(self.server_trait.clone(), self.visibility).with_types_import()
   }
 
   /// Formats tokens into source code with a file header (no lint attributes).
