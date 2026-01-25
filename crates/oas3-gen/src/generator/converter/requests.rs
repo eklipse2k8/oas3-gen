@@ -24,6 +24,10 @@ use crate::{
   utils::SchemaExt,
 };
 
+/// Result of building a request struct for an operation.
+///
+/// Contains the main request struct, nested parameter structs (path, query, header),
+/// inline types generated from parameter or body schemas, and any warnings.
 #[derive(Debug, Clone)]
 pub(crate) struct RequestOutput {
   pub(crate) main_struct: StructDef,
@@ -117,10 +121,12 @@ pub(crate) struct BodyInfo {
 }
 
 impl BodyInfo {
-  /// Prepares request body information for an operation.
+  /// Extracts request body information from an operation entry.
   ///
-  /// This is used by the operation converter to track body metadata
-  /// separately from request struct generation.
+  /// Resolves the body schema (via `$ref` or inline), determines the content
+  /// category (JSON, form, multipart, binary), and collects any inline types
+  /// generated during schema resolution. Returns an empty body info if no
+  /// request body is defined.
   pub(crate) fn new(context: &Rc<ConverterContext>, entry: &OperationEntry) -> anyhow::Result<Self> {
     let spec = context.graph().spec();
     let Some(body_ref) = entry.operation.request_body.as_ref() else {
@@ -171,6 +177,11 @@ impl BodyInfo {
     })
   }
 
+  /// Extracts field information for multipart form data bodies.
+  ///
+  /// Returns `None` for non-multipart content types. For multipart bodies,
+  /// inspects the body struct to determine which fields are binary, nullable,
+  /// or require JSON serialization.
   fn resolve_multipart_fields(
     category: ContentCategory,
     body_type: &TypeRef,
@@ -205,6 +216,7 @@ impl BodyInfo {
     Some(fields)
   }
 
+  /// Creates a field definition for the request body if present.
   pub(crate) fn create_field(&self) -> Option<FieldDef> {
     let type_ref = self.body_type.clone()?;
     Some(FieldDef::body_field(
@@ -215,6 +227,7 @@ impl BodyInfo {
     ))
   }
 
+  /// Converts body info into operation body metadata for code generation.
   pub(crate) fn to_operation_body(&self) -> Option<OperationBody> {
     let field_name = self.field_name.as_ref()?;
 
@@ -229,6 +242,7 @@ impl BodyInfo {
     )
   }
 
+  /// Creates an empty body info with the specified optionality.
   fn empty(optional: bool) -> Self {
     Self {
       optional,

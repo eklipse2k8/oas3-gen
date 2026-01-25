@@ -12,7 +12,9 @@ use crate::generator::{
   ast::{EnumToken, OperationInfo, RustType, constants::HttpHeaderRef},
   converter::GenerationTarget,
   postprocess::{
-    response_enum::ResponseEnumDeduplicator, serde_usage::UsagePropagator, uses::OutputAssembler,
+    response_enum::ResponseEnumDeduplicator,
+    serde_usage::SerdeUsage,
+    uses::{HeaderRefCollection, ModuleImports, RustTypeDeduplication},
     validation::NestedValidationProcessor,
   },
 };
@@ -34,14 +36,16 @@ pub(crate) fn postprocess(
 
   NestedValidationProcessor::new(&types).process(&mut types);
 
-  UsagePropagator::new(&types, seed_usage, target).propagate(&mut types);
+  SerdeUsage::new(&types, seed_usage, target).apply(&mut types);
 
-  let assembled = OutputAssembler::new(types, target).assemble();
+  let dedup_output = RustTypeDeduplication::new(types).process();
+  let header_output = HeaderRefCollection::new(dedup_output.clone()).process();
+  let uses_output = ModuleImports::new(dedup_output.clone(), target).process();
 
   PostprocessOutput {
-    types: assembled.types,
+    types: dedup_output,
     operations,
-    header_refs: assembled.header_refs,
-    uses: assembled.uses,
+    header_refs: header_output,
+    uses: uses_output,
   }
 }

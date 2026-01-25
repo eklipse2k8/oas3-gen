@@ -28,6 +28,11 @@ pub(crate) struct EnumConverter {
 }
 
 impl EnumConverter {
+  /// Creates a new enum converter with the specified converter context.
+  ///
+  /// The converter inherits case-sensitivity settings from the context's
+  /// [`CodegenConfig`] and uses them to configure the underlying
+  /// [`ValueEnumBuilder`].
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let case_insensitive = context.config().case_insensitive_enums();
     Self {
@@ -36,6 +41,15 @@ impl EnumConverter {
     }
   }
 
+  /// Converts an OpenAPI string enum schema into a Rust enum type.
+  ///
+  /// Extracts the `enum` values from the schema and generates a Rust enum
+  /// with PascalCase variant names and `#[serde(rename)]` attributes preserving
+  /// the original JSON string values.
+  ///
+  /// The collision strategy (from config) determines how variant name collisions
+  /// are resolved: either by appending numeric suffixes or by merging duplicates
+  /// with serde aliases.
   pub(crate) fn convert_value_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
     let strategy = if self.context.config().preserve_case_variants() {
       CollisionStrategy::Preserve
@@ -63,6 +77,10 @@ pub(crate) struct UnionConverter {
 }
 
 impl UnionConverter {
+  /// Creates a new union converter with the specified converter context.
+  ///
+  /// Initializes internal builders for variant construction, relaxed enum
+  /// generation (anyOf with freeform strings), and helper method generation.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let variant_builder = VariantBuilder::new(context.clone());
     let relaxed_enum_builder = RelaxedEnumBuilder::new(context.clone());
@@ -76,6 +94,17 @@ impl UnionConverter {
     }
   }
 
+  /// Converts an OpenAPI `oneOf` or `anyOf` schema into a Rust enum type.
+  ///
+  /// For `anyOf` schemas containing both enumerated values and a freeform string
+  /// branch, produces a "relaxed enum" with `Known` and `Other` variants.
+  /// Otherwise, generates an untagged enum with one variant per union branch.
+  ///
+  /// If the schema has a discriminator mapping, upgrades the result to a
+  /// discriminated enum with `#[serde(tag)]` instead of `#[serde(untagged)]`.
+  ///
+  /// Returns the main enum type plus any inline types generated for anonymous
+  /// variant schemas.
   pub(crate) fn convert_union(
     &self,
     name: &str,
@@ -105,6 +134,14 @@ impl UnionConverter {
     Ok(output)
   }
 
+  /// Builds enum variants from the union branches and assembles the final enum.
+  ///
+  /// Resolves each `oneOf` or `anyOf` branch to a variant spec, constructs
+  /// [`VariantDef`]s, strips common name prefixes/suffixes for conciseness,
+  /// and generates optional helper constructors.
+  ///
+  /// Attempts to upgrade to a discriminated enum if the schema contains a
+  /// `discriminator` mapping; otherwise produces an untagged enum.
   fn collect_union_variants(
     &self,
     name: &str,
@@ -148,6 +185,12 @@ impl UnionConverter {
     Ok(ConversionOutput::with_inline_types(main_enum, inline_types))
   }
 
+  /// Extracts variant specifications from raw union branch references.
+  ///
+  /// For each branch, resolves the schema reference, infers a variant name
+  /// (from `$ref` path, schema `title`, or positional fallback), and ensures
+  /// uniqueness across all variants. Null schemas are skipped as they represent
+  /// nullable wrappers rather than distinct variants.
   fn collect_union_variant_specs(
     &self,
     variants_src: &[ObjectOrReference<ObjectSchema>],

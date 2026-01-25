@@ -18,17 +18,28 @@ pub(crate) struct DiscriminatorConverter {
 }
 
 impl DiscriminatorConverter {
+  /// Creates a new discriminator converter with the given context.
+  ///
+  /// The context provides access to the schema registry for parent lookups
+  /// and the reachability filter for selective variant generation.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     Self { context }
   }
 
+  /// Returns the discriminated parent info if `schema_name` extends a base type
+  /// with a discriminator mapping.
+  ///
+  /// Schemas that are children of a discriminated base type do not generate
+  /// standalone Rust types; they become enum variants instead.
   pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&ParentInfo> {
     self.context.graph().parent(schema_name)
   }
 
-  /// Builds a discriminated enum from a base schema with discriminator mappings.
+  /// Builds a discriminated enum from a base schema that has a discriminator property.
   ///
-  /// Returns an error if the schema lacks a discriminator property.
+  /// The discriminator's `propertyName` becomes the serde tag field, and each entry
+  /// in the discriminator's `mapping` becomes an enum variant wrapping a boxed type.
+  /// A fallback variant is added to capture unknown discriminator values.
   pub(crate) fn build_base_discriminated_enum(
     &self,
     name: &str,
@@ -65,10 +76,14 @@ impl DiscriminatorConverter {
     )
   }
 
-  /// Returns discriminator tag-to-schema mappings grouped by target schema.
+  /// Extracts discriminated enum variants from the schema's discriminator mapping.
   ///
-  /// Each entry contains `(schema_name, tags)` where `tags` are the discriminator
-  /// values that map to that schema. Results are ordered alphabetically by schema name.
+  /// Groups discriminator tag values by their target schema, producing one variant
+  /// per schema. Variant names strip any common prefix with `parent_name` to reduce
+  /// redundancy (e.g., parent "Pet" with child "PetCat" yields variant "Cat").
+  ///
+  /// Unreachable schemas (filtered by operation selection) are excluded.
+  /// Returns an empty vector if the schema has no discriminator mapping.
   pub(crate) fn build_variants_from_mapping(
     &self,
     parent_name: &str,
@@ -110,10 +125,15 @@ impl DiscriminatorConverter {
       .collect()
   }
 
-  /// Tries to convert existing union variants into a discriminated enum.
+  /// Attempts to convert a union enum into a discriminated enum using the schema's
+  /// discriminator mapping.
   ///
-  /// Returns `None` if the schema lacks a discriminator mapping or if the
-  /// variants don't match the mapping entries.
+  /// Returns `Some(RustType::DiscriminatedEnum)` if:
+  /// - The schema has a discriminator with a mapping
+  /// - Every mapping entry has a corresponding variant in the provided list
+  ///
+  /// Returns `None` if conversion is not possible, indicating the original union
+  /// enum should be used.
   pub(crate) fn try_upgrade_to_discriminated(
     name: &str,
     schema: &ObjectSchema,
@@ -140,7 +160,11 @@ impl DiscriminatorConverter {
     )
   }
 
-  /// Returns true if all mapping entries have a corresponding variant type.
+  /// Returns `true` if every schema referenced in the discriminator mapping
+  /// has a corresponding variant in the provided list.
+  ///
+  /// This ensures a union-to-discriminated conversion will not lose any
+  /// discriminator cases.
   fn all_mappings_have_variants(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {
     if variants.is_empty() || mapping.is_empty() {
       return false;
@@ -156,7 +180,12 @@ impl DiscriminatorConverter {
     })
   }
 
-  /// Converts union variants to discriminated variants using the mapping.
+  /// Converts union variants to discriminated variants by associating each with
+  /// its discriminator tag values from the mapping.
+  ///
+  /// Groups tags that map to the same schema into a single variant. Preserves
+  /// the original variant name and inner type from the source `VariantDef`.
+  /// Mapping entries without matching variants are skipped.
   fn convert_to_discriminated_variants(
     variants: &[VariantDef],
     mapping: &BTreeMap<String, String>,

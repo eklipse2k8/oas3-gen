@@ -22,6 +22,10 @@ use crate::{
   utils::SchemaExt,
 };
 
+/// Contains resolved field information including type, inline definitions, and validation.
+///
+/// Returned by [`FieldConverter::resolve_with_metadata`] to bundle all data
+/// needed for field construction in one pass.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedFieldData {
   pub(crate) type_ref: TypeRef,
@@ -30,6 +34,11 @@ pub(crate) struct ResolvedFieldData {
   pub(crate) schema: ObjectSchema,
 }
 
+/// Converts OpenAPI object properties into Rust struct field definitions.
+///
+/// Coordinates type resolution, validation attribute extraction, and serde
+/// attribute generation. Applies special handling for discriminator fields,
+/// OData properties, and custom type mappings.
 #[derive(Clone, Debug)]
 pub(crate) struct FieldConverter {
   context: Rc<ConverterContext>,
@@ -39,6 +48,7 @@ pub(crate) struct FieldConverter {
 }
 
 impl FieldConverter {
+  /// Creates a new field converter with configuration from the context.
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
     let config = context.config();
     Self {
@@ -85,7 +95,13 @@ impl FieldConverter {
     })
   }
 
-  /// Collects fields from an object schema, applying deduplication and inline type extraction.
+  /// Collects struct fields from all properties in an object schema.
+  ///
+  /// Iterates over `schema.properties`, resolves each property's type,
+  /// extracts validation attributes, and builds field definitions.
+  /// Deduplicates field names that collide after Rust identifier conversion.
+  /// Returns the fields along with any inline types extracted from
+  /// nested object or enum properties.
   pub(crate) fn collect_fields(
     &self,
     parent_name: &str,
@@ -128,6 +144,11 @@ impl FieldConverter {
     ))
   }
 
+  /// Converts `additionalProperties` into serde attributes and an optional catch-all field.
+  ///
+  /// Returns `#[serde(deny_unknown_fields)]` when `additionalProperties: false`,
+  /// or a `HashMap<String, T>` field when `additionalProperties` specifies a schema.
+  /// Returns empty attributes and `None` when `additionalProperties` is not set.
   pub(crate) fn build_additional_properties(
     &self,
     schema: &ObjectSchema,
@@ -149,6 +170,10 @@ impl FieldConverter {
     }
   }
 
+  /// Derives struct-level serde and outer attributes from field characteristics.
+  ///
+  /// Adds `#[serde(default)]` if any field has a default value. Adds
+  /// `#[serde_as]` if any field uses serde_with custom serialization.
   pub(crate) fn struct_attributes(
     fields: &[FieldDef],
     base_serde: Vec<SerdeAttribute>,
@@ -170,6 +195,12 @@ impl FieldConverter {
     (serde_attrs, outer_attrs)
   }
 
+  /// Converts a single property into a Rust field definition.
+  ///
+  /// Applies optionality rules (required, default, discriminator, OData),
+  /// extracts validation attributes from schema constraints, and generates
+  /// serde rename attributes when the Rust field name differs from the
+  /// JSON property name.
   pub(crate) fn convert_field(
     &self,
     prop_name: &str,
@@ -222,6 +253,10 @@ impl FieldConverter {
     }
   }
 
+  /// Looks up a custom serde_with type override for the field's primitive type.
+  ///
+  /// Returns `Some` if the configuration specifies a custom serialization
+  /// type for this primitive (e.g., `date_time` → `time::OffsetDateTime`).
   fn get_customization_for_type(&self, type_ref: &TypeRef) -> Option<SerdeAsFieldAttr> {
     let key = Self::primitive_to_key(&type_ref.base_type)?;
     let custom_type = self.customizations.get(&key)?;
@@ -232,6 +267,7 @@ impl FieldConverter {
     })
   }
 
+  /// Maps a primitive type to its customization lookup key.
   fn primitive_to_key(primitive: &RustPrimitive) -> Option<String> {
     match primitive {
       RustPrimitive::DateTime => Some("date_time".to_string()),
@@ -256,6 +292,9 @@ impl FieldConverter {
     (validation_attrs, default_value)
   }
 
+  /// Extracts a default value from schema `default`, `const`, or single-value `enum`.
+  ///
+  /// Prefers `default` over `const` over single-element enum arrays.
   pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
     schema
       .default
@@ -264,6 +303,12 @@ impl FieldConverter {
       .or_else(|| schema.enum_values.iter().exactly_one().ok().cloned())
   }
 
+  /// Extracts validation attributes from schema constraints.
+  ///
+  /// Generates `#[validate(email)]`, `#[validate(url)]`, `#[validate(range)]`,
+  /// `#[validate(length)]`, and `#[validate(regex)]` based on format,
+  /// min/max values, and pattern constraints. Skips regex validation for
+  /// types with known formats (date, datetime, uuid).
   pub(crate) fn extract_all_validation(
     prop_name: &str,
     is_required: bool,
@@ -317,6 +362,7 @@ impl FieldConverter {
     attrs
   }
 
+  /// Filters out regex validation for types with built-in format validation.
   fn filter_regex_validation(regex: Option<String>, type_ref: &TypeRef) -> Option<String> {
     match &type_ref.base_type {
       RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid => None,
@@ -324,6 +370,7 @@ impl FieldConverter {
     }
   }
 
+  /// Returns `true` if the format indicates a non-string primitive type.
   fn is_non_string_format(format: &str) -> bool {
     matches!(
       format,
@@ -331,6 +378,13 @@ impl FieldConverter {
     )
   }
 
+  /// Determines whether a field should be wrapped in `Option<T>`.
+  ///
+  /// Returns `true` when:
+  /// - The field is not in the `required` array
+  /// - The field has a default value
+  /// - The field is a discriminator without enum values
+  /// - OData support is enabled and the field is an `@odata.*` property
   fn is_field_optional(
     &self,
     prop_name: &str,
@@ -359,6 +413,12 @@ impl FieldConverter {
     false
   }
 
+  /// Resolves field name collisions by appending numeric suffixes.
+  ///
+  /// When multiple properties map to the same Rust field name (e.g., `foo-bar`
+  /// and `foo_bar` both become `foo_bar`), this removes deprecated duplicates
+  /// when a non-deprecated version exists, then appends `_2`, `_3`, etc.
+  /// to remaining duplicates.
   pub(crate) fn deduplicate_names(fields: Vec<FieldDef>) -> Vec<FieldDef> {
     let duplicate_names = fields
       .iter()
@@ -407,6 +467,10 @@ impl FieldConverter {
   }
 }
 
+/// Tracks discriminator-related metadata for a field during conversion.
+///
+/// Used to determine special handling for fields that serve as discriminator
+/// properties in polymorphic schemas.
 #[derive(Debug, Clone)]
 pub(crate) struct DiscriminatorFieldInfo {
   pub value: Option<DefaultAtom>,
@@ -415,6 +479,11 @@ pub(crate) struct DiscriminatorFieldInfo {
 }
 
 impl DiscriminatorFieldInfo {
+  /// Creates discriminator info if the field is a discriminator property.
+  ///
+  /// Returns `None` if the field is not related to discriminator handling.
+  /// Sets `is_base` for discriminator properties on base types, and `value`
+  /// for child types with a known discriminator value.
   pub fn new(
     prop_name: &str,
     parent_schema: &ObjectSchema,
@@ -443,6 +512,10 @@ impl DiscriminatorFieldInfo {
     })
   }
 
+  /// Returns `true` if the discriminator field should be hidden from the struct.
+  ///
+  /// Fields are hidden when they lack enum values and either have a fixed
+  /// discriminator value (child types) or are the base type's discriminator.
   pub fn should_hide(&self) -> bool {
     !self.has_enum && (self.value.is_some() || self.is_base)
   }

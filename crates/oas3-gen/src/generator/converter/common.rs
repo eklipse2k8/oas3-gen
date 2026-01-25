@@ -14,6 +14,10 @@ pub(crate) struct ConversionOutput<T> {
 }
 
 impl<T> ConversionOutput<T> {
+  /// Creates a conversion output containing only the primary result.
+  ///
+  /// Use this constructor when the conversion produces a single type without
+  /// generating any additional inline type definitions.
   pub(crate) fn new(result: T) -> Self {
     Self {
       result,
@@ -21,12 +25,23 @@ impl<T> ConversionOutput<T> {
     }
   }
 
+  /// Creates a conversion output containing the primary result along with
+  /// additional inline type definitions discovered during conversion.
+  ///
+  /// Inline types are nested definitions (e.g., struct fields with anonymous
+  /// object schemas, enum variants with inline schemas) that must be emitted
+  /// as separate top-level Rust types alongside the primary converted type.
   pub(crate) fn with_inline_types(result: T, inline_types: Vec<RustType>) -> Self {
     Self { result, inline_types }
   }
 }
 
 impl ConversionOutput<RustType> {
+  /// Consumes this output and returns all types as a flat vector.
+  ///
+  /// The inline types appear first, followed by the primary result. This
+  /// ordering ensures that type definitions appear before types that
+  /// depend on them, which is required for valid Rust code emission.
   pub(crate) fn into_vec(self) -> Vec<RustType> {
     let mut types = self.inline_types;
     types.push(self.result);
@@ -34,6 +49,14 @@ impl ConversionOutput<RustType> {
   }
 }
 
+/// Extracts the set of `$ref` schema names from a slice of union variants.
+///
+/// Returns only the names of variants that are schema references (e.g.,
+/// `#/components/schemas/Foo` yields `"Foo"`). Inline object schemas are
+/// excluded since they have no referenceable name.
+///
+/// The returned `BTreeSet` provides deterministic ordering for fingerprint
+/// comparison, enabling union type deduplication.
 pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
   variants.iter().filter_map(RefCollector::parse_schema_ref).collect()
 }

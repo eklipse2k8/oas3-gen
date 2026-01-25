@@ -19,16 +19,29 @@ use crate::{
   utils::SchemaExt,
 };
 
+/// Resolves anonymous inline schemas into named Rust types with cache deduplication.
+///
+/// When a property contains an inline object, enum, or union definition (rather than
+/// a `$ref`), this resolver creates a named type and registers it in the shared cache.
+/// Subsequent encounters of structurally identical schemas reuse the cached name,
+/// preventing duplicate type definitions in generated output.
 #[derive(Debug, Clone)]
 pub(crate) struct InlineTypeResolver {
   context: Rc<ConverterContext>,
 }
 
 impl InlineTypeResolver {
+  /// Creates a new inline type resolver with access to the shared converter context.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     Self { context }
   }
 
+  /// Creates a named struct type from an inline object schema.
+  ///
+  /// Generates a type name by concatenating `parent_name` with `property_name`
+  /// in PascalCase (e.g., `UserAddress` for a property `address` on `User`).
+  /// If an identical schema already exists in the cache, returns a reference
+  /// to the existing type instead of creating a duplicate.
   pub(crate) fn resolve_inline_struct(
     &self,
     parent_name: &str,
@@ -47,6 +60,11 @@ impl InlineTypeResolver {
     )
   }
 
+  /// Creates a named struct type from an inline schema using an explicit name.
+  ///
+  /// Unlike [`resolve_inline_struct`], the caller provides the full type name
+  /// rather than deriving it from parent and property names. Useful for
+  /// union variant structs where the name follows a different convention.
   pub(crate) fn resolve_inline_struct_with_name(
     &self,
     schema: &ObjectSchema,
@@ -61,6 +79,12 @@ impl InlineTypeResolver {
     )
   }
 
+  /// Creates a named enum type from an inline string enum schema.
+  ///
+  /// Uses `enum_values` as a cache key to detect duplicate enum definitions
+  /// across the specification. If an enum with identical values already exists,
+  /// returns a reference to that type. Otherwise, generates a new enum with
+  /// the name `{parent_name}{property_name}`.
   pub(crate) fn resolve_inline_enum(
     &self,
     parent_name: &str,
@@ -87,6 +111,12 @@ impl InlineTypeResolver {
     )
   }
 
+  /// Creates a named union enum from an inline `oneOf` or `anyOf` schema.
+  ///
+  /// First checks if a union with the same set of `$ref` targets already
+  /// exists in the cache. If so, returns a reference to that type. Otherwise,
+  /// generates a new enum and registers it in both the schema cache and
+  /// the union registry for future deduplication.
   pub(crate) fn resolve_inline_union(
     &self,
     schema: &ObjectSchema,
@@ -133,6 +163,12 @@ impl InlineTypeResolver {
     Ok(result)
   }
 
+  /// Attempts to create a named type from an arbitrary inline schema.
+  ///
+  /// Inspects the schema to determine if it represents a non-trivial type
+  /// (object, enum, or union) that warrants extraction. Returns `None` for
+  /// primitive types or empty objects. For nullable unions with a single
+  /// non-null variant, returns the inner type wrapped in `Option`.
   pub(crate) fn try_inline_schema(
     &self,
     schema: &ObjectSchema,
@@ -157,6 +193,13 @@ impl InlineTypeResolver {
     Ok(None)
   }
 
+  /// Resolves an inline schema using a custom conversion function.
+  ///
+  /// Performs cache lookup first; if the schema hash matches an existing
+  /// type, returns the cached name. Otherwise, calls `convert_fn` to
+  /// generate the type definition(s) and registers them in the cache.
+  /// The primary type name is extracted from the last element of the
+  /// generated types vector.
   pub(crate) fn resolve_inline_schema_with_fn<F>(
     &self,
     schema: &ObjectSchema,
@@ -211,6 +254,12 @@ impl InlineTypeResolver {
     Ok(Some(ConversionOutput::with_inline_types(final_name, generated)))
   }
 
+  /// Internal cache-aware resolution with pluggable generation logic.
+  ///
+  /// Checks schema hash cache, then `cached_name_check`, then generates
+  /// the type using `generator`. The `forced_name` overrides automatic
+  /// naming when provided (used for enum deduplication). Registers the
+  /// generated type in the cache with its canonical hash.
   fn resolve_with_cache<F, C>(
     &self,
     schema: &ObjectSchema,
@@ -261,6 +310,7 @@ impl InlineTypeResolver {
     Ok(ConversionOutput::new(TypeRef::new(type_name)))
   }
 
+  /// Creates a type reference for a named schema, applying `Box` if cyclic.
   fn type_ref(&self, schema_name: &str) -> TypeRef {
     let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
     if self.context.graph().is_cyclic(schema_name) {
@@ -269,6 +319,10 @@ impl InlineTypeResolver {
     type_ref
   }
 
+  /// Looks up a union type by its set of variant `$ref` targets.
+  ///
+  /// Returns `None` if fewer than 2 refs are provided or no matching
+  /// union exists in the schema registry's union fingerprint cache.
   fn find_union_by_refs(&self, refs: &BTreeSet<String>) -> Option<String> {
     if refs.len() < 2 {
       return None;

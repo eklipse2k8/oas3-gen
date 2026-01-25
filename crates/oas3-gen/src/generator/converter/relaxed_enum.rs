@@ -30,6 +30,10 @@ pub(crate) struct RelaxedEnumBuilder {
 }
 
 impl RelaxedEnumBuilder {
+  /// Creates a new `RelaxedEnumBuilder` with the given converter context.
+  ///
+  /// Initializes the internal `ValueEnumBuilder` with case-sensitivity settings
+  /// from the codegen configuration.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let case_insensitive = context.config().case_insensitive_enums();
     Self {
@@ -38,6 +42,14 @@ impl RelaxedEnumBuilder {
     }
   }
 
+  /// Attempts to convert an OpenAPI `anyOf` schema into a relaxed enum type pair.
+  ///
+  /// Recognizes schemas containing both constrained string variants (with enum values)
+  /// and a freeform string variant. Returns `None` if the schema does not match
+  /// the relaxed enum pattern.
+  ///
+  /// On success, returns a wrapper enum with `Known(T)` and `Other(String)` variants,
+  /// plus an inner enum `T` containing the known values.
   pub(crate) fn try_build_relaxed_enum(&self, name: &str, schema: &ObjectSchema) -> Option<ConversionOutput<RustType>> {
     let known_values = self.collect_known_values(schema);
     if known_values.is_empty() {
@@ -47,6 +59,11 @@ impl RelaxedEnumBuilder {
     Some(self.build_relaxed_enum_types(name, schema, &known_values))
   }
 
+  /// Extracts known enum values from an `anyOf` schema if it contains a freeform string variant.
+  ///
+  /// Returns an empty vector if the schema lacks a freeform string variant,
+  /// indicating it does not follow the relaxed enum pattern. Otherwise, returns
+  /// all constrained enum values from the non-freeform variants.
   fn collect_known_values(&self, schema: &ObjectSchema) -> Vec<EnumValueEntry> {
     let spec = self.context.graph().spec();
 
@@ -63,6 +80,12 @@ impl RelaxedEnumBuilder {
     schema.extract_enum_entries(spec)
   }
 
+  /// Constructs the relaxed enum type pair: an inner enum of known values and
+  /// an outer wrapper enum.
+  ///
+  /// The inner enum (e.g., `FooKnown`) contains one variant per known string value.
+  /// The outer enum (e.g., `Foo`) has two variants: `Known(FooKnown)` and `Other(String)`.
+  /// Constructor methods are generated for each known value unless helpers are disabled.
   fn build_relaxed_enum_types(
     &self,
     name: &str,
@@ -84,6 +107,11 @@ impl RelaxedEnumBuilder {
     ConversionOutput::with_inline_types(outer_enum, inner_enum_type.into_iter().collect())
   }
 
+  /// Looks up or creates the inner known-values enum, deduplicating across schemas.
+  ///
+  /// Returns the enum type name and optionally the `RustType` definition. Returns
+  /// `None` for the type if an identical enum was already generated, avoiding
+  /// duplicate definitions in the output.
   fn resolve_or_create_known_enum(
     &self,
     base_name: &str,
@@ -104,6 +132,11 @@ impl RelaxedEnumBuilder {
     }
   }
 
+  /// Generates the known-values enum definition and registers it in the cache.
+  ///
+  /// Creates an enum with one variant per known string value, using the
+  /// `ValueEnumBuilder` for variant construction. Registers both the enum-to-name
+  /// mapping and marks the name as used in the shared cache.
   fn create_known_enum(
     &self,
     name: String,
@@ -124,6 +157,12 @@ impl RelaxedEnumBuilder {
     (name, Some(def))
   }
 
+  /// Generates constructor methods for each known value on the wrapper enum.
+  ///
+  /// For an enum `Status` with known values `["active", "pending"]`, produces
+  /// methods like `fn active() -> Self` and `fn pending() -> Self` that wrap
+  /// the inner known-values enum variant. Method names are derived by removing
+  /// words shared with the enum name and ensuring uniqueness.
   fn build_known_value_constructors(
     wrapper_enum_name: &str,
     known_type_name: &str,
@@ -160,6 +199,11 @@ impl RelaxedEnumBuilder {
       .collect()
   }
 
+  /// Constructs the wrapper enum with `Known` and `Other` variants.
+  ///
+  /// Creates an untagged serde enum where `Known` wraps the inner known-values
+  /// enum and `Other` accepts arbitrary strings. Includes documentation from
+  /// the schema and attaches any provided constructor methods.
   fn build_wrapper_enum(
     name: &str,
     known_type_name: &str,

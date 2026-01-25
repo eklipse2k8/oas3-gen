@@ -12,10 +12,28 @@ pub(crate) struct ValueEnumBuilder {
 }
 
 impl ValueEnumBuilder {
+  /// Creates a new builder for constructing value enums from OpenAPI `enum` arrays.
+  ///
+  /// When `case_insensitive` is `true`, the generated enum will deserialize values
+  /// regardless of letter case (e.g., `"active"`, `"ACTIVE"`, and `"Active"` all
+  /// deserialize to the same variant).
   pub(crate) fn new(case_insensitive: bool) -> Self {
     Self { case_insensitive }
   }
 
+  /// Constructs a Rust enum from an array of OpenAPI enum values.
+  ///
+  /// Converts JSON string, number, and boolean values into PascalCase enum variants
+  /// with appropriate `#[serde(rename = "...")]` attributes to preserve the original
+  /// wire format.
+  ///
+  /// When multiple values normalize to the same Rust identifier (e.g., `"foo-bar"` and
+  /// `"foo_bar"` both become `FooBar`), the `strategy` parameter controls the behavior:
+  ///
+  /// - [`CollisionStrategy::Deduplicate`]: Merges collisions into a single variant with
+  ///   `#[serde(alias = "...")]` for additional values.
+  /// - [`CollisionStrategy::Preserve`]: Creates distinct variants by appending the
+  ///   entry index (e.g., `FooBar`, `FooBar1`).
   pub(crate) fn build_enum_from_values(
     &self,
     name: &str,
@@ -63,6 +81,10 @@ impl ValueEnumBuilder {
     )
   }
 
+  /// Constructs a unit enum variant with serde rename and documentation attributes.
+  ///
+  /// The `variant_name` is the PascalCase identifier for the variant (e.g., `"FooBar"`).
+  /// The `rename_value` is the original value to use in `#[serde(rename = "...")]`.
   fn build_variant(variant_name: String, rename_value: &str, entry: &EnumValueEntry) -> VariantDef {
     VariantDef::builder()
       .name(EnumVariantToken::from(variant_name))

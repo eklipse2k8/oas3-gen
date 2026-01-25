@@ -20,6 +20,10 @@ pub(crate) struct StructConverter {
 }
 
 impl StructConverter {
+  /// Creates a new struct converter with field and discriminator sub-converters.
+  ///
+  /// The `context` provides access to the schema registry, configuration,
+  /// and shared type cache for deduplication.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let field_converter = FieldConverter::new(&context);
     let discriminator_converter = DiscriminatorConverter::new(context.clone());
@@ -30,6 +34,11 @@ impl StructConverter {
     }
   }
 
+  /// Derives the Rust struct name from an OpenAPI schema name.
+  ///
+  /// For schemas that define a discriminator (polymorphic base types), appends
+  /// a `Base` suffix to distinguish the struct from the generated discriminated
+  /// enum. Otherwise, converts the name to PascalCase.
   pub(crate) fn struct_name(name: &str, schema: &ObjectSchema) -> StructToken {
     if schema.is_discriminated_base_type() {
       StructToken::from(format!("{}{}", to_rust_type_name(name), DISCRIMINATED_BASE_SUFFIX))
@@ -38,6 +47,12 @@ impl StructConverter {
     }
   }
 
+  /// Assembles a struct definition from schema properties and additional properties.
+  ///
+  /// Collects fields from `schema.properties`, adds a catch-all field for
+  /// `additionalProperties` if present, and attaches serde attributes.
+  /// Returns the struct definition along with any inline types extracted
+  /// from nested object or enum properties.
   fn build_struct(
     &self,
     name: StructToken,
@@ -72,6 +87,11 @@ impl StructConverter {
     ))
   }
 
+  /// Converts a child schema in a discriminated union hierarchy.
+  ///
+  /// For schemas that inherit from a discriminated base type via `allOf`,
+  /// this creates a struct with all merged fields. The parent must have
+  /// a `discriminator` definition; otherwise, an error is returned.
   fn convert_discriminated_child(
     &self,
     name: &str,
@@ -111,7 +131,11 @@ impl StructConverter {
     )
   }
 
-  /// Converts an object schema into a struct definition.
+  /// Converts an OpenAPI object schema into a Rust struct definition.
+  ///
+  /// Routes to [`build_struct`] for field extraction and registers the
+  /// result in the shared cache for deduplication. The `kind` parameter
+  /// controls struct decoration (e.g., derive macros, serde attributes).
   pub(crate) fn convert_struct(
     &self,
     name: &str,
@@ -138,6 +162,11 @@ impl StructConverter {
     Ok(result)
   }
 
+  /// Converts an `allOf` schema by merging all constituent schemas into one struct.
+  ///
+  /// If the schema participates in a discriminated union (has a parent with
+  /// a `discriminator`), delegates to [`convert_discriminated_child`].
+  /// Otherwise, merges all properties and builds a standard struct.
   pub(crate) fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
     let graph = self.context.graph();
 
@@ -163,6 +192,12 @@ impl StructConverter {
     self.finalize_struct_types(name, effective_schema, result.result, result.inline_types)
   }
 
+  /// Assembles the final type collection, optionally prepending a discriminated enum.
+  ///
+  /// For schemas that define a `discriminator`, creates a tagged union enum
+  /// that wraps the base struct and all subtypes. The discriminated enum
+  /// is placed first in the output vector, followed by the struct and
+  /// any inline types.
   fn finalize_struct_types(
     &self,
     name: &str,

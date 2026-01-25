@@ -5,35 +5,16 @@ use crate::generator::{
   converter::GenerationTarget,
 };
 
-pub struct AssembledOutput {
-  pub types: Vec<RustType>,
-  pub header_refs: Vec<HttpHeaderRef>,
-  pub uses: BTreeSet<String>,
-}
-
-pub(crate) struct OutputAssembler {
+pub(crate) struct RustTypeDeduplication {
   types: Vec<RustType>,
-  target: GenerationTarget,
 }
 
-impl OutputAssembler {
-  pub(crate) fn new(types: Vec<RustType>, target: GenerationTarget) -> Self {
-    Self { types, target }
+impl RustTypeDeduplication {
+  pub(crate) fn new(types: Vec<RustType>) -> Self {
+    Self { types }
   }
 
-  pub(crate) fn assemble(self) -> AssembledOutput {
-    let header_refs = self.extract_header_refs();
-    let types = self.sort_and_dedup_types();
-    let uses = Self::calculate_uses(&types, self.target);
-
-    AssembledOutput {
-      types,
-      header_refs,
-      uses,
-    }
-  }
-
-  fn sort_and_dedup_types(&self) -> Vec<RustType> {
+  pub(crate) fn process(self) -> Vec<RustType> {
     let mut map = BTreeMap::new();
 
     for t in &self.types {
@@ -54,8 +35,18 @@ impl OutputAssembler {
 
     map.into_values().collect::<Vec<_>>()
   }
+}
 
-  fn extract_header_refs(&self) -> Vec<HttpHeaderRef> {
+pub(crate) struct HeaderRefCollection {
+  types: Vec<RustType>,
+}
+
+impl HeaderRefCollection {
+  pub(crate) fn new(types: Vec<RustType>) -> Self {
+    Self { types }
+  }
+
+  pub(crate) fn process(self) -> Vec<HttpHeaderRef> {
     self
       .types
       .iter()
@@ -70,15 +61,26 @@ impl OutputAssembler {
       .map(HttpHeaderRef::from)
       .collect()
   }
+}
 
-  fn calculate_uses(types: &[RustType], target: GenerationTarget) -> BTreeSet<String> {
+pub(crate) struct ModuleImports {
+  types: Vec<RustType>,
+  target: GenerationTarget,
+}
+
+impl ModuleImports {
+  pub(crate) fn new(types: Vec<RustType>, target: GenerationTarget) -> Self {
+    Self { types, target }
+  }
+
+  pub(crate) fn process(self) -> BTreeSet<String> {
     let mut uses = BTreeSet::new();
 
     let mut needs_serialize = false;
     let mut needs_deserialize = false;
     let mut needs_validate = false;
 
-    for ty in types {
+    for ty in &self.types {
       needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
       needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
 
@@ -100,7 +102,7 @@ impl OutputAssembler {
     if needs_validate {
       uses.insert("validator::Validate".to_string());
     }
-    if target == GenerationTarget::Server {
+    if self.target == GenerationTarget::Server {
       uses.insert("axum::response::IntoResponse".to_string());
     }
 

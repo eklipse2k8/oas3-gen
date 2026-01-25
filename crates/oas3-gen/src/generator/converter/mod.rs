@@ -114,25 +114,28 @@ pub(crate) struct CodegenConfig {
 }
 
 impl CodegenConfig {
-  /// Returns whether enum variant collisions should preserve original names with suffixes.
+  /// Returns `true` if enum variant name collisions should be resolved by appending
+  /// numeric suffixes (e.g., `Value`, `Value1`) rather than merging with serde aliases.
   #[must_use]
   pub fn preserve_case_variants(&self) -> bool {
     self.enum_case == EnumCasePolicy::Preserve
   }
 
-  /// Returns whether enums should use case-insensitive deserialization.
+  /// Returns `true` if enums should generate custom deserializers that accept
+  /// any casing of variant names (e.g., "FOO", "foo", "Foo" all deserialize to `Foo`).
   #[must_use]
   pub fn case_insensitive_enums(&self) -> bool {
     self.enum_deserialize == EnumDeserializePolicy::CaseInsensitive
   }
 
-  /// Returns whether helper constructors should be disabled.
+  /// Returns `true` if enum helper constructor methods should be omitted from generated code.
   #[must_use]
   pub fn no_helpers(&self) -> bool {
     self.enum_helpers == EnumHelperPolicy::Disable
   }
 
-  /// Returns whether OData support is enabled.
+  /// Returns `true` if OData-specific handling is enabled, which makes `@odata.*` fields
+  /// optional even when the schema marks them as required.
   #[must_use]
   pub fn odata_support(&self) -> bool {
     self.odata == ODataPolicy::Enabled
@@ -149,6 +152,11 @@ pub(crate) struct ConverterContext {
 }
 
 impl ConverterContext {
+  /// Creates a new converter context with the given schema registry, configuration,
+  /// type cache, and optional schema filter.
+  ///
+  /// The `reachable_schemas` parameter, when `Some`, restricts conversion to only
+  /// schemas reachable from the filtered operations, enabling dead-code elimination.
   pub(crate) fn new(
     graph: Arc<SchemaRegistry>,
     config: CodegenConfig,
@@ -164,26 +172,42 @@ impl ConverterContext {
     }
   }
 
+  /// Returns a reference to the schema registry containing all resolved schemas
+  /// and their dependency relationships.
   pub(crate) fn graph(&self) -> &SchemaRegistry {
     &self.graph
   }
 
+  /// Returns a reference to the code generation configuration.
   pub(crate) fn config(&self) -> &CodegenConfig {
     &self.config
   }
 
+  /// Extracts the accumulated type usage data, replacing it with an empty recorder.
+  ///
+  /// Call this after conversion completes to retrieve which types are used in
+  /// requests vs responses for serde mode optimization.
   pub(crate) fn take_type_usage(&self) -> TypeUsageRecorder {
     self.type_usage.take()
   }
 
+  /// Records that the named type appears in an HTTP request context (request body or parameter).
+  ///
+  /// Types used only in requests may derive `Serialize` without `Deserialize`.
   pub(crate) fn mark_request(&self, type_name: impl Into<super::ast::EnumToken>) {
     self.type_usage.borrow_mut().mark_request(type_name);
   }
 
+  /// Records that the named type appears in an HTTP response context.
+  ///
+  /// Types used only in responses may derive `Deserialize` without `Serialize`.
   pub(crate) fn mark_response(&self, type_name: impl Into<super::ast::EnumToken>) {
     self.type_usage.borrow_mut().mark_response(type_name);
   }
 
+  /// Records that multiple types appear in HTTP request contexts.
+  ///
+  /// More efficient than calling [`mark_request`](Self::mark_request) in a loop.
   pub(crate) fn mark_request_iter<I, T>(&self, types: I)
   where
     I: IntoIterator<Item = T>,
@@ -192,18 +216,30 @@ impl ConverterContext {
     self.type_usage.borrow_mut().mark_request_iter(types);
   }
 
+  /// Extracts custom type names from a [`TypeRef`] and records them as response types.
+  ///
+  /// Handles nested types like `Box<CustomType>` by extracting the inner type name.
   pub(crate) fn mark_response_type_ref(&self, type_ref: &TypeRef) {
     self.type_usage.borrow_mut().mark_response_type_ref(type_ref);
   }
 
+  /// Combines type usage data from another recorder into this context's recorder.
+  ///
+  /// Used when sub-converters track usage independently and results must be aggregated.
   pub(crate) fn merge_usage(&self, other: TypeUsageRecorder) {
     self.type_usage.borrow_mut().merge(other);
   }
 
+  /// Increments the count of generated HTTP client or server methods.
+  ///
+  /// Used for generation statistics and progress reporting.
   pub(crate) fn record_method(&self) {
     self.type_usage.borrow_mut().record_method();
   }
 
+  /// Records an HTTP header name for generation statistics.
+  ///
+  /// Header names are normalized to lowercase for deduplication.
   pub(crate) fn record_header(&self, header_name: &str) {
     self.type_usage.borrow_mut().record_header(header_name);
   }
@@ -225,6 +261,10 @@ pub(crate) struct SchemaConverter {
 }
 
 impl SchemaConverter {
+  /// Creates a new schema converter with all specialized sub-converters.
+  ///
+  /// Each sub-converter receives a clone of the shared context `Rc`, enabling
+  /// coordinated type caching and usage tracking across conversion operations.
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       type_resolver: TypeResolver::new(context.clone()),
@@ -236,18 +276,28 @@ impl SchemaConverter {
     }
   }
 
+  /// Returns a reference to the shared converter context.
   pub(crate) fn context(&self) -> &Rc<ConverterContext> {
     &self.context
   }
 
-  /// Checks if a name corresponds to a known schema in the graph.
+  /// Returns `true` if the schema registry contains a schema with the given name.
   pub(crate) fn contains(&self, name: &str) -> bool {
     self.context.graph().contains(name)
   }
 
-  /// Converts a schema definition into Rust types.
+  /// Converts a named OpenAPI schema into one or more Rust type definitions.
   ///
-  /// Handles `allOf`, `oneOf`, `anyOf`, enums, and objects.
+  /// Routes the schema to the appropriate specialized converter based on its structure:
+  /// - `allOf` schemas become merged structs
+  /// - `oneOf`/`anyOf` schemas become tagged or untagged enums
+  /// - Schemas with `enum` values become string enums
+  /// - Schemas with `properties` become structs
+  /// - Array schemas become `Vec<T>` type aliases
+  /// - Primitive schemas become type aliases
+  ///
+  /// Returns multiple types when inline definitions are extracted (e.g., nested
+  /// anonymous objects become separate struct definitions).
   pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> Result<Vec<RustType>> {
     if schema.has_intersection() {
       return self.struct_converter.convert_all_of_schema(name);
@@ -299,14 +349,21 @@ impl SchemaConverter {
     })])
   }
 
-  /// Builds a discriminated enum from a base schema with discriminator mappings.
+  /// Builds a discriminated union enum for a base schema that defines discriminator mappings.
+  ///
+  /// The `fallback_type` specifies the struct type to use for the catch-all variant
+  /// when the discriminator value doesn't match any known mapping.
   fn discriminated_enum(&self, name: &str, schema: &ObjectSchema, fallback_type: &str) -> Result<RustType> {
     self
       .discriminator_converter
       .build_base_discriminated_enum(name, schema, fallback_type)
   }
 
-  /// Finalizes struct conversion by optionally adding a discriminated enum wrapper.
+  /// Assembles the final type collection for a struct conversion, optionally prepending
+  /// a discriminated enum wrapper.
+  ///
+  /// When the schema defines a discriminator with mappings, this creates a tagged union
+  /// enum that wraps the base struct and its subtypes, enabling polymorphic deserialization.
   pub(crate) fn finalize_struct_types(
     &self,
     name: &str,
@@ -334,6 +391,11 @@ impl SchemaConverter {
     )
   }
 
+  /// Attempts to create a `Vec<T>` type reference for an array schema with inline items.
+  ///
+  /// Returns `None` if the schema is not an array type or has no inline item definition.
+  /// Returns `Some` with the `Vec` type reference and any inline types extracted from
+  /// the array items (e.g., anonymous structs or enums).
   fn try_array_alias(&self, name: &str, schema: &ObjectSchema) -> Result<Option<ConversionOutput<TypeRef>>> {
     if !schema.is_array() && !schema.is_nullable_array() {
       return Ok(None);

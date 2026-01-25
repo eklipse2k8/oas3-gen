@@ -9,18 +9,27 @@ struct UsageFlags {
 }
 
 impl UsageFlags {
+  /// Sets the request usage flag to `true`.
   fn mark_request(&mut self) {
     self.request = true;
   }
 
+  /// Sets the response usage flag to `true`.
   fn mark_response(&mut self) {
     self.response = true;
   }
 
+  /// Converts the usage flags into a `(request, response)` tuple.
+  ///
+  /// Consumes `self` and returns the flags as a tuple where the first element
+  /// indicates request usage and the second indicates response usage.
   fn into_tuple(self) -> (bool, bool) {
     (self.request, self.response)
   }
 
+  /// Combines another `UsageFlags` into this one using logical OR.
+  ///
+  /// After merging, each flag is `true` if either `self` or `other` had that flag set.
   fn merge(&mut self, other: UsageFlags) {
     if other.request {
       self.request = true;
@@ -43,7 +52,7 @@ pub(crate) struct TypeUsageRecorder {
 }
 
 impl TypeUsageRecorder {
-  /// Creates a new `TypeUsageRecorder`.
+  /// Creates an empty recorder with no tracked types or statistics.
   pub(crate) fn new() -> Self {
     Self {
       entries: BTreeMap::new(),
@@ -52,7 +61,10 @@ impl TypeUsageRecorder {
     }
   }
 
-  /// Marks a type name as used in a request.
+  /// Records that a type is used in a request body.
+  ///
+  /// Empty type names are ignored. The recorded usage propagates through
+  /// the dependency graph during postprocessing to determine serde derives.
   pub(crate) fn mark_request(&mut self, type_name: impl Into<EnumToken>) {
     let token = type_name.into();
     if token.is_empty() {
@@ -61,7 +73,10 @@ impl TypeUsageRecorder {
     self.entries.entry(token).or_default().mark_request();
   }
 
-  /// Marks a type name as used in a response.
+  /// Records that a type is used in a response body.
+  ///
+  /// Empty type names are ignored. The recorded usage propagates through
+  /// the dependency graph during postprocessing to determine serde derives.
   pub(crate) fn mark_response(&mut self, type_name: impl Into<EnumToken>) {
     let token = type_name.into();
     if token.is_empty() {
@@ -70,7 +85,10 @@ impl TypeUsageRecorder {
     self.entries.entry(token).or_default().mark_response();
   }
 
-  /// Marks multiple types as requests.
+  /// Records multiple types as used in request bodies.
+  ///
+  /// Convenience method that calls [`mark_request`](Self::mark_request) for each type
+  /// in the iterator.
   pub(crate) fn mark_request_iter<I, T>(&mut self, types: I)
   where
     I: IntoIterator<Item = T>,
@@ -81,7 +99,10 @@ impl TypeUsageRecorder {
     }
   }
 
-  /// Marks multiple types as responses.
+  /// Records multiple types as used in response bodies.
+  ///
+  /// Convenience method that calls [`mark_response`](Self::mark_response) for each type
+  /// in the iterator.
   pub(crate) fn mark_response_iter<I, T>(&mut self, types: I)
   where
     I: IntoIterator<Item = T>,
@@ -92,7 +113,11 @@ impl TypeUsageRecorder {
     }
   }
 
-  /// Returns a map of TypeName -> (is_request, is_response).
+  /// Consumes the recorder and returns the usage data as a map.
+  ///
+  /// Each entry maps a type name to a `(is_request, is_response)` tuple.
+  /// This map seeds the postprocessing phase, which propagates usage through
+  /// type dependencies to compute final serde derive attributes.
   pub(crate) fn into_usage_map(self) -> BTreeMap<EnumToken, (bool, bool)> {
     self
       .entries
@@ -101,34 +126,48 @@ impl TypeUsageRecorder {
       .collect()
   }
 
-  /// Analyzes a `TypeRef` and marks used types (e.g. custom structs inside `Box`).
+  /// Records the custom type within a [`TypeRef`] as used in a response.
+  ///
+  /// Extracts the type name from [`RustPrimitive::Custom`] variants and records
+  /// it as a response type. Primitive types are ignored since they do not
+  /// require generated serde derives.
   pub(crate) fn mark_response_type_ref(&mut self, type_ref: &TypeRef) {
     if let RustPrimitive::Custom(name) = &type_ref.base_type {
       self.mark_response(name.as_ref());
     }
   }
 
-  /// Increments the method count.
+  /// Increments the generated method counter.
+  ///
+  /// Called once per API operation to track generation statistics.
   pub(crate) fn record_method(&mut self) {
     self.methods_generated += 1;
   }
 
-  /// Records a header name (normalized to lowercase for uniqueness).
+  /// Records an HTTP header name for statistics tracking.
+  ///
+  /// Header names are normalized to ASCII lowercase before insertion,
+  /// ensuring case-insensitive deduplication (e.g., "Content-Type" and
+  /// "content-type" count as one unique header).
   pub(crate) fn record_header(&mut self, header_name: &str) {
     self.unique_headers.insert(header_name.to_ascii_lowercase());
   }
 
-  /// Returns the number of methods generated.
+  /// Returns the number of API methods recorded.
   pub(crate) fn methods_generated(&self) -> usize {
     self.methods_generated
   }
 
-  /// Returns the number of unique headers.
+  /// Returns the count of unique HTTP headers recorded.
   pub(crate) fn headers_generated(&self) -> usize {
     self.unique_headers.len()
   }
 
-  /// Merges another recorder into this one.
+  /// Combines another recorder's data into this one.
+  ///
+  /// Usage flags are merged with logical OR: if either recorder marked a type
+  /// as request or response, the merged result reflects that. Method counts
+  /// and header sets are combined additively.
   pub(crate) fn merge(&mut self, other: TypeUsageRecorder) {
     for (token, flags) in other.entries {
       self.entries.entry(token).or_default().merge(flags);

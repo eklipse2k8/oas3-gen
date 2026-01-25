@@ -16,6 +16,11 @@ use crate::generator::{
   },
 };
 
+/// Result of converting all parameters for an operation.
+///
+/// Contains main fields for the request struct, nested structs for
+/// parameter groups (path, query, header), and any inline types
+/// generated from parameter schemas.
 #[derive(Debug, Clone)]
 pub(crate) struct ConvertedParams {
   pub(crate) main_fields: Vec<FieldDef>,
@@ -88,6 +93,9 @@ impl ParameterConverter {
     })
   }
 
+  /// Collects parameters from both path-level and operation-level definitions.
+  ///
+  /// Operation parameters override path parameters with the same name and location.
   fn collect_parameters(&self, path: &str, operation: &Operation) -> Vec<Parameter> {
     let spec = self.context.graph().spec();
     let mut params = vec![];
@@ -104,6 +112,10 @@ impl ParameterConverter {
     params
   }
 
+  /// Creates field definitions for path template variables missing from declared parameters.
+  ///
+  /// For paths like `/users/{id}/posts/{postId}`, if `postId` is not declared,
+  /// synthesizes a `String` field for it.
   fn synthesize_missing_fields(path: &str, declared: &HashSet<String>) -> impl Iterator<Item = FieldDef> {
     ParsedPath::extract_template_params(path)
       .filter(|name| !declared.contains(*name))
@@ -111,6 +123,10 @@ impl ParameterConverter {
       .map(|name| FieldDef::builder().synthesized_path_param(name).build())
   }
 
+  /// Converts a single OpenAPI parameter into a field definition.
+  ///
+  /// Resolves the parameter schema, extracts validation attributes, and
+  /// applies query parameter serialization attributes (explode, style).
   fn convert_parameter(
     &self,
     param: &Parameter,
@@ -160,6 +176,7 @@ impl ParameterConverter {
   }
 }
 
+/// Groups parameters by location into a nested struct.
 #[derive(Debug, Clone)]
 struct ParamGroup {
   struct_name: String,
@@ -169,6 +186,7 @@ struct ParamGroup {
 }
 
 impl ParamGroup {
+  /// Creates a new parameter group with the given naming configuration.
   fn new(request_name: &str, suffix: &str, field_name: &'static str, kind: StructKind) -> Self {
     Self {
       struct_name: format!("{request_name}{suffix}"),
@@ -178,6 +196,9 @@ impl ParamGroup {
     }
   }
 
+  /// Converts the group into a main field and nested struct definition.
+  ///
+  /// Returns `None` if the group has no fields.
   fn into_structs(self) -> Option<(FieldDef, StructDef)> {
     if self.fields.is_empty() {
       return None;
@@ -202,6 +223,7 @@ impl ParamGroup {
   }
 }
 
+/// Collects parameters into location-based groups during conversion.
 #[derive(Debug, Clone)]
 struct Collector {
   path: ParamGroup,
@@ -211,6 +233,7 @@ struct Collector {
 }
 
 impl Collector {
+  /// Creates a new collector with empty groups for each parameter location.
   fn new(request_name: &str) -> Self {
     Self {
       path: ParamGroup::new(
@@ -235,6 +258,7 @@ impl Collector {
     }
   }
 
+  /// Returns the parent struct name for the given parameter location.
   fn parent_name(&self, location: ParameterLocation) -> &str {
     match location {
       ParameterLocation::Path => &self.path.struct_name,
@@ -243,6 +267,7 @@ impl Collector {
     }
   }
 
+  /// Inserts a field into the appropriate location group.
   fn insert(&mut self, location: ParameterLocation, field: FieldDef) {
     self.all.push(field.clone());
     match location {
@@ -253,6 +278,7 @@ impl Collector {
     }
   }
 
+  /// Consumes the collector and produces main fields and nested structs.
   fn finish(self) -> (Vec<FieldDef>, Vec<StructDef>, Vec<FieldDef>) {
     let (main_fields, nested_structs) = [self.path, self.query, self.header]
       .into_iter()

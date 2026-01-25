@@ -18,12 +18,20 @@ use crate::generator::{
   orchestrator::GenerationWarning,
 };
 
+/// Result of converting a single OpenAPI operation.
+///
+/// Contains generated types (request struct, response enum, inline types)
+/// and metadata about the operation (path, method, parameters).
 #[derive(Debug, Clone)]
 pub(crate) struct ConversionResult {
   pub(crate) types: Vec<RustType>,
   pub(crate) operation_info: OperationInfo,
 }
 
+/// Aggregate result of converting all operations in a specification.
+///
+/// Collects types, operation metadata, warnings, and type usage data
+/// from the full conversion pass.
 #[derive(Debug, Clone)]
 pub(crate) struct OperationsOutput {
   pub(crate) types: Vec<RustType>,
@@ -32,12 +40,17 @@ pub(crate) struct OperationsOutput {
   pub(crate) usage_recorder: TypeUsageRecorder,
 }
 
+/// Orchestrates conversion of all operations in a specification.
+///
+/// Iterates over operation entries, converts each to request/response
+/// types, and aggregates results with error handling and warning collection.
 pub(crate) struct OperationsProcessor {
   context: Rc<ConverterContext>,
   schema_converter: SchemaConverter,
 }
 
 impl OperationsProcessor {
+  /// Creates a new operations processor with the shared converter context.
   pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
     Self {
       context,
@@ -45,6 +58,11 @@ impl OperationsProcessor {
     }
   }
 
+  /// Converts all operations, collecting types and warnings.
+  ///
+  /// Operations that fail to convert emit warnings rather than failing
+  /// the entire generation. Returns accumulated type usage data for
+  /// serde derive optimization in postprocessing.
   pub(crate) fn process_all<'a>(&self, entries: impl Iterator<Item = &'a OperationEntry>) -> OperationsOutput {
     let mut rust_types = vec![];
     let mut operations_info = vec![];
@@ -88,6 +106,11 @@ impl OperationsProcessor {
   }
 }
 
+/// Builds the server trait definition from converted operations.
+///
+/// Creates an `ApiServer` trait with one method per operation, including
+/// typed path, query, and header parameter structs. Returns `None` if
+/// there are no operations to include.
 pub(crate) fn build_server_trait(operations: &[OperationInfo]) -> Option<ServerRequestTraitDef> {
   if operations.is_empty() {
     return None;
@@ -135,6 +158,10 @@ pub(crate) fn build_server_trait(operations: &[OperationInfo]) -> Option<ServerR
   )
 }
 
+/// Extracts the nested parameter struct type for a specific location.
+///
+/// Returns the struct name (e.g., `GetUsersRequestPath`) if any parameters
+/// exist for the given location, `None` otherwise.
 fn extract_nested_type(
   parameters: &[FieldDef],
   location: ParameterLocation,
@@ -165,6 +192,7 @@ pub(crate) struct OperationConverter {
 }
 
 impl OperationConverter {
+  /// Creates a new operation converter with request and response sub-converters.
   pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
     let response_converter = ResponseConverter::new(context.clone());
     let request_converter = RequestConverter::new(&context);
@@ -177,6 +205,10 @@ impl OperationConverter {
     }
   }
 
+  /// Converts a single operation entry into types and metadata.
+  ///
+  /// Generates request struct (with parameters and body), response enum,
+  /// and collects operation metadata for client/server code generation.
   pub(crate) fn convert(&self, entry: &OperationEntry) -> anyhow::Result<ConversionResult> {
     let base_name = to_rust_type_name(&entry.stable_id);
     let body_info = BodyInfo::new(&self.context, entry)?;
@@ -209,6 +241,7 @@ impl OperationConverter {
     Ok(ConversionResult { types, operation_info })
   }
 
+  /// Builds the response enum and parse method for an operation.
   fn response_definition(&self, base_name: &str, entry: &OperationEntry) -> ResponseDefinition {
     let response_name = generate_unique_response_name(base_name, |n| self.schema_converter.contains(n));
     let response_def = self
@@ -224,6 +257,7 @@ impl OperationConverter {
     (response_def, parse_method)
   }
 
+  /// Builds the request struct with parameters, body, and methods.
   fn request(
     &self,
     base_name: &str,
@@ -237,6 +271,7 @@ impl OperationConverter {
       .build(&request_name, entry, body_info, parse_method)
   }
 
+  /// Assembles request types and marks them as request-context types.
   fn request_types(&self, output: RequestOutput, has_response: bool) -> RequestTypes {
     let has_fields = !output.main_struct.fields.is_empty();
 
@@ -258,6 +293,7 @@ impl OperationConverter {
     (types, Some(name))
   }
 
+  /// Assembles response types and marks them as response-context types.
   fn response_types(&self, response_def: Option<ResponseEnumDef>, request_type: Option<&StructToken>) -> ResponseTypes {
     let Some(mut def) = response_def else {
       return (vec![], None);
@@ -274,6 +310,7 @@ impl OperationConverter {
     (vec![RustType::ResponseEnum(def)], Some(token))
   }
 
+  /// Records method and header statistics for generation metrics.
   fn record_stats(&self, parameters: &[FieldDef]) {
     self.context.record_method();
 
@@ -286,6 +323,7 @@ impl OperationConverter {
     }
   }
 
+  /// Combines body, request, and response types into a single collection.
   fn collect_types(body_info: &BodyInfo, request_types: Vec<RustType>, response_types: Vec<RustType>) -> Vec<RustType> {
     body_info
       .generated_types
@@ -296,6 +334,7 @@ impl OperationConverter {
       .collect::<Vec<_>>()
   }
 
+  /// Builds the operation metadata for client/server code generation.
   #[allow(clippy::too_many_arguments)]
   fn operation_info(
     &self,

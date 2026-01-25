@@ -23,12 +23,14 @@ use crate::{
   utils::SchemaExt as _,
 };
 
+/// Extracted metadata about operation responses for code generation.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResponseMetadata {
   pub(crate) type_name: Option<String>,
   pub(crate) media_types: Vec<ResponseMediaType>,
 }
 
+/// Response metadata bundled with type usage data.
 #[derive(Debug, Clone)]
 pub(crate) struct ResponseMetadataOutput {
   pub(crate) metadata: ResponseMetadata,
@@ -106,6 +108,11 @@ impl ResponseConverter {
     )
   }
 
+  /// Builds the `parse_response` method for a request struct.
+  ///
+  /// For client generation, creates a method that parses HTTP responses
+  /// into the response enum by matching status codes and content types.
+  /// For server generation, creates an `IntoResponse` implementation.
   pub(crate) fn build_parse_method(&self, response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
     let (status_handlers, default_handler) = Self::build_status_handlers(variants);
 
@@ -165,6 +172,10 @@ impl ResponseConverter {
     }
   }
 
+  /// Extracts media type information from a response definition.
+  ///
+  /// Resolves schemas for each content type and maps binary responses
+  /// to `Bytes` for success status codes.
   fn extract_media_types(
     &self,
     response: &Response,
@@ -181,6 +192,11 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Resolves the schema type for a specific media type in a response.
+  ///
+  /// Returns `Bytes` for binary content types on success responses,
+  /// resolves `$ref` schemas to type references, and creates inline
+  /// types for anonymous schemas.
   fn resolve_media_schema(
     &self,
     content_type: &str,
@@ -206,6 +222,11 @@ impl ResponseConverter {
     }
   }
 
+  /// Resolves an inline response schema to a type reference.
+  ///
+  /// Returns `None` for empty schemas. For primitive types without
+  /// properties, returns the primitive directly. For complex types,
+  /// creates a named type via the inline resolver.
   fn resolve_inline_schema(
     &self,
     schema: &ObjectSchema,
@@ -234,6 +255,7 @@ impl ResponseConverter {
     Ok(Some(TypeRef::new(output.result)))
   }
 
+  /// Ensures at least one media type exists, defaulting to `application/json`.
   fn with_default_media_type(media_types: Vec<ResponseMediaType>) -> Vec<ResponseMediaType> {
     if media_types.is_empty() {
       vec![ResponseMediaType::new(DEFAULT_MEDIA_TYPE)]
@@ -242,6 +264,7 @@ impl ResponseConverter {
     }
   }
 
+  /// Adds a catch-all `Default` variant if no default status exists.
   fn with_default_variant(variants: Vec<ResponseVariant>) -> Vec<ResponseVariant> {
     if variants.is_empty() || variants.iter().any(|v| v.status_code.is_default()) {
       return variants;
@@ -259,6 +282,10 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Splits a status code into multiple variants when different content types have different schemas.
+  ///
+  /// For example, a 200 response with both JSON and XML schemas generates
+  /// `Ok200Json` and `Ok200Xml` variants.
   fn split_variants_by_content_type(
     status_code: StatusCodeToken,
     base_name: &EnumVariantToken,
@@ -300,6 +327,7 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Groups media types by their schema type for variant splitting.
   fn group_media_types_by_schema(media_types: &[ResponseMediaType]) -> Vec<(String, Vec<ResponseMediaType>)> {
     media_types
       .iter()
@@ -322,6 +350,10 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Builds status code handlers and optional default handler from variants.
+  ///
+  /// Groups variants by status code and extracts the default handler
+  /// (if a `default` status code variant exists).
   fn build_status_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseVariantCategory>) {
     let (default_variants, status_variants): (Vec<_>, Vec<_>) =
       variants.iter().partition(|v| v.status_code.is_default());
@@ -352,6 +384,10 @@ impl ResponseConverter {
 }
 
 impl ResponseStatusCategory {
+  /// Creates a status category from variants sharing the same status code.
+  ///
+  /// Returns `Single` when all variants have the same content type category,
+  /// `ContentDispatch` when multiple content types need runtime dispatch.
   #[must_use]
   pub fn from_variants(variants: &[&ResponseVariant]) -> Self {
     if let [variant] = variants {
@@ -370,6 +406,9 @@ impl ResponseStatusCategory {
     Self::from_content_types(variants)
   }
 
+  /// Creates a content-dispatch category from variants with different content types.
+  ///
+  /// Separates event streams from other content types for special handling.
   #[must_use]
   pub(crate) fn from_content_types(variants: &[&ResponseVariant]) -> Self {
     let all_categories = variants
