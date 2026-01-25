@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 
-use super::{postprocess_types_for_server, postprocess_types_with_usage};
 use crate::generator::{
   ast::{
     DeriveTrait, DerivesProvider, EnumDef, EnumToken, EnumVariantToken, FieldDef, OuterAttr, RustType, StructDef,
     StructKind, StructToken, TypeRef, ValidationAttribute, VariantContent, VariantDef, tokens::FieldNameToken,
   },
-  postprocess::TypeUsage,
+  postprocess::{
+    serde_usage::TypeUsage,
+    tests::{postprocess_types_for_server, postprocess_types_with_usage},
+  },
 };
 
 fn create_struct(name: &str, kind: StructKind, nullable: bool) -> StructDef {

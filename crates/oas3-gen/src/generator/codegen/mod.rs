@@ -1,4 +1,7 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{
+  collections::{BTreeSet, HashMap},
+  rc::Rc,
+};
 
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
@@ -171,6 +174,7 @@ pub struct SchemaCodeGenerator {
   rust_types: Rc<Vec<RustType>>,
   operations: Rc<Vec<OperationInfo>>,
   header_refs: Rc<Vec<HttpHeaderRef>>,
+  uses: Rc<BTreeSet<String>>,
   client: Rc<ClientRootNode>,
   server_trait: Option<ServerRequestTraitDef>,
   visibility: Visibility,
@@ -186,6 +190,7 @@ impl SchemaCodeGenerator {
     rust_types: Vec<RustType>,
     operations: Vec<OperationInfo>,
     header_refs: Vec<HttpHeaderRef>,
+    uses: BTreeSet<String>,
     client: ClientRootNode,
     server_trait: Option<ServerRequestTraitDef>,
     visibility: Visibility,
@@ -197,6 +202,7 @@ impl SchemaCodeGenerator {
       rust_types: Rc::new(rust_types),
       operations: Rc::new(operations),
       header_refs: Rc::new(header_refs),
+      uses: Rc::new(uses),
       client: Rc::new(client),
       server_trait,
       visibility,
@@ -262,6 +268,7 @@ impl SchemaCodeGenerator {
     TypesFragment::new(
       self.rust_types.clone(),
       self.header_refs.clone(),
+      (*self.uses).clone(),
       self.visibility,
       self.config.target,
     )

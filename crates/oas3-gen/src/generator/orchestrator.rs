@@ -1,5 +1,5 @@
 use std::{
-  collections::{HashMap, HashSet},
+  collections::{BTreeSet, HashMap, HashSet},
   rc::Rc,
   sync::Arc,
 };
@@ -19,7 +19,7 @@ use crate::generator::{
   },
   naming::identifiers::to_rust_type_name,
   operation_registry::OperationRegistry,
-  postprocess::{PostprocessOutput, TypePostprocessor},
+  postprocess::{PostprocessOutput, postprocess},
   schema_registry::SchemaRegistry,
 };
 
@@ -145,7 +145,7 @@ impl Orchestrator {
   }
 
   pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, client, server_trait, stats) =
+    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
       self.run_conversion_and_analysis();
 
     let codegen = SchemaCodeGenerator::builder()
@@ -153,6 +153,7 @@ impl Orchestrator {
       .rust_types(rust_types)
       .operations(operations_info)
       .header_refs(header_refs)
+      .uses(uses)
       .client(client)
       .maybe_server_trait(server_trait)
       .visibility(self.visibility)
@@ -165,7 +166,7 @@ impl Orchestrator {
   }
 
   pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, client, server_trait, stats) =
+    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
       self.run_conversion_and_analysis();
 
     let codegen = SchemaCodeGenerator::builder()
@@ -173,6 +174,7 @@ impl Orchestrator {
       .rust_types(rust_types)
       .operations(operations_info)
       .header_refs(header_refs)
+      .uses(uses)
       .client(client)
       .maybe_server_trait(server_trait)
       .visibility(self.visibility)
@@ -185,7 +187,7 @@ impl Orchestrator {
   }
 
   pub fn generate_client_mod(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, client, server_trait, stats) =
+    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
       self.run_conversion_and_analysis();
 
     let codegen = SchemaCodeGenerator::builder()
@@ -193,6 +195,7 @@ impl Orchestrator {
       .rust_types(rust_types)
       .operations(operations_info)
       .header_refs(header_refs)
+      .uses(uses)
       .client(client)
       .maybe_server_trait(server_trait)
       .visibility(self.visibility)
@@ -205,7 +208,7 @@ impl Orchestrator {
   }
 
   pub fn generate_server_mod(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, client, server_trait, stats) =
+    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
       self.run_conversion_and_analysis();
 
     let codegen = SchemaCodeGenerator::builder()
@@ -213,6 +216,7 @@ impl Orchestrator {
       .rust_types(rust_types)
       .operations(operations_info)
       .header_refs(header_refs)
+      .uses(uses)
       .client(client)
       .maybe_server_trait(server_trait)
       .visibility(self.visibility)
@@ -232,6 +236,7 @@ impl Orchestrator {
     Vec<RustType>,
     Vec<OperationInfo>,
     Vec<HttpHeaderRef>,
+    BTreeSet<String>,
     ClientRootNode,
     Option<ServerRequestTraitDef>,
     GenerationStats,
@@ -252,12 +257,12 @@ impl Orchestrator {
       .build();
 
     let seed_map = usage_recorder.into_usage_map();
-    let postprocessor = TypePostprocessor::new(rust_types, operations_info, seed_map, config.target);
     let PostprocessOutput {
       types,
       operations,
       header_refs,
-    } = postprocessor.postprocess();
+      uses,
+    } = postprocess(rust_types, operations_info, seed_map, config.target);
 
     let server_trait = if config.target == GenerationTarget::Server {
       build_server_trait(&operations)
@@ -265,7 +270,16 @@ impl Orchestrator {
       None
     };
 
-    (config, types, operations, header_refs, client, server_trait, stats)
+    (
+      config,
+      types,
+      operations,
+      header_refs,
+      uses,
+      client,
+      server_trait,
+      stats,
+    )
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {

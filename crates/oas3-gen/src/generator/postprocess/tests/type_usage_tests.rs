@@ -7,7 +7,7 @@ use crate::generator::{
     RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
     VariantContent, VariantDef, tokens::FieldNameToken,
   },
-  postprocess::{DependencyGraph, TypeUsage},
+  postprocess::serde_usage::{DependencyGraph, TypeUsage},
 };
 
 fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<EnumToken, (bool, bool)> {

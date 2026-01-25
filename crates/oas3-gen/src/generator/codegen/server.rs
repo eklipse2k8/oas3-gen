@@ -222,8 +222,8 @@ impl ToTokens for HandlerFunctionFragment {
     let fn_name = &self.method.name;
     let trait_name = format_ident!("ApiServer");
 
-    let extractors = ExtractorsFragment::new(&self.method);
-    let request_construction = RequestConstructionFragment::new(&self.method);
+    let extractors = ExtractorsFragment::new(self.method.clone());
+    let request_construction = RequestConstructionFragment::new(self.method.clone());
 
     let return_type = self
       .method
@@ -263,17 +263,17 @@ impl ToTokens for HandlerFunctionFragment {
 }
 
 #[derive(Clone, Debug)]
-struct ExtractorsFragment<'a> {
-  method: &'a ServerTraitMethod,
+struct ExtractorsFragment {
+  method: ServerTraitMethod,
 }
 
-impl<'a> ExtractorsFragment<'a> {
-  fn new(method: &'a ServerTraitMethod) -> Self {
+impl ExtractorsFragment {
+  fn new(method: ServerTraitMethod) -> Self {
     Self { method }
   }
 }
 
-impl ToTokens for ExtractorsFragment<'_> {
+impl ToTokens for ExtractorsFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let mut parts = vec![quote! { State(service): State<S> }];
 
@@ -290,7 +290,7 @@ impl ToTokens for ExtractorsFragment<'_> {
     }
 
     if let Some(body_info) = &self.method.body_info {
-      let body_extractor = BodyExtractorFragment::new(body_info);
+      let body_extractor = BodyExtractorFragment::new(body_info.clone());
       parts.push(body_extractor.into_token_stream());
     }
 
@@ -300,17 +300,17 @@ impl ToTokens for ExtractorsFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-struct BodyExtractorFragment<'a> {
-  body_info: &'a HandlerBodyInfo,
+struct BodyExtractorFragment {
+  body_info: HandlerBodyInfo,
 }
 
-impl<'a> BodyExtractorFragment<'a> {
-  fn new(body_info: &'a HandlerBodyInfo) -> Self {
+impl BodyExtractorFragment {
+  fn new(body_info: HandlerBodyInfo) -> Self {
     Self { body_info }
   }
 }
 
-impl ToTokens for BodyExtractorFragment<'_> {
+impl ToTokens for BodyExtractorFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let body_type = &self.body_info.body_type;
 
@@ -350,17 +350,17 @@ impl ToTokens for BodyExtractorFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-struct RequestConstructionFragment<'a> {
-  method: &'a ServerTraitMethod,
+struct RequestConstructionFragment {
+  method: ServerTraitMethod,
 }
 
-impl<'a> RequestConstructionFragment<'a> {
-  fn new(method: &'a ServerTraitMethod) -> Self {
+impl RequestConstructionFragment {
+  fn new(method: ServerTraitMethod) -> Self {
     Self { method }
   }
 }
 
-impl ToTokens for RequestConstructionFragment<'_> {
+impl ToTokens for RequestConstructionFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let Some(request_type) = &self.method.request_type else {
       return;

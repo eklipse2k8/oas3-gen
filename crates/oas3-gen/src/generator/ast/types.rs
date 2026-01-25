@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{collections::BTreeSet, sync::LazyLock};
 
 use num_format::{CustomFormat, Grouping, ToFormattedString};
 use quote::{ToTokens, quote};
@@ -23,6 +23,8 @@ pub(crate) fn format_number_with_underscores<T: ToFormattedString>(value: &T) ->
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct TypesRootNode {
   pub header: FileHeaderNode,
+  #[builder(default)]
+  pub uses: BTreeSet<String>,
 }
 
 /// Type reference with wrapper support (Box, Option, Vec)
