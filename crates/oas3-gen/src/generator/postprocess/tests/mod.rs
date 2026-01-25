@@ -21,6 +21,21 @@ pub(super) fn postprocess_types_with_usage(
   types: Vec<RustType>,
   usage_seeds: BTreeMap<EnumToken, (bool, bool)>,
 ) -> Vec<RustType> {
-  let postprocessor = TypePostprocessor::new(types, vec![], usage_seeds, GenerationTarget::default());
+  postprocess_types_with_target(types, usage_seeds, GenerationTarget::default())
+}
+
+pub(super) fn postprocess_types_for_server(
+  types: Vec<RustType>,
+  usage_seeds: BTreeMap<EnumToken, (bool, bool)>,
+) -> Vec<RustType> {
+  postprocess_types_with_target(types, usage_seeds, GenerationTarget::Server)
+}
+
+fn postprocess_types_with_target(
+  types: Vec<RustType>,
+  usage_seeds: BTreeMap<EnumToken, (bool, bool)>,
+  target: GenerationTarget,
+) -> Vec<RustType> {
+  let postprocessor = TypePostprocessor::new(types, vec![], usage_seeds, target);
   postprocessor.postprocess().types
 }
