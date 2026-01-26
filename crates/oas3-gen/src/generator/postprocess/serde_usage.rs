@@ -28,10 +28,12 @@ impl TypeUsage {
 
   fn to_serde_mode(self, target: GenerationTarget) -> SerdeMode {
     match (target, self) {
-      (GenerationTarget::Client, Self::RequestOnly) => SerdeMode::SerializeOnly,
-      (GenerationTarget::Client, Self::ResponseOnly) => SerdeMode::DeserializeOnly,
-      (GenerationTarget::Server, Self::RequestOnly) => SerdeMode::DeserializeOnly,
-      (GenerationTarget::Server, Self::ResponseOnly) => SerdeMode::SerializeOnly,
+      (GenerationTarget::Client, Self::RequestOnly) | (GenerationTarget::Server, Self::ResponseOnly) => {
+        SerdeMode::SerializeOnly
+      }
+      (GenerationTarget::Client, Self::ResponseOnly) | (GenerationTarget::Server, Self::RequestOnly) => {
+        SerdeMode::DeserializeOnly
+      }
       (_, Self::Bidirectional) => SerdeMode::Both,
     }
   }
@@ -168,11 +170,9 @@ impl SerdeUsage {
   }
 
   fn get_usage(&self, name: &EnumToken) -> TypeUsage {
-    self
-      .usage
-      .get(name)
-      .map(|&(req, resp)| TypeUsage::from_flags(req, resp))
-      .unwrap_or(TypeUsage::Bidirectional)
+    self.usage.get(name).map_or(TypeUsage::Bidirectional, |&(req, resp)| {
+      TypeUsage::from_flags(req, resp)
+    })
   }
 
   fn update_types(&self, types: &mut [RustType]) {
@@ -196,7 +196,7 @@ impl SerdeUsage {
       def.fields.iter_mut().for_each(|f| f.validation_attrs.clear());
     }
 
-    self.update_skip_serializing_none(def);
+    Self::update_skip_serializing_none(def);
   }
 
   fn struct_serde_mode(&self, def: &StructDef) -> SerdeMode {
@@ -217,7 +217,7 @@ impl SerdeUsage {
     }
   }
 
-  fn update_skip_serializing_none(&self, def: &mut StructDef) {
+  fn update_skip_serializing_none(def: &mut StructDef) {
     def.outer_attrs.retain(|attr| *attr != OuterAttr::SkipSerializingNone);
 
     let derives_serialize = def.is_serializable() == SerdeImpl::Derive;

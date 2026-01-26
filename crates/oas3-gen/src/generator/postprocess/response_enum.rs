@@ -70,7 +70,7 @@ impl ResponseEnumDeduplicator {
         continue;
       };
 
-      let signature = self.compute_signature(def);
+      let signature = Self::compute_signature(def);
       signature_map.entry(signature).or_default().push(Candidate {
         index: i,
         name: def.name.to_string(),
@@ -80,7 +80,7 @@ impl ResponseEnumDeduplicator {
     signature_map
   }
 
-  fn compute_signature(&self, def: &ResponseEnumDef) -> Signature {
+  fn compute_signature(def: &ResponseEnumDef) -> Signature {
     let mut signature: Vec<_> = def
       .variants
       .iter()

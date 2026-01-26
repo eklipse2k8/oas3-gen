@@ -555,17 +555,14 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn extract_enum_entries(&self, spec: &Spec) -> Vec<EnumValueEntry> {
-    let base_docs = Documentation::from_optional(self.description.as_ref());
-    let deprecated = self.deprecated.unwrap_or(false);
-
     if !self.enum_values.is_empty() {
       return self
         .enum_values
         .iter()
         .map(|value| EnumValueEntry {
           value: value.clone(),
-          docs: base_docs.clone(),
-          deprecated,
+          docs: Documentation::default(),
+          deprecated: false,
         })
         .collect();
     }
@@ -573,8 +570,8 @@ impl SchemaExt for ObjectSchema {
     if let Some(const_val) = &self.const_value {
       return vec![EnumValueEntry {
         value: const_val.clone(),
-        docs: base_docs,
-        deprecated,
+        docs: Documentation::from_optional(self.description.as_ref()),
+        deprecated: self.deprecated.unwrap_or(false),
       }];
     }
 
@@ -592,14 +589,11 @@ fn extract_variant_entries(schema: &ObjectSchema) -> Vec<EnumValueEntry> {
     return vec![];
   }
 
-  let docs = Documentation::from_optional(schema.description.as_ref());
-  let deprecated = schema.deprecated.unwrap_or(false);
-
   if let Some(const_val) = &schema.const_value {
     return vec![EnumValueEntry {
       value: const_val.clone(),
-      docs,
-      deprecated,
+      docs: Documentation::from_optional(schema.description.as_ref()),
+      deprecated: schema.deprecated.unwrap_or(false),
     }];
   }
 
@@ -608,8 +602,8 @@ fn extract_variant_entries(schema: &ObjectSchema) -> Vec<EnumValueEntry> {
     .iter()
     .map(|value| EnumValueEntry {
       value: value.clone(),
-      docs: docs.clone(),
-      deprecated,
+      docs: Documentation::default(),
+      deprecated: false,
     })
     .collect()
 }
