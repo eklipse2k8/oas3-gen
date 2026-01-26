@@ -14,21 +14,23 @@ Note: Use `cargo test` without `--lib` to test the entire workspace. Using `carg
 All code changes that affect code generation output require rebuilding the fixture files. Run these commands after making changes:
 
 ```bash
-# Rebuild petstore fixture (types.rs, client.rs, mod.rs)
+# Rebuild all client fixtures
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore --all-schemas
-
-# Rebuild petstore_server fixture (types.rs, server.rs, mod.rs)
-cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore_server --all-schemas
-
-# Rebuild union_serde fixture (types.rs, client.rs, mod.rs)
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --all-schemas
-
-# Rebuild intersection_union fixture (types.rs, client.rs, mod.rs)
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/intersection_union.json -o crates/oas3-gen/fixtures/intersection_union --all-schemas
-
-# Rebuild event_stream fixture (types.rs, client.rs, mod.rs)
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/event_stream.json -o crates/oas3-gen/fixtures/event_stream --all-schemas
+
+# Rebuild server fixture
+cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore_server --all-schemas
 ```
+
+| Fixture | Source | Output | Description |
+|---------|--------|--------|-------------|
+| `petstore/` | `petstore.json` | client-mod | Client module for Petstore API |
+| `petstore_server/` | `petstore.json` | server-mod | Server trait for Petstore API |
+| `union_serde/` | `union_serde.json` | client-mod | Union serialization/deserialization tests |
+| `intersection_union/` | `intersection_union.json` | client-mod | Intersection and union type tests |
+| `event_stream/` | `event_stream.json` | client-mod | Server-sent events streaming tests |
 
 ## Code Coverage
 

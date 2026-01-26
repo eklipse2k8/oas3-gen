@@ -201,16 +201,20 @@ The generator follows a strict one-way data flow where each stage produces immut
 | `naming/name_index.rs`              | Name indexing for conflict resolution                               |
 | `naming/operations.rs`              | Operation-specific naming logic                                     |
 | `naming/responses.rs`               | Response-specific naming logic                                      |
-| `postprocess/mod.rs`                | `TypePostprocessor`: usage propagation, serde modes, error schemas  |
-| `postprocess/dependency_graph.rs`   | Type dependency tracking for postprocessing                         |
-| `codegen/mod.rs`                    | Entry point for Rust code generation                                |
+| `postprocess/mod.rs`                | Postprocess orchestrator: response dedup, serde, validation         |
+| `postprocess/serde_usage.rs`        | `SerdeUsage` for serde mode propagation through dependencies        |
+| `postprocess/response_enum.rs`      | `ResponseEnumDeduplicator` for deduplicating response enums         |
+| `postprocess/uses.rs`               | `RustTypeDeduplication`, `ModuleImports`, `HeaderRefCollection`     |
+| `postprocess/validation.rs`         | `NestedValidationProcessor` for #[validate(nested)]                 |
+| `codegen/mod.rs`                    | `SchemaCodeGenerator`: entry point for Rust code generation         |
+| `codegen/types.rs`                  | `TypeFragment`, `TypesFragment` for type file generation            |
 | `codegen/structs.rs`                | Struct code generation with derives and serde attrs                 |
 | `codegen/enums.rs`                  | Enum code generation with case-insensitive deser support            |
-| `codegen/client.rs`                 | HTTP client code generation                                         |
-| `codegen/server.rs`                 | HTTP server trait generation (axum)                                 |
+| `codegen/client.rs`                 | HTTP client code generation (`ClientFragment`)                      |
+| `codegen/server.rs`                 | HTTP server trait generation (`ServerGenerator`, axum)              |
 | `codegen/mod_file.rs`               | Modular output file generation (mod.rs)                             |
 | `ast/mod.rs`                        | AST types: `RustType`, `StructDef`, `EnumDef`, `TypeRef`, etc.      |
-| `ast/server.rs`                     | Server AST definitions (`ServerRootNode`)                           |
+| `ast/server.rs`                     | Server AST: `ServerRequestTraitDef`, `ServerTraitMethod`            |
 
 ## Key Files
 

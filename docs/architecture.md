@@ -11,8 +11,10 @@ crates/
 │   │   ├── basic_api.json         # Basic API test fixture
 │   │   ├── content_types.json     # Content type handling tests
 │   │   ├── enum_deduplication.json # Enum deduplication tests
+│   │   ├── event_stream.json      # Server-sent events streaming tests
 │   │   ├── implicit_union.json    # Implicit union tests
 │   │   ├── integer_path_param.json # Integer path parameter tests
+│   │   ├── intersection_union.json # Intersection/union type tests
 │   │   ├── Lizard.json            # Discriminator/inheritance tests
 │   │   ├── oas_3_1_2_pet_benchmark.json # Benchmark specification
 │   │   ├── operation_filtering.json # Operation filtering tests
@@ -22,9 +24,21 @@ crates/
 │   │   ├── undeclared_path_params.json # Undeclared path parameter tests
 │   │   ├── union_serde.json       # Union serialization tests
 │   │   ├── untyped_parameter.json # Untyped parameter tests
-│   │   ├── petstore/              # Petstore generated output fixtures
+│   │   ├── event_stream/          # Event stream generated output fixtures
 │   │   │   ├── mod.rs
 │   │   │   ├── client.rs
+│   │   │   └── types.rs
+│   │   ├── intersection_union/    # Intersection union generated output fixtures
+│   │   │   ├── mod.rs
+│   │   │   ├── client.rs
+│   │   │   └── types.rs
+│   │   ├── petstore/              # Petstore client generated output fixtures
+│   │   │   ├── mod.rs
+│   │   │   ├── client.rs
+│   │   │   └── types.rs
+│   │   ├── petstore_server/       # Petstore server generated output fixtures
+│   │   │   ├── mod.rs
+│   │   │   ├── server.rs
 │   │   │   └── types.rs
 │   │   └── union_serde/           # Union serde generated output fixtures
 │   │       ├── mod.rs
@@ -63,12 +77,13 @@ crates/
 │           │   ├── undeclared_path_params.rs
 │           │   └── untyped_params.rs
 │           ├── postprocess/       # Type postprocessing and refinement
-│           │   ├── mod.rs         # TypePostprocessor, TypeUsage, response deduplication, serde modes
-│           │   ├── dependency_graph.rs  # Type dependency graph
+│           │   ├── mod.rs         # PostprocessOutput, postprocess() orchestrator
+│           │   ├── response_enum.rs  # ResponseEnumDeduplicator for deduplicating response enums
+│           │   ├── serde_usage.rs    # SerdeUsage for serde mode propagation
+│           │   ├── uses.rs           # RustTypeDeduplication, HeaderRefCollection, ModuleImports
+│           │   ├── validation.rs     # NestedValidationProcessor for #[validate(nested)]
 │           │   └── tests/         # Postprocess tests
-│           │       ├── mod.rs
-│           │       ├── transform_tests.rs
-│           │       └── type_usage_tests.rs
+│           │       └── mod.rs
 │           ├── naming/            # Identifier naming and conversion
 │           │   ├── mod.rs
 │           │   ├── constants.rs   # Naming constants
@@ -81,23 +96,29 @@ crates/
 │           │       ├── mod.rs
 │           │       ├── identifiers.rs
 │           │       ├── inference.rs
+│           │       ├── operations.rs
 │           │       └── responses.rs
 │           ├── ast/               # AST type definitions
 │           │   ├── mod.rs
 │           │   ├── types.rs       # Core AST types (RustType, StructDef, EnumDef, etc.)
 │           │   ├── client.rs      # Client AST definitions
-│           │   ├── server.rs      # Server AST definitions
-│           │   ├── tokens.rs      # Token stream utilities
+│           │   ├── constants.rs   # Constant node definitions (HttpHeaderRef)
 │           │   ├── derives.rs     # Derive macro selection
 │           │   ├── documentation.rs # Doc comment generation
+│           │   ├── fields.rs      # Field-related AST types (FieldMeta, etc.)
 │           │   ├── lints.rs       # Clippy lint attributes
 │           │   ├── outer_attrs.rs # Type-safe outer attributes (skip_serializing_none, non_exhaustive)
 │           │   ├── parsed_path.rs # URL path template parsing
 │           │   ├── serde_attrs.rs # Serde attribute builders with ToTokens
+│           │   ├── server.rs      # Server AST definitions
 │           │   ├── status_codes.rs # HTTP status code handling (full RFC coverage)
+│           │   ├── tokens.rs      # Token stream utilities
 │           │   ├── validation_attrs.rs # Validation attribute builders with ToTokens
 │           │   └── tests/         # AST tests
 │           │       ├── mod.rs
+│           │       ├── content_category.rs
+│           │       ├── documentation.rs
+│           │       ├── outer_attrs.rs
 │           │       ├── parsed_path.rs
 │           │       ├── status_codes.rs
 │           │       ├── types.rs
@@ -116,7 +137,6 @@ crates/
 │           │   ├── relaxed_enum.rs # anyOf enums with known values + freeform
 │           │   ├── requests.rs    # Request body handling
 │           │   ├── responses.rs   # Response enum generation
-│           │   ├── struct_summaries.rs # Struct metadata for enum helpers
 │           │   ├── structs.rs     # Object schema conversion (includes field optionality)
 │           │   ├── type_resolver.rs # Central type mapping and conversion logic
 │           │   ├── type_usage_recorder.rs # Tracks request/response type usage
@@ -129,32 +149,38 @@ crates/
 │           │       ├── cache.rs
 │           │       ├── common_tests.rs
 │           │       ├── enums.rs
+│           │       ├── fields.rs
 │           │       ├── helper_tests.rs
 │           │       ├── implicit_dependencies.rs
 │           │       ├── inline_objects.rs
+│           │       ├── intersection_union.rs
 │           │       ├── metadata_tests.rs
 │           │       ├── operations.rs
 │           │       ├── structs.rs
 │           │       ├── type_aliases.rs
 │           │       └── type_resolution.rs
 │           └── codegen/           # AST -> Rust source generation
-│               ├── mod.rs         # Entry point, deduplication, type ordering
+│               ├── mod.rs         # SchemaCodeGenerator, Visibility, GeneratedResult
 │               ├── attributes.rs  # Attribute generation
-│               ├── client.rs      # HTTP client generation (ClientGenerator)
-│               ├── server.rs      # HTTP server trait generation (ServerGenerator)
+│               ├── client.rs      # HTTP client generation (ClientFragment)
 │               ├── coercion.rs    # Type coercion logic
-│               ├── constants.rs   # Regex constant generation
+│               ├── constants.rs   # Regex and header constant generation
 │               ├── enums.rs       # Enum, DiscriminatedEnum, ResponseEnum generation
 │               ├── headers.rs     # Header code generation
+│               ├── http.rs        # HTTP status code fragments
+│               ├── methods.rs     # Helper method fragments
 │               ├── mod_file.rs    # Module file generation (mod.rs)
-│               ├── structs.rs     # Struct code generation (StructGenerator)
+│               ├── server.rs      # HTTP server trait generation (ServerGenerator)
+│               ├── structs.rs     # Struct code generation (StructFragment)
 │               ├── type_aliases.rs # Type alias generation
+│               ├── types.rs       # TypeFragment, TypesFragment for type file generation
 │               └── tests/         # Codegen tests
 │                   ├── mod.rs
 │                   ├── client.rs
 │                   ├── coercion_tests.rs
 │                   ├── constants_tests.rs
 │                   ├── enum_tests.rs
+│                   ├── module_uses_tests.rs
 │                   ├── struct_tests.rs
 │                   └── type_alias_tests.rs
 └── oas3-gen-support/              # Runtime library (rlib + cdylib)
@@ -189,12 +215,17 @@ Data flows forward only - no stage feeds back to earlier stages.
 - [converter/variants.rs](../crates/oas3-gen/src/generator/converter/variants.rs): Union variant building (ref, inline, const)
 - [naming/inference.rs](../crates/oas3-gen/src/generator/naming/inference.rs): Variant prefix extraction helpers
 - [naming/identifiers.rs](../crates/oas3-gen/src/generator/naming/identifiers.rs): Identifier sanitization
-- [postprocess/mod.rs](../crates/oas3-gen/src/generator/postprocess/mod.rs): TypePostprocessor, usage propagation, serde modes
-- [codegen/mod.rs](../crates/oas3-gen/src/generator/codegen/mod.rs): Code generation entry point
-- [codegen/client.rs](../crates/oas3-gen/src/generator/codegen/client.rs): HTTP client generation
-- [codegen/server.rs](../crates/oas3-gen/src/generator/codegen/server.rs): HTTP server trait generation
+- [postprocess/mod.rs](../crates/oas3-gen/src/generator/postprocess/mod.rs): Postprocess orchestrator, composes all processors
+- [postprocess/serde_usage.rs](../crates/oas3-gen/src/generator/postprocess/serde_usage.rs): SerdeUsage for serde mode propagation
+- [postprocess/response_enum.rs](../crates/oas3-gen/src/generator/postprocess/response_enum.rs): ResponseEnumDeduplicator
+- [postprocess/uses.rs](../crates/oas3-gen/src/generator/postprocess/uses.rs): RustTypeDeduplication, ModuleImports, HeaderRefCollection
+- [postprocess/validation.rs](../crates/oas3-gen/src/generator/postprocess/validation.rs): NestedValidationProcessor
+- [codegen/mod.rs](../crates/oas3-gen/src/generator/codegen/mod.rs): SchemaCodeGenerator entry point
+- [codegen/types.rs](../crates/oas3-gen/src/generator/codegen/types.rs): TypeFragment, TypesFragment for type file generation
+- [codegen/client.rs](../crates/oas3-gen/src/generator/codegen/client.rs): HTTP client generation (ClientFragment)
+- [codegen/server.rs](../crates/oas3-gen/src/generator/codegen/server.rs): HTTP server trait generation (ServerGenerator)
 - [ast/mod.rs](../crates/oas3-gen/src/generator/ast/mod.rs): AST type definitions
-- [ast/server.rs](../crates/oas3-gen/src/generator/ast/server.rs): Server AST definitions
+- [ast/server.rs](../crates/oas3-gen/src/generator/ast/server.rs): Server AST definitions (ServerRequestTraitDef, ServerTraitMethod)
 - [operation_registry.rs](../crates/oas3-gen/src/generator/operation_registry.rs): HTTP operations and webhooks
 
 ## Code Generation Fragments
