@@ -26,3 +26,7 @@ GEMINI.md
 
 # mdBook build output
 /book/book
+
+# Nix build artifact symlink
+/result
+/.direnv
