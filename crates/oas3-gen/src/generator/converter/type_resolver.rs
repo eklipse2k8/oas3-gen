@@ -193,7 +193,7 @@ impl TypeResolver {
   ///
   /// Single-value enums are treated as constants rather than generating
   /// a separate enum type.
-  fn inline_enum(
+  pub(crate) fn inline_enum(
     &self,
     parent_name: &str,
     property_name: &str,

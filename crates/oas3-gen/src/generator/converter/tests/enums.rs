@@ -1779,3 +1779,273 @@ fn test_anyof_with_nullable_map_type_generates_enum() -> anyhow::Result<()> {
 
   Ok(())
 }
+
+#[test]
+fn test_anyof_with_string_enum_and_object_generates_inline_enum() -> anyhow::Result<()> {
+  let function_call_option = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "name".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        description: Some("The name of the function to call.".to_string()),
+        ..Default::default()
+      }),
+    )]),
+    required: vec!["name".to_string()],
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    description: Some("Controls which function is called by the model.".to_string()),
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        description: Some("`none` or `auto` mode".to_string()),
+        enum_values: vec![json!("none"), json!("auto")],
+        title: Some("FunctionCallMode".to_string()),
+        ..Default::default()
+      }),
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/FunctionCallOption".to_string(),
+        description: None,
+        summary: None,
+      },
+    ],
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("FunctionCall".to_string(), union_schema.clone()),
+    ("FunctionCallOption".to_string(), function_call_option),
+  ]);
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let result = converter.convert_schema("FunctionCall", &union_schema)?;
+
+  let binding = context.cache.borrow();
+  let cached_types = &binding.types.types;
+  let all_types = result.iter().chain(cached_types.iter()).collect::<Vec<_>>();
+
+  let enum_def = all_types.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == "FunctionCall" => Some(e),
+    _ => None,
+  });
+
+  assert!(enum_def.is_some(), "should produce FunctionCall enum");
+  let enum_def = enum_def.unwrap();
+
+  assert_eq!(
+    enum_def.variants.len(),
+    2,
+    "should have 2 variants"
+  );
+
+  let mode_variant = enum_def
+    .variants
+    .iter()
+    .find(|v| v.name.to_string() != "Option")
+    .expect("should have a mode variant");
+
+  match &mode_variant.content {
+    VariantContent::Tuple(types) => {
+      assert_eq!(types.len(), 1);
+      let inner_type = types[0].to_rust_type();
+      assert_ne!(
+        inner_type, "String",
+        "variant should NOT be plain String, should be an inline enum"
+      );
+    }
+    _ => panic!("expected tuple variant for mode variant"),
+  }
+
+  let inline_enum = all_types.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name != "FunctionCall" && e.variants.iter().any(|v| v.name.to_string() == "None" || v.name.to_string() == "Auto") => Some(e),
+    _ => None,
+  });
+
+  assert!(
+    inline_enum.is_some(),
+    "should generate inline enum for string enum variant with None/Auto variants, types: {:?}",
+    all_types.iter().map(|t| t.type_name().to_string()).collect::<Vec<_>>()
+  );
+
+  let inline_enum = inline_enum.unwrap();
+  assert_eq!(inline_enum.variants.len(), 2);
+
+  let variant_names = inline_enum
+    .variants
+    .iter()
+    .map(|v| v.name.to_string())
+    .collect::<Vec<_>>();
+  assert!(variant_names.contains(&"None".to_string()), "should have None variant");
+  assert!(variant_names.contains(&"Auto".to_string()), "should have Auto variant");
+
+  Ok(())
+}
+
+#[test]
+fn test_oneof_with_string_enum_variant_generates_inline_enum() -> anyhow::Result<()> {
+  let text_format = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        const_value: Some(json!("text")),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        title: Some("ResponseMode".to_string()),
+        enum_values: vec![json!("streaming"), json!("batch")],
+        ..Default::default()
+      }),
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/TextFormat".to_string(),
+        description: None,
+        summary: None,
+      },
+    ],
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("ResponseFormat".to_string(), union_schema.clone()),
+    ("TextFormat".to_string(), text_format),
+  ]);
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let result = converter.convert_schema("ResponseFormat", &union_schema)?;
+
+  let binding = context.cache.borrow();
+  let cached_types = &binding.types.types;
+  let all_types = result.iter().chain(cached_types.iter()).collect::<Vec<_>>();
+
+  let enum_def = all_types.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == "ResponseFormat" => Some(e),
+    _ => None,
+  });
+
+  assert!(enum_def.is_some(), "should produce ResponseFormat enum");
+  let enum_def = enum_def.unwrap();
+
+  let mode_variant = enum_def
+    .variants
+    .iter()
+    .find(|v| v.name.to_string() != "TextFormat")
+    .expect("should have a mode variant");
+
+  match &mode_variant.content {
+    VariantContent::Tuple(types) => {
+      assert_eq!(types.len(), 1);
+      let inner_type = types[0].to_rust_type();
+      assert_ne!(
+        inner_type, "String",
+        "variant should NOT be plain String, should be an inline enum"
+      );
+    }
+    _ => panic!("expected tuple variant for mode variant"),
+  }
+
+  let inline_enum = all_types.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name != "ResponseFormat" && e.variants.iter().any(|v| v.name.to_string() == "Streaming" || v.name.to_string() == "Batch") => Some(e),
+    _ => None,
+  });
+
+  assert!(
+    inline_enum.is_some(),
+    "should generate inline enum with Streaming/Batch variants, types: {:?}",
+    all_types.iter().map(|t| t.type_name().to_string()).collect::<Vec<_>>()
+  );
+
+  let inline_enum = inline_enum.unwrap();
+  let variant_names = inline_enum
+    .variants
+    .iter()
+    .map(|v| v.name.to_string())
+    .collect::<Vec<_>>();
+  assert!(variant_names.contains(&"Streaming".to_string()));
+  assert!(variant_names.contains(&"Batch".to_string()));
+
+  Ok(())
+}
+
+#[test]
+fn test_anyof_with_single_value_enum_uses_primitive() -> anyhow::Result<()> {
+  let object_variant = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "name".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let union_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("auto")],
+        ..Default::default()
+      }),
+      ObjectOrReference::Ref {
+        ref_path: "#/components/schemas/ObjectVariant".to_string(),
+        description: None,
+        summary: None,
+      },
+    ],
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("TestUnion".to_string(), union_schema.clone()),
+    ("ObjectVariant".to_string(), object_variant),
+  ]);
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let result = converter.convert_schema("TestUnion", &union_schema)?;
+
+  let enum_def = result.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == "TestUnion" => Some(e),
+    _ => None,
+  });
+
+  assert!(enum_def.is_some(), "should produce TestUnion enum");
+  let enum_def = enum_def.unwrap();
+
+  let string_variant = enum_def
+    .variants
+    .iter()
+    .find(|v| v.name.to_string() != "ObjectVariant")
+    .expect("should have a non-ObjectVariant variant");
+
+  match &string_variant.content {
+    VariantContent::Tuple(types) => {
+      assert_eq!(types.len(), 1);
+      let inner_type = types[0].to_rust_type();
+      assert_eq!(
+        inner_type, "String",
+        "single-value enum should use primitive String type"
+      );
+    }
+    _ => panic!("expected tuple variant"),
+  }
+
+  Ok(())
+}

@@ -120,9 +120,11 @@ impl<'a> TypeNameIndex<'a> {
 
         index.add_schema_candidate(canonical, rust_name.clone(), false);
 
-        let entries = prop_schema.extract_enum_entries(self.spec);
-        if !entries.is_empty() {
-          index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, false);
+        if !prop_schema.has_union() {
+          let entries = prop_schema.extract_enum_entries(self.spec);
+          if !entries.is_empty() {
+            index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, false);
+          }
         }
       }
 

@@ -758,3 +758,85 @@ fn extract_common_variant_prefix_cases() {
     );
   }
 }
+
+#[test]
+fn test_union_schemas_do_not_generate_enum_candidates() {
+  let integer_or_inf_union = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(make_const_schema(json!("inf"))),
+    ],
+    ..Default::default()
+  };
+
+  let parent_schema_a = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [(
+      "max_output_tokens".to_string(),
+      ObjectOrReference::Object(integer_or_inf_union.clone()),
+    )]
+    .into_iter()
+    .collect(),
+    ..Default::default()
+  };
+
+  let parent_schema_b = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [(
+      "max_output_tokens".to_string(),
+      ObjectOrReference::Object(integer_or_inf_union),
+    )]
+    .into_iter()
+    .collect(),
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([
+    ("ParentA".to_string(), parent_schema_a),
+    ("ParentB".to_string(), parent_schema_b),
+  ]);
+
+  let spec = create_test_spec(BTreeMap::new());
+  let index = TypeNameIndex::new(&schemas, &spec);
+  let result = index.scan_and_compute_names().expect("Should scan successfully");
+
+  let inf_values = vec!["inf".to_string()];
+  assert!(
+    !result.enum_names.contains_key(&inf_values),
+    "Union schemas with const values should NOT generate enum candidates. \
+     This prevents name collision between enum and schema precomputed names."
+  );
+
+  assert!(
+    !result.names.is_empty(),
+    "Schema candidates should still be collected for the union types"
+  );
+}
+
+#[test]
+fn test_regular_enums_still_generate_enum_candidates() {
+  let status_enum = make_string_enum_schema(vec![json!("active"), json!("pending"), json!("done")]);
+
+  let parent_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [("status".to_string(), ObjectOrReference::Object(status_enum))]
+      .into_iter()
+      .collect(),
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([("Parent".to_string(), parent_schema)]);
+
+  let spec = create_test_spec(BTreeMap::new());
+  let index = TypeNameIndex::new(&schemas, &spec);
+  let result = index.scan_and_compute_names().expect("Should scan successfully");
+
+  let status_values = vec!["active".to_string(), "done".to_string(), "pending".to_string()];
+  assert!(
+    result.enum_names.contains_key(&status_values),
+    "Regular string enums (not unions) should still generate enum candidates"
+  );
+}

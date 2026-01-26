@@ -99,11 +99,7 @@ impl InlineTypeResolver {
       schema,
       &base_name,
       forced_name,
-      |cache| {
-        cache
-          .get_enum_name(enum_values)
-          .filter(|_| cache.is_enum_generated(enum_values))
-      },
+      |cache| cache.get_generated_enum_name(enum_values),
       |name| {
         let converter = EnumConverter::new(self.context.clone());
         Ok(ConversionOutput::new(converter.convert_value_enum(name, schema)))
@@ -148,7 +144,11 @@ impl InlineTypeResolver {
       schema,
       base_name,
       None,
-      |cache| enum_cache_key.as_ref().and_then(|key| cache.get_enum_name(key)),
+      |cache| {
+        enum_cache_key
+          .as_ref()
+          .and_then(|key| cache.get_generated_enum_name(key))
+      },
       |name| UnionConverter::new(self.context.clone()).convert_union(name, schema, kind),
     )?;
 

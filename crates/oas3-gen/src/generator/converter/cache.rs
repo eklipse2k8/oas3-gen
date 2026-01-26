@@ -271,6 +271,17 @@ impl SharedSchemaCache {
     self.enums.is_registered(values)
   }
 
+  /// Returns the type name for an enum only if it has already been generated.
+  ///
+  /// Unlike [`get_enum_name`], this excludes precomputed names for enums that
+  /// have not yet been emitted to the type collector.
+  pub(crate) fn get_generated_enum_name(&self, values: &[String]) -> Option<String> {
+    self
+      .is_enum_generated(values)
+      .then(|| self.get_enum_name(values))
+      .flatten()
+  }
+
   /// Records that an enum with the given values has been generated with the
   /// specified type name.
   pub(crate) fn register_enum(&mut self, values: Vec<String>, name: String) {

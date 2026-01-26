@@ -520,3 +520,84 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
     panic!("SecondRelaxedEnum should be an enum");
   }
 }
+
+#[test]
+fn test_canonical_schema_with_large_numbers_succeeds() {
+  let schema = ObjectSchema {
+    minimum: Some(serde_json::from_str("-9223372036854776000").unwrap()),
+    maximum: Some(serde_json::from_str("9223372036854776000").unwrap()),
+    ..Default::default()
+  };
+
+  let result = CanonicalSchema::from_schema(&schema);
+  assert!(
+    result.is_ok(),
+    "Should successfully canonicalize schema with large numbers (exceeding IEEE 754 safe range)"
+  );
+}
+
+#[test]
+fn test_canonical_schema_large_numbers_are_normalized() {
+  let schema1 = ObjectSchema {
+    minimum: Some(serde_json::from_str("-9223372036854776000").unwrap()),
+    maximum: Some(serde_json::from_str("9223372036854776000").unwrap()),
+    ..Default::default()
+  };
+
+  let schema2 = ObjectSchema {
+    minimum: Some(serde_json::from_str("-9999999999999999999").unwrap()),
+    maximum: Some(serde_json::from_str("9999999999999999999").unwrap()),
+    ..Default::default()
+  };
+
+  let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
+  let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
+
+  assert_eq!(
+    canonical1, canonical2,
+    "Large numbers outside IEEE 754 safe range should be clamped to the same value"
+  );
+}
+
+#[test]
+fn test_get_generated_enum_name_returns_none_for_precomputed_only() {
+  let enum_values = vec!["alpha".to_string(), "beta".to_string()];
+  let mut precomputed_enum_names = BTreeMap::new();
+  precomputed_enum_names.insert(enum_values.clone(), "PrecomputedEnum".to_string());
+
+  let mut cache = SharedSchemaCache::new();
+  cache.set_precomputed_names(BTreeMap::new(), precomputed_enum_names);
+
+  assert_eq!(
+    cache.get_enum_name(&enum_values),
+    Some("PrecomputedEnum".to_string()),
+    "get_enum_name should return precomputed name"
+  );
+
+  assert_eq!(
+    cache.get_generated_enum_name(&enum_values),
+    None,
+    "get_generated_enum_name should return None when enum is only precomputed, not registered"
+  );
+}
+
+#[test]
+fn test_get_generated_enum_name_returns_name_when_registered() {
+  let enum_values = vec!["red".to_string(), "green".to_string()];
+
+  let mut cache = SharedSchemaCache::new();
+
+  assert_eq!(
+    cache.get_generated_enum_name(&enum_values),
+    None,
+    "Should return None before registration"
+  );
+
+  cache.register_enum(enum_values.clone(), "ColorEnum".to_string());
+
+  assert_eq!(
+    cache.get_generated_enum_name(&enum_values),
+    Some("ColorEnum".to_string()),
+    "Should return name after registration"
+  );
+}

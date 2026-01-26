@@ -3,7 +3,7 @@ use std::{cmp::Ordering, hash::Hash};
 use anyhow::Context;
 use json_canon::to_string as to_canonical_json;
 use oas3::spec::ObjectSchema;
-use serde_json::Value;
+use serde_json::{Number, Value};
 
 /// Opaque representation of a schema's canonical form.
 ///
@@ -63,12 +63,15 @@ impl Hash for CanonicalSchema {
   }
 }
 
-/// Sorts order-independent JSON Schema arrays in-place for canonical comparison.
+/// Normalizes JSON Schema values for canonical comparison.
 ///
-/// Recursively traverses the JSON value and alphabetically sorts the `required`,
-/// `type`, and `enum` arrays when they contain only string elements. This ensures
-/// schemas like `{"required": ["b", "a"]}` and `{"required": ["a", "b"]}` produce
-/// identical canonical representations.
+/// Recursively traverses the JSON value and:
+/// - Alphabetically sorts order-independent arrays (`required`, `type`, `enum`)
+/// - Clamps large integers to the IEEE 754 safe integer range
+///
+/// This ensures schemas like `{"required": ["b", "a"]}` and `{"required": ["a", "b"]}`
+/// produce identical canonical representations, and schemas with large numbers
+/// (outside ±2^53) can be canonicalized without RFC 8785 errors.
 fn normalize_schema_semantics(value: &mut Value) {
   match value {
     Value::Object(map) => {
@@ -93,8 +96,48 @@ fn normalize_schema_semantics(value: &mut Value) {
         normalize_schema_semantics(item);
       }
     }
+    Value::Number(n) => {
+      if let Some(clamped) = clamp_number_to_safe_range(n) {
+        *value = Value::Number(clamped);
+      }
+    }
     _ => {}
   }
+}
+
+const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+const MIN_SAFE_INTEGER: i64 = -9_007_199_254_740_991;
+
+/// Clamps a JSON number to the IEEE 754 safe integer range (±2^53).
+///
+/// RFC 8785 (JSON Canonicalization Scheme) requires numbers to be representable
+/// as IEEE 754 double-precision floats. Integers outside the range ±2^53 cannot
+/// be exactly represented and will cause canonicalization to fail.
+///
+/// Returns `Some(clamped_number)` if the number was outside the safe range,
+/// or `None` if no clamping was needed.
+#[allow(clippy::cast_precision_loss)]
+fn clamp_number_to_safe_range(n: &serde_json::Number) -> Option<serde_json::Number> {
+  if let Some(i) = n.as_i64() {
+    return match i {
+      i if i > MAX_SAFE_INTEGER => Some(MAX_SAFE_INTEGER.into()),
+      i if i < MIN_SAFE_INTEGER => Some(MIN_SAFE_INTEGER.into()),
+      _ => None,
+    };
+  }
+
+  if let Some(u) = n.as_u64() {
+    return (u > MAX_SAFE_INTEGER as u64).then_some(MAX_SAFE_INTEGER.into());
+  }
+
+  if let Some(f) = n.as_f64() {
+    let (min_f, max_f) = (MIN_SAFE_INTEGER as f64, MAX_SAFE_INTEGER as f64);
+    if f < min_f || f > max_f {
+      return Number::from_f64(f.clamp(min_f, max_f));
+    }
+  }
+
+  None
 }
 
 /// Sorts a JSON array in-place if all elements are strings; otherwise leaves it unchanged.

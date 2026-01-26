@@ -111,6 +111,8 @@ impl VariantBuilder {
         output
       } else if let Some(output) = self.build_nested_union_content(enum_name, &variant_label, &resolved_schema)? {
         output
+      } else if let Some(output) = self.build_enum_content(enum_name, &variant_label, &resolved_schema)? {
+        output
       } else {
         self.build_primitive_content(&resolved_schema)?
       }
@@ -206,6 +208,34 @@ impl VariantBuilder {
     let result = self
       .type_resolver
       .inline_union(enum_name, variant_label, resolved_schema)?;
+
+    Ok(Some(ConversionOutput::with_inline_types(
+      VariantContent::Tuple(vec![result.result]),
+      result.inline_types,
+    )))
+  }
+
+  /// Builds tuple variant content for schemas with enum values.
+  ///
+  /// For a schema like `{ "type": "string", "enum": ["foo", "bar"] }`, this
+  /// generates a separate enum type and wraps it in a tuple variant. The
+  /// generated enum is included in `ConversionOutput::inline_types`.
+  ///
+  /// Returns `None` if the schema has no enum values, allowing callers to try
+  /// other content-building strategies.
+  fn build_enum_content(
+    &self,
+    enum_name: &str,
+    variant_label: &str,
+    resolved_schema: &ObjectSchema,
+  ) -> anyhow::Result<Option<ConversionOutput<VariantContent>>> {
+    if !resolved_schema.has_enum_values() {
+      return Ok(None);
+    }
+
+    let result = self
+      .type_resolver
+      .inline_enum(enum_name, variant_label, resolved_schema)?;
 
     Ok(Some(ConversionOutput::with_inline_types(
       VariantContent::Tuple(vec![result.result]),
