@@ -75,6 +75,73 @@ pub struct Pet {
 }
 ```
 
+### Server Generation
+
+The `server-mod` command generates an axum-based server trait with handler functions and router configuration.
+
+```zsh
+oas3-gen generate server-mod -i path/to/openapi.json -o path/to/output/
+```
+
+This generates three files:
+- `types.rs` - All request/response types
+- `server.rs` - Server trait, handlers, and router
+- `mod.rs` - Module exports
+
+#### Generated Server Trait
+
+```rust
+// server.rs
+
+pub trait ApiServer: Send + Sync {
+    fn list_pets(&self, request: ListPetsRequest)
+        -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
+
+    fn create_pet(&self, request: CreatePetRequest)
+        -> impl std::future::Future<Output = anyhow::Result<CreatePetResponse>> + Send;
+
+    fn get_pet_by_id(&self, request: GetPetByIdRequest)
+        -> impl std::future::Future<Output = anyhow::Result<GetPetByIdResponse>> + Send;
+}
+```
+
+#### Implementing the Server
+
+```rust
+use generated::{ApiServer, ListPetsRequest, ListPetsResponse, /* ... */};
+
+#[derive(Clone)]
+struct MyServer {
+    db: DatabasePool,
+}
+
+impl ApiServer for MyServer {
+    fn list_pets(&self, request: ListPetsRequest)
+        -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send
+    {
+        async move {
+            let pets = self.db.query_pets(request.query.limit).await?;
+            Ok(ListPetsResponse::Ok(pets))
+        }
+    }
+    // ... implement other methods
+}
+
+#[tokio::main]
+async fn main() {
+    let server = MyServer { db: create_pool().await };
+    let app = generated::router(server);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+```
+
+The generated router automatically:
+- Extracts path, query, and header parameters
+- Deserializes request bodies (JSON, form, multipart)
+- Routes requests to the correct handler based on path and HTTP method
+- Converts response enums to proper HTTP responses with status codes
+
 ## Key Features
 
 | Feature | Description |
