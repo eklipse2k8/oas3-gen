@@ -327,6 +327,10 @@ impl EnumVariantToken {
   pub fn with_content_suffix(self, category: ContentCategory) -> Self {
     Self::new(format!("{}{}", self, category.variant_suffix()))
   }
+
+  pub fn with_schema_suffix(self, schema_name: &str) -> Self {
+    Self::new(format!("{}{}", self, schema_name))
+  }
 }
 
 /// Media type information for a response variant.

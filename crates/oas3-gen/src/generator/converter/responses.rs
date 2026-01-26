@@ -284,8 +284,8 @@ impl ResponseConverter {
 
   /// Splits a status code into multiple variants when different content types have different schemas.
   ///
-  /// For example, a 200 response with both JSON and XML schemas generates
-  /// `Ok200Json` and `Ok200Xml` variants.
+  /// When multiple schemas share the same content category (e.g., both JSON), uses schema type
+  /// names as suffixes: `BadRequestBasicError` and `BadRequestScimError`.
   fn split_variants_by_content_type(
     status_code: StatusCodeToken,
     base_name: &EnumVariantToken,
@@ -306,25 +306,35 @@ impl ResponseConverter {
     }
 
     let needs_suffix = grouped.len() > 1;
+    let use_schema_suffix = needs_suffix && Self::has_duplicate_categories(&grouped);
 
     grouped
       .into_iter()
       .map(|(schema_key, types)| {
         let primary_category = types.first().map_or(ContentCategory::Json, |m| m.category);
+        let variant_name = match (needs_suffix, use_schema_suffix) {
+          (false, _) => base_name.clone(),
+          (true, true) => base_name.clone().with_schema_suffix(&schema_key),
+          (true, false) => base_name.clone().with_content_suffix(primary_category),
+        };
 
         ResponseVariant::builder()
           .status_code(status_code)
-          .variant_name(if needs_suffix {
-            base_name.clone().with_content_suffix(primary_category)
-          } else {
-            base_name.clone()
-          })
+          .variant_name(variant_name)
           .maybe_description(description.cloned())
           .media_types(types)
           .maybe_schema_type(Some(TypeRef::new(schema_key)))
           .build()
       })
       .collect()
+  }
+
+  fn has_duplicate_categories(grouped: &[(String, Vec<ResponseMediaType>)]) -> bool {
+    let categories = grouped
+      .iter()
+      .map(|(_, types)| types.first().map_or(ContentCategory::Json, |m| m.category))
+      .collect_vec();
+    categories.len() != categories.iter().unique().count()
   }
 
   /// Groups media types by their schema type for variant splitting.
