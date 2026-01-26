@@ -336,7 +336,9 @@ impl FieldConverter {
       let has_non_string_format = schema.format.as_ref().is_some_and(|f| Self::is_non_string_format(f));
 
       if !has_non_string_format {
-        if let Some(length_attr) = ValidationAttribute::length(schema.min_length, schema.max_length, is_required) {
+        if let Some(length_attr) =
+          ValidationAttribute::length(schema.min_length, schema.max_length, is_required && !type_ref.nullable)
+        {
           attrs.push(length_attr);
         }
 

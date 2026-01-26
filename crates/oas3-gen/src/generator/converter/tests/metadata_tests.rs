@@ -13,6 +13,13 @@ fn string_schema() -> ObjectSchema {
   }
 }
 
+fn nullable_string_schema() -> ObjectSchema {
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Null])),
+    ..Default::default()
+  }
+}
+
 fn number_schema() -> ObjectSchema {
   ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
@@ -204,6 +211,33 @@ fn validation_required_string_implies_min_length() {
       min: Some(1),
       max: None
     }]
+  );
+}
+
+#[test]
+fn validation_nullable_required_string_skips_implicit_min_length() {
+  let schema = nullable_string_schema();
+  let type_ref = TypeRef::new(RustPrimitive::String).with_option();
+  let attrs = FieldConverter::extract_all_validation("test", true, &schema, &type_ref);
+  assert!(
+    attrs.is_empty(),
+    "nullable required strings should not get implicit min_length=1"
+  );
+}
+
+#[test]
+fn validation_nullable_string_with_explicit_min_length() {
+  let mut schema = nullable_string_schema();
+  schema.min_length = Some(5);
+  let type_ref = TypeRef::new(RustPrimitive::String).with_option();
+  let attrs = FieldConverter::extract_all_validation("test", true, &schema, &type_ref);
+  assert_eq!(
+    attrs,
+    vec![ValidationAttribute::Length {
+      min: Some(5),
+      max: None
+    }],
+    "explicit min_length should still be applied to nullable strings"
   );
 }
 
