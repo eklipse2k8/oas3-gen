@@ -389,9 +389,9 @@ impl StatusConditionFragment {
 impl ToTokens for StatusConditionFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let ts = match self.status_code {
-      c if c.is_success() => quote! { status.is_success() },
       c if c.is_default() => quote! { true },
       StatusCodeToken::Informational1XX => quote! { status.is_informational() },
+      StatusCodeToken::Success2XX => quote! { status.is_success() },
       StatusCodeToken::Redirection3XX => quote! { status.is_redirection() },
       StatusCodeToken::ClientError4XX => quote! { status.is_client_error() },
       StatusCodeToken::ServerError5XX => quote! { status.is_server_error() },
