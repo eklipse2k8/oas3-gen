@@ -3,19 +3,30 @@ use std::{
   rc::Rc,
 };
 
-use super::{SchemaExt, structs::StructConverter};
-use crate::generator::{
-  ast::{
-    BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
-    FieldNameToken, MethodNameToken, RustType, StructDef, StructMethod, StructMethodKind, TypeRef, VariantDef,
+use itertools::Itertools;
+
+use super::structs::StructConverter;
+use crate::{
+  generator::{
+    ast::{
+      BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
+      FieldNameToken, MethodKind, MethodNameToken, RustType, StructDef, StructMethod, TypeRef, VariantDef,
+    },
+    converter::ConverterContext,
+    naming::{
+      identifiers::{ensure_unique, to_rust_type_name},
+      inference::derive_method_names,
+    },
   },
-  converter::ConverterContext,
-  naming::{
-    identifiers::{ensure_unique, to_rust_type_name},
-    inference::derive_method_names,
-  },
+  utils::SchemaExt,
 };
 
+/// Generates helper constructor methods for enum variants and builder methods for request structs.
+///
+/// For enum types, analyzes variant wrapped types to determine which variants can
+/// have convenient constructors (e.g., `fn user(u: User) -> Self`). For request
+/// structs, builds a `new()` method that accepts required fields and nested
+/// parameter structs.
 #[derive(Clone, Debug)]
 pub(crate) struct MethodGenerator {
   context: Rc<ConverterContext>,
@@ -23,6 +34,7 @@ pub(crate) struct MethodGenerator {
 }
 
 impl MethodGenerator {
+  /// Creates a new method generator with access to the converter context.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let struct_converter = StructConverter::new(context.clone());
     Self {
@@ -31,6 +43,13 @@ impl MethodGenerator {
     }
   }
 
+  /// Generates constructor methods for enum variants wrapping struct types.
+  ///
+  /// For each variant containing a single wrapped type, inspects the struct
+  /// definition to determine constructor eligibility. Structs with all-optional
+  /// fields get zero-argument constructors; structs with exactly one required
+  /// field get single-argument constructors. Method names are derived by
+  /// stripping common prefixes from variant names.
   pub(crate) fn build_constructors(
     &self,
     variants: &[VariantDef],
@@ -39,13 +58,13 @@ impl MethodGenerator {
   ) -> Vec<EnumMethod> {
     let enum_name = to_rust_type_name(enum_name);
 
-    let mut struct_cache: BTreeMap<String, StructDef> = inline_types
+    let mut struct_cache = inline_types
       .iter()
       .filter_map(|t| match t {
         RustType::Struct(s) => Some((s.name.to_string(), s.clone())),
         _ => None,
       })
-      .collect();
+      .collect::<BTreeMap<String, StructDef>>();
 
     let eligible = self.collect_eligible_variants(variants, &mut struct_cache);
 
@@ -56,6 +75,11 @@ impl MethodGenerator {
     Self::build_methods_from_eligible(&enum_name, &eligible, variants)
   }
 
+  /// Filters variants to those eligible for constructor generation.
+  ///
+  /// A variant is eligible if it wraps a single struct type that has a
+  /// default implementation (all optional fields or all fields with defaults).
+  /// Array-typed variants are excluded.
   fn collect_eligible_variants(
     &self,
     variants: &[VariantDef],
@@ -80,18 +104,26 @@ impl MethodGenerator {
     eligible
   }
 
+  /// Constructs method definitions from eligible variant specifications.
+  ///
+  /// Derives method names by stripping common prefixes shared with `enum_name`,
+  /// then ensures uniqueness by appending numeric suffixes if needed. Attaches
+  /// documentation from the original variant definitions.
   fn build_methods_from_eligible(
     enum_name: &str,
     eligible: &[(EnumVariantToken, EnumMethodKind)],
     variants: &[VariantDef],
   ) -> Vec<EnumMethod> {
-    let variant_names: Vec<String> = eligible.iter().map(|(name, _)| name.to_string()).collect();
+    let variant_names = eligible
+      .iter()
+      .map(|(name, _)| name.to_string())
+      .collect::<Vec<String>>();
     let method_names = derive_method_names(enum_name, &variant_names);
 
     let mut seen = BTreeSet::new();
     eligible
       .iter()
-      .zip(method_names)
+      .zip_eq(method_names)
       .map(|((variant_name, kind), base_name)| {
         let method_name = ensure_unique(&base_name, &seen);
         seen.insert(method_name.clone());
@@ -106,6 +138,13 @@ impl MethodGenerator {
       .collect()
   }
 
+  /// Determines the appropriate constructor kind for a variant's wrapped type.
+  ///
+  /// Returns `None` for types without defaults or array types. For struct types:
+  /// - Zero required fields + one optional field → `ParameterizedConstructor`
+  /// - Zero required fields + multiple optional fields → `SimpleConstructor`
+  /// - One required field → `ParameterizedConstructor`
+  /// - Multiple required fields → `None`
   fn constructor_kind_for(
     type_ref: &TypeRef,
     variant_name: &EnumVariantToken,
@@ -115,8 +154,8 @@ impl MethodGenerator {
       return None;
     }
 
-    let required_fields: Vec<_> = struct_def.required_fields().collect();
-    let user_fields: Vec<_> = struct_def.user_fields().collect();
+    let required_fields = struct_def.required_fields().collect::<Vec<_>>();
+    let user_fields = struct_def.user_fields().collect::<Vec<_>>();
 
     match required_fields.len() {
       0 => {
@@ -148,6 +187,11 @@ impl MethodGenerator {
     }
   }
 
+  /// Retrieves the struct definition for a type reference.
+  ///
+  /// Checks the local cache first, then the shared schema cache, and finally
+  /// attempts on-demand conversion from the schema registry. Returns `None`
+  /// if the type is not a struct or cannot be found.
   fn resolve_struct_def(
     &self,
     type_ref: &TypeRef,
@@ -182,6 +226,12 @@ impl MethodGenerator {
     }
   }
 
+  /// Generates a `new()` builder method for request structs.
+  ///
+  /// Flattens nested parameter structs (path, query, header) into the method
+  /// signature, allowing callers to pass individual parameters rather than
+  /// constructing nested types manually. Returns `None` if there are no
+  /// fields to include in the builder.
   pub(crate) fn build_builder_method(nested_structs: &[StructDef], main_fields: &[FieldDef]) -> Option<StructMethod> {
     let (fields, nested): BuilderFieldTuple = main_fields
       .iter()
@@ -201,7 +251,7 @@ impl MethodGenerator {
         .docs(Documentation::from_lines([
           "Create a new request with the given parameters.",
         ]))
-        .kind(StructMethodKind::Builder {
+        .kind(MethodKind::Builder {
           fields,
           nested_structs: nested,
         })
@@ -209,6 +259,12 @@ impl MethodGenerator {
     )
   }
 
+  /// Expands a field into builder components, flattening nested structs.
+  ///
+  /// If the field's type matches a nested struct, extracts that struct's
+  /// fields for inclusion in the builder method signature. Returns both
+  /// the flattened fields and metadata about the nesting relationship
+  /// for code generation.
   fn resolve_field_components(
     field: &FieldDef,
     nested_structs: &[StructDef],
@@ -222,14 +278,14 @@ impl MethodGenerator {
     let nested_info = BuilderNestedStruct::builder()
       .field_name(field.name.clone())
       .struct_name(nested.name.clone())
-      .field_names(nested.fields.iter().map(|f| f.name.clone()).collect())
+      .field_names(nested.fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
       .build();
 
     let flattened_fields = nested
       .fields
       .iter()
       .map(|nested_field| BuilderField::from_nested(nested_field, &field.name))
-      .collect();
+      .collect::<Vec<_>>();
 
     (flattened_fields, Some(nested_info))
   }
@@ -238,6 +294,10 @@ impl MethodGenerator {
 type BuilderFieldTuple = (Vec<Vec<BuilderField>>, Vec<Option<BuilderNestedStruct>>);
 
 impl BuilderField {
+  /// Creates a builder field from a nested struct's field with owner tracking.
+  ///
+  /// The `owner` parameter records which nested struct contains this field,
+  /// enabling correct field assignment during code generation.
   pub(crate) fn from_nested(field: &FieldDef, owner: &FieldNameToken) -> Self {
     let mut builder_field = Self::from(field);
     builder_field.owner_field = Some(owner.clone());

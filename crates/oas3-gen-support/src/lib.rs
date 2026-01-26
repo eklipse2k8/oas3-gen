@@ -1,10 +1,12 @@
+#[cfg(feature = "eventsource")]
 mod event_stream;
 pub use better_default::Default;
 pub use bon::bon;
+#[cfg(feature = "eventsource")]
 pub use event_stream::{EventStream, EventStreamError};
 pub use http::Method;
 use http::{StatusCode, header::RETRY_AFTER};
-use reqwest::Response;
+use serde::de::DeserializeOwned;
 use serde_with::{
   StringWithSeparator,
   formats::{CommaSeparator, Separator, SpaceSeparator},
@@ -36,19 +38,17 @@ pub type StringWithSpaceSeparator = StringWithSeparator<SpaceSeparator, String>;
 pub type StringWithPipeSeparator = StringWithSeparator<PipeSeparator, String>;
 
 #[derive(Debug, thiserror::Error)]
-pub enum JsonDiagnostics {
-  #[error("Failed to read response body: {0}")]
+pub enum DiagnosticsError {
+  #[cfg(feature = "reqwest")]
+  #[error(transparent)]
   BodyReadError(#[from] reqwest::Error),
+
   #[error("JSON deserialization error at path '{path}': {inner}")]
   DeserializationError { path: String, inner: serde_json::Error },
-}
 
-#[derive(Debug, thiserror::Error)]
-pub enum XmlDiagnostics {
-  #[error("Failed to read response body: {0}")]
-  BodyReadError(#[from] reqwest::Error),
-  #[error("XML deserialization error: {0}")]
-  DeserializationError(#[from] quick_xml::DeError),
+  #[cfg(feature = "quick-xml")]
+  #[error(transparent)]
+  XmlDeserializationError(#[from] quick_xml::DeError),
 }
 
 #[allow(async_fn_in_trait)]
@@ -56,64 +56,80 @@ pub trait Diagnostics<T>
 where
   T: serde::de::DeserializeOwned,
 {
-  async fn json_with_diagnostics(self) -> Result<T, JsonDiagnostics>;
-  async fn xml_with_diagnostics(self) -> Result<T, XmlDiagnostics>;
+  async fn json_with_diagnostics(self) -> Result<T, DiagnosticsError>;
+
+  #[cfg(feature = "quick-xml")]
+  async fn xml_with_diagnostics(self) -> Result<T, DiagnosticsError>;
 }
 
+#[cfg(feature = "reqwest")]
 impl<T> Diagnostics<T> for reqwest::Response
 where
   T: serde::de::DeserializeOwned,
 {
-  async fn json_with_diagnostics(self) -> Result<T, JsonDiagnostics> {
-    let raw_body = self.text().await.map_err(JsonDiagnostics::BodyReadError)?;
+  async fn json_with_diagnostics(self) -> Result<T, DiagnosticsError> {
+    let raw_body = self.text().await?;
     let mut de = serde_json::Deserializer::from_str(&raw_body);
-    serde_path_to_error::deserialize(&mut de).map_err(|err| JsonDiagnostics::DeserializationError {
+    serde_path_to_error::deserialize(&mut de).map_err(|err| DiagnosticsError::DeserializationError {
       path: err.path().to_string(),
       inner: err.into_inner(),
     })
   }
 
-  async fn xml_with_diagnostics(self) -> Result<T, XmlDiagnostics> {
-    let raw_body = self.bytes().await.map_err(XmlDiagnostics::BodyReadError)?;
-    quick_xml::de::from_reader(std::io::Cursor::new(raw_body)).map_err(XmlDiagnostics::DeserializationError)
+  #[cfg(feature = "quick-xml")]
+  async fn xml_with_diagnostics(self) -> Result<T, DiagnosticsError> {
+    let raw_body = self.bytes().await?;
+    Ok(quick_xml::de::from_reader(std::io::Cursor::new(raw_body))?)
   }
 }
 
-#[derive(Debug)]
-pub enum ClientErrorCode {
-  Ok(Response),
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub enum RateLimit {
   /// The client has sent too many requests in a given amount of time.
-  RateLimitExceeded,
+  #[default]
+  Exceeded,
   /// The client should try the request again after the specified number of seconds.
   TryAgainAfter(u32),
-  UnexpectedStatus(StatusCode),
 }
 
-pub trait ClientStatus: Sized {
-  fn decode_status(self) -> ClientErrorCode;
+impl RateLimit {
+  /// If the `Retry-After` header is present and valid, it will be used to create a `TryAgainAfter` variant.
+  /// Otherwise, it will return `Exceeded`.
+  #[must_use]
+  pub fn with_headers(headers: &http::HeaderMap) -> Self {
+    if let Some(retry_after) = headers.get(RETRY_AFTER)
+      && let Ok(seconds) = String::from_utf8_lossy(retry_after.as_bytes()).parse::<u32>()
+    {
+      return Self::TryAgainAfter(seconds);
+    }
+    Self::Exceeded
+  }
 }
 
-impl ClientStatus for Response {
-  fn decode_status(self) -> ClientErrorCode {
-    let status = self.status();
-    if status.is_success() {
-      return ClientErrorCode::Ok(self);
-    }
+#[derive(Debug, Clone)]
+pub struct TooManyRequests<T: DeserializeOwned>(RateLimit, T);
 
-    match status {
-      StatusCode::TOO_MANY_REQUESTS => {
-        let retry_after = self
-          .headers()
-          .get(RETRY_AFTER)
-          .and_then(|h| String::from_utf8_lossy(h.as_bytes()).parse::<u32>().ok());
+impl<T: DeserializeOwned> TooManyRequests<T> {
+  #[must_use]
+  pub fn is_too_many_requests(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS
+  }
 
-        if let Some(seconds) = retry_after {
-          ClientErrorCode::TryAgainAfter(seconds)
-        } else {
-          ClientErrorCode::RateLimitExceeded
-        }
-      }
-      _ => ClientErrorCode::UnexpectedStatus(status),
-    }
+  /// Create a new `TooManyRequests` instance by extracting rate limit information from headers
+  #[must_use]
+  pub fn new(headers: &http::HeaderMap, inner: T) -> Self {
+    Self(RateLimit::with_headers(headers), inner)
+  }
+
+  /// If the `Retry-After` header is present and valid, it will be used to create a `TryAgainAfter` variant.
+  /// Otherwise, it will return `Exceeded`.
+  pub fn rate_limit(&self) -> &RateLimit {
+    &self.0
+  }
+
+  /// Consume the `TooManyRequests` and return the inner value
+  #[must_use]
+  pub fn into_inner(self) -> T {
+    self.1
   }
 }

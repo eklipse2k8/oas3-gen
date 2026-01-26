@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use crate::generator::{codegen::Visibility, orchestrator::Orchestrator};
+use crate::generator::{
+  codegen::{GeneratedFileType, Visibility},
+  converter::GenerationTarget,
+  orchestrator::Orchestrator,
+};
 
 fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
   Orchestrator::new(
@@ -13,6 +17,7 @@ fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
     false,
     false,
     false,
+    GenerationTarget::default(),
     HashMap::new(),
   )
 }
@@ -31,7 +36,8 @@ fn test_undeclared_path_parameters_are_synthesized() {
     result.err()
   );
 
-  let (code, _) = result.unwrap();
+  let output = result.unwrap();
+  let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   // Should generate path struct with synthesized parameters
   assert!(

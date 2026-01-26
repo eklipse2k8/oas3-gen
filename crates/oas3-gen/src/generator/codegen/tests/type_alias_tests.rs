@@ -1,6 +1,8 @@
+use quote::ToTokens;
+
 use crate::generator::{
-  ast::{RustPrimitive, TypeAliasDef, TypeAliasToken, TypeRef},
-  codegen::{Visibility, type_aliases::generate_type_alias},
+  ast::{Documentation, RustPrimitive, TypeAliasDef, TypeAliasToken, TypeRef},
+  codegen::{Visibility, type_aliases::TypeAliasFragment},
 };
 
 fn format_tokens(tokens: proc_macro2::TokenStream) -> String {
@@ -38,7 +40,7 @@ fn test_basic_type_aliases() {
 
   for (def, expected_suffix) in cases {
     let name = def.name.clone();
-    let tokens = generate_type_alias(&def, Visibility::Public);
+    let tokens = TypeAliasFragment::new(def, Visibility::Public).into_token_stream();
     let code = format_tokens(tokens);
     assert!(code.contains("pub"), "missing pub visibility for {name}");
     assert!(
@@ -52,15 +54,11 @@ fn test_basic_type_aliases() {
 fn test_type_alias_with_docs() {
   let def = TypeAliasDef {
     name: TypeAliasToken::new("UserId"),
-    docs: vec![
-      "Unique identifier for a user.".to_string(),
-      "Format: UUID string.".to_string(),
-    ]
-    .into(),
+    docs: Documentation::from_lines(["Unique identifier for a user.", "Format: UUID string."]),
     target: TypeRef::new(RustPrimitive::String),
   };
 
-  let tokens = generate_type_alias(&def, Visibility::Public);
+  let tokens = TypeAliasFragment::new(def, Visibility::Public).into_token_stream();
   let code = format_tokens(tokens);
 
   assert!(
@@ -92,7 +90,7 @@ fn test_type_alias_visibility_levels() {
   ];
 
   for (visibility, expected_prefix) in cases {
-    let tokens = generate_type_alias(&def, visibility);
+    let tokens = TypeAliasFragment::new(def.clone(), visibility).into_token_stream();
     let code = format_tokens(tokens);
     assert!(
       code.contains(expected_prefix),
@@ -134,7 +132,7 @@ fn test_type_alias_with_wrapper_types() {
       target,
       ..Default::default()
     };
-    let tokens = generate_type_alias(&def, Visibility::Public);
+    let tokens = TypeAliasFragment::new(def, Visibility::Public).into_token_stream();
     let code = format_tokens(tokens);
     assert!(
       code.contains(expected_suffix),
@@ -147,11 +145,11 @@ fn test_type_alias_with_wrapper_types() {
 fn test_type_alias_custom_types() {
   let def = TypeAliasDef {
     name: TypeAliasToken::new("PetList"),
-    docs: vec!["List of pets from the API.".to_string()].into(),
+    docs: Documentation::from_lines(["List of pets from the API."]),
     target: TypeRef::new(RustPrimitive::Custom("Vec<Pet>".into())),
   };
 
-  let tokens = generate_type_alias(&def, Visibility::Crate);
+  let tokens = TypeAliasFragment::new(def, Visibility::Crate).into_token_stream();
   let code = format_tokens(tokens);
 
   assert!(code.contains("pub(crate) type PetList = Vec<Pet>;"));

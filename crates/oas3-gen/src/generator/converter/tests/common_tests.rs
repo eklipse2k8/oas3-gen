@@ -1,44 +1,65 @@
-use std::{cell::Cell, collections::BTreeMap};
+use std::collections::BTreeMap;
 
 use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use crate::{
-  generator::{
-    ast::{RustType, TypeAliasDef, TypeAliasToken, TypeRef},
-    converter::common::{ConversionOutput, handle_inline_creation},
-    schema_registry::SchemaRegistry,
-  },
+  generator::{converter::inline_resolver::InlineTypeResolver, schema_registry::SchemaRegistry},
   tests::common::{create_test_context, create_test_graph, create_test_spec, default_config},
 };
 
 #[test]
-fn test_handle_inline_creation_uses_cached_name_check() -> anyhow::Result<()> {
-  let schema = ObjectSchema::default();
+fn test_inline_resolver_uses_cached_enum() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::default());
   let context = create_test_context(graph, default_config());
-  let generator_called = Cell::new(false);
 
-  let result = handle_inline_creation(
-    &schema,
-    "Ignored",
-    None,
-    &context,
-    |_| Some("CachedType".to_string()),
-    |_| {
-      generator_called.set(true);
-      Ok(ConversionOutput::new(RustType::TypeAlias(TypeAliasDef {
-        name: TypeAliasToken::from_raw("Ignored"),
-        target: TypeRef::new("i32"),
-        ..Default::default()
-      })))
-    },
-  )?;
+  let enum_values = vec!["A".to_string(), "B".to_string()];
+  context
+    .cache
+    .borrow_mut()
+    .register_enum(enum_values.clone(), "CachedEnum".to_string());
+  context.cache.borrow_mut().mark_name_used("CachedEnum".to_string());
 
-  assert_eq!(result.result.to_rust_type(), "CachedType");
+  let inline_resolver = InlineTypeResolver::new(context);
+
+  let schema = ObjectSchema {
+    enum_values: vec![serde_json::json!("A"), serde_json::json!("B")],
+    ..Default::default()
+  };
+
+  let result = inline_resolver.resolve_inline_enum("Parent", "Status", &schema, &enum_values)?;
+
+  assert_eq!(result.result.to_rust_type(), "CachedEnum");
   assert!(
-    !generator_called.get(),
-    "Generator should not run when cached name exists"
+    result.inline_types.is_empty(),
+    "No new types should be generated for cached enum"
   );
+  Ok(())
+}
+
+#[test]
+fn test_inline_resolver_generates_unique_names() -> anyhow::Result<()> {
+  let graph = create_test_graph(BTreeMap::default());
+  let context = create_test_context(graph, default_config());
+
+  context.cache.borrow_mut().mark_name_used("ParentItem".to_string());
+
+  let inline_resolver = InlineTypeResolver::new(context);
+
+  let schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "id".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let result = inline_resolver.resolve_inline_struct("Parent", "Item", &schema)?;
+
+  assert_eq!(result.result.to_rust_type(), "ParentItem2");
   Ok(())
 }
 

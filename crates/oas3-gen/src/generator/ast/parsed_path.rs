@@ -20,7 +20,7 @@ pub enum PathParseError {
 
 impl std::error::Error for PathParseError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PathSegment {
   Literal(String),
   Param(FieldNameToken),
@@ -37,6 +37,27 @@ enum SegmentPart<'a> {
 }
 
 impl PathSegment {
+  #[cfg(test)]
+  pub fn is_mixed(&self) -> bool {
+    matches!(self, Self::Mixed { .. })
+  }
+
+  pub fn to_axum_segment(&self) -> String {
+    match self {
+      Self::Literal(lit) => lit.clone(),
+      Self::Param(field) => format!("{{{}}}", field.as_str()),
+      Self::Mixed { format, params } => {
+        let mut result = format.clone();
+        for param in params {
+          if let Some(pos) = result.find("{}") {
+            result.replace_range(pos..pos + 2, &format!("{{{}}}", param.as_str()));
+          }
+        }
+        result
+      }
+    }
+  }
+
   pub fn parse(segment: &str, params: &HashMap<&str, &FieldNameToken>) -> Result<Self, PathParseError> {
     let parts = Self::tokenize(segment)?;
 
@@ -158,7 +179,7 @@ impl ToTokens for PathSegment {
   }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct ParsedPath(pub Vec<PathSegment>);
 
 impl ParsedPath {
@@ -177,6 +198,27 @@ impl ParsedPath {
       .collect();
 
     Ok(Self(segments?))
+  }
+
+  pub fn to_axum_path(&self) -> String {
+    if self.0.is_empty() {
+      return "/".to_string();
+    }
+
+    self
+      .0
+      .iter()
+      .map(PathSegment::to_axum_segment)
+      .fold(String::new(), |mut acc, seg| {
+        acc.push('/');
+        acc.push_str(&seg);
+        acc
+      })
+  }
+
+  #[cfg(test)]
+  pub fn has_mixed_segments(&self) -> bool {
+    self.0.iter().any(PathSegment::is_mixed)
   }
 
   pub fn extract_template_params(path: &str) -> impl Iterator<Item = &str> {

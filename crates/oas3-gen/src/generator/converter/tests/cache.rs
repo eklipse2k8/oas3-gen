@@ -5,15 +5,20 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{EnumDef, EnumToken, EnumVariantToken, RustType},
+    ast::{EnumDef, EnumToken, EnumVariantToken, RustType, VariantContent},
     converter::{
-      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
-      union_types::UnionKind, unions::UnionConverter,
+      SchemaConverter,
+      cache::SharedSchemaCache,
+      hashing::CanonicalSchema,
+      type_resolver::TypeResolver,
+      union_types::{UnionKind, entries_to_cache_key},
+      unions::UnionConverter,
     },
     naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
   tests::common::{create_test_context, create_test_graph, default_config},
+  utils::SchemaExt,
 };
 
 fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
@@ -22,6 +27,12 @@ fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
     enum_values: values.iter().map(|v| json!(v)).collect(),
     ..Default::default()
   }
+}
+
+fn make_enum_cache_key(schema: &ObjectSchema) -> Option<Vec<String>> {
+  let spec = crate::tests::common::create_test_spec(std::collections::BTreeMap::new());
+  let entries = schema.extract_enum_entries(&spec);
+  (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
 }
 
 fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
@@ -265,7 +276,6 @@ fn test_cache_operations() {
   let enum1 = RustType::Enum(EnumDef {
     name: EnumToken::new("FirstEnum"),
     variants: vec![],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -276,7 +286,6 @@ fn test_cache_operations() {
   let enum2 = RustType::Enum(EnumDef {
     name: EnumToken::new("SecondEnum"),
     variants: vec![],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -284,13 +293,20 @@ fn test_cache_operations() {
     ..Default::default()
   });
 
-  let mut type_cache = SharedSchemaCache::new();
-  type_cache
-    .register_type(&schema1, "FirstEnum", vec![], enum1)
-    .expect("Should register first enum");
-  type_cache
-    .register_type(&schema2, "SecondEnum", vec![], enum2)
-    .expect("Should register second enum");
+  let type_cache = SharedSchemaCache::new();
+
+  let reg1 = type_cache
+    .prepare_registration(&schema1, "FirstEnum", make_enum_cache_key(&schema1))
+    .expect("Should prepare first enum");
+  let named_enum1 = SharedSchemaCache::apply_name_to_type(enum1, &reg1.assigned_name);
+  let mut type_cache = type_cache;
+  type_cache.commit_registration(reg1, vec![], named_enum1);
+
+  let reg2 = type_cache
+    .prepare_registration(&schema2, "SecondEnum", make_enum_cache_key(&schema2))
+    .expect("Should prepare second enum");
+  let named_enum2 = SharedSchemaCache::apply_name_to_type(enum2, &reg2.assigned_name);
+  type_cache.commit_registration(reg2, vec![], named_enum2);
 
   let types = type_cache.into_types();
   assert_eq!(types.len(), 2, "Should return all generated types");
@@ -464,7 +480,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       .iter()
       .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
       .expect("Should have Known variant");
-    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+    if let VariantContent::Tuple(refs) = &known_variant.content {
       refs[0].base_type.to_string()
     } else {
       panic!("Known variant should have tuple content");
@@ -489,7 +505,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       .iter()
       .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
       .expect("Should have Known variant");
-    if let crate::generator::ast::VariantContent::Tuple(refs) = &known_variant.content {
+    if let VariantContent::Tuple(refs) = &known_variant.content {
       let second_inner_name = refs[0].base_type.to_string();
       assert_eq!(
         inner_enum_name, second_inner_name,

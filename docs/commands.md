@@ -30,6 +30,9 @@ cargo run -- generate client -i spec.json -o client.rs
 # Generate modular client output (types.rs, client.rs, mod.rs in directory)
 cargo run -- generate client-mod -i spec.json -o output/
 
+# Generate modular server output (types.rs, server.rs, mod.rs in directory)
+cargo run -- generate server-mod -i spec.json -o output/
+
 # With verbose output (shows cycles, operations count, etc.)
 cargo run -- generate types -i spec.json -o output.rs --verbose
 
@@ -57,9 +60,9 @@ cargo run -- list --help
 
 | Argument/Option | Description |
 |-----------------|-------------|
-| `[MODE]` | Generation mode: `types` (default), `client`, or `client-mod` |
+| `[MODE]` | Generation mode: `types` (default), `client`, `client-mod`, or `server-mod` |
 | `--input` / `-i` | (Required) Path to OpenAPI specification file (JSON or YAML, auto-detected) |
-| `--output` / `-o` | (Required) Path for output (file for types/client, directory for client-mod) |
+| `--output` / `-o` | (Required) Path for output (file for types/client, directory for client-mod/server-mod) |
 | `--visibility` / `-C` | Visibility level for generated types (public, crate, or file; default: public) |
 | `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |

@@ -222,6 +222,68 @@
 					}
 				}
 			}
+		},
+		"/pets/{petId}/upload": {
+			"post": {
+				"summary": "Upload pet image and update name",
+				"operationId": "uploadPetImage",
+				"tags": ["pets"],
+				"parameters": [
+					{
+						"name": "petId",
+						"in": "path",
+						"required": true,
+						"description": "The id of the pet to update",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"multipart/form-data": {
+							"schema": {
+								"type": "object",
+								"required": ["name", "image"],
+								"properties": {
+									"name": {
+										"type": "string",
+										"description": "The pet's name"
+									},
+									"image": {
+										"type": "string",
+										"format": "binary",
+										"description": "The pet's image file"
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Successfully updated pet",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Pet"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "unexpected error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	},
 	"components": {

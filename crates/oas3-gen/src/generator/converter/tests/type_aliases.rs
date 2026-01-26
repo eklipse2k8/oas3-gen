@@ -212,7 +212,7 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
   let result = converter.convert_schema("EventList", graph.get("EventList").unwrap())?;
 
   let mut all_types = result;
-  all_types.extend(context.cache.borrow().generated.generated_types.clone());
+  all_types.extend(context.cache.borrow().types.types.clone());
 
   assert_eq!(all_types.len(), 2, "expected type alias + inline enum");
 
@@ -304,7 +304,7 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
   let result = converter.convert_schema("NullableEventList", graph.get("NullableEventList").unwrap())?;
 
   let mut all_types = result;
-  all_types.extend(context.cache.borrow().generated.generated_types.clone());
+  all_types.extend(context.cache.borrow().types.types.clone());
 
   assert_eq!(all_types.len(), 2, "expected type alias + inline enum");
 

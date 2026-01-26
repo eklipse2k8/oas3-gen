@@ -8,8 +8,9 @@ use crossterm::style::Stylize;
 
 use crate::{
   generator::{
-    codegen::Visibility,
-    orchestrator::{ClientModOutput, GenerationStats, Orchestrator},
+    codegen::{GeneratedFileType, Visibility},
+    converter::GenerationTarget,
+    orchestrator::{GeneratedFinalOutput, GenerationStats, Orchestrator},
   },
   ui::{Colors, EnumCaseMode, GenerateCommand, GenerateMode},
   utils::spec::SpecLoader,
@@ -51,6 +52,11 @@ impl GenerateConfig {
   }
 
   fn create_orchestrator(&self, spec: oas3::Spec) -> Orchestrator {
+    let generation_target = match self.mode {
+      GenerateMode::ServerMod => GenerationTarget::Server,
+      _ => GenerationTarget::Client,
+    };
+
     Orchestrator::new(
       spec,
       self.visibility,
@@ -61,6 +67,7 @@ impl GenerateConfig {
       self.preserve_case_variants,
       self.case_insensitive_enums,
       self.no_helpers,
+      generation_target,
       self.customizations.clone(),
     )
   }
@@ -73,11 +80,41 @@ impl GenerateConfig {
     Ok(())
   }
 
-  async fn write_module_output(&self, output: ClientModOutput) -> anyhow::Result<()> {
+  async fn write_module_output(&self, output: &GeneratedFinalOutput) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&self.output).await?;
-    tokio::fs::write(self.output.join("types.rs"), output.types_code).await?;
-    tokio::fs::write(self.output.join("client.rs"), output.client_code).await?;
-    tokio::fs::write(self.output.join("mod.rs"), output.mod_code).await?;
+    let types_code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
+    let client_code = output
+      .code
+      .code(&GeneratedFileType::Client)
+      .cloned()
+      .unwrap_or_default();
+    let mod_code = output
+      .code
+      .code(&GeneratedFileType::Module)
+      .cloned()
+      .unwrap_or_default();
+    tokio::fs::write(self.output.join("types.rs"), types_code).await?;
+    tokio::fs::write(self.output.join("client.rs"), client_code).await?;
+    tokio::fs::write(self.output.join("mod.rs"), mod_code).await?;
+    Ok(())
+  }
+
+  async fn write_server_module_output(&self, output: &GeneratedFinalOutput) -> anyhow::Result<()> {
+    tokio::fs::create_dir_all(&self.output).await?;
+    let types_code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
+    let server_code = output
+      .code
+      .code(&GeneratedFileType::Server)
+      .cloned()
+      .unwrap_or_default();
+    let mod_code = output
+      .code
+      .code(&GeneratedFileType::Module)
+      .cloned()
+      .unwrap_or_default();
+    tokio::fs::write(self.output.join("types.rs"), types_code).await?;
+    tokio::fs::write(self.output.join("server.rs"), server_code).await?;
+    tokio::fs::write(self.output.join("mod.rs"), mod_code).await?;
     Ok(())
   }
 }
@@ -101,7 +138,7 @@ impl GenerateConfig {
     } = command;
 
     let output = match (&mode, output) {
-      (GenerateMode::ClientMod, None) => PathBuf::from("."),
+      (GenerateMode::ClientMod | GenerateMode::ServerMod, None) => PathBuf::from("."),
       (_, None) => anyhow::bail!("Output path (-o) is required for types and client modes"),
       (_, Some(path)) => path,
     };
@@ -200,6 +237,7 @@ impl<'a> GenerateLogger<'a> {
       GenerateMode::Types => "Generating Rust types...",
       GenerateMode::Client => "Generating Rust client...",
       GenerateMode::ClientMod => "Generating Rust client module...",
+      GenerateMode::ServerMod => "Generating Rust server module...",
     };
     self.info(&message.with(self.colors.primary()).to_string());
   }
@@ -215,6 +253,9 @@ impl<'a> GenerateLogger<'a> {
       GenerateMode::ClientMod => {
         self.print_type_stats(stats);
         self.print_client_stats(stats);
+      }
+      GenerateMode::ServerMod => {
+        self.print_type_stats(stats);
       }
     }
 
@@ -331,6 +372,7 @@ impl<'a> GenerateLogger<'a> {
         GenerateMode::Types => "Successfully generated Rust types",
         GenerateMode::Client => "Successfully generated Rust client",
         GenerateMode::ClientMod => "Successfully generated Rust client module",
+        GenerateMode::ServerMod => "Successfully generated Rust server module",
       };
       println!();
       println!(
@@ -354,22 +396,34 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
 
   match config.mode {
     GenerateMode::Types => {
-      let (code, stats) = orchestrator.generate_with_header(&source_path)?;
-      logger.print_statistics(&stats);
+      let output = orchestrator.generate_with_header(&source_path)?;
+      logger.print_statistics(&output.stats);
       logger.log_writing();
+      let code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
       config.write_output(code).await?;
     }
     GenerateMode::Client => {
-      let (code, stats) = orchestrator.generate_client_with_header(&source_path)?;
-      logger.print_statistics(&stats);
+      let output = orchestrator.generate_client_with_header(&source_path)?;
+      logger.print_statistics(&output.stats);
       logger.log_writing();
+      let code = output
+        .code
+        .code(&GeneratedFileType::Client)
+        .cloned()
+        .unwrap_or_default();
       config.write_output(code).await?;
     }
     GenerateMode::ClientMod => {
       let output = orchestrator.generate_client_mod(&source_path)?;
       logger.print_statistics(&output.stats);
       logger.log_writing();
-      config.write_module_output(output).await?;
+      config.write_module_output(&output).await?;
+    }
+    GenerateMode::ServerMod => {
+      let output = orchestrator.generate_server_mod(&source_path)?;
+      logger.print_statistics(&output.stats);
+      logger.log_writing();
+      config.write_server_module_output(&output).await?;
     }
   }
 

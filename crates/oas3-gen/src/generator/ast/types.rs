@@ -1,11 +1,11 @@
-use std::sync::LazyLock;
+use std::{collections::BTreeSet, sync::LazyLock};
 
 use num_format::{CustomFormat, Grouping, ToFormattedString};
 use quote::{ToTokens, quote};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
-use crate::generator::ast::{DefaultAtom, StructToken};
+use crate::generator::ast::{DefaultAtom, FileHeaderNode, StructToken};
 
 static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
   CustomFormat::builder()
@@ -19,8 +19,16 @@ pub(crate) fn format_number_with_underscores<T: ToFormattedString>(value: &T) ->
   value.to_formatted_string(&*UNDERSCORE_FORMAT)
 }
 
+/// Contains AST nodes related to types code generation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct TypesRootNode {
+  pub header: FileHeaderNode,
+  #[builder(default)]
+  pub uses: BTreeSet<String>,
+}
+
 /// Type reference with wrapper support (Box, Option, Vec)
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct TypeRef {
   pub base_type: RustPrimitive,
@@ -136,7 +144,10 @@ impl TypeRef {
       unique_items: false,
     };
 
-    let formatted_items: Vec<String> = items.iter().map(|item| element_type.format_example(item)).collect();
+    let formatted_items = items
+      .iter()
+      .map(|item| element_type.format_example(item))
+      .collect::<Vec<String>>();
 
     format!("vec![{}]", formatted_items.join(", "))
   }
@@ -161,7 +172,7 @@ impl From<&serde_json::Value> for TypeRef {
 }
 
 /// Rust primitive and standard library types
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, strum::Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, strum::Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum RustPrimitive {
   #[serde(rename = "i8")]
@@ -272,7 +283,10 @@ impl RustPrimitive {
       }
       serde_json::Value::Null => String::new(),
       serde_json::Value::Array(items) => {
-        let formatted_items: Vec<String> = items.iter().map(|item| self.format_value(item)).collect();
+        let formatted_items = items
+          .iter()
+          .map(|item| self.format_value(item))
+          .collect::<Vec<String>>();
         format!("vec![{}]", formatted_items.join(", "))
       }
       serde_json::Value::Object(_) => serde_json::to_string(value).unwrap_or_else(|_| "...".to_string()),
@@ -446,7 +460,7 @@ fn format_time_constructor(time_str: &str) -> String {
 }
 
 pub(crate) fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
-  let parts: Vec<&str> = date_str.split('-').collect();
+  let parts = date_str.split('-').collect::<Vec<&str>>();
   if parts.len() == 3 {
     let year = parts[0].parse().ok()?;
     let month = parts[1].parse().ok()?;
@@ -458,10 +472,10 @@ pub(crate) fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
 }
 
 pub(crate) fn parse_time_parts(time_str: &str) -> Option<(u32, u32, u32)> {
-  let parts: Vec<&str> = time_str.split(':').collect();
+  let parts = time_str.split(':').collect::<Vec<&str>>();
   if parts.len() >= 2 {
-    let hour: u32 = parts[0].parse().ok()?;
-    let minute: u32 = parts[1].parse().ok()?;
+    let hour = parts[0].parse::<u32>().ok()?;
+    let minute = parts[1].parse::<u32>().ok()?;
     let second: u32 = if parts.len() >= 3 {
       parts[2].split('.').next()?.parse().ok()?
     } else {

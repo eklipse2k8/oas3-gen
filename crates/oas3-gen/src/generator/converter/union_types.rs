@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use oas3::spec::ObjectSchema;
 use serde_json::Value;
 
@@ -13,6 +14,10 @@ pub(crate) enum UnionKind {
 }
 
 impl UnionKind {
+  /// Returns the union kind based on whether the schema defines `oneOf` or `anyOf` variants.
+  ///
+  /// If the schema's `one_of` array is empty, assumes the union is defined via `anyOf`.
+  /// Otherwise, treats it as a `oneOf` union where exactly one variant must match.
   pub(crate) fn from_schema(schema: &ObjectSchema) -> Self {
     if schema.one_of.is_empty() {
       UnionKind::AnyOf
@@ -35,6 +40,24 @@ pub(crate) struct EnumValueEntry {
   pub(crate) deprecated: bool,
 }
 
+impl EnumValueEntry {
+  /// Extracts a cache key from this enum entry's value, if it is a string.
+  ///
+  /// Returns `Some(value)` for string enum values, or `None` for non-string values
+  /// (integers, booleans, etc.) which cannot be used as cache keys.
+  pub(crate) fn cache_key(&self) -> Option<String> {
+    self.value.as_str().map(String::from)
+  }
+}
+
+/// Builds a sorted list of cache keys from enum value entries for type deduplication.
+///
+/// Filters out non-string entries, then sorts alphabetically to produce a canonical
+/// key that identifies equivalent enum types regardless of their declaration order.
+pub(crate) fn entries_to_cache_key(entries: &[EnumValueEntry]) -> Vec<String> {
+  entries.iter().filter_map(EnumValueEntry::cache_key).sorted().collect()
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct UnionVariantSpec {
   pub(crate) variant_name: EnumVariantToken,
@@ -44,6 +67,10 @@ pub(crate) struct UnionVariantSpec {
 
 #[bon::bon]
 impl RustType {
+  /// Creates an untagged enum type for `oneOf`/`anyOf` unions without a discriminator.
+  ///
+  /// The generated enum uses `#[serde(untagged)]` for deserialization, which attempts
+  /// each variant in declaration order until one successfully deserializes.
   #[builder]
   pub(crate) fn untagged_enum(
     name: &str,
@@ -63,6 +90,10 @@ impl RustType {
     )
   }
 
+  /// Creates a discriminated enum type for OpenAPI unions with a discriminator property.
+  ///
+  /// The generated enum uses the discriminator field value to select the correct variant
+  /// during deserialization, avoiding the overhead of trying each variant.
   #[builder]
   pub(crate) fn discriminated_enum(
     name: &EnumToken,

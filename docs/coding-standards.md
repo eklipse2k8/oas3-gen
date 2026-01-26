@@ -74,6 +74,111 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - Types/schemas/dependencies -> BTreeMap (alphabetical is better)
 - Internal bookkeeping -> HashMap only if order truly doesn't matter
 
+## Itertools for Deterministic Iteration
+
+Use `itertools` APIs instead of reimplementing equivalent functionality. These are well-tested, familiar to Rust engineers, and reduce code size while improving readability.
+
+### Sorted Iteration
+
+Prefer itertools' stable sort methods over manual `collect` + `sort` + `into_iter`:
+
+```rust
+use itertools::Itertools;
+
+// Good: itertools sorted_by_key (stable, deterministic)
+let types = schemas.into_iter()
+    .sorted_by_key(|s| s.name.clone())
+    .collect::<Vec<_>>();
+
+// Bad: manual sort (more code, same result)
+let mut types: Vec<_> = schemas.into_iter().collect();
+types.sort_by_key(|s| s.name.clone());
+```
+
+Available methods:
+- `.sorted()` - stable sort by natural `Ord`
+- `.sorted_by(cmp)` - stable sort with custom comparator
+- `.sorted_by_key(f)` - stable sort by extracted key
+- `.sorted_by_cached_key(f)` - same but caches key (use for expensive key functions)
+
+### Deduplication
+
+Use itertools for order-preserving deduplication:
+
+```rust
+// Good: itertools unique (first occurrence retained, order preserved)
+let unique_types = types.into_iter()
+    .unique_by(|t| t.name.clone())
+    .collect::<Vec<_>>();
+
+// Bad: manual HashSet tracking
+let mut seen = HashSet::new();
+let unique_types: Vec<_> = types.into_iter()
+    .filter(|t| seen.insert(t.name.clone()))
+    .collect();
+```
+
+Available methods:
+- `.unique()` - remove duplicates globally, first occurrence retained
+- `.unique_by(f)` - deduplicate by extracted key
+- `.dedup()` - remove consecutive duplicates only (use after sorting for full dedup)
+- `.dedup_with_count()` - dedup + count occurrences
+
+### Merging Pre-Sorted Iterators
+
+Use itertools merge operations for combining sorted sequences:
+
+```rust
+// Good: itertools kmerge for multiple sorted iterators
+let merged = vec![sorted_a, sorted_b, sorted_c]
+    .into_iter()
+    .kmerge()
+    .collect::<Vec<_>>();
+
+// Good: merge two sorted iterators
+let merged = iter_a.merge(iter_b).collect::<Vec<_>>();
+```
+
+### Grouping Consecutive Elements
+
+Use `.chunk_by()` for grouping consecutive elements (NOT HashMap-based):
+
+```rust
+// Good: chunk_by groups consecutive matching keys, preserves order
+let grouped = items.into_iter()
+    .sorted_by_key(|x| x.category.clone())  // sort first for full grouping
+    .chunk_by(|x| x.category.clone());
+
+for (category, group) in &grouped {
+    let items: Vec<_> = group.collect();
+}
+```
+
+### Avoid HashMap-Based Grouping
+
+The `.into_group_map()` and `.counts()` methods return `HashMap`, which has non-deterministic iteration order. If you must use them, always sort the keys:
+
+```rust
+// If using group_map, ALWAYS sort keys before iteration
+let grouped = items.into_iter().into_group_map_by(|t| t.category.clone());
+for key in grouped.keys().sorted() {
+    let items = &grouped[key];
+}
+```
+
+### Other Useful Methods
+
+- `.exactly_one()` - validate iterator has exactly one element
+- `.at_most_one()` - validate zero or one element
+- `.positions(predicate)` - indices matching condition (in order)
+- `.interleave(other)` - alternate between two iterators
+
+### When NOT to Use Itertools
+
+- Simple iteration that std handles well (`.map()`, `.filter()`, `.flat_map()`)
+- When you need lazy evaluation (itertools sorting methods collect eagerly)
+- Performance-critical hot paths where you need control over allocation
+
 ## Preferred Code Patterns
 
 ### Rust 2024 Edition Style
@@ -84,11 +189,12 @@ Follow Rust standard library conventions and Rust 2024 idioms:
 - **`into_iter()` over `.iter().cloned()`**: Consume owned collections directly when possible
 - **`let-else` for early returns**: Use `let Some(x) = y else { return None; }` pattern
 - **`bool::then` over `if`**: Prefer `condition.then(|| value)` for Option construction
-- **Iterator chains**: Favor iterator methods (`map`, `filter`, `flat_map`) over manual loops
+- **Iterator chains**: Favor iterator methods (`map`, `filter`, `flat_map`) over manual loops; use itertools for sorting, deduplication, and merging
 - **`From`/`Into` traits**: Implement standard conversion traits instead of ad-hoc methods
 - **Type aliases for complex types**: Use `type Foo = (Vec<A>, Vec<B>)` to document tuple semantics
 - **Early returns**: Return early on error/empty cases to reduce nesting
 - **Method chaining**: Keep transformations flowing left-to-right in single expressions
+- **Anonymous trait imports at module level**: When importing a trait solely for method resolution (e.g., `use quote::ToTokens as _;`), place the import at module level, never inline within functions
 
 ### State Management
 
@@ -163,6 +269,25 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
 - The underlying error is automatically chained; don't manually interpolate it into the message
 - Import `use anyhow::Context;` to access the `with_context()` or `context()` method on `Result` types
 
+### Extension Traits for External Types
+
+- Use extension traits to add methods to external library types without modifying them
+- Define trait in a dedicated module (e.g., `utils/schema_ext.rs` for `SchemaExt`)
+- Trait methods should be cohesive - group related functionality
+- Good: `trait SchemaExt { fn is_array(&self) -> bool; fn has_union(&self) -> bool; }`
+- Import the trait where needed: `use crate::utils::SchemaExt;`
+- Example: `SchemaExt` adds type predicates and inference methods to `oas3::spec::ObjectSchema`
+- Prefer extension traits over free functions when the operation is conceptually a method on the type
+
+### Focused Registries over Monolithic Caches
+
+- Split large cache structures into focused, single-responsibility registries
+- Each registry should manage one type of mapping or concern
+- Good: `NameRegistry` (name uniqueness), `SchemaIdentity` (schema-to-type), `EnumRegistry` (enum values-to-type)
+- Bad: `TypeIdentityCache` with mixed concerns (schema maps, enum maps, union maps, name tracking)
+- Benefits: clearer ownership, easier testing, simpler method signatures
+- Example: `SharedSchemaCache` composes `NameRegistry`, `SchemaIdentity`, `EnumRegistry`, `UnionRegistry`
+
 ### Type-Safe Enums for Configuration
 
 - Use typed enums instead of boolean flags for configuration options
@@ -201,9 +326,10 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
 
 1. Review pipeline architecture: Parse/Analyze -> Convert (AST) -> Generate (Rust source)
 2. Identify stage:
-   - analyzer/ for schema analysis, validation, and type usage tracking
-   - naming/ for identifier generation and type name inference
+   - utils/ for cross-cutting concerns (extension traits, text processing)
+   - postprocess/ for type postprocessing, validation, and serde mode optimization
+   - naming/ for identifier generation and variant naming
    - converter/ for OpenAPI to AST transformation
    - codegen/ for AST to Rust source code generation
 3. Locate module: enums, structs, operations, type_resolver, attributes, cache, etc.
-4. Check utilities for cross-cutting concerns: utils/text.rs, naming/identifiers.rs
+4. Check utilities for cross-cutting concerns: utils/schema_ext.rs, utils/text.rs, naming/identifiers.rs

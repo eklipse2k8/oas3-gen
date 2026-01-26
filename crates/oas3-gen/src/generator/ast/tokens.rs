@@ -234,3 +234,8 @@ impl From<&StructToken> for EnumToken {
     Self(token.to_atom())
   }
 }
+
+define_ident_token!(
+  /// Token representing a Trait
+  TraitToken => to_rust_type_name
+);

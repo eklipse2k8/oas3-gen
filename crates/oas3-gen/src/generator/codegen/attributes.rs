@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
+use quote::{ToTokens, TokenStreamExt as _, quote};
 
 use super::coercion;
 use crate::generator::ast::{
@@ -29,8 +31,31 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Documentation {
   docs
 }
 
+#[derive(Clone, Debug)]
+pub struct DeriveAttribute<T>(BTreeSet<T>);
+
+impl<T: ToTokens> DeriveAttribute<T> {
+  pub fn new(derives: BTreeSet<T>) -> Self {
+    Self(derives)
+  }
+}
+
+impl<T: ToTokens> ToTokens for DeriveAttribute<T> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    if self.0.is_empty() {
+      return;
+    }
+
+    let derives = &self.0;
+    tokens.append_all(quote! { #[derive(#(#derives),*)] });
+  }
+}
+
 pub(crate) fn generate_derives_from_slice<'a>(derives: impl IntoIterator<Item = &'a DeriveTrait>) -> TokenStream {
-  let derive_idents: Vec<_> = derives.into_iter().map(quote::ToTokens::to_token_stream).collect();
+  let derive_idents = derives
+    .into_iter()
+    .map(quote::ToTokens::to_token_stream)
+    .collect::<Vec<_>>();
 
   if derive_idents.is_empty() {
     quote! {}
@@ -40,7 +65,10 @@ pub(crate) fn generate_derives_from_slice<'a>(derives: impl IntoIterator<Item = 
 }
 
 pub(crate) fn generate_outer_attrs<'a>(attrs: impl IntoIterator<Item = &'a OuterAttr>) -> TokenStream {
-  let attr_tokens: Vec<_> = attrs.into_iter().map(quote::ToTokens::to_token_stream).collect();
+  let attr_tokens = attrs
+    .into_iter()
+    .map(quote::ToTokens::to_token_stream)
+    .collect::<Vec<_>>();
 
   if attr_tokens.is_empty() {
     quote! {}
@@ -54,7 +82,10 @@ pub(crate) fn generate_outer_attrs<'a>(attrs: impl IntoIterator<Item = &'a Outer
 /// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
 /// `#[serde(attr1, attr2, ...)]` attribute to reduce output noise.
 pub(crate) fn generate_serde_attrs<'a>(attrs: impl IntoIterator<Item = &'a SerdeAttribute>) -> TokenStream {
-  let attr_tokens: Vec<_> = attrs.into_iter().map(quote::ToTokens::to_token_stream).collect();
+  let attr_tokens = attrs
+    .into_iter()
+    .map(quote::ToTokens::to_token_stream)
+    .collect::<Vec<_>>();
 
   if attr_tokens.is_empty() {
     quote! {}
@@ -68,7 +99,10 @@ pub(crate) fn generate_serde_attrs<'a>(attrs: impl IntoIterator<Item = &'a Serde
 /// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
 /// `#[validate(attr1, attr2, ...)]` attribute.
 pub(crate) fn generate_validation_attrs<'a>(attrs: impl IntoIterator<Item = &'a ValidationAttribute>) -> TokenStream {
-  let attr_tokens: Vec<_> = attrs.into_iter().map(quote::ToTokens::to_token_stream).collect();
+  let attr_tokens = attrs
+    .into_iter()
+    .map(quote::ToTokens::to_token_stream)
+    .collect::<Vec<_>>();
 
   if attr_tokens.is_empty() {
     quote! {}

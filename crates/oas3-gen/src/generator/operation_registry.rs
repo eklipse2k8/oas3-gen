@@ -75,10 +75,10 @@ impl RegistrationContext {
   }
 
   fn simplify_keys(&mut self) {
-    let original_keys: Vec<String> = self.entries.keys().cloned().collect();
+    let original_keys = self.entries.keys().cloned().collect::<Vec<String>>();
     let simplified_keys = trim_common_affixes(&original_keys);
 
-    let remapped: IndexMap<String, OperationEntry> = original_keys
+    let remapped = original_keys
       .into_iter()
       .zip(simplified_keys)
       .filter_map(|(old, new)| {
@@ -87,7 +87,7 @@ impl RegistrationContext {
           (new, entry)
         })
       })
-      .collect();
+      .collect::<IndexMap<String, OperationEntry>>();
 
     self.entries = remapped;
   }

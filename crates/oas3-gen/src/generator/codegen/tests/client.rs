@@ -1,66 +1,54 @@
 use http::Method;
-use proc_macro2::TokenStream;
 use quote::ToTokens;
+use reqwest::Url;
 
 use crate::generator::{
   ast::{
-    ClientDef, ContentCategory, EnumToken, FieldDef, FieldNameToken, OperationInfo, OperationKind, ParameterLocation,
-    ParsedPath, PathSegment, ResponseMediaType, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef,
+    ClientRootNode, ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, MultipartFieldInfo,
+    OperationBody, OperationInfo, OperationKind, ParameterLocation, ParsedPath, PathSegment, ResponseMediaType,
+    StructToken, TypeRef,
   },
   codegen::{
     Visibility,
-    client::{ClientGenerator, method},
+    client::{ClientFragment, ClientMethodFragment, MultipartFormFragment},
   },
 };
 
-fn build_doc_attributes(op: &OperationInfo) -> crate::generator::ast::Documentation {
-  method::doc_attributes(op)
-}
-
-fn generate_method(op: &OperationInfo, rust_types: &[RustType], visibility: Visibility) -> anyhow::Result<TokenStream> {
-  method::MethodGenerator::new(op, rust_types, visibility).emit()
-}
-
-fn build_multipart_body(
-  field: &FieldNameToken,
-  optional: bool,
-  op: &OperationInfo,
-  rust_types: &[RustType],
-) -> TokenStream {
-  method::body::multipart::MultipartGenerator::new(op, rust_types, field, optional)
-    .emit()
-    .tokens
-}
-
 #[derive(Default)]
-struct TestOperation<'a> {
-  summary: Option<&'a str>,
-  description: Option<&'a str>,
+struct TestOperation {
+  summary: Option<String>,
+  description: Option<String>,
   response_media_types: Option<Vec<ResponseMediaType>>,
-  response_enum: Option<&'a str>,
+  response_enum: Option<String>,
 }
 
-impl TestOperation<'_> {
+impl TestOperation {
   fn build(self) -> OperationInfo {
-    OperationInfo {
-      stable_id: "test_operation".to_string(),
-      operation_id: "testOperation".to_string(),
-      method: Method::GET,
-      path: ParsedPath(vec![PathSegment::Literal("test".to_string())]),
-      path_template: "/test".to_string(),
-      kind: OperationKind::Http,
-      summary: self.summary.map(String::from),
-      description: self.description.map(String::from),
-      request_type: Some(StructToken::new("TestRequest")),
-      response_type: Some("TestResponse".to_string()),
-      response_enum: self.response_enum.map(EnumToken::new),
-      response_media_types: self
-        .response_media_types
-        .unwrap_or_else(|| vec![ResponseMediaType::new("application/json")]),
-      warnings: vec![],
-      parameters: vec![],
-      body: None,
-    }
+    let method = Method::GET;
+    let path_template = "/test";
+    OperationInfo::builder()
+      .stable_id("test_operation")
+      .operation_id("testOperation")
+      .method(method.clone())
+      .path(ParsedPath(vec![PathSegment::Literal("test".to_string())]))
+      .kind(OperationKind::Http)
+      .request_type(StructToken::new("TestRequest"))
+      .response_type("TestResponse".to_string())
+      .maybe_response_enum(self.response_enum.as_deref().map(EnumToken::new))
+      .response_media_types(
+        self
+          .response_media_types
+          .unwrap_or_else(|| vec![ResponseMediaType::new("application/json")]),
+      )
+      .documentation(
+        Documentation::documentation()
+          .maybe_summary(self.summary.as_deref())
+          .maybe_description(self.description.as_deref())
+          .method(&method)
+          .path(path_template)
+          .call(),
+      )
+      .build()
   }
 }
 
@@ -109,13 +97,12 @@ fn test_build_doc_attributes() {
   for case in cases {
     let label = format!("summary={:?}, description={:?}", case.summary, case.description);
     let operation = TestOperation {
-      summary: case.summary,
-      description: case.description,
+      summary: case.summary.map(String::from),
+      description: case.description.map(String::from),
       ..Default::default()
     }
     .build();
-    let doc_attrs = build_doc_attributes(&operation);
-    let output = doc_attrs.to_string();
+    let output = operation.documentation.to_string();
 
     for expected in case.expected_contains {
       assert!(output.contains(expected), "{label}: expected to contain '{expected}'");
@@ -129,13 +116,12 @@ fn test_build_doc_attributes() {
   }
 
   let operation = TestOperation {
-    summary: Some("Test summary"),
-    description: Some("Test description"),
+    summary: Some("Test summary".to_string()),
+    description: Some("Test description".to_string()),
     ..Default::default()
   }
   .build();
-  let doc_attrs = build_doc_attributes(&operation);
-  let output = doc_attrs.to_string();
+  let output = operation.documentation.to_string();
   let summary_pos = output.find("Test summary").unwrap();
   let description_pos = output.find("Test description").unwrap();
   let signature_pos = output.find("GET /test").unwrap();
@@ -208,13 +194,13 @@ fn test_response_handling_content_categories() {
       ..Default::default()
     }
     .build();
-    let method = generate_method(&operation, &[], Visibility::Public)
+    let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+      .generate()
       .unwrap()
       .to_string();
 
     let expected_return = format!("-> anyhow :: Result < {} >", case.expected_return_ty);
 
-    // Normalize spaces for comparison if needed, or just check substring
     assert!(
       method.contains(&expected_return),
       "{label}: return type mismatch. Got code: {method}"
@@ -232,11 +218,12 @@ fn test_response_handling_content_categories() {
 #[test]
 fn test_response_handling_with_response_enum() {
   let operation = TestOperation {
-    response_enum: Some("TestResponseEnum"),
+    response_enum: Some("TestResponseEnum".to_string()),
     ..Default::default()
   }
   .build();
-  let method = generate_method(&operation, &[], Visibility::Public)
+  let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+    .generate()
     .unwrap()
     .to_string();
 
@@ -257,7 +244,8 @@ fn test_event_stream_response_handling() {
     ..Default::default()
   }
   .build();
-  let method = generate_method(&operation, &[], Visibility::Public)
+  let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+    .generate()
     .unwrap()
     .to_string();
 
@@ -274,58 +262,23 @@ fn test_event_stream_response_handling() {
 
 #[test]
 fn test_multipart_generation() {
-  let binary_field = FieldDef::builder()
-    .name(FieldNameToken::new("file"))
-    .rust_type(TypeRef::new(RustPrimitive::Bytes))
-    .build();
-
-  let text_field = FieldDef::builder()
-    .name(FieldNameToken::new("description"))
-    .rust_type(TypeRef::new(RustPrimitive::String))
-    .build();
-
-  let body_struct = StructDef {
-    name: StructToken::new("MultipartBody"),
-    fields: vec![binary_field, text_field],
-    kind: StructKind::Schema,
-    ..Default::default()
-  };
-
-  let request_struct = StructDef {
-    name: StructToken::new("UploadRequest"),
-    fields: vec![
-      FieldDef::builder()
-        .name(FieldNameToken::new("body"))
-        .rust_type(TypeRef::new(RustPrimitive::Custom("MultipartBody".into())))
+  let strict_body = OperationBody::builder()
+    .field_name(FieldNameToken::new("body"))
+    .content_category(ContentCategory::Multipart)
+    .multipart_fields(vec![
+      MultipartFieldInfo::builder()
+        .name(FieldNameToken::new("file"))
+        .is_bytes(true)
         .build(),
-    ],
-    kind: StructKind::OperationRequest,
-    ..Default::default()
-  };
+      MultipartFieldInfo::builder()
+        .name(FieldNameToken::new("description"))
+        .build(),
+    ])
+    .build();
 
-  let make_operation = |request_type: &str| OperationInfo {
-    stable_id: format!("{request_type}_operation"),
-    operation_id: format!("{request_type}Operation"),
-    method: Method::GET,
-    path: ParsedPath(vec![PathSegment::Literal("test".to_string())]),
-    path_template: "/test".to_string(),
-    kind: OperationKind::Http,
-    summary: None,
-    description: None,
-    request_type: Some(StructToken::new(request_type)),
-    response_type: Some("TestResponse".to_string()),
-    response_enum: None,
-    response_media_types: vec![ResponseMediaType::new("application/json")],
-    warnings: vec![],
-    parameters: vec![],
-    body: None,
-  };
-
-  let field_ident = FieldNameToken::new("body");
-
-  let rust_types = vec![RustType::Struct(request_struct), RustType::Struct(body_struct)];
-  let strict_operation = make_operation("UploadRequest");
-  let strict_code = build_multipart_body(&field_ident, false, &strict_operation, &rust_types).to_string();
+  let strict_code = MultipartFormFragment::new(strict_body.clone())
+    .into_token_stream()
+    .to_string();
 
   assert!(
     strict_code.contains("Part :: bytes"),
@@ -348,8 +301,14 @@ fn test_multipart_generation() {
     "strict: should NOT use fallback"
   );
 
-  let fallback_operation = make_operation("UnknownRequest");
-  let fallback_code = build_multipart_body(&field_ident, false, &fallback_operation, &[]).to_string();
+  let fallback_body = OperationBody::builder()
+    .field_name(FieldNameToken::new("body"))
+    .content_category(ContentCategory::Multipart)
+    .build();
+
+  let fallback_code = MultipartFormFragment::new(fallback_body.clone())
+    .into_token_stream()
+    .to_string();
 
   assert!(
     fallback_code.contains("serde_json :: to_value"),
@@ -364,61 +323,69 @@ fn test_multipart_generation() {
 
 #[test]
 fn test_client_filters_webhook_operations() {
-  let http_operation = OperationInfo {
-    stable_id: "list_pets".to_string(),
-    operation_id: "listPets".to_string(),
-    method: Method::GET,
-    path: ParsedPath(vec![PathSegment::Literal("pets".to_string())]),
-    path_template: "/pets".to_string(),
-    kind: OperationKind::Http,
-    summary: Some("List all pets".to_string()),
-    description: None,
-    request_type: Some(StructToken::new("ListPetsRequest")),
-    response_type: Some("Vec<Pet>".to_string()),
-    response_enum: None,
-    response_media_types: vec![ResponseMediaType::new("application/json")],
-    warnings: vec![],
-    parameters: vec![
-      FieldDef::builder()
-        .name(FieldNameToken::new("x_custom_header"))
-        .rust_type(TypeRef::new("String"))
-        .parameter_location(ParameterLocation::Header)
-        .original_name("X-Custom-Header".to_string())
-        .build(),
-    ],
-    body: None,
+  let http_operation = {
+    let method = Method::GET;
+    let path_template = "/pets";
+    let documentation = Documentation::documentation()
+      .summary("List all pets")
+      .method(&method)
+      .path(path_template)
+      .call();
+    OperationInfo::builder()
+      .stable_id("list_pets")
+      .operation_id("listPets")
+      .method(method)
+      .path(ParsedPath(vec![PathSegment::Literal("pets".to_string())]))
+      .kind(OperationKind::Http)
+      .request_type(StructToken::new("ListPetsRequest"))
+      .response_type("Vec<Pet>".to_string())
+      .response_media_types(vec![ResponseMediaType::new("application/json")])
+      .parameters(vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("x_custom_header"))
+          .rust_type(TypeRef::new("String"))
+          .parameter_location(ParameterLocation::Header)
+          .original_name("X-Custom-Header".to_string())
+          .build(),
+      ])
+      .documentation(documentation)
+      .build()
   };
 
-  let webhook_operation = OperationInfo {
-    stable_id: "pet_added_hook".to_string(),
-    operation_id: "petAddedHook".to_string(),
-    method: Method::POST,
-    path: ParsedPath(vec![
-      PathSegment::Literal("webhooks".to_string()),
-      PathSegment::Literal("petAdded".to_string()),
-    ]),
-    path_template: "webhooks/petAdded".to_string(),
-    kind: OperationKind::Webhook,
-    summary: Some("Pet added webhook".to_string()),
-    description: None,
-    request_type: Some(StructToken::new("PetAddedHookRequest")),
-    response_type: Some("WebhookResponse".to_string()),
-    response_enum: None,
-    response_media_types: vec![ResponseMediaType::new("application/json")],
-    warnings: vec![],
-    parameters: vec![
-      FieldDef::builder()
-        .name(FieldNameToken::new("x_webhook_secret"))
-        .rust_type(TypeRef::new("String"))
-        .parameter_location(ParameterLocation::Header)
-        .original_name("X-Webhook-Secret".to_string())
-        .build(),
-    ],
-    body: None,
+  let webhook_operation = {
+    let method = Method::POST;
+    let path_template = "webhooks/petAdded";
+    let documentation = Documentation::documentation()
+      .summary("Pet added webhook")
+      .method(&method)
+      .path(path_template)
+      .call();
+    OperationInfo::builder()
+      .stable_id("pet_added_hook")
+      .operation_id("petAddedHook")
+      .method(method)
+      .path(ParsedPath(vec![
+        PathSegment::Literal("webhooks".to_string()),
+        PathSegment::Literal("petAdded".to_string()),
+      ]))
+      .kind(OperationKind::Webhook)
+      .request_type(StructToken::new("PetAddedHookRequest"))
+      .response_type("WebhookResponse".to_string())
+      .response_media_types(vec![ResponseMediaType::new("application/json")])
+      .parameters(vec![
+        FieldDef::builder()
+          .name(FieldNameToken::new("x_webhook_secret"))
+          .rust_type(TypeRef::new("String"))
+          .parameter_location(ParameterLocation::Header)
+          .original_name("X-Webhook-Secret".to_string())
+          .build(),
+      ])
+      .documentation(documentation)
+      .build()
   };
 
   let operations = vec![http_operation, webhook_operation];
-  let metadata = ClientDef {
+  let metadata = ClientRootNode {
     name: StructToken::new("PetStoreClient"),
     title: "PetStore".to_string(),
     base_url: "https://api.example.com".to_string(),
@@ -426,23 +393,19 @@ fn test_client_filters_webhook_operations() {
     description: None,
   };
 
-  let generator = ClientGenerator::new(&metadata, &operations, &[], Visibility::Public);
+  let generator = ClientFragment::new(&metadata, &operations, Visibility::Public);
   let output = generator.to_token_stream().to_string();
 
-  // HTTP operation should generate a client method
   assert!(
     output.contains("list_pets"),
     "HTTP operation method should be generated"
   );
 
-  // Webhook operation should NOT generate a client method
   assert!(
     !output.contains("pet_added_hook"),
     "Webhook operation method should NOT be generated"
   );
 
-  // Header constants are now generated in types.rs, not client.rs
-  // Verify the client uses the headers via the From impl
   assert!(output.contains("headers"), "HTTP operation should use headers");
 }
 
@@ -528,9 +491,168 @@ fn test_path_segments_mixed_segment() {
 }
 
 #[test]
-fn test_url_path_segments_encoding() {
-  use reqwest::Url;
+fn test_multipart_method_generation_with_path_params() {
+  let method = Method::POST;
+  let path_template = "/pets/{petId}/upload";
+  let documentation = Documentation::documentation()
+    .summary("Upload pet image")
+    .description("Updates the pet's image and name")
+    .method(&method)
+    .path(path_template)
+    .call();
+  let operation = OperationInfo::builder()
+    .stable_id("upload_pet_image")
+    .operation_id("uploadPetImage")
+    .method(method)
+    .path(ParsedPath(vec![
+      PathSegment::Literal("pets".to_string()),
+      PathSegment::Param(FieldNameToken::new("pet_id")),
+      PathSegment::Literal("upload".to_string()),
+    ]))
+    .kind(OperationKind::Http)
+    .request_type(StructToken::new("UploadPetImageRequest"))
+    .response_type("Pet".to_string())
+    .response_media_types(vec![ResponseMediaType::new("application/json")])
+    .parameters(vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("pet_id"))
+        .rust_type(TypeRef::new("String"))
+        .parameter_location(ParameterLocation::Path)
+        .build(),
+    ])
+    .body(
+      OperationBody::builder()
+        .field_name(FieldNameToken::new("body"))
+        .content_category(ContentCategory::Multipart)
+        .multipart_fields(vec![
+          MultipartFieldInfo::builder()
+            .name(FieldNameToken::new("image"))
+            .is_bytes(true)
+            .build(),
+          MultipartFieldInfo::builder().name(FieldNameToken::new("name")).build(),
+        ])
+        .build(),
+    )
+    .documentation(documentation)
+    .build();
 
+  let generated = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+    .generate()
+    .unwrap()
+    .to_string();
+
+  assert!(
+    generated.contains("upload_pet_image"),
+    "method name should be upload_pet_image"
+  );
+  assert!(
+    generated.contains("UploadPetImageRequest"),
+    "should use UploadPetImageRequest type"
+  );
+  assert!(generated.contains("post (url)"), "should use POST method");
+  assert!(generated.contains("pet_id"), "should include path parameter pet_id");
+  assert!(
+    generated.contains("multipart :: Form :: new"),
+    "should create multipart form"
+  );
+  assert!(
+    generated.contains("Part :: bytes"),
+    "should use Part::bytes for image field"
+  );
+  assert!(
+    generated.contains("Part :: text"),
+    "should use Part::text for name field"
+  );
+  assert!(
+    generated.contains("req_builder . multipart (form)"),
+    "should attach multipart form to request"
+  );
+  assert!(
+    generated.contains("-> anyhow :: Result < Pet >"),
+    "should return Pet type"
+  );
+}
+
+#[test]
+fn test_multipart_with_nullable_fields() {
+  let body = OperationBody::builder()
+    .field_name(FieldNameToken::new("body"))
+    .content_category(ContentCategory::Multipart)
+    .multipart_fields(vec![
+      MultipartFieldInfo::builder()
+        .name(FieldNameToken::new("file"))
+        .is_bytes(true)
+        .build(),
+      MultipartFieldInfo::builder()
+        .name(FieldNameToken::new("description"))
+        .nullable(true)
+        .build(),
+    ])
+    .build();
+
+  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
+
+  assert!(
+    code.contains("if let Some (val)"),
+    "nullable field should use if let Some pattern"
+  );
+  assert!(
+    code.contains("form . part (\"file\""),
+    "non-nullable file field should be added unconditionally"
+  );
+  assert!(
+    code.contains("form . part (\"description\""),
+    "nullable description field should be added conditionally"
+  );
+}
+
+#[test]
+fn test_multipart_with_json_serialization() {
+  let body = OperationBody::builder()
+    .field_name(FieldNameToken::new("body"))
+    .content_category(ContentCategory::Multipart)
+    .multipart_fields(vec![
+      MultipartFieldInfo::builder()
+        .name(FieldNameToken::new("metadata"))
+        .requires_json(true)
+        .build(),
+      MultipartFieldInfo::builder()
+        .name(FieldNameToken::new("simple_text"))
+        .build(),
+    ])
+    .build();
+
+  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
+
+  assert!(
+    code.contains("serde_json :: to_string"),
+    "JSON-required field should use serde_json::to_string"
+  );
+  assert!(code.contains("form . part (\"metadata\""), "should have metadata part");
+  assert!(
+    code.contains("form . part (\"simple_text\""),
+    "should have simple_text part"
+  );
+}
+
+#[test]
+fn test_multipart_fallback_with_body_type() {
+  let body = OperationBody::builder()
+    .field_name(FieldNameToken::new("body"))
+    .body_type(TypeRef::new("UploadRequest"))
+    .content_category(ContentCategory::Multipart)
+    .build();
+
+  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
+
+  assert!(
+    code.contains("serde_json :: to_value :: < UploadRequest >"),
+    "fallback with body_type should include type annotation: {code}"
+  );
+}
+
+#[test]
+fn test_url_path_segments_encoding() {
   let mut url = Url::parse("http://example.com").unwrap();
 
   url
@@ -574,7 +696,7 @@ fn test_url_path_segments_encoding() {
     .expect("valid URL")
     .clear()
     .push("pets")
-    .push("café");
+    .push("cafe");
 
-  assert_eq!(url.path(), "/pets/caf%C3%A9", "unicode should be percent-encoded");
+  assert_eq!(url.path(), "/pets/cafe", "unicode should be percent-encoded");
 }

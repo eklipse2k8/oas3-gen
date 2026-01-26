@@ -1,16 +1,8 @@
 use std::collections::BTreeSet;
 
-use oas3::{
-  Spec,
-  spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
-};
+use oas3::spec::{ObjectOrReference, ObjectSchema};
 
-use crate::generator::{
-  ast::{RustType, TypeRef},
-  converter::{ConverterContext, cache::SharedSchemaCache},
-  naming::inference::has_mixed_string_variants,
-  schema_registry::RefCollector,
-};
+use crate::generator::{ast::RustType, schema_registry::RefCollector};
 
 /// Wraps a conversion result with any inline types generated during conversion.
 ///
@@ -22,6 +14,10 @@ pub(crate) struct ConversionOutput<T> {
 }
 
 impl<T> ConversionOutput<T> {
+  /// Creates a conversion output containing only the primary result.
+  ///
+  /// Use this constructor when the conversion produces a single type without
+  /// generating any additional inline type definitions.
   pub(crate) fn new(result: T) -> Self {
     Self {
       result,
@@ -29,12 +25,23 @@ impl<T> ConversionOutput<T> {
     }
   }
 
+  /// Creates a conversion output containing the primary result along with
+  /// additional inline type definitions discovered during conversion.
+  ///
+  /// Inline types are nested definitions (e.g., struct fields with anonymous
+  /// object schemas, enum variants with inline schemas) that must be emitted
+  /// as separate top-level Rust types alongside the primary converted type.
   pub(crate) fn with_inline_types(result: T, inline_types: Vec<RustType>) -> Self {
     Self { result, inline_types }
   }
 }
 
 impl ConversionOutput<RustType> {
+  /// Consumes this output and returns all types as a flat vector.
+  ///
+  /// The inline types appear first, followed by the primary result. This
+  /// ordering ensures that type definitions appear before types that
+  /// depend on them, which is required for valid Rust code emission.
   pub(crate) fn into_vec(self) -> Vec<RustType> {
     let mut types = self.inline_types;
     types.push(self.result);
@@ -42,302 +49,14 @@ impl ConversionOutput<RustType> {
   }
 }
 
-/// Output from converting an inline schema.
-pub(crate) struct InlineSchemaOutput {
-  pub type_name: String,
-  pub generated_types: Vec<RustType>,
-}
-
-/// Helper to handle the common pattern of checking cache, generating an inline type, and registering it.
+/// Extracts the set of `$ref` schema names from a slice of union variants.
 ///
-/// This function orchestrates inline type creation by:
-/// 1. Checking if the type already exists in cache (early return if found)
-/// 2. Running a cached name check for special cases like enums (early return if found)
-/// 3. Determining the appropriate name for the new type
-/// 4. Calling the generator function to create the type
-/// 5. Registering the new type in cache or collecting inline types
-pub(crate) fn handle_inline_creation<F, C>(
-  schema: &ObjectSchema,
-  base_name: &str,
-  forced_name: Option<String>,
-  context: &ConverterContext,
-  cached_name_check: C,
-  generator: F,
-) -> anyhow::Result<ConversionOutput<TypeRef>>
-where
-  F: FnOnce(&str) -> anyhow::Result<ConversionOutput<RustType>>,
-  C: FnOnce(&SharedSchemaCache) -> Option<String>,
-{
-  {
-    let cache = context.cache.borrow();
-    if let Some(existing_name) = cache.get_type_name(schema)? {
-      return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
-    }
-    if let Some(name) = cached_name_check(&cache) {
-      return Ok(ConversionOutput::new(TypeRef::new(name)));
-    }
-  }
-
-  let name = if let Some(forced) = forced_name {
-    forced
-  } else {
-    context.cache.borrow().get_preferred_name(schema, base_name)?
-  };
-
-  let result = generator(&name)?;
-
-  let type_name =
-    context
-      .cache
-      .borrow_mut()
-      .register_type(schema, &name, result.inline_types, result.result.clone())?;
-  Ok(ConversionOutput::new(TypeRef::new(type_name)))
-}
-
-/// Extension methods for `ObjectSchema` to query its type properties conveniently.
-pub(crate) trait SchemaExt {
-  /// Returns true if the schema represents a primitive type (no properties, oneOf, anyOf, allOf).
-  fn is_primitive(&self) -> bool;
-
-  /// Returns true if the schema is explicitly null type.
-  fn is_null(&self) -> bool;
-
-  /// Returns true if the schema is a nullable placeholder (pure null or empty object with null).
-  /// This includes schemas like `{type: "null"}` and `{type: ["object", "null"]}` with no properties.
-  fn is_nullable_object(&self) -> bool;
-
-  /// Returns true if the schema is an array type.
-  fn is_array(&self) -> bool;
-
-  /// Returns true if the schema is a string type.
-  fn is_string(&self) -> bool;
-
-  /// Returns true if the schema is an object type.
-  fn is_object(&self) -> bool;
-
-  /// Returns true if the schema is a numeric type (integer or number).
-  fn is_numeric(&self) -> bool;
-
-  /// Returns true if the schema is a nullable array type `[array, null]`.
-  fn is_nullable_array(&self) -> bool;
-
-  /// Returns true if the schema has exactly the single specified type.
-  fn is_single_type(&self, schema_type: SchemaType) -> bool;
-
-  /// Returns the single `SchemaType` if exactly one is defined, None otherwise.
-  fn single_type(&self) -> Option<SchemaType>;
-
-  /// Returns the non-null type from a two-type nullable set (e.g., `[string, null]` -> `string`).
-  fn non_null_type(&self) -> Option<SchemaType>;
-
-  /// Returns true if the schema represents an inline object definition.
-  /// This excludes enums, unions, arrays, and schemas without properties.
-  fn is_inline_object(&self) -> bool;
-
-  /// Returns true if the schema is a discriminated base type with a non-empty mapping.
-  fn is_discriminated_base_type(&self) -> bool;
-
-  /// Returns true if the schema has no type constraints (no properties, no type info).
-  /// An empty schema `{}` or one with only `additionalProperties: {}` both return true,
-  /// as neither constrains the shape of the data.
-  fn is_empty_object(&self) -> bool;
-
-  /// Returns true if the schema has inline oneOf or anyOf variants.
-  fn has_union(&self) -> bool;
-
-  /// Returns true if this is an array with inline union items (oneOf/anyOf in items).
-  fn has_inline_union_array_items(&self, spec: &Spec) -> bool;
-
-  /// Extracts the inline array items schema if present and not a reference.
-  /// Returns None if: no items, items is a boolean schema, or items is a $ref.
-  fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema>;
-
-  /// Returns true if the schema has enum values defined.
-  fn has_enum_values(&self) -> bool;
-
-  /// Returns true if the schema has allOf composition.
-  fn has_intersection(&self) -> bool;
-
-  /// Returns true if the schema has a const value defined.
-  fn has_const_value(&self) -> bool;
-
-  /// Returns true if the schema requires a dedicated type definition.
-  /// This includes schemas with enum values, oneOf/anyOf unions, or typed object properties.
-  fn requires_type_definition(&self) -> bool;
-
-  /// Returns true if the schema has a relaxed enum pattern in anyOf.
-  /// A relaxed enum has both freeform string variants and constrained string variants,
-  /// allowing APIs to accept known values plus arbitrary strings for forward compatibility.
-  fn has_relaxed_anyof_enum(&self) -> bool;
-
-  /// Returns true if the schema is a freeform string (string type with no const or enum constraints).
-  fn is_freeform_string(&self) -> bool;
-}
-
-impl SchemaExt for ObjectSchema {
-  fn is_primitive(&self) -> bool {
-    self.properties.is_empty()
-      && self.one_of.is_empty()
-      && self.any_of.is_empty()
-      && self.all_of.is_empty()
-      && self.enum_values.len() <= 1
-      && (self.schema_type.is_some() || self.enum_values.is_empty())
-  }
-
-  fn is_null(&self) -> bool {
-    self.is_single_type(SchemaType::Null)
-  }
-
-  fn is_nullable_object(&self) -> bool {
-    if self.is_null() {
-      return true;
-    }
-    if let Some(SchemaTypeSet::Multiple(types)) = &self.schema_type {
-      types.contains(&SchemaType::Null)
-        && types.contains(&SchemaType::Object)
-        && self.properties.is_empty()
-        && self.additional_properties.is_none()
-    } else {
-      false
-    }
-  }
-
-  fn is_array(&self) -> bool {
-    self.is_single_type(SchemaType::Array)
-  }
-
-  fn is_string(&self) -> bool {
-    self.is_single_type(SchemaType::String)
-  }
-
-  fn is_object(&self) -> bool {
-    self.is_single_type(SchemaType::Object)
-  }
-
-  fn is_numeric(&self) -> bool {
-    matches!(
-      &self.schema_type,
-      Some(SchemaTypeSet::Single(SchemaType::Number | SchemaType::Integer))
-    )
-  }
-
-  fn is_nullable_array(&self) -> bool {
-    match &self.schema_type {
-      Some(SchemaTypeSet::Multiple(types)) => {
-        types.len() == 2 && types.contains(&SchemaType::Array) && types.contains(&SchemaType::Null)
-      }
-      _ => false,
-    }
-  }
-
-  fn is_single_type(&self, schema_type: SchemaType) -> bool {
-    matches!(
-      &self.schema_type,
-      Some(SchemaTypeSet::Single(t)) if *t == schema_type
-    )
-  }
-
-  fn single_type(&self) -> Option<SchemaType> {
-    match &self.schema_type {
-      Some(SchemaTypeSet::Single(t)) => Some(*t),
-      _ => None,
-    }
-  }
-
-  fn non_null_type(&self) -> Option<SchemaType> {
-    match &self.schema_type {
-      Some(SchemaTypeSet::Multiple(types)) if types.len() == 2 && types.contains(&SchemaType::Null) => {
-        types.iter().find(|t| **t != SchemaType::Null).copied()
-      }
-      _ => None,
-    }
-  }
-
-  fn is_inline_object(&self) -> bool {
-    if !self.enum_values.is_empty() {
-      return false;
-    }
-
-    if !self.one_of.is_empty() || !self.any_of.is_empty() {
-      return false;
-    }
-
-    if self.is_array() {
-      return false;
-    }
-
-    let is_object_type = self.single_type() == Some(SchemaType::Object) || self.schema_type.is_none();
-    is_object_type && !self.properties.is_empty()
-  }
-
-  fn is_discriminated_base_type(&self) -> bool {
-    self
-      .discriminator
-      .as_ref()
-      .and_then(|d| d.mapping.as_ref().map(|m| !m.is_empty()))
-      .unwrap_or(false)
-      && !self.properties.is_empty()
-  }
-
-  fn is_empty_object(&self) -> bool {
-    self.properties.is_empty()
-      && self.one_of.is_empty()
-      && self.any_of.is_empty()
-      && self.all_of.is_empty()
-      && self.enum_values.is_empty()
-      && self.schema_type.is_none()
-  }
-
-  fn has_union(&self) -> bool {
-    !self.one_of.is_empty() || !self.any_of.is_empty()
-  }
-
-  fn has_inline_union_array_items(&self, spec: &Spec) -> bool {
-    if !self.is_array() {
-      return false;
-    }
-    self.inline_array_items(spec).is_some_and(|items| items.has_union())
-  }
-
-  fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema> {
-    let items_box = self.items.as_ref()?;
-    let items_schema_ref = match items_box.as_ref() {
-      Schema::Object(o) => o,
-      Schema::Boolean(_) => return None,
-    };
-
-    if matches!(&**items_schema_ref, ObjectOrReference::Ref { .. }) {
-      return None;
-    }
-
-    items_schema_ref.resolve(spec).ok()
-  }
-
-  fn has_enum_values(&self) -> bool {
-    !self.enum_values.is_empty()
-  }
-
-  fn has_intersection(&self) -> bool {
-    !self.all_of.is_empty()
-  }
-
-  fn has_const_value(&self) -> bool {
-    self.const_value.is_some()
-  }
-
-  fn requires_type_definition(&self) -> bool {
-    self.has_enum_values() || self.has_union() || (!self.properties.is_empty() && self.additional_properties.is_none())
-  }
-
-  fn has_relaxed_anyof_enum(&self) -> bool {
-    !self.any_of.is_empty() && has_mixed_string_variants(self.any_of.iter())
-  }
-
-  fn is_freeform_string(&self) -> bool {
-    !self.has_const_value() && !self.has_enum_values() && self.is_string()
-  }
-}
-
+/// Returns only the names of variants that are schema references (e.g.,
+/// `#/components/schemas/Foo` yields `"Foo"`). Inline object schemas are
+/// excluded since they have no referenceable name.
+///
+/// The returned `BTreeSet` provides deterministic ordering for fingerprint
+/// comparison, enabling union type deduplication.
 pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
   variants.iter().filter_map(RefCollector::parse_schema_ref).collect()
 }

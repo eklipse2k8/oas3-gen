@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LintAllow {
   ClippyDefaultTraitAccess,
   ClippyDocMarkdown,
@@ -35,15 +37,16 @@ impl ToTokens for LintAllow {
   }
 }
 
-#[derive(Debug, Clone)]
-pub struct LintConfig {
-  pub allows: Vec<LintAllow>,
+#[derive(Debug, Clone, PartialEq, Eq, Hash, bon::Builder)]
+pub struct GlobalLintsNode {
+  #[builder(default)]
+  pub allows: BTreeSet<LintAllow>,
 }
 
-impl Default for LintConfig {
+impl Default for GlobalLintsNode {
   fn default() -> Self {
     Self {
-      allows: vec![
+      allows: BTreeSet::from([
         LintAllow::ClippyDefaultTraitAccess,
         LintAllow::ClippyDocMarkdown,
         LintAllow::ClippyEnumVariantNames,
@@ -55,12 +58,12 @@ impl Default for LintConfig {
         LintAllow::ClippyUnnecessaryWraps,
         LintAllow::ClippyUnusedSelf,
         LintAllow::DeadCode,
-      ],
+      ]),
     }
   }
 }
 
-impl ToTokens for LintConfig {
+impl ToTokens for GlobalLintsNode {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     for allow in &self.allows {
       allow.to_tokens(tokens);

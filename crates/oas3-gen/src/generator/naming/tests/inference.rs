@@ -1,15 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use serde_json::{Value, json};
 
-use crate::generator::{
-  ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
-  naming::{
-    constants::{KNOWN_ENUM_VARIANT, REQUEST_BODY_SUFFIX},
-    inference::{InferenceExt, NormalizedVariant, derive_method_names, strip_common_affixes},
-    name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
+use crate::{
+  generator::{
+    ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
+    naming::{
+      constants::{KNOWN_ENUM_VARIANT, REQUEST_BODY_SUFFIX},
+      inference::{NormalizedVariant, derive_method_names, strip_common_affixes},
+      name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
+    },
   },
+  tests::common::create_test_spec,
+  utils::SchemaExt,
 };
 
 fn make_string_schema() -> ObjectSchema {
@@ -52,7 +56,7 @@ fn test_derive_method_names() {
   ];
 
   for (enum_name, variants, expected) in cases {
-    let variants_vec: Vec<String> = variants.into_iter().map(String::from).collect();
+    let variants_vec = variants.into_iter().map(String::from).collect::<Vec<String>>();
     assert_eq!(
       derive_method_names(enum_name, &variants_vec),
       expected,
@@ -73,7 +77,7 @@ fn test_longest_common_suffix() {
   ];
 
   for (inputs, expected) in cases {
-    let input_strings: Vec<String> = inputs.into_iter().map(String::from).collect();
+    let input_strings = inputs.into_iter().map(String::from).collect::<Vec<String>>();
     let refs: Vec<&String> = input_strings.iter().collect();
     assert_eq!(
       longest_common_suffix(&refs),
@@ -118,8 +122,11 @@ fn test_compute_best_name() {
   ];
 
   for (candidate_pairs, used_list, expected) in cases {
-    let candidates: BTreeSet<(String, bool)> = candidate_pairs.iter().map(|(s, b)| ((*s).to_string(), *b)).collect();
-    let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
+    let candidates = candidate_pairs
+      .iter()
+      .map(|(s, b)| ((*s).to_string(), *b))
+      .collect::<BTreeSet<(String, bool)>>();
+    let used = used_list.into_iter().map(String::from).collect::<BTreeSet<String>>();
     assert_eq!(
       compute_best_name(&candidates, &used),
       expected,
@@ -157,7 +164,8 @@ fn test_inline_type_scanner_known_suffix_patterns() {
     ("FormatType".to_string(), format_type),
   ]);
 
-  let index = TypeNameIndex::new(&schemas);
+  let spec = create_test_spec(BTreeMap::new());
+  let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
   let cases = [
@@ -207,7 +215,8 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
     ("ModelIdsShared".to_string(), model_ids_shared),
   ]);
 
-  let index = TypeNameIndex::new(&schemas);
+  let spec = create_test_spec(BTreeMap::new());
+  let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
   let status_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
@@ -500,4 +509,252 @@ fn test_strip_common_affixes_preserves_variant_content() {
   assert_eq!(variants[1].name, EnumVariantToken::new("Update"));
   assert!(matches!(variants[0].content, VariantContent::Tuple(_)));
   assert!(matches!(variants[1].content, VariantContent::Unit));
+}
+
+#[test]
+fn schema_ext_is_primitive() {
+  let mut schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    ..ObjectSchema::default()
+  };
+  assert!(schema.is_primitive(), "string without properties should be primitive");
+
+  schema
+    .properties
+    .insert("foo".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+  assert!(!schema.is_primitive(), "schema with properties should not be primitive");
+
+  let string_enum_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("auto"), json!("none")],
+    ..ObjectSchema::default()
+  };
+  assert!(
+    !string_enum_schema.is_primitive(),
+    "string enum with 2+ values should NOT be primitive"
+  );
+
+  let single_enum_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    enum_values: vec![json!("only_value")],
+    ..ObjectSchema::default()
+  };
+  assert!(
+    single_enum_schema.is_primitive(),
+    "string enum with 1 value should be primitive (const-like)"
+  );
+}
+
+#[test]
+fn schema_ext_is_nullable_object() {
+  let null_only = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+    ..ObjectSchema::default()
+  };
+  assert!(null_only.is_nullable_object(), "null-only schema should be nullable");
+
+  let nullable_object = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Object, SchemaType::Null])),
+    ..ObjectSchema::default()
+  };
+  assert!(
+    nullable_object.is_nullable_object(),
+    "object|null without properties should be nullable"
+  );
+
+  let mut nullable_with_props = nullable_object.clone();
+  nullable_with_props
+    .properties
+    .insert("x".into(), ObjectOrReference::Object(ObjectSchema::default()));
+  assert!(
+    !nullable_with_props.is_nullable_object(),
+    "object|null with properties should not be nullable"
+  );
+}
+
+#[test]
+fn schema_ext_has_inline_union_array_items() {
+  use crate::tests::common::create_test_graph;
+
+  let type_a = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [("field_a".to_string(), ObjectOrReference::Object(make_string_schema()))]
+      .into_iter()
+      .collect(),
+    ..Default::default()
+  };
+  let type_b = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: [("field_b".to_string(), ObjectOrReference::Object(make_string_schema()))]
+      .into_iter()
+      .collect(),
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+  ]));
+
+  let array_with_union_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+      ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/TypeA".to_string(),
+            summary: None,
+            description: None,
+          },
+          ObjectOrReference::Ref {
+            ref_path: "#/components/schemas/TypeB".to_string(),
+            summary: None,
+            description: None,
+          },
+        ],
+        ..Default::default()
+      },
+    ))))),
+    ..Default::default()
+  };
+
+  assert!(
+    array_with_union_items.has_inline_union_array_items(graph.spec()),
+    "array with oneOf items should have union items"
+  );
+
+  let array_with_string_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+      make_string_schema(),
+    ))))),
+    ..Default::default()
+  };
+
+  assert!(
+    !array_with_string_items.has_inline_union_array_items(graph.spec()),
+    "array with string items should not have union items"
+  );
+
+  let array_with_ref_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Ref {
+      ref_path: "#/components/schemas/TypeA".to_string(),
+      summary: None,
+      description: None,
+    })))),
+    ..Default::default()
+  };
+
+  assert!(
+    !array_with_ref_items.has_inline_union_array_items(graph.spec()),
+    "array with ref items should not have inline union items"
+  );
+
+  let array_without_items = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+    items: None,
+    ..Default::default()
+  };
+
+  assert!(
+    !array_without_items.has_inline_union_array_items(graph.spec()),
+    "array without items should not have union items"
+  );
+}
+
+#[test]
+fn extract_common_variant_prefix_cases() {
+  use crate::generator::naming::inference::extract_common_variant_prefix;
+
+  struct Case {
+    variants: Vec<&'static str>,
+    expected: Option<&'static str>,
+    description: &'static str,
+  }
+
+  let cases = [
+    Case {
+      variants: vec![
+        "BetaResponseCharLocationCitation",
+        "BetaResponseUrlCitation",
+        "BetaResponseFileCitation",
+      ],
+      expected: Some("BetaCitation"),
+      description: "first prefix (Beta) + suffix (Citation) - terse naming",
+    },
+    Case {
+      variants: vec!["ContentBlockStart", "ContentBlockDelta", "ContentBlockStop"],
+      expected: Some("ContentBlock"),
+      description: "full common prefix (ContentBlock), no suffix",
+    },
+    Case {
+      variants: vec!["Tool", "BashTool"],
+      expected: None,
+      description: "no common prefix (Tool vs Bash) - returns None",
+    },
+    Case {
+      variants: vec!["TypeA", "TypeB", "TypeC"],
+      expected: Some("Type"),
+      description: "common prefix (Type) only, no suffix",
+    },
+    Case {
+      variants: vec!["AlphaFoo", "BetaBar", "GammaQux"],
+      expected: None,
+      description: "no common prefix - returns None",
+    },
+    Case {
+      variants: vec!["RequestBody"],
+      expected: None,
+      description: "single variant - returns None",
+    },
+    Case {
+      variants: vec![],
+      expected: None,
+      description: "empty variants - returns None",
+    },
+    Case {
+      variants: vec!["ApiErrorNotFound", "ApiErrorBadRequest", "ApiErrorUnauthorized"],
+      expected: Some("ApiError"),
+      description: "full common prefix (ApiError), no suffix",
+    },
+    Case {
+      variants: vec!["BetaMessageStartEvent", "BetaMessageDeltaEvent", "BetaMessageStopEvent"],
+      expected: Some("BetaEvent"),
+      description: "first prefix (Beta) + suffix (Event) - terse naming",
+    },
+    Case {
+      variants: vec!["FooBarBaz", "FooQuxBaz"],
+      expected: Some("FooBaz"),
+      description: "first prefix (Foo) + suffix (Baz) - terse naming",
+    },
+    Case {
+      variants: vec!["StreamEventStart", "StreamEventData", "StreamEventEnd"],
+      expected: Some("StreamEvent"),
+      description: "full common prefix (StreamEvent), no suffix",
+    },
+  ];
+
+  for case in cases {
+    let variants = case
+      .variants
+      .iter()
+      .map(|name| ObjectOrReference::Ref {
+        ref_path: format!("#/components/schemas/{name}"),
+        summary: None,
+        description: None,
+      })
+      .collect::<Vec<ObjectOrReference<ObjectSchema>>>();
+
+    let result = extract_common_variant_prefix(&variants);
+
+    assert_eq!(
+      result.as_ref().map(|r| r.name.as_str()),
+      case.expected,
+      "{}: expected {:?}, got {:?}",
+      case.description,
+      case.expected,
+      result.as_ref().map(|r| r.name.as_str())
+    );
+  }
 }

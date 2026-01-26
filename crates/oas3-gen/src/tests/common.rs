@@ -1,10 +1,13 @@
 use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 
-use oas3::spec::{ObjectSchema, Spec};
+use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet, Spec};
 use serde_json::json;
 
 use crate::generator::{
-  converter::{CodegenConfig, ConverterContext, EnumCasePolicy, EnumHelperPolicy, cache::SharedSchemaCache},
+  ast::{Documentation, FieldDef, FieldNameToken, RustPrimitive, TypeRef},
+  converter::{
+    CodegenConfig, ConverterContext, EnumCasePolicy, EnumHelperPolicy, SchemaConverter, cache::SharedSchemaCache,
+  },
   schema_registry::SchemaRegistry,
 };
 
@@ -54,4 +57,40 @@ pub(crate) fn config_with_no_helpers() -> CodegenConfig {
 pub(crate) fn create_test_context(graph: Arc<SchemaRegistry>, config: CodegenConfig) -> Rc<ConverterContext> {
   let cache = SharedSchemaCache::new();
   Rc::new(ConverterContext::new(graph, config, cache, None))
+}
+
+pub(crate) fn create_schema_converter(context: &Rc<ConverterContext>) -> SchemaConverter {
+  SchemaConverter::new(context)
+}
+
+pub(crate) fn make_string_schema() -> ObjectSchema {
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+    ..Default::default()
+  }
+}
+
+pub(crate) fn make_object_schema_with_property(prop_name: &str, prop_schema: ObjectSchema) -> ObjectSchema {
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(prop_name.to_string(), ObjectOrReference::Object(prop_schema))]),
+    ..Default::default()
+  }
+}
+
+pub(crate) fn create_empty_test_graph() -> Arc<SchemaRegistry> {
+  create_test_graph(BTreeMap::new())
+}
+
+pub(crate) fn make_docs() -> Documentation {
+  Documentation::from_lines(["Some docs"])
+}
+
+pub(crate) fn make_field(name: &str, deprecated: bool) -> FieldDef {
+  FieldDef::builder()
+    .name(FieldNameToken::from_raw(name))
+    .rust_type(TypeRef::new(RustPrimitive::String))
+    .docs(make_docs())
+    .deprecated(deprecated)
+    .build()
 }

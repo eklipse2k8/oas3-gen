@@ -58,7 +58,7 @@ pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
 
   let mut words = vec![];
   let mut current_word = String::new();
-  let chars: Vec<char> = name.chars().collect();
+  let chars = name.chars().collect::<Vec<char>>();
 
   for (i, &ch) in chars.iter().enumerate() {
     if ch.is_uppercase() && !current_word.is_empty() {
@@ -198,19 +198,15 @@ pub(crate) fn to_rust_const_name(input: &str) -> String {
 /// Converts a string into a valid Rust type name (`PascalCase`).
 ///
 /// # Rules:
-/// 1. If the string starts with `-`, it's stripped and "Negative" is prepended to the result.
-/// 2. If the input already has mixed case (both upper and lowercase, no separators), preserve capitalization.
-/// 3. Otherwise, sanitizes the base string and converts to `PascalCase` using capitalize_words.
-/// 4. If the result is a reserved name (e.g., `Clone`, `Vec`), it gets a raw identifier prefix (`r#`).
-/// 5. If the result starts with a digit, it's prefixed with `T`.
-/// 6. If the result is empty, it becomes `Unnamed`.
+/// 1. If the string starts with `r#`, strip it (raw identifiers should be re-evaluated for type names).
+/// 2. If the string starts with `-`, it's stripped and "Negative" is prepended to the result.
+/// 3. If the input already has mixed case (both upper and lowercase, no separators), preserve capitalization.
+/// 4. Otherwise, sanitizes the base string and converts to `PascalCase` using capitalize_words.
+/// 5. If the result is a reserved name (e.g., `Clone`, `Vec`), it gets a `Type` suffix.
+/// 6. If the result starts with a digit, it's prefixed with `T`.
+/// 7. If the result is empty, it becomes `Unnamed`.
 pub(crate) fn to_rust_type_name(name: &str) -> String {
-  if let Some(raw) = name.strip_prefix("r#")
-    && !raw.is_empty()
-    && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-  {
-    return format!("r#{raw}");
-  }
+  let name = name.strip_prefix("r#").unwrap_or(name);
 
   let has_leading_minus = name.starts_with('-');
   let name_without_minus = name.strip_prefix('-').unwrap_or(name);
@@ -222,7 +218,7 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
 
   let mut ident = if appears_mixed_case {
     let ascii = any_ascii(name_without_minus);
-    let cleaned: String = ascii.chars().filter(char::is_ascii_alphanumeric).collect();
+    let cleaned = ascii.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
 
     if cleaned.is_empty() {
       cleaned

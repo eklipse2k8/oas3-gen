@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use super::build_type_usage_map;
 use crate::generator::{
-  analyzer::{DependencyGraph, TypeUsage},
   ast::{
     EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive,
     RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
     VariantContent, VariantDef, tokens::FieldNameToken,
   },
+  postprocess::serde_usage::TypeUsage,
 };
 
 fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<EnumToken, (bool, bool)> {
@@ -611,7 +611,7 @@ fn test_request_body_chain_with_response_enum() {
 }
 
 #[test]
-fn test_response_enum_dependency_extraction() {
+fn test_response_enum_propagates_to_variants_not_request_type() {
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("RequestParams"),
     kind: StructKind::OperationRequest,
@@ -657,16 +657,22 @@ fn test_response_enum_dependency_extraction() {
   });
 
   let types = vec![request_struct, response_a, response_b, response_enum];
-  let dep_graph = DependencyGraph::build(&types);
+  let seed = seeds(&[("RequestParams", (true, false)), ("MyResponseEnum", (false, true))]);
+  let usage_map = build_type_usage_map(seed, &types);
 
-  let response_enum_deps = dep_graph.dependencies_of("MyResponseEnum");
-  assert!(response_enum_deps.is_some(), "ResponseEnum should have dependencies");
-
-  let deps = response_enum_deps.unwrap();
-  assert!(deps.contains("ResponseA"), "Should depend on ResponseA variant");
-  assert!(deps.contains("ResponseB"), "Should depend on ResponseB variant");
-  assert!(
-    !deps.contains("RequestParams"),
-    "Should NOT depend on request_type field - this was the bug!"
+  assert_eq!(
+    usage_map.get(&EnumToken::new("ResponseA")),
+    Some(&TypeUsage::ResponseOnly),
+    "ResponseA should be response-only (propagated from ResponseEnum)"
+  );
+  assert_eq!(
+    usage_map.get(&EnumToken::new("ResponseB")),
+    Some(&TypeUsage::ResponseOnly),
+    "ResponseB should be response-only (propagated from ResponseEnum)"
+  );
+  assert_eq!(
+    usage_map.get(&EnumToken::new("RequestParams")),
+    Some(&TypeUsage::RequestOnly),
+    "RequestParams should stay request-only (ResponseEnum.request_type should not cause propagation)"
   );
 }

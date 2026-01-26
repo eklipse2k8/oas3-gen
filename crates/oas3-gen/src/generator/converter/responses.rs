@@ -1,29 +1,40 @@
-use std::{collections::HashSet, rc::Rc};
+use std::rc::Rc;
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
 
-use super::{ConverterContext, TypeResolver, TypeUsageRecorder};
-use crate::generator::{
-  ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodNameToken, ResponseEnumDef, ResponseMediaType,
-    ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler,
-    StructMethod, StructMethodKind, TypeRef,
+use super::{ConverterContext, TypeResolver, TypeUsageRecorder, inline_resolver::InlineTypeResolver};
+use crate::{
+  generator::{
+    ast::{
+      ContentCategory, Documentation, EnumToken, EnumVariantToken, MethodKind, MethodNameToken, ResponseEnumDef,
+      ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, RustPrimitive,
+      StatusCodeToken, StatusHandler, StructMethod, TypeRef,
+    },
+    converter::GenerationTarget,
+    naming::{
+      constants::{DEFAULT_MEDIA_TYPE, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
+      identifiers::to_rust_type_name,
+      responses as naming_responses,
+    },
+    schema_registry::SchemaRegistry,
   },
-  converter::SchemaExt as _,
-  naming::{
-    constants::{DEFAULT_MEDIA_TYPE, DEFAULT_RESPONSE_DESCRIPTION, DEFAULT_RESPONSE_VARIANT},
-    identifiers::to_rust_type_name,
-    inference::InferenceExt,
-    responses as naming_responses,
-  },
-  schema_registry::SchemaRegistry,
+  utils::SchemaExt as _,
 };
 
+/// Extracted metadata about operation responses for code generation.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResponseMetadata {
   pub(crate) type_name: Option<String>,
   pub(crate) media_types: Vec<ResponseMediaType>,
+}
+
+/// Response metadata bundled with type usage data.
+#[derive(Debug, Clone)]
+pub(crate) struct ResponseMetadataOutput {
+  pub(crate) metadata: ResponseMetadata,
+  pub(crate) usage: TypeUsageRecorder,
 }
 
 /// Converts OpenAPI responses into Rust enum definitions.
@@ -32,6 +43,7 @@ pub(crate) struct ResponseMetadata {
 #[derive(Debug, Clone)]
 pub(crate) struct ResponseConverter {
   type_resolver: TypeResolver,
+  inline_resolver: InlineTypeResolver,
   context: Rc<ConverterContext>,
 }
 
@@ -39,7 +51,12 @@ impl ResponseConverter {
   /// Creates a new response converter.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let type_resolver = TypeResolver::new(context.clone());
-    Self { type_resolver, context }
+    let inline_resolver = InlineTypeResolver::new(context.clone());
+    Self {
+      type_resolver,
+      inline_resolver,
+      context,
+    }
   }
 
   /// Builds a response enum for an operation.
@@ -54,7 +71,9 @@ impl ResponseConverter {
       .iter()
       .filter_map(|(status_str, resp_ref)| {
         let response = resp_ref.resolve(spec).ok()?;
-        let status_code: StatusCodeToken = status_str.parse().unwrap_or(StatusCodeToken::Default);
+        let status_code = status_str
+          .parse::<StatusCodeToken>()
+          .unwrap_or(StatusCodeToken::Default);
         let media_types = Self::with_default_media_type(
           self
             .extract_media_types(&response, path, status_code)
@@ -69,7 +88,7 @@ impl ResponseConverter {
         ))
       })
       .flatten()
-      .collect::<Vec<_>>();
+      .collect_vec();
 
     let variants = Self::with_default_variant(variants);
 
@@ -89,26 +108,46 @@ impl ResponseConverter {
     )
   }
 
-  pub(crate) fn build_parse_method(response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
+  /// Builds the `parse_response` method for a request struct.
+  ///
+  /// For client generation, creates a method that parses HTTP responses
+  /// into the response enum by matching status codes and content types.
+  /// For server generation, creates an `IntoResponse` implementation.
+  pub(crate) fn build_parse_method(&self, response_enum: &EnumToken, variants: &[ResponseVariant]) -> StructMethod {
     let (status_handlers, default_handler) = Self::build_status_handlers(variants);
 
-    StructMethod::builder()
-      .name(MethodNameToken::from_raw("parse_response"))
-      .docs(Documentation::from_lines([
-        "Parse the HTTP response into the response enum.",
-      ]))
-      .kind(StructMethodKind::ParseResponse {
-        response_enum: response_enum.clone(),
-        status_handlers,
-        default_handler,
-      })
-      .build()
+    // We could combine these into one variant, but we shouldn't generate both server and client code
+    // in the same generation.
+    match self.context.config.target {
+      GenerationTarget::Client => StructMethod::builder()
+        .name(MethodNameToken::from_raw("parse_response"))
+        .docs(Documentation::from_lines([
+          "Parse the HTTP response into the response enum.",
+        ]))
+        .kind(MethodKind::ParseResponse {
+          response_enum: response_enum.clone(),
+          status_handlers,
+          default_handler,
+        })
+        .build(),
+      GenerationTarget::Server => StructMethod::builder()
+        .name(MethodNameToken::from_raw("parse_response"))
+        .docs(Documentation::from_lines([
+          "Server code does not need to parse responses.",
+        ]))
+        .kind(MethodKind::IntoAxumResponse {
+          response_enum: response_enum.clone(),
+          status_handlers,
+          default_handler,
+        })
+        .build(),
+    }
   }
 
   /// Extracts response metadata for operation info.
   ///
-  /// Gathers type names and media types, marking them for usage tracking.
-  pub(crate) fn extract_metadata(&self, operation: &Operation, usage: &mut TypeUsageRecorder) -> ResponseMetadata {
+  /// Gathers type names and media types, returning usage data.
+  pub(crate) fn extract_metadata(&self, operation: &Operation) -> ResponseMetadataOutput {
     let spec = self.context.graph().spec();
     let type_name = naming_responses::extract_response_type_name(spec, operation);
     let response_types = naming_responses::extract_all_response_types(spec, operation);
@@ -120,15 +159,23 @@ impl ResponseConverter {
         .collect(),
     );
 
+    let mut usage = TypeUsageRecorder::new();
     if let Some(ref name) = type_name {
       usage.mark_response(name);
     }
     usage.mark_response_iter(&response_types.success);
     usage.mark_response_iter(&response_types.error);
 
-    ResponseMetadata { type_name, media_types }
+    ResponseMetadataOutput {
+      metadata: ResponseMetadata { type_name, media_types },
+      usage,
+    }
   }
 
+  /// Extracts media type information from a response definition.
+  ///
+  /// Resolves schemas for each content type and maps binary responses
+  /// to `Bytes` for success status codes.
   fn extract_media_types(
     &self,
     response: &Response,
@@ -145,6 +192,11 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Resolves the schema type for a specific media type in a response.
+  ///
+  /// Returns `Bytes` for binary content types on success responses,
+  /// resolves `$ref` schemas to type references, and creates inline
+  /// types for anonymous schemas.
   fn resolve_media_schema(
     &self,
     content_type: &str,
@@ -170,6 +222,11 @@ impl ResponseConverter {
     }
   }
 
+  /// Resolves an inline response schema to a type reference.
+  ///
+  /// Returns `None` for empty schemas. For primitive types without
+  /// properties, returns the primitive directly. For complex types,
+  /// creates a named type via the inline resolver.
   fn resolve_inline_schema(
     &self,
     schema: &ObjectSchema,
@@ -190,20 +247,15 @@ impl ResponseConverter {
       return Ok(Some(primitive));
     }
 
-    let effective = if has_compound {
-      self.context.graph().merge_all_of(schema)
-    } else {
-      schema.clone()
-    };
-
-    let base_name = effective.infer_name_from_context(path, status_code.as_str());
-    let Some(output) = self.type_resolver.try_inline_schema(schema, &base_name)? else {
+    let base_name = schema.infer_name_from_context(path, status_code.as_str());
+    let Some(output) = self.inline_resolver.try_inline_schema(schema, &base_name)? else {
       return Ok(None);
     };
 
-    Ok(Some(TypeRef::new(output.type_name)))
+    Ok(Some(TypeRef::new(output.result)))
   }
 
+  /// Ensures at least one media type exists, defaulting to `application/json`.
   fn with_default_media_type(media_types: Vec<ResponseMediaType>) -> Vec<ResponseMediaType> {
     if media_types.is_empty() {
       vec![ResponseMediaType::new(DEFAULT_MEDIA_TYPE)]
@@ -212,6 +264,7 @@ impl ResponseConverter {
     }
   }
 
+  /// Adds a catch-all `Default` variant if no default status exists.
   fn with_default_variant(variants: Vec<ResponseVariant>) -> Vec<ResponseVariant> {
     if variants.is_empty() || variants.iter().any(|v| v.status_code.is_default()) {
       return variants;
@@ -229,6 +282,10 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Splits a status code into multiple variants when different content types have different schemas.
+  ///
+  /// For example, a 200 response with both JSON and XML schemas generates
+  /// `Ok200Json` and `Ok200Xml` variants.
   fn split_variants_by_content_type(
     status_code: StatusCodeToken,
     base_name: &EnumVariantToken,
@@ -270,6 +327,7 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Groups media types by their schema type for variant splitting.
   fn group_media_types_by_schema(media_types: &[ResponseMediaType]) -> Vec<(String, Vec<ResponseMediaType>)> {
     media_types
       .iter()
@@ -292,6 +350,10 @@ impl ResponseConverter {
       .collect()
   }
 
+  /// Builds status code handlers and optional default handler from variants.
+  ///
+  /// Groups variants by status code and extracts the default handler
+  /// (if a `default` status code variant exists).
   fn build_status_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseVariantCategory>) {
     let (default_variants, status_variants): (Vec<_>, Vec<_>) =
       variants.iter().partition(|v| v.status_code.is_default());
@@ -322,15 +384,14 @@ impl ResponseConverter {
 }
 
 impl ResponseStatusCategory {
+  /// Creates a status category from variants sharing the same status code.
+  ///
+  /// Returns `Single` when all variants have the same content type category,
+  /// `ContentDispatch` when multiple content types need runtime dispatch.
   #[must_use]
   pub fn from_variants(variants: &[&ResponseVariant]) -> Self {
     if let [variant] = variants {
-      let unique_categories = variant
-        .media_types
-        .iter()
-        .map(|m| m.category)
-        .collect::<HashSet<_>>()
-        .len();
+      let unique_categories = variant.media_types.iter().map(|m| m.category).unique().count();
 
       if unique_categories <= 1 {
         return Self::Single(
@@ -345,6 +406,9 @@ impl ResponseStatusCategory {
     Self::from_content_types(variants)
   }
 
+  /// Creates a content-dispatch category from variants with different content types.
+  ///
+  /// Separates event streams from other content types for special handling.
   #[must_use]
   pub(crate) fn from_content_types(variants: &[&ResponseVariant]) -> Self {
     let all_categories = variants
@@ -360,18 +424,14 @@ impl ResponseStatusCategory {
         default_category
           .into_iter()
           .chain(explicit_categories)
-          .map(move |category| (category, variant.variant_name.as_str(), (*variant).clone()))
+          .map(move |category| (category, *variant))
       })
-      .fold(
-        (HashSet::new(), vec![]),
-        |(mut seen, mut result), (category, name, variant)| {
-          if seen.insert((category, name)) {
-            result.push(ResponseVariantCategory { category, variant });
-          }
-          (seen, result)
-        },
-      )
-      .1;
+      .unique_by(|(category, variant)| (*category, variant.variant_name.as_str()))
+      .map(|(category, variant)| ResponseVariantCategory {
+        category,
+        variant: variant.clone(),
+      })
+      .collect_vec();
 
     let (streams, variants): (Vec<_>, Vec<_>) = all_categories
       .into_iter()

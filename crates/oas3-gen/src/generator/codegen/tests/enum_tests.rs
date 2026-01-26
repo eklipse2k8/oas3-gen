@@ -1,13 +1,16 @@
+use quote::ToTokens;
+
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
-    OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute, SerdeMode,
-    StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
+    DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
+    EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute,
+    SerdeMode, StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
-    enums::{DiscriminatedEnumGenerator, EnumGenerator, ResponseEnumGenerator},
+    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment},
   },
+  converter::GenerationTarget,
   naming::constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
 };
 
@@ -22,7 +25,6 @@ fn make_simple_enum(name: &str, variants: Vec<VariantDef>) -> EnumDef {
   EnumDef {
     name: EnumToken::new(name),
     variants,
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -43,7 +45,9 @@ fn test_basic_enum_generation() {
     ],
   );
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
 
   let assertions = [
     ("pub enum Color", "should have pub enum declaration"),
@@ -73,8 +77,8 @@ fn test_simple_enum_display_impl() {
     ],
   );
 
-  let code = EnumGenerator::new(&simple_def, Visibility::Public)
-    .generate()
+  let code = EnumFragment::new(simple_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
 
   assert!(
@@ -112,7 +116,6 @@ fn test_simple_enum_display_impl_with_serde_rename() {
         .serde_attrs(vec![SerdeAttribute::Rename("completed".to_string())])
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -121,8 +124,8 @@ fn test_simple_enum_display_impl_with_serde_rename() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&renamed_def, Visibility::Public)
-    .generate()
+  let code = EnumFragment::new(renamed_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
 
   assert!(
@@ -154,7 +157,6 @@ fn test_tuple_enum_no_display_impl() {
         .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::I64)]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -162,8 +164,8 @@ fn test_tuple_enum_no_display_impl() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&tuple_def, Visibility::Public)
-    .generate()
+  let code = EnumFragment::new(tuple_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
 
   assert!(
@@ -176,13 +178,8 @@ fn test_tuple_enum_no_display_impl() {
 fn test_enum_with_docs() {
   let def = EnumDef {
     name: EnumToken::new("Status"),
-    docs: vec![
-      "Represents the status of an item.".to_string(),
-      "Can be active or inactive.".to_string(),
-    ]
-    .into(),
+    docs: Documentation::from_lines(["Represents the status of an item.", "Can be active or inactive."]),
     variants: vec![make_unit_variant("Active"), make_unit_variant("Inactive")],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -190,14 +187,16 @@ fn test_enum_with_docs() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
 
   assert!(
-    code.contains("# [doc = \"Represents the status of an item.\"]"),
+    code.contains("# [doc = \" Represents the status of an item.\"]"),
     "should have first doc line"
   );
   assert!(
-    code.contains("# [doc = \"Can be active or inactive.\"]"),
+    code.contains("# [doc = \" Can be active or inactive.\"]"),
     "should have second doc line"
   );
 }
@@ -241,7 +240,9 @@ fn test_enum_tuple_variants() {
 
   for (case_name, variants, expected_content) in cases {
     let def = make_simple_enum("Value", variants);
-    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+    let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
 
     for (expected, msg) in expected_content {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
@@ -261,7 +262,6 @@ fn test_enum_variant_attributes() {
         .build(),
       make_unit_variant("V2"),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -269,8 +269,8 @@ fn test_enum_variant_attributes() {
     ..Default::default()
   };
 
-  let deprecated_code = EnumGenerator::new(&deprecated_def, Visibility::Public)
-    .generate()
+  let deprecated_code = EnumFragment::new(deprecated_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
   assert!(
     deprecated_code.contains("# [deprecated]"),
@@ -280,7 +280,6 @@ fn test_enum_variant_attributes() {
   let outer_attrs_def = EnumDef {
     name: EnumToken::new("Flagged"),
     variants: vec![make_unit_variant("Yes"), make_unit_variant("No")],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![OuterAttr::SkipSerializingNone],
     case_insensitive: false,
@@ -288,8 +287,8 @@ fn test_enum_variant_attributes() {
     ..Default::default()
   };
 
-  let outer_attrs_code = EnumGenerator::new(&outer_attrs_def, Visibility::Public)
-    .generate()
+  let outer_attrs_code = EnumFragment::new(outer_attrs_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
   assert!(
     outer_attrs_code.contains("# [serde_with :: skip_serializing_none]"),
@@ -316,7 +315,6 @@ fn test_enum_serde_attributes() {
             .serde_attrs(vec![SerdeAttribute::Rename("completed".to_string())])
             .build(),
         ],
-        discriminator: None,
         serde_attrs: vec![],
         outer_attrs: vec![],
         case_insensitive: false,
@@ -329,29 +327,10 @@ fn test_enum_serde_attributes() {
       ],
     ),
     (
-      "discriminator tag",
-      EnumDef {
-        name: EnumToken::new("Event"),
-        variants: vec![
-          make_unit_variant("Created"),
-          make_unit_variant("Updated"),
-          make_unit_variant("Deleted"),
-        ],
-        discriminator: Some("eventType".to_string()),
-        serde_attrs: vec![],
-        outer_attrs: vec![],
-        case_insensitive: false,
-        methods: vec![],
-        ..Default::default()
-      },
-      vec![("# [serde (tag = \"eventType\")]", "serde tag attribute")],
-    ),
-    (
       "untagged",
       EnumDef {
         name: EnumToken::new("AnyValue"),
         variants: vec![make_unit_variant("StringVal"), make_unit_variant("NumberVal")],
-        discriminator: None,
         serde_attrs: vec![SerdeAttribute::Untagged],
         outer_attrs: vec![],
         case_insensitive: false,
@@ -363,7 +342,10 @@ fn test_enum_serde_attributes() {
   ];
 
   for (case_name, def, expected_attrs) in cases {
-    let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+    let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string()
+      .clone();
     for (expected, msg) in expected_attrs {
       assert!(code.contains(expected), "{case_name}: should have {msg}");
     }
@@ -386,7 +368,6 @@ fn test_case_insensitive_enum() {
         .serde_attrs(vec![SerdeAttribute::Rename("in-progress".to_string())])
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
@@ -394,8 +375,9 @@ fn test_case_insensitive_enum() {
     ..Default::default()
   };
 
-  let tokens = EnumGenerator::new(&base_def, Visibility::Public).generate();
-  let code = tokens.to_string();
+  let code = EnumFragment::new(base_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
 
   let parts: Vec<&str> = code.split("enum Status").collect();
   assert_eq!(parts.len(), 2, "should split into derive and impl parts");
@@ -427,7 +409,6 @@ fn test_case_insensitive_enum() {
       make_unit_variant("Low"),
       make_unit_variant("Unknown"),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: true,
@@ -435,8 +416,8 @@ fn test_case_insensitive_enum() {
     ..Default::default()
   };
 
-  let fallback_code = EnumGenerator::new(&fallback_def, Visibility::Public)
-    .generate()
+  let fallback_code = EnumFragment::new(fallback_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
   assert!(
     fallback_code.contains("_ => Ok (Priority :: Unknown)"),
@@ -465,7 +446,9 @@ fn test_case_insensitive_enum_deserialize_only() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
 
   let parts: Vec<&str> = code.split("pub enum Status").collect();
   assert_eq!(parts.len(), 2, "should split into derives and enum parts");
@@ -524,7 +507,9 @@ fn test_enum_visibility() {
       Visibility::Public => "Public",
     };
     let def = make_simple_enum(name, vec![make_unit_variant("A"), make_unit_variant("B")]);
-    let code = EnumGenerator::new(&def, visibility).generate().to_string();
+    let code = EnumFragment::new(def, visibility, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
 
     if should_contain {
       assert!(code.contains(pattern), "should have {msg}");
@@ -546,7 +531,6 @@ fn test_enum_constructor_methods() {
         ))]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -556,13 +540,13 @@ fn test_enum_constructor_methods() {
         variant_name: "Json".into(),
         wrapped_type: TypeRef::new("JsonPayload"),
       },
-      vec!["Creates an empty JSON body.".to_string()],
+      Documentation::from_lines(["Creates an empty JSON body."]),
     )],
     ..Default::default()
   };
 
-  let simple_code = EnumGenerator::new(&simple_def, Visibility::Public)
-    .generate()
+  let simple_code = EnumFragment::new(simple_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
   assert!(simple_code.contains("impl RequestBody"), "should have impl block");
   assert!(
@@ -584,7 +568,6 @@ fn test_enum_constructor_methods() {
         ))]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -596,13 +579,13 @@ fn test_enum_constructor_methods() {
         param_name: "name".to_string(),
         param_type: TypeRef::new("String"),
       },
-      vec!["Creates a request with the given name.".to_string()],
+      Documentation::from_lines(["Creates a request with the given name."]),
     )],
     ..Default::default()
   };
 
-  let param_code = EnumGenerator::new(&param_def, Visibility::Public)
-    .generate()
+  let param_code = EnumFragment::new(param_def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
     .to_string();
   assert!(
     param_code.contains("pub fn with_name (name : String) -> Self"),
@@ -626,7 +609,6 @@ fn test_enum_constructor_methods_without_docs() {
         ))]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -636,12 +618,14 @@ fn test_enum_constructor_methods_without_docs() {
         variant_name: "Json".into(),
         wrapped_type: TypeRef::new("JsonPayload"),
       },
-      vec![],
+      Documentation::default(),
     )],
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
   assert!(code.contains("pub fn json () -> Self"), "should have json constructor");
   assert!(
     !code.contains("Creates a `"),
@@ -667,7 +651,6 @@ fn test_known_value_constructor_methods() {
         .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
         .build(),
     ],
-    discriminator: None,
     serde_attrs: vec![],
     outer_attrs: vec![],
     case_insensitive: false,
@@ -678,7 +661,7 @@ fn test_known_value_constructor_methods() {
           known_type: EnumToken::new("ModelOptionKnown"),
           known_variant: EnumVariantToken::new("Gemini25Pro"),
         },
-        vec!["Our best model.".to_string()],
+        Documentation::from_lines(["Our best model."]),
       ),
       EnumMethod::new(
         "gemini_25_flash",
@@ -686,13 +669,15 @@ fn test_known_value_constructor_methods() {
           known_type: EnumToken::new("ModelOptionKnown"),
           known_variant: EnumVariantToken::new("Gemini25Flash"),
         },
-        vec![],
+        Documentation::default(),
       ),
     ],
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
   assert!(
     code.contains("pub fn gemini_25_pro () -> Self"),
     "should have gemini_25_pro constructor"
@@ -712,7 +697,7 @@ fn test_known_value_constructor_methods() {
 fn test_discriminated_enum() {
   let without_fallback = DiscriminatedEnumDef::builder()
     .name("Pet".into())
-    .docs(vec!["A pet can be a dog or cat.".to_string()].into())
+    .docs(Documentation::from_lines(["A pet can be a dog or cat."]))
     .discriminator_field("petType".to_string())
     .variants(vec![
       DiscriminatedVariant::builder()
@@ -729,8 +714,8 @@ fn test_discriminated_enum() {
     .serde_mode(SerdeMode::Both)
     .build();
 
-  let code = DiscriminatedEnumGenerator::new(&without_fallback, Visibility::Public)
-    .generate()
+  let code = DiscriminatedEnumFragment::new(without_fallback, Visibility::Public)
+    .into_token_stream()
     .to_string();
   let assertions_without = [
     (
@@ -782,8 +767,8 @@ fn test_discriminated_enum() {
     .serde_mode(SerdeMode::Both)
     .build();
 
-  let code_with = DiscriminatedEnumGenerator::new(&with_fallback, Visibility::Public)
-    .generate()
+  let code_with = DiscriminatedEnumFragment::new(with_fallback, Visibility::Public)
+    .into_token_stream()
     .to_string();
   let fallback_assertions = [
     ("Unknown (serde_json :: Value)", "should have fallback variant in enum"),
@@ -820,8 +805,8 @@ fn test_discriminated_enum_serialize_only() {
     .serde_mode(SerdeMode::SerializeOnly)
     .build();
 
-  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
-    .generate()
+  let code = DiscriminatedEnumFragment::new(def, Visibility::Public)
+    .into_token_stream()
     .to_string();
   assert!(
     code.contains("impl serde :: Serialize for RequestType"),
@@ -849,8 +834,8 @@ fn test_discriminated_enum_deserialize_only() {
     .serde_mode(SerdeMode::DeserializeOnly)
     .build();
 
-  let code = DiscriminatedEnumGenerator::new(&def, Visibility::Public)
-    .generate()
+  let code = DiscriminatedEnumFragment::new(def, Visibility::Public)
+    .into_token_stream()
     .to_string();
   assert!(
     !code.contains("impl serde :: Serialize"),
@@ -866,7 +851,7 @@ fn test_discriminated_enum_deserialize_only() {
 fn test_response_enum_generation() {
   let def = ResponseEnumDef {
     name: EnumToken::new("GetUserResponse"),
-    docs: vec!["Response for GET /users/{id}".to_string()].into(),
+    docs: Documentation::from_lines(["Response for GET /users/{id}"]),
     variants: vec![
       ResponseVariant::builder()
         .status_code(StatusCodeToken::Ok200)
@@ -895,10 +880,11 @@ fn test_response_enum_generation() {
         .build(),
     ],
     request_type: Some(StructToken::new("GetUserRequest")),
+    try_from: vec![],
   };
 
-  let code = ResponseEnumGenerator::new(&def, Visibility::Public)
-    .generate()
+  let code = ResponseEnumFragment::new(Visibility::Public, def)
+    .into_token_stream()
     .to_string();
 
   let assertions = [
@@ -943,7 +929,9 @@ fn test_relaxed_wrapper_enum_generates_display() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
 
   let assertions = [
     (
@@ -983,7 +971,9 @@ fn test_non_simple_enum_without_generate_display_has_no_display() {
     ..Default::default()
   };
 
-  let code = EnumGenerator::new(&def, Visibility::Public).generate().to_string();
+  let code = EnumFragment::new(def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
 
   assert!(
     !code.contains("impl core :: fmt :: Display"),

@@ -19,7 +19,8 @@ cargo test                     # Test
 cargo run -- generate types -i spec.json -o types.rs        # Generate types (JSON)
 cargo run -- generate types -i spec.yaml -o types.rs        # Generate types (YAML)
 cargo run -- generate client -i spec.json -o client.rs      # Generate client
-cargo run -- generate client-mod -i spec.json -o output/    # Generate modular output (types.rs, client.rs, mod.rs)
+cargo run -- generate client-mod -i spec.json -o output/    # Generate modular client (types.rs, client.rs, mod.rs)
+cargo run -- generate server-mod -i spec.json -o output/    # Generate modular server (types.rs, server.rs, mod.rs)
 ```
 
 ## Essential Rules
@@ -28,6 +29,18 @@ cargo run -- generate client-mod -i spec.json -o output/    # Generate modular o
 2. **NO emojis** - Token conservation
 3. **Run tests** before committing: `cargo test`
 4. **Rebuild fixtures** after code generation changes (see [testing.md](docs/testing.md))
+
+## REQUIRED: Read Before Writing Code
+
+**Before writing or modifying any code, you MUST read [docs/coding-standards.md](docs/coding-standards.md).** This document contains critical style requirements including:
+
+- Turbofish syntax for `.collect::<Vec<_>>()` (not type annotations)
+- `vec![]` over `Vec::new()`
+- Iterator chains and itertools usage patterns
+- Collection type selection (BTreeMap vs IndexMap vs HashMap)
+- State management patterns
+
+Failure to follow these standards will require rework.
 
 ## Detailed Documentation
 
@@ -38,6 +51,7 @@ cargo run -- generate client-mod -i spec.json -o output/    # Generate modular o
 | [docs/testing.md](docs/testing.md) | Test requirements, fixtures, coverage, debugging |
 | [docs/architecture.md](docs/architecture.md) | Pipeline stages, directory structure, dependencies |
 | [docs/subagents.md](docs/subagents.md) | Specialized subagents for performance, review, testing, CLI, docs |
+| [docs/code-fragments.md](docs/code-fragments.md) | Complete reference of codegen fragments and composition patterns |
 
 ## One-Way Data Flow Pipeline
 
@@ -67,12 +81,12 @@ The generator follows a strict one-way data flow where each stage produces immut
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STAGE 2: NAME INFERENCE (naming/)                                           │
+│ STAGE 2: SCHEMA INTROSPECTION & CACHING                                     │
 │ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
-│ │   InferenceExt      │───▶│ • Infers type names from schema context    │  │
-│ │ (naming/inference)  │    │ • Schema type inference                    │  │
-│ └─────────────────────┘    │ • Union variant inference                  │  │
-│           │                │ • Enum value extraction                    │  │
+│ │     SchemaExt       │───▶│ • Schema type predicates (is_array, etc.)  │  │
+│ │ (utils/schema_ext)  │    │ • Union variant queries                    │  │
+│ └─────────────────────┘    │ • Enum value extraction                    │  │
+│           │                │ • Name inference from context              │  │
 │           ▼                └────────────────────────────────────────────┘  │
 │ ┌─────────────────────┐                                                     │
 │ │ SharedSchemaCache   │───▶ Deduplicates types by schema hash              │
@@ -92,6 +106,8 @@ The generator follows a strict one-way data flow where each stage produces immut
 │           ├──▶ EnumConverter    ──▶ EnumDef (value enums)                  │
 │           ├──▶ UnionConverter   ──▶ DiscriminatedEnumDef / EnumDef         │
 │           └──▶ TypeResolver     ──▶ TypeRef (type references)              │
+│                     │                                                        │
+│                     └──▶ InlineTypeResolver (cache-aware inline creation)  │
 │                                                                              │
 │ OUTPUT: Vec<RustType> (schemas sorted: enums first, then others)           │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -114,10 +130,10 @@ The generator follows a strict one-way data flow where each stage produces immut
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ STAGE 5: TYPE ANALYSIS (TypeAnalyzer)                                       │
+│ STAGE 5: TYPE POSTPROCESSING (TypePostprocessor)                            │
 │ ┌─────────────────────┐    ┌────────────────────────────────────────────┐  │
-│ │    TypeAnalyzer     │───▶│ • Builds DependencyGraph from types        │  │
-│ │  (analyzer/mod.rs)  │    │ • Propagates usage through dependencies    │  │
+│ │  TypePostprocessor  │───▶│ • Builds DependencyGraph from types        │  │
+│ │ (postprocess/mod.rs)│    │ • Propagates usage through dependencies    │  │
 │ └─────────────────────┘    │ • Updates SerdeMode per type:              │  │
 │                            │   - RequestOnly → SerializeOnly            │  │
 │                            │   - ResponseOnly → DeserializeOnly         │  │
@@ -165,10 +181,12 @@ The generator follows a strict one-way data flow where each stage produces immut
 | ----------------------------------- | ------------------------------------------------------------------- |
 | `orchestrator.rs`                   | Pipeline coordinator, creates all stages, combines outputs          |
 | `schema_registry.rs`                | Schema storage, dependency graph, cycle detection, discriminator    |
+| `utils/schema_ext.rs`               | `SchemaExt` trait: schema query predicates and name inference       |
 | `converter/mod.rs`                  | `SchemaConverter`, `ConverterContext`, `CodegenConfig` policy enums |
 | `converter/type_resolver.rs`        | Central conversion logic: maps OpenAPI types to Rust `TypeRef`      |
-| `converter/cache.rs`                | Deduplicates types by schema hash during conversion                 |
-| `converter/common.rs`               | `ConversionOutput<T>` wrapper and inline type tracking              |
+| `converter/inline_resolver.rs`      | Cache-aware inline type creation (structs, enums, unions)           |
+| `converter/cache.rs`                | Type deduplication with focused registries (name, schema, enum, union) |
+| `converter/common.rs`               | `ConversionOutput<T>` wrapper for inline type tracking              |
 | `converter/hashing.rs`              | Schema hashing utilities for cache keying                           |
 | `converter/unions.rs`               | `UnionConverter` for oneOf/anyOf handling                           |
 | `converter/union_types.rs`          | Shared union types: `UnionKind`, `CollisionStrategy`, variant specs |
@@ -178,34 +196,45 @@ The generator follows a strict one-way data flow where each stage produces immut
 | `converter/relaxed_enum.rs`         | Builds anyOf enums with known values + freeform string              |
 | `converter/methods.rs`              | Generates helper constructor methods for enum variants              |
 | `converter/type_usage_recorder.rs`  | `TypeUsageRecorder` for tracking request/response type usage        |
-| `naming/inference.rs`               | `InferenceExt` trait for type/variant/enum name inference           |
+| `naming/inference.rs`               | Variant prefix extraction and name deduplication helpers            |
 | `naming/identifiers.rs`             | Identifier sanitization (reserved words, casing)                    |
 | `naming/name_index.rs`              | Name indexing for conflict resolution                               |
 | `naming/operations.rs`              | Operation-specific naming logic                                     |
 | `naming/responses.rs`               | Response-specific naming logic                                      |
-| `analyzer/mod.rs`                   | `TypeAnalyzer`: usage propagation, serde modes, error schemas       |
-| `analyzer/dependency_graph.rs`      | Type dependency tracking for analysis                               |
-| `codegen/mod.rs`                    | Entry point for Rust code generation                                |
+| `postprocess/mod.rs`                | Postprocess orchestrator: response dedup, serde, validation         |
+| `postprocess/serde_usage.rs`        | `SerdeUsage` for serde mode propagation through dependencies        |
+| `postprocess/response_enum.rs`      | `ResponseEnumDeduplicator` for deduplicating response enums         |
+| `postprocess/uses.rs`               | `RustTypeDeduplication`, `ModuleImports`, `HeaderRefCollection`     |
+| `postprocess/validation.rs`         | `NestedValidationProcessor` for #[validate(nested)]                 |
+| `codegen/mod.rs`                    | `SchemaCodeGenerator`: entry point for Rust code generation         |
+| `codegen/types.rs`                  | `TypeFragment`, `TypesFragment` for type file generation            |
 | `codegen/structs.rs`                | Struct code generation with derives and serde attrs                 |
 | `codegen/enums.rs`                  | Enum code generation with case-insensitive deser support            |
-| `codegen/client.rs`                 | HTTP client code generation                                         |
+| `codegen/client.rs`                 | HTTP client code generation (`ClientFragment`)                      |
+| `codegen/server.rs`                 | HTTP server trait generation (`ServerGenerator`, axum)              |
 | `codegen/mod_file.rs`               | Modular output file generation (mod.rs)                             |
 | `ast/mod.rs`                        | AST types: `RustType`, `StructDef`, `EnumDef`, `TypeRef`, etc.      |
+| `ast/server.rs`                     | Server AST: `ServerRequestTraitDef`, `ServerTraitMethod`            |
 
 ## Key Files
 
 - [orchestrator.rs](crates/oas3-gen/src/generator/orchestrator.rs) - Pipeline coordinator
 - [schema_registry.rs](crates/oas3-gen/src/generator/schema_registry.rs) - Dependency graph and cycle detection
+- [utils/schema_ext.rs](crates/oas3-gen/src/utils/schema_ext.rs) - SchemaExt trait for schema queries and inference
 - [converter/mod.rs](crates/oas3-gen/src/generator/converter/mod.rs) - SchemaConverter and ConverterContext
 - [converter/type_resolver.rs](crates/oas3-gen/src/generator/converter/type_resolver.rs) - Central OpenAPI to Rust type conversion
-- [converter/cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication cache
+- [converter/inline_resolver.rs](crates/oas3-gen/src/generator/converter/inline_resolver.rs) - Cache-aware inline type creation
+- [converter/cache.rs](crates/oas3-gen/src/generator/converter/cache.rs) - Type deduplication with focused registries
 - [converter/unions.rs](crates/oas3-gen/src/generator/converter/unions.rs) - oneOf/anyOf conversion
-- [naming/inference.rs](crates/oas3-gen/src/generator/naming/inference.rs) - Name inference from schema context
+- [converter/variants.rs](crates/oas3-gen/src/generator/converter/variants.rs) - Union variant building
+- [naming/inference.rs](crates/oas3-gen/src/generator/naming/inference.rs) - Variant prefix extraction helpers
 - [naming/identifiers.rs](crates/oas3-gen/src/generator/naming/identifiers.rs) - Identifier sanitization
-- [analyzer/mod.rs](crates/oas3-gen/src/generator/analyzer/mod.rs) - TypeAnalyzer and serde mode computation
+- [postprocess/mod.rs](crates/oas3-gen/src/generator/postprocess/mod.rs) - TypePostprocessor and serde mode computation
 - [codegen/mod.rs](crates/oas3-gen/src/generator/codegen/mod.rs) - Code generation entry point
 - [codegen/client.rs](crates/oas3-gen/src/generator/codegen/client.rs) - HTTP client generation
+- [codegen/server.rs](crates/oas3-gen/src/generator/codegen/server.rs) - HTTP server trait generation
 - [ast/mod.rs](crates/oas3-gen/src/generator/ast/mod.rs) - AST type definitions
+- [ast/server.rs](crates/oas3-gen/src/generator/ast/server.rs) - Server AST definitions
 - [operation_registry.rs](crates/oas3-gen/src/generator/operation_registry.rs) - HTTP operations and webhooks
 
 ## Collection Types (Critical)

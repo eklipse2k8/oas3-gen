@@ -1,9 +1,11 @@
+use quote::ToTokens as _;
+
 use crate::generator::{
   ast::{
     FieldDef, FieldNameToken, RustType, StructDef, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
     ValidationAttribute, constants::HttpHeaderRef,
   },
-  codegen::constants::{generate_header_constants, generate_regex_constants},
+  codegen::constants::{HeaderConstantsFragment, RegexConstantsResult},
 };
 
 fn make_field(name: &str, pattern: Option<&str>) -> FieldDef {
@@ -27,32 +29,32 @@ fn make_struct(name: &str, fields: Vec<FieldDef>) -> RustType {
 }
 
 #[test]
-fn test_generate_regex_constants_empty() {
+fn test_regex_constants_result_empty() {
   let types: Vec<RustType> = vec![];
-  let (tokens, lookup) = generate_regex_constants(&types);
+  let result = RegexConstantsResult::from_types(&types);
 
-  assert!(lookup.is_empty());
-  assert!(tokens.is_empty());
+  assert!(result.lookup.is_empty());
+  assert!(result.into_token_stream().is_empty());
 }
 
 #[test]
-fn test_generate_regex_constants_no_regex_fields() {
+fn test_regex_constants_result_no_regex_fields() {
   let struct_type = make_struct("User", vec![make_field("name", None), make_field("email", None)]);
   let types: Vec<RustType> = vec![struct_type];
-  let (tokens, lookup) = generate_regex_constants(&types);
+  let result = RegexConstantsResult::from_types(&types);
 
-  assert!(lookup.is_empty());
-  assert!(tokens.is_empty());
+  assert!(result.lookup.is_empty());
+  assert!(result.into_token_stream().is_empty());
 }
 
 #[test]
-fn test_generate_regex_constants_single_field() {
+fn test_regex_constants_result_single_field() {
   let struct_type = make_struct("User", vec![make_field("email", Some(r"^[\w.-]+@[\w.-]+$"))]);
   let types: Vec<RustType> = vec![struct_type];
-  let (tokens, lookup) = generate_regex_constants(&types);
+  let result = RegexConstantsResult::from_types(&types);
 
-  assert_eq!(lookup.len(), 1);
-  let code = tokens.to_string();
+  assert_eq!(result.lookup.len(), 1);
+  let code = result.into_token_stream().to_string();
   assert!(
     code.contains("REGEX_USER_EMAIL"),
     "should contain constant name: {code}"
@@ -62,7 +64,7 @@ fn test_generate_regex_constants_single_field() {
 }
 
 #[test]
-fn test_generate_regex_constants_multiple_fields_same_struct() {
+fn test_regex_constants_result_multiple_fields_same_struct() {
   let struct_type = make_struct(
     "User",
     vec![
@@ -71,34 +73,34 @@ fn test_generate_regex_constants_multiple_fields_same_struct() {
     ],
   );
   let types: Vec<RustType> = vec![struct_type];
-  let (tokens, lookup) = generate_regex_constants(&types);
+  let result = RegexConstantsResult::from_types(&types);
 
-  assert_eq!(lookup.len(), 2);
-  let code = tokens.to_string();
+  assert_eq!(result.lookup.len(), 2);
+  let code = result.into_token_stream().to_string();
   assert!(code.contains("REGEX_USER_EMAIL"));
   assert!(code.contains("REGEX_USER_PHONE"));
 }
 
 #[test]
-fn test_generate_regex_constants_deduplicates_patterns() {
+fn test_regex_constants_result_deduplicates_patterns() {
   let email_pattern = r"^[\w.-]+@[\w.-]+$";
   let struct1 = make_struct("User", vec![make_field("email", Some(email_pattern))]);
   let struct2 = make_struct("Contact", vec![make_field("email", Some(email_pattern))]);
   let types: Vec<RustType> = vec![struct1, struct2];
-  let (tokens, lookup) = generate_regex_constants(&types);
+  let result = RegexConstantsResult::from_types(&types);
 
-  assert_eq!(lookup.len(), 2, "both fields should be in lookup");
+  assert_eq!(result.lookup.len(), 2, "both fields should be in lookup");
 
-  let const_names: std::collections::HashSet<_> = lookup.values().collect();
+  let const_names = result.lookup.values().collect::<std::collections::HashSet<_>>();
   assert_eq!(const_names.len(), 1, "both should reference same constant");
 
-  let code = tokens.to_string();
+  let code = result.into_token_stream().to_string();
   let static_count = code.matches("static REGEX_").count();
   assert_eq!(static_count, 1, "should only generate one regex constant");
 }
 
 #[test]
-fn test_generate_regex_constants_skips_non_structs() {
+fn test_regex_constants_result_skips_non_structs() {
   let struct_type = make_struct("User", vec![make_field("email", Some(r"pattern"))]);
   let alias = RustType::TypeAlias(TypeAliasDef {
     name: TypeAliasToken::new("UserId"),
@@ -106,24 +108,21 @@ fn test_generate_regex_constants_skips_non_structs() {
     ..Default::default()
   });
   let types: Vec<RustType> = vec![struct_type, alias];
-  let (_, lookup) = generate_regex_constants(&types);
+  let result = RegexConstantsResult::from_types(&types);
 
-  assert_eq!(lookup.len(), 1);
+  assert_eq!(result.lookup.len(), 1);
 }
 
 #[test]
-fn test_generate_header_constants_empty() {
-  let headers: Vec<HttpHeaderRef> = vec![];
-  let tokens = generate_header_constants(&headers);
-
-  assert!(tokens.is_empty());
+fn test_header_constants_fragment_empty() {
+  let fragment = HeaderConstantsFragment::new(vec![]);
+  assert!(fragment.into_token_stream().is_empty());
 }
 
 #[test]
-fn test_generate_header_constants_single() {
-  let headers = vec![HttpHeaderRef::from("x-request-id")];
-  let tokens = generate_header_constants(&headers);
-  let code = tokens.to_string();
+fn test_header_constants_fragment_single() {
+  let fragment = HeaderConstantsFragment::new(vec![HttpHeaderRef::from("x-request-id")]);
+  let code = fragment.into_token_stream().to_string();
 
   assert!(code.contains("X_REQUEST_ID"), "should contain constant name: {code}");
   assert!(
@@ -137,14 +136,13 @@ fn test_generate_header_constants_single() {
 }
 
 #[test]
-fn test_generate_header_constants_multiple() {
-  let headers = vec![
+fn test_header_constants_fragment_multiple() {
+  let fragment = HeaderConstantsFragment::new(vec![
     HttpHeaderRef::from("x-request-id"),
     HttpHeaderRef::from("x-correlation-id"),
     HttpHeaderRef::from("content-type"),
-  ];
-  let tokens = generate_header_constants(&headers);
-  let code = tokens.to_string();
+  ]);
+  let code = fragment.into_token_stream().to_string();
 
   assert!(code.contains("X_REQUEST_ID"));
   assert!(code.contains("X_CORRELATION_ID"));

@@ -47,60 +47,35 @@ impl DerivesProvider for StructDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
     let mut derives = BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Default]);
 
-    match self.kind {
-      StructKind::OperationRequest => {
-        derives.insert(DeriveTrait::Validate);
-      }
-      StructKind::Schema => {
-        derives.insert(DeriveTrait::PartialEq);
-        if self.is_serializable() == SerdeImpl::Derive {
-          derives.insert(DeriveTrait::Serialize);
-          if self.has_validation_attrs() {
-            derives.insert(DeriveTrait::Validate);
-          }
-        }
-        if self.is_deserializable() == SerdeImpl::Derive {
-          derives.insert(DeriveTrait::Deserialize);
-        }
-      }
-      StructKind::PathParams | StructKind::HeaderParams => {
-        derives.insert(DeriveTrait::PartialEq);
-        if self.has_validation_attrs() {
-          derives.insert(DeriveTrait::Validate);
-        }
-      }
-      StructKind::QueryParams => {
-        derives.insert(DeriveTrait::PartialEq);
-        derives.insert(DeriveTrait::Serialize);
-        if self.has_validation_attrs() {
-          derives.insert(DeriveTrait::Validate);
-        }
-      }
+    if self.kind != StructKind::OperationRequest {
+      derives.insert(DeriveTrait::PartialEq);
+    }
+
+    if self.is_serializable() == SerdeImpl::Derive {
+      derives.insert(DeriveTrait::Serialize);
+    }
+    if self.is_deserializable() == SerdeImpl::Derive {
+      derives.insert(DeriveTrait::Deserialize);
+    }
+
+    if self.kind == StructKind::OperationRequest || self.has_validation_attrs() {
+      derives.insert(DeriveTrait::Validate);
     }
 
     derives
   }
 
   fn is_serializable(&self) -> SerdeImpl {
-    match self.kind {
-      StructKind::OperationRequest | StructKind::PathParams | StructKind::HeaderParams => SerdeImpl::None,
-      StructKind::QueryParams => SerdeImpl::Derive,
-      StructKind::Schema => match self.serde_mode {
-        SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
-        SerdeMode::DeserializeOnly => SerdeImpl::None,
-      },
+    match self.serde_mode {
+      SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
+      SerdeMode::DeserializeOnly | SerdeMode::None => SerdeImpl::None,
     }
   }
 
   fn is_deserializable(&self) -> SerdeImpl {
-    match self.kind {
-      StructKind::OperationRequest | StructKind::PathParams | StructKind::HeaderParams | StructKind::QueryParams => {
-        SerdeImpl::None
-      }
-      StructKind::Schema => match self.serde_mode {
-        SerdeMode::DeserializeOnly | SerdeMode::Both => SerdeImpl::Derive,
-        SerdeMode::SerializeOnly => SerdeImpl::None,
-      },
+    match self.serde_mode {
+      SerdeMode::DeserializeOnly | SerdeMode::Both => SerdeImpl::Derive,
+      SerdeMode::SerializeOnly | SerdeMode::None => SerdeImpl::None,
     }
   }
 }
@@ -132,7 +107,7 @@ impl DerivesProvider for EnumDef {
   fn is_serializable(&self) -> SerdeImpl {
     match self.serde_mode {
       SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
-      SerdeMode::DeserializeOnly => SerdeImpl::None,
+      SerdeMode::DeserializeOnly | SerdeMode::None => SerdeImpl::None,
     }
   }
 
@@ -145,7 +120,7 @@ impl DerivesProvider for EnumDef {
           SerdeImpl::Derive
         }
       }
-      SerdeMode::SerializeOnly => SerdeImpl::None,
+      SerdeMode::SerializeOnly | SerdeMode::None => SerdeImpl::None,
     }
   }
 }
@@ -165,14 +140,14 @@ impl DerivesProvider for DiscriminatedEnumDef {
   fn is_serializable(&self) -> SerdeImpl {
     match self.serde_mode {
       SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Custom,
-      SerdeMode::DeserializeOnly => SerdeImpl::None,
+      SerdeMode::DeserializeOnly | SerdeMode::None => SerdeImpl::None,
     }
   }
 
   fn is_deserializable(&self) -> SerdeImpl {
     match self.serde_mode {
       SerdeMode::DeserializeOnly | SerdeMode::Both => SerdeImpl::Custom,
-      SerdeMode::SerializeOnly => SerdeImpl::None,
+      SerdeMode::SerializeOnly | SerdeMode::None => SerdeImpl::None,
     }
   }
 }

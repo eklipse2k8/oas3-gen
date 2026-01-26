@@ -1,8 +1,9 @@
+use oas3::spec::ObjectSchema;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use serde_json::Number;
 
-use crate::generator::ast::{RustPrimitive, StructToken, types::render_unsigned_integer};
+use crate::generator::ast::{RustPrimitive, StructToken, TypeRef, types::render_unsigned_integer};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RegexKey {
@@ -50,6 +51,49 @@ pub enum ValidationAttribute {
     exclusive_max: Option<Number>,
   },
   Regex(String),
+}
+
+impl ValidationAttribute {
+  pub fn range(schema: &ObjectSchema, type_ref: &TypeRef) -> Option<Self> {
+    let exclusive_min = schema.exclusive_minimum.clone();
+    let exclusive_max = schema.exclusive_maximum.clone();
+    let min = schema.minimum.clone();
+    let max = schema.maximum.clone();
+
+    if exclusive_min.is_none() && exclusive_max.is_none() && min.is_none() && max.is_none() {
+      return None;
+    }
+
+    Some(Self::Range {
+      primitive: type_ref.base_type.clone(),
+      min,
+      max,
+      exclusive_min,
+      exclusive_max,
+    })
+  }
+
+  pub fn length(min: Option<u64>, max: Option<u64>, is_required_non_empty: bool) -> Option<Self> {
+    match (min, max) {
+      (Some(min), Some(max)) => Some(Self::Length {
+        min: Some(min),
+        max: Some(max),
+      }),
+      (Some(min), None) => Some(Self::Length {
+        min: Some(min),
+        max: None,
+      }),
+      (None, Some(max)) => Some(Self::Length {
+        min: None,
+        max: Some(max),
+      }),
+      (None, None) if is_required_non_empty => Some(Self::Length {
+        min: Some(1),
+        max: None,
+      }),
+      _ => None,
+    }
+  }
 }
 
 impl PartialEq for ValidationAttribute {
@@ -114,11 +158,15 @@ impl ToTokens for ValidationAttribute {
       Self::Regex(path) => quote! { regex(path = #path) },
       Self::Length { min, max } => {
         let min_part = min.map(|m| {
-          let lit: TokenStream = render_unsigned_integer(&RustPrimitive::U64, m).parse().unwrap();
+          let lit = render_unsigned_integer(&RustPrimitive::U64, m)
+            .parse::<TokenStream>()
+            .unwrap();
           quote! { min = #lit }
         });
         let max_part = max.map(|m| {
-          let lit: TokenStream = render_unsigned_integer(&RustPrimitive::U64, m).parse().unwrap();
+          let lit = render_unsigned_integer(&RustPrimitive::U64, m)
+            .parse::<TokenStream>()
+            .unwrap();
           quote! { max = #lit }
         });
         match (min_part, max_part) {
@@ -137,19 +185,19 @@ impl ToTokens for ValidationAttribute {
       } => {
         let mut parts = vec![];
         if let Some(m) = min {
-          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
           parts.push(quote! { min = #lit });
         }
         if let Some(m) = max {
-          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
           parts.push(quote! { max = #lit });
         }
         if let Some(m) = exclusive_min {
-          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
           parts.push(quote! { exclusive_min = #lit });
         }
         if let Some(m) = exclusive_max {
-          let lit: TokenStream = primitive.format_number(m).parse().unwrap();
+          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
           parts.push(quote! { exclusive_max = #lit });
         }
         quote! { range(#(#parts),*) }

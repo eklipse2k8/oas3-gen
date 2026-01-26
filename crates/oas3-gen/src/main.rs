@@ -35,5 +35,6 @@ async fn main() -> anyhow::Result<()> {
 mod fixtures {
   pub mod intersection_union;
   pub mod petstore;
+  pub mod petstore_server;
   pub mod union_serde;
 }

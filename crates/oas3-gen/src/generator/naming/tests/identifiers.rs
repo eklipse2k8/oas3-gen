@@ -76,6 +76,16 @@ fn test_type_names() {
     ("Type", "TypeType"),
     // Self is a keyword, so it gets raw identifier prefix
     ("Self", "r#Self"),
+    // Raw identifier prefixes should be stripped and PascalCased
+    ("r#move", "Move"),
+    ("r#static", "Static"),
+    ("r#type", "TypeType"),
+    ("r#match", "Match"),
+    // Keywords become proper PascalCase (no r# needed for type names)
+    ("move", "Move"),
+    ("static", "Static"),
+    ("type", "TypeType"),
+    ("match", "Match"),
   ];
   for (input, expected) in cases {
     assert_eq!(to_rust_type_name(input), expected, "failed for input {input:?}");
@@ -147,7 +157,7 @@ fn test_ensure_unique() {
   ];
 
   for (used_list, input, expected) in cases {
-    let used: BTreeSet<String> = used_list.into_iter().map(String::from).collect();
+    let used = used_list.into_iter().map(String::from).collect::<BTreeSet<String>>();
     assert_eq!(
       ensure_unique(input, &used),
       expected,

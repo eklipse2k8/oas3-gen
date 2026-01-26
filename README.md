@@ -2,7 +2,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.24.0/status.svg)](https://deps.rs/crate/oas3-gen/0.24.0)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.25.0/status.svg)](https://deps.rs/crate/oas3-gen/0.25.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.2?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.2.md)
 <!-- prettier-ignore-end -->
@@ -30,6 +30,9 @@ oas3-gen generate -i path/to/openapi.yaml -o path/to/types.rs
 
 # generate client operations
 oas3-gen generate client -i path/to/openapi.json -o path/to/client.rs
+
+# generate server module (types.rs, server.rs, mod.rs)
+oas3-gen generate server-mod -i path/to/openapi.json -o path/to/output/
 ```
 
 #### Example
@@ -72,6 +75,73 @@ pub struct Pet {
 }
 ```
 
+### Server Generation
+
+The `server-mod` command generates an axum-based server trait with handler functions and router configuration.
+
+```zsh
+oas3-gen generate server-mod -i path/to/openapi.json -o path/to/output/
+```
+
+This generates three files:
+- `types.rs` - All request/response types
+- `server.rs` - Server trait, handlers, and router
+- `mod.rs` - Module exports
+
+#### Generated Server Trait
+
+```rust
+// server.rs
+
+pub trait ApiServer: Send + Sync {
+    fn list_pets(&self, request: ListPetsRequest)
+        -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
+
+    fn create_pet(&self, request: CreatePetRequest)
+        -> impl std::future::Future<Output = anyhow::Result<CreatePetResponse>> + Send;
+
+    fn get_pet_by_id(&self, request: GetPetByIdRequest)
+        -> impl std::future::Future<Output = anyhow::Result<GetPetByIdResponse>> + Send;
+}
+```
+
+#### Implementing the Server
+
+```rust
+use generated::{ApiServer, ListPetsRequest, ListPetsResponse, /* ... */};
+
+#[derive(Clone)]
+struct MyServer {
+    db: DatabasePool,
+}
+
+impl ApiServer for MyServer {
+    fn list_pets(&self, request: ListPetsRequest)
+        -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send
+    {
+        async move {
+            let pets = self.db.query_pets(request.query.limit).await?;
+            Ok(ListPetsResponse::Ok(pets))
+        }
+    }
+    // ... implement other methods
+}
+
+#[tokio::main]
+async fn main() {
+    let server = MyServer { db: create_pool().await };
+    let app = generated::router(server);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+```
+
+The generated router automatically:
+- Extracts path, query, and header parameters
+- Deserializes request bodies (JSON, form, multipart)
+- Routes requests to the correct handler based on path and HTTP method
+- Converts response enums to proper HTTP responses with status codes
+
 ## Key Features
 
 | Feature | Description |
@@ -88,6 +158,7 @@ pub struct Pet {
 | Operation Filtering | Include/exclude specific operations |
 | Operation Types | Request/response type generation |
 | Schema Composition | Handles allOf/oneOf/anyOf correctly |
+| Server Generation | Axum server trait scaffolding |
 | Serde Integration | Automatic derive for serialization |
 | Smart Naming | Auto-detects camelCase/snake_case conventions |
 | Validation | Constraint attributes from spec |
@@ -95,7 +166,6 @@ pub struct Pet {
 
 ### Missing features
 
-* Server Code generation
 * OAS 3.1 Links and `$dynamic-ref` (oas3 doesn't support this yet)
 * OAS 3.2 Event-stream support
 * External schema references
@@ -130,11 +200,11 @@ Generates idiomatic, type-safe Rust code from an OpenAPI v3.1 (OAS31) specificat
 Usage: oas3-gen generate [OPTIONS] --input <FILE> --output <FILE> [MODE]
 
 Arguments:
-  [MODE]  Sets the generation mode [default: types] [possible values: types, client, client-mod]
+  [MODE]  Sets the generation mode [default: types] [possible values: types, client, client-mod, server-mod]
 
 Required:
   -i, --input <FILE>   Path to the OpenAPI specification file
-  -o, --output <PATH>  Path for generated output (file for types/client, directory for client-mod)
+  -o, --output <PATH>  Path for generated output (file for types/client, directory for client-mod/server-mod)
 
 Code Generation:
   -C, --visibility <PUB>       Module visibility for generated items [default: public] [possible values: public, crate, file]
@@ -169,6 +239,9 @@ Options:
 ```zsh
 # Basic usage to generate a client module from a json schema file
 oas3-gen generate client-mod -i openapi.json -o generated
+
+# Generate a server module with axum trait scaffolding
+oas3-gen generate server-mod -i openapi.json -o generated
 
 # Or generate types and client code individually ...
 

@@ -2,10 +2,12 @@ mod client;
 pub mod constants;
 mod derives;
 mod documentation;
+pub mod fields;
 pub mod lints;
 mod outer_attrs;
 mod parsed_path;
 pub(super) mod serde_attrs;
+pub(crate) mod server;
 mod status_codes;
 pub mod tokens;
 pub(super) mod types;
@@ -14,29 +16,41 @@ pub(super) mod validation_attrs;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeSet;
-
-pub use client::ClientDef;
+pub use client::ClientRootNode;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
-pub use lints::LintConfig;
+pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
-use oas3::spec::{ParameterIn, ParameterStyle};
+use oas3::spec::ParameterIn;
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
 pub use serde_attrs::SerdeAttribute;
+pub use server::{HandlerBodyInfo, ServerRequestTraitDef, ServerTraitMethod};
 pub use status_codes::StatusCodeToken;
 pub use tokens::{
-  DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TypeAliasToken,
+  DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TraitToken, TypeAliasToken,
 };
 pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
+pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
+
+/// Node used to generate file header
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
+pub struct FileHeaderNode {
+  pub title: String,
+  pub version: String,
+  pub source_path: String,
+  pub generator_version: String,
+  pub description: Option<Documentation>,
+  pub lints: GlobalLintsNode,
+}
+
 /// Discriminated enum variant mapping
-#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
 pub struct DiscriminatedVariant {
   #[builder(default)]
   pub discriminator_values: Vec<String>,
@@ -44,14 +58,18 @@ pub struct DiscriminatedVariant {
   pub type_name: TypeRef,
 }
 
-/// Serde mode for discriminated enums
+/// Serde mode controlling which serde traits a type derives/implements
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SerdeMode {
   #[default]
   Both,
   SerializeOnly,
   DeserializeOnly,
+  None,
 }
+
+pub type EnumMethod = MethodNode<EnumMethodKind>;
+pub type StructMethod = MethodNode<MethodKind>;
 
 /// Discriminated enum definition (uses macro for custom ser/de)
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -123,6 +141,12 @@ pub struct StatusHandler {
   pub dispatch: ResponseStatusCategory,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct ImplTryFromNode {
+  pub into: TypeRef,
+  pub methods: Vec<MethodKind>,
+}
+
 /// Response enum definition for operation responses
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct ResponseEnumDef {
@@ -132,6 +156,8 @@ pub struct ResponseEnumDef {
   #[builder(default)]
   pub variants: Vec<ResponseVariant>,
   pub request_type: Option<StructToken>,
+  #[builder(default)]
+  pub try_from: Vec<ImplTryFromNode>,
 }
 
 /// Top-level Rust type representation
@@ -188,19 +214,6 @@ impl RustType {
   }
 }
 
-pub trait RustTypeCollection {
-  fn find_struct(&self, name: &StructToken) -> Option<&StructDef>;
-}
-
-impl RustTypeCollection for [RustType] {
-  fn find_struct(&self, name: &StructToken) -> Option<&StructDef> {
-    self.iter().find_map(|t| match t {
-      RustType::Struct(s) if &s.name == name => Some(s),
-      _ => None,
-    })
-  }
-}
-
 /// Metadata about an API operation (for tracking, not direct code generation)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationKind {
@@ -216,13 +229,7 @@ pub struct OperationInfo {
   pub operation_id: String,
   pub method: Method,
   pub path: ParsedPath,
-  #[builder(into)]
-  pub path_template: String,
   pub kind: OperationKind,
-  #[builder(into)]
-  pub summary: Option<String>,
-  #[builder(into)]
-  pub description: Option<String>,
   pub request_type: Option<StructToken>,
   pub response_type: Option<String>,
   pub response_enum: Option<EnumToken>,
@@ -233,6 +240,8 @@ pub struct OperationInfo {
   #[builder(default)]
   pub parameters: Vec<FieldDef>,
   pub body: Option<OperationBody>,
+  #[builder(default)]
+  pub documentation: Documentation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -242,6 +251,18 @@ pub enum ParameterLocation {
   Query,
   Header,
   Cookie,
+}
+
+impl ParameterLocation {
+  #[must_use]
+  pub const fn suffix(self) -> Option<&'static str> {
+    match self {
+      Self::Path => Some("Path"),
+      Self::Query => Some("Query"),
+      Self::Header => Some("Header"),
+      Self::Cookie => None,
+    }
+  }
 }
 
 impl From<ParameterIn> for ParameterLocation {
@@ -347,11 +368,26 @@ impl ResponseMediaType {
   }
 }
 
-#[derive(Debug, Clone, Default, bon::Builder)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct MultipartFieldInfo {
+  pub name: FieldNameToken,
+  #[builder(default)]
+  pub nullable: bool,
+  #[builder(default)]
+  pub is_bytes: bool,
+  #[builder(default)]
+  pub requires_json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct OperationBody {
   pub field_name: FieldNameToken,
+  pub body_type: Option<TypeRef>,
+  #[builder(default)]
   pub optional: bool,
+  #[builder(default)]
   pub content_category: ContentCategory,
+  pub multipart_fields: Option<Vec<MultipartFieldInfo>>,
 }
 
 /// Semantic kind of a struct to determine code generation behavior
@@ -410,21 +446,21 @@ impl StructDef {
   }
 }
 
-/// Associated method definition for a struct
-#[derive(Debug, Clone, PartialEq, Eq, bon::Builder)]
-pub struct StructMethod {
-  pub name: MethodNameToken,
-  pub docs: Documentation,
-  pub kind: StructMethodKind,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StructMethodKind {
+pub enum MethodKind {
+  /// Method to parse a reqwest response into the struct
   ParseResponse {
     response_enum: EnumToken,
     status_handlers: Vec<StatusHandler>,
     default_handler: Option<ResponseVariantCategory>,
   },
+  /// Method to convert the struct into an axum response
+  IntoAxumResponse {
+    response_enum: EnumToken,
+    status_handlers: Vec<StatusHandler>,
+    default_handler: Option<ResponseVariantCategory>,
+  },
+  /// Method that wraps bon::Builder for constructing the struct
   Builder {
     fields: Vec<BuilderField>,
     nested_structs: Vec<BuilderNestedStruct>,
@@ -448,13 +484,13 @@ pub struct BuilderNestedStruct {
 
 /// Associated method definition for an enum
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
-pub struct EnumMethod {
+pub struct MethodNode<Kind> {
   pub name: MethodNameToken,
   pub docs: Documentation,
-  pub kind: EnumMethodKind,
+  pub kind: Kind,
 }
 
-impl EnumMethod {
+impl MethodNode<EnumMethodKind> {
   pub fn new(name: impl Into<MethodNameToken>, kind: EnumMethodKind, docs: impl Into<Documentation>) -> Self {
     Self {
       name: name.into(),
@@ -492,113 +528,12 @@ impl Default for EnumMethodKind {
   }
 }
 
-/// Rust struct field definition
-#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
-pub struct FieldDef {
-  pub name: FieldNameToken,
-  #[builder(default)]
-  pub docs: Documentation,
-  pub rust_type: TypeRef,
-  #[builder(default)]
-  pub serde_attrs: BTreeSet<SerdeAttribute>,
-  pub serde_as_attr: Option<SerdeAsFieldAttr>,
-  #[builder(default)]
-  pub doc_hidden: bool,
-  #[builder(default)]
-  pub validation_attrs: Vec<ValidationAttribute>,
-  pub default_value: Option<serde_json::Value>,
-  pub example_value: Option<serde_json::Value>,
-  #[builder(into)]
-  pub parameter_location: Option<ParameterLocation>,
-  #[builder(default)]
-  pub deprecated: bool,
-  pub multiple_of: Option<serde_json::Number>,
-  #[builder(into)]
-  pub original_name: Option<String>,
-}
-
-impl FieldDef {
-  #[must_use]
-  pub fn is_required(&self) -> bool {
-    self.default_value.is_none() && !self.rust_type.nullable
-  }
-
-  #[must_use]
-  pub fn with_discriminator_behavior(mut self, discriminator_value: Option<&str>, is_base: bool) -> Self {
-    self.docs.clear();
-    self.validation_attrs.clear();
-    self.doc_hidden = true;
-
-    if let Some(value) = discriminator_value {
-      self.default_value = Some(serde_json::Value::String(value.to_string()));
-      self.serde_attrs.insert(SerdeAttribute::SkipDeserializing);
-      self.serde_attrs.insert(SerdeAttribute::Default);
-    } else if is_base {
-      self.serde_attrs.clear();
-      self.serde_attrs.insert(SerdeAttribute::Skip);
-      if self.rust_type.is_string_like() {
-        self.default_value = Some(serde_json::Value::String(String::new()));
-      }
-    }
-
-    self
-  }
-
-  #[must_use]
-  pub fn with_serde_attributes(mut self, explode: bool, style: Option<ParameterStyle>) -> Self {
-    if let Some(original) = &self.original_name
-      && self.name != original.as_str()
-    {
-      self.serde_attrs.insert(SerdeAttribute::Rename(original.clone()));
-    }
-
-    if self.rust_type.is_array && !explode {
-      let separator = match style {
-        Some(ParameterStyle::SpaceDelimited) => SerdeAsSeparator::Space,
-        Some(ParameterStyle::PipeDelimited) => SerdeAsSeparator::Pipe,
-        _ => SerdeAsSeparator::Comma,
-      };
-
-      self.serde_as_attr = Some(SerdeAsFieldAttr::SeparatedList {
-        separator,
-        optional: self.rust_type.nullable,
-      });
-    }
-
-    self
-  }
-}
-
-pub trait FieldCollection: Send + Sync {
-  type Token;
-
-  /// Find the element matching `name` token
-  #[must_use]
-  fn find_name(&self, name: &FieldNameToken) -> Option<&Self::Token>;
-
-  #[must_use]
-  fn has_serde_as(&self) -> bool;
-}
-
-impl FieldCollection for [FieldDef] {
-  type Token = FieldDef;
-
-  fn find_name(&self, name: &FieldNameToken) -> Option<&Self::Token> {
-    self.iter().find(|t| t.name == *name)
-  }
-
-  fn has_serde_as(&self) -> bool {
-    self.iter().any(|t| t.serde_as_attr.is_some())
-  }
-}
-
 /// Rust enum definition
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct EnumDef {
   pub name: EnumToken,
   pub docs: Documentation,
   pub variants: Vec<VariantDef>,
-  pub discriminator: Option<String>,
   #[builder(default)]
   pub serde_attrs: Vec<SerdeAttribute>,
   #[builder(default)]

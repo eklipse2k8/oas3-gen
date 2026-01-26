@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.24.0"
+version = "0.25.0"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -37,14 +37,16 @@ split-debuginfo = "unpacked"
 
 [workspace.dependencies]
 # Workspace Members
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.24.0" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.25.0" }
 
 # External Dependencies
 any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
+axum = { version = "0.8" }
+axum-core = { version = "0.5" }
 better_default = { version = "1.0" }
 blake3 = { version = "1.8", features = ["neon", "traits-preview"] }
-bon = { version = "3.8" }
+bon = { version = "3.8", features = ["implied-bounds"] }
 cfg-if = { version = "1.0" }
 chrono = { version = ">=0.4.42", default-features = false, features = ["std", "clock", "serde"] }
 clap = { version = "4.5", features = ["derive", "color"] }
@@ -52,17 +54,21 @@ comfy-table = { version = "7.2" }
 crossterm = { version = "0.29", default-features = false }
 cruet = { version = "0.15" }
 fmmap = { version = "0.4", features = ["tokio"] }
+futures = { version = "0.3" }
+futures-core = { version = "0.3" }
 http = { version = "1.4" }
-indexmap = { version = "2.12", features = ["serde"] }
+indexmap = { version = "2.13", features = ["serde"] }
 inflections = { version = "1.1" }
+itertools = { version = "0.14" }
 json-canon = { version = "0.1" }
 mediatype = { version = "0.21", features = ["serde"] }
 num-format = { version = "0.4" }
 oas3 = { version = "0.20", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
+petgraph = { version = "0.8" }
 prettyplease = { version = "0.2" }
 proc-macro2 = { version = "1.0" }
-quick-xml = { version = ">=0.38", features = ["serde", "serialize"] }
+quick-xml = { version = ">=0.38", default-features = false }
 quote = { version = "1.0" }
 regex = { version = "1.12" }
 reqwest = { version = "0.13", default-features = false }
@@ -70,12 +76,12 @@ eventsource-stream = { version = "0.2" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }
-serde_with = { version = "3.15", features = ["chrono"] }
+serde_with = { version = "3.16", features = ["chrono"] }
 string_cache = { version = "0.9", features = ["serde"] }
 strum = { version = "0.27", features = ["derive"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
 tempfile = { version = "3.24" }
 thiserror = { version = "2.0" }
-tokio = { version = "1.48", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
+tokio = { version = "1.49", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
 uuid = { version = "1.19", features = ["serde"] }
 validator = { version = "0.20" }

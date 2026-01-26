@@ -1,30 +1,94 @@
-use quote::quote;
+use proc_macro2::TokenStream;
+use quote::{ToTokens, quote};
 
 use super::Visibility;
-use crate::generator::ast::{ClientDef, LintConfig};
+use crate::generator::{
+  ast::{ClientRootNode, GlobalLintsNode},
+  codegen::generate_source,
+};
 
-pub struct ModFileGenerator<'a> {
-  metadata: &'a ClientDef,
-  visibility: Visibility,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModFileKind {
+  Client,
+  Server,
 }
 
-impl<'a> ModFileGenerator<'a> {
-  pub fn new(metadata: &'a ClientDef, visibility: Visibility) -> Self {
-    Self { metadata, visibility }
+impl ModFileKind {
+  const fn secondary_module_name(self) -> &'static str {
+    match self {
+      Self::Client => "client",
+      Self::Server => "server",
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct ModFileFragment {
+  metadata: ClientRootNode,
+  visibility: Visibility,
+  kind: ModFileKind,
+  source_path: String,
+  gen_version: String,
+}
+
+impl ModFileFragment {
+  pub fn new(
+    metadata: ClientRootNode,
+    visibility: Visibility,
+    kind: ModFileKind,
+    source_path: String,
+    gen_version: String,
+  ) -> Self {
+    Self {
+      metadata,
+      visibility,
+      kind,
+      source_path,
+      gen_version,
+    }
   }
 
-  pub fn generate(&self, source_path: &str, gen_version: &str) -> anyhow::Result<String> {
-    let vis = self.visibility.to_tokens();
+  pub fn for_client(
+    metadata: ClientRootNode,
+    visibility: Visibility,
+    source_path: String,
+    gen_version: String,
+  ) -> Self {
+    Self::new(metadata, visibility, ModFileKind::Client, source_path, gen_version)
+  }
 
-    let code = quote! {
+  pub fn for_server(
+    metadata: ClientRootNode,
+    visibility: Visibility,
+    source_path: String,
+    gen_version: String,
+  ) -> Self {
+    Self::new(metadata, visibility, ModFileKind::Server, source_path, gen_version)
+  }
+
+  pub fn generate(&self) -> anyhow::Result<String> {
+    let lint_config = GlobalLintsNode::default();
+    generate_source(
+      &self.to_token_stream(),
+      &self.metadata,
+      Some(&lint_config),
+      &self.source_path,
+      &self.gen_version,
+    )
+  }
+}
+
+impl ToTokens for ModFileFragment {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let vis = &self.visibility;
+    let secondary_mod = syn::Ident::new(self.kind.secondary_module_name(), proc_macro2::Span::call_site());
+
+    tokens.extend(quote! {
       mod types;
-      mod client;
+      mod #secondary_mod;
 
       #vis use types::*;
-      #vis use client::*;
-    };
-
-    let lint_config = LintConfig::default();
-    super::generate_source(&code, self.metadata, Some(&lint_config), source_path, gen_version)
+      #vis use #secondary_mod::*;
+    });
   }
 }
