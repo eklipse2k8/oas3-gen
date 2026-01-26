@@ -329,7 +329,7 @@ impl EnumVariantToken {
   }
 
   pub fn with_schema_suffix(self, schema_name: &str) -> Self {
-    Self::new(format!("{}{}", self, schema_name))
+    Self::new(format!("{self}{schema_name}"))
   }
 }
 

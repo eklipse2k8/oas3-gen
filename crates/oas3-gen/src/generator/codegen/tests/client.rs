@@ -636,7 +636,7 @@ fn test_multipart_with_json_serialization() {
 }
 
 #[test]
-fn test_multipart_fallback_with_body_type() {
+fn test_multipart_fallback_uses_type_inference() {
   let body = OperationBody::builder()
     .field_name(FieldNameToken::new("body"))
     .body_type(TypeRef::new("UploadRequest"))
@@ -646,8 +646,12 @@ fn test_multipart_fallback_with_body_type() {
   let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
 
   assert!(
-    code.contains("serde_json :: to_value :: < UploadRequest >"),
-    "fallback with body_type should include type annotation: {code}"
+    code.contains("serde_json :: to_value (body)"),
+    "fallback should use type inference without explicit annotation: {code}"
+  );
+  assert!(
+    !code.contains("to_value :: <"),
+    "fallback should not include explicit type annotation: {code}"
   );
 }
 

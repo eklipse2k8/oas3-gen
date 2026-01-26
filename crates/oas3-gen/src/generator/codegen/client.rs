@@ -7,7 +7,7 @@ use syn::LitStr;
 use super::Visibility;
 use crate::generator::ast::{
   ClientRootNode, ContentCategory, EnumToken, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody,
-  OperationInfo, OperationKind, ParameterLocation, ParsedPath, StructToken, TypeRef,
+  OperationInfo, OperationKind, ParameterLocation, ParsedPath, StructToken,
 };
 
 #[derive(Clone, Debug)]
@@ -163,28 +163,18 @@ impl ToTokens for XmlBodyFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct MultipartFallbackFragment {
-  body_type: Option<TypeRef>,
-}
+pub(crate) struct MultipartFallbackFragment;
 
 impl MultipartFallbackFragment {
-  pub(crate) fn new(body_type: Option<TypeRef>) -> Self {
-    Self { body_type }
+  pub(crate) fn new() -> Self {
+    Self
   }
 }
 
 impl ToTokens for MultipartFallbackFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let type_annotation = self.body_type.as_ref().map_or_else(
-      || quote! {},
-      |ty| {
-        let ty_tokens = ty.to_token_stream();
-        quote! { ::<#ty_tokens> }
-      },
-    );
-
     let ts = quote! {
-      let json_value = serde_json::to_value #type_annotation (body)?;
+      let json_value = serde_json::to_value(body)?;
       let mut form = reqwest::multipart::Form::new();
       if let serde_json::Value::Object(map) = json_value {
         for (key, value) in map {
@@ -243,7 +233,7 @@ impl MultipartFormFragment {
 
   fn inner_logic(&self) -> TokenStream {
     self.body.multipart_fields.as_ref().map_or_else(
-      || MultipartFallbackFragment::new(self.body.body_type.clone()).into_token_stream(),
+      || MultipartFallbackFragment::new().into_token_stream(),
       |f| MultipartStrictFragment::new(f.clone()).into_token_stream(),
     )
   }
