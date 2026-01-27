@@ -25,5 +25,5 @@ GEMINI.md
 .env.*
 
 # Nix build artifact symlink
-/result
-/.direnv
+result
+.direnv
