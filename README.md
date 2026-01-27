@@ -1,8 +1,17 @@
-# Rust OpenAPI 3.1 Type Generator
+# (OAS3-GEN) OpenAPI 3.1+ Rust Generator
+
+```rust
+//     ██████╗  █████╗ ███████╗██████╗        ██████╗ ███████╗███╗   ██╗
+//    ██╔═══██╗██╔══██╗██╔════╝╚════██╗      ██╔════╝ ██╔════╝████╗  ██║
+//    ██║   ██║███████║███████╗ █████╔╝█████╗██║  ███╗█████╗  ██╔██╗ ██║
+//    ██║   ██║██╔══██║╚════██║ ╚═══██╗╚════╝██║   ██║██╔══╝  ██║╚██╗██║
+//    ╚██████╔╝██║  ██║███████║██████╔╝      ╚██████╔╝███████╗██║ ╚████║
+//     ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═════╝        ╚═════╝ ╚══════╝╚═╝  ╚═══╝
+```
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.25.0/status.svg)](https://deps.rs/crate/oas3-gen/0.25.0)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.25.1/status.svg)](https://deps.rs/crate/oas3-gen/0.25.1)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.2?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.2.md)
 <!-- prettier-ignore-end -->

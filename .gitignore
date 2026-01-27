@@ -9,9 +9,12 @@
 /specs
 
 # No custom agent settings
-.claude/settings.local.json
+.claude/
 .opencode/
+.codex/
+.gemini/
 opencode.*
+GEMINI.md
 
 # No IDE files
 .idea/
