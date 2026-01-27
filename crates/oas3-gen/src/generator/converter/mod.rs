@@ -305,7 +305,7 @@ impl SchemaConverter {
 
     if let Some((_, kind)) = schema.union_variants_with_kind() {
       if schema.discriminator.is_none() && self.type_resolver.is_wrapper_union(schema)? {
-        return Ok(vec![]);
+        return self.convert_nullable_enum(name, schema);
       }
 
       if let Some(flattened) = self.type_resolver.try_flatten_nested_union(schema)? {
@@ -389,6 +389,25 @@ impl SchemaConverter {
         .chain(inline_types)
         .collect(),
     )
+  }
+
+  /// Converts a nullable enum schema to just the enum type.
+  ///
+  /// For nullable enums (`anyOf: [{ enum: [...] }, null]`), generates the enum
+  /// directly with the schema name. The nullability is handled at the usage site
+  /// (struct fields get `Option<EnumType>`).
+  fn convert_nullable_enum(&self, name: &str, schema: &ObjectSchema) -> Result<Vec<RustType>> {
+    let spec = self.context.graph().spec();
+    let Some(non_null_variant) = schema.find_non_null_variant(spec) else {
+      return Ok(vec![]);
+    };
+
+    let resolved = non_null_variant.resolve(spec)?;
+    if resolved.has_enum_values() && resolved.enum_values.len() > 1 {
+      return Ok(vec![self.enum_converter.convert_value_enum(name, &resolved)]);
+    }
+
+    Ok(vec![])
   }
 
   /// Attempts to create a `Vec<T>` type reference for an array schema with inline items.

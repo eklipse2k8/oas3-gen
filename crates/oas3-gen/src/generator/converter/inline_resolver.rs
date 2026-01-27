@@ -126,10 +126,20 @@ impl InlineTypeResolver {
 
     let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
 
-    let enum_cache_key = {
-      let entries = schema.extract_enum_entries(self.context.graph().spec());
-      (!schema.is_relaxed_enum_pattern() && !entries.is_empty()).then(|| entries_to_cache_key(&entries))
-    };
+    let enum_cache_key = self
+      .context
+      .cache
+      .borrow()
+      .get_precomputed_enum_cache_key(schema)
+      .ok()
+      .flatten()
+      .or_else(|| {
+        if schema.is_relaxed_enum_pattern() {
+          return None;
+        }
+        let entries = schema.extract_enum_entries(self.context.graph().spec());
+        (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+      });
 
     {
       let cache = self.context.cache.borrow();
@@ -234,10 +244,17 @@ impl InlineTypeResolver {
     }
 
     let main_type = generated.last().cloned().unwrap();
-    let enum_cache_key = {
-      let entries = schema.extract_enum_entries(self.context.graph().spec());
-      (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
-    };
+    let enum_cache_key = self
+      .context
+      .cache
+      .borrow()
+      .get_precomputed_enum_cache_key(schema)
+      .ok()
+      .flatten()
+      .or_else(|| {
+        let entries = schema.extract_enum_entries(self.context.graph().spec());
+        (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+      });
     let registration = self
       .context
       .cache
@@ -290,10 +307,17 @@ impl InlineTypeResolver {
 
     let result = generator(&name)?;
 
-    let enum_cache_key = {
-      let entries = schema.extract_enum_entries(self.context.graph().spec());
-      (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
-    };
+    let enum_cache_key = self
+      .context
+      .cache
+      .borrow()
+      .get_precomputed_enum_cache_key(schema)
+      .ok()
+      .flatten()
+      .or_else(|| {
+        let entries = schema.extract_enum_entries(self.context.graph().spec());
+        (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+      });
     let registration = self
       .context
       .cache

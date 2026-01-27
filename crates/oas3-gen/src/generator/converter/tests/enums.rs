@@ -1837,16 +1837,12 @@ fn test_anyof_with_string_enum_and_object_generates_inline_enum() -> anyhow::Res
   assert!(enum_def.is_some(), "should produce FunctionCall enum");
   let enum_def = enum_def.unwrap();
 
-  assert_eq!(
-    enum_def.variants.len(),
-    2,
-    "should have 2 variants"
-  );
+  assert_eq!(enum_def.variants.len(), 2, "should have 2 variants");
 
   let mode_variant = enum_def
     .variants
     .iter()
-    .find(|v| v.name.to_string() != "Option")
+    .find(|v| v.name != "Option")
     .expect("should have a mode variant");
 
   match &mode_variant.content {
@@ -1858,11 +1854,15 @@ fn test_anyof_with_string_enum_and_object_generates_inline_enum() -> anyhow::Res
         "variant should NOT be plain String, should be an inline enum"
       );
     }
-    _ => panic!("expected tuple variant for mode variant"),
+    VariantContent::Unit => panic!("expected tuple variant for mode variant"),
   }
 
   let inline_enum = all_types.iter().find_map(|t| match t {
-    RustType::Enum(e) if e.name != "FunctionCall" && e.variants.iter().any(|v| v.name.to_string() == "None" || v.name.to_string() == "Auto") => Some(e),
+    RustType::Enum(e)
+      if e.name != "FunctionCall" && e.variants.iter().any(|v| v.name == "None" || v.name == "Auto") =>
+    {
+      Some(e)
+    }
     _ => None,
   });
 
@@ -1943,7 +1943,7 @@ fn test_oneof_with_string_enum_variant_generates_inline_enum() -> anyhow::Result
   let mode_variant = enum_def
     .variants
     .iter()
-    .find(|v| v.name.to_string() != "TextFormat")
+    .find(|v| v.name != "TextFormat")
     .expect("should have a mode variant");
 
   match &mode_variant.content {
@@ -1955,11 +1955,15 @@ fn test_oneof_with_string_enum_variant_generates_inline_enum() -> anyhow::Result
         "variant should NOT be plain String, should be an inline enum"
       );
     }
-    _ => panic!("expected tuple variant for mode variant"),
+    VariantContent::Unit => panic!("expected tuple variant for mode variant"),
   }
 
   let inline_enum = all_types.iter().find_map(|t| match t {
-    RustType::Enum(e) if e.name != "ResponseFormat" && e.variants.iter().any(|v| v.name.to_string() == "Streaming" || v.name.to_string() == "Batch") => Some(e),
+    RustType::Enum(e)
+      if e.name != "ResponseFormat" && e.variants.iter().any(|v| v.name == "Streaming" || v.name == "Batch") =>
+    {
+      Some(e)
+    }
     _ => None,
   });
 
@@ -2032,7 +2036,7 @@ fn test_anyof_with_single_value_enum_uses_primitive() -> anyhow::Result<()> {
   let string_variant = enum_def
     .variants
     .iter()
-    .find(|v| v.name.to_string() != "ObjectVariant")
+    .find(|v| v.name != "ObjectVariant")
     .expect("should have a non-ObjectVariant variant");
 
   match &string_variant.content {
@@ -2044,7 +2048,7 @@ fn test_anyof_with_single_value_enum_uses_primitive() -> anyhow::Result<()> {
         "single-value enum should use primitive String type"
       );
     }
-    _ => panic!("expected tuple variant"),
+    VariantContent::Unit => panic!("expected tuple variant"),
   }
 
   Ok(())

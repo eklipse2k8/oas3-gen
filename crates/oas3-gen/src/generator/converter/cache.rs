@@ -6,7 +6,10 @@ use super::hashing::CanonicalSchema;
 use crate::{
   generator::{
     ast::{EnumToken, RustType, StructDef, StructToken, TypeRef},
-    naming::identifiers::{ensure_unique, to_rust_type_name},
+    naming::{
+      identifiers::{ensure_unique, to_rust_type_name},
+      name_index::SchemaPrecomputed,
+    },
   },
   utils::SchemaExt,
 };
@@ -52,13 +55,19 @@ impl NameRegistry {
 struct SchemaIdentity {
   schema_to_type: BTreeMap<CanonicalSchema, String>,
   precomputed: BTreeMap<CanonicalSchema, String>,
+  metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
 }
 
 impl SchemaIdentity {
   /// Stores a mapping of canonical schemas to their precomputed type names for
   /// deterministic naming across code generation runs.
-  fn set_precomputed(&mut self, names: BTreeMap<CanonicalSchema, String>) {
+  fn set_precomputed(
+    &mut self,
+    names: BTreeMap<CanonicalSchema, String>,
+    metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
+  ) {
     self.precomputed = names;
+    self.metadata = metadata;
   }
 
   /// Returns the type name previously assigned to this canonical schema, or `None`
@@ -71,6 +80,12 @@ impl SchemaIdentity {
   /// during initialization.
   fn get_precomputed(&self, canonical: &CanonicalSchema) -> Option<&str> {
     self.precomputed.get(canonical).map(String::as_str)
+  }
+
+  /// Returns the precomputed enum cache key for this canonical schema if one was
+  /// computed during the pre-scan phase.
+  fn get_precomputed_enum_cache_key(&self, canonical: &CanonicalSchema) -> Option<&Vec<String>> {
+    self.metadata.get(canonical).and_then(|m| m.enum_cache_key.as_ref())
   }
 
   /// Records that a canonical schema has been assigned the given type name,
@@ -247,9 +262,17 @@ impl SharedSchemaCache {
     &mut self,
     schema_names: BTreeMap<CanonicalSchema, String>,
     enum_names: BTreeMap<Vec<String>, String>,
+    schema_metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
   ) {
-    self.schemas.set_precomputed(schema_names);
+    self.schemas.set_precomputed(schema_names, schema_metadata);
     self.enums.set_precomputed(enum_names);
+  }
+
+  /// Returns the precomputed enum cache key for this schema if one was computed
+  /// during the pre-scan phase.
+  pub(crate) fn get_precomputed_enum_cache_key(&self, schema: &ObjectSchema) -> anyhow::Result<Option<Vec<String>>> {
+    let canonical = CanonicalSchema::from_schema(schema)?;
+    Ok(self.schemas.get_precomputed_enum_cache_key(&canonical).cloned())
   }
 
   /// Returns the Rust type name assigned to this schema, or `None` if the schema

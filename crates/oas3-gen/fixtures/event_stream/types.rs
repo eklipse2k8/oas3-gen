@@ -23,7 +23,7 @@ impl EventsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<EventsResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let data = <oas3_gen_support::EventStream<StreamEvent>>::from_response(req);
       return Ok(EventsResponse::Ok(data));
     }
@@ -96,7 +96,7 @@ impl TypedEventsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<TypedEventsResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let data = <oas3_gen_support::EventStream<TypedEvent>>::from_response(req);
       return Ok(TypedEventsResponse::Ok(data));
     }

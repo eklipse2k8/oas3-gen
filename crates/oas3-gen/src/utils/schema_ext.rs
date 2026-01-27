@@ -186,6 +186,11 @@ pub(crate) trait SchemaExt {
   /// Returns entries with documentation and deprecated status from the source schema
   /// when available, enabling per-variant metadata in generated code.
   fn extract_enum_entries(&self, spec: &Spec) -> Vec<EnumValueEntry>;
+
+  /// Returns true if the schema should be registered as an enum in the name index.
+  ///
+  /// This includes schemas with direct enum values and relaxed anyOf enum patterns.
+  fn should_register_as_enum(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -581,6 +586,10 @@ impl SchemaExt for ObjectSchema {
       .flat_map(|s| extract_variant_entries(&s))
       .unique_by(|e| e.value.clone())
       .collect()
+  }
+
+  fn should_register_as_enum(&self) -> bool {
+    self.has_enum_values() || self.has_relaxed_anyof_enum()
   }
 }
 

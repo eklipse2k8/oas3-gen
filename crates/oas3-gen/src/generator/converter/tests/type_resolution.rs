@@ -1082,3 +1082,77 @@ fn convert_schema_with_allof() {
   let has_struct = types.iter().any(|t| matches!(t, RustType::Struct(_)));
   assert!(has_struct, "allOf should generate a struct");
 }
+
+#[test]
+fn nullable_enum_generates_direct_enum_not_union_wrapper() {
+  let nullable_enum = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("minimal"), json!("low"), json!("medium"), json!("high")],
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(null_schema()),
+    ],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("ReasoningEffort".to_string(), nullable_enum)]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = create_schema_converter(&context);
+
+  let schema = graph.get("ReasoningEffort").unwrap();
+  let types = converter.convert_schema("ReasoningEffort", schema).unwrap();
+
+  assert_eq!(types.len(), 1, "nullable enum should generate exactly one type");
+
+  match &types[0] {
+    RustType::Enum(e) => {
+      assert_eq!(
+        e.name.to_string(),
+        "ReasoningEffort",
+        "enum should use schema name directly"
+      );
+      assert!(!e.variants.is_empty(), "enum should have variants");
+      let variant_names = e.variants.iter().map(|v| v.name.to_string()).collect::<Vec<_>>();
+      let expected_variants = ["Minimal", "Low", "Medium", "High"];
+      assert!(
+        expected_variants.iter().any(|v| variant_names.contains(&v.to_string())),
+        "enum should have value variants, got: {variant_names:?}"
+      );
+      assert!(
+        !variant_names.contains(&"Enum".to_string()),
+        "enum should NOT have a wrapper variant named 'Enum'"
+      );
+    }
+    other => panic!("expected Enum, got {other:?}"),
+  }
+}
+
+#[test]
+fn nullable_enum_does_not_create_type_alias() {
+  let nullable_enum = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        enum_values: vec![json!("auto"), json!("default"), json!("flex")],
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(null_schema()),
+    ],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([("ServiceTier".to_string(), nullable_enum)]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = create_schema_converter(&context);
+
+  let schema = graph.get("ServiceTier").unwrap();
+  let types = converter.convert_schema("ServiceTier", schema).unwrap();
+
+  let has_type_alias = types.iter().any(|t| matches!(t, RustType::TypeAlias(_)));
+  assert!(
+    !has_type_alias,
+    "nullable enum should NOT create a type alias - Option wrapping happens at usage site"
+  );
+}

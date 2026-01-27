@@ -606,6 +606,10 @@ impl TypeResolver {
       return Ok(false);
     }
 
+    if resolved.has_enum_values() && resolved.enum_values.len() > 1 {
+      return Ok(true);
+    }
+
     Ok(resolved.is_primitive())
   }
 

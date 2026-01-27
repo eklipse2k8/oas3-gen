@@ -19,16 +19,23 @@ const RESERVED_TYPE_NAMES: &[&str] = &["Enum", "Struct", "Type", "Object"];
 
 type NameCandidates = BTreeSet<(String, bool)>;
 
+#[derive(Default, Clone, Debug)]
+pub struct SchemaPrecomputed {
+  pub enum_cache_key: Option<Vec<String>>,
+}
+
 #[derive(Default)]
 pub struct ScanResult {
   pub names: BTreeMap<CanonicalSchema, String>,
   pub enum_names: BTreeMap<Vec<String>, String>,
+  pub schema_metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
 }
 
 #[derive(Default)]
 struct CandidateIndex {
   schemas: BTreeMap<CanonicalSchema, NameCandidates>,
   enums: BTreeMap<Vec<String>, NameCandidates>,
+  metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
 }
 
 impl CandidateIndex {
@@ -39,15 +46,28 @@ impl CandidateIndex {
     for (key, candidates) in other.enums {
       self.enums.entry(key).or_default().extend(candidates);
     }
+    for (key, meta) in other.metadata {
+      self.metadata.entry(key).or_insert(meta);
+    }
     self
   }
 
-  fn add_schema_candidate(&mut self, canonical: CanonicalSchema, name: String, is_from_schema: bool) {
+  fn add_schema_candidate_with_metadata(
+    &mut self,
+    canonical: CanonicalSchema,
+    name: String,
+    is_from_schema: bool,
+    enum_cache_key: Option<Vec<String>>,
+  ) {
     self
       .schemas
-      .entry(canonical)
+      .entry(canonical.clone())
       .or_default()
       .insert((name, is_from_schema));
+    self
+      .metadata
+      .entry(canonical)
+      .or_insert_with(|| SchemaPrecomputed { enum_cache_key });
   }
 
   fn add_enum_candidate(&mut self, values: Vec<String>, name: String, is_from_schema: bool) {
@@ -72,7 +92,11 @@ impl<'a> TypeNameIndex<'a> {
     let enum_names = resolve_names(candidates.enums, &mut used_names);
     let names = resolve_names(candidates.schemas, &mut used_names);
 
-    Ok(ScanResult { names, enum_names })
+    Ok(ScanResult {
+      names,
+      enum_names,
+      schema_metadata: candidates.metadata,
+    })
   }
 
   fn collect_all_candidates(&self) -> anyhow::Result<CandidateIndex> {
@@ -90,15 +114,13 @@ impl<'a> TypeNameIndex<'a> {
   fn collect_top_level_candidates(&self, schema_name: &str, schema: &ObjectSchema) -> CandidateIndex {
     let mut index = CandidateIndex::default();
 
-    if schema.requires_type_definition() {
+    if schema.should_register_as_enum() {
       let entries = schema.extract_enum_entries(self.spec);
-      if !entries.is_empty() {
-        let mut rust_name = to_rust_type_name(schema_name);
-        if schema.has_relaxed_anyof_enum() {
-          rust_name.push_str(KNOWN_ENUM_VARIANT);
-        }
-        index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, true);
+      let mut rust_name = to_rust_type_name(schema_name);
+      if schema.has_relaxed_anyof_enum() {
+        rust_name.push_str(KNOWN_ENUM_VARIANT);
       }
+      index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, true);
     }
 
     index
@@ -118,14 +140,16 @@ impl<'a> TypeNameIndex<'a> {
         let canonical = CanonicalSchema::from_schema(prop_schema)?;
         let rust_name = to_rust_type_name(&next_parent);
 
-        index.add_schema_candidate(canonical, rust_name.clone(), false);
-
-        if !prop_schema.has_union() {
+        let enum_cache_key = if prop_schema.should_register_as_enum() {
           let entries = prop_schema.extract_enum_entries(self.spec);
-          if !entries.is_empty() {
-            index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, false);
-          }
-        }
+          let key = entries_to_cache_key(&entries);
+          index.add_enum_candidate(key.clone(), rust_name.clone(), false);
+          Some(key)
+        } else {
+          None
+        };
+
+        index.add_schema_candidate_with_metadata(canonical, rust_name, false, enum_cache_key);
       }
 
       if !prop_schema.properties.is_empty() {

@@ -119,16 +119,19 @@ impl UnionConverter {
 
     let output = self.collect_union_variants(name, schema, kind)?;
 
-    let entries = schema.extract_enum_entries(self.context.graph().spec());
-    if !entries.is_empty()
-      && let RustType::Enum(e) = &output.result
-    {
-      let cache_key = entries_to_cache_key(&entries);
-      self
-        .context
-        .cache
-        .borrow_mut()
-        .register_enum(cache_key, e.name.to_string());
+    let should_register_enum = !schema.enum_values.is_empty() || schema.has_relaxed_anyof_enum();
+    if should_register_enum {
+      let entries = schema.extract_enum_entries(self.context.graph().spec());
+      if !entries.is_empty()
+        && let RustType::Enum(e) = &output.result
+      {
+        let cache_key = entries_to_cache_key(&entries);
+        self
+          .context
+          .cache
+          .borrow_mut()
+          .register_enum(cache_key, e.name.to_string());
+      }
     }
 
     Ok(output)

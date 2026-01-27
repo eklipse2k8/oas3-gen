@@ -410,7 +410,7 @@ impl GetEventsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<GetEventsResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let data = oas3_gen_support::Diagnostics::<EventList>::json_with_diagnostics(req).await?;
       return Ok(GetEventsResponse::Ok(data));
     }
@@ -621,7 +621,7 @@ impl SendContentRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<SendContentResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let data = oas3_gen_support::Diagnostics::<ContentResponse>::json_with_diagnostics(req).await?;
       return Ok(SendContentResponse::Ok(data));
     }

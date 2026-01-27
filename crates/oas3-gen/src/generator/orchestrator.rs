@@ -332,7 +332,7 @@ impl Orchestrator {
     let graph = Arc::new(graph);
 
     let mut cache = SharedSchemaCache::new();
-    cache.set_precomputed_names(scan_result.names, scan_result.enum_names);
+    cache.set_precomputed_names(scan_result.names, scan_result.enum_names, scan_result.schema_metadata);
 
     let context = Rc::new(ConverterContext::new(
       graph.clone(),

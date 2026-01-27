@@ -29,7 +29,7 @@ impl CreatePetsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<CreatePetsResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 201u16 {
       let _ = req.bytes().await?;
       return Ok(CreatePetsResponse::Created);
     }
@@ -74,7 +74,7 @@ impl ListCatsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ListCatsResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let data = oas3_gen_support::Diagnostics::<Cats>::json_with_diagnostics(req).await?;
       return Ok(ListCatsResponse::Ok(data));
     }
@@ -163,7 +163,7 @@ impl ListPetsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ListPetsResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let content_type_str = req
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -285,7 +285,7 @@ impl ShowPetByIdRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ShowPetByIdResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
       return Ok(ShowPetByIdResponse::Ok(data));
     }
@@ -353,7 +353,7 @@ impl UploadPetImageRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ShowPetByIdResponse> {
     let status = req.status();
-    if status.is_success() {
+    if status.as_u16() == 200u16 {
       let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
       return Ok(ShowPetByIdResponse::Ok(data));
     }

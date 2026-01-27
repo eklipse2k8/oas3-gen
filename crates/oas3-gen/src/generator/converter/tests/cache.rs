@@ -228,7 +228,7 @@ fn test_precomputed_names() {
   precomputed_enum_names.insert(enum_values.clone(), "PrecomputedEnum".to_string());
 
   let mut cache = SharedSchemaCache::new();
-  cache.set_precomputed_names(precomputed_names, precomputed_enum_names);
+  cache.set_precomputed_names(precomputed_names, precomputed_enum_names, BTreeMap::new());
 
   let preferred_name = cache
     .get_preferred_name(&schema, "DefaultName")
@@ -566,7 +566,7 @@ fn test_get_generated_enum_name_returns_none_for_precomputed_only() {
   precomputed_enum_names.insert(enum_values.clone(), "PrecomputedEnum".to_string());
 
   let mut cache = SharedSchemaCache::new();
-  cache.set_precomputed_names(BTreeMap::new(), precomputed_enum_names);
+  cache.set_precomputed_names(BTreeMap::new(), precomputed_enum_names, BTreeMap::new());
 
   assert_eq!(
     cache.get_enum_name(&enum_values),
