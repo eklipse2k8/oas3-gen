@@ -20,6 +20,7 @@ use crate::generator::{
   codegen::{
     attributes::generate_derives_from_slice,
     headers::{HeaderFromMapFragment, HeaderMapFragment},
+    http::HttpStatusCode,
   },
   converter::GenerationTarget,
 };
@@ -395,9 +396,11 @@ impl ToTokens for StatusConditionFragment {
       StatusCodeToken::Redirection3XX => quote! { status.is_redirection() },
       StatusCodeToken::ClientError4XX => quote! { status.is_client_error() },
       StatusCodeToken::ServerError5XX => quote! { status.is_server_error() },
-      other => other
-        .code()
-        .map_or_else(|| quote! { false }, |code| quote! { status.as_u16() == #code }),
+      StatusCodeToken::Default => quote! { false },
+      status_code => {
+        let code = HttpStatusCode::new(status_code);
+        quote! { status == #code }
+      }
     };
 
     tokens.extend(ts);
