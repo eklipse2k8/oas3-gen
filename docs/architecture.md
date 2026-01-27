@@ -200,7 +200,7 @@ The generator follows a strict one-way data flow where each stage produces immut
 6. **Postprocess**: `TypePostprocessor` propagates usage, updates serde modes, deduplicates response enums
 7. **Generate**: `codegen::generate()` produces formatted Rust source code
 
-Data flows forward only - no stage feeds back to earlier stages.
+**Key Principle:** Data flows forward only. Each stage consumes outputs from previous stages without back-references. The `SharedSchemaCache` enables deduplication within the conversion stage but doesn't feed back to earlier stages.
 
 ## Key Files
 
