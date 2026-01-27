@@ -23,3 +23,7 @@ GEMINI.md
 
 .env
 .env.*
+
+# Nix build artifact symlink
+result
+.direnv
