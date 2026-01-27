@@ -28,6 +28,20 @@ Install the tool directly from crates.io using `cargo`.
 cargo install oas3-gen
 ```
 
+#### Alternative build with [Nix](https://nixos.org/)
+
+ -  Make sure you have `nix` installed or install it with:
+    ```shell
+    sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon
+    ```
+ -  Now simply run it with:
+    - `nix run github:eklipse2k8/oas3-gen` will run the binary, fetching the git repo automatically.
+    - Or locally in the repo with `nix run`
+    - To globally install use `nix profile install`
+
+This takes cares of build dependencies (`openssl`, `pkg-config`) and they are packaged reproducibly and defined in `flake.nix`.
+A development shell is included and can be accessed by running `nix develop` or use `direnv allow` if available.
+
 ### 2. Generation
 
 Provide a path to an OpenAPI specification (JSON or YAML) and specify an output file for the generated Rust code. The format is auto-detected based on file extension.

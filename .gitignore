@@ -28,5 +28,5 @@ GEMINI.md
 /book/book
 
 # Nix build artifact symlink
-/result
-/.direnv
+result
+.direnv
