@@ -403,13 +403,18 @@ impl UrlConstructionFragment {
 
 impl ToTokens for UrlConstructionFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let segments = &self.path.0;
+    let segments = &self.path.segments;
+
+    let query_setter = self.path.query_string.as_ref().map(|qs| {
+      quote! { url.set_query(Some(#qs)); }
+    });
 
     let ts = quote! {
       let mut url = self.base_url.clone();
       url.path_segments_mut()
          .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
          #(#segments)*;
+      #query_setter
     };
 
     tokens.extend(ts);

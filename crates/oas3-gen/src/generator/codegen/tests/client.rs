@@ -30,7 +30,10 @@ impl TestOperation {
       .stable_id("test_operation")
       .operation_id("testOperation")
       .method(method.clone())
-      .path(ParsedPath(vec![PathSegment::Literal("test".to_string())]))
+      .path(ParsedPath {
+        segments: vec![PathSegment::Literal("test".to_string())],
+        query_string: None,
+      })
       .kind(OperationKind::Http)
       .request_type(StructToken::new("TestRequest"))
       .response_type("TestResponse".to_string())
@@ -335,7 +338,10 @@ fn test_client_filters_webhook_operations() {
       .stable_id("list_pets")
       .operation_id("listPets")
       .method(method)
-      .path(ParsedPath(vec![PathSegment::Literal("pets".to_string())]))
+      .path(ParsedPath {
+        segments: vec![PathSegment::Literal("pets".to_string())],
+        query_string: None,
+      })
       .kind(OperationKind::Http)
       .request_type(StructToken::new("ListPetsRequest"))
       .response_type("Vec<Pet>".to_string())
@@ -364,10 +370,13 @@ fn test_client_filters_webhook_operations() {
       .stable_id("pet_added_hook")
       .operation_id("petAddedHook")
       .method(method)
-      .path(ParsedPath(vec![
-        PathSegment::Literal("webhooks".to_string()),
-        PathSegment::Literal("petAdded".to_string()),
-      ]))
+      .path(ParsedPath {
+        segments: vec![
+          PathSegment::Literal("webhooks".to_string()),
+          PathSegment::Literal("petAdded".to_string()),
+        ],
+        query_string: None,
+      })
       .kind(OperationKind::Webhook)
       .request_type(StructToken::new("PetAddedHookRequest"))
       .response_type("WebhookResponse".to_string())
@@ -411,9 +420,12 @@ fn test_client_filters_webhook_operations() {
 
 #[test]
 fn test_path_segments_static_path() {
-  let segments = ParsedPath(vec![PathSegment::Literal("pets".to_string())]);
-  let output = segments
-    .0
+  let parsed_path = ParsedPath {
+    segments: vec![PathSegment::Literal("pets".to_string())],
+    query_string: None,
+  };
+  let output = parsed_path
+    .segments
     .iter()
     .map(|s| s.to_token_stream().to_string())
     .collect::<String>();
@@ -422,36 +434,42 @@ fn test_path_segments_static_path() {
     output.contains("push") && output.contains("pets"),
     "should push 'pets' segment: {output}"
   );
-  assert_eq!(segments.0.len(), 1, "should have exactly one segment");
+  assert_eq!(parsed_path.segments.len(), 1, "should have exactly one segment");
 }
 
 #[test]
 fn test_path_segments_single_param() {
-  let segments = ParsedPath(vec![
-    PathSegment::Literal("pets".to_string()),
-    PathSegment::Param(FieldNameToken::new("pet_id")),
-  ]);
-  let output = segments
-    .0
+  let parsed_path = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("pets".to_string()),
+      PathSegment::Param(FieldNameToken::new("pet_id")),
+    ],
+    query_string: None,
+  };
+  let output = parsed_path
+    .segments
     .iter()
     .map(|s| s.to_token_stream().to_string())
     .collect::<String>();
 
   assert!(output.contains("pets"), "should push 'pets' literal: {output}");
   assert!(output.contains("pet_id"), "should reference path param: {output}");
-  assert_eq!(segments.0.len(), 2, "should have two segments");
+  assert_eq!(parsed_path.segments.len(), 2, "should have two segments");
 }
 
 #[test]
 fn test_path_segments_multiple_params() {
-  let segments = ParsedPath(vec![
-    PathSegment::Literal("users".to_string()),
-    PathSegment::Param(FieldNameToken::new("user_id")),
-    PathSegment::Literal("posts".to_string()),
-    PathSegment::Param(FieldNameToken::new("post_id")),
-  ]);
-  let output = segments
-    .0
+  let parsed_path = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("users".to_string()),
+      PathSegment::Param(FieldNameToken::new("user_id")),
+      PathSegment::Literal("posts".to_string()),
+      PathSegment::Param(FieldNameToken::new("post_id")),
+    ],
+    query_string: None,
+  };
+  let output = parsed_path
+    .segments
     .iter()
     .map(|s| s.to_token_stream().to_string())
     .collect::<String>();
@@ -460,20 +478,23 @@ fn test_path_segments_multiple_params() {
   assert!(output.contains("posts"), "should push 'posts': {output}");
   assert!(output.contains("user_id"), "should reference user_id: {output}");
   assert!(output.contains("post_id"), "should reference post_id: {output}");
-  assert_eq!(segments.0.len(), 4, "should have four segments");
+  assert_eq!(parsed_path.segments.len(), 4, "should have four segments");
 }
 
 #[test]
 fn test_path_segments_mixed_segment() {
-  let segments = ParsedPath(vec![
-    PathSegment::Literal("api".to_string()),
-    PathSegment::Mixed {
-      format: "v{}.json".to_string(),
-      params: vec![FieldNameToken::new("version")],
-    },
-  ]);
-  let output = segments
-    .0
+  let parsed_path = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("api".to_string()),
+      PathSegment::Mixed {
+        format: "v{}.json".to_string(),
+        params: vec![FieldNameToken::new("version")],
+      },
+    ],
+    query_string: None,
+  };
+  let output = parsed_path
+    .segments
     .iter()
     .map(|s| s.to_token_stream().to_string())
     .collect::<String>();
@@ -487,7 +508,7 @@ fn test_path_segments_mixed_segment() {
     output.contains("v{}.json"),
     "should have correct format string: {output}"
   );
-  assert_eq!(segments.0.len(), 2, "should have two segments");
+  assert_eq!(parsed_path.segments.len(), 2, "should have two segments");
 }
 
 #[test]
@@ -504,11 +525,14 @@ fn test_multipart_method_generation_with_path_params() {
     .stable_id("upload_pet_image")
     .operation_id("uploadPetImage")
     .method(method)
-    .path(ParsedPath(vec![
-      PathSegment::Literal("pets".to_string()),
-      PathSegment::Param(FieldNameToken::new("pet_id")),
-      PathSegment::Literal("upload".to_string()),
-    ]))
+    .path(ParsedPath {
+      segments: vec![
+        PathSegment::Literal("pets".to_string()),
+        PathSegment::Param(FieldNameToken::new("pet_id")),
+        PathSegment::Literal("upload".to_string()),
+      ],
+      query_string: None,
+    })
     .kind(OperationKind::Http)
     .request_type(StructToken::new("UploadPetImageRequest"))
     .response_type("Pet".to_string())
@@ -703,4 +727,68 @@ fn test_url_path_segments_encoding() {
     .push("cafe");
 
   assert_eq!(url.path(), "/pets/cafe", "unicode should be percent-encoded");
+}
+
+#[test]
+fn test_url_construction_with_embedded_query_string() {
+  use crate::generator::codegen::client::UrlConstructionFragment;
+
+  let path_with_query = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("v1".to_string()),
+      PathSegment::Literal("messages".to_string()),
+    ],
+    query_string: Some("beta=true".to_string()),
+  };
+
+  let fragment = UrlConstructionFragment::new(path_with_query);
+  let code = fragment.to_token_stream().to_string();
+
+  assert!(code.contains("push (\"v1\")"), "should push v1 segment: {code}");
+  assert!(
+    code.contains("push (\"messages\")"),
+    "should push messages segment: {code}"
+  );
+  assert!(
+    code.contains("set_query (Some (\"beta=true\"))"),
+    "should set query string: {code}"
+  );
+}
+
+#[test]
+fn test_url_construction_without_query_string() {
+  use crate::generator::codegen::client::UrlConstructionFragment;
+
+  let path_without_query = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("v1".to_string()),
+      PathSegment::Literal("messages".to_string()),
+    ],
+    query_string: None,
+  };
+
+  let fragment = UrlConstructionFragment::new(path_without_query);
+  let code = fragment.to_token_stream().to_string();
+
+  assert!(code.contains("push (\"v1\")"), "should push v1 segment: {code}");
+  assert!(
+    code.contains("push (\"messages\")"),
+    "should push messages segment: {code}"
+  );
+  assert!(
+    !code.contains("set_query"),
+    "should NOT call set_query when there's no query string: {code}"
+  );
+}
+
+#[test]
+fn test_demonstrates_query_string_fix() {
+  let mut url = Url::parse("https://api.example.com").unwrap();
+  url.path_segments_mut().unwrap().push("v1").push("messages");
+  url.set_query(Some("beta=true"));
+  assert_eq!(
+    url.as_str(),
+    "https://api.example.com/v1/messages?beta=true",
+    "correct URL with query param"
+  );
 }
