@@ -168,16 +168,18 @@ fn extract_template_params_handles_unclosed() {
 #[test]
 fn parsed_path_empty() {
   let path = ParsedPath::parse("/", &[]).unwrap();
-  assert!(path.0.is_empty());
+  assert!(path.segments.is_empty());
+  assert!(path.query_string.is_none());
 }
 
 #[test]
 fn parsed_path_simple_literal() {
   let path = ParsedPath::parse("/api/v1/pets", &[]).unwrap();
-  assert_eq!(path.0.len(), 3);
-  assert!(matches!(&path.0[0], PathSegment::Literal(s) if s == "api"));
-  assert!(matches!(&path.0[1], PathSegment::Literal(s) if s == "v1"));
-  assert!(matches!(&path.0[2], PathSegment::Literal(s) if s == "pets"));
+  assert_eq!(path.segments.len(), 3);
+  assert!(matches!(&path.segments[0], PathSegment::Literal(s) if s == "api"));
+  assert!(matches!(&path.segments[1], PathSegment::Literal(s) if s == "v1"));
+  assert!(matches!(&path.segments[2], PathSegment::Literal(s) if s == "pets"));
+  assert!(path.query_string.is_none());
 }
 
 #[test]
@@ -197,59 +199,77 @@ fn make_path_param(name: &str, original: &str) -> FieldDef {
 
 #[test]
 fn to_axum_path_empty() {
-  let path = ParsedPath(vec![]);
+  let path = ParsedPath {
+    segments: vec![],
+    query_string: None,
+  };
   assert_eq!(path.to_axum_path(), "/");
 }
 
 #[test]
 fn to_axum_path_literal_only() {
-  let path = ParsedPath(vec![
-    PathSegment::Literal("api".to_string()),
-    PathSegment::Literal("v1".to_string()),
-    PathSegment::Literal("users".to_string()),
-  ]);
+  let path = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("api".to_string()),
+      PathSegment::Literal("v1".to_string()),
+      PathSegment::Literal("users".to_string()),
+    ],
+    query_string: None,
+  };
   assert_eq!(path.to_axum_path(), "/api/v1/users");
 }
 
 #[test]
 fn to_axum_path_with_params() {
-  let path = ParsedPath(vec![
-    PathSegment::Literal("users".to_string()),
-    PathSegment::Param(FieldNameToken::new("user_id")),
-    PathSegment::Literal("posts".to_string()),
-    PathSegment::Param(FieldNameToken::new("post_id")),
-  ]);
+  let path = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("users".to_string()),
+      PathSegment::Param(FieldNameToken::new("user_id")),
+      PathSegment::Literal("posts".to_string()),
+      PathSegment::Param(FieldNameToken::new("post_id")),
+    ],
+    query_string: None,
+  };
   assert_eq!(path.to_axum_path(), "/users/{user_id}/posts/{post_id}");
 }
 
 #[test]
 fn to_axum_path_with_mixed_segment() {
-  let path = ParsedPath(vec![
-    PathSegment::Literal("files".to_string()),
-    PathSegment::Mixed {
-      format: "v{}.json".to_string(),
-      params: vec![FieldNameToken::new("version")],
-    },
-  ]);
+  let path = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("files".to_string()),
+      PathSegment::Mixed {
+        format: "v{}.json".to_string(),
+        params: vec![FieldNameToken::new("version")],
+      },
+    ],
+    query_string: None,
+  };
   assert_eq!(path.to_axum_path(), "/files/v{version}.json");
   assert!(path.has_mixed_segments());
 }
 
 #[test]
 fn to_axum_path_mixed_multiple_params() {
-  let path = ParsedPath(vec![PathSegment::Mixed {
-    format: "{}.{}".to_string(),
-    params: vec![FieldNameToken::new("major"), FieldNameToken::new("minor")],
-  }]);
+  let path = ParsedPath {
+    segments: vec![PathSegment::Mixed {
+      format: "{}.{}".to_string(),
+      params: vec![FieldNameToken::new("major"), FieldNameToken::new("minor")],
+    }],
+    query_string: None,
+  };
   assert_eq!(path.to_axum_path(), "/{major}.{minor}");
 }
 
 #[test]
 fn has_mixed_segments_false() {
-  let path = ParsedPath(vec![
-    PathSegment::Literal("users".to_string()),
-    PathSegment::Param(FieldNameToken::new("id")),
-  ]);
+  let path = ParsedPath {
+    segments: vec![
+      PathSegment::Literal("users".to_string()),
+      PathSegment::Param(FieldNameToken::new("id")),
+    ],
+    query_string: None,
+  };
   assert!(!path.has_mixed_segments());
 }
 
@@ -266,4 +286,37 @@ fn parse_and_convert_mixed_sanitizes_names() {
   let path = ParsedPath::parse("/files/v{api-version}.json", &params).unwrap();
   assert_eq!(path.to_axum_path(), "/files/v{api_version}.json");
   assert!(path.has_mixed_segments());
+}
+
+#[test]
+fn parse_path_with_query_string() {
+  let path = ParsedPath::parse("/v1/messages?beta=true", &[]).unwrap();
+  assert_eq!(path.segments.len(), 2);
+  assert!(matches!(&path.segments[0], PathSegment::Literal(s) if s == "v1"));
+  assert!(matches!(&path.segments[1], PathSegment::Literal(s) if s == "messages"));
+  assert_eq!(path.query_string, Some("beta=true".to_string()));
+}
+
+#[test]
+fn parse_path_with_query_string_and_param() {
+  let params = vec![make_path_param("batch_id", "batch_id")];
+  let path = ParsedPath::parse("/v1/batches/{batch_id}?beta=true", &params).unwrap();
+  assert_eq!(path.segments.len(), 3);
+  assert!(matches!(&path.segments[0], PathSegment::Literal(s) if s == "v1"));
+  assert!(matches!(&path.segments[1], PathSegment::Literal(s) if s == "batches"));
+  assert!(matches!(&path.segments[2], PathSegment::Param(_)));
+  assert_eq!(path.query_string, Some("beta=true".to_string()));
+}
+
+#[test]
+fn parse_path_with_multiple_query_params() {
+  let path = ParsedPath::parse("/api/endpoint?foo=bar&baz=qux", &[]).unwrap();
+  assert_eq!(path.segments.len(), 2);
+  assert_eq!(path.query_string, Some("foo=bar&baz=qux".to_string()));
+}
+
+#[test]
+fn to_axum_path_ignores_query_string() {
+  let path = ParsedPath::parse("/v1/messages?beta=true", &[]).unwrap();
+  assert_eq!(path.to_axum_path(), "/v1/messages");
 }

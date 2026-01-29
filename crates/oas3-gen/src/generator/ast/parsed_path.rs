@@ -180,33 +180,40 @@ impl ToTokens for PathSegment {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct ParsedPath(pub Vec<PathSegment>);
+pub struct ParsedPath {
+  pub segments: Vec<PathSegment>,
+  pub query_string: Option<String>,
+}
 
 impl ParsedPath {
   pub fn parse(path: &str, parameters: &[FieldDef]) -> Result<Self, PathParseError> {
-    let param_map: HashMap<&str, &FieldNameToken> = parameters
+    let (path_part, query_string) = path
+      .split_once('?')
+      .map_or((path, None), |(p, q)| (p, Some(q.to_string())));
+
+    let param_map = parameters
       .iter()
       .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Path)))
       .filter_map(|p| p.original_name.as_deref().map(|name| (name, &p.name)))
-      .collect();
+      .collect::<HashMap<_, _>>();
 
-    let segments: Result<Vec<_>, _> = path
+    let segments = path_part
       .trim_start_matches('/')
       .split('/')
       .filter(|s| !s.is_empty())
       .map(|segment| PathSegment::parse(segment, &param_map))
-      .collect();
+      .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(Self(segments?))
+    Ok(Self { segments, query_string })
   }
 
   pub fn to_axum_path(&self) -> String {
-    if self.0.is_empty() {
+    if self.segments.is_empty() {
       return "/".to_string();
     }
 
     self
-      .0
+      .segments
       .iter()
       .map(PathSegment::to_axum_segment)
       .fold(String::new(), |mut acc, seg| {
@@ -218,7 +225,7 @@ impl ParsedPath {
 
   #[cfg(test)]
   pub fn has_mixed_segments(&self) -> bool {
-    self.0.iter().any(PathSegment::is_mixed)
+    self.segments.iter().any(PathSegment::is_mixed)
   }
 
   pub fn extract_template_params(path: &str) -> impl Iterator<Item = &str> {
