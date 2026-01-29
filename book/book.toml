@@ -1,0 +1,35 @@
+[book]
+title = "oas3-gen"
+description = "A Rust type generator for OpenAPI v3.1.x specifications"
+authors = ["Matthew Jarjoura"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/eklipse2k8/oas3-gen"
+edit-url-template = "https://github.com/eklipse2k8/oas3-gen/edit/main/book/{path}"
+site-url = "/oas3-gen/"
+cname = ""
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.playground]
+editable = false
+copyable = true
+copy-js = true
+runnable = false
+
+[output.html.code]
+hidelines = { rust = "#" }
+
+[output.html.search]
+enable = true
+limit-results = 30
+boost-hierarchy = 2
