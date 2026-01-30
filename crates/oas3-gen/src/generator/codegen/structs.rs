@@ -595,7 +595,11 @@ impl ToTokens for ResponseExtractionFragment {
         }
       }
       ContentCategory::Binary => {
-        quote! { req.bytes().await?.to_vec() }
+        if matches!(self.schema_type.base_type, RustPrimitive::Bytes) {
+          quote! { req.bytes().await?.to_vec() }
+        } else {
+          quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
+        }
       }
       ContentCategory::EventStream => {
         quote! { <#schema_type>::from_response(req) }
