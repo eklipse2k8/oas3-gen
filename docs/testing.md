@@ -46,6 +46,7 @@ This command generates a `tarpaulin-report.md` file with detailed coverage stati
 - All code changes require unit tests in `#[cfg(test)]` modules
 - Cover: happy paths, edge cases (empty/boundary/special chars), error conditions
 - Run `cargo test` before committing
+- **Feature changes must also update `book/src/` documentation** (see CLAUDE.md)
 
 ## Test Style
 
