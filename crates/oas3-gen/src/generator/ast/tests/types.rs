@@ -7,12 +7,12 @@ use crate::generator::ast::{
   types::{parse_date_parts, parse_time_parts},
 };
 
-fn base_field(type_ref: TypeRef) -> FieldDef {
+fn corgi_field(type_ref: TypeRef) -> FieldDef {
   FieldDef::builder()
-    .name(FieldNameToken::from_raw("test_field"))
-    .docs(Documentation::from_lines(["Some docs"]))
+    .name(FieldNameToken::from_raw("toebeans"))
+    .docs(Documentation::from_lines(["Floof documentation"]))
     .rust_type(type_ref)
-    .serde_attrs(BTreeSet::from([SerdeAttribute::Rename("original".to_string())]))
+    .serde_attrs(BTreeSet::from([SerdeAttribute::Rename("loaf".to_string())]))
     .validation_attrs(vec![ValidationAttribute::Email])
     .build()
 }
@@ -43,8 +43,8 @@ fn test_rust_primitive_from_str() {
     ("chrono::NaiveTime", RustPrimitive::Time),
     ("uuid::Uuid", RustPrimitive::Uuid),
     ("serde_json::Value", RustPrimitive::Value),
-    ("MyCustomType", RustPrimitive::Custom("MyCustomType".into())),
-    ("Vec<MyType>", RustPrimitive::Custom("Vec<MyType>".into())),
+    ("Pembroke", RustPrimitive::Custom("Pembroke".into())),
+    ("Vec<Cardigan>", RustPrimitive::Custom("Vec<Cardigan>".into())),
   ];
 
   for (input, expected) in cases {
@@ -73,7 +73,7 @@ fn test_rust_primitive_display_and_default() {
     RustPrimitive::Uuid,
     RustPrimitive::Value,
     RustPrimitive::Unit,
-    RustPrimitive::Custom("MyType".into()),
+    RustPrimitive::Custom("Corgi".into()),
   ];
 
   for primitive in primitives {
@@ -102,8 +102,11 @@ fn test_type_ref_construction() {
 #[test]
 fn test_type_ref_wrappers() {
   let cases = [
-    (TypeRef::new("String").with_vec().with_option(), "Option<Vec<String>>"),
-    (TypeRef::new("MyType").with_boxed().with_option(), "Option<Box<MyType>>"),
+    (TypeRef::new("Corgi").with_vec().with_option(), "Option<Vec<Corgi>>"),
+    (
+      TypeRef::new("Pembroke").with_boxed().with_option(),
+      "Option<Box<Pembroke>>",
+    ),
     (TypeRef::new("i32").with_vec(), "Vec<i32>"),
     (TypeRef::new("bool").with_option(), "Option<bool>"),
   ];
@@ -347,18 +350,18 @@ fn discriminator_behavior() {
 
   let cases = [
     Case {
-      name: "child discriminator hides and sets value",
+      name: "nugget sploot hides and sets treat",
       type_ref: TypeRef::new(RustPrimitive::String),
-      discriminator_value: Some("child_type"),
+      discriminator_value: Some("nugget"),
       is_base: false,
       expect_doc_hidden: true,
       expect_skip_deserializing: true,
       expect_skip: false,
       expect_default: true,
-      expected_default_value: Some(serde_json::Value::String("child_type".to_string())),
+      expected_default_value: Some(serde_json::Value::String("nugget".to_string())),
     },
     Case {
-      name: "base hides and skips string",
+      name: "loaf sploot and skips bark",
       type_ref: TypeRef::new(RustPrimitive::String),
       discriminator_value: None,
       is_base: true,
@@ -369,7 +372,7 @@ fn discriminator_behavior() {
       expected_default_value: Some(serde_json::Value::String(String::new())),
     },
     Case {
-      name: "base non-string no default",
+      name: "loaf non-bark no treat",
       type_ref: TypeRef::new(RustPrimitive::I64),
       discriminator_value: None,
       is_base: true,
@@ -382,7 +385,7 @@ fn discriminator_behavior() {
   ];
 
   for case in cases {
-    let field = base_field(case.type_ref);
+    let field = corgi_field(case.type_ref);
     let result = field.with_discriminator_behavior(case.discriminator_value, case.is_base);
 
     let docs = &result.docs;

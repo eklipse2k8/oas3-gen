@@ -31,13 +31,11 @@ fn test_implicit_dependency_via_union_fingerprint() {
   let output = orchestrator.generate_with_header("test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
-  // Verify that ImplicitlyRequiredUnion was generated
   assert!(
     code.contains("pub enum ImplicitlyRequiredUnion"),
     "ImplicitlyRequiredUnion was not generated!"
   );
 
-  // Verify that ComponentA and ComponentB were generated
   assert!(code.contains("pub struct ComponentA"), "ComponentA was not generated!");
   assert!(code.contains("pub struct ComponentB"), "ComponentB was not generated!");
 }

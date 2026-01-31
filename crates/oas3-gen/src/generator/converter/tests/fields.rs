@@ -24,20 +24,20 @@ fn test_datetime_field_with_customization() -> anyhow::Result<()> {
     ..Default::default()
   };
   schema.properties.insert(
-    "created_at".to_string(),
+    "sploot_at".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
       ..Default::default()
     }),
   );
-  schema.required = vec!["created_at".to_string()];
+  schema.required = vec!["sploot_at".to_string()];
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
-  let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Frappe".to_string(), schema)]));
   let context = create_test_context(graph.clone(), config_with_customizations(customizations));
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
+  let result = converter.convert_schema("Frappe", graph.get("Frappe").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -50,8 +50,8 @@ fn test_datetime_field_with_customization() -> anyhow::Result<()> {
   let field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "created_at")
-    .expect("created_at field should exist");
+    .find(|f| f.name == "sploot_at")
+    .expect("sploot_at field should exist");
 
   assert!(
     field.serde_as_attr.is_some(),
@@ -83,7 +83,7 @@ fn test_optional_datetime_field_with_customization() -> anyhow::Result<()> {
     ..Default::default()
   };
   schema.properties.insert(
-    "updated_at".to_string(),
+    "waddle_at".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
@@ -92,10 +92,10 @@ fn test_optional_datetime_field_with_customization() -> anyhow::Result<()> {
   );
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
-  let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Frappe".to_string(), schema)]));
   let context = create_test_context(graph.clone(), config_with_customizations(customizations));
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
+  let result = converter.convert_schema("Frappe", graph.get("Frappe").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -108,8 +108,8 @@ fn test_optional_datetime_field_with_customization() -> anyhow::Result<()> {
   let field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "updated_at")
-    .expect("updated_at field should exist");
+    .find(|f| f.name == "waddle_at")
+    .expect("waddle_at field should exist");
 
   let serde_as = field.serde_as_attr.as_ref().expect("Should have serde_as_attr");
   assert_eq!(
@@ -131,7 +131,7 @@ fn test_array_of_datetime_with_customization() -> anyhow::Result<()> {
     ..Default::default()
   };
   schema.properties.insert(
-    "timestamps".to_string(),
+    "toebeans".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
       items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
@@ -144,13 +144,13 @@ fn test_array_of_datetime_with_customization() -> anyhow::Result<()> {
       ..Default::default()
     }),
   );
-  schema.required = vec!["timestamps".to_string()];
+  schema.required = vec!["toebeans".to_string()];
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
-  let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Frappe".to_string(), schema)]));
   let context = create_test_context(graph.clone(), config_with_customizations(customizations));
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
+  let result = converter.convert_schema("Frappe", graph.get("Frappe").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -163,8 +163,8 @@ fn test_array_of_datetime_with_customization() -> anyhow::Result<()> {
   let field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "timestamps")
-    .expect("timestamps field should exist");
+    .find(|f| f.name == "toebeans")
+    .expect("toebeans field should exist");
 
   let serde_as = field.serde_as_attr.as_ref().expect("Should have serde_as_attr");
   assert_eq!(
@@ -186,20 +186,20 @@ fn test_date_field_with_customization() -> anyhow::Result<()> {
     ..Default::default()
   };
   schema.properties.insert(
-    "birth_date".to_string(),
+    "corgi_date".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date".to_string()),
       ..Default::default()
     }),
   );
-  schema.required = vec!["birth_date".to_string()];
+  schema.required = vec!["corgi_date".to_string()];
 
   let customizations = HashMap::from([("date".to_string(), "crate::MyDate".to_string())]);
-  let graph = create_test_graph(BTreeMap::from([("Person".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Corgi".to_string(), schema)]));
   let context = create_test_context(graph.clone(), config_with_customizations(customizations));
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Person", graph.get("Person").unwrap())?;
+  let result = converter.convert_schema("Corgi", graph.get("Corgi").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -212,8 +212,8 @@ fn test_date_field_with_customization() -> anyhow::Result<()> {
   let field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "birth_date")
-    .expect("birth_date field should exist");
+    .find(|f| f.name == "corgi_date")
+    .expect("corgi_date field should exist");
 
   let serde_as = field.serde_as_attr.as_ref().expect("Should have serde_as_attr");
   assert_eq!(
@@ -235,20 +235,20 @@ fn test_uuid_field_with_customization() -> anyhow::Result<()> {
     ..Default::default()
   };
   schema.properties.insert(
-    "id".to_string(),
+    "tag_id".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("uuid".to_string()),
       ..Default::default()
     }),
   );
-  schema.required = vec!["id".to_string()];
+  schema.required = vec!["tag_id".to_string()];
 
   let customizations = HashMap::from([("uuid".to_string(), "crate::MyUuid".to_string())]);
-  let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Cardigan".to_string(), schema)]));
   let context = create_test_context(graph.clone(), config_with_customizations(customizations));
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
+  let result = converter.convert_schema("Cardigan", graph.get("Cardigan").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -261,8 +261,8 @@ fn test_uuid_field_with_customization() -> anyhow::Result<()> {
   let field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "id")
-    .expect("id field should exist");
+    .find(|f| f.name == "tag_id")
+    .expect("tag_id field should exist");
 
   let serde_as = field.serde_as_attr.as_ref().expect("Should have serde_as_attr");
   assert_eq!(
@@ -284,19 +284,19 @@ fn test_no_serde_as_attr_without_customization() -> anyhow::Result<()> {
     ..Default::default()
   };
   schema.properties.insert(
-    "created_at".to_string(),
+    "sploot_at".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
       ..Default::default()
     }),
   );
-  schema.required = vec!["created_at".to_string()];
+  schema.required = vec!["sploot_at".to_string()];
 
-  let graph = create_test_graph(BTreeMap::from([("Event".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Frappe".to_string(), schema)]));
   let context = create_test_context(graph.clone(), CodegenConfig::default());
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Event", graph.get("Event").unwrap())?;
+  let result = converter.convert_schema("Frappe", graph.get("Frappe").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -309,8 +309,8 @@ fn test_no_serde_as_attr_without_customization() -> anyhow::Result<()> {
   let field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "created_at")
-    .expect("created_at field should exist");
+    .find(|f| f.name == "sploot_at")
+    .expect("sploot_at field should exist");
 
   assert!(
     field.serde_as_attr.is_none(),
@@ -336,8 +336,8 @@ fn field_name_deduplication() {
   let cases = [
     Case {
       name: "no duplicates",
-      fields: vec![("foo", false), ("bar", false), ("baz", false)],
-      expected_names: vec!["foo", "bar", "baz"],
+      fields: vec![("loaf", false), ("sploot", false), ("floof", false)],
+      expected_names: vec!["loaf", "sploot", "floof"],
     },
     Case {
       name: "empty input",
@@ -346,23 +346,23 @@ fn field_name_deduplication() {
     },
     Case {
       name: "all non-deprecated renamed with suffix",
-      fields: vec![("foo", false), ("foo", false), ("foo", false)],
-      expected_names: vec!["foo", "foo_2", "foo_3"],
+      fields: vec![("loaf", false), ("loaf", false), ("loaf", false)],
+      expected_names: vec!["loaf", "loaf_2", "loaf_3"],
     },
     Case {
       name: "deprecated removed when mixed with non-deprecated",
-      fields: vec![("foo", true), ("foo", false), ("bar", false)],
-      expected_names: vec!["foo", "bar"],
+      fields: vec![("loaf", true), ("loaf", false), ("sploot", false)],
+      expected_names: vec!["loaf", "sploot"],
     },
     Case {
       name: "all deprecated renamed with suffix",
-      fields: vec![("foo", true), ("foo", true)],
-      expected_names: vec!["foo", "foo_2"],
+      fields: vec![("loaf", true), ("loaf", true)],
+      expected_names: vec!["loaf", "loaf_2"],
     },
     Case {
       name: "multiple groups",
-      fields: vec![("foo", false), ("bar", true), ("foo", false), ("bar", false)],
-      expected_names: vec!["foo", "foo_2", "bar"],
+      fields: vec![("loaf", false), ("sploot", true), ("loaf", false), ("sploot", false)],
+      expected_names: vec!["loaf", "loaf_2", "sploot"],
     },
   ];
 
@@ -395,10 +395,10 @@ fn test_string_field_no_customization() -> anyhow::Result<()> {
   schema.required = vec!["name".to_string()];
 
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
-  let graph = create_test_graph(BTreeMap::from([("Person".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Corgi".to_string(), schema)]));
   let context = create_test_context(graph.clone(), config_with_customizations(customizations));
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Person", graph.get("Person").unwrap())?;
+  let result = converter.convert_schema("Corgi", graph.get("Corgi").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -430,7 +430,7 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
     ..Default::default()
   };
   schema.properties.insert(
-    "created_at".to_string(),
+    "sploot_at".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
@@ -438,7 +438,7 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
     }),
   );
   schema.properties.insert(
-    "birth_date".to_string(),
+    "corgi_date".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date".to_string()),
@@ -446,14 +446,14 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
     }),
   );
   schema.properties.insert(
-    "id".to_string(),
+    "tag_id".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("uuid".to_string()),
       ..Default::default()
     }),
   );
-  schema.required = vec!["created_at".to_string(), "birth_date".to_string(), "id".to_string()];
+  schema.required = vec!["sploot_at".to_string(), "corgi_date".to_string(), "tag_id".to_string()];
 
   let customizations = HashMap::from([
     ("date_time".to_string(), "crate::MyDateTime".to_string()),
@@ -461,10 +461,10 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
     ("uuid".to_string(), "crate::MyUuid".to_string()),
   ]);
 
-  let graph = create_test_graph(BTreeMap::from([("Entity".to_string(), schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Cardigan".to_string(), schema)]));
   let context = create_test_context(graph.clone(), config_with_customizations(customizations));
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Entity", graph.get("Entity").unwrap())?;
+  let result = converter.convert_schema("Cardigan", graph.get("Cardigan").unwrap())?;
 
   let struct_def = result
     .iter()
@@ -474,33 +474,33 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
     })
     .expect("Struct should be present");
 
-  let created_field = struct_def
+  let sploot_field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "created_at")
-    .expect("created_at field should exist");
+    .find(|f| f.name == "sploot_at")
+    .expect("sploot_at field should exist");
   assert!(matches!(
-    created_field.serde_as_attr,
+    sploot_field.serde_as_attr,
     Some(SerdeAsFieldAttr::CustomOverride { ref custom_type, .. }) if custom_type == "crate::MyDateTime"
   ));
 
   let birth_field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "birth_date")
-    .expect("birth_date field should exist");
+    .find(|f| f.name == "corgi_date")
+    .expect("corgi_date field should exist");
   assert!(matches!(
     birth_field.serde_as_attr,
     Some(SerdeAsFieldAttr::CustomOverride { ref custom_type, .. }) if custom_type == "crate::MyDate"
   ));
 
-  let id_field = struct_def
+  let tag_id_field = struct_def
     .fields
     .iter()
-    .find(|f| f.name == "id")
-    .expect("id field should exist");
+    .find(|f| f.name == "tag_id")
+    .expect("tag_id field should exist");
   assert!(matches!(
-    id_field.serde_as_attr,
+    tag_id_field.serde_as_attr,
     Some(SerdeAsFieldAttr::CustomOverride { ref custom_type, .. }) if custom_type == "crate::MyUuid"
   ));
 

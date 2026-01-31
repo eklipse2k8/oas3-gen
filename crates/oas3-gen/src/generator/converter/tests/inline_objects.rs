@@ -9,12 +9,11 @@ use crate::{
 
 #[test]
 fn test_inline_object_generation() -> anyhow::Result<()> {
-  let mut parent_schema = ObjectSchema {
+  let mut loaf_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
 
-  // Define an inline object for the "config" field
   let mut config_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
@@ -34,49 +33,46 @@ fn test_inline_object_generation() -> anyhow::Result<()> {
     }),
   );
 
-  parent_schema
+  loaf_schema
     .properties
-    .insert("config".to_string(), ObjectOrReference::Object(config_schema));
+    .insert("loaf_config".to_string(), ObjectOrReference::Object(config_schema));
 
-  let graph = create_test_graph(BTreeMap::from([("Parent".to_string(), parent_schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Loaf".to_string(), loaf_schema)]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Parent", graph.get("Parent").unwrap())?;
+  let result = converter.convert_schema("Loaf", graph.get("Loaf").unwrap())?;
 
   let binding = context.cache.borrow();
   let generated = &binding.types.types;
   let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
 
-  // Check for Parent struct
-  let parent_struct = all_types
+  let loaf_struct = all_types
     .iter()
     .find_map(|ty| match ty {
-      RustType::Struct(def) if def.name == "Parent" => Some(def),
+      RustType::Struct(def) if def.name == "Loaf" => Some(def),
       _ => None,
     })
-    .expect("Parent struct should be present");
+    .expect("Loaf struct should be present");
 
-  // Check "config" field type
-  let config_field = parent_struct
+  let config_field = loaf_struct
     .fields
     .iter()
-    .find(|f| f.name == "config")
-    .expect("config field should exist");
+    .find(|f| f.name == "loaf_config")
+    .expect("loaf_config field should exist");
 
   assert_eq!(
     config_field.rust_type.to_rust_type(),
-    "Option<ParentConfig>",
-    "Config field should reference generated inline struct"
+    "Option<LoafConfig>",
+    "loaf_config field should reference generated inline struct"
   );
 
-  // Check for ParentConfig struct
   let config_struct = all_types
     .iter()
     .find_map(|ty| match ty {
-      RustType::Struct(def) if def.name == "ParentConfig" => Some(def),
+      RustType::Struct(def) if def.name == "LoafConfig" => Some(def),
       _ => None,
     })
-    .expect("ParentConfig struct should be present");
+    .expect("LoafConfig struct should be present");
 
   assert!(config_struct.fields.iter().any(|f| f.name == "timeout"));
   assert!(config_struct.fields.iter().any(|f| f.name == "enabled"));
@@ -86,15 +82,13 @@ fn test_inline_object_generation() -> anyhow::Result<()> {
 
 #[test]
 fn test_inline_object_without_type_field() -> anyhow::Result<()> {
-  // Some specs omit "type": "object" but implied by properties
-  let mut parent_schema = ObjectSchema {
+  let mut cardigan_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
 
-  // Define an inline object for the "metadata" field WITHOUT type: object
   let mut meta_schema = ObjectSchema {
-    schema_type: None, // Intentionally missing
+    schema_type: None,
     ..Default::default()
   };
   meta_schema.properties.insert(
@@ -105,49 +99,46 @@ fn test_inline_object_without_type_field() -> anyhow::Result<()> {
     }),
   );
 
-  parent_schema
+  cardigan_schema
     .properties
-    .insert("metadata".to_string(), ObjectOrReference::Object(meta_schema));
+    .insert("fluff".to_string(), ObjectOrReference::Object(meta_schema));
 
-  let graph = create_test_graph(BTreeMap::from([("Resource".to_string(), parent_schema)]));
+  let graph = create_test_graph(BTreeMap::from([("Cardigan".to_string(), cardigan_schema)]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Resource", graph.get("Resource").unwrap())?;
+  let result = converter.convert_schema("Cardigan", graph.get("Cardigan").unwrap())?;
 
   let binding = context.cache.borrow();
   let generated = &binding.types.types;
   let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
 
-  // Check for Resource struct
   let resource_struct = all_types
     .iter()
     .find_map(|ty| match ty {
-      RustType::Struct(def) if def.name == "Resource" => Some(def),
+      RustType::Struct(def) if def.name == "Cardigan" => Some(def),
       _ => None,
     })
-    .expect("Resource struct should be present");
+    .expect("Cardigan struct should be present");
 
-  // Check "metadata" field type
   let meta_field = resource_struct
     .fields
     .iter()
-    .find(|f| f.name == "metadata")
-    .expect("metadata field should exist");
+    .find(|f| f.name == "fluff")
+    .expect("fluff field should exist");
 
   assert_eq!(
     meta_field.rust_type.to_rust_type(),
-    "Option<ResourceMetadata>",
-    "Metadata field should reference generated inline struct even if type is missing"
+    "Option<CardiganFluff>",
+    "fluff field should reference generated inline struct even if type is missing"
   );
 
-  // Check for ResourceMetadata struct
   let meta_struct = all_types
     .iter()
     .find_map(|ty| match ty {
-      RustType::Struct(def) if def.name == "ResourceMetadata" => Some(def),
+      RustType::Struct(def) if def.name == "CardiganFluff" => Some(def),
       _ => None,
     })
-    .expect("ResourceMetadata struct should be present");
+    .expect("CardiganFluff struct should be present");
 
   assert!(meta_struct.fields.iter().any(|f| f.name == "key"));
 

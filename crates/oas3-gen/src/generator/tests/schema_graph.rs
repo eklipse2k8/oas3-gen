@@ -72,8 +72,8 @@ fn make_ref(name: &str) -> ObjectOrReference<ObjectSchema> {
 #[test]
 fn test_parse_ref() {
   let cases = [
-    ("#/components/schemas/User", Some("User")),
-    ("#/components/schemas/NestedSchema", Some("NestedSchema")),
+    ("#/components/schemas/Corgi", Some("Corgi")),
+    ("#/components/schemas/NestedCorgi", Some("NestedCorgi")),
     ("#/other/path", None),
     ("InvalidRef", None),
   ];
@@ -87,14 +87,14 @@ fn test_parse_ref() {
 fn test_ref_collector() {
   let collector = RefCollector::new(None);
 
-  let schema = make_schema_with_ref("User");
+  let schema = make_schema_with_ref("Corgi");
   let refs = collector.collect(&schema);
   assert_eq!(refs.len(), 1, "simple ref: expected 1 ref");
-  assert!(refs.contains("User"), "simple ref: should contain User");
+  assert!(refs.contains("Corgi"), "simple ref: should contain Corgi");
 
   let mut properties = BTreeMap::new();
-  properties.insert("author".to_string(), make_ref("User"));
-  properties.insert("category".to_string(), make_ref("Category"));
+  properties.insert("waddler".to_string(), make_ref("Corgi"));
+  properties.insert("sploot".to_string(), make_ref("Sploot"));
   let schema = ObjectSchema {
     schema_type: None,
     properties,
@@ -102,42 +102,42 @@ fn test_ref_collector() {
   };
   let refs = collector.collect(&schema);
   assert_eq!(refs.len(), 2, "multiple refs: expected 2 refs");
-  assert!(refs.contains("User"), "multiple refs: should contain User");
-  assert!(refs.contains("Category"), "multiple refs: should contain Category");
+  assert!(refs.contains("Corgi"), "multiple refs: should contain Corgi");
+  assert!(refs.contains("Sploot"), "multiple refs: should contain Sploot");
 
   let schema = ObjectSchema {
     schema_type: None,
-    one_of: vec![make_ref("User")],
-    any_of: vec![make_ref("Post")],
-    all_of: vec![make_ref("Comment")],
+    one_of: vec![make_ref("Corgi")],
+    any_of: vec![make_ref("Bark")],
+    all_of: vec![make_ref("Frappe")],
     ..Default::default()
   };
   let refs = collector.collect(&schema);
   assert_eq!(refs.len(), 3, "combinators: expected 3 refs");
-  assert!(refs.contains("User"), "combinators: should contain User");
-  assert!(refs.contains("Post"), "combinators: should contain Post");
-  assert!(refs.contains("Comment"), "combinators: should contain Comment");
+  assert!(refs.contains("Corgi"), "combinators: should contain Corgi");
+  assert!(refs.contains("Bark"), "combinators: should contain Bark");
+  assert!(refs.contains("Frappe"), "combinators: should contain Frappe");
 }
 
 #[test]
 fn test_schema_registry() {
   let mut schemas = BTreeMap::new();
-  schemas.insert("User".to_string(), ObjectOrReference::Object(make_simple_schema()));
-  schemas.insert("Post".to_string(), ObjectOrReference::Object(make_simple_schema()));
+  schemas.insert("Corgi".to_string(), ObjectOrReference::Object(make_simple_schema()));
+  schemas.insert("Bark".to_string(), ObjectOrReference::Object(make_simple_schema()));
 
   let spec = create_test_spec_with_schemas(schemas);
   let registry = SchemaRegistry::from_spec(spec).registry;
 
-  assert!(registry.get("User").is_some(), "should have User schema");
-  assert!(registry.get("Post").is_some(), "should have Post schema");
+  assert!(registry.get("Corgi").is_some(), "should have Corgi schema");
+  assert!(registry.get("Bark").is_some(), "should have Bark schema");
   assert!(registry.get("NonExistent").is_none(), "should not have NonExistent");
   assert_eq!(registry.keys().len(), 2, "should have 2 schemas");
 
   let mut schemas = BTreeMap::new();
-  schemas.insert("User".to_string(), ObjectOrReference::Object(make_simple_schema()));
+  schemas.insert("Corgi".to_string(), ObjectOrReference::Object(make_simple_schema()));
   schemas.insert(
-    "Post".to_string(),
-    ObjectOrReference::Object(make_schema_with_ref("User")),
+    "Bark".to_string(),
+    ObjectOrReference::Object(make_schema_with_ref("Corgi")),
   );
 
   let spec = create_test_spec_with_schemas(schemas);
@@ -145,8 +145,8 @@ fn test_schema_registry() {
   graph.build_dependencies();
 
   assert_eq!(graph.keys().len(), 2, "build deps: should have 2 schemas");
-  assert!(graph.get("User").is_some(), "build deps: should have User");
-  assert!(graph.get("Post").is_some(), "build deps: should have Post");
+  assert!(graph.get("Corgi").is_some(), "build deps: should have Corgi");
+  assert!(graph.get("Bark").is_some(), "build deps: should have Bark");
 }
 
 #[test]
@@ -231,170 +231,170 @@ fn test_schema_graph_cycle_detection() {
 #[test]
 fn test_schema_graph_integration() {
   let mut schemas = BTreeMap::new();
-  schemas.insert("User".to_string(), ObjectOrReference::Object(make_simple_schema()));
+  schemas.insert("Corgi".to_string(), ObjectOrReference::Object(make_simple_schema()));
   schemas.insert(
-    "Post".to_string(),
-    ObjectOrReference::Object(make_schema_with_ref("User")),
+    "Bark".to_string(),
+    ObjectOrReference::Object(make_schema_with_ref("Corgi")),
   );
 
   let spec = create_test_spec_with_schemas(schemas);
   let mut graph = SchemaRegistry::from_spec(spec).registry;
 
-  assert!(graph.get("User").is_some(), "integration: should have User");
-  assert!(graph.get("Post").is_some(), "integration: should have Post");
+  assert!(graph.get("Corgi").is_some(), "integration: should have Corgi");
+  assert!(graph.get("Bark").is_some(), "integration: should have Bark");
   assert_eq!(graph.keys().len(), 2, "integration: should have 2 schemas");
 
   graph.build_dependencies();
   let cycles = graph.detect_cycles();
 
   assert!(cycles.is_empty(), "integration: should have no cycles");
-  assert!(!graph.is_cyclic("User"), "integration: User should not be cyclic");
+  assert!(!graph.is_cyclic("Corgi"), "integration: Corgi should not be cyclic");
 }
 
 #[test]
 fn test_schema_registry_merges_all_of_properties_and_required() {
-  let mut parent = make_simple_schema();
-  parent.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  parent.required.push("id".to_string());
-  parent.properties.insert(
-    "id".to_string(),
+  let mut loaf = make_simple_schema();
+  loaf.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  loaf.required.push("tag_id".to_string());
+  loaf.properties.insert(
+    "tag_id".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       ..Default::default()
     }),
   );
-  parent.additional_properties = Some(Schema::Boolean(BooleanSchema(true)));
+  loaf.additional_properties = Some(Schema::Boolean(BooleanSchema(true)));
 
-  let mut child = make_simple_schema();
-  child.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  child.required.push("name".to_string());
-  child.properties.insert(
+  let mut nugget = make_simple_schema();
+  nugget.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  nugget.required.push("name".to_string());
+  nugget.properties.insert(
     "name".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }),
   );
-  child.all_of.push(make_ref("Parent"));
+  nugget.all_of.push(make_ref("Loaf"));
 
   let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Parent".to_string(), ObjectOrReference::Object(parent.clone())),
-    ("Child".to_string(), ObjectOrReference::Object(child.clone())),
+    ("Loaf".to_string(), ObjectOrReference::Object(loaf.clone())),
+    ("Nugget".to_string(), ObjectOrReference::Object(nugget.clone())),
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
   graph.build_dependencies();
   graph.detect_cycles();
 
-  let merged = graph.merged("Child").expect("merged schema should exist for Child");
+  let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
 
-  assert!(merged.schema.properties.contains_key("id"));
+  assert!(merged.schema.properties.contains_key("tag_id"));
   assert!(merged.schema.properties.contains_key("name"));
-  assert!(merged.schema.required.contains(&"id".to_string()));
+  assert!(merged.schema.required.contains(&"tag_id".to_string()));
   assert!(merged.schema.required.contains(&"name".to_string()));
   assert!(merged.schema.additional_properties.is_some());
 }
 
 #[test]
 fn test_schema_registry_merges_and_tracks_discriminator_parents() {
-  let mut parent_schema = make_simple_schema();
-  parent_schema.properties.insert(
+  let mut loaf_schema = make_simple_schema();
+  loaf_schema.properties.insert(
     "kind".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }),
   );
-  parent_schema.discriminator = Some(Discriminator {
+  loaf_schema.discriminator = Some(Discriminator {
     property_name: "kind".to_string(),
     mapping: Some(BTreeMap::from([(
-      "child".to_string(),
-      format!("{SCHEMA_REF_PREFIX}Child"),
+      "nugget".to_string(),
+      format!("{SCHEMA_REF_PREFIX}Nugget"),
     )])),
   });
 
-  let mut child_schema = make_simple_schema();
-  child_schema.properties.insert(
-    "child_prop".to_string(),
+  let mut nugget_schema = make_simple_schema();
+  nugget_schema.properties.insert(
+    "nugget_prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       ..Default::default()
     }),
   );
-  child_schema.all_of.push(make_ref("Parent"));
+  nugget_schema.all_of.push(make_ref("Loaf"));
 
   let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Parent".to_string(), ObjectOrReference::Object(parent_schema.clone())),
-    ("Child".to_string(), ObjectOrReference::Object(child_schema.clone())),
+    ("Loaf".to_string(), ObjectOrReference::Object(loaf_schema.clone())),
+    ("Nugget".to_string(), ObjectOrReference::Object(nugget_schema.clone())),
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
   graph.build_dependencies();
   graph.detect_cycles();
 
-  let merged_child = graph.merged("Child").expect("merged schema should exist for Child");
+  let merged_nugget = graph.merged("Nugget").expect("merged schema should exist for Nugget");
 
-  assert_eq!(merged_child.discriminator_parent.as_deref(), Some("Parent"));
-  assert!(merged_child.schema.properties.contains_key("kind"));
-  assert!(merged_child.schema.properties.contains_key("child_prop"));
+  assert_eq!(merged_nugget.discriminator_parent.as_deref(), Some("Loaf"));
+  assert!(merged_nugget.schema.properties.contains_key("kind"));
+  assert!(merged_nugget.schema.properties.contains_key("nugget_prop"));
 
-  let discriminator = graph.parent("Child").expect("discriminator parent should be tracked");
+  let discriminator = graph.parent("Nugget").expect("discriminator parent should be tracked");
 
-  assert_eq!(discriminator.parent_name, "Parent");
+  assert_eq!(discriminator.parent_name, "Loaf");
 
-  let effective = graph.resolved("Child").unwrap();
-  assert_eq!(effective.properties.len(), merged_child.schema.properties.len());
+  let effective = graph.resolved("Nugget").unwrap();
+  assert_eq!(effective.properties.len(), merged_nugget.schema.properties.len());
 }
 
 #[test]
 fn schema_merger_merge_child_with_parent() {
-  let mut parent = make_simple_schema();
-  parent.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  parent.properties.insert(
-    "parent_prop".to_string(),
+  let mut loaf = make_simple_schema();
+  loaf.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  loaf.properties.insert(
+    "loaf_prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }),
   );
-  parent.required.push("parent_prop".to_string());
+  loaf.required.push("loaf_prop".to_string());
 
-  let mut child = make_simple_schema();
-  child.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  child.properties.insert(
-    "child_prop".to_string(),
+  let mut nugget = make_simple_schema();
+  nugget.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  nugget.properties.insert(
+    "nugget_prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       ..Default::default()
     }),
   );
-  child.all_of.push(make_ref("Parent"));
+  nugget.all_of.push(make_ref("Loaf"));
 
   let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Parent".to_string(), ObjectOrReference::Object(parent)),
-    ("Child".to_string(), ObjectOrReference::Object(child)),
+    ("Loaf".to_string(), ObjectOrReference::Object(loaf)),
+    ("Nugget".to_string(), ObjectOrReference::Object(nugget)),
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
   graph.build_dependencies();
   graph.detect_cycles();
 
-  let merged = graph.merged("Child").expect("merged schema should exist for Child");
+  let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
 
   assert!(
-    merged.schema.properties.contains_key("parent_prop"),
-    "should have parent_prop"
+    merged.schema.properties.contains_key("loaf_prop"),
+    "should have loaf_prop"
   );
   assert!(
-    merged.schema.properties.contains_key("child_prop"),
-    "should have child_prop"
+    merged.schema.properties.contains_key("nugget_prop"),
+    "should have nugget_prop"
   );
   assert!(
-    merged.schema.required.contains(&"parent_prop".to_string()),
-    "parent_prop should be required"
+    merged.schema.required.contains(&"loaf_prop".to_string()),
+    "loaf_prop should be required"
   );
 
-  let effective = graph.resolved("Child").unwrap();
+  let effective = graph.resolved("Nugget").unwrap();
   assert_eq!(
     effective.properties.len(),
     merged.schema.properties.len(),
@@ -404,9 +404,9 @@ fn schema_merger_merge_child_with_parent() {
 
 #[test]
 fn schema_merger_conflict_resolution() {
-  let mut parent = make_simple_schema();
-  parent.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  parent.properties.insert(
+  let mut loaf = make_simple_schema();
+  loaf.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  loaf.properties.insert(
     "prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
@@ -414,34 +414,34 @@ fn schema_merger_conflict_resolution() {
     }),
   );
 
-  let mut child = make_simple_schema();
-  child.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  child.properties.insert(
+  let mut nugget = make_simple_schema();
+  nugget.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  nugget.properties.insert(
     "prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       ..Default::default()
     }),
   );
-  child.all_of.push(make_ref("Parent"));
+  nugget.all_of.push(make_ref("Loaf"));
 
   let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Parent".to_string(), ObjectOrReference::Object(parent)),
-    ("Child".to_string(), ObjectOrReference::Object(child)),
+    ("Loaf".to_string(), ObjectOrReference::Object(loaf)),
+    ("Nugget".to_string(), ObjectOrReference::Object(nugget)),
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
   graph.build_dependencies();
   graph.detect_cycles();
 
-  let merged = graph.merged("Child").expect("merged schema should exist for Child");
+  let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
 
   let prop = merged.schema.properties.get("prop").unwrap();
   if let ObjectOrReference::Object(schema) = prop {
     assert_eq!(
       schema.schema_type,
       Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      "child property should override parent"
+      "nugget property should override loaf"
     );
   } else {
     panic!("Expected Object schema");
@@ -450,21 +450,21 @@ fn schema_merger_conflict_resolution() {
 
 #[test]
 fn schema_merger_merge_multiple_all_of() {
-  let mut base = make_simple_schema();
-  base.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  base.properties.insert(
-    "base_prop".to_string(),
+  let mut corgi = make_simple_schema();
+  corgi.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  corgi.properties.insert(
+    "corgi_prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }),
   );
-  base.required.push("base_prop".to_string());
+  corgi.required.push("corgi_prop".to_string());
 
-  let mut mixin = make_simple_schema();
-  mixin.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  mixin.properties.insert(
-    "mixin_prop".to_string(),
+  let mut fluff = make_simple_schema();
+  fluff.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
+  fluff.properties.insert(
+    "fluff_prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
       ..Default::default()
@@ -473,8 +473,8 @@ fn schema_merger_merge_multiple_all_of() {
 
   let mut composite = make_simple_schema();
   composite.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  composite.all_of.push(make_ref("Base"));
-  composite.all_of.push(make_ref("Mixin"));
+  composite.all_of.push(make_ref("Corgi"));
+  composite.all_of.push(make_ref("Fluff"));
   composite.properties.insert(
     "own_prop".to_string(),
     ObjectOrReference::Object(ObjectSchema {
@@ -484,8 +484,8 @@ fn schema_merger_merge_multiple_all_of() {
   );
 
   let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Base".to_string(), ObjectOrReference::Object(base)),
-    ("Mixin".to_string(), ObjectOrReference::Object(mixin)),
+    ("Corgi".to_string(), ObjectOrReference::Object(corgi)),
+    ("Fluff".to_string(), ObjectOrReference::Object(fluff)),
     ("Composite".to_string(), ObjectOrReference::Object(composite)),
   ]));
 
@@ -498,19 +498,19 @@ fn schema_merger_merge_multiple_all_of() {
     .expect("merged schema should exist for Composite");
 
   assert!(
-    merged.schema.properties.contains_key("base_prop"),
-    "should have base_prop"
+    merged.schema.properties.contains_key("corgi_prop"),
+    "should have corgi_prop"
   );
   assert!(
-    merged.schema.properties.contains_key("mixin_prop"),
-    "should have mixin_prop"
+    merged.schema.properties.contains_key("fluff_prop"),
+    "should have fluff_prop"
   );
   assert!(
     merged.schema.properties.contains_key("own_prop"),
     "should have own_prop"
   );
   assert!(
-    merged.schema.required.contains(&"base_prop".to_string()),
-    "base_prop should be required"
+    merged.schema.required.contains(&"corgi_prop".to_string()),
+    "corgi_prop should be required"
   );
 }

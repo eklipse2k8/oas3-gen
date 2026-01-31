@@ -16,8 +16,8 @@ fn test_inline_resolver_uses_cached_enum() -> anyhow::Result<()> {
   context
     .cache
     .borrow_mut()
-    .register_enum(enum_values.clone(), "CachedEnum".to_string());
-  context.cache.borrow_mut().mark_name_used("CachedEnum".to_string());
+    .register_enum(enum_values.clone(), "HowlEnum".to_string());
+  context.cache.borrow_mut().mark_name_used("HowlEnum".to_string());
 
   let inline_resolver = InlineTypeResolver::new(context);
 
@@ -26,9 +26,9 @@ fn test_inline_resolver_uses_cached_enum() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = inline_resolver.resolve_inline_enum("Parent", "Status", &schema, &enum_values)?;
+  let result = inline_resolver.resolve_inline_enum("Loaf", "Sploot", &schema, &enum_values)?;
 
-  assert_eq!(result.result.to_rust_type(), "CachedEnum");
+  assert_eq!(result.result.to_rust_type(), "HowlEnum");
   assert!(
     result.inline_types.is_empty(),
     "No new types should be generated for cached enum"
@@ -41,14 +41,14 @@ fn test_inline_resolver_generates_unique_names() -> anyhow::Result<()> {
   let graph = create_test_graph(BTreeMap::default());
   let context = create_test_context(graph, default_config());
 
-  context.cache.borrow_mut().mark_name_used("ParentItem".to_string());
+  context.cache.borrow_mut().mark_name_used("LoafNugget".to_string());
 
   let inline_resolver = InlineTypeResolver::new(context);
 
   let schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
-      "id".to_string(),
+      "tag_id".to_string(),
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
         ..Default::default()
@@ -57,24 +57,24 @@ fn test_inline_resolver_generates_unique_names() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let result = inline_resolver.resolve_inline_struct("Parent", "Item", &schema)?;
+  let result = inline_resolver.resolve_inline_struct("Loaf", "Nugget", &schema)?;
 
-  assert_eq!(result.result.to_rust_type(), "ParentItem2");
+  assert_eq!(result.result.to_rust_type(), "LoafNugget2");
   Ok(())
 }
 
 #[test]
 fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
-  let base_schema = ObjectSchema {
+  let corgi_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
-      "id".to_string(),
+      "tag_id".to_string(),
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
         ..Default::default()
       }),
     )]),
-    required: vec!["id".to_string()],
+    required: vec!["tag_id".to_string()],
     discriminator: Some(Discriminator {
       property_name: "kind".to_string(),
       mapping: None,
@@ -83,53 +83,53 @@ fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let extra_schema = ObjectSchema {
+  let fluff_schema = ObjectSchema {
     properties: BTreeMap::from([(
-      "flag".to_string(),
+      "waddle".to_string(),
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
         ..Default::default()
       }),
     )]),
-    required: vec!["flag".to_string()],
+    required: vec!["waddle".to_string()],
     ..Default::default()
   };
 
   let spec = create_test_spec(BTreeMap::from([
-    ("Base".to_string(), base_schema.clone()),
-    ("Extra".to_string(), extra_schema.clone()),
+    ("Corgi".to_string(), corgi_schema.clone()),
+    ("Fluff".to_string(), fluff_schema.clone()),
   ]));
 
   let registry = SchemaRegistry::from_spec(spec).registry;
 
   let inline_allof = ObjectSchema {
     properties: BTreeMap::from([(
-      "child".to_string(),
+      "sploot".to_string(),
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
         ..Default::default()
       }),
     )]),
-    required: vec!["child".to_string()],
+    required: vec!["sploot".to_string()],
     ..Default::default()
   };
 
   let target_schema = ObjectSchema {
     all_of: vec![
       ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/Base".to_string(),
+        ref_path: "#/components/schemas/Corgi".to_string(),
         summary: None,
         description: None,
       },
       ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/Extra".to_string(),
+        ref_path: "#/components/schemas/Fluff".to_string(),
         summary: None,
         description: None,
       },
       ObjectOrReference::Object(inline_allof),
     ],
     properties: BTreeMap::from([(
-      "own".to_string(),
+      "bark".to_string(),
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
         ..Default::default()
@@ -146,13 +146,13 @@ fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
     Some(SchemaTypeSet::Single(SchemaType::Object)),
     "schema type should be preserved",
   );
-  assert!(merged.properties.contains_key("id"));
-  assert!(merged.properties.contains_key("flag"));
-  assert!(merged.properties.contains_key("child"));
-  assert!(merged.properties.contains_key("own"));
-  assert!(merged.required.contains(&"id".to_string()));
-  assert!(merged.required.contains(&"flag".to_string()));
-  assert!(merged.required.contains(&"child".to_string()));
+  assert!(merged.properties.contains_key("tag_id"));
+  assert!(merged.properties.contains_key("waddle"));
+  assert!(merged.properties.contains_key("sploot"));
+  assert!(merged.properties.contains_key("bark"));
+  assert!(merged.required.contains(&"tag_id".to_string()));
+  assert!(merged.required.contains(&"waddle".to_string()));
+  assert!(merged.required.contains(&"sploot".to_string()));
   assert!(
     merged.discriminator.as_ref().is_some(),
     "discriminator should be retained"

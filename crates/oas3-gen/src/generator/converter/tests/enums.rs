@@ -943,7 +943,7 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
     panic!("Expected enum")
   };
 
-  assert_eq!(enum_def.methods.len(), 2); // Simple + SingleParam, Complex skipped
+  assert_eq!(enum_def.methods.len(), 2);
 
   let simple_method = enum_def
     .methods

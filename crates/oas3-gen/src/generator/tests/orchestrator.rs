@@ -49,7 +49,7 @@ fn test_metadata_and_header_generation() {
   let spec_json = include_str!("../../../fixtures/basic_api.json");
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let metadata = ClientRootNode::builder()
-    .name(StructToken::new("BasicTestApiClient"))
+    .name(StructToken::new("PembrokeApiClient"))
     .info(&spec.info)
     .servers(&spec.servers)
     .build();
@@ -90,16 +90,19 @@ fn test_operation_filtering() {
   let spec_json = include_str!("../../../fixtures/operation_filtering.json");
 
   let mut excluded = HashSet::new();
-  excluded.insert("create_user".to_string());
+  excluded.insert("admin_action".to_string());
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator = make_orchestrator_with_ops(spec, false, None, Some(&excluded));
   let output = orchestrator.generate_with_header("test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
   let stats = &output.stats;
-  assert_eq!(stats.operations_converted, 2, "excluded create_user should leave 2 ops");
+  assert_eq!(
+    stats.operations_converted, 2,
+    "excluded admin_action should leave 2 ops"
+  );
   assert!(
-    !code.contains("create_user"),
-    "create_user should be excluded from code"
+    !code.contains("admin_action"),
+    "admin_action should be excluded from code"
   );
 
   let spec_full: oas3::Spec = oas3::from_json(spec_json).unwrap();
@@ -122,12 +125,12 @@ fn test_operation_filtering() {
     "filtered spec should have 2 ops"
   );
   assert!(
-    code_full.contains("AdminResponse"),
-    "full code should contain AdminResponse"
+    code_full.contains("AdminActionResponse"),
+    "full code should contain AdminActionResponse"
   );
   assert!(
-    !code_filtered.contains("AdminResponse"),
-    "filtered code should not contain AdminResponse"
+    !code_filtered.contains("AdminActionResponse"),
+    "filtered code should not contain AdminActionResponse"
   );
   assert!(
     code_filtered.contains("UserList"),
@@ -277,7 +280,7 @@ fn test_customization_generates_serde_as_attributes() {
     "paths": {},
     "components": {
       "schemas": {
-        "Event": {
+        "Frappe": {
           "type": "object",
           "properties": {
             "id": { "type": "string" },
@@ -314,11 +317,11 @@ fn test_customization_generates_serde_as_attributes() {
 fn test_customization_for_multiple_types() {
   let spec_json = r#"{
     "openapi": "3.0.0",
-    "info": { "title": "Test API", "version": "1.0.0" },
+    "info": { "title": "Pembroke API", "version": "1.0.0" },
     "paths": {},
     "components": {
       "schemas": {
-        "Entity": {
+        "Cardigan": {
           "type": "object",
           "properties": {
             "id": { "type": "string", "format": "uuid" },
@@ -359,19 +362,19 @@ fn test_customization_for_multiple_types() {
 fn test_customization_for_array_types() {
   let spec_json = r#"{
     "openapi": "3.0.0",
-    "info": { "title": "Test API", "version": "1.0.0" },
+    "info": { "title": "Pembroke API", "version": "1.0.0" },
     "paths": {},
     "components": {
       "schemas": {
-        "Timeline": {
+        "WaddleLine": {
           "type": "object",
           "properties": {
-            "timestamps": {
+            "toebeans": {
               "type": "array",
               "items": { "type": "string", "format": "date-time" }
             }
           },
-          "required": ["timestamps"]
+          "required": ["toebeans"]
         }
       }
     }
@@ -393,11 +396,11 @@ fn test_customization_for_array_types() {
 fn test_no_customization_no_serde_as() {
   let spec_json = r#"{
     "openapi": "3.0.0",
-    "info": { "title": "Test API", "version": "1.0.0" },
+    "info": { "title": "Pembroke API", "version": "1.0.0" },
     "paths": {},
     "components": {
       "schemas": {
-        "Event": {
+        "Frappe": {
           "type": "object",
           "properties": {
             "id": { "type": "string" },
@@ -419,7 +422,7 @@ fn test_no_customization_no_serde_as() {
     "Code should not contain serde_as field attribute without customizations"
   );
   assert!(
-    !code.contains("#[serde_with::serde_as]") || !code.contains("Event"),
-    "Event struct should not have serde_as outer attribute without customizations"
+    !code.contains("#[serde_with::serde_as]") || !code.contains("Frappe"),
+    "Frappe struct should not have serde_as outer attribute without customizations"
   );
 }

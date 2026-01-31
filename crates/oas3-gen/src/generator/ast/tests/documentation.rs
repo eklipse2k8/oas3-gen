@@ -11,19 +11,19 @@ fn empty_documentation_produces_no_tokens() {
 
 #[test]
 fn single_line_documentation() {
-  let doc = Documentation::from_lines(["Test documentation"]);
+  let doc = Documentation::from_lines(["Corgi sploot documentation"]);
   let tokens = quote! { #doc };
-  let expected = quote! { #[doc = " Test documentation"] };
+  let expected = quote! { #[doc = " Corgi sploot documentation"] };
   assert_eq!(tokens.to_string(), expected.to_string());
 }
 
 #[test]
 fn multi_line_documentation() {
-  let doc = Documentation::from_lines(["Line 1", "Line 2"]);
+  let doc = Documentation::from_lines(["Floof 1", "Floof 2"]);
   let tokens = quote! { #doc };
   let expected = quote! {
-    #[doc = " Line 1"]
-    #[doc = " Line 2"]
+    #[doc = " Floof 1"]
+    #[doc = " Floof 2"]
   };
   assert_eq!(tokens.to_string(), expected.to_string());
 }
@@ -37,30 +37,30 @@ fn from_optional_none_produces_empty() {
 
 #[test]
 fn from_optional_some_processes_text() {
-  let text = "Test".to_string();
+  let text = "Bark".to_string();
   let doc = Documentation::from_optional(Some(&text));
-  let expected = quote! { #[doc = " Test"] };
+  let expected = quote! { #[doc = " Bark"] };
   assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
 
 #[test]
 fn from_optional_handles_escaped_newlines() {
-  let text = "Line 1\\nLine 2".to_string();
+  let text = "Floof 1\\nFloof 2".to_string();
   let doc = Documentation::from_optional(Some(&text));
   let expected = quote! {
-    #[doc = " Line 1"]
-    #[doc = " Line 2"]
+    #[doc = " Floof 1"]
+    #[doc = " Floof 2"]
   };
   assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
 
 #[test]
 fn push_adds_line() {
-  let mut doc = Documentation::from_lines(["First"]);
-  doc.push("Second");
+  let mut doc = Documentation::from_lines(["Loaf"]);
+  doc.push("Sploot");
   let expected = quote! {
-    #[doc = " First"]
-    #[doc = " Second"]
+    #[doc = " Loaf"]
+    #[doc = " Sploot"]
   };
   assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
