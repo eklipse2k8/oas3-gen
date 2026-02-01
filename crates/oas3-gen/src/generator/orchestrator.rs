@@ -1,23 +1,19 @@
 use std::{
-  collections::{BTreeSet, HashMap, HashSet},
+  collections::{BTreeSet, HashSet},
   rc::Rc,
   sync::Arc,
 };
 
 use strum::Display;
 
-use super::converter::cache::SharedSchemaCache;
 use crate::generator::{
-  ast::{
-    ClientRootNode, OperationInfo, OperationKind, RustType, ServerRequestTraitDef, StructToken,
-    constants::HttpHeaderRef,
-  },
+  ast::{ClientRootNode, OperationInfo, OperationKind, RustType, ServerRequestTraitDef, constants::HttpHeaderRef},
   codegen::{GeneratedResult, SchemaCodeGenerator, Visibility},
   converter::{
-    CodegenConfig, ConverterContext, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationTarget,
-    ODataPolicy, OperationsProcessor, SchemaConverter, TypeUsageRecorder, build_server_trait,
+    CodegenConfig, ConverterContext, GenerationTarget, OperationsProcessor, SchemaConverter, TypeUsageRecorder,
+    build_server_trait, cache::SharedSchemaCache,
   },
-  naming::identifiers::to_rust_type_name,
+  mode::GenerationMode,
   operation_registry::OperationRegistry,
   postprocess::{PostprocessOutput, postprocess},
   schema_registry::SchemaRegistry,
@@ -29,14 +25,9 @@ const OAS3_GEN_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct Orchestrator {
   spec: oas3::Spec,
   visibility: Visibility,
-  include_unused_schemas: bool,
+  config: CodegenConfig,
   operation_registry: OperationRegistry,
-  odata_support: bool,
-  preserve_case_variants: bool,
-  case_insensitive_enums: bool,
-  no_helpers: bool,
-  generation_target: GenerationTarget,
-  customizations: HashMap<String, String>,
+  include_unused_schemas: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +67,17 @@ impl GeneratedFinalOutput {
   }
 }
 
+struct ConversionArtifacts {
+  config: CodegenConfig,
+  types: Vec<RustType>,
+  operations: Vec<OperationInfo>,
+  header_refs: Vec<HttpHeaderRef>,
+  uses: BTreeSet<String>,
+  client: ClientRootNode,
+  server_trait: Option<ServerRequestTraitDef>,
+  stats: GenerationStats,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum GenerationWarning {
   #[strum(to_string = "Failed to convert schema '{schema_name}': {error}")]
@@ -100,147 +102,46 @@ impl GenerationWarning {
 }
 
 impl Orchestrator {
-  #[allow(clippy::too_many_arguments)]
-  #[allow(clippy::fn_params_excessive_bools)]
   #[must_use]
   pub fn new(
     spec: oas3::Spec,
     visibility: Visibility,
-    include_unused_schemas: bool,
+    config: CodegenConfig,
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
-    odata_support: bool,
-    preserve_case_variants: bool,
-    case_insensitive_enums: bool,
-    no_helpers: bool,
-    generation_target: GenerationTarget,
-    customizations: HashMap<String, String>,
+    include_unused_schemas: bool,
   ) -> Self {
     let operation_registry = OperationRegistry::with_filters(&spec, only_operations, excluded_operations);
     Self {
       spec,
       visibility,
-      include_unused_schemas,
+      config,
       operation_registry,
-      odata_support,
-      preserve_case_variants,
-      case_insensitive_enums,
-      no_helpers,
-      generation_target,
-      customizations,
+      include_unused_schemas,
     }
   }
 
-  // TODO: Create a client converter struct to encapsulate this logic
-  fn client_struct_name(&self) -> StructToken {
-    let title = self.spec.info.title.clone();
-
-    let client_name = if title.is_empty() {
-      "ApiClient".to_string()
-    } else {
-      format!("{}Client", to_rust_type_name(&title))
-    };
-
-    StructToken::new(client_name)
-  }
-
-  pub fn generate_client_with_header(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
-      self.run_conversion_and_analysis();
+  pub fn generate(&self, mode: &dyn GenerationMode, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
+    let artifacts = self.run_conversion_and_analysis();
 
     let codegen = SchemaCodeGenerator::builder()
-      .config(config)
-      .rust_types(rust_types)
-      .operations(operations_info)
-      .header_refs(header_refs)
-      .uses(uses)
-      .client(client)
-      .maybe_server_trait(server_trait)
+      .config(artifacts.config)
+      .rust_types(artifacts.types)
+      .operations(artifacts.operations)
+      .header_refs(artifacts.header_refs)
+      .uses(artifacts.uses)
+      .client(artifacts.client)
+      .maybe_server_trait(artifacts.server_trait)
       .visibility(self.visibility)
       .source_path(source_path.to_string())
       .gen_version(OAS3_GEN_VERSION.to_string())
       .build();
 
-    let output = codegen.generate_client()?;
-    Ok(GeneratedFinalOutput::new(output, stats))
+    let output = mode.generate(&codegen)?;
+    Ok(GeneratedFinalOutput::new(output, artifacts.stats))
   }
 
-  pub fn generate_with_header(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
-      self.run_conversion_and_analysis();
-
-    let codegen = SchemaCodeGenerator::builder()
-      .config(config)
-      .rust_types(rust_types)
-      .operations(operations_info)
-      .header_refs(header_refs)
-      .uses(uses)
-      .client(client)
-      .maybe_server_trait(server_trait)
-      .visibility(self.visibility)
-      .source_path(source_path.to_string())
-      .gen_version(OAS3_GEN_VERSION.to_string())
-      .build();
-
-    let output = codegen.generate_types()?;
-    Ok(GeneratedFinalOutput::new(output, stats))
-  }
-
-  pub fn generate_client_mod(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
-      self.run_conversion_and_analysis();
-
-    let codegen = SchemaCodeGenerator::builder()
-      .config(config)
-      .rust_types(rust_types)
-      .operations(operations_info)
-      .header_refs(header_refs)
-      .uses(uses)
-      .client(client)
-      .maybe_server_trait(server_trait)
-      .visibility(self.visibility)
-      .source_path(source_path.to_string())
-      .gen_version(OAS3_GEN_VERSION.to_string())
-      .build();
-
-    let output = codegen.generate_client_mod()?;
-    Ok(GeneratedFinalOutput::new(output, stats))
-  }
-
-  pub fn generate_server_mod(&self, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let (config, rust_types, operations_info, header_refs, uses, client, server_trait, stats) =
-      self.run_conversion_and_analysis();
-
-    let codegen = SchemaCodeGenerator::builder()
-      .config(config)
-      .rust_types(rust_types)
-      .operations(operations_info)
-      .header_refs(header_refs)
-      .uses(uses)
-      .client(client)
-      .maybe_server_trait(server_trait)
-      .visibility(self.visibility)
-      .source_path(source_path.to_string())
-      .gen_version(OAS3_GEN_VERSION.to_string())
-      .build();
-
-    let output = codegen.generate_server_mod()?;
-    Ok(GeneratedFinalOutput::new(output, stats))
-  }
-
-  #[allow(clippy::type_complexity)]
-  fn run_conversion_and_analysis(
-    &self,
-  ) -> (
-    CodegenConfig,
-    Vec<RustType>,
-    Vec<OperationInfo>,
-    Vec<HttpHeaderRef>,
-    BTreeSet<String>,
-    ClientRootNode,
-    Option<ServerRequestTraitDef>,
-    GenerationStats,
-  ) {
+  fn run_conversion_and_analysis(&self) -> ConversionArtifacts {
     let artifacts = self.collect_generation_artifacts();
     let GenerationArtifacts {
       rust_types,
@@ -250,11 +151,7 @@ impl Orchestrator {
       config,
     } = artifacts;
 
-    let client = ClientRootNode::builder()
-      .name(self.client_struct_name())
-      .info(&self.spec.info)
-      .servers(&self.spec.servers)
-      .build();
+    let client = ClientRootNode::from(&self.spec);
 
     let seed_map = usage_recorder.into_usage_map();
     let PostprocessOutput {
@@ -270,7 +167,7 @@ impl Orchestrator {
       None
     };
 
-    (
+    ConversionArtifacts {
       config,
       types,
       operations,
@@ -279,7 +176,7 @@ impl Orchestrator {
       client,
       server_trait,
       stats,
-    )
+    }
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
@@ -302,30 +199,7 @@ impl Orchestrator {
       0
     };
 
-    let config = CodegenConfig {
-      enum_case: if self.preserve_case_variants {
-        EnumCasePolicy::Preserve
-      } else {
-        EnumCasePolicy::Deduplicate
-      },
-      enum_helpers: if self.no_helpers {
-        EnumHelperPolicy::Disable
-      } else {
-        EnumHelperPolicy::Generate
-      },
-      enum_deserialize: if self.case_insensitive_enums {
-        EnumDeserializePolicy::CaseInsensitive
-      } else {
-        EnumDeserializePolicy::CaseSensitive
-      },
-      odata: if self.odata_support {
-        ODataPolicy::Enabled
-      } else {
-        ODataPolicy::Disabled
-      },
-      target: self.generation_target,
-      customizations: self.customizations.clone(),
-    };
+    let config = self.config.clone();
 
     let scan_result = graph.scan_and_compute_names().unwrap_or_default();
 
@@ -415,7 +289,7 @@ impl Orchestrator {
   fn convert_all_schemas(
     graph: &SchemaRegistry,
     schema_converter: &SchemaConverter,
-    operation_reachable: Option<&std::collections::BTreeSet<String>>,
+    operation_reachable: Option<&BTreeSet<String>>,
   ) -> (Vec<RustType>, Vec<GenerationWarning>) {
     let mut rust_types = vec![];
     let mut warnings = vec![];

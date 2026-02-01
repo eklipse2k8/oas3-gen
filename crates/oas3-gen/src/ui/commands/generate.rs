@@ -8,8 +8,9 @@ use crossterm::style::Stylize;
 
 use crate::{
   generator::{
+    ClientModMode, ClientMode, CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationMode,
+    GenerationTarget, ODataPolicy, ServerModMode, TypesMode,
     codegen::{GeneratedFileType, Visibility},
-    converter::GenerationTarget,
     orchestrator::{GeneratedFinalOutput, GenerationStats, Orchestrator},
   },
   ui::{Colors, EnumCaseMode, GenerateCommand, GenerateMode},
@@ -52,23 +53,41 @@ impl GenerateConfig {
   }
 
   fn create_orchestrator(&self, spec: oas3::Spec) -> Orchestrator {
-    let generation_target = match self.mode {
-      GenerateMode::ServerMod => GenerationTarget::Server,
-      _ => GenerationTarget::Client,
-    };
+    let config = CodegenConfig::builder()
+      .enum_case(if self.preserve_case_variants {
+        EnumCasePolicy::Preserve
+      } else {
+        EnumCasePolicy::Deduplicate
+      })
+      .enum_helpers(if self.no_helpers {
+        EnumHelperPolicy::Disable
+      } else {
+        EnumHelperPolicy::Generate
+      })
+      .enum_deserialize(if self.case_insensitive_enums {
+        EnumDeserializePolicy::CaseInsensitive
+      } else {
+        EnumDeserializePolicy::CaseSensitive
+      })
+      .odata(if self.odata_support {
+        ODataPolicy::Enabled
+      } else {
+        ODataPolicy::Disabled
+      })
+      .target(match self.mode {
+        GenerateMode::ServerMod => GenerationTarget::Server,
+        _ => GenerationTarget::Client,
+      })
+      .customizations(self.customizations.clone())
+      .build();
 
     Orchestrator::new(
       spec,
       self.visibility,
-      self.all_schemas,
+      config,
       self.only_operations.as_ref(),
       self.excluded_operations.as_ref(),
-      self.odata_support,
-      self.preserve_case_variants,
-      self.case_insensitive_enums,
-      self.no_helpers,
-      generation_target,
-      self.customizations.clone(),
+      self.all_schemas,
     )
   }
 
@@ -394,18 +413,23 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
   let orchestrator = config.create_orchestrator(spec);
   let source_path = config.input.display().to_string();
 
+  let mode: &dyn GenerationMode = match config.mode {
+    GenerateMode::Types => &TypesMode,
+    GenerateMode::Client => &ClientMode,
+    GenerateMode::ClientMod => &ClientModMode,
+    GenerateMode::ServerMod => &ServerModMode,
+  };
+
+  let output = orchestrator.generate(mode, &source_path)?;
+  logger.print_statistics(&output.stats);
+  logger.log_writing();
+
   match config.mode {
     GenerateMode::Types => {
-      let output = orchestrator.generate_with_header(&source_path)?;
-      logger.print_statistics(&output.stats);
-      logger.log_writing();
       let code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
       config.write_output(code).await?;
     }
     GenerateMode::Client => {
-      let output = orchestrator.generate_client_with_header(&source_path)?;
-      logger.print_statistics(&output.stats);
-      logger.log_writing();
       let code = output
         .code
         .code(&GeneratedFileType::Client)
@@ -414,15 +438,9 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
       config.write_output(code).await?;
     }
     GenerateMode::ClientMod => {
-      let output = orchestrator.generate_client_mod(&source_path)?;
-      logger.print_statistics(&output.stats);
-      logger.log_writing();
       config.write_module_output(&output).await?;
     }
     GenerateMode::ServerMod => {
-      let output = orchestrator.generate_server_mod(&source_path)?;
-      logger.print_statistics(&output.stats);
-      logger.log_writing();
       config.write_server_module_output(&output).await?;
     }
   }

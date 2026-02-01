@@ -103,13 +103,19 @@ pub enum GenerationTarget {
 ///
 /// Uses typed enums instead of booleans to make intent explicit at call sites
 /// and prevent invalid combinations.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CodegenConfig {
+#[derive(Debug, Clone, Default, bon::Builder)]
+pub struct CodegenConfig {
+  #[builder(default)]
   pub enum_case: EnumCasePolicy,
+  #[builder(default)]
   pub enum_helpers: EnumHelperPolicy,
+  #[builder(default)]
   pub enum_deserialize: EnumDeserializePolicy,
+  #[builder(default)]
   pub odata: ODataPolicy,
+  #[builder(default)]
   pub target: GenerationTarget,
+  #[builder(default)]
   pub customizations: HashMap<String, String>,
 }
 

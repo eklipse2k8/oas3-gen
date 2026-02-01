@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::generator::{
+  CodegenConfig, TypesMode,
   codegen::{GeneratedFileType, Visibility},
-  converter::GenerationTarget,
   orchestrator::Orchestrator,
 };
 
@@ -17,18 +17,13 @@ fn test_implicit_dependency_via_union_fingerprint() {
   let orchestrator = Orchestrator::new(
     spec,
     Visibility::default(),
-    false,
+    CodegenConfig::default(),
     Some(&only_ops),
     None,
     false,
-    false,
-    false,
-    false,
-    GenerationTarget::default(),
-    HashMap::new(),
   );
 
-  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   assert!(
