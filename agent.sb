@@ -1,0 +1,103 @@
+(version 1)
+
+;; Protects against prompt injection by limiting file write access
+;; Based on https://github.com/2mawi2/para/blob/03fee6b16e629922021ef12a2adb7a8f26c59e77/src/core/sandbox/profiles/standard.sb
+;; Based on Gemini's minimal security model
+
+;; Deny everything by default
+(deny default)
+
+;; Allow reading files from anywhere on host
+(allow file-read*)
+
+;; Allow process execution and forking (children inherit policy)
+(allow process-exec)
+(allow process-fork)
+
+;; Allow signals to self (e.g., SIGPIPE on write to closed pipe)
+(allow signal (target self))
+
+;; Allow read access to system information
+;; From Chromium's sandbox policy for macOS
+(allow sysctl-read
+    (sysctl-name "hw.activecpu")
+    (sysctl-name "hw.busfrequency_compat")
+    (sysctl-name "hw.byteorder")
+    (sysctl-name "hw.cacheconfig")
+    (sysctl-name "hw.cachelinesize_compat")
+    (sysctl-name "hw.cpufamily")
+    (sysctl-name "hw.cpufrequency_compat")
+    (sysctl-name "hw.cputype")
+    (sysctl-name "hw.l1dcachesize_compat")
+    (sysctl-name "hw.l1icachesize_compat")
+    (sysctl-name "hw.l2cachesize_compat")
+    (sysctl-name "hw.l3cachesize_compat")
+    (sysctl-name "hw.logicalcpu_max")
+    (sysctl-name "hw.machine")
+    (sysctl-name "hw.ncpu")
+    (sysctl-name "hw.pagesize_compat")
+    (sysctl-name "hw.physicalcpu_max")
+    (sysctl-name "hw.tbfrequency_compat")
+    (sysctl-name "kern.hostname")
+    (sysctl-name "kern.maxfilesperproc")
+    (sysctl-name "kern.osproductversion")
+    (sysctl-name "kern.osrelease")
+    (sysctl-name "kern.ostype")
+    (sysctl-name "kern.osversion")
+    (sysctl-name "kern.secure_kernel")
+    (sysctl-name "kern.version")
+)
+
+;; Allow file writes to specific paths only
+;; Note: file-write* does NOT include file-write-create, so we need both
+(allow file-write* file-write-create
+    ;; Project directory - primary workspace
+    (subpath (param "PROJECT_DIR"))
+
+    ;; Temporary directories
+    (subpath "/tmp")
+    (subpath "/private/tmp")
+    (subpath "/var/folders")  ; macOS temp directory root
+    (subpath "/private/var/folders")  ; Real path (var is symlink to private/var)
+    (regex #"^/var/folders/[^/]+/[^/]+/[^/]+/.*")  ; macOS temp dirs and subdirs
+    (regex #"^/private/var/folders/[^/]+/[^/]+/[^/]+/.*")  ; Real path version
+    (regex #"^/var/folders/.*")  ; Allow all subdirectories under /var/folders for broader compatibility
+    (regex #"^/private/var/folders/.*")  ; Real path version
+
+    ;; Claude configuration
+    (subpath (string-append (param "HOME_DIR") "/.claude"))
+    (literal (string-append (param "HOME_DIR") "/.claude.json"))
+    
+    ;; OpenCode configuration and state
+    (subpath (string-append (param "HOME_DIR") "/.cache/opencode"))
+    (subpath (string-append (param "HOME_DIR") "/.config/opencode"))
+    (subpath (string-append (param "HOME_DIR") "/.local/share/opencode"))
+    (subpath (string-append (param "HOME_DIR") "/.local/state/opencode"))
+
+    ;; Standard I/O devices
+    (literal "/dev/stdout")
+    (literal "/dev/stderr")
+    (literal "/dev/null")
+    (literal "/dev/tty")
+    (literal "/dev/ptmx")
+    (regex #"^/dev/ttys[0-9]+")
+    (regex #"^/dev/pty[0-9]+")
+)
+
+;; Allow network access (required for external Agent API)
+(allow network*)
+
+;; Allow terminal I/O operations (required for interactive mode)
+(allow file-ioctl (regex #"^/dev/tty.*"))
+
+;; Allow mach lookups for essential services
+(allow mach-lookup 
+    (global-name "com.apple.sysmond")  ; For process listing
+)
+
+;; Allow file attribute operations needed for file creation
+(allow file-write-setugid)
+(allow file-write-mode)
+(allow file-write-owner)
+(allow file-write-times)
+(allow file-write-flags)
