@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for any rust tasks.
+
 ## Project Overview
 
 OpenAPI-to-Rust code generator that parses OpenAPI 3.1 specifications and generates comprehensive Rust type definitions with validation.

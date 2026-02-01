@@ -308,7 +308,7 @@ fn test_cache_operations() {
   let named_enum2 = SharedSchemaCache::apply_name_to_type(enum2, &reg2.assigned_name);
   type_cache.commit_registration(reg2, vec![], named_enum2);
 
-  let types = type_cache.into_types();
+  let types = type_cache.take_types();
   assert_eq!(types.len(), 2, "Should return all generated types");
 }
 

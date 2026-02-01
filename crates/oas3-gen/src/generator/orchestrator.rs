@@ -4,10 +4,11 @@ use std::{
   sync::Arc,
 };
 
+use oas3::Spec;
 use strum::Display;
 
 use crate::generator::{
-  ast::{ClientRootNode, OperationInfo, OperationKind, RustType, ServerRequestTraitDef, constants::HttpHeaderRef},
+  ast::{ClientRootNode, OperationInfo, OperationKind, RustType},
   codegen::{GeneratedResult, SchemaCodeGenerator, Visibility},
   converter::{
     CodegenConfig, ConverterContext, GenerationTarget, OperationsProcessor, SchemaConverter, TypeUsageRecorder,
@@ -15,7 +16,7 @@ use crate::generator::{
   },
   mode::GenerationMode,
   operation_registry::OperationRegistry,
-  postprocess::{PostprocessOutput, postprocess},
+  postprocess::postprocess,
   schema_registry::SchemaRegistry,
 };
 
@@ -23,7 +24,7 @@ const OAS3_GEN_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug)]
 pub struct Orchestrator {
-  spec: oas3::Spec,
+  spec: Spec,
   visibility: Visibility,
   config: CodegenConfig,
   operation_registry: OperationRegistry,
@@ -67,17 +68,6 @@ impl GeneratedFinalOutput {
   }
 }
 
-struct ConversionArtifacts {
-  config: CodegenConfig,
-  types: Vec<RustType>,
-  operations: Vec<OperationInfo>,
-  header_refs: Vec<HttpHeaderRef>,
-  uses: BTreeSet<String>,
-  client: ClientRootNode,
-  server_trait: Option<ServerRequestTraitDef>,
-  stats: GenerationStats,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum GenerationWarning {
   #[strum(to_string = "Failed to convert schema '{schema_name}': {error}")]
@@ -104,7 +94,7 @@ impl GenerationWarning {
 impl Orchestrator {
   #[must_use]
   pub fn new(
-    spec: oas3::Spec,
+    spec: Spec,
     visibility: Visibility,
     config: CodegenConfig,
     only_operations: Option<&HashSet<String>>,
@@ -122,16 +112,29 @@ impl Orchestrator {
   }
 
   pub fn generate(&self, mode: &dyn GenerationMode, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let artifacts = self.run_conversion_and_analysis();
+    let artifacts = self.collect_generation_artifacts();
+    let seed_map = artifacts.usage_recorder.into_usage_map();
+    let output = postprocess(
+      artifacts.rust_types,
+      artifacts.operations_info,
+      seed_map,
+      artifacts.config.target,
+    );
+
+    let server_trait = if artifacts.config.target == GenerationTarget::Server {
+      build_server_trait(&output.operations)
+    } else {
+      None
+    };
 
     let codegen = SchemaCodeGenerator::builder()
       .config(artifacts.config)
-      .rust_types(artifacts.types)
-      .operations(artifacts.operations)
-      .header_refs(artifacts.header_refs)
-      .uses(artifacts.uses)
-      .client(artifacts.client)
-      .maybe_server_trait(artifacts.server_trait)
+      .rust_types(output.types)
+      .operations(output.operations)
+      .header_refs(output.header_refs)
+      .uses(output.uses)
+      .client(ClientRootNode::from(&self.spec))
+      .maybe_server_trait(server_trait)
       .visibility(self.visibility)
       .source_path(source_path.to_string())
       .gen_version(OAS3_GEN_VERSION.to_string())
@@ -139,44 +142,6 @@ impl Orchestrator {
 
     let output = mode.generate(&codegen)?;
     Ok(GeneratedFinalOutput::new(output, artifacts.stats))
-  }
-
-  fn run_conversion_and_analysis(&self) -> ConversionArtifacts {
-    let artifacts = self.collect_generation_artifacts();
-    let GenerationArtifacts {
-      rust_types,
-      operations_info,
-      usage_recorder,
-      stats,
-      config,
-    } = artifacts;
-
-    let client = ClientRootNode::from(&self.spec);
-
-    let seed_map = usage_recorder.into_usage_map();
-    let PostprocessOutput {
-      types,
-      operations,
-      header_refs,
-      uses,
-    } = postprocess(rust_types, operations_info, seed_map, config.target);
-
-    let server_trait = if config.target == GenerationTarget::Server {
-      build_server_trait(&operations)
-    } else {
-      None
-    };
-
-    ConversionArtifacts {
-      config,
-      types,
-      operations,
-      header_refs,
-      uses,
-      client,
-      server_trait,
-      stats,
-    }
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
@@ -225,7 +190,7 @@ impl Orchestrator {
 
     let mut rust_types = schema_rust_types;
     rust_types.extend(operations_output.types);
-    rust_types.extend(context.cache.replace(SharedSchemaCache::new()).into_types());
+    rust_types.extend(context.cache.borrow_mut().take_types());
 
     warnings.extend(schema_warnings);
     warnings.extend(operations_output.warnings);

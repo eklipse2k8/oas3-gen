@@ -184,9 +184,9 @@ impl TypeCollector {
     self.types.push(main);
   }
 
-  /// Consumes the collector and returns all accumulated types in insertion order.
-  fn into_types(self) -> Vec<RustType> {
-    self.types
+  /// Takes all accumulated types, leaving the collector empty for reuse.
+  pub(crate) fn take_types(&mut self) -> Vec<RustType> {
+    std::mem::take(&mut self.types)
   }
 }
 
@@ -439,9 +439,9 @@ impl SharedSchemaCache {
     Ok(!self.schemas.has_mapping(&canonical, name))
   }
 
-  /// Consumes the cache and returns all accumulated type definitions.
-  pub(crate) fn into_types(self) -> Vec<RustType> {
-    self.types.into_types()
+  /// Takes all accumulated type definitions, leaving the cache empty for reuse.
+  pub(crate) fn take_types(&mut self) -> Vec<RustType> {
+    self.types.take_types()
   }
 
   /// Stores a struct definition indexed by type name for later retrieval when
