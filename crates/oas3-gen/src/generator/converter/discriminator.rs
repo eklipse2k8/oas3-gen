@@ -9,7 +9,7 @@ use crate::generator::{
   ast::{DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken, RustType, TypeRef, VariantDef},
   converter::ConverterContext,
   naming::identifiers::{split_pascal_case, strip_parent_prefix, to_rust_type_name},
-  schema_registry::{ParentInfo, SchemaRegistry},
+  schema_registry::SchemaRegistry,
 };
 
 #[derive(Debug, Clone)]
@@ -26,12 +26,12 @@ impl DiscriminatorConverter {
     Self { context }
   }
 
-  /// Returns the discriminated parent info if `schema_name` extends a base type
+  /// Returns the discriminated parent name if `schema_name` extends a base type
   /// with a discriminator mapping.
   ///
   /// Schemas that are children of a discriminated base type do not generate
   /// standalone Rust types; they become enum variants instead.
-  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&ParentInfo> {
+  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&str> {
     self.context.graph().parent(schema_name)
   }
 

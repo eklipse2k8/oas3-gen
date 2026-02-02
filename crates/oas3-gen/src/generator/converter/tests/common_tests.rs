@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use crate::{
-  generator::{converter::inline_resolver::InlineTypeResolver, schema_registry::SchemaRegistry},
+  generator::{
+    converter::inline_resolver::InlineTypeResolver, metrics::GenerationStats, schema_registry::SchemaRegistry,
+  },
   tests::common::{create_test_context, create_test_graph, create_test_spec, default_config},
 };
 
@@ -100,7 +102,8 @@ fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
     ("Fluff".to_string(), fluff_schema.clone()),
   ]));
 
-  let registry = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
 
   let inline_allof = ObjectSchema {
     properties: BTreeMap::from([(

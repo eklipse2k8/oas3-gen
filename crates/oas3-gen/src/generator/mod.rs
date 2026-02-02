@@ -3,6 +3,7 @@
 pub(crate) mod ast;
 pub(crate) mod codegen;
 pub(crate) mod converter;
+pub mod metrics;
 pub mod mode;
 pub(crate) mod naming;
 pub mod operation_registry;

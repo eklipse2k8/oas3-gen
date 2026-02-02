@@ -219,8 +219,8 @@ fn discriminator_handler_detect_parent() {
 
   let result = handler.detect_discriminated_parent("Nugget");
 
-  let info = result.expect("parent should be detected");
-  assert_eq!(info.parent_name, "Loaf");
+  let parent_name = result.expect("parent should be detected");
+  assert_eq!(parent_name, "Loaf");
 }
 
 #[test]

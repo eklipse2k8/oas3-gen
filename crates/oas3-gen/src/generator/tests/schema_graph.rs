@@ -5,7 +5,7 @@ use oas3::spec::{
   Spec,
 };
 
-use crate::generator::schema_registry::SchemaRegistry;
+use crate::generator::{metrics::GenerationStats, schema_registry::SchemaRegistry};
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
@@ -86,7 +86,8 @@ fn test_parse_ref() {
 #[test]
 fn test_ref_collector() {
   let spec = create_test_spec_with_schemas(BTreeMap::new());
-  let registry = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
 
   let schema = make_schema_with_ref("Corgi");
@@ -128,7 +129,8 @@ fn test_schema_registry() {
   schemas.insert("Bark".to_string(), ObjectOrReference::Object(make_simple_schema()));
 
   let spec = create_test_spec_with_schemas(schemas);
-  let registry = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
 
   assert!(registry.get("Corgi").is_some(), "should have Corgi schema");
   assert!(registry.get("Bark").is_some(), "should have Bark schema");
@@ -143,7 +145,8 @@ fn test_schema_registry() {
   );
 
   let spec = create_test_spec_with_schemas(schemas);
-  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
   graph.build_dependencies(&union_fingerprints);
 
@@ -163,7 +166,8 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("C".to_string(), ObjectOrReference::Object(c_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let mut graph = SchemaRegistry::from_spec(spec).registry;
+    let mut stats = GenerationStats::default();
+    let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
@@ -185,7 +189,8 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("B".to_string(), ObjectOrReference::Object(b_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let mut graph = SchemaRegistry::from_spec(spec).registry;
+    let mut stats = GenerationStats::default();
+    let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
@@ -204,7 +209,8 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let mut graph = SchemaRegistry::from_spec(spec).registry;
+    let mut stats = GenerationStats::default();
+    let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
@@ -224,7 +230,8 @@ fn test_schema_graph_cycle_detection() {
     schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
 
     let spec = create_test_spec_with_schemas(schemas);
-    let mut graph = SchemaRegistry::from_spec(spec).registry;
+    let mut stats = GenerationStats::default();
+    let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
@@ -245,7 +252,8 @@ fn test_schema_graph_integration() {
   );
 
   let spec = create_test_spec_with_schemas(schemas);
-  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
 
   assert!(graph.get("Corgi").is_some(), "integration: should have Corgi");
   assert!(graph.get("Bark").is_some(), "integration: should have Bark");
@@ -290,7 +298,8 @@ fn test_schema_registry_merges_all_of_properties_and_required() {
     ("Nugget".to_string(), ObjectOrReference::Object(nugget.clone())),
   ]));
 
-  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
@@ -337,7 +346,8 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
     ("Nugget".to_string(), ObjectOrReference::Object(nugget_schema.clone())),
   ]));
 
-  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
@@ -348,9 +358,9 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
   assert!(merged_nugget.schema.properties.contains_key("kind"));
   assert!(merged_nugget.schema.properties.contains_key("nugget_prop"));
 
-  let discriminator = graph.parent("Nugget").expect("discriminator parent should be tracked");
+  let parent_name = graph.parent("Nugget").expect("discriminator parent should be tracked");
 
-  assert_eq!(discriminator.parent_name, "Loaf");
+  assert_eq!(parent_name, "Loaf");
 
   let effective = graph.resolved("Nugget").unwrap();
   assert_eq!(effective.properties.len(), merged_nugget.schema.properties.len());
@@ -385,7 +395,8 @@ fn schema_merger_merge_child_with_parent() {
     ("Nugget".to_string(), ObjectOrReference::Object(nugget)),
   ]));
 
-  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
@@ -441,7 +452,8 @@ fn schema_merger_conflict_resolution() {
     ("Nugget".to_string(), ObjectOrReference::Object(nugget)),
   ]));
 
-  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
@@ -501,7 +513,8 @@ fn schema_merger_merge_multiple_all_of() {
     ("Composite".to_string(), ObjectOrReference::Object(composite)),
   ]));
 
-  let mut graph = SchemaRegistry::from_spec(spec).registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();

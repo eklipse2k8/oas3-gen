@@ -235,20 +235,6 @@ impl ConverterContext {
   pub(crate) fn merge_usage(&self, other: TypeUsageRecorder) {
     self.type_usage.borrow_mut().merge(other);
   }
-
-  /// Increments the count of generated HTTP client or server methods.
-  ///
-  /// Used for generation statistics and progress reporting.
-  pub(crate) fn record_method(&self) {
-    self.type_usage.borrow_mut().record_method();
-  }
-
-  /// Records an HTTP header name for generation statistics.
-  ///
-  /// Header names are normalized to lowercase for deduplication.
-  pub(crate) fn record_header(&self, header_name: &str) {
-    self.type_usage.borrow_mut().record_header(header_name);
-  }
 }
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.

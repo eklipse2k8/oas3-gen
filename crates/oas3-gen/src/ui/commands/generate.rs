@@ -11,7 +11,8 @@ use crate::{
     ClientModMode, ClientMode, CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationMode,
     GenerationTarget, ODataPolicy, ServerModMode, TypesMode,
     codegen::{GeneratedFileType, Visibility},
-    orchestrator::{GeneratedFinalOutput, GenerationStats, Orchestrator},
+    metrics::GenerationStats,
+    orchestrator::{GeneratedFinalOutput, Orchestrator},
   },
   ui::{Colors, EnumCaseMode, GenerateCommand, GenerateMode},
   utils::spec::SpecLoader,
@@ -306,11 +307,11 @@ impl<'a> GenerateLogger<'a> {
   }
 
   fn print_client_stats(&self, stats: &GenerationStats) {
-    if let Some(methods) = stats.client_methods_generated {
-      self.stat("Methods generated:", methods.to_string());
+    if stats.client_methods_generated > 0 {
+      self.stat("Methods generated:", stats.client_methods_generated.to_string());
     }
-    if let Some(headers) = stats.client_headers_generated {
-      self.stat("Headers generated:", headers.to_string());
+    if stats.client_headers_generated > 0 {
+      self.stat("Headers generated:", stats.client_headers_generated.to_string());
     }
   }
 

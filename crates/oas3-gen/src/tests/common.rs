@@ -8,6 +8,7 @@ use crate::generator::{
   converter::{
     CodegenConfig, ConverterContext, EnumCasePolicy, EnumHelperPolicy, SchemaConverter, cache::SharedSchemaCache,
   },
+  metrics::GenerationStats,
   schema_registry::SchemaRegistry,
 };
 
@@ -29,8 +30,8 @@ pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec 
 
 pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<SchemaRegistry> {
   let spec = create_test_spec(schemas);
-  let init_result = SchemaRegistry::from_spec(spec);
-  let mut graph = init_result.registry;
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
