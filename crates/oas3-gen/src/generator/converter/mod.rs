@@ -30,7 +30,7 @@ pub(crate) use common::ConversionOutput;
 use oas3::spec::ObjectSchema;
 pub(crate) use operations::{OperationsProcessor, build_server_trait};
 pub(crate) use type_resolver::TypeResolver;
-pub(crate) use type_usage_recorder::TypeUsageRecorder;
+pub(crate) use type_usage_recorder::SerdeUsageRecorder;
 
 use super::ast::RustType;
 use crate::{
@@ -43,6 +43,7 @@ use crate::{
       union_types::UnionKind,
       unions::{EnumConverter, UnionConverter},
     },
+    metrics::GenerationStats,
     naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
     schema_registry::SchemaRegistry,
   },
@@ -153,7 +154,7 @@ pub(crate) struct ConverterContext {
   pub(crate) graph: Arc<SchemaRegistry>,
   pub(crate) config: CodegenConfig,
   pub(crate) cache: RefCell<SharedSchemaCache>,
-  pub(crate) type_usage: RefCell<TypeUsageRecorder>,
+  pub(crate) type_usage: RefCell<SerdeUsageRecorder>,
   pub(crate) reachable_schemas: Option<Arc<BTreeSet<String>>>,
 }
 
@@ -173,7 +174,7 @@ impl ConverterContext {
       graph,
       config,
       cache: RefCell::new(cache),
-      type_usage: RefCell::new(TypeUsageRecorder::new()),
+      type_usage: RefCell::new(SerdeUsageRecorder::new()),
       reachable_schemas,
     }
   }
@@ -193,7 +194,7 @@ impl ConverterContext {
   ///
   /// Call this after conversion completes to retrieve which types are used in
   /// requests vs responses for serde mode optimization.
-  pub(crate) fn take_type_usage(&self) -> TypeUsageRecorder {
+  pub(crate) fn take_type_usage(&self) -> SerdeUsageRecorder {
     self.type_usage.take()
   }
 
@@ -232,7 +233,7 @@ impl ConverterContext {
   /// Combines type usage data from another recorder into this context's recorder.
   ///
   /// Used when sub-converters track usage independently and results must be aggregated.
-  pub(crate) fn merge_usage(&self, other: TypeUsageRecorder) {
+  pub(crate) fn merge_usage(&self, other: SerdeUsageRecorder) {
     self.type_usage.borrow_mut().merge(other);
   }
 }
@@ -422,6 +423,48 @@ impl SchemaConverter {
     }
 
     Ok(None)
+  }
+
+  /// Converts all schemas from the OpenAPI spec to Rust types.
+  ///
+  /// Processes schemas in two phases: first registers all top-level schemas to enable
+  /// deduplication, then converts each to Rust types. Enums are processed before other
+  /// types to ensure their names are available for reference.
+  pub(crate) fn convert_all_schemas(
+    &self,
+    operation_reachable: Option<&BTreeSet<String>>,
+    stats: &mut GenerationStats,
+  ) -> Vec<RustType> {
+    let schemas = self.context.graph().schemas();
+
+    let filtered = schemas
+      .iter()
+      .filter(|(name, _)| operation_reachable.is_none_or(|filter| filter.contains(name.as_str())))
+      .collect::<Vec<_>>();
+
+    let (enums, non_enums): (Vec<_>, Vec<_>) = filtered
+      .into_iter()
+      .partition(|(_, schema)| !schema.enum_values.is_empty());
+
+    let ordered = enums.into_iter().chain(non_enums).collect::<Vec<_>>();
+
+    {
+      let mut cache = self.context().cache.borrow_mut();
+      for (name, schema) in &ordered {
+        let _ = cache.register_top_level_schema(schema, name);
+      }
+    }
+
+    ordered.into_iter().fold(vec![], |mut acc, (name, schema)| {
+      match self.convert_schema(name, schema) {
+        Ok(types) => acc.extend(types),
+        Err(e) => stats.record_warning(super::metrics::GenerationWarning::SchemaConversionFailed {
+          schema_name: name.clone(),
+          error: e.to_string(),
+        }),
+      }
+      acc
+    })
   }
 }
 

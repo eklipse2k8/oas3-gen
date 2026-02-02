@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
 use super::{
-  ConverterContext, SchemaConverter, TypeUsageRecorder,
+  ConverterContext, SchemaConverter, SerdeUsageRecorder,
   requests::{BodyInfo, RequestConverter, RequestOutput},
   responses::ResponseConverter,
 };
@@ -37,7 +37,7 @@ pub(crate) struct OperationsOutput {
   pub(crate) types: Vec<RustType>,
   pub(crate) operations: Vec<OperationInfo>,
   pub(crate) warnings: Vec<GenerationWarning>,
-  pub(crate) usage_recorder: TypeUsageRecorder,
+  pub(crate) usage_recorder: SerdeUsageRecorder,
   pub(crate) unique_headers: BTreeSet<String>,
 }
 

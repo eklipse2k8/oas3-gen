@@ -46,11 +46,11 @@ impl UsageFlags {
 /// Types used only in requests get `Serialize`, types used only in
 /// responses get `Deserialize`, and types used in both get both derives.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct TypeUsageRecorder {
+pub(crate) struct SerdeUsageRecorder {
   entries: BTreeMap<EnumToken, UsageFlags>,
 }
 
-impl TypeUsageRecorder {
+impl SerdeUsageRecorder {
   /// Creates an empty recorder with no tracked types or statistics.
   pub(crate) fn new() -> Self {
     Self {
@@ -138,7 +138,7 @@ impl TypeUsageRecorder {
   ///
   /// Usage flags are merged with logical OR: if either recorder marked a type
   /// as request or response, the merged result reflects that.
-  pub(crate) fn merge(&mut self, other: TypeUsageRecorder) {
+  pub(crate) fn merge(&mut self, other: SerdeUsageRecorder) {
     for (token, flags) in other.entries {
       self.entries.entry(token).or_default().merge(flags);
     }

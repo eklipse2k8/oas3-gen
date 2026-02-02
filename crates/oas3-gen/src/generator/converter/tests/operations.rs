@@ -12,18 +12,18 @@ use oas3::spec::{
 use crate::{
   generator::{
     ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StructDef, StructToken},
-    converter::{SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
+    converter::{SchemaConverter, SerdeUsageRecorder, operations::OperationConverter},
     operation_registry::OperationEntry,
   },
   tests::common::{create_test_context, create_test_graph, default_config},
 };
 
-fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter, TypeUsageRecorder) {
+fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter, SerdeUsageRecorder) {
   let graph = create_test_graph(schemas);
   let context = create_test_context(graph, default_config());
   let schema_converter = SchemaConverter::new(&context);
   let converter = OperationConverter::new(context, schema_converter);
-  let usage = TypeUsageRecorder::new();
+  let usage = SerdeUsageRecorder::new();
   (converter, usage)
 }
 

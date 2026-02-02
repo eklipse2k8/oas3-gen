@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
 
-use super::{ConverterContext, TypeResolver, TypeUsageRecorder, inline_resolver::InlineTypeResolver};
+use super::{ConverterContext, SerdeUsageRecorder, TypeResolver, inline_resolver::InlineTypeResolver};
 use crate::{
   generator::{
     ast::{
@@ -34,7 +34,7 @@ pub(crate) struct ResponseMetadata {
 #[derive(Debug, Clone)]
 pub(crate) struct ResponseMetadataOutput {
   pub(crate) metadata: ResponseMetadata,
-  pub(crate) usage: TypeUsageRecorder,
+  pub(crate) usage: SerdeUsageRecorder,
 }
 
 /// Converts OpenAPI responses into Rust enum definitions.
@@ -159,7 +159,7 @@ impl ResponseConverter {
         .collect(),
     );
 
-    let mut usage = TypeUsageRecorder::new();
+    let mut usage = SerdeUsageRecorder::new();
     if let Some(ref name) = type_name {
       usage.mark_response(name);
     }
