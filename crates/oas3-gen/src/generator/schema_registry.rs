@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+  collections::{BTreeMap, BTreeSet},
   string::ToString,
 };
 
@@ -12,10 +12,7 @@ use petgraph::{algo::kosaraju_scc, graphmap::DiGraphMap, visit::Dfs};
 use super::orchestrator::GenerationWarning;
 use crate::{
   generator::{
-    naming::{
-      identifiers::to_rust_type_name,
-      name_index::{ScanResult, TypeNameIndex},
-    },
+    naming::name_index::{ScanResult, TypeNameIndex},
     operation_registry::OperationRegistry,
   },
   utils::SchemaExt,
@@ -23,7 +20,7 @@ use crate::{
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
-type UnionFingerprints = HashMap<BTreeSet<String>, String>;
+pub(crate) type UnionFingerprints = BTreeMap<BTreeSet<String>, String>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DiscriminatorMapping {
@@ -51,91 +48,6 @@ pub(crate) struct MergedSchema {
 pub(crate) struct ParseResult {
   pub registry: SchemaRegistry,
   pub warnings: Vec<GenerationWarning>,
-}
-
-#[derive(Debug)]
-pub(crate) struct RefCollector<'a> {
-  fingerprints: Option<&'a UnionFingerprints>,
-}
-
-impl<'a> RefCollector<'a> {
-  pub(crate) fn new(fingerprints: Option<&'a UnionFingerprints>) -> Self {
-    Self { fingerprints }
-  }
-
-  pub(crate) fn parse_ref(ref_string: &str) -> Option<String> {
-    ref_string.strip_prefix(SCHEMA_REF_PREFIX).map(ToString::to_string)
-  }
-
-  pub(crate) fn parse_schema_ref(obj_ref: &ObjectOrReference<ObjectSchema>) -> Option<String> {
-    match obj_ref {
-      ObjectOrReference::Ref { ref_path, .. } => Self::parse_ref(ref_path),
-      ObjectOrReference::Object(_) => None,
-    }
-  }
-
-  pub(crate) fn collect(&self, schema: &ObjectSchema) -> BTreeSet<String> {
-    let mut refs = BTreeSet::new();
-    self.collect_all(schema, &mut refs);
-    refs
-  }
-
-  fn collect_all(&self, schema: &ObjectSchema, refs: &mut BTreeSet<String>) {
-    self.collect_from_properties(schema, refs);
-    self.collect_from_combinators(schema, refs);
-    self.collect_from_items(schema, refs);
-  }
-
-  pub(crate) fn collect_from(&self, schema_ref: &ObjectOrReference<ObjectSchema>, refs: &mut BTreeSet<String>) {
-    if let Some(ref_name) = Self::parse_schema_ref(schema_ref) {
-      refs.insert(ref_name);
-    }
-
-    if let ObjectOrReference::Object(inline_schema) = schema_ref {
-      let inline_refs = self.collect(inline_schema);
-      refs.extend(inline_refs);
-    }
-  }
-
-  fn collect_from_properties(&self, schema: &ObjectSchema, refs: &mut BTreeSet<String>) {
-    for prop_schema in schema.properties.values() {
-      self.collect_from(prop_schema, refs);
-    }
-  }
-
-  fn collect_from_combinators(&self, schema: &ObjectSchema, refs: &mut BTreeSet<String>) {
-    for schema_ref in schema.one_of.iter().chain(&schema.any_of).chain(&schema.all_of) {
-      self.collect_from(schema_ref, refs);
-    }
-
-    if let Some(map) = self.fingerprints {
-      for variants in [&schema.one_of, &schema.any_of] {
-        if !variants.is_empty()
-          && let Some(name) = map.get(&Self::fingerprint(variants))
-        {
-          refs.insert(name.clone());
-        }
-      }
-    }
-  }
-
-  fn collect_from_items(&self, schema: &ObjectSchema, refs: &mut BTreeSet<String>) {
-    if let Some(ref items_box) = schema.items
-      && let Schema::Object(ref schema_ref) = **items_box
-    {
-      self.collect_from(schema_ref, refs);
-    }
-  }
-
-  pub(crate) fn fingerprint(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
-    variants.iter().filter_map(Self::parse_schema_ref).collect()
-  }
-}
-
-struct SchemaMerger<'a> {
-  schemas: &'a BTreeMap<String, ObjectSchema>,
-  merged_schemas: &'a BTreeMap<String, MergedSchema>,
-  spec: &'a Spec,
 }
 
 #[derive(Default)]
@@ -187,129 +99,6 @@ impl MergeAccumulator {
   }
 }
 
-impl<'a> SchemaMerger<'a> {
-  fn new(
-    schemas: &'a BTreeMap<String, ObjectSchema>,
-    merged_schemas: &'a BTreeMap<String, MergedSchema>,
-    spec: &'a Spec,
-  ) -> Self {
-    Self {
-      schemas,
-      merged_schemas,
-      spec,
-    }
-  }
-
-  fn merge(&self, schema: &ObjectSchema) -> MergedSchema {
-    if schema.all_of.is_empty() {
-      return MergedSchema {
-        schema: schema.clone(),
-        discriminator_parent: None,
-      };
-    }
-
-    let mut acc = MergeAccumulator::default();
-    self.process_all_of(schema, &mut acc);
-    self.process_optional_combinators(schema, &mut acc);
-    acc.merge_from(schema);
-
-    if acc.additional_properties.is_none() {
-      acc.additional_properties = self.find_additional_properties(schema);
-    }
-
-    let discriminator_parent = acc.discriminator_parent.take();
-    MergedSchema {
-      schema: acc.into_schema(schema),
-      discriminator_parent,
-    }
-  }
-
-  fn merge_inline(&self, schema: &ObjectSchema) -> anyhow::Result<ObjectSchema> {
-    if schema.all_of.is_empty() {
-      return Ok(schema.clone());
-    }
-
-    let mut acc = MergeAccumulator::default();
-
-    for all_of_ref in &schema.all_of {
-      match all_of_ref {
-        ObjectOrReference::Ref { ref_path, .. } => {
-          if let Some(name) = RefCollector::parse_ref(ref_path)
-            && let Some(merged) = self.merged_schemas.get(&name)
-          {
-            acc.merge_from(&merged.schema);
-            continue;
-          }
-
-          let resolved = all_of_ref
-            .resolve(self.spec)
-            .map_err(|e| anyhow::anyhow!("Schema resolution failed for inline allOf reference: {e}"))?;
-          acc.merge_from(&resolved);
-        }
-        ObjectOrReference::Object(inline) => {
-          let inner_merged = self.merge_inline(inline)?;
-          acc.merge_from(&inner_merged);
-        }
-      }
-    }
-
-    acc.merge_from(schema);
-
-    if acc.additional_properties.is_none() {
-      acc.additional_properties.clone_from(&schema.additional_properties);
-    }
-
-    Ok(acc.into_schema(schema))
-  }
-
-  fn process_all_of(&self, schema: &ObjectSchema, acc: &mut MergeAccumulator) {
-    for all_of_ref in &schema.all_of {
-      if let ObjectOrReference::Ref { ref_path, .. } = all_of_ref
-        && let Some(parent_name) = RefCollector::parse_ref(ref_path)
-        && let Some(parent) = self.resolve_schema_ref(all_of_ref)
-        && parent.discriminator.is_some()
-        && parent.is_discriminated_base_type()
-      {
-        acc.discriminator_parent = Some(parent_name.clone());
-      }
-
-      if let Some(parent) = self.resolve_schema_ref(all_of_ref) {
-        acc.merge_from(parent);
-      }
-    }
-  }
-
-  fn process_optional_combinators(&self, schema: &ObjectSchema, acc: &mut MergeAccumulator) {
-    for schema_ref in schema.any_of.iter().chain(&schema.one_of) {
-      if let Some(source) = self.resolve_schema_ref(schema_ref) {
-        acc.merge_optional_from(source);
-      }
-    }
-  }
-
-  fn resolve_schema_ref<'b>(&'b self, schema_ref: &'b ObjectOrReference<ObjectSchema>) -> Option<&'b ObjectSchema> {
-    match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => {
-        let name = RefCollector::parse_ref(ref_path)?;
-        self
-          .merged_schemas
-          .get(&name)
-          .map(|m| &m.schema)
-          .or_else(|| self.schemas.get(&name))
-      }
-      ObjectOrReference::Object(s) => Some(s),
-    }
-  }
-
-  fn find_additional_properties(&self, schema: &ObjectSchema) -> Option<Schema> {
-    schema
-      .all_of
-      .iter()
-      .filter_map(|r| r.resolve(self.spec).ok())
-      .find_map(|parent| parent.additional_properties.clone())
-  }
-}
-
 fn detect_cycles(dependencies: &BTreeMap<String, BTreeSet<String>>) -> Vec<Vec<String>> {
   let mut graph = DiGraphMap::<&str, ()>::new();
   for (node, deps) in dependencies {
@@ -329,14 +118,15 @@ fn detect_cycles(dependencies: &BTreeMap<String, BTreeSet<String>>) -> Vec<Vec<S
 fn collect_refs_from_operation(
   operation: &Operation,
   spec: &Spec,
-  collector: &RefCollector,
+  registry: &SchemaRegistry,
   refs: &mut BTreeSet<String>,
+  union_fingerprints: &UnionFingerprints,
 ) {
   for param in &operation.parameters {
     if let Ok(resolved_param) = param.resolve(spec)
       && let Some(ref schema_ref) = resolved_param.schema
     {
-      collector.collect_from(schema_ref, refs);
+      registry.collect_from(schema_ref, refs, union_fingerprints);
     }
   }
 
@@ -345,7 +135,7 @@ fn collect_refs_from_operation(
   {
     for media_type in request_body.content.values() {
       if let Some(ref schema_ref) = media_type.schema {
-        collector.collect_from(schema_ref, refs);
+        registry.collect_from(schema_ref, refs, union_fingerprints);
       }
     }
   }
@@ -355,7 +145,7 @@ fn collect_refs_from_operation(
       if let Ok(response) = response_ref.resolve(spec) {
         for media_type in response.content.values() {
           if let Some(ref schema_ref) = media_type.schema {
-            collector.collect_from(schema_ref, refs);
+            registry.collect_from(schema_ref, refs, union_fingerprints);
           }
         }
       }
@@ -393,13 +183,97 @@ pub(crate) struct SchemaRegistry {
   dependencies: BTreeMap<String, BTreeSet<String>>,
   cyclic_schemas: BTreeSet<String>,
   discriminator_cache: BTreeMap<String, DiscriminatorMapping>,
-  inheritance_depths: HashMap<String, usize>,
+  inheritance_depths: BTreeMap<String, usize>,
   spec: Spec,
-  union_fingerprints: UnionFingerprints,
-  cached_schema_names: HashSet<String>,
 }
 
 impl SchemaRegistry {
+  pub(crate) fn parse_ref(ref_string: &str) -> Option<String> {
+    ref_string.strip_prefix(SCHEMA_REF_PREFIX).map(ToString::to_string)
+  }
+
+  pub(crate) fn parse_schema_ref(obj_ref: &ObjectOrReference<ObjectSchema>) -> Option<String> {
+    match obj_ref {
+      ObjectOrReference::Ref { ref_path, .. } => Self::parse_ref(ref_path),
+      ObjectOrReference::Object(_) => None,
+    }
+  }
+
+  pub(crate) fn collect(&self, schema: &ObjectSchema, union_fingerprints: &UnionFingerprints) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    self.collect_all(schema, &mut refs, union_fingerprints);
+    refs
+  }
+
+  fn collect_all(&self, schema: &ObjectSchema, refs: &mut BTreeSet<String>, union_fingerprints: &UnionFingerprints) {
+    self.collect_from_properties(schema, refs, union_fingerprints);
+    self.collect_from_combinators(schema, refs, union_fingerprints);
+    self.collect_from_items(schema, refs, union_fingerprints);
+  }
+
+  fn collect_from(
+    &self,
+    schema_ref: &ObjectOrReference<ObjectSchema>,
+    refs: &mut BTreeSet<String>,
+    union_fingerprints: &UnionFingerprints,
+  ) {
+    if let Some(ref_name) = Self::parse_schema_ref(schema_ref) {
+      refs.insert(ref_name);
+    }
+
+    if let ObjectOrReference::Object(inline_schema) = schema_ref {
+      let inline_refs = self.collect(inline_schema, union_fingerprints);
+      refs.extend(inline_refs);
+    }
+  }
+
+  fn collect_from_properties(
+    &self,
+    schema: &ObjectSchema,
+    refs: &mut BTreeSet<String>,
+    union_fingerprints: &UnionFingerprints,
+  ) {
+    for prop_schema in schema.properties.values() {
+      self.collect_from(prop_schema, refs, union_fingerprints);
+    }
+  }
+
+  fn collect_from_combinators(
+    &self,
+    schema: &ObjectSchema,
+    refs: &mut BTreeSet<String>,
+    union_fingerprints: &UnionFingerprints,
+  ) {
+    for schema_ref in schema.one_of.iter().chain(&schema.any_of).chain(&schema.all_of) {
+      self.collect_from(schema_ref, refs, union_fingerprints);
+    }
+
+    for variants in [&schema.one_of, &schema.any_of] {
+      if !variants.is_empty()
+        && let Some(name) = union_fingerprints.get(&Self::fingerprint(variants))
+      {
+        refs.insert(name.clone());
+      }
+    }
+  }
+
+  fn fingerprint(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
+    variants.iter().filter_map(Self::parse_schema_ref).collect()
+  }
+
+  fn collect_from_items(
+    &self,
+    schema: &ObjectSchema,
+    refs: &mut BTreeSet<String>,
+    union_fingerprints: &UnionFingerprints,
+  ) {
+    if let Some(ref items_box) = schema.items
+      && let Schema::Object(ref schema_ref) = **items_box
+    {
+      self.collect_from(schema_ref, refs, union_fingerprints);
+    }
+  }
+
   pub(crate) fn from_spec(spec: Spec) -> ParseResult {
     let mut schemas = BTreeMap::new();
     let mut warnings = vec![];
@@ -421,15 +295,6 @@ impl SchemaRegistry {
     }
 
     let discriminator_cache = Self::build_discriminator_cache(&schemas);
-    let union_fingerprints = Self::build_union_fingerprints(&schemas);
-
-    let cached_schema_names = schemas
-      .keys()
-      .flat_map(|schema_name| {
-        let rust_name = to_rust_type_name(schema_name);
-        [schema_name.clone(), rust_name]
-      })
-      .collect();
 
     ParseResult {
       registry: Self {
@@ -439,13 +304,27 @@ impl SchemaRegistry {
         dependencies: BTreeMap::new(),
         cyclic_schemas: BTreeSet::new(),
         discriminator_cache,
-        inheritance_depths: HashMap::new(),
+        inheritance_depths: BTreeMap::new(),
         spec,
-        union_fingerprints,
-        cached_schema_names,
       },
       warnings,
     }
+  }
+
+  pub(crate) fn initialize(
+    &mut self,
+    operation_registry: &OperationRegistry,
+    include_all: bool,
+    union_fingerprints: &UnionFingerprints,
+  ) -> (Vec<Vec<String>>, Option<BTreeSet<String>>) {
+    self.build_dependencies(union_fingerprints);
+    let cycle_details = self.detect_cycles();
+    let reachable = if include_all {
+      None
+    } else {
+      Some(self.reachable(operation_registry, union_fingerprints))
+    };
+    (cycle_details, reachable)
   }
 
   fn build_discriminator_cache(schemas: &BTreeMap<String, ObjectSchema>) -> BTreeMap<String, DiscriminatorMapping> {
@@ -456,7 +335,7 @@ impl SchemaRegistry {
         && let Some(mapping) = &d.mapping
       {
         for (val, ref_path) in mapping {
-          if let Some(schema_name) = RefCollector::parse_ref(ref_path) {
+          if let Some(schema_name) = Self::parse_ref(ref_path) {
             cache.insert(
               schema_name,
               DiscriminatorMapping {
@@ -472,47 +351,28 @@ impl SchemaRegistry {
     cache
   }
 
-  fn build_union_fingerprints(schemas: &BTreeMap<String, ObjectSchema>) -> UnionFingerprints {
-    let mut map = UnionFingerprints::new();
-    for (name, schema) in schemas {
-      for variants in [&schema.one_of, &schema.any_of] {
-        let fp = RefCollector::fingerprint(variants);
-        if fp.len() >= 2 {
-          map.entry(fp).or_insert(name.clone());
-        }
-      }
-    }
-    map
-  }
-
   pub(crate) fn get(&self, name: &str) -> Option<&ObjectSchema> {
     self.schemas.get(name)
-  }
-
-  pub(crate) fn contains(&self, name: &str) -> bool {
-    self.cached_schema_names.contains(name)
   }
 
   pub(crate) fn keys(&self) -> Vec<&String> {
     self.schemas.keys().collect()
   }
 
+  pub(crate) fn schemas(&self) -> &BTreeMap<String, ObjectSchema> {
+    &self.schemas
+  }
+
   pub(crate) fn spec(&self) -> &Spec {
     &self.spec
   }
 
-  pub(crate) fn parse_ref(ref_string: &str) -> Option<String> {
-    RefCollector::parse_ref(ref_string)
-  }
-
-  pub(crate) fn build_dependencies(&mut self) {
-    let collector = RefCollector::new(Some(&self.union_fingerprints));
-
+  pub(crate) fn build_dependencies(&mut self, union_fingerprints: &UnionFingerprints) {
     for schema_name in self.schemas.keys() {
       let deps = self
         .schemas
         .get(schema_name)
-        .map(|s| collector.collect(s))
+        .map(|s| self.collect(s, union_fingerprints))
         .unwrap_or_default();
 
       self.dependencies.insert(schema_name.clone(), deps);
@@ -542,7 +402,7 @@ impl SchemaRegistry {
         schema
           .all_of
           .iter()
-          .filter_map(RefCollector::parse_schema_ref)
+          .filter_map(Self::parse_schema_ref)
           .collect::<Vec<_>>()
       })
       .unwrap_or_default();
@@ -571,10 +431,80 @@ impl SchemaRegistry {
         continue;
       };
 
-      let merger = SchemaMerger::new(&self.schemas, &self.merged_schemas, &self.spec);
-      let merged_schema = merger.merge(&schema);
+      let merged_schema = self.merge_schema(&schema);
       self.merged_schemas.insert(schema_name, merged_schema);
     }
+  }
+
+  fn merge_schema(&self, schema: &ObjectSchema) -> MergedSchema {
+    if schema.all_of.is_empty() {
+      return MergedSchema {
+        schema: schema.clone(),
+        discriminator_parent: None,
+      };
+    }
+
+    let mut acc = MergeAccumulator::default();
+    self.process_all_of(schema, &mut acc);
+    self.process_optional_combinators(schema, &mut acc);
+    acc.merge_from(schema);
+
+    if acc.additional_properties.is_none() {
+      acc.additional_properties = self.find_additional_properties(schema);
+    }
+
+    let discriminator_parent = acc.discriminator_parent.take();
+    MergedSchema {
+      schema: acc.into_schema(schema),
+      discriminator_parent,
+    }
+  }
+
+  fn process_all_of(&self, schema: &ObjectSchema, acc: &mut MergeAccumulator) {
+    for all_of_ref in &schema.all_of {
+      if let ObjectOrReference::Ref { ref_path, .. } = all_of_ref
+        && let Some(parent_name) = Self::parse_ref(ref_path)
+        && let Some(parent) = self.resolve_schema_ref(all_of_ref)
+        && parent.discriminator.is_some()
+        && parent.is_discriminated_base_type()
+      {
+        acc.discriminator_parent = Some(parent_name.clone());
+      }
+
+      if let Some(parent) = self.resolve_schema_ref(all_of_ref) {
+        acc.merge_from(parent);
+      }
+    }
+  }
+
+  fn process_optional_combinators(&self, schema: &ObjectSchema, acc: &mut MergeAccumulator) {
+    for schema_ref in schema.any_of.iter().chain(&schema.one_of) {
+      if let Some(source) = self.resolve_schema_ref(schema_ref) {
+        acc.merge_optional_from(source);
+      }
+    }
+  }
+
+  fn resolve_schema_ref<'a>(&'a self, schema_ref: &'a ObjectOrReference<ObjectSchema>) -> Option<&'a ObjectSchema> {
+    match schema_ref {
+      ObjectOrReference::Ref { ref_path, .. } => {
+        let name = Self::parse_ref(ref_path)?;
+        self
+          .merged_schemas
+          .get(&name)
+          .map(|m| &m.schema)
+          .or_else(|| self.schemas.get(&name))
+      }
+      ObjectOrReference::Object(s) => Some(s),
+    }
+  }
+
+  fn find_additional_properties(&self, schema: &ObjectSchema) -> Option<Schema> {
+    schema
+      .all_of
+      .iter()
+      .filter_map(|r| r.resolve(&self.spec).ok())
+      .find_map(|parent| parent.additional_properties.clone())
   }
 
   fn build_discriminator_parents(&mut self) {
@@ -612,8 +542,7 @@ impl SchemaRegistry {
     if schema.all_of.is_empty() {
       return schema.clone();
     }
-    let merger = SchemaMerger::new(&self.schemas, &self.merged_schemas, &self.spec);
-    let result = merger.merge(schema);
+    let result = self.merge_schema(schema);
     result.schema
   }
 
@@ -622,8 +551,41 @@ impl SchemaRegistry {
   }
 
   pub(crate) fn merge_inline(&self, schema: &ObjectSchema) -> anyhow::Result<ObjectSchema> {
-    let merger = SchemaMerger::new(&self.schemas, &self.merged_schemas, &self.spec);
-    merger.merge_inline(schema)
+    if schema.all_of.is_empty() {
+      return Ok(schema.clone());
+    }
+
+    let mut acc = MergeAccumulator::default();
+
+    for all_of_ref in &schema.all_of {
+      match all_of_ref {
+        ObjectOrReference::Ref { ref_path, .. } => {
+          if let Some(name) = Self::parse_ref(ref_path)
+            && let Some(merged) = self.merged_schemas.get(&name)
+          {
+            acc.merge_from(&merged.schema);
+            continue;
+          }
+
+          let resolved = all_of_ref
+            .resolve(&self.spec)
+            .map_err(|e| anyhow::anyhow!("Schema resolution failed for inline allOf reference: {e}"))?;
+          acc.merge_from(&resolved);
+        }
+        ObjectOrReference::Object(inline) => {
+          let inner_merged = self.merge_inline(inline)?;
+          acc.merge_from(&inner_merged);
+        }
+      }
+    }
+
+    acc.merge_from(schema);
+
+    if acc.additional_properties.is_none() {
+      acc.additional_properties.clone_from(&schema.additional_properties);
+    }
+
+    Ok(acc.into_schema(schema))
   }
 
   pub(crate) fn detect_cycles(&mut self) -> Vec<Vec<String>> {
@@ -644,16 +606,15 @@ impl SchemaRegistry {
     self.discriminator_cache.get(schema_name)
   }
 
-  pub(crate) fn find_union(&self, fingerprint: &BTreeSet<String>) -> Option<&String> {
-    self.union_fingerprints.get(fingerprint)
-  }
-
-  pub(crate) fn reachable(&self, operation_registry: &OperationRegistry) -> BTreeSet<String> {
+  pub(crate) fn reachable(
+    &self,
+    operation_registry: &OperationRegistry,
+    union_fingerprints: &UnionFingerprints,
+  ) -> BTreeSet<String> {
     let mut refs = BTreeSet::new();
-    let collector = RefCollector::new(Some(&self.union_fingerprints));
 
     for entry in operation_registry.operations() {
-      collect_refs_from_operation(&entry.operation, &self.spec, &collector, &mut refs);
+      collect_refs_from_operation(&entry.operation, &self.spec, self, &mut refs, union_fingerprints);
     }
 
     expand_with_dependencies(&refs, &self.dependencies)

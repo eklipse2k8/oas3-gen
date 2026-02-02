@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use oas3::spec::{ObjectOrReference, ObjectSchema};
 
-use crate::generator::{ast::RustType, schema_registry::RefCollector};
+use crate::generator::{ast::RustType, schema_registry::SchemaRegistry};
 
 /// Wraps a conversion result with any inline types generated during conversion.
 ///
@@ -58,5 +58,5 @@ impl ConversionOutput<RustType> {
 /// The returned `BTreeSet` provides deterministic ordering for fingerprint
 /// comparison, enabling union type deduplication.
 pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
-  variants.iter().filter_map(RefCollector::parse_schema_ref).collect()
+  variants.iter().filter_map(SchemaRegistry::parse_schema_ref).collect()
 }

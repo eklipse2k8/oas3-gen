@@ -148,14 +148,18 @@ impl Orchestrator {
     let init_result = SchemaRegistry::from_spec(self.spec.clone());
     let mut graph = init_result.registry;
     let mut warnings = init_result.warnings;
-    graph.build_dependencies();
-    let cycle_details = graph.detect_cycles();
 
-    let operation_reachable = if self.include_unused_schemas {
-      None
-    } else {
-      Some(Arc::new(graph.reachable(&self.operation_registry)))
-    };
+    let mut cache = SharedSchemaCache::new();
+    cache.initialize_from_schemas(graph.schemas());
+    let union_fingerprints = cache.union_fingerprints().clone();
+
+    let (cycle_details, reachable) = graph.initialize(
+      &self.operation_registry,
+      self.include_unused_schemas,
+      &union_fingerprints,
+    );
+
+    let operation_reachable = reachable.map(Arc::new);
 
     let total_schemas = graph.keys().len();
     let orphaned_schemas_count = if let Some(ref reachable) = operation_reachable {
@@ -170,7 +174,6 @@ impl Orchestrator {
 
     let graph = Arc::new(graph);
 
-    let mut cache = SharedSchemaCache::new();
     cache.set_precomputed_names(scan_result.names, scan_result.enum_names, scan_result.schema_metadata);
 
     let context = Rc::new(ConverterContext::new(

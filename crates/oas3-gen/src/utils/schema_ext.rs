@@ -13,7 +13,7 @@ use crate::generator::{
     identifiers::{sanitize, to_rust_type_name},
     inference::{NormalizedVariant, extract_common_variant_prefix},
   },
-  schema_registry::{RefCollector, SchemaRegistry},
+  schema_registry::SchemaRegistry,
 };
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
@@ -389,7 +389,7 @@ impl SchemaExt for ObjectSchema {
   fn has_inline_single_variant(&self, spec: &Spec) -> bool {
     self
       .single_non_null_variant(spec)
-      .is_some_and(|v| RefCollector::parse_schema_ref(v).is_none())
+      .is_some_and(|v| SchemaRegistry::parse_schema_ref(v).is_none())
   }
 
   fn single_type_or_nullable(&self) -> Option<SchemaType> {

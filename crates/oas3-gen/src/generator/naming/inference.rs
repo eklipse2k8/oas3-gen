@@ -12,7 +12,7 @@ use crate::generator::{
     constants::VARIANT_KIND_SUFFIX,
     identifiers::{split_pascal_case, to_rust_type_name},
   },
-  schema_registry::RefCollector,
+  schema_registry::SchemaRegistry,
 };
 
 pub(crate) struct CommonVariantName {
@@ -56,7 +56,7 @@ impl CommonVariantName {
 pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<CommonVariantName> {
   let ref_names = variants
     .iter()
-    .filter_map(RefCollector::parse_schema_ref)
+    .filter_map(SchemaRegistry::parse_schema_ref)
     .collect::<Vec<String>>();
 
   if ref_names.len() < 2 {

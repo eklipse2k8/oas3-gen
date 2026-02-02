@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::ObjectSchema;
+use oas3::spec::{ObjectOrReference, ObjectSchema};
 
 use super::hashing::CanonicalSchema;
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
       identifiers::{ensure_unique, to_rust_type_name},
       name_index::SchemaPrecomputed,
     },
+    schema_registry::UnionFingerprints,
   },
   utils::SchemaExt,
 };
@@ -224,6 +225,67 @@ impl TypeRefRegistry {
   }
 }
 
+#[derive(Default, Debug, Clone)]
+struct SchemaNameRegistry {
+  names: BTreeSet<String>,
+}
+
+impl SchemaNameRegistry {
+  /// Returns `true` if the given schema name exists in the registry.
+  ///
+  /// Checks both original schema names and Rust-converted type names.
+  fn contains(&self, name: &str) -> bool {
+    self.names.contains(name)
+  }
+
+  /// Extends the registry with multiple names.
+  fn extend(&mut self, names: impl IntoIterator<Item = String>) {
+    self.names.extend(names);
+  }
+}
+
+#[derive(Default, Debug, Clone)]
+struct UnionFingerprintRegistry {
+  fingerprints: BTreeMap<BTreeSet<String>, String>,
+}
+
+impl UnionFingerprintRegistry {
+  /// Returns the schema name for a union with the given variant references, or `None` if not registered.
+  fn lookup(&self, refs: &BTreeSet<String>) -> Option<&str> {
+    self.fingerprints.get(refs).map(String::as_str)
+  }
+
+  /// Registers a union fingerprint mapping.
+  fn register(&mut self, refs: BTreeSet<String>, name: String) {
+    self.fingerprints.insert(refs, name);
+  }
+
+  /// Builds union fingerprints from schemas.
+  fn build_from_schemas(schemas: &BTreeMap<String, ObjectSchema>) -> Self {
+    let mut registry = Self::default();
+    for (name, schema) in schemas {
+      for variants in [&schema.one_of, &schema.any_of] {
+        let refs = variants
+          .iter()
+          .filter_map(|v| {
+            if let ObjectOrReference::Ref { ref_path, .. } = v {
+              ref_path
+                .strip_prefix("#/components/schemas/")
+                .map(std::string::ToString::to_string)
+            } else {
+              None
+            }
+          })
+          .collect::<BTreeSet<_>>();
+        if refs.len() >= 2 {
+          registry.register(refs, name.clone());
+        }
+      }
+    }
+    registry
+  }
+}
+
 pub(crate) struct TypeRegistration {
   pub(crate) assigned_name: String,
   pub(crate) canonical: CanonicalSchema,
@@ -240,6 +302,8 @@ pub(crate) struct SharedSchemaCache {
   pub(crate) types: TypeCollector,
   structs: StructIndex,
   type_refs: TypeRefRegistry,
+  schema_names: SchemaNameRegistry,
+  union_fingerprints: UnionFingerprintRegistry,
 }
 
 impl SharedSchemaCache {
@@ -253,6 +317,8 @@ impl SharedSchemaCache {
       types: TypeCollector::default(),
       structs: StructIndex::default(),
       type_refs: TypeRefRegistry::default(),
+      schema_names: SchemaNameRegistry::default(),
+      union_fingerprints: UnionFingerprintRegistry::default(),
     }
   }
 
@@ -478,5 +544,38 @@ impl SharedSchemaCache {
       _ => {}
     }
     type_def
+  }
+
+  /// Returns `true` if the given schema name exists in the registry.
+  ///
+  /// Checks both original schema names and Rust-converted type names.
+  pub(crate) fn contains_schema_name(&self, name: &str) -> bool {
+    self.schema_names.contains(name)
+  }
+
+  /// Initializes the cache with schema names and union fingerprints from the spec.
+  ///
+  /// This should be called after parsing the OpenAPI spec to populate the cache
+  /// with top-level schema names and union deduplication mappings.
+  pub(crate) fn initialize_from_schemas(&mut self, schemas: &BTreeMap<String, ObjectSchema>) {
+    let schema_names = schemas
+      .keys()
+      .flat_map(|schema_name| {
+        let rust_name = to_rust_type_name(schema_name);
+        vec![schema_name.clone(), rust_name]
+      })
+      .collect::<Vec<_>>();
+    self.schema_names.extend(schema_names);
+    self.union_fingerprints = UnionFingerprintRegistry::build_from_schemas(schemas);
+  }
+
+  /// Returns the schema name for a union with the given variant references, or `None` if not registered.
+  pub(crate) fn find_union(&self, refs: &BTreeSet<String>) -> Option<&str> {
+    self.union_fingerprints.lookup(refs)
+  }
+
+  /// Returns a reference to the union fingerprints map.
+  pub(crate) fn union_fingerprints(&self) -> &UnionFingerprints {
+    &self.union_fingerprints.fingerprints
   }
 }

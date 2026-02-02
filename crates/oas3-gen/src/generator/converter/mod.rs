@@ -289,7 +289,7 @@ impl SchemaConverter {
 
   /// Returns `true` if the schema registry contains a schema with the given name.
   pub(crate) fn contains(&self, name: &str) -> bool {
-    self.context.graph().contains(name)
+    self.context.cache.borrow().contains_schema_name(name)
   }
 
   /// Converts a named OpenAPI schema into one or more Rust type definitions.

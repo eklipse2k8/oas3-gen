@@ -19,7 +19,7 @@ use crate::{
       identifiers::{strip_parent_prefix, to_rust_type_name},
       inference::CommonVariantName,
     },
-    schema_registry::{RefCollector, SchemaRegistry},
+    schema_registry::SchemaRegistry,
   },
   utils::SchemaExt,
 };
@@ -341,7 +341,7 @@ impl TypeResolver {
     if refs.len() < 2 {
       return None;
     }
-    self.context.graph().find_union(refs).cloned()
+    self.context.cache.borrow().find_union(refs).map(String::from)
   }
 
   /// Attempts to recognize a nullable union (exactly one non-null variant).
@@ -366,7 +366,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    if let Some(ref_name) = RefCollector::parse_schema_ref(variant) {
+    if let Some(ref_name) = SchemaRegistry::parse_schema_ref(variant) {
       return Ok(Some(self.type_ref(&ref_name).with_option()));
     }
 
@@ -418,7 +418,7 @@ impl TypeResolver {
     let mut first_ref: Option<String> = None;
 
     for variant in variants {
-      if let Some(name) = RefCollector::parse_schema_ref(variant) {
+      if let Some(name) = SchemaRegistry::parse_schema_ref(variant) {
         if first_ref.is_some() {
           return Ok(None);
         }
@@ -459,7 +459,7 @@ impl TypeResolver {
     }
 
     if let [single_variant] = schema.one_of.as_slice()
-      && let Some(name) = RefCollector::parse_schema_ref(single_variant)
+      && let Some(name) = SchemaRegistry::parse_schema_ref(single_variant)
     {
       return Ok(Some(self.type_ref(&name)));
     }
@@ -596,7 +596,7 @@ impl TypeResolver {
       return Ok(false);
     };
 
-    if RefCollector::parse_schema_ref(variant).is_some() {
+    if SchemaRegistry::parse_schema_ref(variant).is_some() {
       return Ok(true);
     }
 

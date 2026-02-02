@@ -5,7 +5,7 @@ use oas3::spec::{
   Spec,
 };
 
-use crate::generator::schema_registry::{RefCollector, SchemaRegistry};
+use crate::generator::schema_registry::SchemaRegistry;
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
@@ -85,10 +85,12 @@ fn test_parse_ref() {
 
 #[test]
 fn test_ref_collector() {
-  let collector = RefCollector::new(None);
+  let spec = create_test_spec_with_schemas(BTreeMap::new());
+  let registry = SchemaRegistry::from_spec(spec).registry;
+  let union_fingerprints = BTreeMap::new();
 
   let schema = make_schema_with_ref("Corgi");
-  let refs = collector.collect(&schema);
+  let refs = registry.collect(&schema, &union_fingerprints);
   assert_eq!(refs.len(), 1, "simple ref: expected 1 ref");
   assert!(refs.contains("Corgi"), "simple ref: should contain Corgi");
 
@@ -100,7 +102,7 @@ fn test_ref_collector() {
     properties,
     ..Default::default()
   };
-  let refs = collector.collect(&schema);
+  let refs = registry.collect(&schema, &union_fingerprints);
   assert_eq!(refs.len(), 2, "multiple refs: expected 2 refs");
   assert!(refs.contains("Corgi"), "multiple refs: should contain Corgi");
   assert!(refs.contains("Sploot"), "multiple refs: should contain Sploot");
@@ -112,7 +114,7 @@ fn test_ref_collector() {
     all_of: vec![make_ref("Frappe")],
     ..Default::default()
   };
-  let refs = collector.collect(&schema);
+  let refs = registry.collect(&schema, &union_fingerprints);
   assert_eq!(refs.len(), 3, "combinators: expected 3 refs");
   assert!(refs.contains("Corgi"), "combinators: should contain Corgi");
   assert!(refs.contains("Bark"), "combinators: should contain Bark");
@@ -142,7 +144,8 @@ fn test_schema_registry() {
 
   let spec = create_test_spec_with_schemas(schemas);
   let mut graph = SchemaRegistry::from_spec(spec).registry;
-  graph.build_dependencies();
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
 
   assert_eq!(graph.keys().len(), 2, "build deps: should have 2 schemas");
   assert!(graph.get("Corgi").is_some(), "build deps: should have Corgi");
@@ -161,7 +164,8 @@ fn test_schema_graph_cycle_detection() {
 
     let spec = create_test_spec_with_schemas(schemas);
     let mut graph = SchemaRegistry::from_spec(spec).registry;
-    graph.build_dependencies();
+    let union_fingerprints = BTreeMap::new();
+    graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
     assert!(cycles.is_empty(), "linear deps: should have no cycles");
@@ -182,7 +186,8 @@ fn test_schema_graph_cycle_detection() {
 
     let spec = create_test_spec_with_schemas(schemas);
     let mut graph = SchemaRegistry::from_spec(spec).registry;
-    graph.build_dependencies();
+    let union_fingerprints = BTreeMap::new();
+    graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
     assert_eq!(cycles.len(), 1, "simple cycle: should detect 1 cycle");
@@ -200,7 +205,8 @@ fn test_schema_graph_cycle_detection() {
 
     let spec = create_test_spec_with_schemas(schemas);
     let mut graph = SchemaRegistry::from_spec(spec).registry;
-    graph.build_dependencies();
+    let union_fingerprints = BTreeMap::new();
+    graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
     assert_eq!(cycles.len(), 1, "self-ref: should detect 1 cycle");
@@ -219,7 +225,8 @@ fn test_schema_graph_cycle_detection() {
 
     let spec = create_test_spec_with_schemas(schemas);
     let mut graph = SchemaRegistry::from_spec(spec).registry;
-    graph.build_dependencies();
+    let union_fingerprints = BTreeMap::new();
+    graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
     assert!(!cycles.is_empty(), "user-post cycle: should detect cycles");
@@ -244,7 +251,8 @@ fn test_schema_graph_integration() {
   assert!(graph.get("Bark").is_some(), "integration: should have Bark");
   assert_eq!(graph.keys().len(), 2, "integration: should have 2 schemas");
 
-  graph.build_dependencies();
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
   let cycles = graph.detect_cycles();
 
   assert!(cycles.is_empty(), "integration: should have no cycles");
@@ -283,7 +291,8 @@ fn test_schema_registry_merges_all_of_properties_and_required() {
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
-  graph.build_dependencies();
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
   let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
@@ -329,7 +338,8 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
-  graph.build_dependencies();
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
   let merged_nugget = graph.merged("Nugget").expect("merged schema should exist for Nugget");
@@ -376,7 +386,8 @@ fn schema_merger_merge_child_with_parent() {
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
-  graph.build_dependencies();
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
   let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
@@ -431,7 +442,8 @@ fn schema_merger_conflict_resolution() {
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
-  graph.build_dependencies();
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
   let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
@@ -490,7 +502,8 @@ fn schema_merger_merge_multiple_all_of() {
   ]));
 
   let mut graph = SchemaRegistry::from_spec(spec).registry;
-  graph.build_dependencies();
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
   let merged = graph
