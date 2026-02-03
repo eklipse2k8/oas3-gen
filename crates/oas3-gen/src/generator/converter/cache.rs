@@ -10,9 +10,8 @@ use crate::{
       identifiers::{ensure_unique, to_rust_type_name},
       name_index::SchemaPrecomputed,
     },
-    schema_registry::UnionFingerprints,
   },
-  utils::{SchemaExt, extract_union_fingerprint},
+  utils::{SchemaExt, UnionFingerprints, build_union_fingerprints},
 };
 
 #[derive(Default, Debug, Clone)]
@@ -242,20 +241,6 @@ impl SchemaNameRegistry {
   fn extend(&mut self, names: impl IntoIterator<Item = String>) {
     self.names.extend(names);
   }
-}
-
-/// Builds union fingerprints from schemas.
-fn build_union_fingerprints(schemas: &BTreeMap<String, ObjectSchema>) -> UnionFingerprints {
-  let mut fingerprints = UnionFingerprints::new();
-  for (name, schema) in schemas {
-    for variants in [&schema.one_of, &schema.any_of] {
-      let refs = extract_union_fingerprint(variants);
-      if refs.len() >= 2 {
-        fingerprints.insert(refs, name.clone());
-      }
-    }
-  }
-  fingerprints
 }
 
 pub(crate) struct TypeRegistration {

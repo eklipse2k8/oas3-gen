@@ -12,15 +12,8 @@ use crate::{
     naming::name_index::{ScanResult, TypeNameIndex},
     operation_registry::OperationRegistry,
   },
-  utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
+  utils::{SchemaExt, UnionFingerprints, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
 };
-
-/// Maps union type fingerprints to generated type names.
-///
-/// Union types (e.g., `oneOf` or `anyOf` in OpenAPI) that contain the same set of
-/// schema references are identified by a fingerprint. This type maps those
-/// fingerprints to stable names, ensuring consistent type generation across the API.
-pub(crate) type UnionFingerprints = BTreeMap<BTreeSet<String>, String>;
 
 /// Identifies how a schema maps to a discriminator value in a polymorphic hierarchy.
 ///
@@ -513,7 +506,7 @@ impl SchemaRegistry {
       depth
     }
 
-    let names: Vec<String> = self.schemas.keys().cloned().collect();
+    let names = self.schemas.keys().cloned().collect::<Vec<_>>();
     for name in names {
       compute_depth(self, &name);
     }
@@ -526,54 +519,14 @@ impl SchemaRegistry {
   /// `all_of` references, combines properties from all parents into a
   /// single flattened schema definition.
   fn build_merged_schemas(&mut self) {
-    let mut sorted_names: Vec<String> = self.schemas.keys().cloned().collect();
+    let mut sorted_names = self.schemas.keys().cloned().collect::<Vec<_>>();
     sorted_names.sort_by_key(|name| self.inheritance_depths.get(name).copied().unwrap_or(0));
 
     for name in sorted_names {
       let Some(schema) = self.schemas.get(&name).cloned() else {
         continue;
       };
-
-      let merged = if schema.all_of.is_empty() {
-        MergedSchema {
-          schema: schema.clone(),
-          discriminator_parent: None,
-        }
-      } else {
-        let mut acc = MergeAccumulator::default();
-
-        for all_of_ref in &schema.all_of {
-          if let Some(parent_name) = extract_schema_ref_name(all_of_ref)
-            && let Some(parent) = self.resolve_schema_ref(all_of_ref)
-            && parent.is_discriminated_base_type()
-          {
-            acc.discriminator_parent = Some(parent_name.clone());
-          }
-
-          if let Some(parent) = self.resolve_schema_ref(all_of_ref) {
-            acc.merge_from(parent);
-          }
-        }
-
-        for schema_ref in schema.any_of.iter().chain(&schema.one_of) {
-          if let Some(source) = self.resolve_schema_ref(schema_ref) {
-            acc.merge_optional_from(source);
-          }
-        }
-
-        acc.merge_from(&schema);
-
-        if acc.additional_properties.is_none() {
-          acc.additional_properties = self.find_additional_properties(&schema);
-        }
-
-        let discriminator_parent = acc.discriminator_parent.take();
-        MergedSchema {
-          schema: acc.into_schema(&schema),
-          discriminator_parent,
-        }
-      };
-
+      let merged = self.merge_schema(&schema);
       self.merged_schemas.insert(name, merged);
     }
   }

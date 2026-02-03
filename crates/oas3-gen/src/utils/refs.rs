@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, Ref};
 
@@ -46,4 +46,31 @@ pub fn extract_schema_ref_name(obj_ref: &ObjectOrReference<ObjectSchema>) -> Opt
 /// This is used to identify union types (oneOf/anyOf) that share the same set of variants.
 pub fn extract_union_fingerprint(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
   variants.iter().filter_map(extract_schema_ref_name).collect()
+}
+
+/// Maps union type fingerprints to generated type names.
+///
+/// Union types (e.g., `oneOf` or `anyOf` in OpenAPI) that contain the same set of
+/// schema references are identified by a fingerprint. This type maps those
+/// fingerprints to stable names, ensuring consistent type generation across the API.
+pub type UnionFingerprints = BTreeMap<BTreeSet<String>, String>;
+
+/// Builds union fingerprints from a collection of schemas.
+///
+/// Scans all schemas for `oneOf` and `anyOf` compositions and creates a mapping
+/// from the set of referenced schema names to the parent schema name. This enables
+/// deduplication of union types that share the same set of variants.
+///
+/// Only unions with 2 or more named references are included.
+pub fn build_union_fingerprints(schemas: &BTreeMap<String, ObjectSchema>) -> UnionFingerprints {
+  let mut fingerprints = UnionFingerprints::new();
+  for (name, schema) in schemas {
+    for variants in [&schema.one_of, &schema.any_of] {
+      let refs = extract_union_fingerprint(variants);
+      if refs.len() >= 2 {
+        fingerprints.insert(refs, name.clone());
+      }
+    }
+  }
+  fingerprints
 }

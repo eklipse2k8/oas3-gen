@@ -6,7 +6,6 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
   ConversionOutput,
-  common::extract_variant_references,
   inline_resolver::InlineTypeResolver,
   union_types::{UnionKind, entries_to_cache_key},
 };
@@ -20,7 +19,7 @@ use crate::{
       inference::CommonVariantName,
     },
   },
-  utils::{SchemaExt, extract_schema_ref_name, parse_schema_ref_path},
+  utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
 };
 
 /// Resolves OpenAPI schemas into Rust type references.
@@ -254,7 +253,7 @@ impl TypeResolver {
     variants: &[ObjectOrReference<ObjectSchema>],
     base_name: &str,
   ) -> Result<ConversionOutput<TypeRef>> {
-    let refs = extract_variant_references(variants);
+    let refs = extract_union_fingerprint(variants);
     let kind = if schema.one_of.is_empty() {
       UnionKind::AnyOf
     } else {
@@ -392,7 +391,7 @@ impl TypeResolver {
   /// nullable wrapper, or can be simplified to a single ref or primitive.
   /// Returns `None` if a new enum type must be generated.
   pub(crate) fn try_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
-    let refs = extract_variant_references(variants);
+    let refs = extract_union_fingerprint(variants);
 
     if let Some(name) = self.find_union_by_refs(&refs) {
       return Ok(Some(self.type_ref(&name)));

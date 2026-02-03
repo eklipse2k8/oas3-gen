@@ -32,10 +32,9 @@ pub(crate) use operations::{OperationsProcessor, build_server_trait};
 pub(crate) use type_resolver::TypeResolver;
 pub(crate) use type_usage_recorder::SerdeUsageRecorder;
 
-use super::ast::RustType;
 use crate::{
   generator::{
-    ast::{Documentation, TypeAliasDef, TypeAliasToken, TypeRef},
+    ast::{Documentation, EnumToken, RustType, TypeAliasDef, TypeAliasToken, TypeRef},
     converter::{
       cache::SharedSchemaCache,
       discriminator::DiscriminatorConverter,
@@ -43,7 +42,7 @@ use crate::{
       union_types::UnionKind,
       unions::{EnumConverter, UnionConverter},
     },
-    metrics::GenerationStats,
+    metrics::{GenerationStats, GenerationWarning},
     naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
     schema_registry::SchemaRegistry,
   },
@@ -201,14 +200,14 @@ impl ConverterContext {
   /// Records that the named type appears in an HTTP request context (request body or parameter).
   ///
   /// Types used only in requests may derive `Serialize` without `Deserialize`.
-  pub(crate) fn mark_request(&self, type_name: impl Into<super::ast::EnumToken>) {
+  pub(crate) fn mark_request(&self, type_name: impl Into<EnumToken>) {
     self.type_usage.borrow_mut().mark_request(type_name);
   }
 
   /// Records that the named type appears in an HTTP response context.
   ///
   /// Types used only in responses may derive `Deserialize` without `Serialize`.
-  pub(crate) fn mark_response(&self, type_name: impl Into<super::ast::EnumToken>) {
+  pub(crate) fn mark_response(&self, type_name: impl Into<EnumToken>) {
     self.type_usage.borrow_mut().mark_response(type_name);
   }
 
@@ -458,7 +457,7 @@ impl SchemaConverter {
     ordered.into_iter().fold(vec![], |mut acc, (name, schema)| {
       match self.convert_schema(name, schema) {
         Ok(types) => acc.extend(types),
-        Err(e) => stats.record_warning(super::metrics::GenerationWarning::SchemaConversionFailed {
+        Err(e) => stats.record_warning(GenerationWarning::SchemaConversionFailed {
           schema_name: name.clone(),
           error: e.to_string(),
         }),

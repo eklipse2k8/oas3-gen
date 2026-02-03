@@ -1,8 +1,4 @@
-use std::collections::BTreeSet;
-
-use oas3::spec::{ObjectOrReference, ObjectSchema};
-
-use crate::{generator::ast::RustType, utils::extract_schema_ref_name};
+use crate::generator::ast::RustType;
 
 /// Wraps a conversion result with any inline types generated during conversion.
 ///
@@ -47,16 +43,4 @@ impl ConversionOutput<RustType> {
     types.push(self.result);
     types
   }
-}
-
-/// Extracts the set of `$ref` schema names from a slice of union variants.
-///
-/// Returns only the names of variants that are schema references (e.g.,
-/// `#/components/schemas/Foo` yields `"Foo"`). Inline object schemas are
-/// excluded since they have no referenceable name.
-///
-/// The returned `BTreeSet` provides deterministic ordering for fingerprint
-/// comparison, enabling union type deduplication.
-pub(crate) fn extract_variant_references(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
-  variants.iter().filter_map(extract_schema_ref_name).collect()
 }
