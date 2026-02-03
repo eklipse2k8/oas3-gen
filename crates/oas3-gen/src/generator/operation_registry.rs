@@ -101,7 +101,7 @@ impl RegistrationContext {
   /// This improves the ergonomics of generated method names by trimming
   /// redundant affixes (e.g., converting `petstore_get_pet` to `get_pet`).
   fn simplify_keys(&mut self) {
-    let original_keys = self.entries.keys().cloned().collect::<Vec<String>>();
+    let original_keys = self.entries.keys().cloned().collect::<Vec<_>>();
     let simplified_keys = trim_common_affixes(&original_keys);
 
     let remapped = original_keys
@@ -113,7 +113,7 @@ impl RegistrationContext {
           (new, entry)
         })
       })
-      .collect::<IndexMap<String, OperationEntry>>();
+      .collect::<IndexMap<_, _>>();
 
     self.entries = remapped;
   }
@@ -259,7 +259,7 @@ impl OperationRegistryBuilder {
 /// operation identifiers to valid Rust method names.
 #[derive(Debug)]
 pub struct OperationRegistry {
-  entries: Vec<OperationEntry>,
+  pub(crate) entries: Vec<OperationEntry>,
 }
 
 impl OperationRegistry {
@@ -290,19 +290,5 @@ impl OperationRegistry {
   /// preserved within each category.
   pub fn operations(&self) -> impl Iterator<Item = &OperationEntry> {
     self.entries.iter()
-  }
-
-  /// Returns the number of operations in this registry.
-  #[cfg(test)]
-  #[must_use]
-  pub fn len(&self) -> usize {
-    self.entries.len()
-  }
-
-  /// Returns whether this registry contains no operations.
-  #[cfg(test)]
-  #[must_use]
-  pub fn is_empty(&self) -> bool {
-    self.entries.is_empty()
   }
 }

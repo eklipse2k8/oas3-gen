@@ -69,91 +69,95 @@ impl Orchestrator {
 
   pub fn generate(&self, mode: &dyn GenerationMode, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
     let artifacts = self.collect_generation_artifacts();
-    let serde_use = artifacts.serde_recorder.into_usage_map();
-    let output = PostprocessOutput::new(
+    let serde_usage = artifacts.serde_recorder.into_usage_map();
+    let postprocessed = PostprocessOutput::new(
       artifacts.rust_types,
       artifacts.operations_info,
-      serde_use,
+      serde_usage,
       artifacts.config.target,
     );
 
-    let server_trait = if artifacts.config.target == GenerationTarget::Server {
-      build_server_trait(&output.operations)
+    let server_trait_def = if artifacts.config.target == GenerationTarget::Server {
+      build_server_trait(&postprocessed.operations)
     } else {
       None
     };
 
     let codegen = SchemaCodeGenerator::builder()
       .config(artifacts.config)
-      .rust_types(output.types)
-      .operations(output.operations)
-      .header_refs(output.header_refs)
-      .uses(output.uses)
+      .rust_types(postprocessed.types)
+      .operations(postprocessed.operations)
+      .header_refs(postprocessed.header_refs)
+      .uses(postprocessed.uses)
       .client(ClientRootNode::from(&self.spec))
-      .maybe_server_trait(server_trait)
+      .maybe_server_trait(server_trait_def)
       .visibility(self.visibility)
       .source_path(source_path.to_string())
       .gen_version(OAS3_GEN_VERSION.to_string())
       .build();
 
-    let output = mode.generate(&codegen)?;
-    Ok(GeneratedFinalOutput::new(output, artifacts.stats))
+    let code = mode.generate(&codegen)?;
+    Ok(GeneratedFinalOutput::new(code, artifacts.stats))
   }
 
   fn collect_generation_artifacts(&self) -> GenerationArtifacts {
     let mut stats = GenerationStats::default();
-    let mut graph = SchemaRegistry::new(&self.spec, &mut stats);
+    let mut schema_graph = SchemaRegistry::new(&self.spec, &mut stats);
 
     let mut cache = SharedSchemaCache::new();
-    cache.initialize_from_schemas(graph.schemas());
+    cache.initialize_from_schemas(schema_graph.schemas());
     let union_fingerprints = cache.union_fingerprints().clone();
 
-    let (cycle_details, reachable) = graph.initialize(
+    let (cycle_info, filtered_schemas) = schema_graph.initialize(
       &self.operation_registry,
       self.include_unused_schemas,
       &union_fingerprints,
     );
 
-    let graph = Arc::new(graph);
-    let scan_result = graph.scan_and_compute_names().unwrap_or_default();
-    let reachable_schemas = reachable.map(Arc::new);
+    let schema_graph = Arc::new(schema_graph);
+    let schema_names = schema_graph.scan_and_compute_names().unwrap_or_default();
+    let filtered_schemas = filtered_schemas.map(Arc::new);
 
-    cache.set_precomputed_names(scan_result.names, scan_result.enum_names, scan_result.schema_metadata);
+    cache.set_precomputed_names(
+      schema_names.names,
+      schema_names.enum_names,
+      schema_names.schema_metadata,
+    );
 
     let context = Rc::new(ConverterContext::new(
-      graph.clone(),
+      schema_graph.clone(),
       self.config.clone(),
       cache,
-      reachable_schemas.clone(),
+      filtered_schemas.clone(),
     ));
 
-    let schema_converter = SchemaConverter::new(&context);
-    let mut schema_rust_types = schema_converter.convert_all_schemas(reachable_schemas.as_deref(), &mut stats);
+    let converter = SchemaConverter::new(&context);
+    let mut rust_types = converter.convert_all_schemas(filtered_schemas.as_deref(), &mut stats);
 
-    let operations_processor = OperationsProcessor::new(context.clone(), schema_converter.clone());
-    let operations_output = operations_processor.process_all(self.operation_registry.operations());
+    let processor = OperationsProcessor::new(context.clone(), converter.clone());
+    let operation_results = processor.process_all(self.operation_registry.operations());
 
-    schema_rust_types.extend(operations_output.types);
-    schema_rust_types.extend(context.cache.borrow_mut().take_types());
+    rust_types.extend(operation_results.types);
+    rust_types.extend(context.cache.borrow_mut().take_types());
 
-    stats.record_orphaned_schemas(if let Some(ref reachable_schemas) = reachable_schemas {
-      let total_schemas = graph.keys().len();
-      total_schemas.saturating_sub(reachable_schemas.len())
+    stats.record_orphaned_schemas(if let Some(ref schemas) = filtered_schemas {
+      let total = schema_graph.keys().len();
+      total.saturating_sub(schemas.len())
     } else {
       0
     });
 
-    stats.record_warnings(operations_output.warnings);
-    stats.record_rust_types(&schema_rust_types);
-    stats.record_operations(&operations_output.operations);
-    stats.record_cycles(cycle_details);
-    stats.record_client_methods(operations_output.operations.len());
-    stats.record_client_headers(operations_output.unique_headers.len());
+    stats.record_warnings(operation_results.warnings);
+    stats.record_rust_types(&rust_types);
+    stats.record_operations(&operation_results.operations);
+    stats.record_cycles(cycle_info);
+    stats.record_client_methods(operation_results.operations.len());
+    stats.record_client_headers(operation_results.unique_headers.len());
 
     GenerationArtifacts {
-      rust_types: schema_rust_types,
-      operations_info: operations_output.operations,
-      serde_recorder: operations_output.usage_recorder,
+      rust_types,
+      operations_info: operation_results.operations,
+      serde_recorder: operation_results.usage_recorder,
       stats,
       config: context.config.clone(),
     }
