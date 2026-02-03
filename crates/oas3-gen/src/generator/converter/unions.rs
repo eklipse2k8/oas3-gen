@@ -16,9 +16,8 @@ use crate::{
     ast::{Documentation, EnumVariantToken, RustType},
     converter::{ConverterContext, discriminator::DiscriminatorConverter},
     naming::{identifiers::ensure_unique, inference::strip_common_affixes},
-    schema_registry::SchemaRegistry,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, extract_schema_ref_name},
 };
 
 #[derive(Clone, Debug)]
@@ -210,9 +209,9 @@ impl UnionConverter {
         continue;
       }
 
-      let ref_name = SchemaRegistry::parse_schema_ref(variant_ref).or_else(|| {
+      let ref_name = extract_schema_ref_name(variant_ref).or_else(|| {
         if resolved.all_of.len() == 1 {
-          SchemaRegistry::parse_schema_ref(&resolved.all_of[0])
+          extract_schema_ref_name(&resolved.all_of[0])
         } else {
           None
         }

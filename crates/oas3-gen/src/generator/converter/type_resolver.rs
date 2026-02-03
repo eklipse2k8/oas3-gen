@@ -19,9 +19,8 @@ use crate::{
       identifiers::{strip_parent_prefix, to_rust_type_name},
       inference::CommonVariantName,
     },
-    schema_registry::SchemaRegistry,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, extract_schema_ref_name, parse_schema_ref_path},
 };
 
 /// Resolves OpenAPI schemas into Rust type references.
@@ -170,7 +169,7 @@ impl TypeResolver {
   /// Otherwise, returns a reference to the named schema type.
   fn resolve_ref(&self, ref_path: &str, schema: &ObjectSchema) -> Result<ConversionOutput<TypeRef>> {
     let ref_name =
-      SchemaRegistry::parse_ref(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
+      parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference path: {ref_path}"))?;
 
     if schema.is_primitive() && !schema.has_inline_union_array_items(self.spec()) {
       return Ok(ConversionOutput::new(self.resolve_type(schema)?));
@@ -366,7 +365,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    if let Some(ref_name) = SchemaRegistry::parse_schema_ref(variant) {
+    if let Some(ref_name) = extract_schema_ref_name(variant) {
       return Ok(Some(self.type_ref(&ref_name).with_option()));
     }
 
@@ -381,7 +380,7 @@ impl TypeResolver {
 
   /// Returns `true` if the array schema has items containing a union.
   fn has_union_items(&self, schema: &ObjectSchema) -> bool {
-    let Some(Schema::Object(o)) = schema.items.as_ref().map(std::convert::AsRef::as_ref) else {
+    let Some(Schema::Object(o)) = schema.items.as_ref().map(AsRef::as_ref) else {
       return false;
     };
     self.resolve(o).is_ok_and(|items| items.has_union())
@@ -418,7 +417,7 @@ impl TypeResolver {
     let mut first_ref: Option<String> = None;
 
     for variant in variants {
-      if let Some(name) = SchemaRegistry::parse_schema_ref(variant) {
+      if let Some(name) = extract_schema_ref_name(variant) {
         if first_ref.is_some() {
           return Ok(None);
         }
@@ -459,7 +458,7 @@ impl TypeResolver {
     }
 
     if let [single_variant] = schema.one_of.as_slice()
-      && let Some(name) = SchemaRegistry::parse_schema_ref(single_variant)
+      && let Some(name) = extract_schema_ref_name(single_variant)
     {
       return Ok(Some(self.type_ref(&name)));
     }
@@ -546,8 +545,7 @@ impl TypeResolver {
       Schema::Boolean(_) => Ok(TypeRef::new(RustPrimitive::Value)),
       Schema::Object(schema_ref) => {
         if let ObjectOrReference::Ref { ref_path, .. } = &**schema_ref {
-          let name =
-            SchemaRegistry::parse_ref(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
+          let name = parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
           return Ok(self.type_ref(&name));
         }
 
@@ -567,7 +565,7 @@ impl TypeResolver {
   /// Handles both ref and inline item definitions. Unboxes the result
   /// since array items don't need boxing for cycle breaking.
   fn array_item_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
-    let Some(Schema::Object(items_ref)) = schema.items.as_ref().map(std::convert::AsRef::as_ref) else {
+    let Some(Schema::Object(items_ref)) = schema.items.as_ref().map(AsRef::as_ref) else {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };
 
@@ -596,7 +594,7 @@ impl TypeResolver {
       return Ok(false);
     };
 
-    if SchemaRegistry::parse_schema_ref(variant).is_some() {
+    if extract_schema_ref_name(variant).is_some() {
       return Ok(true);
     }
 

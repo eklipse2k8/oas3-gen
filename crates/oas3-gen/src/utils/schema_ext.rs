@@ -5,15 +5,17 @@ use oas3::{
   spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
 };
 
-use crate::generator::{
-  ast::Documentation,
-  converter::union_types::{EnumValueEntry, UnionKind},
-  naming::{
-    constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
-    identifiers::{sanitize, to_rust_type_name},
-    inference::{NormalizedVariant, extract_common_variant_prefix},
+use crate::{
+  generator::{
+    ast::Documentation,
+    converter::union_types::{EnumValueEntry, UnionKind},
+    naming::{
+      constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
+      identifiers::{sanitize, to_rust_type_name},
+      inference::{NormalizedVariant, extract_common_variant_prefix},
+    },
   },
-  schema_registry::SchemaRegistry,
+  utils::refs::extract_schema_ref_name,
 };
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
@@ -389,7 +391,7 @@ impl SchemaExt for ObjectSchema {
   fn has_inline_single_variant(&self, spec: &Spec) -> bool {
     self
       .single_non_null_variant(spec)
-      .is_some_and(|v| SchemaRegistry::parse_schema_ref(v).is_none())
+      .is_some_and(|v| extract_schema_ref_name(v).is_none())
   }
 
   fn single_type_or_nullable(&self) -> Option<SchemaType> {
@@ -485,13 +487,7 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn infer_name_from_ref_properties(&self) -> Option<String> {
-    let mut ref_names = self.properties.values().filter_map(|prop| {
-      if let ObjectOrReference::Ref { ref_path, .. } = prop {
-        SchemaRegistry::parse_ref(ref_path)
-      } else {
-        None
-      }
-    });
+    let mut ref_names = self.properties.values().filter_map(extract_schema_ref_name);
 
     if let Some(first) = ref_names.next()
       && ref_names.next().is_none()

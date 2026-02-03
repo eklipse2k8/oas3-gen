@@ -18,9 +18,8 @@ use crate::{
       identifiers::to_rust_type_name,
       responses as naming_responses,
     },
-    schema_registry::SchemaRegistry,
   },
-  utils::SchemaExt as _,
+  utils::{SchemaExt as _, parse_schema_ref_path},
 };
 
 /// Extracted metadata about operation responses for code generation.
@@ -216,7 +215,7 @@ impl ResponseConverter {
 
     match schema_ref {
       ObjectOrReference::Ref { ref_path, .. } => {
-        Ok(SchemaRegistry::parse_ref(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
+        Ok(parse_schema_ref_path(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
       }
       ObjectOrReference::Object(schema) => self.resolve_inline_schema(schema, path, status_code),
     }

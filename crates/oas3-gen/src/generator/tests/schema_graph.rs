@@ -5,7 +5,10 @@ use oas3::spec::{
   Spec,
 };
 
-use crate::generator::{metrics::GenerationStats, schema_registry::SchemaRegistry};
+use crate::{
+  generator::{metrics::GenerationStats, schema_registry::SchemaRegistry},
+  utils::parse_schema_ref_path,
+};
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
@@ -78,7 +81,7 @@ fn test_parse_ref() {
     ("InvalidRef", None),
   ];
   for (input, expected) in cases {
-    let result = SchemaRegistry::parse_ref(input);
+    let result = parse_schema_ref_path(input);
     assert_eq!(result.as_deref(), expected, "failed for input {input:?}");
   }
 }
