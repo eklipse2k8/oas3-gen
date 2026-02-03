@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
 
-use super::{ConverterContext, TypeResolver, TypeUsageRecorder, inline_resolver::InlineTypeResolver};
+use super::{ConverterContext, SerdeUsageRecorder, TypeResolver, inline_resolver::InlineTypeResolver};
 use crate::{
   generator::{
     ast::{
@@ -18,9 +18,8 @@ use crate::{
       identifiers::to_rust_type_name,
       responses as naming_responses,
     },
-    schema_registry::SchemaRegistry,
   },
-  utils::SchemaExt as _,
+  utils::{SchemaExt as _, parse_schema_ref_path},
 };
 
 /// Extracted metadata about operation responses for code generation.
@@ -34,7 +33,7 @@ pub(crate) struct ResponseMetadata {
 #[derive(Debug, Clone)]
 pub(crate) struct ResponseMetadataOutput {
   pub(crate) metadata: ResponseMetadata,
-  pub(crate) usage: TypeUsageRecorder,
+  pub(crate) usage: SerdeUsageRecorder,
 }
 
 /// Converts OpenAPI responses into Rust enum definitions.
@@ -159,7 +158,7 @@ impl ResponseConverter {
         .collect(),
     );
 
-    let mut usage = TypeUsageRecorder::new();
+    let mut usage = SerdeUsageRecorder::new();
     if let Some(ref name) = type_name {
       usage.mark_response(name);
     }
@@ -216,7 +215,7 @@ impl ResponseConverter {
 
     match schema_ref {
       ObjectOrReference::Ref { ref_path, .. } => {
-        Ok(SchemaRegistry::parse_ref(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
+        Ok(parse_schema_ref_path(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
       }
       ObjectOrReference::Object(schema) => self.resolve_inline_schema(schema, path, status_code),
     }

@@ -5,6 +5,18 @@ Cargo workspace with two crates following a three-stage pipeline: **Parse OpenAP
 ## Directory Structure
 
 ```text
+book/                             # User documentation (mdBook)
+│   ├── src/
+│   │   ├── SUMMARY.md            # Table of contents
+│   │   ├── introduction.md       # Getting started guide
+│   │   └── code-generation.md    # CLI flag reference
+│   └── book.toml                 # mdBook configuration
+docs/                             # Internal developer documentation
+│   ├── architecture.md           # This file
+│   ├── coding-standards.md       # Style and patterns
+│   ├── commands.md               # CLI reference
+│   ├── testing.md                # Test requirements
+│   └── code-fragments.md         # Codegen fragment reference
 crates/
 ├── oas3-gen/                      # CLI tool (binary)
 │   ├── fixtures/                  # Test fixtures (JSON and YAML)

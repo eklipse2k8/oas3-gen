@@ -174,10 +174,10 @@ impl StructConverter {
       .merged(name)
       .ok_or_else(|| anyhow::anyhow!("Schema '{name}' not found in registry"))?;
 
-    if let Some(parent_info) = self.discriminator_converter.detect_discriminated_parent(name) {
+    if let Some(parent_name) = self.discriminator_converter.detect_discriminated_parent(name) {
       let parent_merged = graph
-        .merged(&parent_info.parent_name)
-        .ok_or_else(|| anyhow::anyhow!("Parent schema '{}' not found", parent_info.parent_name))?;
+        .merged(parent_name)
+        .ok_or_else(|| anyhow::anyhow!("Parent schema '{parent_name}' not found"))?;
       return self.convert_discriminated_child(name, &merged_info.schema, &parent_merged.schema);
     }
 

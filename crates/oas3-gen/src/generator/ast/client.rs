@@ -1,6 +1,9 @@
-use oas3::spec::{Info, Server};
+use oas3::{
+  Spec,
+  spec::{Info, Server},
+};
 
-use crate::generator::ast::StructToken;
+use crate::generator::{ast::StructToken, naming::identifiers::to_rust_type_name};
 
 const DEFAULT_BASE_URL: &str = "https://example.com/";
 
@@ -26,5 +29,19 @@ impl ClientRootNode {
         .first()
         .map_or_else(|| DEFAULT_BASE_URL.to_string(), |server| server.url.clone()),
     }
+  }
+}
+
+impl From<&Spec> for ClientRootNode {
+  fn from(value: &Spec) -> Self {
+    ClientRootNode::builder()
+      .name(StructToken::new(if value.info.title.is_empty() {
+        "ApiClient".to_string()
+      } else {
+        format!("{}Client", to_rust_type_name(&value.info.title))
+      }))
+      .info(&value.info)
+      .servers(&value.servers)
+      .build()
   }
 }

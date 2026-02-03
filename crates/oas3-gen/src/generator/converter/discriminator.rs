@@ -5,11 +5,15 @@ use std::{
 
 use oas3::spec::ObjectSchema;
 
-use crate::generator::{
-  ast::{DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken, RustType, TypeRef, VariantDef},
-  converter::ConverterContext,
-  naming::identifiers::{split_pascal_case, strip_parent_prefix, to_rust_type_name},
-  schema_registry::{ParentInfo, SchemaRegistry},
+use crate::{
+  generator::{
+    ast::{
+      DiscriminatedVariant, Documentation, EnumMethod, EnumToken, EnumVariantToken, RustType, TypeRef, VariantDef,
+    },
+    converter::ConverterContext,
+    naming::identifiers::{split_pascal_case, strip_parent_prefix, to_rust_type_name},
+  },
+  utils::parse_schema_ref_path,
 };
 
 #[derive(Debug, Clone)]
@@ -26,12 +30,12 @@ impl DiscriminatorConverter {
     Self { context }
   }
 
-  /// Returns the discriminated parent info if `schema_name` extends a base type
+  /// Returns the discriminated parent name if `schema_name` extends a base type
   /// with a discriminator mapping.
   ///
   /// Schemas that are children of a discriminated base type do not generate
   /// standalone Rust types; they become enum variants instead.
-  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&ParentInfo> {
+  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&str> {
     self.context.graph().parent(schema_name)
   }
 
@@ -104,7 +108,7 @@ impl DiscriminatorConverter {
     mapping
       .iter()
       .filter_map(|(tag, ref_path)| {
-        let name = SchemaRegistry::parse_ref(ref_path)?;
+        let name = parse_schema_ref_path(ref_path)?;
         is_reachable(&name).then_some((tag.clone(), name))
       })
       .fold(BTreeMap::<String, Vec<String>>::new(), |mut acc, (tag, name)| {
@@ -176,7 +180,7 @@ impl DiscriminatorConverter {
       .collect::<BTreeSet<_>>();
 
     mapping.values().all(|ref_path| {
-      SchemaRegistry::parse_ref(ref_path).is_some_and(|name| known_types.contains(&to_rust_type_name(&name)))
+      parse_schema_ref_path(ref_path).is_some_and(|name| known_types.contains(&to_rust_type_name(&name)))
     })
   }
 
@@ -193,7 +197,7 @@ impl DiscriminatorConverter {
     mapping
       .iter()
       .filter_map(|(tag, ref_path)| {
-        let type_name = SchemaRegistry::parse_ref(ref_path).map(|n| to_rust_type_name(&n))?;
+        let type_name = parse_schema_ref_path(ref_path).map(|n| to_rust_type_name(&n))?;
         Some((type_name, tag.clone()))
       })
       .fold(BTreeMap::<String, Vec<String>>::new(), |mut acc, (type_name, tag)| {

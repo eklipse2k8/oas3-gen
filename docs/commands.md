@@ -150,3 +150,23 @@ cargo test -p oas3-gen-support
 # Check a specific crate
 cargo check -p oas3-gen-support
 ```
+
+## Book Documentation
+
+The `book/` folder contains user-facing documentation built with mdBook. Feature changes must be documented here.
+
+```bash
+# Build the book
+mdbook build book/
+
+# Serve locally for preview (http://localhost:3000)
+mdbook serve book/
+
+# Clean build artifacts
+mdbook clean book/
+```
+
+**Files to update for feature changes:**
+- `book/src/code-generation.md` - CLI flags and examples
+- `book/src/introduction.md` - Overview and quick start
+- `book/src/SUMMARY.md` - Table of contents (if adding new pages)

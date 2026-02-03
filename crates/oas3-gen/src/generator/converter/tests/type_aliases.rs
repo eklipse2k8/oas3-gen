@@ -26,7 +26,7 @@ fn make_array_schema(items: Option<Schema>) -> ObjectSchema {
 fn test_primitive_type_aliases() -> anyhow::Result<()> {
   let cases = [
     (
-      "Identifier",
+      "TagId",
       ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
         ..Default::default()
@@ -34,7 +34,7 @@ fn test_primitive_type_aliases() -> anyhow::Result<()> {
       "String",
     ),
     (
-      "Timestamp",
+      "SplootAt",
       ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
         format: Some("int64".to_string()),
@@ -62,13 +62,13 @@ fn test_primitive_type_aliases() -> anyhow::Result<()> {
 
 #[test]
 fn test_array_type_aliases() -> anyhow::Result<()> {
-  let strings_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
+  let barks_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
     make_string_schema(),
   )))));
 
-  let untyped_array_schema = make_array_schema(None);
+  let floof_array_schema = make_array_schema(None);
 
-  let nested_array_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
+  let ball_matrix_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
     ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
       items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
@@ -82,9 +82,9 @@ fn test_array_type_aliases() -> anyhow::Result<()> {
   )))));
 
   let cases = [
-    ("Strings", strings_schema, "Vec<String>"),
-    ("UntypedArray", untyped_array_schema, "Vec<serde_json::Value>"),
-    ("Matrix", nested_array_schema, "Vec<Vec<i64>>"),
+    ("Barks", barks_schema, "Vec<String>"),
+    ("FloofArray", floof_array_schema, "Vec<serde_json::Value>"),
+    ("BallMatrix", ball_matrix_schema, "Vec<Vec<i64>>"),
   ];
 
   for (name, schema, expected_type) in cases {
@@ -105,11 +105,11 @@ fn test_array_type_aliases() -> anyhow::Result<()> {
 
 #[test]
 fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
-  let pet_schema = ObjectSchema {
+  let corgi_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([
       (
-        "id".to_string(),
+        "tag_id".to_string(),
         ObjectOrReference::Object(ObjectSchema {
           schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
           ..Default::default()
@@ -120,41 +120,41 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let pets_schema_array = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Pet".to_string(),
+  let corgis_schema_array = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Ref {
+    ref_path: "#/components/schemas/Corgi".to_string(),
     summary: None,
     description: None,
   }))));
 
   let graph = create_test_graph(BTreeMap::from([
-    ("Pet".to_string(), pet_schema),
-    ("Pets".to_string(), pets_schema_array),
+    ("Corgi".to_string(), corgi_schema),
+    ("Corgis".to_string(), corgis_schema_array),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("Pets", graph.get("Pets").unwrap())?;
+  let result = converter.convert_schema("Corgis", graph.get("Corgis").unwrap())?;
 
   assert_eq!(result.len(), 1);
   let RustType::TypeAlias(alias) = &result[0] else {
     panic!("expected type alias for array schema")
   };
 
-  assert_eq!(alias.name, "Pets");
-  assert_eq!(alias.target.to_rust_type(), "Vec<Pet>");
+  assert_eq!(alias.name, "Corgis");
+  assert_eq!(alias.target.to_rust_type(), "Vec<Corgi>");
   Ok(())
 }
 
 #[test]
 fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
-  let text_event = ObjectSchema {
+  let bark_frappe = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([
       (
         "type".to_string(),
         ObjectOrReference::Object(ObjectSchema {
           schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("text")),
+          const_value: Some(serde_json::json!("bark")),
           ..Default::default()
         }),
       ),
@@ -163,14 +163,14 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let image_event = ObjectSchema {
+  let sploot_frappe = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([
       (
         "type".to_string(),
         ObjectOrReference::Object(ObjectSchema {
           schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("image")),
+          const_value: Some(serde_json::json!("sploot")),
           ..Default::default()
         }),
       ),
@@ -179,18 +179,18 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let event_list_schema = ObjectSchema {
+  let frappe_list_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
         one_of: vec![
           ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/TextEvent".to_string(),
+            ref_path: "#/components/schemas/BarkFrappe".to_string(),
             summary: None,
             description: None,
           },
           ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/ImageEvent".to_string(),
+            ref_path: "#/components/schemas/SplootFrappe".to_string(),
             summary: None,
             description: None,
           },
@@ -202,14 +202,14 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
   };
 
   let graph = create_test_graph(BTreeMap::from([
-    ("TextEvent".to_string(), text_event),
-    ("ImageEvent".to_string(), image_event),
-    ("EventList".to_string(), event_list_schema),
+    ("BarkFrappe".to_string(), bark_frappe),
+    ("SplootFrappe".to_string(), sploot_frappe),
+    ("FrappeList".to_string(), frappe_list_schema),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("EventList", graph.get("EventList").unwrap())?;
+  let result = converter.convert_schema("FrappeList", graph.get("FrappeList").unwrap())?;
 
   let mut all_types = result;
   all_types.extend(context.cache.borrow().types.types.clone());
@@ -222,8 +222,8 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
   });
   assert!(alias.is_some(), "expected a type alias");
   let alias = alias.unwrap();
-  assert_eq!(alias.name, "EventList");
-  assert_eq!(alias.target.to_rust_type(), "Vec<EventListKind>");
+  assert_eq!(alias.name, "FrappeList");
+  assert_eq!(alias.target.to_rust_type(), "Vec<FrappeListKind>");
 
   let inline_enum = all_types.iter().find_map(|t| match t {
     RustType::Enum(e) => Some(e),
@@ -231,7 +231,7 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
   });
   assert!(inline_enum.is_some(), "expected inline enum for union items");
   let inline_enum = inline_enum.unwrap();
-  assert_eq!(inline_enum.name.as_str(), "EventListKind");
+  assert_eq!(inline_enum.name.as_str(), "FrappeListKind");
   assert_eq!(inline_enum.variants.len(), 2);
 
   Ok(())
@@ -239,14 +239,14 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
 
 #[test]
 fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
-  let text_event = ObjectSchema {
+  let bark_frappe = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([
       (
         "type".to_string(),
         ObjectOrReference::Object(ObjectSchema {
           schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("text")),
+          const_value: Some(serde_json::json!("bark")),
           ..Default::default()
         }),
       ),
@@ -255,14 +255,14 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
     ..Default::default()
   };
 
-  let image_event = ObjectSchema {
+  let sploot_frappe = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([
       (
         "type".to_string(),
         ObjectOrReference::Object(ObjectSchema {
           schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("image")),
+          const_value: Some(serde_json::json!("sploot")),
           ..Default::default()
         }),
       ),
@@ -271,18 +271,18 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
     ..Default::default()
   };
 
-  let nullable_event_list_schema = ObjectSchema {
+  let nullable_frappe_list_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Array, SchemaType::Null])),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
         one_of: vec![
           ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/TextEvent".to_string(),
+            ref_path: "#/components/schemas/BarkFrappe".to_string(),
             summary: None,
             description: None,
           },
           ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/ImageEvent".to_string(),
+            ref_path: "#/components/schemas/SplootFrappe".to_string(),
             summary: None,
             description: None,
           },
@@ -294,14 +294,14 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
   };
 
   let graph = create_test_graph(BTreeMap::from([
-    ("TextEvent".to_string(), text_event),
-    ("ImageEvent".to_string(), image_event),
-    ("NullableEventList".to_string(), nullable_event_list_schema),
+    ("BarkFrappe".to_string(), bark_frappe),
+    ("SplootFrappe".to_string(), sploot_frappe),
+    ("OptionFrappeList".to_string(), nullable_frappe_list_schema),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("NullableEventList", graph.get("NullableEventList").unwrap())?;
+  let result = converter.convert_schema("OptionFrappeList", graph.get("OptionFrappeList").unwrap())?;
 
   let mut all_types = result;
   all_types.extend(context.cache.borrow().types.types.clone());
@@ -314,10 +314,10 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
   });
   assert!(alias.is_some(), "expected a type alias");
   let alias = alias.unwrap();
-  assert_eq!(alias.name, "NullableEventList");
+  assert_eq!(alias.name, "OptionFrappeList");
   assert_eq!(
     alias.target.to_rust_type(),
-    "Option<Vec<NullableEventListKind>>",
+    "Option<Vec<OptionFrappeListKind>>",
     "nullable array should be wrapped in Option"
   );
 
@@ -327,7 +327,7 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
   });
   assert!(inline_enum.is_some(), "expected inline enum for union items");
   let inline_enum = inline_enum.unwrap();
-  assert_eq!(inline_enum.name.as_str(), "NullableEventListKind");
+  assert_eq!(inline_enum.name.as_str(), "OptionFrappeListKind");
   assert_eq!(inline_enum.variants.len(), 2);
 
   Ok(())

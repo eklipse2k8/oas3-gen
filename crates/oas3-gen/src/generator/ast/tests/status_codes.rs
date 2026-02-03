@@ -3,12 +3,10 @@ use crate::generator::ast::StatusCodeToken;
 #[test]
 fn test_parse_openapi_specific_codes() {
   let cases = [
-    // 1xx
     ("100", StatusCodeToken::Continue100),
     ("101", StatusCodeToken::SwitchingProtocols101),
     ("102", StatusCodeToken::Processing102),
     ("103", StatusCodeToken::EarlyHints103),
-    // 2xx
     ("200", StatusCodeToken::Ok200),
     ("201", StatusCodeToken::Created201),
     ("202", StatusCodeToken::Accepted202),
@@ -19,7 +17,6 @@ fn test_parse_openapi_specific_codes() {
     ("207", StatusCodeToken::MultiStatus207),
     ("208", StatusCodeToken::AlreadyReported208),
     ("226", StatusCodeToken::ImUsed226),
-    // 3xx
     ("300", StatusCodeToken::MultipleChoices300),
     ("301", StatusCodeToken::MovedPermanently301),
     ("302", StatusCodeToken::Found302),
@@ -28,7 +25,6 @@ fn test_parse_openapi_specific_codes() {
     ("305", StatusCodeToken::UseProxy305),
     ("307", StatusCodeToken::TemporaryRedirect307),
     ("308", StatusCodeToken::PermanentRedirect308),
-    // 4xx
     ("400", StatusCodeToken::BadRequest400),
     ("401", StatusCodeToken::Unauthorized401),
     ("402", StatusCodeToken::PaymentRequired402),
@@ -57,7 +53,6 @@ fn test_parse_openapi_specific_codes() {
     ("429", StatusCodeToken::TooManyRequests429),
     ("431", StatusCodeToken::RequestHeaderFieldsTooLarge431),
     ("451", StatusCodeToken::UnavailableForLegalReasons451),
-    // 5xx
     ("500", StatusCodeToken::InternalServerError500),
     ("501", StatusCodeToken::NotImplemented501),
     ("502", StatusCodeToken::BadGateway502),
@@ -112,13 +107,11 @@ fn test_parse_default_and_unknown() {
   assert_eq!("default".parse::<StatusCodeToken>().unwrap(), StatusCodeToken::Default);
   assert_eq!("invalid".parse::<StatusCodeToken>().unwrap(), StatusCodeToken::Default);
 
-  // Explicitly excluded codes should parse as Unknown
   assert_eq!("104".parse::<StatusCodeToken>().unwrap(), StatusCodeToken::Unknown(104));
   assert_eq!("306".parse::<StatusCodeToken>().unwrap(), StatusCodeToken::Unknown(306));
   assert_eq!("418".parse::<StatusCodeToken>().unwrap(), StatusCodeToken::Unknown(418));
   assert_eq!("510".parse::<StatusCodeToken>().unwrap(), StatusCodeToken::Unknown(510));
 
-  // Random unknown code
   assert_eq!("599".parse::<StatusCodeToken>().unwrap(), StatusCodeToken::Unknown(599));
 }
 
@@ -144,11 +137,9 @@ fn test_variant_name() {
 
 #[test]
 fn test_is_success() {
-  // Existing
   assert!(StatusCodeToken::Ok200.is_success());
   assert!(StatusCodeToken::Created201.is_success());
 
-  // New
   assert!(StatusCodeToken::NonAuthoritativeInformation203.is_success());
   assert!(StatusCodeToken::ResetContent205.is_success());
   assert!(StatusCodeToken::PartialContent206.is_success());
@@ -156,10 +147,8 @@ fn test_is_success() {
   assert!(StatusCodeToken::AlreadyReported208.is_success());
   assert!(StatusCodeToken::ImUsed226.is_success());
 
-  // Wildcard
   assert!(StatusCodeToken::Success2XX.is_success());
 
-  // Negative cases
   assert!(!StatusCodeToken::Continue100.is_success());
   assert!(!StatusCodeToken::NotFound404.is_success());
   assert!(!StatusCodeToken::Default.is_success());

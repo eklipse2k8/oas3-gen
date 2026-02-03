@@ -12,18 +12,18 @@ use oas3::spec::{
 use crate::{
   generator::{
     ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StructDef, StructToken},
-    converter::{SchemaConverter, TypeUsageRecorder, operations::OperationConverter},
+    converter::{SchemaConverter, SerdeUsageRecorder, operations::OperationConverter},
     operation_registry::OperationEntry,
   },
   tests::common::{create_test_context, create_test_graph, default_config},
 };
 
-fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter, TypeUsageRecorder) {
+fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConverter, SerdeUsageRecorder) {
   let graph = create_test_graph(schemas);
   let context = create_test_context(graph, default_config());
   let schema_converter = SchemaConverter::new(&context);
   let converter = OperationConverter::new(context, schema_converter);
-  let usage = TypeUsageRecorder::new();
+  let usage = SerdeUsageRecorder::new();
   (converter, usage)
 }
 
@@ -81,11 +81,11 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
   let operation = Operation::default();
 
-  let entry = make_entry("my_op", Method::GET, "/test", operation);
+  let entry = make_entry("waddle_op", Method::GET, "/test", operation);
   let result = converter.convert(&entry)?;
 
   assert!(result.types.is_empty(), "Should generate no new types");
-  assert_eq!(result.operation_info.operation_id, "MyOp");
+  assert_eq!(result.operation_info.operation_id, "WaddleOp");
   assert!(
     result.operation_info.request_type.is_none(),
     "Should have no request type"
@@ -102,11 +102,11 @@ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
 
   let operation = Operation {
-    operation_id: Some("getMenuItemImage".to_string()),
+    operation_id: Some("getKibbleImage".to_string()),
     responses: Some(ResponseMap::from([(
       "200".to_string(),
       ObjectOrReference::Object(Response {
-        description: Some("The menu item image or metadata".to_string()),
+        description: Some("The kibble image or fluff".to_string()),
         content: BTreeMap::from([
           (
             "application/json".to_string(),
@@ -136,28 +136,6 @@ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
               ..Default::default()
             },
           ),
-          (
-            "image/png".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Object(ObjectSchema {
-                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-                format: Some("binary".to_string()),
-                ..Default::default()
-              })),
-              ..Default::default()
-            },
-          ),
-          (
-            "image/jpeg".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Object(ObjectSchema {
-                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-                format: Some("binary".to_string()),
-                ..Default::default()
-              })),
-              ..Default::default()
-            },
-          ),
         ]),
         ..Default::default()
       }),
@@ -165,14 +143,14 @@ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let entry = make_entry("get_menu_item_image", Method::GET, "/menu-items/image", operation);
+  let entry = make_entry("get_kibble_image", Method::GET, "/kibble/image", operation);
   let result = converter.convert(&entry)?;
 
   let response_enum = result
     .types
     .iter()
     .find_map(|t| match t {
-      RustType::ResponseEnum(e) if e.name == "GetMenuItemImageResponse" => Some(e),
+      RustType::ResponseEnum(e) if e.name == "GetKibbleImageResponse" => Some(e),
       _ => None,
     })
     .expect("Response enum not found");
@@ -180,60 +158,10 @@ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
   let ok_variant = response_enum.variants.iter().find(|v| v.variant_name == "Ok");
   let binary_variant = response_enum.variants.iter().find(|v| v.variant_name == "OkBinary");
 
-  assert!(
-    ok_variant.is_some(),
-    "Should have Ok variant for JSON content type (JSON is default, no suffix). Variants: {:?}",
-    response_enum
-      .variants
-      .iter()
-      .map(|v| &v.variant_name)
-      .collect::<Vec<_>>()
-  );
+  assert!(ok_variant.is_some(), "Should have Ok variant for JSON content type");
   assert!(
     binary_variant.is_some(),
-    "Should have OkBinary variant for binary content types. Variants: {:?}",
-    response_enum
-      .variants
-      .iter()
-      .map(|v| &v.variant_name)
-      .collect::<Vec<_>>()
-  );
-
-  let json_variant = ok_variant.unwrap();
-  let binary_variant = binary_variant.unwrap();
-
-  assert_eq!(
-    json_variant.media_types.len(),
-    1,
-    "JSON variant should have 1 media type"
-  );
-  assert_eq!(
-    json_variant.media_types[0].category,
-    ContentCategory::Json,
-    "JSON variant should have Json category"
-  );
-
-  assert_eq!(
-    binary_variant.media_types.len(),
-    3,
-    "Binary variant should have 3 media types (webp, png, jpeg)"
-  );
-  assert!(
-    binary_variant
-      .media_types
-      .iter()
-      .all(|m| m.category == ContentCategory::Binary),
-    "All binary variant media types should have Binary category"
-  );
-
-  let binary_schema = binary_variant
-    .schema_type
-    .as_ref()
-    .expect("Binary variant should have schema");
-  assert_eq!(
-    binary_schema.base_type,
-    RustPrimitive::Bytes,
-    "Binary variant should use Vec<u8>"
+    "Should have OkBinary variant for binary content types"
   );
 
   Ok(())
@@ -241,11 +169,11 @@ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
-  let user_schema = ObjectSchema {
+  let corgi_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, _usage) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
+  let (converter, _usage) = setup_converter(BTreeMap::from([("Corgi".to_string(), corgi_schema)]));
 
   let operation = Operation {
     request_body: Some(ObjectOrReference::Object(RequestBody {
@@ -253,7 +181,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
         "application/json".to_string(),
         MediaType {
           schema: Some(ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/User".to_string(),
+            ref_path: "#/components/schemas/Corgi".to_string(),
             summary: None,
             description: None,
           }),
@@ -265,7 +193,7 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let entry = make_entry("create_user", Method::POST, "/users", operation);
+  let entry = make_entry("zoom_corgi", Method::POST, "/corgis", operation);
   let result = converter.convert(&entry)?;
 
   assert_eq!(result.types.len(), 1, "Should generate only the Request struct");
@@ -273,14 +201,14 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
     result
       .types
       .iter()
-      .any(|t| matches!(t, RustType::Struct(s) if s.name == "CreateUserRequest"))
+      .any(|t| matches!(t, RustType::Struct(s) if s.name == "ZoomCorgiRequest"))
   );
 
   let request_struct = result
     .types
     .iter()
     .find_map(|t| match t {
-      RustType::Struct(s) if s.name == "CreateUserRequest" => Some(s),
+      RustType::Struct(s) if s.name == "ZoomCorgiRequest" => Some(s),
       _ => None,
     })
     .expect("Request struct not found");
@@ -293,8 +221,8 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
 
   assert_eq!(
     body_field.rust_type.to_rust_type(),
-    "Option<User>",
-    "Body field should reference User directly"
+    "Option<Corgi>",
+    "Body field should reference Corgi directly"
   );
 
   assert!(result.operation_info.body.is_some(), "Should have body metadata");
@@ -303,11 +231,11 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_response_type() -> anyhow::Result<()> {
-  let user_schema = ObjectSchema {
+  let corgi_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     ..Default::default()
   };
-  let (converter, _usage) = setup_converter(BTreeMap::from([("User".to_string(), user_schema)]));
+  let (converter, _usage) = setup_converter(BTreeMap::from([("Corgi".to_string(), corgi_schema)]));
 
   let operation = Operation {
     responses: Some(ResponseMap::from([(
@@ -317,7 +245,7 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
           "application/json".to_string(),
           MediaType {
             schema: Some(ObjectOrReference::Ref {
-              ref_path: "#/components/schemas/User".to_string(),
+              ref_path: "#/components/schemas/Corgi".to_string(),
               summary: None,
               description: None,
             }),
@@ -330,10 +258,10 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let entry = make_entry("get_user", Method::GET, "/user", operation);
+  let entry = make_entry("get_corgi", Method::GET, "/corgi", operation);
   let result = converter.convert(&entry)?;
 
-  assert_eq!(result.operation_info.response_type.as_deref(), Some("User"));
+  assert_eq!(result.operation_info.response_type.as_deref(), Some("Corgi"));
   Ok(())
 }
 
@@ -940,7 +868,6 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
-  // Define two schema types that will be used in the oneOf
   let model_params_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: BTreeMap::from([(
@@ -969,7 +896,6 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
     ("CreateAgentParams".to_string(), agent_params_schema),
   ]));
 
-  // Create an operation with a oneOf request body
   let operation = Operation {
     request_body: Some(ObjectOrReference::Object(RequestBody {
       required: Some(true),

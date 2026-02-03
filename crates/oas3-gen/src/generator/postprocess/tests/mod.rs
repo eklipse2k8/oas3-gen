@@ -7,7 +7,7 @@ use crate::generator::{
   ast::{EnumToken, RustType},
   converter::GenerationTarget,
   postprocess::{
-    postprocess,
+    PostprocessOutput,
     serde_usage::{SerdeUsage, TypeUsage},
   },
 };
@@ -45,5 +45,5 @@ fn postprocess_types_with_target(
   usage_seeds: BTreeMap<EnumToken, (bool, bool)>,
   target: GenerationTarget,
 ) -> Vec<RustType> {
-  postprocess(types, vec![], usage_seeds, target).types
+  PostprocessOutput::new(types, vec![], usage_seeds, target).types
 }

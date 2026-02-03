@@ -5,7 +5,7 @@ use oas3::{
   spec::{ObjectOrReference, Operation, Response},
 };
 
-use crate::generator::{naming::identifiers::to_rust_type_name, schema_registry::SchemaRegistry};
+use crate::{generator::naming::identifiers::to_rust_type_name, utils::parse_schema_ref_path};
 
 const SUCCESS_RESPONSE_PREFIX: char = '2';
 
@@ -81,7 +81,7 @@ pub fn extract_schema_name_from_response(response: &Response) -> Option<String> 
     .schema
     .as_ref()
     .and_then(|schema_ref| match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => SchemaRegistry::parse_ref(ref_path),
+      ObjectOrReference::Ref { ref_path, .. } => parse_schema_ref_path(ref_path),
       ObjectOrReference::Object(_) => None,
     })
 }

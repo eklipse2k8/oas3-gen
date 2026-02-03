@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::generator::ast::{EnumToken, RustPrimitive, TypeRef};
 
@@ -42,22 +42,19 @@ impl UsageFlags {
 
 /// Records which Rust types are used as requests or responses.
 ///
-/// Used for dependency analysis and filtering unused types.
-/// Also tracks generation statistics like methods and headers.
+/// Used for dependency analysis to determine serde derive attributes.
+/// Types used only in requests get `Serialize`, types used only in
+/// responses get `Deserialize`, and types used in both get both derives.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct TypeUsageRecorder {
+pub(crate) struct SerdeUsageRecorder {
   entries: BTreeMap<EnumToken, UsageFlags>,
-  methods_generated: usize,
-  unique_headers: BTreeSet<String>,
 }
 
-impl TypeUsageRecorder {
+impl SerdeUsageRecorder {
   /// Creates an empty recorder with no tracked types or statistics.
   pub(crate) fn new() -> Self {
     Self {
       entries: BTreeMap::new(),
-      methods_generated: 0,
-      unique_headers: BTreeSet::new(),
     }
   }
 
@@ -137,42 +134,13 @@ impl TypeUsageRecorder {
     }
   }
 
-  /// Increments the generated method counter.
-  ///
-  /// Called once per API operation to track generation statistics.
-  pub(crate) fn record_method(&mut self) {
-    self.methods_generated += 1;
-  }
-
-  /// Records an HTTP header name for statistics tracking.
-  ///
-  /// Header names are normalized to ASCII lowercase before insertion,
-  /// ensuring case-insensitive deduplication (e.g., "Content-Type" and
-  /// "content-type" count as one unique header).
-  pub(crate) fn record_header(&mut self, header_name: &str) {
-    self.unique_headers.insert(header_name.to_ascii_lowercase());
-  }
-
-  /// Returns the number of API methods recorded.
-  pub(crate) fn methods_generated(&self) -> usize {
-    self.methods_generated
-  }
-
-  /// Returns the count of unique HTTP headers recorded.
-  pub(crate) fn headers_generated(&self) -> usize {
-    self.unique_headers.len()
-  }
-
-  /// Combines another recorder's data into this one.
+  /// Combines another recorder's usage data into this one.
   ///
   /// Usage flags are merged with logical OR: if either recorder marked a type
-  /// as request or response, the merged result reflects that. Method counts
-  /// and header sets are combined additively.
-  pub(crate) fn merge(&mut self, other: TypeUsageRecorder) {
+  /// as request or response, the merged result reflects that.
+  pub(crate) fn merge(&mut self, other: SerdeUsageRecorder) {
     for (token, flags) in other.entries {
       self.entries.entry(token).or_default().merge(flags);
     }
-    self.methods_generated += other.methods_generated;
-    self.unique_headers.extend(other.unique_headers);
   }
 }

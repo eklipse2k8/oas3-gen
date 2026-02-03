@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use crate::generator::{
+  CodegenConfig, TypesMode,
   codegen::{GeneratedFileType, Visibility},
-  converter::GenerationTarget,
   orchestrator::Orchestrator,
 };
 
@@ -10,15 +8,10 @@ fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
   Orchestrator::new(
     spec,
     Visibility::default(),
+    CodegenConfig::default(),
+    None,
+    None,
     all_schemas,
-    None,
-    None,
-    false,
-    false,
-    false,
-    false,
-    GenerationTarget::default(),
-    HashMap::new(),
   )
 }
 
@@ -28,7 +21,7 @@ fn test_untyped_parameter_generation() {
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator = make_orchestrator(spec, false);
 
-  let result = orchestrator.generate_with_header("test.json");
+  let result = orchestrator.generate(&TypesMode, "test.json");
 
   assert!(
     result.is_ok(),

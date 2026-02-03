@@ -18,6 +18,7 @@ use crate::{
       union_types::{CollisionStrategy, UnionKind},
       unions::{EnumConverter, UnionConverter},
     },
+    metrics::GenerationStats,
     naming::{constants::KNOWN_ENUM_VARIANT, inference::NormalizedVariant},
     schema_registry::SchemaRegistry,
   },
@@ -608,8 +609,10 @@ fn test_relaxed_enum_detects_freeform_pattern() {
     extensions: BTreeMap::default(),
   };
 
-  let graph = SchemaRegistry::from_spec(spec).registry;
-  let graph = Arc::new(graph);
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let graph = Arc::new(registry);
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
@@ -688,8 +691,10 @@ fn test_relaxed_enum_rejects_no_freeform() {
     extensions: BTreeMap::default(),
   };
 
-  let graph = SchemaRegistry::from_spec(spec).registry;
-  let graph = Arc::new(graph);
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let graph = Arc::new(registry);
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
@@ -943,7 +948,7 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
     panic!("Expected enum")
   };
 
-  assert_eq!(enum_def.methods.len(), 2); // Simple + SingleParam, Complex skipped
+  assert_eq!(enum_def.methods.len(), 2);
 
   let simple_method = enum_def
     .methods
@@ -1230,8 +1235,10 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
     extensions: BTreeMap::default(),
   };
 
-  let graph = SchemaRegistry::from_spec(spec).registry;
-  let graph = Arc::new(graph);
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let graph = Arc::new(registry);
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
@@ -1295,8 +1302,10 @@ fn test_union_with_underscored_raw_name_converts_correctly() {
     extensions: BTreeMap::default(),
   };
 
-  let graph = SchemaRegistry::from_spec(spec).registry;
-  let graph = Arc::new(graph);
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let graph = Arc::new(registry);
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
@@ -1414,8 +1423,10 @@ fn test_already_pascalcase_name_not_double_converted() {
     extensions: BTreeMap::default(),
   };
 
-  let graph = SchemaRegistry::from_spec(spec).registry;
-  let graph = Arc::new(graph);
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let graph = Arc::new(registry);
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
@@ -1479,8 +1490,10 @@ fn test_relaxed_enum_with_raw_name() {
     extensions: BTreeMap::default(),
   };
 
-  let graph = SchemaRegistry::from_spec(spec).registry;
-  let graph = Arc::new(graph);
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let graph = Arc::new(registry);
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 

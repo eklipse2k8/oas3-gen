@@ -184,6 +184,32 @@ fn test_binary_response_parsing() {
 }
 
 #[test]
+fn test_binary_content_type_with_json_schema_uses_json_parsing() {
+  let def = make_response_parser_struct(
+    ResponseVariant::builder()
+      .status_code(StatusCodeToken::ClientError4XX)
+      .variant_name(EnumVariantToken::new("ClientError"))
+      .media_types(vec![ResponseMediaType::with_schema(
+        "application/octet-stream",
+        Some(TypeRef::new("ErrorResponse")),
+      )])
+      .schema_type(TypeRef::new("ErrorResponse"))
+      .build(),
+  );
+  let tokens =
+    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+  let code = tokens.to_string();
+  assert!(
+    code.contains("Diagnostics :: < ErrorResponse > :: json_with_diagnostics"),
+    "binary content-type with JSON schema should use JSON parsing: {code}"
+  );
+  assert!(
+    !code.contains("to_vec ()"),
+    "should NOT use bytes to_vec() extraction for JSON schema type: {code}"
+  );
+}
+
+#[test]
 fn test_event_stream_response_generates_from_response() {
   let def = make_response_parser_struct(
     ResponseVariant::builder()

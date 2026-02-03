@@ -96,10 +96,10 @@ fn extract_parameter_metadata_returns_validation_and_default() {
   let mut schema = string_schema();
   schema.min_length = Some(5);
   schema.max_length = Some(50);
-  schema.default = Some(json!("default_value"));
+  schema.default = Some(json!("loaf_value"));
 
   let type_ref = TypeRef::new(RustPrimitive::String);
-  let (attrs, default) = FieldConverter::extract_parameter_metadata("param", true, &schema, &type_ref);
+  let (attrs, default) = FieldConverter::extract_parameter_metadata("toebeans", true, &schema, &type_ref);
 
   assert_eq!(
     attrs,
@@ -108,7 +108,7 @@ fn extract_parameter_metadata_returns_validation_and_default() {
       max: Some(50)
     }]
   );
-  assert_eq!(default, Some(json!("default_value")));
+  assert_eq!(default, Some(json!("loaf_value")));
 }
 
 #[test]

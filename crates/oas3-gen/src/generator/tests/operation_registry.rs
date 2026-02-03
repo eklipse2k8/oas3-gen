@@ -122,7 +122,7 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 3, "expected 3 operations");
+    assert_eq!(registry.entries.len(), 3, "expected 3 operations");
 
     let mut entries = registry.operations().collect::<Vec<_>>();
     entries.sort_by(|a, b| a.stable_id.cmp(&b.stable_id));
@@ -155,7 +155,7 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 5, "expected 5 operations for uniqueness test");
+    assert_eq!(registry.entries.len(), 5, "expected 5 operations for uniqueness test");
     let ids = registry
       .operations()
       .map(|entry| entry.stable_id.clone())
@@ -171,7 +171,11 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 2, "both operations should be included with unique ids");
+    assert_eq!(
+      registry.entries.len(),
+      2,
+      "both operations should be included with unique ids"
+    );
 
     let mut ids = registry
       .operations()
@@ -193,8 +197,8 @@ fn test_operation_registry() {
     let spec: Spec = oas3::from_json(spec_json).unwrap();
     let registry = OperationRegistry::new(&spec);
 
-    assert_eq!(registry.len(), 0);
-    assert!(registry.is_empty());
+    assert_eq!(registry.entries.len(), 0);
+    assert!(registry.entries.is_empty());
     assert_eq!(registry.operations().count(), 0);
   }
 
@@ -210,7 +214,7 @@ fn test_operation_registry() {
 
     let registry = OperationRegistry::with_filters(&spec, None, Some(&excluded));
 
-    assert_eq!(registry.len(), 2, "filtered registry should have 2 operations");
+    assert_eq!(registry.entries.len(), 2, "filtered registry should have 2 operations");
 
     let ids = registry
       .operations()
@@ -248,7 +252,7 @@ fn test_operation_registry() {
     let spec: Spec = oas3::from_json(spec_json).unwrap();
     let registry = OperationRegistry::new(&spec);
 
-    assert_eq!(registry.len(), 1);
+    assert_eq!(registry.entries.len(), 1);
 
     let entry = registry.operations().next().unwrap();
     assert_eq!(entry.stable_id, "pet_added_hook");
@@ -265,7 +269,11 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 3, "all operations should be registered with unique ids");
+    assert_eq!(
+      registry.entries.len(),
+      3,
+      "all operations should be registered with unique ids"
+    );
 
     let mut ids = registry
       .operations()
@@ -299,7 +307,7 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 3);
+    assert_eq!(registry.entries.len(), 3);
 
     let mut ids = registry
       .operations()
@@ -317,7 +325,7 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 3);
+    assert_eq!(registry.entries.len(), 3);
 
     let mut ids = registry
       .operations()
@@ -338,7 +346,7 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 2);
+    assert_eq!(registry.entries.len(), 2);
 
     let mut ids = registry
       .operations()
@@ -359,7 +367,7 @@ fn test_operation_registry() {
     ]);
 
     let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.len(), 2);
+    assert_eq!(registry.entries.len(), 2);
 
     let mut ids = registry
       .operations()

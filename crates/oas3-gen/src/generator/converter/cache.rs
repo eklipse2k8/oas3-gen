@@ -11,7 +11,7 @@ use crate::{
       name_index::SchemaPrecomputed,
     },
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, UnionFingerprints, build_union_fingerprints},
 };
 
 #[derive(Default, Debug, Clone)]
@@ -184,9 +184,9 @@ impl TypeCollector {
     self.types.push(main);
   }
 
-  /// Consumes the collector and returns all accumulated types in insertion order.
-  fn into_types(self) -> Vec<RustType> {
-    self.types
+  /// Takes all accumulated types, leaving the collector empty for reuse.
+  pub(crate) fn take_types(&mut self) -> Vec<RustType> {
+    std::mem::take(&mut self.types)
   }
 }
 
@@ -224,6 +224,25 @@ impl TypeRefRegistry {
   }
 }
 
+#[derive(Default, Debug, Clone)]
+struct SchemaNameRegistry {
+  names: BTreeSet<String>,
+}
+
+impl SchemaNameRegistry {
+  /// Returns `true` if the given schema name exists in the registry.
+  ///
+  /// Checks both original schema names and Rust-converted type names.
+  fn contains(&self, name: &str) -> bool {
+    self.names.contains(name)
+  }
+
+  /// Extends the registry with multiple names.
+  fn extend(&mut self, names: impl IntoIterator<Item = String>) {
+    self.names.extend(names);
+  }
+}
+
 pub(crate) struct TypeRegistration {
   pub(crate) assigned_name: String,
   pub(crate) canonical: CanonicalSchema,
@@ -240,6 +259,8 @@ pub(crate) struct SharedSchemaCache {
   pub(crate) types: TypeCollector,
   structs: StructIndex,
   type_refs: TypeRefRegistry,
+  schema_names: SchemaNameRegistry,
+  union_fingerprints: UnionFingerprints,
 }
 
 impl SharedSchemaCache {
@@ -253,6 +274,8 @@ impl SharedSchemaCache {
       types: TypeCollector::default(),
       structs: StructIndex::default(),
       type_refs: TypeRefRegistry::default(),
+      schema_names: SchemaNameRegistry::default(),
+      union_fingerprints: UnionFingerprints::new(),
     }
   }
 
@@ -439,9 +462,9 @@ impl SharedSchemaCache {
     Ok(!self.schemas.has_mapping(&canonical, name))
   }
 
-  /// Consumes the cache and returns all accumulated type definitions.
-  pub(crate) fn into_types(self) -> Vec<RustType> {
-    self.types.into_types()
+  /// Takes all accumulated type definitions, leaving the cache empty for reuse.
+  pub(crate) fn take_types(&mut self) -> Vec<RustType> {
+    self.types.take_types()
   }
 
   /// Stores a struct definition indexed by type name for later retrieval when
@@ -478,5 +501,38 @@ impl SharedSchemaCache {
       _ => {}
     }
     type_def
+  }
+
+  /// Returns `true` if the given schema name exists in the registry.
+  ///
+  /// Checks both original schema names and Rust-converted type names.
+  pub(crate) fn contains_schema_name(&self, name: &str) -> bool {
+    self.schema_names.contains(name)
+  }
+
+  /// Initializes the cache with schema names and union fingerprints from the spec.
+  ///
+  /// This should be called after parsing the OpenAPI spec to populate the cache
+  /// with top-level schema names and union deduplication mappings.
+  pub(crate) fn initialize_from_schemas(&mut self, schemas: &BTreeMap<String, ObjectSchema>) {
+    let schema_names = schemas
+      .keys()
+      .flat_map(|schema_name| {
+        let rust_name = to_rust_type_name(schema_name);
+        vec![schema_name.clone(), rust_name]
+      })
+      .collect::<Vec<_>>();
+    self.schema_names.extend(schema_names);
+    self.union_fingerprints = build_union_fingerprints(schemas);
+  }
+
+  /// Returns the schema name for a union with the given variant references, or `None` if not registered.
+  pub(crate) fn find_union(&self, refs: &BTreeSet<String>) -> Option<&str> {
+    self.union_fingerprints.get(refs).map(String::as_str)
+  }
+
+  /// Returns a reference to the union fingerprints map.
+  pub(crate) fn union_fingerprints(&self) -> &UnionFingerprints {
+    &self.union_fingerprints
   }
 }

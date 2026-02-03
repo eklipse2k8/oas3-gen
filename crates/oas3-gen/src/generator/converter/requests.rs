@@ -19,9 +19,8 @@ use crate::{
       identifiers::to_rust_type_name,
     },
     operation_registry::OperationEntry,
-    schema_registry::SchemaRegistry,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, parse_schema_ref_path},
 };
 
 /// Result of building a request struct for an operation.
@@ -147,7 +146,7 @@ impl BodyInfo {
     let inline_resolver = InlineTypeResolver::new(context.clone());
     let (generated_types, type_name) = match schema_ref {
       ObjectOrReference::Ref { ref_path, .. } => {
-        let Some(name) = SchemaRegistry::parse_ref(ref_path) else {
+        let Some(name) = parse_schema_ref_path(ref_path) else {
           return Ok(Self::empty(!is_required));
         };
         (vec![], to_rust_type_name(&name))

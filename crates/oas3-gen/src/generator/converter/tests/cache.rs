@@ -43,12 +43,12 @@ fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
 #[test]
 fn test_canonical_schema_equality_and_ordering() {
   let schema1 = ObjectSchema {
-    required: vec!["name".to_string(), "id".to_string()],
+    required: vec!["name".to_string(), "tag_id".to_string()],
     ..Default::default()
   };
 
   let schema2 = ObjectSchema {
-    required: vec!["id".to_string(), "name".to_string()],
+    required: vec!["tag_id".to_string(), "name".to_string()],
     ..Default::default()
   };
 
@@ -82,7 +82,7 @@ fn test_canonical_schema_equality_and_ordering() {
 
 #[test]
 fn test_relaxed_enum_generates_known_variant() {
-  let enum_schema = make_string_enum_schema(&["alpha", "beta", "gamma"]);
+  let enum_schema = make_string_enum_schema(&["bark", "sploot", "loaf"]);
 
   let anyof_schema = ObjectSchema {
     any_of: vec![
@@ -96,8 +96,8 @@ fn test_relaxed_enum_generates_known_variant() {
   };
 
   let graph = create_test_graph(BTreeMap::from([
-    ("SimpleEnum".to_string(), enum_schema),
-    ("OptimizedEnum".to_string(), anyof_schema.clone()),
+    ("PembrokeEnum".to_string(), enum_schema),
+    ("SplootEnum".to_string(), anyof_schema.clone()),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
@@ -105,7 +105,7 @@ fn test_relaxed_enum_generates_known_variant() {
   let union_converter = UnionConverter::new(context);
 
   let optimized_output = union_converter
-    .convert_union("OptimizedEnum", &anyof_schema, UnionKind::AnyOf)
+    .convert_union("SplootEnum", &anyof_schema, UnionKind::AnyOf)
     .expect("Should convert anyOf union");
 
   let optimized_result = optimized_output.into_vec();
@@ -113,8 +113,8 @@ fn test_relaxed_enum_generates_known_variant() {
 
   let outer_enum = optimized_result
     .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "OptimizedEnum"));
-  assert!(outer_enum.is_some(), "Should generate OptimizedEnum");
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "SplootEnum"));
+  assert!(outer_enum.is_some(), "Should generate SplootEnum");
 
   if let Some(RustType::Enum(e)) = outer_enum {
     let known_variant = e
@@ -130,16 +130,16 @@ fn test_relaxed_enum_generates_known_variant() {
 
 #[test]
 fn test_relaxed_enum_with_ref() {
-  let chat_model_enum = make_string_enum_schema(&["gpt-4", "gpt-3.5-turbo"]);
+  let bark_model_enum = make_string_enum_schema(&["corgi-v1", "corgi-v2"]);
 
-  let model_ids_shared = ObjectSchema {
+  let floof_ids_shared = ObjectSchema {
     any_of: vec![
       ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
         ..Default::default()
       }),
       ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/ChatModel".to_string(),
+        ref_path: "#/components/schemas/BarkModel".to_string(),
         summary: None,
         description: None,
       },
@@ -148,27 +148,27 @@ fn test_relaxed_enum_with_ref() {
   };
 
   let graph = create_test_graph(BTreeMap::from([
-    ("ChatModel".to_string(), chat_model_enum),
-    ("ModelIdsShared".to_string(), model_ids_shared.clone()),
+    ("BarkModel".to_string(), bark_model_enum),
+    ("FloofIds".to_string(), floof_ids_shared.clone()),
   ]));
 
   let converter = create_test_converter(&graph);
 
-  let chat_model_result = converter
-    .convert_schema("ChatModel", graph.get("ChatModel").unwrap())
-    .expect("Should convert ChatModel");
-  assert_eq!(chat_model_result.len(), 1);
+  let bark_model_result = converter
+    .convert_schema("BarkModel", graph.get("BarkModel").unwrap())
+    .expect("Should convert BarkModel");
+  assert_eq!(bark_model_result.len(), 1);
 
   let model_ids_result = converter
-    .convert_schema("ModelIdsShared", graph.get("ModelIdsShared").unwrap())
-    .expect("Should convert ModelIdsShared");
+    .convert_schema("FloofIds", graph.get("FloofIds").unwrap())
+    .expect("Should convert FloofIds");
 
   assert!(!model_ids_result.is_empty(), "Should generate at least one type");
 
   let outer_enum = model_ids_result
     .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "ModelIdsShared"));
-  assert!(outer_enum.is_some(), "Should generate ModelIdsShared enum");
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "FloofIds"));
+  assert!(outer_enum.is_some(), "Should generate FloofIds enum");
 
   if let Some(RustType::Enum(outer)) = outer_enum {
     let known_variant = outer
@@ -186,24 +186,24 @@ fn test_relaxed_enum_with_ref() {
 fn test_name_uniqueness() {
   let mut cache = SharedSchemaCache::new();
 
-  cache.mark_name_used("User".to_string());
-  let unique_name = cache.make_unique_name("User");
+  cache.mark_name_used("Corgi".to_string());
+  let unique_name = cache.make_unique_name("Corgi");
   assert_ne!(
-    unique_name, "User",
+    unique_name, "Corgi",
     "Should generate unique name when name is already used"
   );
-  assert!(unique_name.starts_with("User"), "Should maintain base name prefix");
+  assert!(unique_name.starts_with("Corgi"), "Should maintain base name prefix");
 
-  cache.mark_name_used("Item".to_string());
-  let name1 = cache.make_unique_name("Item");
+  cache.mark_name_used("Nugget".to_string());
+  let name1 = cache.make_unique_name("Nugget");
   cache.mark_name_used(name1.clone());
-  let name2 = cache.make_unique_name("Item");
+  let name2 = cache.make_unique_name("Nugget");
   cache.mark_name_used(name2.clone());
-  let name3 = cache.make_unique_name("Item");
+  let name3 = cache.make_unique_name("Nugget");
 
   let unique_names = [&name1, &name2, &name3];
   for (i, current) in unique_names.iter().enumerate() {
-    assert!(current.starts_with("Item"), "Name {i} should maintain base name");
+    assert!(current.starts_with("Nugget"), "Name {i} should maintain base name");
     for (j, other) in unique_names.iter().enumerate() {
       if i != j {
         assert_ne!(current, other, "Names {i} and {j} should be different");
@@ -215,17 +215,17 @@ fn test_name_uniqueness() {
 #[test]
 fn test_precomputed_names() {
   let schema = ObjectSchema {
-    required: vec!["id".to_string()],
+    required: vec!["tag_id".to_string()],
     ..Default::default()
   };
 
   let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
   let mut precomputed_names = BTreeMap::new();
-  precomputed_names.insert(canonical, "CustomName".to_string());
+  precomputed_names.insert(canonical, "FloofName".to_string());
 
-  let enum_values = vec!["alpha".to_string(), "beta".to_string()];
+  let enum_values = vec!["bark".to_string(), "sploot".to_string()];
   let mut precomputed_enum_names = BTreeMap::new();
-  precomputed_enum_names.insert(enum_values.clone(), "PrecomputedEnum".to_string());
+  precomputed_enum_names.insert(enum_values.clone(), "CardiganEnum".to_string());
 
   let mut cache = SharedSchemaCache::new();
   cache.set_precomputed_names(precomputed_names, precomputed_enum_names, BTreeMap::new());
@@ -233,12 +233,12 @@ fn test_precomputed_names() {
   let preferred_name = cache
     .get_preferred_name(&schema, "DefaultName")
     .expect("should get preferred name");
-  assert_eq!(preferred_name, "CustomName", "Should use precomputed schema name");
+  assert_eq!(preferred_name, "FloofName", "Should use precomputed schema name");
 
   let found_enum_name = cache.get_enum_name(&enum_values);
   assert_eq!(
     found_enum_name,
-    Some("PrecomputedEnum".to_string()),
+    Some("CardiganEnum".to_string()),
     "Should find precomputed enum name"
   );
 }
@@ -247,19 +247,19 @@ fn test_precomputed_names() {
 fn test_cache_operations() {
   let mut cache = SharedSchemaCache::new();
 
-  let enum_values = vec!["red".to_string(), "green".to_string(), "blue".to_string()];
+  let enum_values = vec!["brown".to_string(), "white".to_string(), "black".to_string()];
   assert!(
     !cache.is_enum_generated(&enum_values),
     "Enum should not be generated initially"
   );
-  cache.register_enum(enum_values.clone(), "Color".to_string());
+  cache.register_enum(enum_values.clone(), "Howl".to_string());
   assert!(
     cache.is_enum_generated(&enum_values),
     "Enum should be marked as generated"
   );
   assert_eq!(
     cache.get_enum_name(&enum_values),
-    Some("Color".to_string()),
+    Some("Howl".to_string()),
     "Should retrieve registered enum name"
   );
 
@@ -308,7 +308,7 @@ fn test_cache_operations() {
   let named_enum2 = SharedSchemaCache::apply_name_to_type(enum2, &reg2.assigned_name);
   type_cache.commit_registration(reg2, vec![], named_enum2);
 
-  let types = type_cache.into_types();
+  let types = type_cache.take_types();
   assert_eq!(types.len(), 2, "Should return all generated types");
 }
 
@@ -442,7 +442,7 @@ fn test_canonical_schema_hash_consistency() {
 
 #[test]
 fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
-  let enum_schema = make_string_enum_schema(&["easy", "medium", "hard", "expert"]);
+  let enum_schema = make_string_enum_schema(&["waddle", "sploot", "loaf", "zoom"]);
 
   let anyof_schema = ObjectSchema {
     any_of: vec![
@@ -456,23 +456,23 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
   };
 
   let graph = create_test_graph(BTreeMap::from([
-    ("SimpleEnum".to_string(), enum_schema),
-    ("FirstRelaxedEnum".to_string(), anyof_schema.clone()),
-    ("SecondRelaxedEnum".to_string(), anyof_schema.clone()),
+    ("PembrokeEnum".to_string(), enum_schema),
+    ("FloofRelaxed".to_string(), anyof_schema.clone()),
+    ("SplootRelaxed".to_string(), anyof_schema.clone()),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context.clone());
 
   let first_output = union_converter
-    .convert_union("FirstRelaxedEnum", &anyof_schema, UnionKind::AnyOf)
+    .convert_union("FloofRelaxed", &anyof_schema, UnionKind::AnyOf)
     .expect("Should convert first anyOf union");
   let first_result = first_output.into_vec();
 
   let first_outer = first_result
     .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "FirstRelaxedEnum"))
-    .expect("Should generate FirstRelaxedEnum");
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "FloofRelaxed"))
+    .expect("Should generate FloofRelaxed");
 
   let inner_enum_name = if let RustType::Enum(e) = first_outer {
     let known_variant = e
@@ -486,18 +486,18 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       panic!("Known variant should have tuple content");
     }
   } else {
-    panic!("FirstRelaxedEnum should be an enum");
+    panic!("FloofRelaxed should be an enum");
   };
 
   let second_output = union_converter
-    .convert_union("SecondRelaxedEnum", &anyof_schema, UnionKind::AnyOf)
+    .convert_union("SplootRelaxed", &anyof_schema, UnionKind::AnyOf)
     .expect("Should convert second anyOf union");
   let second_result = second_output.into_vec();
 
   let second_outer = second_result
     .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "SecondRelaxedEnum"))
-    .expect("Should generate SecondRelaxedEnum");
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "SplootRelaxed"))
+    .expect("Should generate SplootRelaxed");
 
   if let RustType::Enum(e) = second_outer {
     let known_variant = e
@@ -517,7 +517,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       panic!("Known variant should have tuple content");
     }
   } else {
-    panic!("SecondRelaxedEnum should be an enum");
+    panic!("SplootRelaxed should be an enum");
   }
 }
 
@@ -561,16 +561,16 @@ fn test_canonical_schema_large_numbers_are_normalized() {
 
 #[test]
 fn test_get_generated_enum_name_returns_none_for_precomputed_only() {
-  let enum_values = vec!["alpha".to_string(), "beta".to_string()];
+  let enum_values = vec!["bark".to_string(), "sploot".to_string()];
   let mut precomputed_enum_names = BTreeMap::new();
-  precomputed_enum_names.insert(enum_values.clone(), "PrecomputedEnum".to_string());
+  precomputed_enum_names.insert(enum_values.clone(), "CardiganEnum".to_string());
 
   let mut cache = SharedSchemaCache::new();
   cache.set_precomputed_names(BTreeMap::new(), precomputed_enum_names, BTreeMap::new());
 
   assert_eq!(
     cache.get_enum_name(&enum_values),
-    Some("PrecomputedEnum".to_string()),
+    Some("CardiganEnum".to_string()),
     "get_enum_name should return precomputed name"
   );
 
@@ -583,7 +583,7 @@ fn test_get_generated_enum_name_returns_none_for_precomputed_only() {
 
 #[test]
 fn test_get_generated_enum_name_returns_name_when_registered() {
-  let enum_values = vec!["red".to_string(), "green".to_string()];
+  let enum_values = vec!["brown".to_string(), "white".to_string()];
 
   let mut cache = SharedSchemaCache::new();
 
@@ -593,11 +593,11 @@ fn test_get_generated_enum_name_returns_name_when_registered() {
     "Should return None before registration"
   );
 
-  cache.register_enum(enum_values.clone(), "ColorEnum".to_string());
+  cache.register_enum(enum_values.clone(), "HowlEnum".to_string());
 
   assert_eq!(
     cache.get_generated_enum_name(&enum_values),
-    Some("ColorEnum".to_string()),
+    Some("HowlEnum".to_string()),
     "Should return name after registration"
   );
 }

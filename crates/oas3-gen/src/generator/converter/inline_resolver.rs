@@ -351,6 +351,6 @@ impl InlineTypeResolver {
     if refs.len() < 2 {
       return None;
     }
-    self.context.graph().find_union(refs).cloned()
+    self.context.cache.borrow().find_union(refs).map(String::from)
   }
 }

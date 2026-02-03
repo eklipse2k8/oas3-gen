@@ -109,9 +109,7 @@ impl FieldConverter {
     schema_name: Option<&str>,
   ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
     let required = schema.required.iter().collect::<BTreeSet<_>>();
-    let discriminator_mapping = schema_name
-      .and_then(|name| self.context.graph().mapping(name))
-      .map(DiscriminatorMapping::as_tuple);
+    let discriminator_mapping = schema_name.and_then(|name| self.context.graph().mapping(name));
 
     let (fields, inline_types) = itertools::process_results(
       schema.properties.iter().map(|(prop_name, prop_schema_ref)| {
@@ -129,7 +127,7 @@ impl FieldConverter {
           &prop_schema,
           resolved.result,
           required.contains(prop_name),
-          discriminator_mapping.as_ref(),
+          discriminator_mapping,
         );
 
         anyhow::Ok((field, resolved.inline_types))
@@ -208,7 +206,7 @@ impl FieldConverter {
     prop_schema: &ObjectSchema,
     resolved_type: TypeRef,
     is_required: bool,
-    discriminator_mapping: Option<&(String, String)>,
+    discriminator_mapping: Option<&DiscriminatorMapping>,
   ) -> FieldDef {
     let discriminator_info = DiscriminatorFieldInfo::new(prop_name, parent_schema, prop_schema, discriminator_mapping);
 
@@ -490,11 +488,11 @@ impl DiscriminatorFieldInfo {
     prop_name: &str,
     parent_schema: &ObjectSchema,
     prop_schema: &ObjectSchema,
-    discriminator_mapping: Option<&(String, String)>,
+    discriminator_mapping: Option<&DiscriminatorMapping>,
   ) -> Option<Self> {
     let value = discriminator_mapping
-      .filter(|(prop, _)| prop == prop_name)
-      .map(|(_, v)| DefaultAtom::from(v.as_str()));
+      .filter(|m| m.field_name == prop_name)
+      .map(|m| DefaultAtom::from(m.field_value.as_str()));
 
     let is_base_discriminator = parent_schema
       .discriminator

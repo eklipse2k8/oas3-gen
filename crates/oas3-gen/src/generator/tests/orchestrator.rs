@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::generator::{
+  CodegenConfig, TypesMode,
   ast::{ClientRootNode, StructToken},
   codegen::{GeneratedFileType, Visibility},
-  converter::GenerationTarget,
   orchestrator::Orchestrator,
 };
 
@@ -11,15 +11,10 @@ fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
   Orchestrator::new(
     spec,
     Visibility::default(),
+    CodegenConfig::default(),
+    None,
+    None,
     all_schemas,
-    None,
-    None,
-    false,
-    false,
-    false,
-    false,
-    GenerationTarget::default(),
-    HashMap::new(),
   )
 }
 
@@ -32,15 +27,10 @@ fn make_orchestrator_with_ops(
   Orchestrator::new(
     spec,
     Visibility::default(),
-    all_schemas,
+    CodegenConfig::default(),
     only,
     exclude,
-    false,
-    false,
-    false,
-    false,
-    GenerationTarget::default(),
-    HashMap::new(),
+    all_schemas,
   )
 }
 
@@ -49,7 +39,7 @@ fn test_metadata_and_header_generation() {
   let spec_json = include_str!("../../../fixtures/basic_api.json");
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let metadata = ClientRootNode::builder()
-    .name(StructToken::new("BasicTestApiClient"))
+    .name(StructToken::new("PembrokeApiClient"))
     .info(&spec.info)
     .servers(&spec.servers)
     .build();
@@ -63,7 +53,7 @@ fn test_metadata_and_header_generation() {
   );
 
   let orchestrator = make_orchestrator(spec, false);
-  let result = orchestrator.generate_with_header("/path/to/spec.json");
+  let result = orchestrator.generate(&TypesMode, "/path/to/spec.json");
   assert!(result.is_ok(), "generate_with_header failed");
 
   let output = result.unwrap();
@@ -90,21 +80,24 @@ fn test_operation_filtering() {
   let spec_json = include_str!("../../../fixtures/operation_filtering.json");
 
   let mut excluded = HashSet::new();
-  excluded.insert("create_user".to_string());
+  excluded.insert("admin_action".to_string());
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator = make_orchestrator_with_ops(spec, false, None, Some(&excluded));
-  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
   let stats = &output.stats;
-  assert_eq!(stats.operations_converted, 2, "excluded create_user should leave 2 ops");
+  assert_eq!(
+    stats.operations_converted, 2,
+    "excluded admin_action should leave 2 ops"
+  );
   assert!(
-    !code.contains("create_user"),
-    "create_user should be excluded from code"
+    !code.contains("admin_action"),
+    "admin_action should be excluded from code"
   );
 
   let spec_full: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator_full = make_orchestrator(spec_full, false);
-  let output_full = orchestrator_full.generate_with_header("test.json").unwrap();
+  let output_full = orchestrator_full.generate(&TypesMode, "test.json").unwrap();
   let code_full = output_full.code.code(&GeneratedFileType::Types).unwrap();
   let stats_full = &output_full.stats;
 
@@ -112,7 +105,7 @@ fn test_operation_filtering() {
   let mut excluded_admin = HashSet::new();
   excluded_admin.insert("admin_action".to_string());
   let orchestrator_filtered = make_orchestrator_with_ops(spec_filtered, false, None, Some(&excluded_admin));
-  let output_filtered = orchestrator_filtered.generate_with_header("test.json").unwrap();
+  let output_filtered = orchestrator_filtered.generate(&TypesMode, "test.json").unwrap();
   let code_filtered = output_filtered.code.code(&GeneratedFileType::Types).unwrap();
   let stats_filtered = &output_filtered.stats;
 
@@ -122,12 +115,12 @@ fn test_operation_filtering() {
     "filtered spec should have 2 ops"
   );
   assert!(
-    code_full.contains("AdminResponse"),
-    "full code should contain AdminResponse"
+    code_full.contains("AdminActionResponse"),
+    "full code should contain AdminActionResponse"
   );
   assert!(
-    !code_filtered.contains("AdminResponse"),
-    "filtered code should not contain AdminResponse"
+    !code_filtered.contains("AdminActionResponse"),
+    "filtered code should not contain AdminActionResponse"
   );
   assert!(
     code_filtered.contains("UserList"),
@@ -148,13 +141,13 @@ fn test_all_schemas_overrides_operation_filtering() {
 
   let spec_without: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator_without = make_orchestrator_with_ops(spec_without, false, Some(&only), None);
-  let output_without = orchestrator_without.generate_with_header("test.json").unwrap();
+  let output_without = orchestrator_without.generate(&TypesMode, "test.json").unwrap();
   let code_without = output_without.code.code(&GeneratedFileType::Types).unwrap();
   let stats_without = &output_without.stats;
 
   let spec_with: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator_with = make_orchestrator_with_ops(spec_with, true, Some(&only), None);
-  let output_with = orchestrator_with.generate_with_header("test.json").unwrap();
+  let output_with = orchestrator_with.generate(&TypesMode, "test.json").unwrap();
   let code_with = output_with.code.code(&GeneratedFileType::Types).unwrap();
   let stats_with = &output_with.stats;
 
@@ -193,7 +186,7 @@ fn test_content_types_generation() {
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator = make_orchestrator(spec, false);
 
-  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   let content_type_checks = [
@@ -232,7 +225,7 @@ fn test_enum_deduplication() {
   for (spec_json, presence_checks, absence_checks) in cases {
     let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
     let orchestrator = make_orchestrator(spec, true);
-    let output = orchestrator.generate_with_header("test.json").unwrap();
+    let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
     let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
     for (pattern, expected_count, context) in &presence_checks {
@@ -254,19 +247,8 @@ fn make_orchestrator_with_customizations(
   all_schemas: bool,
   customizations: HashMap<String, String>,
 ) -> Orchestrator {
-  Orchestrator::new(
-    spec,
-    Visibility::default(),
-    all_schemas,
-    None,
-    None,
-    false,
-    false,
-    false,
-    false,
-    GenerationTarget::default(),
-    customizations,
-  )
+  let config = CodegenConfig::builder().customizations(customizations).build();
+  Orchestrator::new(spec, Visibility::default(), config, None, None, all_schemas)
 }
 
 #[test]
@@ -277,7 +259,7 @@ fn test_customization_generates_serde_as_attributes() {
     "paths": {},
     "components": {
       "schemas": {
-        "Event": {
+        "Frappe": {
           "type": "object",
           "properties": {
             "id": { "type": "string" },
@@ -293,7 +275,7 @@ fn test_customization_generates_serde_as_attributes() {
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
   let orchestrator = make_orchestrator_with_customizations(spec, true, customizations);
-  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   assert!(
@@ -314,11 +296,11 @@ fn test_customization_generates_serde_as_attributes() {
 fn test_customization_for_multiple_types() {
   let spec_json = r#"{
     "openapi": "3.0.0",
-    "info": { "title": "Test API", "version": "1.0.0" },
+    "info": { "title": "Pembroke API", "version": "1.0.0" },
     "paths": {},
     "components": {
       "schemas": {
-        "Entity": {
+        "Cardigan": {
           "type": "object",
           "properties": {
             "id": { "type": "string", "format": "uuid" },
@@ -338,7 +320,7 @@ fn test_customization_for_multiple_types() {
     ("uuid".to_string(), "crate::MyUuid".to_string()),
   ]);
   let orchestrator = make_orchestrator_with_customizations(spec, true, customizations);
-  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   assert!(
@@ -359,19 +341,19 @@ fn test_customization_for_multiple_types() {
 fn test_customization_for_array_types() {
   let spec_json = r#"{
     "openapi": "3.0.0",
-    "info": { "title": "Test API", "version": "1.0.0" },
+    "info": { "title": "Pembroke API", "version": "1.0.0" },
     "paths": {},
     "components": {
       "schemas": {
-        "Timeline": {
+        "WaddleLine": {
           "type": "object",
           "properties": {
-            "timestamps": {
+            "toebeans": {
               "type": "array",
               "items": { "type": "string", "format": "date-time" }
             }
           },
-          "required": ["timestamps"]
+          "required": ["toebeans"]
         }
       }
     }
@@ -380,7 +362,7 @@ fn test_customization_for_array_types() {
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let customizations = HashMap::from([("date_time".to_string(), "crate::MyDateTime".to_string())]);
   let orchestrator = make_orchestrator_with_customizations(spec, true, customizations);
-  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   assert!(
@@ -393,11 +375,11 @@ fn test_customization_for_array_types() {
 fn test_no_customization_no_serde_as() {
   let spec_json = r#"{
     "openapi": "3.0.0",
-    "info": { "title": "Test API", "version": "1.0.0" },
+    "info": { "title": "Pembroke API", "version": "1.0.0" },
     "paths": {},
     "components": {
       "schemas": {
-        "Event": {
+        "Frappe": {
           "type": "object",
           "properties": {
             "id": { "type": "string" },
@@ -411,7 +393,7 @@ fn test_no_customization_no_serde_as() {
 
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
   let orchestrator = make_orchestrator(spec, true);
-  let output = orchestrator.generate_with_header("test.json").unwrap();
+  let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
   let code = output.code.code(&GeneratedFileType::Types).unwrap();
 
   assert!(
@@ -419,7 +401,7 @@ fn test_no_customization_no_serde_as() {
     "Code should not contain serde_as field attribute without customizations"
   );
   assert!(
-    !code.contains("#[serde_with::serde_as]") || !code.contains("Event"),
-    "Event struct should not have serde_as outer attribute without customizations"
+    !code.contains("#[serde_with::serde_as]") || !code.contains("Frappe"),
+    "Frappe struct should not have serde_as outer attribute without customizations"
   );
 }

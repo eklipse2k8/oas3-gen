@@ -67,7 +67,6 @@ fn test_basic_enum_generation() {
 
 #[test]
 fn test_simple_enum_display_impl() {
-  // Simple enum without renames - Display uses variant name
   let simple_def = make_simple_enum(
     "Color",
     vec![
@@ -101,7 +100,6 @@ fn test_simple_enum_display_impl() {
 
 #[test]
 fn test_simple_enum_display_impl_with_serde_rename() {
-  // Enum with serde renames - Display uses the serde rename value
   let renamed_def = EnumDef {
     name: EnumToken::new("Status"),
     variants: vec![
@@ -144,7 +142,6 @@ fn test_simple_enum_display_impl_with_serde_rename() {
 
 #[test]
 fn test_tuple_enum_no_display_impl() {
-  // Enums with tuple variants should NOT get a Display impl
   let tuple_def = EnumDef {
     name: EnumToken::new("Value"),
     variants: vec![

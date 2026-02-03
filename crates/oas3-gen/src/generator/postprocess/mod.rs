@@ -19,6 +19,7 @@ use crate::generator::{
   },
 };
 
+#[derive(Debug, Clone, Default)]
 pub struct PostprocessOutput {
   pub types: Vec<RustType>,
   pub operations: Vec<OperationInfo>,
@@ -26,26 +27,28 @@ pub struct PostprocessOutput {
   pub uses: BTreeSet<String>,
 }
 
-pub(crate) fn postprocess(
-  types: Vec<RustType>,
-  operations: Vec<OperationInfo>,
-  seed_usage: std::collections::BTreeMap<EnumToken, (bool, bool)>,
-  target: GenerationTarget,
-) -> PostprocessOutput {
-  let (mut types, operations) = ResponseEnumDeduplicator::new(types, operations).process();
+impl PostprocessOutput {
+  pub(crate) fn new(
+    types: Vec<RustType>,
+    operations: Vec<OperationInfo>,
+    seed_usage: std::collections::BTreeMap<EnumToken, (bool, bool)>,
+    target: GenerationTarget,
+  ) -> Self {
+    let (mut types, operations) = ResponseEnumDeduplicator::new(types, operations).process();
 
-  NestedValidationProcessor::new(&types).process(&mut types);
+    NestedValidationProcessor::new(&types).process(&mut types);
 
-  SerdeUsage::new(&types, seed_usage, target).apply(&mut types);
+    SerdeUsage::new(&types, seed_usage, target).apply(&mut types);
 
-  let dedup_output = RustTypeDeduplication::new(types).process();
-  let header_output = HeaderRefCollection::new(dedup_output.clone()).process();
-  let uses_output = ModuleImports::new(dedup_output.clone(), target).process();
+    let dedup_output = RustTypeDeduplication::new(types).process();
+    let header_output = HeaderRefCollection::new(dedup_output.clone()).process();
+    let uses_output = ModuleImports::new(dedup_output.clone(), target).process();
 
-  PostprocessOutput {
-    types: dedup_output,
-    operations,
-    header_refs: header_output,
-    uses: uses_output,
+    Self {
+      types: dedup_output,
+      operations,
+      header_refs: header_output,
+      uses: uses_output,
+    }
   }
 }

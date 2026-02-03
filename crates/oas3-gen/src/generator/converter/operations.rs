@@ -1,7 +1,7 @@
-use std::rc::Rc;
+use std::{collections::BTreeSet, rc::Rc};
 
 use super::{
-  ConverterContext, SchemaConverter, TypeUsageRecorder,
+  ConverterContext, SchemaConverter, SerdeUsageRecorder,
   requests::{BodyInfo, RequestConverter, RequestOutput},
   responses::ResponseConverter,
 };
@@ -10,12 +10,12 @@ use crate::generator::{
     Documentation, EnumToken, FieldDef, HandlerBodyInfo, MethodNameToken, OperationInfo, ParameterLocation, ParsedPath,
     ResponseEnumDef, RustType, ServerRequestTraitDef, ServerTraitMethod, StructMethod, StructToken, TraitToken,
   },
+  metrics::GenerationWarning,
   naming::{
     identifiers::to_rust_type_name,
     operations::{generate_unique_request_name, generate_unique_response_name},
   },
   operation_registry::OperationEntry,
-  orchestrator::GenerationWarning,
 };
 
 /// Result of converting a single OpenAPI operation.
@@ -37,7 +37,8 @@ pub(crate) struct OperationsOutput {
   pub(crate) types: Vec<RustType>,
   pub(crate) operations: Vec<OperationInfo>,
   pub(crate) warnings: Vec<GenerationWarning>,
-  pub(crate) usage_recorder: TypeUsageRecorder,
+  pub(crate) usage_recorder: SerdeUsageRecorder,
+  pub(crate) unique_headers: BTreeSet<String>,
 }
 
 /// Orchestrates conversion of all operations in a specification.
@@ -67,6 +68,7 @@ impl OperationsProcessor {
     let mut rust_types = vec![];
     let mut operations_info = vec![];
     let mut warnings = vec![];
+    let mut unique_headers = BTreeSet::new();
 
     let operation_converter = OperationConverter::new(self.context.clone(), self.schema_converter.clone());
 
@@ -83,6 +85,8 @@ impl OperationsProcessor {
                 message: w.clone(),
               }),
           );
+
+          Self::collect_header_names(&result.operation_info.parameters, &mut unique_headers);
 
           rust_types.extend(result.types);
           operations_info.push(result.operation_info);
@@ -102,6 +106,17 @@ impl OperationsProcessor {
       operations: operations_info,
       warnings,
       usage_recorder: self.context.take_type_usage(),
+      unique_headers,
+    }
+  }
+
+  fn collect_header_names(parameters: &[FieldDef], headers: &mut BTreeSet<String>) {
+    for param in parameters {
+      if matches!(param.parameter_location, Some(ParameterLocation::Header))
+        && let Some(original_name) = param.original_name.as_deref()
+      {
+        headers.insert(original_name.to_ascii_lowercase());
+      }
     }
   }
 }
@@ -221,8 +236,6 @@ impl OperationConverter {
     let warnings = request_output.warnings.clone();
     let parameters = request_output.parameter_fields.clone();
 
-    self.record_stats(&parameters);
-
     let (request_types, request_type) = self.request_types(request_output, response_def.is_some());
     let (response_types, response_enum_token) = self.response_types(response_def, request_type.as_ref());
 
@@ -308,19 +321,6 @@ impl OperationConverter {
 
     let token = EnumToken::new(def.name.to_string());
     (vec![RustType::ResponseEnum(def)], Some(token))
-  }
-
-  /// Records method and header statistics for generation metrics.
-  fn record_stats(&self, parameters: &[FieldDef]) {
-    self.context.record_method();
-
-    for param in parameters {
-      if matches!(param.parameter_location, Some(ParameterLocation::Header))
-        && let Some(original_name) = param.original_name.as_deref()
-      {
-        self.context.record_header(original_name);
-      }
-    }
   }
 
   /// Combines body, request, and response types into a single collection.
