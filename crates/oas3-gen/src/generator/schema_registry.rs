@@ -12,7 +12,7 @@ use crate::{
     naming::name_index::{ScanResult, TypeNameIndex},
     operation_registry::OperationRegistry,
   },
-  utils::{SchemaExt, extract_schema_ref_name, parse_schema_ref_path},
+  utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
 };
 
 /// Maps union type fingerprints to generated type names.
@@ -345,7 +345,7 @@ impl SchemaRegistry {
     }
 
     for variants in [&schema.one_of, &schema.any_of] {
-      let fingerprint: BTreeSet<String> = variants.iter().filter_map(extract_schema_ref_name).collect();
+      let fingerprint = extract_union_fingerprint(variants);
       if !fingerprint.is_empty()
         && let Some(name) = union_fingerprints.get(&fingerprint)
       {

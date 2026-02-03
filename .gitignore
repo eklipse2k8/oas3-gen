@@ -15,6 +15,7 @@
 .gemini/
 opencode.*
 GEMINI.md
+claude.sh
 
 # No IDE files
 .idea/

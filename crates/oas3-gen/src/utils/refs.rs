@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use oas3::spec::{ObjectOrReference, ObjectSchema, Ref};
 
 /// Parses a schema `$ref` path and extracts the referenced schema name.
@@ -36,4 +38,12 @@ pub fn extract_schema_ref_name(obj_ref: &ObjectOrReference<ObjectSchema>) -> Opt
     ObjectOrReference::Ref { ref_path, .. } => parse_schema_ref_path(ref_path),
     ObjectOrReference::Object(_) => None,
   }
+}
+
+/// Extracts a union fingerprint from a slice of schema references.
+///
+/// Collects all named schema references into a sorted set for union deduplication.
+/// This is used to identify union types (oneOf/anyOf) that share the same set of variants.
+pub fn extract_union_fingerprint(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
+  variants.iter().filter_map(extract_schema_ref_name).collect()
 }

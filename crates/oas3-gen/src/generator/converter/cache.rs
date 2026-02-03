@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{ObjectOrReference, ObjectSchema};
+use oas3::spec::ObjectSchema;
 
 use super::hashing::CanonicalSchema;
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
     },
     schema_registry::UnionFingerprints,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, extract_union_fingerprint},
 };
 
 #[derive(Default, Debug, Clone)]
@@ -244,46 +244,18 @@ impl SchemaNameRegistry {
   }
 }
 
-#[derive(Default, Debug, Clone)]
-struct UnionFingerprintRegistry {
-  fingerprints: BTreeMap<BTreeSet<String>, String>,
-}
-
-impl UnionFingerprintRegistry {
-  /// Returns the schema name for a union with the given variant references, or `None` if not registered.
-  fn lookup(&self, refs: &BTreeSet<String>) -> Option<&str> {
-    self.fingerprints.get(refs).map(String::as_str)
-  }
-
-  /// Registers a union fingerprint mapping.
-  fn register(&mut self, refs: BTreeSet<String>, name: String) {
-    self.fingerprints.insert(refs, name);
-  }
-
-  /// Builds union fingerprints from schemas.
-  fn build_from_schemas(schemas: &BTreeMap<String, ObjectSchema>) -> Self {
-    let mut registry = Self::default();
-    for (name, schema) in schemas {
-      for variants in [&schema.one_of, &schema.any_of] {
-        let refs = variants
-          .iter()
-          .filter_map(|v| {
-            if let ObjectOrReference::Ref { ref_path, .. } = v {
-              ref_path
-                .strip_prefix("#/components/schemas/")
-                .map(std::string::ToString::to_string)
-            } else {
-              None
-            }
-          })
-          .collect::<BTreeSet<_>>();
-        if refs.len() >= 2 {
-          registry.register(refs, name.clone());
-        }
+/// Builds union fingerprints from schemas.
+fn build_union_fingerprints(schemas: &BTreeMap<String, ObjectSchema>) -> UnionFingerprints {
+  let mut fingerprints = UnionFingerprints::new();
+  for (name, schema) in schemas {
+    for variants in [&schema.one_of, &schema.any_of] {
+      let refs = extract_union_fingerprint(variants);
+      if refs.len() >= 2 {
+        fingerprints.insert(refs, name.clone());
       }
     }
-    registry
   }
+  fingerprints
 }
 
 pub(crate) struct TypeRegistration {
@@ -303,7 +275,7 @@ pub(crate) struct SharedSchemaCache {
   structs: StructIndex,
   type_refs: TypeRefRegistry,
   schema_names: SchemaNameRegistry,
-  union_fingerprints: UnionFingerprintRegistry,
+  union_fingerprints: UnionFingerprints,
 }
 
 impl SharedSchemaCache {
@@ -318,7 +290,7 @@ impl SharedSchemaCache {
       structs: StructIndex::default(),
       type_refs: TypeRefRegistry::default(),
       schema_names: SchemaNameRegistry::default(),
-      union_fingerprints: UnionFingerprintRegistry::default(),
+      union_fingerprints: UnionFingerprints::new(),
     }
   }
 
@@ -566,16 +538,16 @@ impl SharedSchemaCache {
       })
       .collect::<Vec<_>>();
     self.schema_names.extend(schema_names);
-    self.union_fingerprints = UnionFingerprintRegistry::build_from_schemas(schemas);
+    self.union_fingerprints = build_union_fingerprints(schemas);
   }
 
   /// Returns the schema name for a union with the given variant references, or `None` if not registered.
   pub(crate) fn find_union(&self, refs: &BTreeSet<String>) -> Option<&str> {
-    self.union_fingerprints.lookup(refs)
+    self.union_fingerprints.get(refs).map(String::as_str)
   }
 
   /// Returns a reference to the union fingerprints map.
   pub(crate) fn union_fingerprints(&self) -> &UnionFingerprints {
-    &self.union_fingerprints.fingerprints
+    &self.union_fingerprints
   }
 }
