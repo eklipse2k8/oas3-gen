@@ -682,6 +682,23 @@
 				"required": ["output_tokens", "type"],
 				"title": "UsageCounterB",
 				"type": "object"
+			},
+			"NullableStringOrArray": {
+				"description": "Test nullable union wrapping an inner oneOf (string or array). This pattern appears in the OpenAI Responses API for the input field.",
+				"anyOf": [
+					{
+						"oneOf": [
+							{ "type": "string" },
+							{
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/TextBlock"
+								}
+							}
+						]
+					},
+					{ "type": "null" }
+				]
 			}
 		}
 	}
