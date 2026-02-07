@@ -200,6 +200,7 @@
 					"content": {
 						"$ref": "#/components/schemas/ToolResultContent"
 					},
+					"iterations": { "$ref": "#/components/schemas/UsageCounters" },
 					"is_error": {
 						"type": "boolean"
 					}
@@ -601,7 +602,64 @@
 						}
 					}
 				]
-			}
+			},
+			"UsageCounters": {
+        "anyOf": [
+          {
+            "items": {
+              "anyOf": [
+                { "$ref": "#/components/schemas/UsageCounterA" },
+                { "$ref": "#/components/schemas/UsageCounterB" }
+              ]
+            },
+            "type": "array"
+          },
+          { "type": "null" }
+        ],
+        "default": null
+      },
+			"UsageCounterA": {
+        "properties": {
+          "output_tokens": {
+            "minimum": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "type": {
+            "const": "counter_a",
+            "default": "counter_a",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_tokens",
+          "type"
+        ],
+        "title": "UsageCounterA",
+        "type": "object"
+      },
+			"UsageCounterB": {
+        "properties": {
+          "output_tokens": {
+            "minimum": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "type": {
+            "const": "counter_b",
+            "default": "counter_b",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_tokens",
+          "type"
+        ],
+        "title": "UsageCounterB",
+        "type": "object"
+      }
 		}
 	}
 }

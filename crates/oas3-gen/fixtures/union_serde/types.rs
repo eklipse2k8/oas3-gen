@@ -693,6 +693,7 @@ pub struct ToolResultBlock {
   /// Tool result can be text or array of content blocks
   pub content: ToolResultContent,
   pub is_error: Option<bool>,
+  pub iterations: Option<Vec<UsageCounters>>,
   #[validate(length(min = 1u64))]
   pub tool_use_id: String,
   #[doc(hidden)]
@@ -796,4 +797,45 @@ pub struct UrlImageSource {
 pub struct Usage {
   pub input_tokens: i64,
   pub output_tokens: i64,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
+#[serde(default)]
+pub struct UsageCounterA {
+  #[validate(range(min = 0i64))]
+  pub output_tokens: i64,
+  #[serde(rename = "type")]
+  #[default(Some("counter_a".to_string()))]
+  pub r#type: Option<String>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default)]
+#[serde(default)]
+pub struct UsageCounterB {
+  #[validate(range(min = 0i64))]
+  pub output_tokens: i64,
+  #[serde(rename = "type")]
+  #[default(Some("counter_b".to_string()))]
+  pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum UsageCounters {
+  #[default]
+  A(UsageCounterA),
+  B(UsageCounterB),
+}
+impl UsageCounters {
+  pub fn a(output_tokens: i64) -> Self {
+    Self::A(UsageCounterA {
+      output_tokens,
+      ..Default::default()
+    })
+  }
+  pub fn b(output_tokens: i64) -> Self {
+    Self::B(UsageCounterB {
+      output_tokens,
+      ..Default::default()
+    })
+  }
 }

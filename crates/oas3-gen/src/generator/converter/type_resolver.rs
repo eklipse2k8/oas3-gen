@@ -178,6 +178,16 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.type_ref(&ref_name)));
     };
 
+    let spec = self.spec();
+    if schema.has_null_variant(spec)
+      && let Some(non_null) = schema.find_non_null_variant(spec)
+    {
+      let resolved = self.resolve(non_null)?;
+      if resolved.has_inline_union_array_items(spec) {
+        return Ok(ConversionOutput::new(self.type_ref(&ref_name).with_option()));
+      }
+    }
+
     if self.is_wrapper_union(schema)?
       && let Some(type_ref) = self.try_union(variants)?
     {
@@ -603,6 +613,10 @@ impl TypeResolver {
       return Ok(false);
     }
 
+    if resolved.has_inline_union_array_items(spec) {
+      return Ok(false);
+    }
+
     if resolved.has_enum_values() && resolved.enum_values.len() > 1 {
       return Ok(true);
     }
@@ -626,6 +640,20 @@ impl TypeResolver {
     let inner = self.resolve(variant)?;
 
     if !inner.has_union() {
+      if let Some(items) = inner.inline_array_items(spec)
+        && items.has_union()
+      {
+        let (item_variants, _) = items.union_variants_with_kind().unwrap();
+        let variants_vec = item_variants.to_vec();
+        let is_one_of = !items.one_of.is_empty();
+        return Ok(Some(ObjectSchema {
+          description: outer.description.clone().or_else(|| items.description.clone()),
+          discriminator: items.discriminator.clone(),
+          one_of: if is_one_of { variants_vec.clone() } else { vec![] },
+          any_of: if is_one_of { vec![] } else { variants_vec },
+          ..Default::default()
+        }));
+      }
       return Ok(None);
     }
 

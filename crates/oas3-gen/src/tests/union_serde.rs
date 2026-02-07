@@ -332,6 +332,7 @@ mod tests {
       content: ToolResultContent::String("Result".to_string()),
       is_error: None,
       r#type: Some("tool_result".to_string()),
+      iterations: None,
     };
     let json = serde_json::to_value(&string_block).unwrap();
     assert_eq!(json["type"], "tool_result", "string result type mismatch");
@@ -343,6 +344,7 @@ mod tests {
       content: ToolResultContent::Array(vec![ToolResultContentBlock::Text(text_block("Text result"))]),
       is_error: Some(false),
       r#type: Some("tool_result".to_string()),
+      iterations: None,
     };
     let json = serde_json::to_value(&array_block).unwrap();
     assert_eq!(json["type"], "tool_result", "array result type mismatch");
@@ -394,6 +396,7 @@ mod tests {
       ]),
       is_error: None,
       r#type: Some("tool_result".to_string()),
+      iterations: None,
     });
     let json = serde_json::to_string(&nested).unwrap();
     let deserialized: ContentBlock = serde_json::from_str(&json).unwrap();
@@ -562,6 +565,7 @@ mod tests {
           content: ToolResultContent::Array(vec![ToolResultContentBlock::Text(text_block("Previous tool output"))]),
           is_error: None,
           r#type: Some("tool_result".to_string()),
+          iterations: None,
         }),
       ],
       metadata: None,
