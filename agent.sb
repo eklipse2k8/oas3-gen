@@ -74,6 +74,9 @@
     (subpath (string-append (param "HOME_DIR") "/.local/share/opencode"))
     (subpath (string-append (param "HOME_DIR") "/.local/state/opencode"))
 
+    ;; Keychain databases
+    (subpath (string-append (param "HOME_DIR") "/Library/Keychains"))
+
     ;; Standard I/O devices
     (literal "/dev/stdout")
     (literal "/dev/stderr")
@@ -91,8 +94,12 @@
 (allow file-ioctl (regex #"^/dev/tty.*"))
 
 ;; Allow mach lookups for essential services
-(allow mach-lookup 
+(allow mach-lookup
     (global-name "com.apple.sysmond")  ; For process listing
+    (global-name "com.apple.SecurityServer")  ; Keychain access
+    (global-name "com.apple.securityd")  ; Keychain daemon
+    (global-name "com.apple.trustd")  ; TLS certificate trust evaluation
+    (global-name "com.apple.trustd.agent")  ; User-level trust evaluation
 )
 
 ;; Allow file attribute operations needed for file creation

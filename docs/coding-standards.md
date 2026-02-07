@@ -179,6 +179,113 @@ for key in grouped.keys().sorted() {
 - When you need lazy evaluation (itertools sorting methods collect eagerly)
 - Performance-critical hot paths where you need control over allocation
 
+## Iterator Flattening (CRITICAL)
+
+### Never Nest Iterators Inside Iterators
+
+Never create nested iterator patterns where inner iterators are created within outer iterator closures. This creates O(n²) complexity and prevents Rust's zero-cost abstractions from optimizing properly.
+
+**Bad - Nested iterators (O(n²)):**
+```rust
+// NEVER: Inner iterator created for each outer iteration
+let result: Vec<Item> = outer_collection
+    .iter()
+    .map(|outer| {
+        inner_collection
+            .iter()
+            .filter(|inner| inner.parent_id == outer.id)
+            .map(|inner| transform(inner))
+            .collect::<Vec<_>>()
+    })
+    .flatten()
+    .collect::<Vec<_>>();
+```
+
+**Good - Flattened approach (O(n)):**
+```rust
+// Pre-process inner collection into a lookup structure
+let inner_by_parent: BTreeMap<Id, Vec<&Inner>> = inner_collection
+    .iter()
+    .into_group_map_by(|inner| inner.parent_id);
+
+// Single-pass iteration over outer collection
+let result: Vec<Item> = outer_collection
+    .iter()
+    .flat_map(|outer| {
+        inner_by_parent
+            .get(&outer.id)
+            .into_iter()
+            .flatten()
+            .map(|inner| transform(inner))
+    })
+    .collect::<Vec<_>>();
+```
+
+### Return Iterators Instead of Collecting Early
+
+Functions should return iterators when possible, deferring `collect()` until the final consumer. This enables chaining and avoids intermediate allocations.
+
+**Bad - Early collection:**
+```rust
+fn get_active_items(items: &[Item]) -> Vec<Item> {
+    items
+        .iter()
+        .filter(|item| item.is_active)
+        .cloned()
+        .collect::<Vec<_>>()  // Forced allocation
+}
+
+// Caller forced to iterate again
+let active = get_active_items(&all_items);
+let processed = active
+    .iter()
+    .map(|item| process(item))
+    .collect::<Vec<_>>();
+```
+
+**Good - Return iterator:**
+```rust
+fn get_active_items(items: &[Item]) -> impl Iterator<Item = &Item> + '_ {
+    items.iter().filter(|item| item.is_active)
+}
+
+// Caller chains directly, single allocation at end
+let processed: Vec<Processed> = get_active_items(&all_items)
+    .map(|item| process(item))
+    .collect::<Vec<_>>();
+```
+
+### Flatten Nested Structures
+
+When working with nested collections, flatten early rather than iterating through layers.
+
+**Bad - Nested iteration:**
+```rust
+let all_fields: Vec<Field> = structs
+    .iter()
+    .map(|s| s.fields.clone())
+    .collect::<Vec<_>>()
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+```
+
+**Good - Immediate flatten:**
+```rust
+let all_fields: Vec<&Field> = structs
+    .iter()
+    .flat_map(|s| &s.fields)
+    .collect::<Vec<_>>();
+```
+
+### Guidelines
+
+- **Pre-process data**: Build lookup tables (maps, indexes) before iteration loops
+- **Use `flat_map`**: Replace nested iteration with `flat_map` for one-to-many relationships
+- **Defer `collect()`**: Return `impl Iterator` from functions when the result will be further processed
+- **Avoid allocation in loops**: Never allocate inside iterator closures that execute multiple times
+- **Profile nested patterns**: If you must nest, ensure the inner collection is O(1) lookup
+
 ## Preferred Code Patterns
 
 ### Rust 2024 Edition Style
