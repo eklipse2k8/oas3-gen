@@ -10,6 +10,7 @@ mod tests {
     TextBlock {
       text: text.to_string(),
       annotations: None,
+      recipes: None,
       r#type: Some("text".to_string()),
     }
   }
@@ -358,6 +359,7 @@ mod tests {
     let text = TextBlock {
       text: "Round trip test".to_string(),
       annotations: None,
+      recipes: None,
       r#type: Some("text".to_string()),
     };
     let json = serde_json::to_string(&text).unwrap();

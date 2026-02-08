@@ -131,6 +131,12 @@
 						"items": {
 							"$ref": "#/components/schemas/Annotation"
 						}
+					},
+					"recipes": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/RecipeList"
+						}
 					}
 				}
 			},
@@ -602,6 +608,23 @@
 						}
 					}
 				]
+			},
+			"RecipeList": {
+				"additionalProperties": true,
+				"properties": {
+					"ingredients": {
+						"anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }],
+						"title": "Ingredients"
+					},
+					"required": {
+						"anyOf": [{ "items": { "type": "string" }, "type": "array" }, { "type": "null" }],
+						"title": "Required"
+					},
+					"type": { "const": "object", "title": "Type", "type": "string" }
+				},
+				"required": ["type"],
+				"title": "RecipeList",
+				"type": "object"
 			},
 			"UsageCounters": {
         "anyOf": [

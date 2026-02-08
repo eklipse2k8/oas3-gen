@@ -586,6 +586,19 @@ pub struct PingEvent {
   #[default(Some("ping".to_string()))]
   pub r#type: Option<String>,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(default)]
+pub struct RecipeList {
+  pub ingredients: Option<std::collections::HashMap<String, serde_json::Value>>,
+  pub required: Option<Vec<String>>,
+  #[serde(rename = "type")]
+  #[default("object".to_string())]
+  pub r#type: String,
+  /// Additional properties not defined in the schema.
+  #[serde(flatten)]
+  pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum Role {
   #[serde(rename = "user")]
@@ -670,6 +683,7 @@ impl core::fmt::Display for StopReason {
 #[serde(default)]
 pub struct TextBlock {
   pub annotations: Option<Vec<Annotation>>,
+  pub recipes: Option<Vec<RecipeList>>,
   #[validate(length(min = 1u64))]
   pub text: String,
   #[doc(hidden)]
@@ -693,7 +707,7 @@ pub struct ToolResultBlock {
   /// Tool result can be text or array of content blocks
   pub content: ToolResultContent,
   pub is_error: Option<bool>,
-  pub iterations: Option<Vec<UsageCounters>>,
+  pub iterations: Option<UsageCounters>,
   #[validate(length(min = 1u64))]
   pub tool_use_id: String,
   #[doc(hidden)]

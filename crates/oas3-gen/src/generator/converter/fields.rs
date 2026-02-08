@@ -157,14 +157,13 @@ impl FieldConverter {
 
     match additional {
       Schema::Boolean(b) if !b.0 => Ok((vec![SerdeAttribute::DenyUnknownFields], None)),
-      Schema::Object(_) => {
+      Schema::Object(_) | Schema::Boolean(_) => {
         let value_type = self.type_resolver.additional_properties_type(additional)?;
         Ok((
           vec![],
           Some(FieldDef::builder().additional_properties(&value_type).build()),
         ))
       }
-      Schema::Boolean(_) => Ok((vec![], None)),
     }
   }
 
