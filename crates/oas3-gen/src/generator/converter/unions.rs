@@ -73,6 +73,7 @@ pub(crate) struct UnionConverter {
   variant_builder: VariantBuilder,
   relaxed_enum_builder: RelaxedEnumBuilder,
   method_generator: MethodGenerator,
+  discriminator_converter: DiscriminatorConverter,
 }
 
 impl UnionConverter {
@@ -84,12 +85,14 @@ impl UnionConverter {
     let variant_builder = VariantBuilder::new(context.clone());
     let relaxed_enum_builder = RelaxedEnumBuilder::new(context.clone());
     let method_generator = MethodGenerator::new(context.clone());
+    let discriminator_converter = DiscriminatorConverter::new(context.clone());
 
     Self {
       context,
       variant_builder,
       relaxed_enum_builder,
       method_generator,
+      discriminator_converter,
     }
   }
 
@@ -174,7 +177,9 @@ impl UnionConverter {
       self.method_generator.build_constructors(&variants, &inline_types, name)
     };
 
-    let main_enum = DiscriminatorConverter::try_upgrade_to_discriminated(name, schema, &variants, methods.clone())
+    let main_enum = self
+      .discriminator_converter
+      .try_upgrade_to_discriminated(name, schema, &variants, methods.clone())
       .unwrap_or_else(|| {
         RustType::untagged_enum()
           .name(name)

@@ -155,7 +155,7 @@ impl SchemaRegistry {
       discriminator_parents: BTreeMap::new(),
       dependencies: BTreeMap::new(),
       cyclic_schemas: BTreeSet::new(),
-      discriminator_cache: Self::build_discriminator_cache(&schemas),
+      discriminator_cache: Self::build_discriminator_cache(&schemas, stats),
       inheritance_depths: BTreeMap::new(),
       spec: spec.clone(),
     }
@@ -247,6 +247,36 @@ impl SchemaRegistry {
   /// in a discriminated union, if it participates in one.
   pub(crate) fn mapping(&self, schema_name: &str) -> Option<&DiscriminatorMapping> {
     self.discriminator_cache.get(schema_name)
+  }
+
+  /// Returns the effective discriminator mapping for a schema in OpenAPI format.
+  ///
+  /// If the schema has an explicit `mapping`, returns it directly. Otherwise,
+  /// reconstructs the mapping from the discriminator cache (which may contain
+  /// mappings synthesized from `const` values). The returned map is in the
+  /// format expected by OpenAPI: `(discriminator_value -> $ref_path)`.
+  ///
+  /// Returns `None` if no mapping (explicit or implicit) is available.
+  pub(crate) fn effective_mapping(&self, schema: &ObjectSchema) -> Option<BTreeMap<String, String>> {
+    let discriminator = schema.discriminator.as_ref()?;
+
+    if let Some(mapping) = &discriminator.mapping {
+      return Some(mapping.clone());
+    }
+
+    let synthesized = schema.union_variants().try_fold(BTreeMap::new(), |mut acc, variant| {
+      let ObjectOrReference::Ref { ref_path, .. } = variant else {
+        return Some(acc);
+      };
+      let name = parse_schema_ref_path(ref_path)?;
+      let dm = self.discriminator_cache.get(&name)?;
+      (dm.field_name == discriminator.property_name).then(|| {
+        acc.insert(dm.field_value.clone(), ref_path.clone());
+        acc
+      })
+    })?;
+
+    (!synthesized.is_empty()).then_some(synthesized)
   }
 
   /// Checks if a schema participates in a dependency cycle.
@@ -568,13 +598,23 @@ impl SchemaRegistry {
   /// lookup from child schema name to its discriminator property and value.
   /// This enables code generation for tagged unions with proper variant
   /// identification.
-  fn build_discriminator_cache(schemas: &BTreeMap<String, ObjectSchema>) -> BTreeMap<String, DiscriminatorMapping> {
+  ///
+  /// Handles two cases:
+  /// 1. Explicit mappings from the discriminator's `mapping` field
+  /// 2. Implicit mappings inferred from `const` values on the discriminator
+  ///    property in each `oneOf`/`anyOf` variant schema
+  fn build_discriminator_cache(
+    schemas: &BTreeMap<String, ObjectSchema>,
+    stats: &mut GenerationStats,
+  ) -> BTreeMap<String, DiscriminatorMapping> {
     let mut cache = BTreeMap::new();
 
-    for schema in schemas.values() {
-      if let Some(d) = &schema.discriminator
-        && let Some(mapping) = &d.mapping
-      {
+    for (parent_name, schema) in schemas {
+      let Some(d) = &schema.discriminator else {
+        continue;
+      };
+
+      if let Some(mapping) = &d.mapping {
         for (val, ref_path) in mapping {
           if let Some(schema_name) = parse_schema_ref_path(ref_path) {
             cache.insert(
@@ -586,10 +626,83 @@ impl SchemaRegistry {
             );
           }
         }
+        continue;
       }
+
+      Self::synthesize_implicit_mappings(parent_name, schema, d, schemas, stats, &mut cache);
     }
 
     cache
+  }
+
+  /// Synthesizes discriminator mappings from `const` values on variant schemas.
+  ///
+  /// When a discriminator has no explicit `mapping`, examines each `oneOf`/`anyOf`
+  /// variant's discriminator property for a `const` value. All variants must have
+  /// a unique string `const` value for synthesis to succeed. Records a warning
+  /// and skips synthesis on any failure (missing const, non-string const, duplicates).
+  fn synthesize_implicit_mappings(
+    parent_name: &str,
+    schema: &ObjectSchema,
+    discriminator: &Discriminator,
+    schemas: &BTreeMap<String, ObjectSchema>,
+    stats: &mut GenerationStats,
+    cache: &mut BTreeMap<String, DiscriminatorMapping>,
+  ) {
+    let mut staged = BTreeMap::new();
+    let mut seen_values = BTreeSet::new();
+
+    for variant_name in schema.union_variants().filter_map(extract_schema_ref_name) {
+      let warn = |msg: String| GenerationWarning::DiscriminatorMappingFailed {
+        schema_name: parent_name.to_owned(),
+        message: msg,
+      };
+
+      let Some(variant_schema) = schemas.get(&variant_name) else {
+        stats.record_warning(warn(format!(
+          "cannot build implicit discriminator mapping: variant '{variant_name}' not found in schemas"
+        )));
+        return;
+      };
+
+      let Some(const_value) = Self::extract_const_discriminator_value(variant_schema, &discriminator.property_name)
+      else {
+        stats.record_warning(warn(format!(
+          "cannot build implicit discriminator mapping: variant '{variant_name}' has no string const value for property '{}'",
+          discriminator.property_name
+        )));
+        return;
+      };
+
+      if !seen_values.insert(const_value.clone()) {
+        stats.record_warning(warn(format!(
+          "cannot build implicit discriminator mapping: duplicate const value '{const_value}' on variant '{variant_name}'"
+        )));
+        return;
+      }
+
+      staged.insert(
+        variant_name,
+        DiscriminatorMapping {
+          field_name: discriminator.property_name.clone(),
+          field_value: const_value,
+        },
+      );
+    }
+
+    cache.extend(staged);
+  }
+
+  /// Extracts the string `const` value from a schema's discriminator property.
+  ///
+  /// Returns `None` if the property doesn't exist, has no `const_value`,
+  /// or the `const_value` is not a string.
+  fn extract_const_discriminator_value(schema: &ObjectSchema, property_name: &str) -> Option<String> {
+    let prop_ref = schema.properties.get(property_name)?;
+    let ObjectOrReference::Object(prop_schema) = prop_ref else {
+      return None;
+    };
+    prop_schema.const_value.as_ref()?.as_str().map(String::from)
   }
 
   /// Builds mappings from child schemas to their discriminator parents.

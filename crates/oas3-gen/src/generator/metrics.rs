@@ -110,6 +110,8 @@ pub enum GenerationWarning {
   },
   #[strum(to_string = "[{operation_id}] {message}")]
   OperationSpecific { operation_id: String, message: String },
+  #[strum(to_string = "Schema '{schema_name}': {message}")]
+  DiscriminatorMappingFailed { schema_name: String, message: String },
 }
 
 impl GenerationWarning {

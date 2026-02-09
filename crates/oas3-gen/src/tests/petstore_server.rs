@@ -125,6 +125,7 @@ fn test_pet_struct_compiles() {
     id: 1,
     name: "Fluffy".to_string(),
     tag: Some("cat".to_string()),
+    ..Default::default()
   };
   assert_eq!(pet.id, 1, "id should match");
   assert_eq!(pet.name, "Fluffy", "name should match");
@@ -148,11 +149,13 @@ fn test_pets_type_alias() {
       id: 1,
       name: "Fluffy".to_string(),
       tag: None,
+      ..Default::default()
     },
     Pet {
       id: 2,
       name: "Rex".to_string(),
       tag: Some("dog".to_string()),
+      ..Default::default()
     },
   ];
   assert_eq!(pets.len(), 2, "should have 2 pets");
@@ -173,6 +176,7 @@ fn test_list_pets_response_into_response() {
     id: 1,
     name: "Fluffy".to_string(),
     tag: None,
+    ..Default::default()
   }]);
   let response = ok_response.into_response();
   assert_eq!(
@@ -199,6 +203,7 @@ fn test_show_pet_by_id_response_into_response() {
     id: 42,
     name: "Rex".to_string(),
     tag: Some("dog".to_string()),
+    ..Default::default()
   });
   let response = ok_response.into_response();
   assert_eq!(

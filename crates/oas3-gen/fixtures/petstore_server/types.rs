@@ -15,7 +15,17 @@ pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
 pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+#[serde(default)]
+pub struct Allergies {
+  #[doc(hidden)]
+  #[serde(default, rename = "type", skip_deserializing)]
+  #[default(Some("allergies".to_string()))]
+  pub r#type: Option<String>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 pub struct Cat {
+  pub allergies: Option<Box<Health>>,
   #[serde(rename = "favoriteToy")]
   pub favorite_toy: Option<String>,
   pub id: i64,
@@ -44,10 +54,51 @@ impl IntoResponse for CreatePetsResponse {
     }
   }
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+#[serde(default)]
+pub struct Diet {
+  #[doc(hidden)]
+  #[serde(default, rename = "type", skip_deserializing)]
+  #[default(Some("diet".to_string()))]
+  pub r#type: Option<String>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 pub struct Error {
   pub code: i32,
   pub message: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub enum Health {
+  Allergies(Allergies),
+  Diet(Diet),
+}
+impl Health {
+  pub const DISCRIMINATOR_FIELD: &'static str = "type";
+}
+impl Default for Health {
+  fn default() -> Self {
+    Self::Allergies(<Allergies>::default())
+  }
+}
+impl serde::Serialize for Health {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    match self {
+      Self::Allergies(v) => v.serialize(serializer),
+      Self::Diet(v) => v.serialize(serializer),
+    }
+  }
+}
+impl Health {
+  pub fn allergies() -> Self {
+    Self::Allergies(Allergies::default())
+  }
+  pub fn diet() -> Self {
+    Self::Diet(Diet::default())
+  }
 }
 /// List all cats
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
@@ -299,6 +350,7 @@ impl IntoResponse for ListPetsResponse {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 pub struct Pet {
+  pub allergies: Option<Box<Health>>,
   pub id: i64,
   pub name: String,
   pub tag: Option<String>,

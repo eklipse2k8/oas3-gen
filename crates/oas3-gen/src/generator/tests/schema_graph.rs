@@ -4,9 +4,13 @@ use oas3::spec::{
   BooleanSchema, Components, Discriminator, Info, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet,
   Spec,
 };
+use serde_json::json;
 
 use crate::{
-  generator::{metrics::GenerationStats, schema_registry::SchemaRegistry},
+  generator::{
+    metrics::{GenerationStats, GenerationWarning},
+    schema_registry::SchemaRegistry,
+  },
   utils::parse_schema_ref_path,
 };
 
@@ -541,5 +545,234 @@ fn schema_merger_merge_multiple_all_of() {
   assert!(
     merged.schema.required.contains(&"corgi_prop".to_string()),
     "corgi_prop should be required"
+  );
+}
+
+fn make_variant_schema_with_const(property_name: &str, const_value: &str) -> ObjectSchema {
+  let mut properties = BTreeMap::new();
+  properties.insert(
+    property_name.to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      const_value: Some(json!(const_value)),
+      ..Default::default()
+    }),
+  );
+  ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties,
+    required: vec![property_name.to_string()],
+    ..Default::default()
+  }
+}
+
+#[test]
+fn implicit_discriminator_mapping_from_const_values() {
+  let allergies = make_variant_schema_with_const("type", "allergies");
+  let diet = make_variant_schema_with_const("type", "diet");
+
+  let health = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: None,
+    }),
+    ..Default::default()
+  };
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
+    ("Diet".to_string(), ObjectOrReference::Object(diet)),
+    ("Health".to_string(), ObjectOrReference::Object(health)),
+  ]));
+
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let allergies_mapping = registry.mapping("Allergies");
+  assert!(
+    allergies_mapping.is_some(),
+    "Allergies should have a synthesized mapping"
+  );
+  let am = allergies_mapping.unwrap();
+  assert_eq!(am.field_name, "type", "field_name should be 'type'");
+  assert_eq!(am.field_value, "allergies", "field_value should be 'allergies'");
+
+  let diet_mapping = registry.mapping("Diet");
+  assert!(diet_mapping.is_some(), "Diet should have a synthesized mapping");
+  let dm = diet_mapping.unwrap();
+  assert_eq!(dm.field_name, "type", "field_name should be 'type'");
+  assert_eq!(dm.field_value, "diet", "field_value should be 'diet'");
+
+  assert!(stats.warnings.is_empty(), "should have no warnings");
+}
+
+#[test]
+fn implicit_discriminator_mapping_warns_on_missing_const() {
+  let allergies = make_variant_schema_with_const("type", "allergies");
+  let diet = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    properties: BTreeMap::from([(
+      "type".to_string(),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+        ..Default::default()
+      }),
+    )]),
+    ..Default::default()
+  };
+
+  let health = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: None,
+    }),
+    ..Default::default()
+  };
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
+    ("Diet".to_string(), ObjectOrReference::Object(diet)),
+    ("Health".to_string(), ObjectOrReference::Object(health)),
+  ]));
+
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  assert!(
+    registry.mapping("Allergies").is_none(),
+    "no mapping should be synthesized"
+  );
+  assert!(registry.mapping("Diet").is_none(), "no mapping should be synthesized");
+  assert_eq!(stats.warnings.len(), 1, "should have one warning");
+  assert!(
+    matches!(&stats.warnings[0], GenerationWarning::DiscriminatorMappingFailed { schema_name, message }
+      if schema_name == "Health" && message.contains("Diet") && message.contains("no string const")),
+    "warning should mention Diet missing const: {:?}",
+    stats.warnings[0]
+  );
+}
+
+#[test]
+fn implicit_discriminator_mapping_warns_on_duplicate_const() {
+  let allergies = make_variant_schema_with_const("type", "same_value");
+  let diet = make_variant_schema_with_const("type", "same_value");
+
+  let health = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: None,
+    }),
+    ..Default::default()
+  };
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
+    ("Diet".to_string(), ObjectOrReference::Object(diet)),
+    ("Health".to_string(), ObjectOrReference::Object(health)),
+  ]));
+
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  assert!(
+    registry.mapping("Allergies").is_none(),
+    "no mapping should be synthesized"
+  );
+  assert!(registry.mapping("Diet").is_none(), "no mapping should be synthesized");
+  assert_eq!(stats.warnings.len(), 1, "should have one warning");
+  assert!(
+    matches!(&stats.warnings[0], GenerationWarning::DiscriminatorMappingFailed { schema_name, message }
+      if schema_name == "Health" && message.contains("duplicate")),
+    "warning should mention duplicate: {:?}",
+    stats.warnings[0]
+  );
+}
+
+#[test]
+fn explicit_mapping_takes_precedence_over_const() {
+  let allergies = make_variant_schema_with_const("type", "allergies");
+  let diet = make_variant_schema_with_const("type", "diet");
+
+  let health = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: Some(BTreeMap::from([
+        ("allergy_override".to_string(), format!("{SCHEMA_REF_PREFIX}Allergies")),
+        ("diet_override".to_string(), format!("{SCHEMA_REF_PREFIX}Diet")),
+      ])),
+    }),
+    ..Default::default()
+  };
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
+    ("Diet".to_string(), ObjectOrReference::Object(diet)),
+    ("Health".to_string(), ObjectOrReference::Object(health)),
+  ]));
+
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let am = registry.mapping("Allergies").expect("Allergies should have a mapping");
+  assert_eq!(
+    am.field_value, "allergy_override",
+    "explicit mapping should take precedence"
+  );
+
+  let dm = registry.mapping("Diet").expect("Diet should have a mapping");
+  assert_eq!(
+    dm.field_value, "diet_override",
+    "explicit mapping should take precedence"
+  );
+
+  assert!(stats.warnings.is_empty(), "should have no warnings");
+}
+
+#[test]
+fn effective_mapping_synthesizes_from_cache() {
+  let allergies = make_variant_schema_with_const("type", "allergies");
+  let diet = make_variant_schema_with_const("type", "diet");
+
+  let health = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
+    discriminator: Some(Discriminator {
+      property_name: "type".to_string(),
+      mapping: None,
+    }),
+    ..Default::default()
+  };
+
+  let spec = create_test_spec_with_schemas(BTreeMap::from([
+    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
+    ("Diet".to_string(), ObjectOrReference::Object(diet)),
+    ("Health".to_string(), ObjectOrReference::Object(health.clone())),
+  ]));
+
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+
+  let effective = registry.effective_mapping(&health);
+  assert!(effective.is_some(), "effective mapping should be available");
+
+  let mapping = effective.unwrap();
+  assert_eq!(mapping.len(), 2, "should have 2 entries");
+  assert_eq!(
+    mapping.get("allergies").map(std::string::String::as_str),
+    Some(format!("{SCHEMA_REF_PREFIX}Allergies").as_str()),
+    "allergies value should map to Allergies ref"
+  );
+  assert_eq!(
+    mapping.get("diet").map(std::string::String::as_str),
+    Some(format!("{SCHEMA_REF_PREFIX}Diet").as_str()),
+    "diet value should map to Diet ref"
   );
 }

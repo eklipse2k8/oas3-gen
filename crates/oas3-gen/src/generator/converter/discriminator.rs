@@ -80,20 +80,23 @@ impl DiscriminatorConverter {
     )
   }
 
-  /// Extracts discriminated enum variants from the schema's discriminator mapping.
+  /// Extracts discriminated enum variants from the effective discriminator mapping.
   ///
   /// Groups discriminator tag values by their target schema, producing one variant
   /// per schema. Variant names strip any common prefix with `parent_name` to reduce
   /// redundancy (e.g., parent "Pet" with child "PetCat" yields variant "Cat").
   ///
+  /// Uses the effective mapping from the schema registry, which handles both
+  /// explicit mappings and implicit mappings synthesized from `const` values.
+  ///
   /// Unreachable schemas (filtered by operation selection) are excluded.
-  /// Returns an empty vector if the schema has no discriminator mapping.
+  /// Returns an empty vector if no effective mapping is available.
   pub(crate) fn build_variants_from_mapping(
     &self,
     parent_name: &str,
     schema: &ObjectSchema,
   ) -> Vec<DiscriminatedVariant> {
-    let Some(mapping) = schema.discriminator.as_ref().and_then(|d| d.mapping.as_ref()) else {
+    let Some(mapping) = self.context.graph().effective_mapping(schema) else {
       return vec![];
     };
 
@@ -129,23 +132,25 @@ impl DiscriminatorConverter {
       .collect()
   }
 
-  /// Attempts to convert a union enum into a discriminated enum using the schema's
-  /// discriminator mapping.
+  /// Attempts to convert a union enum into a discriminated enum using the
+  /// effective discriminator mapping.
   ///
   /// Returns `Some(RustType::DiscriminatedEnum)` if:
-  /// - The schema has a discriminator with a mapping
+  /// - The schema has a discriminator
+  /// - An effective mapping is available (explicit or synthesized from `const`)
   /// - Every mapping entry has a corresponding variant in the provided list
   ///
   /// Returns `None` if conversion is not possible, indicating the original union
   /// enum should be used.
   pub(crate) fn try_upgrade_to_discriminated(
+    &self,
     name: &str,
     schema: &ObjectSchema,
     variants: &[VariantDef],
     methods: Vec<EnumMethod>,
   ) -> Option<RustType> {
     let discriminator = schema.discriminator.as_ref()?;
-    let mapping = discriminator.mapping.as_ref()?;
+    let mapping = &self.context.graph().effective_mapping(schema)?;
 
     if !Self::all_mappings_have_variants(variants, mapping) {
       return None;

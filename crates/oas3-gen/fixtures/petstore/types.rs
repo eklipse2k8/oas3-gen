@@ -13,7 +13,16 @@ pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api
 pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
 pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+#[serde(default)]
+pub struct Allergies {
+  #[doc(hidden)]
+  #[serde(default, rename = "type", skip_deserializing)]
+  #[default(Some("allergies".to_string()))]
+  pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Cat {
+  pub allergies: Option<Box<Health>>,
   #[serde(rename = "favoriteToy")]
   pub favorite_toy: Option<String>,
   pub id: i64,
@@ -46,9 +55,59 @@ pub enum CreatePetsResponse {
   Unknown(Error),
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+#[serde(default)]
+pub struct Diet {
+  #[doc(hidden)]
+  #[serde(default, rename = "type", skip_deserializing)]
+  #[default(Some("diet".to_string()))]
+  pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Error {
   pub code: i32,
   pub message: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub enum Health {
+  Allergies(Allergies),
+  Diet(Diet),
+}
+impl Health {
+  pub const DISCRIMINATOR_FIELD: &'static str = "type";
+}
+impl Default for Health {
+  fn default() -> Self {
+    Self::Allergies(<Allergies>::default())
+  }
+}
+impl<'de> serde::Deserialize<'de> for Health {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+      Some("allergies") => serde_json::from_value(value)
+        .map(Self::Allergies)
+        .map_err(serde::de::Error::custom),
+      Some("diet") => serde_json::from_value(value)
+        .map(Self::Diet)
+        .map_err(serde::de::Error::custom),
+      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      Some(other) => Err(serde::de::Error::custom(format!(
+        "Unknown discriminator value '{}' for field '{}'",
+        other, "type"
+      ))),
+    }
+  }
+}
+impl Health {
+  pub fn allergies() -> Self {
+    Self::Allergies(Allergies::default())
+  }
+  pub fn diet() -> Self {
+    Self::Diet(Diet::default())
+  }
 }
 /// List all cats
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
@@ -255,6 +314,7 @@ pub enum ListPetsResponse {
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Pet {
+  pub allergies: Option<Box<Health>>,
   pub id: i64,
   pub name: String,
   pub tag: Option<String>,

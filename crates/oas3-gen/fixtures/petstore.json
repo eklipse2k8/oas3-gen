@@ -288,6 +288,36 @@
 	},
 	"components": {
 		"schemas": {
+			"Allergies": {
+				"type": "object",
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "allergies"
+					}
+				},
+				"required": ["type"]
+			},
+			"Diet": {
+				"type": "object",
+				"properties": {
+					"type": {
+						"type": "string",
+						"const": "diet"
+					}
+				},
+				"required": ["type"]
+			},
+			"Health": {
+				"type": "object",
+				"oneOf": [
+					{ "$ref": "#/components/schemas/Allergies" },
+					{ "$ref": "#/components/schemas/Diet" }
+				],
+				"discriminator": {
+					"propertyName": "type"
+				}
+			},
 			"Pet": {
 				"type": "object",
 				"required": ["id", "name"],
@@ -298,6 +328,9 @@
 					},
 					"name": {
 						"type": "string"
+					},
+					"allergies": {
+						"$ref": "#/components/schemas/Health"
 					},
 					"tag": {
 						"type": "string"
