@@ -42,6 +42,9 @@ cargo run -- generate types -i spec.json -o output.rs --quiet
 # Generate all schemas (default: only operation-referenced schemas)
 cargo run -- generate types -i spec.json -o output.rs --all-schemas
 
+# Emit all component-level header constants (default: only operation-referenced headers)
+cargo run -- generate types -i spec.json -o output.rs --all-headers
+
 # Output to nested directory (creates parent directories automatically)
 cargo run -- generate types -i spec.json -o output/types/generated.rs
 
@@ -67,6 +70,7 @@ cargo run -- list --help
 | `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |
 | `--no-helpers` | Disable generation of ergonomic helper methods for enum variants |
+| `--all-headers` | Emit header constants for all header parameters in components, not just those used in operations |
 | `--only` | Include only the specified comma-separated operation IDs |
 | `--exclude` | Exclude the specified comma-separated operation IDs |
 | `--all-schemas` | Generate all schemas defined in spec (default: only schemas referenced by operations) |

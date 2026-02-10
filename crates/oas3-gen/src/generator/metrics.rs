@@ -1,6 +1,9 @@
 use strum::Display;
 
-use crate::generator::ast::{OperationInfo, OperationKind, RustType};
+use crate::generator::{
+  ast::{OperationInfo, OperationKind, RustType},
+  operation_registry::OperationEntry,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GenerationStats {
@@ -115,6 +118,21 @@ pub enum GenerationWarning {
 }
 
 impl GenerationWarning {
+  pub fn conversion_failure(entry: &OperationEntry, error: &impl ToString) -> Self {
+    Self::OperationConversionFailed {
+      method: entry.method.to_string(),
+      path: entry.path.clone(),
+      error: error.to_string(),
+    }
+  }
+
+  pub fn operation_specific(operation_id: &impl ToString, message: &impl ToString) -> Self {
+    Self::OperationSpecific {
+      operation_id: operation_id.to_string(),
+      message: message.to_string(),
+    }
+  }
+
   pub fn is_skipped_item(&self) -> bool {
     matches!(
       self,

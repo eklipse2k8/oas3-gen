@@ -300,7 +300,15 @@
 					"type": "string"
 				},
 				"in": "path"
-			}
+			},
+			"x-api-key": {
+        "name": "x-api-key",
+        "description": "API key to authenticate requests.",
+        "schema": {
+          "type": "string"
+        },
+        "in": "header"
+      }
 		},
 		"schemas": {
 			"Allergies": {

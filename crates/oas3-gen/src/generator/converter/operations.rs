@@ -1,5 +1,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
+use oas3::spec::ParameterIn;
+
 use super::{
   ConverterContext, SchemaConverter, SerdeUsageRecorder,
   requests::{BodyInfo, RequestConverter, RequestOutput},
@@ -9,6 +11,7 @@ use crate::generator::{
   ast::{
     Documentation, EnumToken, FieldDef, HandlerBodyInfo, MethodNameToken, OperationInfo, ParameterLocation, ParsedPath,
     ResponseEnumDef, RustType, ServerRequestTraitDef, ServerTraitMethod, StructMethod, StructToken, TraitToken,
+    constants::HttpHeaderRef,
   },
   metrics::GenerationWarning,
   naming::{
@@ -38,25 +41,24 @@ pub(crate) struct OperationsOutput {
   pub(crate) operations: Vec<OperationInfo>,
   pub(crate) warnings: Vec<GenerationWarning>,
   pub(crate) usage_recorder: SerdeUsageRecorder,
-  pub(crate) unique_headers: BTreeSet<String>,
+  pub(crate) unique_headers: BTreeSet<HttpHeaderRef>,
 }
 
 /// Orchestrates conversion of all operations in a specification.
 ///
 /// Iterates over operation entries, converts each to request/response
 /// types, and aggregates results with error handling and warning collection.
+#[derive(Debug, Clone)]
 pub(crate) struct OperationsProcessor {
   context: Rc<ConverterContext>,
-  schema_converter: SchemaConverter,
+  converter: OperationConverter,
 }
 
 impl OperationsProcessor {
   /// Creates a new operations processor with the shared converter context.
-  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
-    Self {
-      context,
-      schema_converter,
-    }
+  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: &SchemaConverter) -> Self {
+    let converter = OperationConverter::new(context.clone(), schema_converter.clone());
+    Self { context, converter }
   }
 
   /// Converts all operations, collecting types and warnings.
@@ -65,59 +67,50 @@ impl OperationsProcessor {
   /// the entire generation. Returns accumulated type usage data for
   /// serde derive optimization in postprocessing.
   pub(crate) fn process_all<'a>(&self, entries: impl Iterator<Item = &'a OperationEntry>) -> OperationsOutput {
-    let mut rust_types = vec![];
-    let mut operations_info = vec![];
+    let mut types = vec![];
+    let mut operations = vec![];
     let mut warnings = vec![];
     let mut unique_headers = BTreeSet::new();
 
-    let operation_converter = OperationConverter::new(self.context.clone(), self.schema_converter.clone());
-
     for entry in entries {
-      match operation_converter.convert(entry) {
-        Ok(result) => {
-          warnings.extend(
-            result
-              .operation_info
-              .warnings
-              .iter()
-              .map(|w| GenerationWarning::OperationSpecific {
-                operation_id: result.operation_info.operation_id.clone(),
-                message: w.clone(),
-              }),
-          );
-
-          Self::collect_header_names(&result.operation_info.parameters, &mut unique_headers);
-
-          rust_types.extend(result.types);
-          operations_info.push(result.operation_info);
+      match self.converter.convert(entry) {
+        Ok(ConversionResult {
+          types: operation_types,
+          operation_info,
+        }) => {
+          warnings.extend(operation_info.warnings());
+          unique_headers.extend(operation_info.header_names());
+          types.extend(operation_types);
+          operations.push(operation_info);
         }
-        Err(e) => {
-          warnings.push(GenerationWarning::OperationConversionFailed {
-            method: entry.method.to_string(),
-            path: entry.path.clone(),
-            error: e.to_string(),
-          });
-        }
+        Err(error) => warnings.push(GenerationWarning::conversion_failure(entry, &error)),
       }
     }
 
+    if self.context.config().include_all_headers() {
+      self.extend_component_headers(&mut unique_headers);
+    }
+
     OperationsOutput {
-      types: rust_types,
-      operations: operations_info,
+      types,
+      operations,
       warnings,
       usage_recorder: self.context.take_type_usage(),
       unique_headers,
     }
   }
 
-  fn collect_header_names(parameters: &[FieldDef], headers: &mut BTreeSet<String>) {
-    for param in parameters {
-      if matches!(param.parameter_location, Some(ParameterLocation::Header))
-        && let Some(original_name) = param.original_name.as_deref()
-      {
-        headers.insert(original_name.to_ascii_lowercase());
-      }
-    }
+  fn extend_component_headers(&self, unique_headers: &mut BTreeSet<HttpHeaderRef>) {
+    let spec = self.context.graph().spec();
+    unique_headers.extend(
+      spec
+        .components
+        .iter()
+        .flat_map(|components| components.parameters.values())
+        .filter_map(|parameter| parameter.resolve(spec).ok())
+        .filter(|parameter| parameter.location == ParameterIn::Header)
+        .map(|parameter| HttpHeaderRef::from(parameter.name.to_ascii_lowercase())),
+    );
   }
 }
 

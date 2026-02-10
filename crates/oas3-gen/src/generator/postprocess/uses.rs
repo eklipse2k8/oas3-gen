@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use crate::generator::{
-  ast::{MethodKind, RustType, SerdeImpl, StructKind, ValidationAttribute, constants::HttpHeaderRef},
+  ast::{MethodKind, RustType, SerdeImpl, ValidationAttribute},
   converter::GenerationTarget,
 };
 
@@ -34,32 +34,6 @@ impl RustTypeDeduplication {
     }
 
     map.into_values().collect::<Vec<_>>()
-  }
-}
-
-pub(crate) struct HeaderRefCollection {
-  types: Vec<RustType>,
-}
-
-impl HeaderRefCollection {
-  pub(crate) fn new(types: Vec<RustType>) -> Self {
-    Self { types }
-  }
-
-  pub(crate) fn process(self) -> Vec<HttpHeaderRef> {
-    self
-      .types
-      .iter()
-      .filter_map(|t| match t {
-        RustType::Struct(def) if def.kind == StructKind::HeaderParams => Some(def),
-        _ => None,
-      })
-      .flat_map(|def| &def.fields)
-      .filter_map(|field| field.original_name.as_deref())
-      .collect::<BTreeSet<_>>()
-      .into_iter()
-      .map(HttpHeaderRef::from)
-      .collect()
   }
 }
 

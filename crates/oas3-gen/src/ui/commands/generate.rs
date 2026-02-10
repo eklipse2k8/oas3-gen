@@ -9,7 +9,7 @@ use crossterm::style::Stylize;
 use crate::{
   generator::{
     ClientModMode, ClientMode, CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationMode,
-    GenerationTarget, ODataPolicy, ServerModMode, TypesMode,
+    GenerationTarget, HeaderScope, ODataPolicy, SchemaScope, ServerModMode, TypesMode,
     codegen::{GeneratedFileType, Visibility},
     metrics::GenerationStats,
     orchestrator::{GeneratedFinalOutput, Orchestrator},
@@ -33,6 +33,7 @@ pub struct GenerateConfig {
   pub verbose: bool,
   pub quiet: bool,
   pub all_schemas: bool,
+  pub all_headers: bool,
   pub odata_support: bool,
   pub preserve_case_variants: bool,
   pub case_insensitive_enums: bool,
@@ -79,6 +80,16 @@ impl GenerateConfig {
         GenerateMode::ServerMod => GenerationTarget::Server,
         _ => GenerationTarget::Client,
       })
+      .schema_scope(if self.all_schemas {
+        SchemaScope::All
+      } else {
+        SchemaScope::ReferencedOnly
+      })
+      .header_scope(if self.all_headers {
+        HeaderScope::All
+      } else {
+        HeaderScope::ReferencedOnly
+      })
       .customizations(self.customizations.clone())
       .build();
 
@@ -88,7 +99,6 @@ impl GenerateConfig {
       config,
       self.only_operations.as_ref(),
       self.excluded_operations.as_ref(),
-      self.all_schemas,
     )
   }
 
@@ -150,6 +160,7 @@ impl GenerateConfig {
       enum_mode,
       no_helpers,
       all_schemas,
+      all_headers,
       only,
       exclude,
       verbose,
@@ -173,6 +184,7 @@ impl GenerateConfig {
       verbose,
       quiet,
       all_schemas,
+      all_headers,
       odata_support,
       preserve_case_variants: enum_policies.preserve_case_variants,
       case_insensitive_enums: enum_policies.case_insensitive_enums,

@@ -1,18 +1,19 @@
 use crate::generator::{
-  CodegenConfig, TypesMode,
+  CodegenConfig, SchemaScope, TypesMode,
   codegen::{GeneratedFileType, Visibility},
   orchestrator::Orchestrator,
 };
 
 fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
-  Orchestrator::new(
-    spec,
-    Visibility::default(),
-    CodegenConfig::default(),
-    None,
-    None,
-    all_schemas,
-  )
+  let config = CodegenConfig {
+    schema_scope: if all_schemas {
+      SchemaScope::All
+    } else {
+      SchemaScope::ReferencedOnly
+    },
+    ..Default::default()
+  };
+  Orchestrator::new(spec, Visibility::default(), config, None, None)
 }
 
 #[test]

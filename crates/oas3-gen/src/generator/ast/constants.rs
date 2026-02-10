@@ -34,11 +34,12 @@ pub struct HttpHeaderRef {
   pub header_name: HeaderNameToken,
 }
 
-impl From<&str> for HttpHeaderRef {
-  fn from(s: &str) -> Self {
+impl<T: ToString> From<T> for HttpHeaderRef {
+  fn from(s: T) -> Self {
+    let header_name_str = s.to_string();
     Self {
-      const_token: ConstToken::from_raw(s),
-      header_name: HeaderNameToken::from_raw(s),
+      const_token: ConstToken::from_raw(&header_name_str),
+      header_name: HeaderNameToken::from_raw(&header_name_str),
     }
   }
 }

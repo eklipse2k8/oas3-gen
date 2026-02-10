@@ -12,7 +12,8 @@ pub(crate) mod postprocess;
 pub(crate) mod schema_registry;
 
 pub use converter::{
-  CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationTarget, ODataPolicy,
+  CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationTarget, HeaderScope, ODataPolicy,
+  SchemaScope,
 };
 pub use mode::{ClientModMode, ClientMode, GenerationMode, ServerModMode, TypesMode};
 

@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use validator::Validate;
+pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
 pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
 pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
 pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");

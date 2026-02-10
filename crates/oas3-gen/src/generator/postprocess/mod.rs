@@ -14,7 +14,7 @@ use crate::generator::{
   postprocess::{
     response_enum::ResponseEnumDeduplicator,
     serde_usage::SerdeUsage,
-    uses::{HeaderRefCollection, ModuleImports, RustTypeDeduplication},
+    uses::{ModuleImports, RustTypeDeduplication},
     validation::NestedValidationProcessor,
   },
 };
@@ -33,6 +33,7 @@ impl PostprocessOutput {
     operations: Vec<OperationInfo>,
     seed_usage: std::collections::BTreeMap<EnumToken, (bool, bool)>,
     target: GenerationTarget,
+    header_refs: Vec<HttpHeaderRef>,
   ) -> Self {
     let (mut types, operations) = ResponseEnumDeduplicator::new(types, operations).process();
 
@@ -41,13 +42,12 @@ impl PostprocessOutput {
     SerdeUsage::new(&types, seed_usage, target).apply(&mut types);
 
     let dedup_output = RustTypeDeduplication::new(types).process();
-    let header_output = HeaderRefCollection::new(dedup_output.clone()).process();
     let uses_output = ModuleImports::new(dedup_output.clone(), target).process();
 
     Self {
       types: dedup_output,
       operations,
-      header_refs: header_output,
+      header_refs,
       uses: uses_output,
     }
   }

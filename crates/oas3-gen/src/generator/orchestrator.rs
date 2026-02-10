@@ -3,7 +3,7 @@ use std::{collections::HashSet, rc::Rc, sync::Arc};
 use oas3::Spec;
 
 use crate::generator::{
-  ast::{ClientRootNode, OperationInfo, RustType},
+  ast::{ClientRootNode, OperationInfo, RustType, constants::HttpHeaderRef},
   codegen::{GeneratedResult, SchemaCodeGenerator, Visibility},
   converter::{
     CodegenConfig, ConverterContext, GenerationTarget, OperationsProcessor, SchemaConverter, SerdeUsageRecorder,
@@ -24,13 +24,13 @@ pub struct Orchestrator {
   visibility: Visibility,
   config: CodegenConfig,
   operation_registry: OperationRegistry,
-  include_unused_schemas: bool,
 }
 
 struct GenerationArtifacts {
   rust_types: Vec<RustType>,
   operations_info: Vec<OperationInfo>,
   serde_recorder: SerdeUsageRecorder,
+  unique_headers: Vec<HttpHeaderRef>,
   stats: GenerationStats,
   config: CodegenConfig,
 }
@@ -55,7 +55,6 @@ impl Orchestrator {
     config: CodegenConfig,
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
-    include_unused_schemas: bool,
   ) -> Self {
     let operation_registry = OperationRegistry::with_filters(&spec, only_operations, excluded_operations);
     Self {
@@ -63,7 +62,6 @@ impl Orchestrator {
       visibility,
       config,
       operation_registry,
-      include_unused_schemas,
     }
   }
 
@@ -75,6 +73,7 @@ impl Orchestrator {
       artifacts.operations_info,
       serde_usage,
       artifacts.config.target,
+      artifacts.unique_headers,
     );
 
     let server_trait_def = if artifacts.config.target == GenerationTarget::Server {
@@ -110,7 +109,7 @@ impl Orchestrator {
 
     let (cycle_info, filtered_schemas) = schema_graph.initialize(
       &self.operation_registry,
-      self.include_unused_schemas,
+      self.config.include_all_schemas(),
       &union_fingerprints,
     );
 
@@ -134,7 +133,7 @@ impl Orchestrator {
     let converter = SchemaConverter::new(&context);
     let mut rust_types = converter.convert_all_schemas(filtered_schemas.as_deref(), &mut stats);
 
-    let processor = OperationsProcessor::new(context.clone(), converter.clone());
+    let processor = OperationsProcessor::new(context.clone(), &converter);
     let operation_results = processor.process_all(self.operation_registry.operations());
 
     rust_types.extend(operation_results.types);
@@ -158,6 +157,7 @@ impl Orchestrator {
       rust_types,
       operations_info: operation_results.operations,
       serde_recorder: operation_results.usage_recorder,
+      unique_headers: operation_results.unique_headers.into_iter().collect::<Vec<_>>(),
       stats,
       config: context.config.clone(),
     }

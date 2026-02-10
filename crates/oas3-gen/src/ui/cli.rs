@@ -131,6 +131,10 @@ pub struct GenerateCommand {
   )]
   pub all_schemas: bool,
 
+  /// Emit header constants for all parameters defined in components, not just those used in operations
+  #[arg(long, default_value_t = false, display_order = 15, help_heading = "Code Generation")]
+  pub all_headers: bool,
+
   /// Include only the specified comma-separated operation IDs
   #[arg(
     group = "filter",

@@ -1,20 +1,30 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::generator::{
-  CodegenConfig, TypesMode,
+  CodegenConfig, SchemaScope, TypesMode,
   ast::{ClientRootNode, StructToken},
   codegen::{GeneratedFileType, Visibility},
   orchestrator::Orchestrator,
 };
 
+fn config_for_schema_scope(all_schemas: bool) -> CodegenConfig {
+  CodegenConfig {
+    schema_scope: if all_schemas {
+      SchemaScope::All
+    } else {
+      SchemaScope::ReferencedOnly
+    },
+    ..Default::default()
+  }
+}
+
 fn make_orchestrator(spec: oas3::Spec, all_schemas: bool) -> Orchestrator {
   Orchestrator::new(
     spec,
     Visibility::default(),
-    CodegenConfig::default(),
+    config_for_schema_scope(all_schemas),
     None,
     None,
-    all_schemas,
   )
 }
 
@@ -27,10 +37,9 @@ fn make_orchestrator_with_ops(
   Orchestrator::new(
     spec,
     Visibility::default(),
-    CodegenConfig::default(),
+    config_for_schema_scope(all_schemas),
     only,
     exclude,
-    all_schemas,
   )
 }
 
@@ -247,8 +256,15 @@ fn make_orchestrator_with_customizations(
   all_schemas: bool,
   customizations: HashMap<String, String>,
 ) -> Orchestrator {
-  let config = CodegenConfig::builder().customizations(customizations).build();
-  Orchestrator::new(spec, Visibility::default(), config, None, None, all_schemas)
+  let config = CodegenConfig::builder()
+    .schema_scope(if all_schemas {
+      SchemaScope::All
+    } else {
+      SchemaScope::ReferencedOnly
+    })
+    .customizations(customizations)
+    .build();
+  Orchestrator::new(spec, Visibility::default(), config, None, None)
 }
 
 #[test]

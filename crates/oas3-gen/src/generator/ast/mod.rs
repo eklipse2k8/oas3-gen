@@ -37,6 +37,7 @@ pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
+use crate::generator::{ast::constants::HttpHeaderRef, metrics::GenerationWarning};
 
 /// Node used to generate file header
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
@@ -242,6 +243,24 @@ pub struct OperationInfo {
   pub body: Option<OperationBody>,
   #[builder(default)]
   pub documentation: Documentation,
+}
+
+impl OperationInfo {
+  pub fn header_names(&self) -> impl Iterator<Item = HttpHeaderRef> {
+    self
+      .parameters
+      .iter()
+      .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)))
+      .filter_map(|p| p.original_name.as_deref())
+      .map(|name| HttpHeaderRef::from(name.to_ascii_lowercase()))
+  }
+
+  pub fn warnings(&self) -> impl Iterator<Item = GenerationWarning> {
+    self
+      .warnings
+      .iter()
+      .map(|warning| GenerationWarning::operation_specific(&self.operation_id, warning))
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

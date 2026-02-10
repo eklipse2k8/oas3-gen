@@ -14,6 +14,7 @@ Rust code.
 - [Type Customization](#type-customization)
 - [Operation Filtering](#operation-filtering)
 - [Schema Filtering](#schema-filtering)
+- [Header Emission](#header-emission)
 
 ---
 
@@ -636,6 +637,49 @@ cargo run -- generate client -i spec.json -o client.rs --only listPets
 
 ---
 
+## Header Emission
+
+```text
+--all-headers
+```
+
+By default, header constants are only generated for headers that appear as parameters
+in selected operations. The `--all-headers` flag additionally emits constants for
+all header parameters defined in `components/parameters`, even if no operation
+references them.
+
+### Default (operation-referenced headers only)
+
+Given a spec with `x-api-version` used in an operation and `x-api-key` defined
+in `components/parameters` but not referenced by any operation:
+
+```bash
+cargo run -- generate types -i spec.json -o types.rs
+```
+
+**Generated:**
+
+```rust
+pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
+```
+
+`x-api-key` is not emitted because no operation uses it.
+
+### With `--all-headers`
+
+```bash
+cargo run -- generate types -i spec.json -o types.rs --all-headers
+```
+
+**Generated:**
+
+```rust
+pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
+pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
+```
+
+---
+
 ## Flag Summary
 
 | Flag | Default | Description |
@@ -646,6 +690,7 @@ cargo run -- generate client -i spec.json -o client.rs --only listPets
 | `--no-helpers` | `false` | Disable enum constructor helpers |
 | `--odata-support` | `false` | Make `@odata.*` fields optional |
 | `-c, --customize` | *(none)* | Custom type mapping (repeatable) |
+| `--all-headers` | `false` | Emit header constants for all component-level headers |
 | `--only` | *(none)* | Include only specified operations |
 | `--exclude` | *(none)* | Exclude specified operations |
 | `--all-schemas` | `false` | Generate all schemas regardless of usage |

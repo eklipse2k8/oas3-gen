@@ -115,7 +115,10 @@ fn test_show_pet_by_id_header_to_header_map() {
 
 #[test]
 fn test_create_pets_request_compiles() {
-  let request = CreatePetsRequest::builder().api_version("v1".to_string()).build().unwrap();
+  let request = CreatePetsRequest::builder()
+    .api_version("v1".to_string())
+    .build()
+    .unwrap();
   assert!(request.validate().is_ok(), "request with api_version should be valid");
   assert_eq!(request.path.api_version, "v1", "api_version should match");
 }
@@ -174,4 +177,13 @@ fn test_query_serialization() {
   let query_none = ListPetsRequestQuery { limit: None };
   let serialized_none = serde_json::to_string(&query_none).expect("serialization should succeed");
   assert_eq!(serialized_none, "{}", "None fields should be skipped");
+}
+
+#[test]
+fn test_component_header_constant_exists() {
+  assert_eq!(
+    X_API_KEY.as_str(),
+    "x-api-key",
+    "component-level header constant should exist"
+  );
 }

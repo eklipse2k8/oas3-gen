@@ -99,6 +99,26 @@ pub enum GenerationTarget {
   Server,
 }
 
+/// Policy for schema inclusion scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SchemaScope {
+  /// Generate only schemas referenced by operations.
+  #[default]
+  ReferencedOnly,
+  /// Generate all schemas defined in the spec.
+  All,
+}
+
+/// Policy for header constant inclusion scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HeaderScope {
+  /// Emit header constants only for headers used in operations.
+  #[default]
+  ReferencedOnly,
+  /// Emit header constants for all header parameters in components.
+  All,
+}
+
 /// Configuration for code generation.
 ///
 /// Uses typed enums instead of booleans to make intent explicit at call sites
@@ -115,6 +135,10 @@ pub struct CodegenConfig {
   pub odata: ODataPolicy,
   #[builder(default)]
   pub target: GenerationTarget,
+  #[builder(default)]
+  pub schema_scope: SchemaScope,
+  #[builder(default)]
+  pub header_scope: HeaderScope,
   #[builder(default)]
   pub customizations: HashMap<String, String>,
 }
@@ -145,6 +169,19 @@ impl CodegenConfig {
   #[must_use]
   pub fn odata_support(&self) -> bool {
     self.odata == ODataPolicy::Enabled
+  }
+
+  /// Returns `true` if all schemas should be generated, not just those referenced by operations.
+  #[must_use]
+  pub fn include_all_schemas(&self) -> bool {
+    self.schema_scope == SchemaScope::All
+  }
+
+  /// Returns `true` if header constants should be emitted for all component-level headers,
+  /// not just those used in operations.
+  #[must_use]
+  pub fn include_all_headers(&self) -> bool {
+    self.header_scope == HeaderScope::All
   }
 }
 

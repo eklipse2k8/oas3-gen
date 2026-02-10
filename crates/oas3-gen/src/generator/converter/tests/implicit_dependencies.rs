@@ -20,7 +20,6 @@ fn test_implicit_dependency_via_union_fingerprint() {
     CodegenConfig::default(),
     Some(&only_ops),
     None,
-    false,
   );
 
   let output = orchestrator.generate(&TypesMode, "test.json").unwrap();
