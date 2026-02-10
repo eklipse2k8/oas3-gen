@@ -507,7 +507,7 @@ impl DiscriminatorFieldInfo {
     Some(Self {
       value,
       is_base: is_base_discriminator && !is_child_discriminator,
-      has_enum: prop_schema.has_enum_values(),
+      has_enum: prop_schema.has_selectable_values(),
     })
   }
 

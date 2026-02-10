@@ -5,7 +5,7 @@ use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, 
 use crate::{
   generator::{
     ast::{RustType, SerdeAttribute},
-    converter::{SchemaConverter, discriminator::DiscriminatorConverter},
+    converter::{discriminator::DiscriminatorConverter, SchemaConverter},
   },
   tests::common::{create_test_context, create_test_graph, default_config},
 };
@@ -123,6 +123,68 @@ fn discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
   assert!(
     !sploot_role_field.rust_type.to_rust_type().starts_with("Option<"),
     "sploot_role field should be required, not optional"
+  );
+
+  Ok(())
+}
+
+#[test]
+fn discriminator_with_single_enum_is_hidden() -> anyhow::Result<()> {
+  let mut howl_schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    additional_properties: Some(Schema::Boolean(BooleanSchema(false))),
+    ..Default::default()
+  };
+  howl_schema.properties.insert(
+    "howl_role".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      enum_values: vec![serde_json::Value::String("only_value".to_string())],
+      ..Default::default()
+    }),
+  );
+  howl_schema.properties.insert(
+    "howl_content".to_string(),
+    ObjectOrReference::Object(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      ..Default::default()
+    }),
+  );
+  howl_schema.required = vec!["howl_role".to_string(), "howl_content".to_string()];
+  howl_schema.discriminator = Some(Discriminator {
+    property_name: "howl_role".to_string(),
+    mapping: None,
+  });
+
+  let graph = create_test_graph(BTreeMap::from([("Howl".to_string(), howl_schema)]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Howl", graph.get("Howl").unwrap())?;
+
+  let struct_def = result
+    .iter()
+    .find_map(|ty| match ty {
+      RustType::Struct(def) => Some(def),
+      _ => None,
+    })
+    .expect("Struct should be present");
+
+  let howl_role_field = struct_def
+    .fields
+    .iter()
+    .find(|f| f.name == "howl_role")
+    .expect("howl_role field should exist");
+
+  assert!(
+    howl_role_field.doc_hidden,
+    "single-value enum discriminator should be hidden like const"
+  );
+  assert!(
+    howl_role_field
+      .serde_attrs
+      .iter()
+      .any(|a| matches!(a, SerdeAttribute::Skip)),
+    "single-value enum discriminator should be skipped like const"
   );
 
   Ok(())

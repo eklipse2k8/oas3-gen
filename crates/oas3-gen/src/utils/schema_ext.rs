@@ -79,6 +79,12 @@ pub(crate) trait SchemaExt {
   /// Returns true if the schema has enum values defined.
   fn has_enum_values(&self) -> bool;
 
+  /// Returns true if the schema has multiple enum values that a user can choose between.
+  ///
+  /// A single-value enum is semantically equivalent to `const` (no choice exists),
+  /// so this returns `false` for `enum: ["only_value"]` and `true` for `enum: ["a", "b"]`.
+  fn has_selectable_values(&self) -> bool;
+
   /// Returns true if the schema has an inline enum (multiple enum values directly or in array items).
   fn has_inline_enum(&self, spec: &Spec) -> bool;
 
@@ -336,6 +342,10 @@ impl SchemaExt for ObjectSchema {
 
   fn has_enum_values(&self) -> bool {
     !self.enum_values.is_empty()
+  }
+
+  fn has_selectable_values(&self) -> bool {
+    self.enum_values.len() > 1
   }
 
   fn has_inline_enum(&self, spec: &Spec) -> bool {
