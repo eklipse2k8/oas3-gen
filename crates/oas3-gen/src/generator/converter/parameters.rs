@@ -147,7 +147,7 @@ impl ParameterConverter {
       return Ok((field, vec![]));
     };
 
-    let is_required = param.required.unwrap_or(false);
+    let is_required = location == ParameterLocation::Path || param.required.unwrap_or(false);
     let resolved = self
       .field_converter
       .resolve_with_metadata(parent_name, &param.name, schema_ref, is_required)?;

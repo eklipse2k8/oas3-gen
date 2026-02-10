@@ -33,7 +33,22 @@ pub struct Cat {
 pub type Cats = Vec<Cat>;
 /// Create a pet
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct CreatePetsRequest {}
+pub struct CreatePetsRequest {
+  #[validate(nested)]
+  pub path: CreatePetsRequestPath,
+}
+#[bon::bon]
+impl CreatePetsRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(api_version: String) -> anyhow::Result<Self> {
+    let request = Self {
+      path: CreatePetsRequestPath { api_version },
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
 impl CreatePetsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<CreatePetsResponse> {
@@ -45,6 +60,12 @@ impl CreatePetsRequest {
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
     Ok(CreatePetsResponse::Unknown(data))
   }
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct CreatePetsRequestPath {
+  /// Which version of the API to use.
+  #[validate(length(min = 1u64))]
+  pub api_version: String,
 }
 /// Response types for createPets
 #[derive(Debug, Clone)]
@@ -198,6 +219,8 @@ pub enum ListCatsResponse {
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct ListPetsRequest {
   #[validate(nested)]
+  pub path: ListPetsRequestPath,
+  #[validate(nested)]
   pub query: ListPetsRequestQuery,
   pub header: ListPetsRequestHeader,
 }
@@ -206,11 +229,13 @@ impl ListPetsRequest {
   /// Create a new request with the given parameters.
   #[builder]
   pub fn new(
+    api_version: String,
     limit: Option<i32>,
     x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
     x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
   ) -> anyhow::Result<Self> {
     let request = Self {
+      path: ListPetsRequestPath { api_version },
       query: ListPetsRequestQuery { limit },
       header: ListPetsRequestHeader { x_sort_order, x_only },
     };
@@ -296,6 +321,12 @@ impl core::fmt::Display for ListPetsRequestHeaderXonly {
       Self::Bird => write!(f, "bird"),
     }
   }
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct ListPetsRequestPath {
+  /// Which version of the API to use.
+  #[validate(length(min = 1u64))]
+  pub api_version: String,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]

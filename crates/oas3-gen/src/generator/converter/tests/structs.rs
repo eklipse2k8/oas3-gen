@@ -5,7 +5,7 @@ use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, 
 use crate::{
   generator::{
     ast::{RustType, SerdeAttribute},
-    converter::{discriminator::DiscriminatorConverter, SchemaConverter},
+    converter::{SchemaConverter, discriminator::DiscriminatorConverter},
   },
   tests::common::{create_test_context, create_test_graph, default_config},
 };

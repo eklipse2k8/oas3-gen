@@ -36,8 +36,29 @@ pub struct Cat {
 pub type Cats = Vec<Cat>;
 /// Create a pet
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct CreatePetsRequest {}
+pub struct CreatePetsRequest {
+  #[validate(nested)]
+  pub path: CreatePetsRequestPath,
+}
+#[bon::bon]
+impl CreatePetsRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(api_version: String) -> anyhow::Result<Self> {
+    let request = Self {
+      path: CreatePetsRequestPath { api_version },
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
 impl CreatePetsRequest {}
+#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
+pub struct CreatePetsRequestPath {
+  /// Which version of the API to use.
+  #[validate(length(min = 1u64))]
+  pub api_version: String,
+}
 /// Response types for createPets
 #[derive(Debug, Clone)]
 pub enum CreatePetsResponse {
@@ -212,6 +233,8 @@ impl IntoResponse for ListCatsResponse {
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct ListPetsRequest {
   #[validate(nested)]
+  pub path: ListPetsRequestPath,
+  #[validate(nested)]
   pub query: ListPetsRequestQuery,
   pub header: ListPetsRequestHeader,
 }
@@ -220,11 +243,13 @@ impl ListPetsRequest {
   /// Create a new request with the given parameters.
   #[builder]
   pub fn new(
+    api_version: String,
     limit: Option<i32>,
     x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
     x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
   ) -> anyhow::Result<Self> {
     let request = Self {
+      path: ListPetsRequestPath { api_version },
       query: ListPetsRequestQuery { limit },
       header: ListPetsRequestHeader { x_sort_order, x_only },
     };
@@ -324,6 +349,12 @@ impl core::str::FromStr for ListPetsRequestHeaderXonly {
       )),
     }
   }
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
+pub struct ListPetsRequestPath {
+  /// Which version of the API to use.
+  #[validate(length(min = 1u64))]
+  pub api_version: String,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
 pub struct ListPetsRequestQuery {

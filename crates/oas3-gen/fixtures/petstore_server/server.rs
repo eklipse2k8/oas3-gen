@@ -24,20 +24,6 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: ListCatsRequest,
   ) -> impl std::future::Future<Output = anyhow::Result<ListCatsResponse>> + Send;
-  /// List all pets
-  ///
-  /// * Path: `GET /pets`
-  fn list_pets(
-    &self,
-    request: ListPetsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
-  /// Create a pet
-  ///
-  /// * Path: `POST /pets`
-  fn create_pets(
-    &self,
-    request: CreatePetsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<CreatePetsResponse>> + Send;
   /// Info for a specific pet
   ///
   /// * Path: `GET /pets/{petId}`
@@ -52,6 +38,20 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: UploadPetImageRequest,
   ) -> impl std::future::Future<Output = anyhow::Result<ShowPetByIdResponse>> + Send;
+  /// List all pets
+  ///
+  /// * Path: `GET /{api_version}/pets`
+  fn list_pets(
+    &self,
+    request: ListPetsRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
+  /// Create a pet
+  ///
+  /// * Path: `POST /{api_version}/pets`
+  fn create_pets(
+    &self,
+    request: CreatePetsRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<CreatePetsResponse>> + Send;
 }
 pub async fn list_cats<S>(
   State(service): State<S>,
@@ -66,43 +66,6 @@ where
     header: (&headers).try_into().unwrap_or_default(),
   };
   let result: anyhow::Result<ListCatsResponse> = service.list_cats(request).await;
-  match result {
-    Ok(response) => response.into_response(),
-    Err(e) => (
-      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-      format!("Internal error: {e}"),
-    )
-      .into_response(),
-  }
-}
-pub async fn list_pets<S>(
-  State(service): State<S>,
-  Query(query): Query<ListPetsRequestQuery>,
-  headers: HeaderMap,
-) -> impl IntoResponse
-where
-  S: ApiServer + Clone + Send + Sync + 'static,
-{
-  let request = ListPetsRequest {
-    query,
-    header: (&headers).try_into().unwrap_or_default(),
-  };
-  let result: anyhow::Result<ListPetsResponse> = service.list_pets(request).await;
-  match result {
-    Ok(response) => response.into_response(),
-    Err(e) => (
-      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-      format!("Internal error: {e}"),
-    )
-      .into_response(),
-  }
-}
-pub async fn create_pets<S>(State(service): State<S>) -> impl IntoResponse
-where
-  S: ApiServer + Clone + Send + Sync + 'static,
-{
-  let request = CreatePetsRequest {};
-  let result: anyhow::Result<CreatePetsResponse> = service.create_pets(request).await;
   match result {
     Ok(response) => response.into_response(),
     Err(e) => (
@@ -153,14 +116,53 @@ where
       .into_response(),
   }
 }
+pub async fn list_pets<S>(
+  State(service): State<S>,
+  Path(path): Path<ListPetsRequestPath>,
+  Query(query): Query<ListPetsRequestQuery>,
+  headers: HeaderMap,
+) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = ListPetsRequest {
+    path,
+    query,
+    header: (&headers).try_into().unwrap_or_default(),
+  };
+  let result: anyhow::Result<ListPetsResponse> = service.list_pets(request).await;
+  match result {
+    Ok(response) => response.into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn create_pets<S>(State(service): State<S>, Path(path): Path<CreatePetsRequestPath>) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = CreatePetsRequest { path };
+  let result: anyhow::Result<CreatePetsResponse> = service.create_pets(request).await;
+  match result {
+    Ok(response) => response.into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
 pub fn router<S>(service: S) -> Router
 where
   S: ApiServer + Clone + Send + Sync + 'static,
 {
   Router::new()
     .route("/cats", get(list_cats::<S>))
-    .route("/pets", get(list_pets::<S>).post(create_pets::<S>))
     .route("/pets/{pet_id}", get(show_pet_by_id::<S>))
     .route("/pets/{pet_id}/upload", post(upload_pet_image::<S>))
+    .route("/{api_version}/pets", get(list_pets::<S>).post(create_pets::<S>))
     .with_state(service)
 }

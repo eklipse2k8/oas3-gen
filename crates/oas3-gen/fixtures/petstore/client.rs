@@ -64,38 +64,6 @@ impl SwaggerPetstoreClient {
       .await?;
     ListCatsRequest::parse_response(response).await
   }
-  /// List all pets
-  ///
-  /// * Path: `GET /pets`
-  pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ListPetsResponse> {
-    request.validate().context("parameter validation")?;
-    let mut url = self.base_url.clone();
-    url
-      .path_segments_mut()
-      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-      .push("pets");
-    let response = self
-      .client
-      .get(url)
-      .query(&request.query)
-      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
-      .send()
-      .await?;
-    ListPetsRequest::parse_response(response).await
-  }
-  /// Create a pet
-  ///
-  /// * Path: `POST /pets`
-  pub async fn create_pets(&self, request: CreatePetsRequest) -> anyhow::Result<CreatePetsResponse> {
-    request.validate().context("parameter validation")?;
-    let mut url = self.base_url.clone();
-    url
-      .path_segments_mut()
-      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-      .push("pets");
-    let response = self.client.post(url).send().await?;
-    CreatePetsRequest::parse_response(response).await
-  }
   /// Info for a specific pet
   ///
   /// * Path: `GET /pets/{petId}`
@@ -138,5 +106,39 @@ impl SwaggerPetstoreClient {
     req_builder = req_builder.multipart(form);
     let response = req_builder.send().await?;
     UploadPetImageRequest::parse_response(response).await
+  }
+  /// List all pets
+  ///
+  /// * Path: `GET /{api_version}/pets`
+  pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ListPetsResponse> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push(&request.path.api_version.clone())
+      .push("pets");
+    let response = self
+      .client
+      .get(url)
+      .query(&request.query)
+      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
+      .send()
+      .await?;
+    ListPetsRequest::parse_response(response).await
+  }
+  /// Create a pet
+  ///
+  /// * Path: `POST /{api_version}/pets`
+  pub async fn create_pets(&self, request: CreatePetsRequest) -> anyhow::Result<CreatePetsResponse> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push(&request.path.api_version.clone())
+      .push("pets");
+    let response = self.client.post(url).send().await?;
+    CreatePetsRequest::parse_response(response).await
   }
 }

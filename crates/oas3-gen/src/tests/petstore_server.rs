@@ -7,6 +7,7 @@ use crate::fixtures::petstore_server::*;
 #[test]
 fn test_list_pets_request_compiles() {
   let request = ListPetsRequest::builder()
+    .api_version("v1".to_string())
     .x_sort_order(ListCatsRequestHeaderXSortOrder::Asc)
     .x_only(vec![ListPetsRequestHeaderXonly::Bird, ListPetsRequestHeaderXonly::Fish])
     .limit(50)
@@ -115,8 +116,9 @@ fn test_show_pet_by_id_header_to_header_map() {
 
 #[test]
 fn test_create_pets_request_compiles() {
-  let request = CreatePetsRequest {};
-  assert!(request.validate().is_ok(), "empty request should be valid");
+  let request = CreatePetsRequest::builder().api_version("v1".to_string()).build().unwrap();
+  assert!(request.validate().is_ok(), "request with api_version should be valid");
+  assert_eq!(request.path.api_version, "v1", "api_version should match");
 }
 
 #[test]

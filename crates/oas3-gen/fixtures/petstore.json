@@ -14,7 +14,12 @@
 		}
 	],
 	"paths": {
-		"/pets": {
+		"/{api_version}/pets": {
+			"parameters": [
+				{
+					"$ref": "#/components/parameters/api_version"
+				}
+			],
 			"get": {
 				"summary": "List all pets",
 				"operationId": "listPets",
@@ -287,6 +292,16 @@
 		}
 	},
 	"components": {
+		"parameters": {
+			"api_version": {
+				"name": "api_version",
+				"description": "Which version of the API to use.",
+				"schema": {
+					"type": "string"
+				},
+				"in": "path"
+			}
+		},
 		"schemas": {
 			"Allergies": {
 				"type": "object",
