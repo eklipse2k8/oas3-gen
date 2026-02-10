@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.25.1"
+version = "0.25.2"
 authors = ["Matthew Jarjoura <eklipse2k8>"]
 categories = [
   "command-line-utilities",
@@ -11,6 +11,7 @@ categories = [
   "web-programming::http-client",
 ]
 description = "A rust type generator for OpenAPI v3.1.x specification."
+documentation = "https://eklipse2k8.github.io/oas3-gen/"
 edition = "2024"
 keywords = ["oas3", "json", "yaml", "openapi", "generator"]
 license = "MIT"
@@ -37,7 +38,7 @@ split-debuginfo = "unpacked"
 
 [workspace.dependencies]
 # Workspace Members
-oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.25.1" }
+oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.25.2" }
 
 # External Dependencies
 any_ascii = { version = "0.3" }
@@ -80,7 +81,7 @@ serde_with = { version = "3.16", features = ["chrono"] }
 string_cache = { version = "0.9", features = ["serde"] }
 strum = { version = "0.27", features = ["derive"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
-tempfile = { version = "3.24" }
+tempfile = { version = "3.25" }
 thiserror = { version = "2.0" }
 tokio = { version = "1.49", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
 uuid = { version = "1.19", features = ["serde"] }
