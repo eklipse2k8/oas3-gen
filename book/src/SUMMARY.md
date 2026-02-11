@@ -5,3 +5,4 @@
 # User Guide
 
 - [Code Generation](./code-generation.md)
+- [Builder Pattern](./builders.md)

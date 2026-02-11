@@ -15,6 +15,7 @@ Rust code.
 - [Operation Filtering](#operation-filtering)
 - [Schema Filtering](#schema-filtering)
 - [Header Emission](#header-emission)
+- [Builder Generation](#builder-generation)
 
 ---
 
@@ -680,6 +681,55 @@ pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key
 
 ---
 
+## Builder Generation
+
+```text
+--enable-builders
+```
+
+Enables `bon::Builder` derives on schema structs and `#[builder]` constructor
+methods on request structs.
+
+When disabled (the default), no bon attributes are emitted in generated code.
+
+### Default (builders disabled)
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pet {
+    pub id: i64,
+    pub name: String,
+}
+
+pub struct CreatePetRequest {
+    pub path: CreatePetRequestPath,
+}
+```
+
+### With `--enable-builders`
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct Pet {
+    pub id: i64,
+    pub name: String,
+}
+
+pub struct CreatePetRequest {
+    pub path: CreatePetRequestPath,
+}
+
+#[bon::bon]
+impl CreatePetRequest {
+    #[builder]
+    pub fn new(/* params */) -> anyhow::Result<Self> {
+        /* ... */
+    }
+}
+```
+
+---
+
 ## Flag Summary
 
 | Flag | Default | Description |
@@ -691,6 +741,7 @@ pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key
 | `--odata-support` | `false` | Make `@odata.*` fields optional |
 | `-c, --customize` | *(none)* | Custom type mapping (repeatable) |
 | `--all-headers` | `false` | Emit header constants for all component-level headers |
+| `--enable-builders` | `false` | Enable bon builder derives and methods |
 | `--only` | *(none)* | Include only specified operations |
 | `--exclude` | *(none)* | Exclude specified operations |
 | `--all-schemas` | `false` | Generate all schemas regardless of usage |

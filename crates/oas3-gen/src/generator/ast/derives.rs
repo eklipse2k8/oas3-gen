@@ -29,6 +29,8 @@ pub enum DeriveTrait {
   Validate,
   #[strum(serialize = "oas3_gen_support::Default")]
   Default,
+  #[strum(serialize = "bon::Builder")]
+  Builder,
 }
 
 impl ToTokens for DeriveTrait {
@@ -62,6 +64,7 @@ impl DerivesProvider for StructDef {
       derives.insert(DeriveTrait::Validate);
     }
 
+    derives.extend(&self.additional_derives);
     derives
   }
 

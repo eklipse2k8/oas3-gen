@@ -40,6 +40,7 @@ pub struct GenerateConfig {
   pub only_operations: Option<HashSet<String>>,
   pub excluded_operations: Option<HashSet<String>>,
   pub no_helpers: bool,
+  pub enable_builders: bool,
   pub customizations: HashMap<String, String>,
 }
 
@@ -90,6 +91,7 @@ impl GenerateConfig {
       } else {
         HeaderScope::ReferencedOnly
       })
+      .enable_builders(self.enable_builders)
       .customizations(self.customizations.clone())
       .build();
 
@@ -161,6 +163,7 @@ impl GenerateConfig {
       no_helpers,
       all_schemas,
       all_headers,
+      enable_builders,
       only,
       exclude,
       verbose,
@@ -191,6 +194,7 @@ impl GenerateConfig {
       only_operations: only.map(|ops| ops.into_iter().collect()),
       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
       no_helpers,
+      enable_builders,
       customizations,
     })
   }

@@ -1,11 +1,11 @@
-use std::rc::Rc;
+use std::{collections::BTreeSet, rc::Rc};
 
 use oas3::spec::ObjectSchema;
 
 use super::{ConversionOutput, discriminator::DiscriminatorConverter, fields::FieldConverter};
 use crate::{
   generator::{
-    ast::{Documentation, RustType, StructDef, StructKind, StructToken},
+    ast::{DeriveTrait, Documentation, RustType, StructDef, StructKind, StructToken},
     converter::ConverterContext,
     naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
   },
@@ -72,6 +72,12 @@ impl StructConverter {
 
     let (serde_attrs, outer_attrs) = FieldConverter::struct_attributes(&fields, additional_serde_attrs);
 
+    let additional_derives = if matches!(kind, StructKind::Schema) && self.context.config().enable_builders() {
+      BTreeSet::from([DeriveTrait::Builder])
+    } else {
+      BTreeSet::new()
+    };
+
     let struct_def = StructDef::builder()
       .name(name)
       .docs(Documentation::from_optional(schema.description.as_ref()))
@@ -79,6 +85,7 @@ impl StructConverter {
       .serde_attrs(serde_attrs)
       .outer_attrs(outer_attrs)
       .kind(kind)
+      .additional_derives(additional_derives)
       .build();
 
     Ok(ConversionOutput::with_inline_types(
@@ -115,6 +122,12 @@ impl StructConverter {
 
     let (serde_attrs, outer_attrs) = FieldConverter::struct_attributes(&fields, additional_serde_attrs);
 
+    let additional_derives = if self.context.config().enable_builders() {
+      BTreeSet::from([DeriveTrait::Builder])
+    } else {
+      BTreeSet::new()
+    };
+
     let struct_def = StructDef::builder()
       .name(struct_token)
       .docs(Documentation::from_optional(merged_schema.description.as_ref()))
@@ -122,6 +135,7 @@ impl StructConverter {
       .serde_attrs(serde_attrs)
       .outer_attrs(outer_attrs)
       .kind(StructKind::Schema)
+      .additional_derives(additional_derives)
       .build();
 
     Ok(

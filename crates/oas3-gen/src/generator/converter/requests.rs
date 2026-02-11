@@ -43,6 +43,7 @@ pub(crate) struct RequestOutput {
 #[derive(Debug, Clone)]
 pub(crate) struct RequestConverter {
   param_converter: ParameterConverter,
+  enable_builders: bool,
 }
 
 impl RequestConverter {
@@ -50,6 +51,7 @@ impl RequestConverter {
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       param_converter: ParameterConverter::new(context),
+      enable_builders: context.config().enable_builders(),
     }
   }
 
@@ -77,10 +79,13 @@ impl RequestConverter {
       main_fields.push(body_field);
     }
 
-    let methods = extra_method
-      .into_iter()
-      .chain(MethodGenerator::build_builder_method(&nested_structs, &main_fields))
-      .collect::<Vec<_>>();
+    let builder_method = if self.enable_builders {
+      MethodGenerator::build_builder_method(&nested_structs, &main_fields)
+    } else {
+      None
+    };
+
+    let methods = extra_method.into_iter().chain(builder_method).collect::<Vec<_>>();
 
     let main_struct = StructDef::builder()
       .name(StructToken::new(name))

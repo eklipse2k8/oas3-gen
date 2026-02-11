@@ -57,14 +57,18 @@ impl ToTokens for StructFragment {
 
     tokens.extend(quote! {
       #definition
+
       #impl_block
+
       #header_map
+
     });
 
     if self.target == GenerationTarget::Server {
       let header_from_map = HeaderFromMapFragment::new(self.def.clone());
       tokens.extend(quote! {
         #header_from_map
+
       });
     }
   }

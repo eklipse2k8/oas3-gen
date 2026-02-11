@@ -15,13 +15,13 @@ All code changes that affect code generation output require rebuilding the fixtu
 
 ```bash
 # Rebuild all client fixtures
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore --all-schemas
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --all-schemas
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/intersection_union.json -o crates/oas3-gen/fixtures/intersection_union --all-schemas
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/event_stream.json -o crates/oas3-gen/fixtures/event_stream --all-schemas
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore --enable-builders --all-schemas --all-headers
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --enable-builders --all-schemas
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/intersection_union.json -o crates/oas3-gen/fixtures/intersection_union --enable-builders --all-schemas
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/event_stream.json -o crates/oas3-gen/fixtures/event_stream --enable-builders --all-schemas
 
 # Rebuild server fixture
-cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore_server --all-schemas
+cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore_server --enable-builders --all-schemas --all-headers
 ```
 
 | Fixture | Source | Output | Description |
