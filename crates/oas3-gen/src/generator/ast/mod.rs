@@ -2,7 +2,7 @@ pub mod bon_attrs;
 mod client;
 pub mod constants;
 mod derives;
-mod documentation;
+pub(crate) mod documentation;
 pub mod fields;
 pub mod lints;
 mod outer_attrs;

@@ -48,6 +48,9 @@ cargo run -- generate types -i spec.json -o output.rs --all-headers
 # Enable bon builder derives on generated structs
 cargo run -- generate client-mod -i spec.json -o output/ --enable-builders
 
+# Format documentation comments using mdformat
+cargo run -- generate types -i spec.json -o output.rs --doc-format
+
 # Custom serde_as type overrides
 cargo run -- generate types -i spec.json -o output.rs -c MyDate=my_crate::CustomDate
 
@@ -79,6 +82,7 @@ cargo run -- list --help
 | `--customize` / `-c` | Custom serde_as type overrides (format: type_name=custom::Path); repeatable |
 | `--all-headers` | Emit header constants for all header parameters in components, not just those used in operations |
 | `--enable-builders` | Enable bon builder derives on schema structs and builder methods on request structs |
+| `--doc-format` | Format documentation comments using mdformat (requires `mdformat` installed) |
 | `--only` | Include only the specified comma-separated operation IDs |
 | `--exclude` | Exclude the specified comma-separated operation IDs |
 | `--all-schemas` | Generate all schemas defined in spec (default: only schemas referenced by operations) |

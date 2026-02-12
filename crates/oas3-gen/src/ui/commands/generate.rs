@@ -10,6 +10,7 @@ use crate::{
   generator::{
     ClientModMode, ClientMode, CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationMode,
     GenerationTarget, HeaderScope, ODataPolicy, SchemaScope, ServerModMode, TypesMode,
+    ast::documentation::init_doc_format,
     codegen::{GeneratedFileType, Visibility},
     metrics::GenerationStats,
     orchestrator::{GeneratedFinalOutput, Orchestrator},
@@ -41,6 +42,7 @@ pub struct GenerateConfig {
   pub excluded_operations: Option<HashSet<String>>,
   pub no_helpers: bool,
   pub enable_builders: bool,
+  pub doc_format: bool,
   pub customizations: HashMap<String, String>,
 }
 
@@ -164,6 +166,7 @@ impl GenerateConfig {
       all_schemas,
       all_headers,
       enable_builders,
+      doc_format,
       only,
       exclude,
       verbose,
@@ -195,6 +198,7 @@ impl GenerateConfig {
       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
       no_helpers,
       enable_builders,
+      doc_format,
       customizations,
     })
   }
@@ -425,6 +429,7 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
 
   logger.log_loading();
   let spec = config.load_spec().await?;
+  init_doc_format(config.doc_format);
 
   logger.log_generating();
   let orchestrator = config.create_orchestrator(spec);

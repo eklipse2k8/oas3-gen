@@ -16,6 +16,7 @@ Rust code.
 - [Schema Filtering](#schema-filtering)
 - [Header Emission](#header-emission)
 - [Builder Generation](#builder-generation)
+- [Documentation Formatting](#documentation-formatting)
 
 ---
 
@@ -730,6 +731,53 @@ impl CreatePetRequest {
 
 ---
 
+## Documentation Formatting
+
+```text
+--doc-format
+```
+
+Enables formatting of generated documentation comments using the external
+[mdformat](https://github.com/executablebooks/mdformat) CLI tool. When enabled,
+documentation text from OpenAPI `description` and `summary` fields is piped
+through `mdformat` with line wrapping at 100 characters.
+
+This requires `mdformat` to be installed and available on `PATH`.
+
+```bash
+pip install mdformat
+```
+
+### Default (formatting disabled)
+
+Documentation text is passed through as-is from the OpenAPI specification,
+with only escaped newline normalization applied.
+
+```rust
+/// A long description that may contain very long lines that extend well beyond typical line widths because the OpenAPI spec author did not wrap them.
+pub struct Widget {
+    pub id: i64,
+}
+```
+
+### With `--doc-format`
+
+```bash
+cargo run -- generate types -i spec.json -o types.rs --doc-format
+```
+
+Documentation text is reformatted with consistent line wrapping:
+
+```rust
+/// A long description that may contain very long lines that extend well beyond
+/// typical line widths because the OpenAPI spec author did not wrap them.
+pub struct Widget {
+    pub id: i64,
+}
+```
+
+---
+
 ## Flag Summary
 
 | Flag | Default | Description |
@@ -742,6 +790,7 @@ impl CreatePetRequest {
 | `-c, --customize` | *(none)* | Custom type mapping (repeatable) |
 | `--all-headers` | `false` | Emit header constants for all component-level headers |
 | `--enable-builders` | `false` | Enable bon builder derives and methods |
+| `--doc-format` | `false` | Format doc comments with mdformat |
 | `--only` | *(none)* | Include only specified operations |
 | `--exclude` | *(none)* | Exclude specified operations |
 | `--all-schemas` | `false` | Generate all schemas regardless of usage |

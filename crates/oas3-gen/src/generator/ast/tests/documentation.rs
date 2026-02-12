@@ -65,9 +65,19 @@ fn push_adds_line() {
   assert_eq!(quote! { #doc }.to_string(), expected.to_string());
 }
 
-#[cfg(feature = "mdformat")]
 #[tokio::test]
 async fn test_doc_lines_with_mdformat() {
+  let mdformat_available = tokio::process::Command::new("mdformat")
+    .arg("--version")
+    .output()
+    .await
+    .is_ok_and(|o| o.status.success());
+
+  if !mdformat_available {
+    eprintln!("skipping test: mdformat not installed");
+    return;
+  }
+
   let input = r"## Blockquotes
 
 > Markdown is a lightweight markup language with plain-text-formatting syntax, created in 2004 by John Gruber with Aaron Swartz.
