@@ -140,6 +140,8 @@ pub struct CodegenConfig {
   #[builder(default)]
   pub header_scope: HeaderScope,
   #[builder(default)]
+  pub enable_builders: bool,
+  #[builder(default)]
   pub customizations: HashMap<String, String>,
 }
 
@@ -182,6 +184,13 @@ impl CodegenConfig {
   #[must_use]
   pub fn include_all_headers(&self) -> bool {
     self.header_scope == HeaderScope::All
+  }
+
+  /// Returns `true` if bon builder derives should be generated for schema structs
+  /// and builder methods for request structs.
+  #[must_use]
+  pub fn enable_builders(&self) -> bool {
+    self.enable_builders
   }
 }
 

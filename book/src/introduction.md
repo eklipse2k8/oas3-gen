@@ -16,6 +16,7 @@ support, making it easy to integrate with HTTP clients and servers.
 - **Validation**: Field validation using the `validator` crate
 - **Serde Support**: Full serialization/deserialization with `serde`
 - **Discriminated Unions**: Proper handling of `oneOf`/`anyOf` with discriminators
+- **Builder Pattern**: Optional [`bon`](https://docs.rs/bon/latest/bon/) integration for ergonomic struct construction via `--enable-builders`
 
 ## Installation
 

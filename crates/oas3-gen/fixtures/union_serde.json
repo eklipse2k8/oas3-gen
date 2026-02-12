@@ -304,7 +304,7 @@
 			},
 			"CitationAnnotation": {
 				"type": "object",
-				"required": ["type", "start", "end", "source"],
+				"required": ["type", "start", "end", "build"],
 				"properties": {
 					"type": {
 						"type": "string",
@@ -316,7 +316,7 @@
 					"end": {
 						"type": "integer"
 					},
-					"source": {
+					"build": {
 						"type": "string"
 					}
 				}
@@ -613,11 +613,17 @@
 				"additionalProperties": true,
 				"properties": {
 					"ingredients": {
-						"anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }],
+						"anyOf": [
+							{ "additionalProperties": true, "type": "object" },
+							{ "type": "null" }
+						],
 						"title": "Ingredients"
 					},
 					"required": {
-						"anyOf": [{ "items": { "type": "string" }, "type": "array" }, { "type": "null" }],
+						"anyOf": [
+							{ "items": { "type": "string" }, "type": "array" },
+							{ "type": "null" }
+						],
 						"title": "Required"
 					},
 					"type": { "const": "object", "title": "Type", "type": "string" }
@@ -627,62 +633,56 @@
 				"type": "object"
 			},
 			"UsageCounters": {
-        "anyOf": [
-          {
-            "items": {
-              "anyOf": [
-                { "$ref": "#/components/schemas/UsageCounterA" },
-                { "$ref": "#/components/schemas/UsageCounterB" }
-              ]
-            },
-            "type": "array"
-          },
-          { "type": "null" }
-        ],
-        "default": null
-      },
+				"anyOf": [
+					{
+						"items": {
+							"anyOf": [
+								{ "$ref": "#/components/schemas/UsageCounterA" },
+								{ "$ref": "#/components/schemas/UsageCounterB" }
+							]
+						},
+						"type": "array"
+					},
+					{ "type": "null" }
+				],
+				"default": null
+			},
 			"UsageCounterA": {
-        "properties": {
-          "output_tokens": {
-            "minimum": 0,
-            "title": "Output Tokens",
-            "type": "integer"
-          },
-          "type": {
-            "const": "counter_a",
-            "default": "counter_a",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "output_tokens",
-          "type"
-        ],
-        "title": "UsageCounterA",
-        "type": "object"
-      },
+				"properties": {
+					"output_tokens": {
+						"minimum": 0,
+						"title": "Output Tokens",
+						"type": "integer"
+					},
+					"type": {
+						"const": "counter_a",
+						"default": "counter_a",
+						"title": "Type",
+						"type": "string"
+					}
+				},
+				"required": ["output_tokens", "type"],
+				"title": "UsageCounterA",
+				"type": "object"
+			},
 			"UsageCounterB": {
-        "properties": {
-          "output_tokens": {
-            "minimum": 0,
-            "title": "Output Tokens",
-            "type": "integer"
-          },
-          "type": {
-            "const": "counter_b",
-            "default": "counter_b",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "output_tokens",
-          "type"
-        ],
-        "title": "UsageCounterB",
-        "type": "object"
-      }
+				"properties": {
+					"output_tokens": {
+						"minimum": 0,
+						"title": "Output Tokens",
+						"type": "integer"
+					},
+					"type": {
+						"const": "counter_b",
+						"default": "counter_b",
+						"title": "Type",
+						"type": "string"
+					}
+				},
+				"required": ["output_tokens", "type"],
+				"title": "UsageCounterB",
+				"type": "object"
+			}
 		}
 	}
 }

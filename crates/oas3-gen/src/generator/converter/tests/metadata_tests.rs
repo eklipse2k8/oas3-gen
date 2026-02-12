@@ -99,7 +99,13 @@ fn extract_parameter_metadata_returns_validation_and_default() {
   schema.default = Some(json!("loaf_value"));
 
   let type_ref = TypeRef::new(RustPrimitive::String);
-  let (attrs, default) = FieldConverter::extract_parameter_metadata("toebeans", true, &schema, &type_ref);
+  let (attrs, default) = {
+    let schema: &ObjectSchema = &schema;
+    let type_ref: &TypeRef = &type_ref;
+    let validation_attrs = FieldConverter::extract_all_validation("toebeans", true, schema, type_ref);
+    let default_value = FieldConverter::extract_default_value(schema);
+    (validation_attrs, default_value)
+  };
 
   assert_eq!(
     attrs,

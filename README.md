@@ -185,6 +185,7 @@ The generated router automatically:
 | Serde Integration | Automatic derive for serialization |
 | Smart Naming | Auto-detects camelCase/snake_case conventions |
 | Validation | Constraint attributes from spec |
+| Builder Pattern | Optional `bon` integration for ergonomic struct construction |
 | Webhooks | Generates structs from Webhook components |
 
 ### Missing features
@@ -235,6 +236,9 @@ Code Generation:
       --enum-mode <ENUM_MODE>  Specifies how to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
       --no-helpers             Disable generation of ergonomic helper methods for enum variants
   -c, --customize <TYPE=PATH>  Custom serde_as type overrides (format: type_name=custom::Path)
+      --enable-builders        Enable bon builder derives on schema structs and builder methods on request structs
+      --doc-format             Format documentation comments using mdformat (requires mdformat installed)
+      --all-headers            Emit header constants for all component-level header parameters
 
 Operation Filtering:
       --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
@@ -293,9 +297,26 @@ oas3-gen generate -i openapi.json -o types.rs --enum-mode relaxed
 # Enable custom parsing through serde_as traits
 oas3-gen generate client-mod -i openapi.json -o generated --customize datetime=MyCustomDateTime
 
+# Enable bon builder derives for ergonomic struct construction
+oas3-gen generate client-mod -i openapi.json -o generated --enable-builders
+
+# Format documentation comments with mdformat
+oas3-gen generate client-mod -i openapi.json -o generated --doc-format
+
 # List all operations in the specification
 oas3-gen list operations -i openapi.json
 ```
+
+## Documentation Formatting with `mdformat`
+
+The `--doc-format` flag pipes generated documentation comments through
+[mdformat](https://github.com/executablebooks/mdformat), a CommonMark-compliant
+Markdown formatter. This reformats long descriptions from OpenAPI `summary` and
+`description` fields into consistently wrapped, readable rustdoc comments. Lines are wrapped at 100 characters and markdown structure (headings, blockquotes, lists) is normalized.
+
+The `mdformat` binary must be available on your `PATH` when using `--doc-format`.
+If it is not installed, the command will fail with an error. The flag is entirely
+optional and has no effect on the structure or correctness of generated code.
 
 ## License
 

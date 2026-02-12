@@ -27,6 +27,7 @@ fn typed_literal(value: impl std::fmt::Display, type_suffix: &str) -> TokenStrea
 fn coerce_to_rust_type(value: &serde_json::Value, rust_type: &RustPrimitive) -> TokenStream {
   match rust_type {
     RustPrimitive::String => coerce_to_string(value),
+    RustPrimitive::StaticStr => coerce_to_static_str(value),
     RustPrimitive::I8
     | RustPrimitive::I16
     | RustPrimitive::I32
@@ -58,6 +59,21 @@ fn coerce_to_string(value: &Value) -> TokenStream {
       quote! { #b_str.to_string() }
     }
     _ => quote! { Default::default() },
+  }
+}
+
+fn coerce_to_static_str(value: &Value) -> TokenStream {
+  match value {
+    Value::String(s) => quote! { #s },
+    Value::Number(n) => {
+      let n_str = n.to_string();
+      quote! { #n_str }
+    }
+    Value::Bool(b) => {
+      let b_str = b.to_string();
+      quote! { #b_str }
+    }
+    _ => quote! { "" },
   }
 }
 

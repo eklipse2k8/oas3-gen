@@ -135,6 +135,14 @@ pub struct GenerateCommand {
   #[arg(long, default_value_t = false, display_order = 15, help_heading = "Code Generation")]
   pub all_headers: bool,
 
+  /// Enable bon builder derives on schema structs and builder methods on request structs
+  #[arg(long, default_value_t = false, display_order = 16, help_heading = "Code Generation")]
+  pub enable_builders: bool,
+
+  /// Format documentation comments using mdformat (requires mdformat installed)
+  #[arg(long, default_value_t = false, display_order = 17, help_heading = "Code Generation")]
+  pub doc_format: bool,
+
   /// Include only the specified comma-separated operation IDs
   #[arg(
     group = "filter",

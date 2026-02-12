@@ -11,7 +11,7 @@ mod tests {
       text: text.to_string(),
       annotations: None,
       recipes: None,
-      r#type: Some("text".to_string()),
+      r#type: Some("text"),
     }
   }
 
@@ -19,14 +19,14 @@ mod tests {
     CodeBlock {
       code: code.to_string(),
       language: None,
-      r#type: Some("code".to_string()),
+      r#type: Some("code"),
     }
   }
 
   fn url_source(url: &str) -> UrlImageSource {
     UrlImageSource {
       url: url.to_string(),
-      r#type: Some("url".to_string()),
+      r#type: Some("url"),
     }
   }
 
@@ -34,7 +34,7 @@ mod tests {
     ImageBlock {
       source: Box::new(source),
       alt_text: None,
-      r#type: Some("image".to_string()),
+      r#type: Some("image"),
     }
   }
 
@@ -138,7 +138,7 @@ mod tests {
       "type": "text",
       "text": "Check out this link and citation",
       "annotations": [
-        {"type": "citation", "start": 0, "end": 10, "source": "doc.pdf"},
+        {"type": "citation", "start": 0, "end": 10, "build": "doc.pdf"},
         {"type": "link", "start": 20, "end": 30, "url": "https://example.com"}
       ]
     });
@@ -150,7 +150,7 @@ mod tests {
     let annotations = tb.annotations.as_ref().unwrap();
     assert_eq!(annotations.len(), 2, "expected 2 annotations");
     assert!(
-      matches!(&annotations[0], Annotation::Citation(c) if c.source == "doc.pdf"),
+      matches!(&annotations[0], Annotation::Citation(c) if c.build == "doc.pdf"),
       "first annotation should be citation"
     );
     assert!(
@@ -332,7 +332,7 @@ mod tests {
       tool_use_id: "tool_123".to_string(),
       content: ToolResultContent::String("Result".to_string()),
       is_error: None,
-      r#type: Some("tool_result".to_string()),
+      r#type: Some("tool_result"),
       iterations: None,
     };
     let json = serde_json::to_value(&string_block).unwrap();
@@ -344,7 +344,7 @@ mod tests {
       tool_use_id: "tool_456".to_string(),
       content: ToolResultContent::Array(vec![ToolResultContentBlock::Text(text_block("Text result"))]),
       is_error: Some(false),
-      r#type: Some("tool_result".to_string()),
+      r#type: Some("tool_result"),
       iterations: None,
     };
     let json = serde_json::to_value(&array_block).unwrap();
@@ -360,7 +360,7 @@ mod tests {
       text: "Round trip test".to_string(),
       annotations: None,
       recipes: None,
-      r#type: Some("text".to_string()),
+      r#type: Some("text"),
     };
     let json = serde_json::to_string(&text).unwrap();
     let deserialized: TextBlock = serde_json::from_str(&json).unwrap();
@@ -377,7 +377,7 @@ mod tests {
     let base64_source = ImageSource::Base64(Base64ImageSource {
       media_type: MediaType::ImagePng,
       data: vec![1, 2, 3, 4],
-      r#type: Some("base64".to_string()),
+      r#type: Some("base64"),
     });
     let json = serde_json::to_string(&base64_source).unwrap();
     let deserialized: ImageSource = serde_json::from_str(&json).unwrap();
@@ -393,11 +393,11 @@ mod tests {
         ToolResultContentBlock::Image(ImageBlock {
           source: Box::new(ImageSource::Url(url_source("https://example.com/nested.png"))),
           alt_text: Some("Nested image".to_string()),
-          r#type: Some("image".to_string()),
+          r#type: Some("image"),
         }),
       ]),
       is_error: None,
-      r#type: Some("tool_result".to_string()),
+      r#type: Some("tool_result"),
       iterations: None,
     });
     let json = serde_json::to_string(&nested).unwrap();
@@ -438,7 +438,7 @@ mod tests {
       panic!("Expected TextBlock from helper, got {helper_result:?}");
     };
     assert_eq!(tb.text, "Helper created", "helper text mismatch");
-    assert_eq!(tb.r#type, Some("text".to_string()), "helper type should be set");
+    assert_eq!(tb.r#type, Some("text"), "helper type should be set");
   }
 
   #[test]
@@ -470,13 +470,11 @@ mod tests {
     let image = ContentBlock::Image(image_block(source));
     assert!(matches!(image, ContentBlock::Image(_)), "image construction failed");
 
-    let ping = Event::Ping(PingEvent {
-      r#type: Some("ping".to_string()),
-    });
+    let ping = Event::Ping(PingEvent { r#type: Some("ping") });
     assert!(matches!(ping, Event::Ping(_)), "ping event construction failed");
 
     let stop = Event::MessageStop(MessageStopEvent {
-      r#type: Some("message_stop".to_string()),
+      r#type: Some("message_stop"),
     });
     assert!(
       matches!(stop, Event::MessageStop(_)),
@@ -485,7 +483,7 @@ mod tests {
 
     let block_stop = Event::ContentBlockStop(ContentBlockStopEvent {
       index: 5,
-      r#type: Some("content_block_stop".to_string()),
+      r#type: Some("content_block_stop"),
     });
     let Event::ContentBlockStop(e) = block_stop else {
       panic!("Expected ContentBlockStop");
@@ -494,7 +492,7 @@ mod tests {
 
     let text_delta = Delta::Text(TextDelta {
       text: "chunk".to_string(),
-      r#type: Some("text_delta".to_string()),
+      r#type: Some("text_delta"),
     });
     assert!(
       matches!(text_delta, Delta::Text(d) if d.text == "chunk"),
@@ -503,7 +501,7 @@ mod tests {
 
     let json_delta = Delta::InputJson(InputJsonDelta {
       partial_json: "{\"partial\":".to_string(),
-      r#type: Some("input_json_delta".to_string()),
+      r#type: Some("input_json_delta"),
     });
     assert!(
       matches!(json_delta, Delta::InputJson(d) if d.partial_json == "{\"partial\":"),
@@ -556,17 +554,17 @@ mod tests {
           source: Box::new(ImageSource::Base64(Base64ImageSource {
             media_type: MediaType::ImagePng,
             data: vec![0x89, 0x50, 0x4E, 0x47],
-            r#type: Some("base64".to_string()),
+            r#type: Some("base64"),
           })),
           alt_text: Some("Screenshot".to_string()),
-          r#type: Some("image".to_string()),
+          r#type: Some("image"),
         }),
         ContentBlock::Code(code_block("def hello():\n    print('world')")),
         ContentBlock::ToolResult(ToolResultBlock {
           tool_use_id: "prev_tool".to_string(),
           content: ToolResultContent::Array(vec![ToolResultContentBlock::Text(text_block("Previous tool output"))]),
           is_error: None,
-          r#type: Some("tool_result".to_string()),
+          r#type: Some("tool_result"),
           iterations: None,
         }),
       ],
@@ -599,7 +597,7 @@ mod tests {
       "type": "tool_result",
       "tool_use_id": "deep_tool",
       "content": [
-        {"type": "text", "text": "Here are the results:", "annotations": [{"type": "citation", "start": 0, "end": 4, "source": "analysis.pdf"}]},
+        {"type": "text", "text": "Here are the results:", "annotations": [{"type": "citation", "start": 0, "end": 4, "build": "analysis.pdf"}]},
         {"type": "image", "source": {"type": "url", "url": "https://results.example.com/chart.png"}, "alt_text": "Results chart"}
       ]
     });
@@ -621,7 +619,7 @@ mod tests {
     let annotations = tb.annotations.as_ref().unwrap();
     assert_eq!(annotations.len(), 1, "annotations length mismatch");
     assert!(
-      matches!(&annotations[0], Annotation::Citation(c) if c.source == "analysis.pdf"),
+      matches!(&annotations[0], Annotation::Citation(c) if c.build == "analysis.pdf"),
       "annotation should be citation"
     );
 
@@ -737,9 +735,7 @@ mod tests {
   #[test]
   fn test_response_types() {
     let event_list = EventList {
-      events: vec![Event::Ping(PingEvent {
-        r#type: Some("ping".to_string()),
-      })],
+      events: vec![Event::Ping(PingEvent { r#type: Some("ping") })],
     };
     let ok_response = GetEventsResponse::Ok(event_list.clone());
     let GetEventsResponse::Ok(list) = ok_response else {

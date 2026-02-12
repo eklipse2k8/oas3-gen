@@ -75,7 +75,7 @@ impl TypeRef {
   }
 
   pub fn is_string_like(&self) -> bool {
-    matches!(self.base_type, RustPrimitive::String) && !self.is_array
+    matches!(self.base_type, RustPrimitive::String | RustPrimitive::StaticStr) && !self.is_array
   }
 
   pub fn unboxed_base_type_name(&self) -> String {
@@ -209,6 +209,9 @@ pub enum RustPrimitive {
   #[serde(rename = "String")]
   #[strum(serialize = "String")]
   String,
+  #[serde(rename = "&'static str")]
+  #[strum(serialize = "&'static str")]
+  StaticStr,
   #[serde(rename = "Vec<u8>")]
   #[strum(serialize = "Vec<u8>")]
   Bytes,
@@ -268,14 +271,14 @@ impl RustPrimitive {
     match value {
       serde_json::Value::String(s) => self.format_string_value(s),
       serde_json::Value::Number(n) => {
-        if matches!(self, RustPrimitive::String) {
+        if matches!(self, RustPrimitive::String | RustPrimitive::StaticStr) {
           format!("\"{}\"", escape_string_literal(&n.to_string()))
         } else {
           self.format_number(n)
         }
       }
       serde_json::Value::Bool(b) => {
-        if matches!(self, RustPrimitive::String) {
+        if matches!(self, RustPrimitive::String | RustPrimitive::StaticStr) {
           format!("\"{b}\"")
         } else {
           b.to_string()

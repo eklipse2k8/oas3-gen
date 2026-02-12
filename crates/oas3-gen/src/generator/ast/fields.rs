@@ -4,8 +4,8 @@ use itertools::Itertools;
 use oas3::spec::{ObjectSchema, Parameter, ParameterStyle};
 
 use crate::generator::ast::{
-  Documentation, FieldNameToken, ParameterLocation, SerdeAsFieldAttr, SerdeAsSeparator, SerdeAttribute, TypeRef,
-  ValidationAttribute,
+  Documentation, FieldNameToken, OuterAttr, ParameterLocation, RustPrimitive, SerdeAsFieldAttr, SerdeAsSeparator,
+  SerdeAttribute, TypeRef, ValidationAttribute, bon_attrs::BuilderAttribute,
 };
 
 /// Rust struct field definition
@@ -22,6 +22,8 @@ pub struct FieldDef {
   pub doc_hidden: bool,
   #[builder(default)]
   pub validation_attrs: Vec<ValidationAttribute>,
+  #[builder(default)]
+  pub builder_attrs: Vec<BuilderAttribute>,
   pub default_value: Option<serde_json::Value>,
   pub example_value: Option<serde_json::Value>,
   #[builder(into)]
@@ -44,6 +46,10 @@ impl FieldDef {
     self.docs.clear();
     self.validation_attrs.clear();
     self.doc_hidden = true;
+
+    if self.rust_type.base_type == RustPrimitive::String {
+      self.rust_type.base_type = RustPrimitive::StaticStr;
+    }
 
     if let Some(value) = discriminator_value {
       self.default_value = Some(serde_json::Value::String(value.to_string()));
@@ -83,16 +89,59 @@ impl FieldDef {
 
     self
   }
+
+  #[must_use]
+  pub fn with_builder_attrs(self) -> Self {
+    let mut attrs = vec![];
+
+    let needs_rename = BON_RESERVED_FIELD_NAMES.contains(&self.name.as_str());
+    if needs_rename && !self.doc_hidden {
+      attrs.push(BuilderAttribute::Rename(format!("{}_value", self.name.as_str())));
+    }
+
+    if let Some(default_value) = &self.default_value {
+      if self.doc_hidden {
+        attrs.push(BuilderAttribute::Skip {
+          value: default_value.clone(),
+          type_ref: self.rust_type.clone(),
+        });
+      } else if !self.rust_type.nullable {
+        attrs.push(BuilderAttribute::Default {
+          value: default_value.clone(),
+          type_ref: self.rust_type.clone(),
+        });
+      }
+    }
+
+    let mut new_field = self;
+    new_field.builder_attrs = attrs;
+    new_field
+  }
 }
 
 pub trait FieldCollection: Send + Sync {
   #[must_use]
   fn has_serde_as(&self) -> bool;
+
+  /// Derives struct-level serde attributes from field characteristics.
+  ///
+  /// Appends `#[serde(default)]` to `base` when any field carries a default value.
+  #[must_use]
+  fn struct_serde_attrs(&self, base: Vec<SerdeAttribute>) -> Vec<SerdeAttribute>;
+
+  /// Derives struct-level outer attributes from field characteristics.
+  ///
+  /// Returns `#[serde_as]` when any field uses serde_with custom serialization.
+  #[must_use]
+  fn struct_outer_attrs(&self) -> Vec<OuterAttr>;
 }
 
-use crate::generator::ast::fields::field_def_builder::{
-  IsSet, IsUnset, SetDefaultValue, SetDeprecated, SetDocs, SetExampleValue, SetMultipleOf, SetName, SetOriginalName,
-  SetParameterLocation, SetRustType, SetSerdeAttrs, State,
+use crate::generator::{
+  ast::fields::field_def_builder::{
+    IsSet, IsUnset, SetDefaultValue, SetDeprecated, SetDocs, SetExampleValue, SetMultipleOf, SetName, SetOriginalName,
+    SetParameterLocation, SetRustType, SetSerdeAttrs, State,
+  },
+  naming::constants::BON_RESERVED_FIELD_NAMES,
 };
 
 impl<S: State> FieldDefBuilder<S>
@@ -257,5 +306,18 @@ impl FieldDef {
 impl FieldCollection for [FieldDef] {
   fn has_serde_as(&self) -> bool {
     self.iter().any(|t| t.serde_as_attr.is_some())
+  }
+
+  fn struct_serde_attrs(&self, base: Vec<SerdeAttribute>) -> Vec<SerdeAttribute> {
+    let default_serde = self
+      .iter()
+      .any(|f| f.default_value.is_some())
+      .then_some(SerdeAttribute::Default);
+
+    base.into_iter().chain(default_serde).collect()
+  }
+
+  fn struct_outer_attrs(&self) -> Vec<OuterAttr> {
+    self.has_serde_as().then_some(OuterAttr::SerdeAs).into_iter().collect()
   }
 }

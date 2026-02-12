@@ -45,6 +45,15 @@ cargo run -- generate types -i spec.json -o output.rs --all-schemas
 # Emit all component-level header constants (default: only operation-referenced headers)
 cargo run -- generate types -i spec.json -o output.rs --all-headers
 
+# Enable bon builder derives on generated structs
+cargo run -- generate client-mod -i spec.json -o output/ --enable-builders
+
+# Format documentation comments using mdformat
+cargo run -- generate types -i spec.json -o output.rs --doc-format
+
+# Custom serde_as type overrides
+cargo run -- generate types -i spec.json -o output.rs -c MyDate=my_crate::CustomDate
+
 # Output to nested directory (creates parent directories automatically)
 cargo run -- generate types -i spec.json -o output/types/generated.rs
 
@@ -70,7 +79,10 @@ cargo run -- list --help
 | `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |
 | `--no-helpers` | Disable generation of ergonomic helper methods for enum variants |
+| `--customize` / `-c` | Custom serde_as type overrides (format: type_name=custom::Path); repeatable |
 | `--all-headers` | Emit header constants for all header parameters in components, not just those used in operations |
+| `--enable-builders` | Enable bon builder derives on schema structs and builder methods on request structs |
+| `--doc-format` | Format documentation comments using mdformat (requires `mdformat` installed) |
 | `--only` | Include only the specified comma-separated operation IDs |
 | `--exclude` | Exclude the specified comma-separated operation IDs |
 | `--all-schemas` | Generate all schemas defined in spec (default: only schemas referenced by operations) |
@@ -172,5 +184,6 @@ mdbook clean book/
 
 **Files to update for feature changes:**
 - `book/src/code-generation.md` - CLI flags and examples
+- `book/src/builders.md` - Builder pattern documentation
 - `book/src/introduction.md` - Overview and quick start
 - `book/src/SUMMARY.md` - Table of contents (if adding new pages)

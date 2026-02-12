@@ -1,7 +1,8 @@
+pub mod bon_attrs;
 mod client;
 pub mod constants;
 mod derives;
-mod documentation;
+pub(crate) mod documentation;
 pub mod fields;
 pub mod lints;
 mod outer_attrs;
@@ -15,6 +16,8 @@ pub(super) mod validation_attrs;
 
 #[cfg(test)]
 mod tests;
+
+use std::collections::BTreeSet;
 
 pub use client::ClientRootNode;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
@@ -447,6 +450,9 @@ pub struct StructDef {
   pub kind: StructKind,
   #[builder(default)]
   pub serde_mode: SerdeMode,
+  /// Additional traits to derive beyond the standard set (e.g., Builder), controlled by config options
+  #[builder(default)]
+  pub additional_derives: BTreeSet<DeriveTrait>,
 }
 
 impl StructDef {

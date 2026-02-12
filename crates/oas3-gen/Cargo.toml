@@ -13,7 +13,6 @@ rust-version.workspace = true
 
 [features]
 default = ["quick-xml", "reqwest", "eventsource"]
-mdformat = []
 reqwest = []
 eventsource = ["reqwest"]
 quick-xml = []

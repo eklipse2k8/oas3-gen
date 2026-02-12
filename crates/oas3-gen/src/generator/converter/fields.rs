@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeMap, BTreeSet, HashMap},
+  collections::{BTreeMap, BTreeSet},
   rc::Rc,
 };
 
@@ -7,13 +7,12 @@ use anyhow::Context as _;
 use itertools::{Either, Itertools};
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema};
 use regex::Regex;
-use string_cache::DefaultAtom;
 
-use super::{ConversionOutput, RustType, type_resolver::TypeResolver};
+use super::{ConversionOutput, type_resolver::TypeResolver};
 use crate::{
   generator::{
     ast::{
-      FieldDef, FieldNameToken, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute, TypeRef,
+      FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAsFieldAttr, SerdeAttribute, StructKind, TypeRef,
       ValidationAttribute,
     },
     converter::ConverterContext,
@@ -43,29 +42,22 @@ pub(crate) struct ResolvedFieldData {
 pub(crate) struct FieldConverter {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
-  odata_support: bool,
-  customizations: HashMap<String, String>,
 }
 
 impl FieldConverter {
   /// Creates a new field converter with configuration from the context.
   pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
-    let config = context.config();
     Self {
       context: context.clone(),
       type_resolver: TypeResolver::new(context.clone()),
-      odata_support: config.odata_support(),
-      customizations: config.customizations.clone(),
     }
   }
 
   /// Resolves a schema reference and extracts type information with validation metadata.
   ///
-  /// This centralizes the common pattern of:
-  /// 1. Resolving the schema reference
-  /// 2. Checking for inline enums (which require `resolve_property` for inline type creation)
-  /// 3. Resolving to a Rust type
-  /// 4. Extracting validation attributes and default values
+  /// This centralizes the common pattern of resolving the schema reference,
+  /// checking for inline enums, resolving to a Rust type, and extracting
+  /// validation attributes and default values.
   pub(crate) fn resolve_with_metadata(
     &self,
     parent_name: &str,
@@ -98,107 +90,63 @@ impl FieldConverter {
   /// Collects struct fields from all properties in an object schema.
   ///
   /// Iterates over `schema.properties`, resolves each property's type,
-  /// extracts validation attributes, and builds field definitions.
-  /// Deduplicates field names that collide after Rust identifier conversion.
-  /// Returns the fields along with any inline types extracted from
-  /// nested object or enum properties.
-  pub(crate) fn collect_fields(
+  /// deduplicates field names, and adds an `additionalProperties` catch-all
+  /// field when the schema defines one. Returns the fields along with any
+  /// inline types extracted from nested object or enum properties.
+  pub(crate) fn build_struct_fields(
     &self,
     parent_name: &str,
     schema: &ObjectSchema,
     schema_name: Option<&str>,
+    kind: StructKind,
   ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
+    let spec = self.context.graph().spec();
     let required = schema.required.iter().collect::<BTreeSet<_>>();
     let discriminator_mapping = schema_name.and_then(|name| self.context.graph().mapping(name));
 
-    let (fields, inline_types) = itertools::process_results(
-      schema.properties.iter().map(|(prop_name, prop_schema_ref)| {
-        let prop_schema = prop_schema_ref
-          .resolve(self.context.graph().spec())
-          .context(format!("Schema resolution failed for property '{prop_name}'"))?;
+    let mut fields = vec![];
+    let mut inline_types = vec![];
 
-        let resolved = self
-          .type_resolver
-          .resolve_property(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
+    for (prop_name, prop_schema_ref) in &schema.properties {
+      let prop_schema = prop_schema_ref
+        .resolve(spec)
+        .context(format!("Schema resolution failed for property '{prop_name}'"))?;
 
-        let field = self.convert_field(
-          prop_name,
-          schema,
-          &prop_schema,
-          resolved.result,
-          required.contains(prop_name),
-          discriminator_mapping,
-        );
+      let resolved = self
+        .type_resolver
+        .resolve_property(parent_name, prop_name, &prop_schema, prop_schema_ref)?;
 
-        anyhow::Ok((field, resolved.inline_types))
-      }),
-      |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
-    )?;
-    let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
+      fields.push(self.convert_field(
+        prop_name,
+        schema,
+        &prop_schema,
+        resolved.result,
+        required.contains(prop_name),
+        discriminator_mapping,
+      ));
+      inline_types.extend(resolved.inline_types);
+    }
 
-    Ok(ConversionOutput::with_inline_types(
-      Self::deduplicate_names(fields),
-      inline_types,
-    ))
-  }
+    fields = Self::deduplicate_names(fields);
 
-  /// Converts `additionalProperties` into serde attributes and an optional catch-all field.
-  ///
-  /// Returns `#[serde(deny_unknown_fields)]` when `additionalProperties: false`,
-  /// or a `HashMap<String, T>` field when `additionalProperties` specifies a schema.
-  /// Returns empty attributes and `None` when `additionalProperties` is not set.
-  pub(crate) fn build_additional_properties(
-    &self,
-    schema: &ObjectSchema,
-  ) -> anyhow::Result<(Vec<SerdeAttribute>, Option<FieldDef>)> {
-    let Some(ref additional) = schema.additional_properties else {
-      return Ok((vec![], None));
-    };
-
-    match additional {
-      Schema::Boolean(b) if !b.0 => Ok((vec![SerdeAttribute::DenyUnknownFields], None)),
-      Schema::Object(_) | Schema::Boolean(_) => {
-        let value_type = self.type_resolver.additional_properties_type(additional)?;
-        Ok((
-          vec![],
-          Some(FieldDef::builder().additional_properties(&value_type).build()),
-        ))
+    if let Some(ref additional) = schema.additional_properties {
+      match additional {
+        Schema::Boolean(b) if !b.0 => {}
+        Schema::Object(_) | Schema::Boolean(_) => {
+          let value_type = self.type_resolver.additional_properties_type(additional)?;
+          fields.push(FieldDef::builder().additional_properties(&value_type).build());
+        }
       }
     }
+
+    if matches!(kind, StructKind::Schema) && self.context.config().enable_builders() {
+      fields = fields.into_iter().map(FieldDef::with_builder_attrs).collect::<Vec<_>>();
+    }
+
+    Ok(ConversionOutput::with_inline_types(fields, inline_types))
   }
 
-  /// Derives struct-level serde and outer attributes from field characteristics.
-  ///
-  /// Adds `#[serde(default)]` if any field has a default value. Adds
-  /// `#[serde_as]` if any field uses serde_with custom serialization.
-  pub(crate) fn struct_attributes(
-    fields: &[FieldDef],
-    base_serde: Vec<SerdeAttribute>,
-  ) -> (Vec<SerdeAttribute>, Vec<OuterAttr>) {
-    let default_serde = fields
-      .iter()
-      .any(|f| f.default_value.is_some())
-      .then_some(SerdeAttribute::Default);
-
-    let serde_attrs = base_serde.into_iter().chain(default_serde).collect();
-
-    let outer_attrs = fields
-      .iter()
-      .any(|f| f.serde_as_attr.is_some())
-      .then_some(OuterAttr::SerdeAs)
-      .into_iter()
-      .collect();
-
-    (serde_attrs, outer_attrs)
-  }
-
-  /// Converts a single property into a Rust field definition.
-  ///
-  /// Applies optionality rules (required, default, discriminator, OData),
-  /// extracts validation attributes from schema constraints, and generates
-  /// serde rename attributes when the Rust field name differs from the
-  /// JSON property name.
-  pub(crate) fn convert_field(
+  fn convert_field(
     &self,
     prop_name: &str,
     parent_schema: &ObjectSchema,
@@ -207,15 +155,29 @@ impl FieldConverter {
     is_required: bool,
     discriminator_mapping: Option<&DiscriminatorMapping>,
   ) -> FieldDef {
-    let discriminator_info = DiscriminatorFieldInfo::new(prop_name, parent_schema, prop_schema, discriminator_mapping);
+    let discriminator_value = discriminator_mapping
+      .filter(|m| m.field_name == prop_name)
+      .map(|m| m.field_value.as_str());
 
-    let should_be_optional = self.is_field_optional(
-      prop_name,
-      parent_schema,
-      prop_schema,
-      discriminator_info.as_ref(),
-      is_required,
-    );
+    let is_base_discriminator = parent_schema
+      .discriminator
+      .as_ref()
+      .is_some_and(|d| d.property_name == prop_name);
+
+    let is_discriminator = discriminator_value.is_some() || is_base_discriminator;
+    let discriminator_has_enum = is_discriminator && prop_schema.has_selectable_values();
+    let is_base = is_base_discriminator && discriminator_value.is_none();
+
+    let is_odata_optional = self.context.config().odata_support()
+      && prop_name.starts_with("@odata.")
+      && parent_schema.discriminator.is_none()
+      && !parent_schema.has_intersection();
+
+    let should_be_optional = !is_required
+      || prop_schema.default.is_some()
+      || (is_discriminator && !discriminator_has_enum)
+      || is_odata_optional;
+
     let final_type = if should_be_optional && !resolved_type.nullable {
       resolved_type.with_option()
     } else {
@@ -232,7 +194,7 @@ impl FieldConverter {
       BTreeSet::from([SerdeAttribute::Rename(prop_name.to_string())])
     };
 
-    let serde_as_attr = self.get_customization_for_type(&final_type);
+    let serde_as_attr = self.customization_for_type(&final_type);
 
     let field = FieldDef::builder()
       .schema(prop_schema)
@@ -244,49 +206,30 @@ impl FieldConverter {
       .validation_attrs(validation_attrs)
       .build();
 
-    match discriminator_info.as_ref().filter(|d| d.should_hide()) {
-      Some(info) => field.with_discriminator_behavior(info.value.as_deref(), info.is_base),
-      None => field,
+    let should_hide = is_discriminator && !discriminator_has_enum;
+    if should_hide {
+      field.with_discriminator_behavior(discriminator_value, is_base)
+    } else {
+      field
     }
   }
 
-  /// Looks up a custom serde_with type override for the field's primitive type.
-  ///
-  /// Returns `Some` if the configuration specifies a custom serialization
-  /// type for this primitive (e.g., `date_time` → `time::OffsetDateTime`).
-  fn get_customization_for_type(&self, type_ref: &TypeRef) -> Option<SerdeAsFieldAttr> {
-    let key = Self::primitive_to_key(&type_ref.base_type)?;
-    let custom_type = self.customizations.get(&key)?;
+  fn customization_for_type(&self, type_ref: &TypeRef) -> Option<SerdeAsFieldAttr> {
+    let key = match &type_ref.base_type {
+      RustPrimitive::DateTime => "date_time",
+      RustPrimitive::Date => "date",
+      RustPrimitive::Time => "time",
+      RustPrimitive::Duration => "duration",
+      RustPrimitive::Uuid => "uuid",
+      RustPrimitive::Custom(name) => name,
+      _ => return None,
+    };
+    let custom_type = self.context.config().customizations.get(key)?;
     Some(SerdeAsFieldAttr::CustomOverride {
       custom_type: custom_type.clone(),
       optional: type_ref.nullable,
       is_array: type_ref.is_array,
     })
-  }
-
-  /// Maps a primitive type to its customization lookup key.
-  fn primitive_to_key(primitive: &RustPrimitive) -> Option<String> {
-    match primitive {
-      RustPrimitive::DateTime => Some("date_time".to_string()),
-      RustPrimitive::Date => Some("date".to_string()),
-      RustPrimitive::Time => Some("time".to_string()),
-      RustPrimitive::Duration => Some("duration".to_string()),
-      RustPrimitive::Uuid => Some("uuid".to_string()),
-      RustPrimitive::Custom(name) => Some(name.to_string()),
-      _ => None,
-    }
-  }
-
-  #[cfg(test)]
-  pub(crate) fn extract_parameter_metadata(
-    prop_name: &str,
-    is_required: bool,
-    schema: &ObjectSchema,
-    type_ref: &TypeRef,
-  ) -> (Vec<ValidationAttribute>, Option<serde_json::Value>) {
-    let validation_attrs = Self::extract_all_validation(prop_name, is_required, schema, type_ref);
-    let default_value = Self::extract_default_value(schema);
-    (validation_attrs, default_value)
   }
 
   /// Extracts a default value from schema `default`, `const`, or single-value `enum`.
@@ -304,8 +247,7 @@ impl FieldConverter {
   ///
   /// Generates `#[validate(email)]`, `#[validate(url)]`, `#[validate(range)]`,
   /// `#[validate(length)]`, and `#[validate(regex)]` based on format,
-  /// min/max values, and pattern constraints. Skips regex validation for
-  /// types with known formats (date, datetime, uuid).
+  /// min/max values, and pattern constraints.
   pub(crate) fn extract_all_validation(
     prop_name: &str,
     is_required: bool,
@@ -330,9 +272,14 @@ impl FieldConverter {
     }
 
     if schema.is_freeform_string() {
-      let has_non_string_format = schema.format.as_ref().is_some_and(|f| Self::is_non_string_format(f));
+      let is_non_string_format = schema.format.as_ref().is_some_and(|f| {
+        matches!(
+          f.as_str(),
+          "date" | "date-time" | "duration" | "time" | "binary" | "byte" | "uuid"
+        )
+      });
 
-      if !has_non_string_format {
+      if !is_non_string_format {
         if let Some(length_attr) =
           ValidationAttribute::length(schema.min_length, schema.max_length, is_required && !type_ref.nullable)
         {
@@ -341,8 +288,12 @@ impl FieldConverter {
 
         if let Some(pattern) = schema.pattern.as_ref() {
           if Regex::new(pattern).is_ok() {
-            if let Some(regex) = Self::filter_regex_validation(Some(pattern.clone()), type_ref) {
-              attrs.push(ValidationAttribute::Regex(regex));
+            let skip = matches!(
+              &type_ref.base_type,
+              RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid
+            );
+            if !skip {
+              attrs.push(ValidationAttribute::Regex(pattern.clone()));
             }
           } else {
             eprintln!("Warning: Invalid regex pattern '{pattern}' for property '{prop_name}'");
@@ -359,57 +310,6 @@ impl FieldConverter {
     }
 
     attrs
-  }
-
-  /// Filters out regex validation for types with built-in format validation.
-  fn filter_regex_validation(regex: Option<String>, type_ref: &TypeRef) -> Option<String> {
-    match &type_ref.base_type {
-      RustPrimitive::DateTime | RustPrimitive::Date | RustPrimitive::Time | RustPrimitive::Uuid => None,
-      _ => regex,
-    }
-  }
-
-  /// Returns `true` if the format indicates a non-string primitive type.
-  fn is_non_string_format(format: &str) -> bool {
-    matches!(
-      format,
-      "date" | "date-time" | "duration" | "time" | "binary" | "byte" | "uuid"
-    )
-  }
-
-  /// Determines whether a field should be wrapped in `Option<T>`.
-  ///
-  /// Returns `true` when:
-  /// - The field is not in the `required` array
-  /// - The field has a default value
-  /// - The field is a discriminator without enum values
-  /// - OData support is enabled and the field is an `@odata.*` property
-  fn is_field_optional(
-    &self,
-    prop_name: &str,
-    parent_schema: &ObjectSchema,
-    prop_schema: &ObjectSchema,
-    discriminator_info: Option<&DiscriminatorFieldInfo>,
-    is_required: bool,
-  ) -> bool {
-    let has_default = prop_schema.default.is_some();
-    let is_discriminator_field = discriminator_info.is_some();
-    let discriminator_has_enum = discriminator_info.is_some_and(|i| i.has_enum);
-
-    if !is_required || has_default {
-      return true;
-    }
-    if is_discriminator_field && !discriminator_has_enum {
-      return true;
-    }
-    if self.odata_support
-      && prop_name.starts_with("@odata.")
-      && parent_schema.discriminator.is_none()
-      && !parent_schema.has_intersection()
-    {
-      return true;
-    }
-    false
   }
 
   /// Resolves field name collisions by appending numeric suffixes.
@@ -463,59 +363,5 @@ impl FieldConverter {
         }
       })
       .collect()
-  }
-}
-
-/// Tracks discriminator-related metadata for a field during conversion.
-///
-/// Used to determine special handling for fields that serve as discriminator
-/// properties in polymorphic schemas.
-#[derive(Debug, Clone)]
-pub(crate) struct DiscriminatorFieldInfo {
-  pub value: Option<DefaultAtom>,
-  pub is_base: bool,
-  pub has_enum: bool,
-}
-
-impl DiscriminatorFieldInfo {
-  /// Creates discriminator info if the field is a discriminator property.
-  ///
-  /// Returns `None` if the field is not related to discriminator handling.
-  /// Sets `is_base` for discriminator properties on base types, and `value`
-  /// for child types with a known discriminator value.
-  pub fn new(
-    prop_name: &str,
-    parent_schema: &ObjectSchema,
-    prop_schema: &ObjectSchema,
-    discriminator_mapping: Option<&DiscriminatorMapping>,
-  ) -> Option<Self> {
-    let value = discriminator_mapping
-      .filter(|m| m.field_name == prop_name)
-      .map(|m| DefaultAtom::from(m.field_value.as_str()));
-
-    let is_base_discriminator = parent_schema
-      .discriminator
-      .as_ref()
-      .is_some_and(|d| d.property_name == prop_name);
-
-    let is_child_discriminator = value.is_some();
-
-    if !is_child_discriminator && !is_base_discriminator {
-      return None;
-    }
-
-    Some(Self {
-      value,
-      is_base: is_base_discriminator && !is_child_discriminator,
-      has_enum: prop_schema.has_selectable_values(),
-    })
-  }
-
-  /// Returns `true` if the discriminator field should be hidden from the struct.
-  ///
-  /// Fields are hidden when they lack enum values and either have a fixed
-  /// discriminator value (child types) or are the base type's discriminator.
-  pub fn should_hide(&self) -> bool {
-    !self.has_enum && (self.value.is_some() || self.is_base)
   }
 }

@@ -9,7 +9,8 @@ book/                             # User documentation (mdBook)
 │   ├── src/
 │   │   ├── SUMMARY.md            # Table of contents
 │   │   ├── introduction.md       # Getting started guide
-│   │   └── code-generation.md    # CLI flag reference
+│   │   ├── code-generation.md    # CLI flag reference
+│   │   └── builders.md           # Builder pattern documentation
 │   └── book.toml                 # mdBook configuration
 docs/                             # Internal developer documentation
 │   ├── architecture.md           # This file
@@ -20,42 +21,6 @@ docs/                             # Internal developer documentation
 crates/
 ├── oas3-gen/                      # CLI tool (binary)
 │   ├── fixtures/                  # Test fixtures (JSON and YAML)
-│   │   ├── basic_api.json         # Basic API test fixture
-│   │   ├── content_types.json     # Content type handling tests
-│   │   ├── enum_deduplication.json # Enum deduplication tests
-│   │   ├── event_stream.json      # Server-sent events streaming tests
-│   │   ├── implicit_union.json    # Implicit union tests
-│   │   ├── integer_path_param.json # Integer path parameter tests
-│   │   ├── intersection_union.json # Intersection/union type tests
-│   │   ├── Lizard.json            # Discriminator/inheritance tests
-│   │   ├── oas_3_1_2_pet_benchmark.json # Benchmark specification
-│   │   ├── operation_filtering.json # Operation filtering tests
-│   │   ├── petstore.json          # Petstore API specification
-│   │   ├── relaxed_enum_deduplication.json # Relaxed enum deduplication tests
-│   │   ├── schema.yaml            # YAML format test fixture
-│   │   ├── undeclared_path_params.json # Undeclared path parameter tests
-│   │   ├── union_serde.json       # Union serialization tests
-│   │   ├── untyped_parameter.json # Untyped parameter tests
-│   │   ├── event_stream/          # Event stream generated output fixtures
-│   │   │   ├── mod.rs
-│   │   │   ├── client.rs
-│   │   │   └── types.rs
-│   │   ├── intersection_union/    # Intersection union generated output fixtures
-│   │   │   ├── mod.rs
-│   │   │   ├── client.rs
-│   │   │   └── types.rs
-│   │   ├── petstore/              # Petstore client generated output fixtures
-│   │   │   ├── mod.rs
-│   │   │   ├── client.rs
-│   │   │   └── types.rs
-│   │   ├── petstore_server/       # Petstore server generated output fixtures
-│   │   │   ├── mod.rs
-│   │   │   ├── server.rs
-│   │   │   └── types.rs
-│   │   └── union_serde/           # Union serde generated output fixtures
-│   │       ├── mod.rs
-│   │       ├── client.rs
-│   │       └── types.rs
 │   └── src/
 │       ├── main.rs                # Entry point
 │       ├── ui/                    # CLI interface
@@ -68,16 +33,21 @@ crates/
 │       │       └── list.rs
 │       ├── utils/                 # Cross-cutting utilities
 │       │   ├── mod.rs
+│       │   ├── refs.rs            # OpenAPI $ref resolution utilities
 │       │   ├── schema_ext.rs      # SchemaExt trait for schema queries and inference
-│       │   ├── spec.rs            # Spec loading utilities
-│       │   └── text.rs            # Text processing utilities
-│       ├── tests/                 # Integration test utilities
+│       │   └── spec.rs            # Spec loading utilities
+│       ├── tests/                 # Integration tests
 │       │   ├── mod.rs
 │       │   ├── common.rs          # Common test helpers
-│       │   ├── petstore.rs        # Petstore integration tests
+│       │   ├── event_stream.rs    # Event stream integration tests
+│       │   ├── intersection_union.rs # Intersection union integration tests
+│       │   ├── petstore.rs        # Petstore client integration tests
+│       │   ├── petstore_server.rs # Petstore server integration tests
 │       │   └── union_serde.rs     # Union serialization tests
 │       └── generator/             # Core generation pipeline
 │           ├── mod.rs
+│           ├── metrics.rs         # Generation statistics and warnings
+│           ├── mode.rs            # Generation modes (Types, Client, Server, etc.)
 │           ├── orchestrator.rs    # Main pipeline coordinator
 │           ├── operation_registry.rs # Operation and webhook collection management
 │           ├── schema_registry.rs # Dependency tracking and cycle detection
@@ -95,7 +65,9 @@ crates/
 │           │   ├── uses.rs           # RustTypeDeduplication, HeaderRefCollection, ModuleImports
 │           │   ├── validation.rs     # NestedValidationProcessor for #[validate(nested)]
 │           │   └── tests/         # Postprocess tests
-│           │       └── mod.rs
+│           │       ├── mod.rs
+│           │       ├── transform_tests.rs
+│           │       └── type_usage_tests.rs
 │           ├── naming/            # Identifier naming and conversion
 │           │   ├── mod.rs
 │           │   ├── constants.rs   # Naming constants
@@ -112,6 +84,7 @@ crates/
 │           │       └── responses.rs
 │           ├── ast/               # AST type definitions
 │           │   ├── mod.rs
+│           │   ├── bon_attrs.rs   # Bon builder attribute generation
 │           │   ├── types.rs       # Core AST types (RustType, StructDef, EnumDef, etc.)
 │           │   ├── client.rs      # Client AST definitions
 │           │   ├── constants.rs   # Constant node definitions (HttpHeaderRef)
@@ -197,7 +170,8 @@ crates/
 │                   └── type_alias_tests.rs
 └── oas3-gen-support/              # Runtime library (rlib + cdylib)
     └── src/
-        └── lib.rs                 # Runtime utilities for generated code
+        ├── lib.rs                 # Runtime utilities for generated code
+        └── event_stream.rs        # EventStream for SSE support
 ```
 
 ## Generation Pipeline (One-Way Data Flow)
@@ -217,6 +191,8 @@ The generator follows a strict one-way data flow where each stage produces immut
 ## Key Files
 
 - [orchestrator.rs](../crates/oas3-gen/src/generator/orchestrator.rs): Pipeline coordinator, combines all stages
+- [mode.rs](../crates/oas3-gen/src/generator/mode.rs): Generation modes (Types, Client, ClientMod, ServerMod)
+- [metrics.rs](../crates/oas3-gen/src/generator/metrics.rs): Generation statistics and warnings
 - [schema_registry.rs](../crates/oas3-gen/src/generator/schema_registry.rs): Dependency graph, cycle detection, merged schemas
 - [utils/schema_ext.rs](../crates/oas3-gen/src/utils/schema_ext.rs): SchemaExt trait for schema queries and inference
 - [converter/mod.rs](../crates/oas3-gen/src/generator/converter/mod.rs): SchemaConverter, ConverterContext, CodegenConfig
@@ -237,6 +213,7 @@ The generator follows a strict one-way data flow where each stage produces immut
 - [codegen/client.rs](../crates/oas3-gen/src/generator/codegen/client.rs): HTTP client generation (ClientFragment)
 - [codegen/server.rs](../crates/oas3-gen/src/generator/codegen/server.rs): HTTP server trait generation (ServerGenerator)
 - [ast/mod.rs](../crates/oas3-gen/src/generator/ast/mod.rs): AST type definitions
+- [ast/bon_attrs.rs](../crates/oas3-gen/src/generator/ast/bon_attrs.rs): Bon builder attribute generation for structs
 - [ast/server.rs](../crates/oas3-gen/src/generator/ast/server.rs): Server AST definitions (ServerRequestTraitDef, ServerTraitMethod)
 - [operation_registry.rs](../crates/oas3-gen/src/generator/operation_registry.rs): HTTP operations and webhooks
 
@@ -276,7 +253,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 - **serde** (1.0): Serialization framework
 - **serde_json** (1.0): JSON with order preservation
-- **serde_with** (3.15): Enhanced serde utilities and chrono support
+- **serde_with** (3.16): Enhanced serde utilities and chrono support
 - **serde_path_to_error** (0.1): Detailed deserialization error paths
 - **json-canon** (0.1): Canonical JSON representation
 - **quick-xml** (>=0.38): XML parsing for content negotiation
@@ -325,8 +302,8 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Runtime Support
 
-- **oas3-gen-support** (0.25.0): Workspace runtime library with macros and utilities
+- **oas3-gen-support**: Workspace runtime library with macros and utilities
 
 ### Development & Testing
 
-- **tempfile** (3.24): Temporary test files and directories
+- **tempfile** (3.25): Temporary test files and directories

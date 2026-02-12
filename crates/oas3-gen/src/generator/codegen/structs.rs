@@ -6,8 +6,9 @@ use quote::{ToTokens, quote};
 use super::{
   Visibility,
   attributes::{
-    generate_deprecated_attr, generate_doc_hidden_attr, generate_docs_for_field, generate_field_default_attr,
-    generate_outer_attrs, generate_serde_as_attr, generate_serde_attrs, generate_validation_attrs,
+    generate_builder_attrs, generate_deprecated_attr, generate_doc_hidden_attr, generate_docs_for_field,
+    generate_field_default_attr, generate_outer_attrs, generate_serde_as_attr, generate_serde_attrs,
+    generate_validation_attrs,
   },
 };
 use crate::generator::{
@@ -57,14 +58,18 @@ impl ToTokens for StructFragment {
 
     tokens.extend(quote! {
       #definition
+
       #impl_block
+
       #header_map
+
     });
 
     if self.target == GenerationTarget::Server {
       let header_from_map = HeaderFromMapFragment::new(self.def.clone());
       tokens.extend(quote! {
         #header_from_map
+
       });
     }
   }
@@ -179,6 +184,7 @@ impl ToTokens for StructFieldFragment {
     let validation = self.validation_attrs();
     let deprecated = generate_deprecated_attr(self.field.deprecated);
     let default_val = generate_field_default_attr(&self.field);
+    let builder_attr = generate_builder_attrs(&self.field.builder_attrs);
     let doc_hidden = generate_doc_hidden_attr(self.field.doc_hidden);
 
     tokens.extend(quote! {
@@ -189,6 +195,7 @@ impl ToTokens for StructFieldFragment {
       #serde_attrs
       #validation
       #default_val
+      #builder_attr
       #vis #name: #type_tokens
     });
   }
