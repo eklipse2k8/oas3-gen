@@ -80,8 +80,9 @@ pub struct Base64ImageSource {
   pub media_type: MediaType,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("base64".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("base64"))]
+  #[builder(skip = Some("base64"))]
+  pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -89,14 +90,16 @@ pub struct Base64ImageSource {
 )]
 #[serde(default)]
 pub struct CitationAnnotation {
-  pub end: i64,
   #[validate(length(min = 1u64))]
-  pub source: String,
+  #[builder(name = build_value)]
+  pub build: String,
+  pub end: i64,
   pub start: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("citation".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("citation"))]
+  #[builder(skip = Some("citation"))]
+  pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -109,8 +112,9 @@ pub struct CodeBlock {
   pub language: Option<String>,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("code".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("code"))]
+  #[builder(skip = Some("code"))]
+  pub r#type: Option<&'static str>,
 }
 /// A union of content block types with discriminator
 #[derive(Debug, Clone, PartialEq)]
@@ -201,8 +205,9 @@ pub struct ContentBlockDeltaEvent {
   pub index: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("content_block_delta".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("content_block_delta"))]
+  #[builder(skip = Some("content_block_delta"))]
+  pub r#type: Option<&'static str>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
@@ -212,8 +217,9 @@ pub struct ContentBlockStartEvent {
   pub index: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("content_block_start".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("content_block_start"))]
+  #[builder(skip = Some("content_block_start"))]
+  pub r#type: Option<&'static str>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
@@ -221,8 +227,9 @@ pub struct ContentBlockStopEvent {
   pub index: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("content_block_stop".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("content_block_stop"))]
+  #[builder(skip = Some("content_block_stop"))]
+  pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
@@ -299,6 +306,7 @@ pub struct ErrorResponse {
   pub error: ErrorDetails,
   #[serde(rename = "type")]
   #[default("error".to_string())]
+  #[builder(default = "error".to_string())]
   pub r#type: String,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
@@ -439,8 +447,9 @@ pub struct ImageBlock {
   pub source: Box<ImageSource>,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("image".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("image"))]
+  #[builder(skip = Some("image"))]
+  pub r#type: Option<&'static str>,
 }
 /// Image source can be base64 or URL
 #[derive(Debug, Clone, PartialEq)]
@@ -502,8 +511,9 @@ pub struct InputJsonDelta {
   pub partial_json: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("input_json_delta".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("input_json_delta"))]
+  #[builder(skip = Some("input_json_delta"))]
+  pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -515,8 +525,9 @@ pub struct LinkAnnotation {
   pub start: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("link".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("link"))]
+  #[builder(skip = Some("link"))]
+  pub r#type: Option<&'static str>,
   #[validate(url, length(min = 1u64))]
   pub url: String,
 }
@@ -557,16 +568,18 @@ pub struct MessageStartEvent {
   pub message: Message,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("message_start".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("message_start"))]
+  #[builder(skip = Some("message_start"))]
+  pub r#type: Option<&'static str>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct MessageStopEvent {
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("message_stop".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("message_stop"))]
+  #[builder(skip = Some("message_stop"))]
+  pub r#type: Option<&'static str>,
 }
 /// Flexible metadata that can be string or object
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
@@ -589,8 +602,9 @@ pub enum NullableStringOrNumber {
 pub struct PingEvent {
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("ping".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("ping"))]
+  #[builder(skip = Some("ping"))]
+  pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -600,6 +614,7 @@ pub struct RecipeList {
   pub required: Option<Vec<String>>,
   #[serde(rename = "type")]
   #[default("object".to_string())]
+  #[builder(default = "object".to_string())]
   pub r#type: String,
   /// Additional properties not defined in the schema.
   #[serde(flatten)]
@@ -696,8 +711,9 @@ pub struct TextBlock {
   pub text: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("text".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("text"))]
+  #[builder(skip = Some("text"))]
+  pub r#type: Option<&'static str>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
@@ -705,8 +721,9 @@ pub struct TextDelta {
   pub text: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("text_delta".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("text_delta"))]
+  #[builder(skip = Some("text_delta"))]
+  pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -722,8 +739,9 @@ pub struct ToolResultBlock {
   pub tool_use_id: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("tool_result".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("tool_result"))]
+  #[builder(skip = Some("tool_result"))]
+  pub r#type: Option<&'static str>,
 }
 /// Tool result can be text or array of content blocks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -805,8 +823,9 @@ pub struct ToolUseBlock {
   pub name: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("tool_use".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("tool_use"))]
+  #[builder(skip = Some("tool_use"))]
+  pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -816,8 +835,9 @@ pub struct ToolUseBlock {
 pub struct UrlImageSource {
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("url".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("url"))]
+  #[builder(skip = Some("url"))]
+  pub r#type: Option<&'static str>,
   #[validate(url, length(min = 1u64))]
   pub url: String,
 }

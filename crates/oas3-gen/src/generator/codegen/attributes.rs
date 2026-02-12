@@ -5,7 +5,8 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 
 use super::coercion;
 use crate::generator::ast::{
-  DeriveTrait, Documentation, FieldDef, OuterAttr, SerdeAsFieldAttr, SerdeAttribute, ValidationAttribute,
+  DeriveTrait, Documentation, FieldDef, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute,
+  ValidationAttribute, bon_attrs::BuilderAttribute,
 };
 
 pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Documentation {
@@ -13,7 +14,7 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Documentation {
 
   if let Some(ref example) = field.example_value {
     let mut formatted_example = field.rust_type.format_example(example);
-    if field.rust_type.is_string_like() && !formatted_example.ends_with(".to_string()") {
+    if field.rust_type.base_type == RustPrimitive::String && !formatted_example.ends_with(".to_string()") {
       formatted_example = format!("{formatted_example}.to_string()");
     }
     let display_example = if field.rust_type.nullable {
@@ -108,6 +109,39 @@ pub(crate) fn generate_validation_attrs<'a>(attrs: impl IntoIterator<Item = &'a 
     quote! {}
   } else {
     quote! { #[validate(#(#attr_tokens),*)] }
+  }
+}
+
+/// Generates a single combined `#[builder(...)]` attribute for the given builder attributes.
+///
+/// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
+/// `#[builder(attr1, attr2, ...)]` attribute to reduce output noise.
+///
+/// `Default` and `Skip` variants carry a `serde_json::Value` + `TypeRef` which are
+/// coerced to Rust expressions via [`coercion::json_to_rust_literal`].
+pub(crate) fn generate_builder_attrs<'a>(attrs: impl IntoIterator<Item = &'a BuilderAttribute>) -> TokenStream {
+  let attr_tokens = attrs
+    .into_iter()
+    .map(|attr| match attr {
+      BuilderAttribute::Default { value, type_ref } => {
+        let expr = coercion::json_to_rust_literal(value, type_ref);
+        quote! { default = #expr }
+      }
+      BuilderAttribute::Rename(name) => {
+        let ident = syn::Ident::new(name, proc_macro2::Span::call_site());
+        quote! { name = #ident }
+      }
+      BuilderAttribute::Skip { value, type_ref } => {
+        let expr = coercion::json_to_rust_literal(value, type_ref);
+        quote! { skip = #expr }
+      }
+    })
+    .collect::<Vec<_>>();
+
+  if attr_tokens.is_empty() {
+    quote! {}
+  } else {
+    quote! { #[builder(#(#attr_tokens),*)] }
   }
 }
 

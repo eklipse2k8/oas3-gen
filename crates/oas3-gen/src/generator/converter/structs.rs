@@ -1,11 +1,13 @@
 use std::{collections::BTreeSet, rc::Rc};
 
-use oas3::spec::ObjectSchema;
+use oas3::spec::{ObjectSchema, Schema};
 
 use super::{ConversionOutput, discriminator::DiscriminatorConverter, fields::FieldConverter};
 use crate::{
   generator::{
-    ast::{DeriveTrait, Documentation, RustType, StructDef, StructKind, StructToken},
+    ast::{
+      DeriveTrait, Documentation, FieldCollection as _, RustType, SerdeAttribute, StructDef, StructKind, StructToken,
+    },
     converter::ConverterContext,
     naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
   },
@@ -47,12 +49,12 @@ impl StructConverter {
     }
   }
 
-  /// Assembles a struct definition from schema properties and additional properties.
+  /// Assembles a struct definition from schema properties.
   ///
-  /// Collects fields from `schema.properties`, adds a catch-all field for
-  /// `additionalProperties` if present, and attaches serde attributes.
-  /// Returns the struct definition along with any inline types extracted
-  /// from nested object or enum properties.
+  /// Collects fields via [`FieldConverter::build_struct_fields`], then derives
+  /// struct-level serde attributes, outer attributes, and builder configuration
+  /// from the resulting field set. Returns the struct definition along with any
+  /// inline types extracted from nested object or enum properties.
   fn build_struct(
     &self,
     name: StructToken,
@@ -62,28 +64,31 @@ impl StructConverter {
   ) -> anyhow::Result<ConversionOutput<RustType>> {
     let field_result = self
       .field_converter
-      .collect_fields(name.as_str(), schema, schema_name)?;
-    let (additional_serde_attrs, additional_field) = self.field_converter.build_additional_properties(schema)?;
+      .build_struct_fields(name.as_str(), schema, schema_name, kind)?;
 
-    let mut fields = field_result.result;
-    if let Some(extra) = additional_field {
-      fields.push(extra);
-    }
+    let fields = field_result.result;
 
-    let (serde_attrs, outer_attrs) = FieldConverter::struct_attributes(&fields, additional_serde_attrs);
+    let deny_unknown = matches!(&schema.additional_properties, Some(Schema::Boolean(b)) if !b.0);
+    let serde_attrs = fields.struct_serde_attrs(
+      deny_unknown
+        .then_some(SerdeAttribute::DenyUnknownFields)
+        .into_iter()
+        .collect(),
+    );
 
-    let additional_derives = if matches!(kind, StructKind::Schema) && self.context.config().enable_builders() {
+    let enable_builders = matches!(kind, StructKind::Schema) && self.context.config().enable_builders();
+    let additional_derives = if enable_builders {
       BTreeSet::from([DeriveTrait::Builder])
     } else {
-      BTreeSet::new()
+      BTreeSet::default()
     };
 
     let struct_def = StructDef::builder()
       .name(name)
       .docs(Documentation::from_optional(schema.description.as_ref()))
-      .fields(fields)
+      .outer_attrs(fields.struct_outer_attrs())
       .serde_attrs(serde_attrs)
-      .outer_attrs(outer_attrs)
+      .fields(fields)
       .kind(kind)
       .additional_derives(additional_derives)
       .build();
@@ -109,40 +114,14 @@ impl StructConverter {
       anyhow::bail!("Parent schema for discriminated child '{name}' is not a valid discriminator base");
     }
 
-    let struct_token = StructToken::from_raw(name);
-    let field_result = self
-      .field_converter
-      .collect_fields(struct_token.as_str(), merged_schema, Some(name))?;
-    let (additional_serde_attrs, additional_field) = self.field_converter.build_additional_properties(merged_schema)?;
+    let result = self.build_struct(
+      StructToken::from_raw(name),
+      merged_schema,
+      Some(name),
+      StructKind::Schema,
+    )?;
 
-    let mut fields = field_result.result;
-    if let Some(extra) = additional_field {
-      fields.push(extra);
-    }
-
-    let (serde_attrs, outer_attrs) = FieldConverter::struct_attributes(&fields, additional_serde_attrs);
-
-    let additional_derives = if self.context.config().enable_builders() {
-      BTreeSet::from([DeriveTrait::Builder])
-    } else {
-      BTreeSet::new()
-    };
-
-    let struct_def = StructDef::builder()
-      .name(struct_token)
-      .docs(Documentation::from_optional(merged_schema.description.as_ref()))
-      .fields(fields)
-      .serde_attrs(serde_attrs)
-      .outer_attrs(outer_attrs)
-      .kind(StructKind::Schema)
-      .additional_derives(additional_derives)
-      .build();
-
-    Ok(
-      std::iter::once(RustType::Struct(struct_def))
-        .chain(field_result.inline_types)
-        .collect(),
-    )
+    Ok(std::iter::once(result.result).chain(result.inline_types).collect())
   }
 
   /// Converts an OpenAPI object schema into a Rust struct definition.

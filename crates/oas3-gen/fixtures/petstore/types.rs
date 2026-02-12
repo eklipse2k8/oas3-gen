@@ -18,8 +18,9 @@ pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort
 pub struct Allergies {
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("allergies".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("allergies"))]
+  #[builder(skip = Some("allergies"))]
+  pub r#type: Option<&'static str>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct Cat {
@@ -81,8 +82,9 @@ pub enum CreatePetsResponse {
 pub struct Diet {
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
-  #[default(Some("diet".to_string()))]
-  pub r#type: Option<String>,
+  #[default(Some("diet"))]
+  #[builder(skip = Some("diet"))]
+  pub r#type: Option<&'static str>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct Error {

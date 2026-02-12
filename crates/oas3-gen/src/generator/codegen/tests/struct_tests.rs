@@ -1,12 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use quote::ToTokens as _;
 
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken,
-    ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, StatusCodeToken,
-    StatusHandler, StructDef, StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute,
+    ContentCategory, DeriveTrait, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind,
+    MethodNameToken, ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory,
+    StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute,
   },
   codegen::{Visibility, structs::StructFragment},
   converter::GenerationTarget,
@@ -324,5 +324,75 @@ fn test_header_params_with_primitive_types() {
   assert!(
     code.contains("to_string ()"),
     "primitive types should use to_string() conversion: {code}"
+  );
+}
+
+#[test]
+fn test_builder_renames_reserved_bon_field_names() {
+  let cases = [
+    (
+      "build",
+      true,
+      "field named 'build' should get #[builder(name = build_value)]",
+    ),
+    (
+      "builder",
+      true,
+      "field named 'builder' should get #[builder(name = builder_value)]",
+    ),
+    ("name", false, "field named 'name' should not be renamed"),
+  ];
+  for (field_name, should_rename, desc) in cases {
+    let mut field = FieldDef::builder()
+      .name(FieldNameToken::new(field_name))
+      .rust_type(TypeRef::new("String").with_option())
+      .build();
+    field = field.with_builder_attrs();
+
+    let def = StructDef {
+      name: StructToken::new("TestStruct"),
+      docs: Documentation::default(),
+      fields: vec![field],
+      kind: StructKind::Schema,
+      additional_derives: BTreeSet::from([DeriveTrait::Builder]),
+      ..Default::default()
+    };
+
+    let tokens =
+      StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    let code = tokens.to_string();
+    let expected_rename = format!("{field_name}_value");
+
+    assert_eq!(code.contains(&expected_rename), should_rename, "{desc}: {code}");
+  }
+}
+
+#[test]
+fn test_builder_skipped_field_named_build_not_renamed() {
+  let mut field = FieldDef::builder()
+    .name(FieldNameToken::new("build"))
+    .rust_type(TypeRef::new("String").with_option())
+    .doc_hidden(true)
+    .default_value(serde_json::Value::String("hidden".to_string()))
+    .build();
+  field = field.with_builder_attrs();
+
+  let def = StructDef {
+    name: StructToken::new("TestStruct"),
+    docs: Documentation::default(),
+    fields: vec![field],
+    kind: StructKind::Schema,
+    additional_derives: BTreeSet::from([DeriveTrait::Builder]),
+    ..Default::default()
+  };
+
+  let tokens =
+    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+  let code = tokens.to_string();
+
+  assert!(code.contains("builder (skip"), "hidden field should be skipped: {code}");
+  assert!(
+    !code.contains("build_value"),
+    "skipped field should not be renamed: {code}"
   );
 }
