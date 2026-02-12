@@ -351,6 +351,15 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
   - Private helper functions with type aliases: `type FieldTuple = (Vec<Field>, Option<Nested>);`
   - Intermediate iterator results that are immediately destructured
 
+### Avoid Bespoke Shuttle Structs
+
+- Don't create a dedicated struct solely to pass data between a producer and a single consumer
+- If a generic container already models the return shape (e.g., `ConversionOutput<T>`), use it
+- Let consumers derive secondary values from the raw data rather than pre-computing them in the producer
+- Bad: `struct FieldData { fields, serde_attrs, outer_attrs }` returned from a field collector where `serde_attrs` and `outer_attrs` are derivable from `fields`
+- Good: return `ConversionOutput<Vec<FieldDef>>` and let the struct assembler call `fields.struct_serde_attrs()` itself
+- This keeps producers focused on their core responsibility and avoids coupling them to consumer-specific concerns
+
 ### String Enums
 
 - Use `strum` (with `#[derive(EnumString, Display)]`) for simple known string enums
