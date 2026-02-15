@@ -255,7 +255,7 @@ impl OperationInfo {
       .iter()
       .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)))
       .filter_map(|p| p.original_name.as_deref())
-      .map(|name| HttpHeaderRef::from(name.to_ascii_lowercase()))
+      .map(HttpHeaderRef::from)
   }
 
   pub fn warnings(&self) -> impl Iterator<Item = GenerationWarning> {
