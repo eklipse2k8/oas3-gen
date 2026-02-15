@@ -109,7 +109,7 @@ impl OperationsProcessor {
         .flat_map(|components| components.parameters.values())
         .filter_map(|parameter| parameter.resolve(spec).ok())
         .filter(|parameter| parameter.location == ParameterIn::Header)
-        .map(|parameter| HttpHeaderRef::from(parameter.name.to_ascii_lowercase())),
+        .map(|parameter| HttpHeaderRef::from(&parameter.name)),
     );
   }
 }
