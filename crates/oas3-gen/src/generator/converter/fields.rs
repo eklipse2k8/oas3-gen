@@ -271,7 +271,7 @@ impl FieldConverter {
       return attrs;
     }
 
-    if schema.is_freeform_string() {
+    if schema.is_unconstrained_string() {
       let is_non_string_format = schema.format.as_ref().is_some_and(|f| {
         matches!(
           f.as_str(),

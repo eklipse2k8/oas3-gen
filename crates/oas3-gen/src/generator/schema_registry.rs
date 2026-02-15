@@ -12,7 +12,10 @@ use crate::{
     naming::name_index::{ScanResult, TypeNameIndex},
     operation_registry::OperationRegistry,
   },
-  utils::{SchemaExt, UnionFingerprints, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
+  utils::{
+    SchemaExt, UnionFingerprints, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path,
+    schema_ext::SchemaExtIters,
+  },
 };
 
 /// Identifies how a schema maps to a discriminator value in a polymorphic hierarchy.
@@ -198,6 +201,11 @@ impl SchemaRegistry {
   /// without any inheritance flattening applied.
   pub(crate) fn get(&self, name: &str) -> Option<&ObjectSchema> {
     self.schemas.get(name)
+  }
+
+  /// Returns whether a schema with the given name exists in the registry.
+  pub(crate) fn contains(&self, name: &str) -> bool {
+    self.schemas.contains_key(name)
   }
 
   /// Returns all schema names in the registry.
@@ -588,7 +596,7 @@ impl SchemaRegistry {
     schema
       .all_of
       .iter()
-      .filter_map(|r| r.resolve(&self.spec).ok())
+      .resolve_all(&self.spec)
       .find_map(|parent| parent.additional_properties.clone())
   }
 

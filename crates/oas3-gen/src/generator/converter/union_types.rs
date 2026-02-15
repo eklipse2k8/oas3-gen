@@ -1,6 +1,5 @@
 use itertools::Itertools;
 use oas3::spec::ObjectSchema;
-use serde_json::Value;
 
 use crate::generator::ast::{
   DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumToken, EnumVariantToken,
@@ -33,29 +32,13 @@ pub(crate) enum CollisionStrategy {
   Deduplicate,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct EnumValueEntry {
-  pub(crate) value: Value,
-  pub(crate) docs: Documentation,
-  pub(crate) deprecated: bool,
-}
-
-impl EnumValueEntry {
-  /// Extracts a cache key from this enum entry's value, if it is a string.
-  ///
-  /// Returns `Some(value)` for string enum values, or `None` for non-string values
-  /// (integers, booleans, etc.) which cannot be used as cache keys.
-  pub(crate) fn cache_key(&self) -> Option<String> {
-    self.value.as_str().map(String::from)
-  }
-}
-
-/// Builds a sorted list of cache keys from enum value entries for type deduplication.
+/// Builds a sorted list of cache keys from variant definitions for type deduplication.
 ///
-/// Filters out non-string entries, then sorts alphabetically to produce a canonical
-/// key that identifies equivalent enum types regardless of their declaration order.
-pub(crate) fn entries_to_cache_key(entries: &[EnumValueEntry]) -> Vec<String> {
-  entries.iter().filter_map(EnumValueEntry::cache_key).sorted().collect()
+/// Uses each variant's serde name (the wire-format value) as the cache key,
+/// sorted alphabetically to produce a canonical key that identifies equivalent
+/// enum types regardless of their declaration order.
+pub(crate) fn variants_to_cache_key(variants: &[VariantDef]) -> Vec<String> {
+  variants.iter().map(VariantDef::serde_name).sorted().collect()
 }
 
 #[derive(Clone, Debug)]

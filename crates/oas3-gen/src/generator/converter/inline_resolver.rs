@@ -7,7 +7,7 @@ use oas3::spec::ObjectSchema;
 use super::{
   ConversionOutput, TypeResolver,
   structs::StructConverter,
-  union_types::{UnionKind, entries_to_cache_key},
+  union_types::{UnionKind, variants_to_cache_key},
   unions::{EnumConverter, UnionConverter},
 };
 use crate::{
@@ -138,7 +138,7 @@ impl InlineTypeResolver {
           return None;
         }
         let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
       });
 
     {
@@ -253,7 +253,7 @@ impl InlineTypeResolver {
       .flatten()
       .or_else(|| {
         let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
       });
     let registration = self
       .context
@@ -316,7 +316,7 @@ impl InlineTypeResolver {
       .flatten()
       .or_else(|| {
         let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
       });
     let registration = self
       .context

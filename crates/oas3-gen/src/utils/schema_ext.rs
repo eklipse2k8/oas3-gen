@@ -2,13 +2,13 @@ use inflections::Inflect;
 use itertools::Itertools;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
+  spec::{FromRef, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
 };
 
 use crate::{
   generator::{
-    ast::Documentation,
-    converter::union_types::{EnumValueEntry, UnionKind},
+    ast::{VariantContent, VariantDef},
+    converter::union_types::UnionKind,
     naming::{
       constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
       identifiers::{sanitize, to_rust_type_name},
@@ -17,6 +17,46 @@ use crate::{
   },
   utils::refs::extract_schema_ref_name,
 };
+
+pub trait SchemaIters {
+  fn variants(self) -> impl Iterator<Item = VariantDef>;
+}
+
+pub trait Resolvable {
+  type Output;
+  fn try_resolve(self, spec: &Spec) -> Option<Self::Output>;
+}
+
+impl<T: FromRef> Resolvable for &ObjectOrReference<T> {
+  type Output = T;
+  fn try_resolve(self, spec: &Spec) -> Option<T> {
+    self.resolve(spec).ok()
+  }
+}
+
+/// Resolve a Map or filter out items
+impl<'a, K, T: FromRef> Resolvable for (&'a K, &'a ObjectOrReference<T>) {
+  type Output = (&'a K, T);
+  fn try_resolve(self, spec: &Spec) -> Option<(&'a K, T)> {
+    let value = self.1.resolve(spec).ok()?;
+    Some((self.0, value))
+  }
+}
+
+pub trait SchemaExtIters: Iterator {
+  fn resolve_all(self, spec: &Spec) -> impl Iterator<Item = <Self::Item as Resolvable>::Output>
+  where
+    Self::Item: Resolvable;
+}
+
+impl<I: Iterator> SchemaExtIters for I {
+  fn resolve_all(self, spec: &Spec) -> impl Iterator<Item = <Self::Item as Resolvable>::Output>
+  where
+    Self::Item: Resolvable,
+  {
+    self.filter_map(|item| item.try_resolve(spec))
+  }
+}
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
 pub(crate) trait SchemaExt {
@@ -142,7 +182,7 @@ pub(crate) trait SchemaExt {
   /// { "type": "string", "enum": ["a"] }     => false
   /// { "type": "string", "const": "x" }      => false
   /// ```
-  fn is_freeform_string(&self) -> bool;
+  fn is_unconstrained_string(&self) -> bool;
 
   /// Returns true if schema has enum values or a const constraint.
   ///
@@ -183,17 +223,17 @@ pub(crate) trait SchemaExt {
   /// Checks in order: title, single property name, path segments.
   fn infer_name_from_context(&self, path: &str, context: &str) -> String;
 
-  /// Extracts all enum value entries from the schema with proper metadata.
+  /// Extracts all enum variant definitions from the schema.
   ///
   /// Handles multiple patterns:
-  /// - Direct `enum` arrays: each value becomes an entry
-  /// - `const` values: single entry with schema's docs/deprecated
+  /// - Direct `enum` arrays: each value becomes a unit variant
+  /// - `const` values: single variant with schema's docs/deprecated
   /// - oneOf/anyOf with const variants: per-variant metadata preserved
   /// - Relaxed enum patterns: known values extracted from constrained variants
   ///
-  /// Returns entries with documentation and deprecated status from the source schema
-  /// when available, enabling per-variant metadata in generated code.
-  fn extract_enum_entries(&self, spec: &Spec) -> Vec<EnumValueEntry>;
+  /// Returns fully-constructed `VariantDef`s with normalized names, serde attributes,
+  /// documentation, and deprecated status from the source schema when available.
+  fn extract_enum_entries(&self, spec: &Spec) -> Vec<VariantDef>;
 
   /// Returns true if the schema should be registered as an enum in the name index.
   ///
@@ -412,8 +452,8 @@ impl SchemaExt for ObjectSchema {
     matches!(self.single_type_or_nullable(), Some(SchemaType::String))
   }
 
-  fn is_freeform_string(&self) -> bool {
-    self.is_string_type() && self.enum_values.is_empty() && self.const_value.is_none()
+  fn is_unconstrained_string(&self) -> bool {
+    self.is_string_type() && !self.is_constrained()
   }
 
   fn is_constrained(&self) -> bool {
@@ -565,32 +605,29 @@ impl SchemaExt for ObjectSchema {
       })
   }
 
-  fn extract_enum_entries(&self, spec: &Spec) -> Vec<EnumValueEntry> {
+  fn extract_enum_entries(&self, spec: &Spec) -> Vec<VariantDef> {
     if !self.enum_values.is_empty() {
-      return self
-        .enum_values
-        .iter()
-        .map(|value| EnumValueEntry {
-          value: value.clone(),
-          docs: Documentation::default(),
-          deprecated: false,
-        })
-        .collect();
+      return self.enum_values.iter().variants().collect();
     }
 
     if let Some(const_val) = &self.const_value {
-      return vec![EnumValueEntry {
-        value: const_val.clone(),
-        docs: Documentation::from_optional(self.description.as_ref()),
-        deprecated: self.deprecated.unwrap_or(false),
-      }];
+      let Ok(normalized) = NormalizedVariant::try_from(const_val) else {
+        return vec![];
+      };
+      return vec![
+        VariantDef::builder()
+          .normalized(normalized)
+          .content(VariantContent::Unit)
+          .schema(self)
+          .build(),
+      ];
     }
 
     self
       .union_variants()
-      .filter_map(|v| v.resolve(spec).ok())
+      .resolve_all(spec)
       .flat_map(|s| extract_variant_entries(&s))
-      .unique_by(|e| e.value.clone())
+      .unique_by(VariantDef::serde_name)
       .collect()
   }
 
@@ -599,28 +636,26 @@ impl SchemaExt for ObjectSchema {
   }
 }
 
-fn extract_variant_entries(schema: &ObjectSchema) -> Vec<EnumValueEntry> {
-  if schema.is_freeform_string() {
+fn extract_variant_entries(schema: &ObjectSchema) -> Vec<VariantDef> {
+  if schema.is_unconstrained_string() {
     return vec![];
   }
 
   if let Some(const_val) = &schema.const_value {
-    return vec![EnumValueEntry {
-      value: const_val.clone(),
-      docs: Documentation::from_optional(schema.description.as_ref()),
-      deprecated: schema.deprecated.unwrap_or(false),
-    }];
+    let Ok(normalized) = NormalizedVariant::try_from(const_val) else {
+      return vec![];
+    };
+
+    return vec![
+      VariantDef::builder()
+        .normalized(normalized)
+        .content(VariantContent::Unit)
+        .schema(schema)
+        .build(),
+    ];
   }
 
-  schema
-    .enum_values
-    .iter()
-    .map(|value| EnumValueEntry {
-      value: value.clone(),
-      docs: Documentation::default(),
-      deprecated: false,
-    })
-    .collect()
+  schema.enum_values.iter().variants().collect()
 }
 
 fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spec: &Spec) -> bool {
@@ -641,20 +676,25 @@ fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spec: &Spec) -
 pub(crate) fn has_mixed_string_variants<'a>(
   variants: impl Iterator<Item = &'a ObjectOrReference<ObjectSchema>>,
 ) -> bool {
+  let objects = variants.filter_map(|variant| match variant {
+    ObjectOrReference::Object(s) => Some(s),
+    ObjectOrReference::Ref { .. } => None,
+  });
+
   let mut has_freeform = false;
   let mut has_constrained = false;
 
-  for v in variants {
-    if let ObjectOrReference::Object(s) = v {
-      if s.is_freeform_string() {
-        has_freeform = true;
-      } else if s.is_constrained() {
-        has_constrained = true;
+  for v in objects {
+    if v.is_unconstrained_string() {
+      if has_constrained {
+        return true;
       }
-    }
-
-    if has_freeform && has_constrained {
-      return true;
+      has_freeform = true;
+    } else if v.is_constrained() {
+      if has_freeform {
+        return true;
+      }
+      has_constrained = true;
     }
   }
 

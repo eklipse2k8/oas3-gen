@@ -7,7 +7,7 @@ use super::{
   ConversionOutput,
   methods::MethodGenerator,
   relaxed_enum::RelaxedEnumBuilder,
-  union_types::{CollisionStrategy, UnionKind, UnionVariantSpec, entries_to_cache_key},
+  union_types::{CollisionStrategy, UnionKind, UnionVariantSpec, variants_to_cache_key},
   value_enums::ValueEnumBuilder,
   variants::VariantBuilder,
 };
@@ -56,11 +56,11 @@ impl EnumConverter {
       CollisionStrategy::Deduplicate
     };
 
-    let entries = schema.extract_enum_entries(self.context.graph().spec());
+    let variants = schema.extract_enum_entries(self.context.graph().spec());
 
-    self.value_enum_builder.build_enum_from_values(
+    self.value_enum_builder.build_enum_from_variants(
       name,
-      &entries,
+      variants,
       strategy,
       Documentation::from_optional(schema.description.as_ref()),
     )
@@ -123,11 +123,11 @@ impl UnionConverter {
 
     let should_register_enum = !schema.enum_values.is_empty() || schema.has_relaxed_anyof_enum();
     if should_register_enum {
-      let entries = schema.extract_enum_entries(self.context.graph().spec());
-      if !entries.is_empty()
+      let variants = schema.extract_enum_entries(self.context.graph().spec());
+      if !variants.is_empty()
         && let RustType::Enum(e) = &output.result
       {
-        let cache_key = entries_to_cache_key(&entries);
+        let cache_key = variants_to_cache_key(&variants);
         self
           .context
           .cache

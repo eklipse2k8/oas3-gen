@@ -4,16 +4,19 @@ use itertools::Itertools;
 use oas3::spec::{Operation, Parameter, ParameterStyle};
 
 use super::fields::FieldConverter;
-use crate::generator::{
-  ast::{
-    FieldCollection as _, FieldDef, FieldNameToken, OuterAttr, ParameterLocation, ParsedPath, RustType, StructDef,
-    StructKind, StructToken, TypeRef,
+use crate::{
+  generator::{
+    ast::{
+      FieldCollection as _, FieldDef, FieldNameToken, OuterAttr, ParameterLocation, ParsedPath, RustType, StructDef,
+      StructKind, StructToken, TypeRef,
+    },
+    converter::ConverterContext,
+    naming::constants::{
+      HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD,
+      QUERY_PARAMS_SUFFIX,
+    },
   },
-  converter::ConverterContext,
-  naming::constants::{
-    HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD,
-    QUERY_PARAMS_SUFFIX,
-  },
+  utils::schema_ext::SchemaExtIters,
 };
 
 /// Result of converting all parameters for an operation.
@@ -101,10 +104,10 @@ impl ParameterConverter {
     let mut params = vec![];
 
     if let Some(path_item) = spec.paths.as_ref().and_then(|p| p.get(path)) {
-      params.extend(path_item.parameters.iter().filter_map(|r| r.resolve(spec).ok()));
+      params.extend(path_item.parameters.iter().resolve_all(spec));
     }
 
-    for param in operation.parameters.iter().filter_map(|r| r.resolve(spec).ok()) {
+    for param in operation.parameters.iter().resolve_all(spec) {
       params.retain(|p| p.location != param.location || p.name != param.name);
       params.push(param);
     }

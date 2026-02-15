@@ -11,7 +11,7 @@ use crate::{
       cache::SharedSchemaCache,
       hashing::CanonicalSchema,
       type_resolver::TypeResolver,
-      union_types::{UnionKind, entries_to_cache_key},
+      union_types::{UnionKind, variants_to_cache_key},
       unions::UnionConverter,
     },
     naming::constants::KNOWN_ENUM_VARIANT,
@@ -31,8 +31,8 @@ fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
 
 fn make_enum_cache_key(schema: &ObjectSchema) -> Option<Vec<String>> {
   let spec = crate::tests::common::create_test_spec(std::collections::BTreeMap::new());
-  let entries = schema.extract_enum_entries(&spec);
-  (!entries.is_empty()).then(|| entries_to_cache_key(&entries))
+  let variants = schema.extract_enum_entries(&spec);
+  (!variants.is_empty()).then(|| variants_to_cache_key(&variants))
 }
 
 fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {

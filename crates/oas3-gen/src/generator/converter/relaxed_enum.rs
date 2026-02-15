@@ -1,11 +1,11 @@
 use std::{collections::BTreeSet, rc::Rc};
 
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use oas3::spec::ObjectSchema;
 
 use super::{
   ConversionOutput, ConverterContext,
-  union_types::{CollisionStrategy, EnumValueEntry, entries_to_cache_key},
+  union_types::{CollisionStrategy, variants_to_cache_key},
   value_enums::ValueEnumBuilder,
 };
 use crate::{
@@ -17,10 +17,10 @@ use crate::{
     naming::{
       constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
       identifiers::{ensure_unique, to_rust_type_name},
-      inference::{NormalizedVariant, derive_method_names},
+      inference::derive_method_names,
     },
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, schema_ext::SchemaExtIters},
 };
 
 #[derive(Clone, Debug)]
@@ -51,29 +51,29 @@ impl RelaxedEnumBuilder {
   /// On success, returns a wrapper enum with `Known(T)` and `Other(String)` variants,
   /// plus an inner enum `T` containing the known values.
   pub(crate) fn try_build_relaxed_enum(&self, name: &str, schema: &ObjectSchema) -> Option<ConversionOutput<RustType>> {
-    let known_values = self.collect_known_values(schema);
-    if known_values.is_empty() {
+    let known_variants = self.collect_known_variants(schema);
+    if known_variants.is_empty() {
       return None;
     }
 
-    Some(self.build_relaxed_enum_types(name, schema, &known_values))
+    Some(self.build_relaxed_enum_types(name, schema, &known_variants))
   }
 
-  /// Extracts known enum values from an `anyOf` schema if it contains a freeform string variant.
+  /// Extracts known enum variants from an `anyOf` schema if it contains a freeform string variant.
   ///
   /// Returns an empty vector if the schema lacks a freeform string variant,
   /// indicating it does not follow the relaxed enum pattern. Otherwise, returns
-  /// all constrained enum values from the non-freeform variants.
-  fn collect_known_values(&self, schema: &ObjectSchema) -> Vec<EnumValueEntry> {
+  /// all constrained enum variants from the non-freeform variants.
+  fn collect_known_variants(&self, schema: &ObjectSchema) -> Vec<VariantDef> {
     let spec = self.context.graph().spec();
 
-    let has_freeform = schema
+    let unconstrained = schema
       .any_of
       .iter()
-      .filter_map(|v| v.resolve(spec).ok())
-      .any(|s| s.is_freeform_string());
+      .resolve_all(spec)
+      .any(|s| s.is_unconstrained_string());
 
-    if !has_freeform {
+    if !unconstrained {
       return vec![];
     }
 
@@ -90,17 +90,18 @@ impl RelaxedEnumBuilder {
     &self,
     name: &str,
     schema: &ObjectSchema,
-    known_values: &[EnumValueEntry],
+    known_variants: &[VariantDef],
   ) -> ConversionOutput<RustType> {
     let base_name = to_rust_type_name(name);
-    let cache_key = entries_to_cache_key(known_values);
+    let cache_key = variants_to_cache_key(known_variants);
 
-    let (known_enum_name, inner_enum_type) = self.resolve_or_create_known_enum(&base_name, known_values, &cache_key);
+    let (known_enum_name, inner_enum_type) =
+      self.resolve_or_create_known_enum(&base_name, known_variants.to_owned(), &cache_key);
 
     let methods = if self.context.config().no_helpers() {
       vec![]
     } else {
-      Self::build_known_value_constructors(&base_name, &known_enum_name, known_values)
+      Self::build_known_value_constructors(&base_name, &known_enum_name, known_variants)
     };
 
     let outer_enum = Self::build_wrapper_enum(&base_name, &known_enum_name, schema, methods);
@@ -115,7 +116,7 @@ impl RelaxedEnumBuilder {
   fn resolve_or_create_known_enum(
     &self,
     base_name: &str,
-    known_values: &[EnumValueEntry],
+    known_variants: Vec<VariantDef>,
     cache_key: &[String],
   ) -> (String, Option<RustType>) {
     let cached_result = {
@@ -127,8 +128,8 @@ impl RelaxedEnumBuilder {
 
     match cached_result {
       Some((name, true)) => (name, None),
-      Some((name, false)) => self.create_known_enum(name, known_values, cache_key),
-      None => self.create_known_enum(format!("{base_name}Known"), known_values, cache_key),
+      Some((name, false)) => self.create_known_enum(name, known_variants, cache_key),
+      None => self.create_known_enum(format!("{base_name}Known"), known_variants, cache_key),
     }
   }
 
@@ -140,12 +141,12 @@ impl RelaxedEnumBuilder {
   fn create_known_enum(
     &self,
     name: String,
-    known_values: &[EnumValueEntry],
+    known_variants: Vec<VariantDef>,
     cache_key: &[String],
   ) -> (String, Option<RustType>) {
-    let def = self.value_enum_builder.build_enum_from_values(
+    let def = self.value_enum_builder.build_enum_from_variants(
       &name,
-      known_values,
+      known_variants,
       CollisionStrategy::Preserve,
       Documentation::from_lines(["Known values for the string enum."]),
     );
@@ -166,34 +167,27 @@ impl RelaxedEnumBuilder {
   fn build_known_value_constructors(
     wrapper_enum_name: &str,
     known_type_name: &str,
-    entries: &[EnumValueEntry],
+    variants: &[VariantDef],
   ) -> Vec<EnumMethod> {
     let known_type = EnumToken::new(known_type_name);
 
-    let variants = entries
-      .iter()
-      .filter_map(|e| {
-        NormalizedVariant::try_from(&e.value)
-          .ok()
-          .map(|n| EnumVariantToken::new(n.name))
-      })
-      .collect_vec();
-
-    let variant_strings = variants.iter().map(ToString::to_string).collect_vec();
+    let variant_strings = variants.iter().map(|v| v.name.to_string()).collect_vec();
     let method_names = derive_method_names(wrapper_enum_name, &variant_strings);
 
     let mut seen = BTreeSet::new();
-    izip!(&variants, &method_names, entries)
-      .map(|(variant, base_name, entry)| {
+    variants
+      .iter()
+      .zip(&method_names)
+      .map(|(variant, base_name)| {
         let method_name = ensure_unique(base_name, &seen);
         seen.insert(method_name.clone());
         EnumMethod::new(
           method_name,
           EnumMethodKind::KnownValueConstructor {
             known_type: known_type.clone(),
-            known_variant: variant.clone(),
+            known_variant: variant.name.clone(),
           },
-          entry.docs.clone(),
+          variant.docs.clone(),
         )
       })
       .collect()

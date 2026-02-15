@@ -7,7 +7,7 @@ use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 use super::{
   ConversionOutput,
   inline_resolver::InlineTypeResolver,
-  union_types::{UnionKind, entries_to_cache_key},
+  union_types::{UnionKind, variants_to_cache_key},
 };
 use crate::{
   generator::{
@@ -22,11 +22,6 @@ use crate::{
   utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
 };
 
-/// Resolves OpenAPI schemas into Rust type references.
-///
-/// This is a read-only component that maps OpenAPI schemas to Rust `TypeRef`
-/// and provides navigation through the schema graph. It does not produce
-/// `RustType` definitions - that is handled by `SchemaConverter`.
 #[derive(Clone, Debug)]
 pub(crate) struct TypeResolver {
   context: Rc<ConverterContext>,
@@ -64,8 +59,7 @@ impl TypeResolver {
 
   /// Resolves a schema to its Rust type reference.
   pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
-    let cached = self.context.cache.borrow().get_type_ref(schema)?;
-    if let Some(type_ref) = cached {
+    if let Some(type_ref) = self.context.cache.borrow().get_type_ref(schema)? {
       return Ok(type_ref);
     }
 
@@ -178,12 +172,11 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.type_ref(&ref_name)));
     };
 
-    let spec = self.spec();
-    if schema.has_null_variant(spec)
-      && let Some(non_null) = schema.find_non_null_variant(spec)
+    if schema.has_null_variant(self.spec())
+      && let Some(non_null) = schema.find_non_null_variant(self.spec())
     {
       let resolved = self.resolve(non_null)?;
-      if resolved.has_inline_union_array_items(spec) {
+      if resolved.has_inline_union_array_items(self.spec()) {
         return Ok(ConversionOutput::new(self.type_ref(&ref_name).with_option()));
       }
     }
@@ -211,7 +204,7 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.resolve_type(schema)?));
     }
 
-    let enum_values = entries_to_cache_key(&schema.extract_enum_entries(self.spec()));
+    let enum_values = variants_to_cache_key(&schema.extract_enum_entries(self.spec()));
     self
       .inline_resolver
       .resolve_inline_enum(parent_name, property_name, schema, &enum_values)
@@ -336,12 +329,11 @@ impl TypeResolver {
   /// Returns `None` if the schema has no title, has an explicit type, or
   /// the title doesn't match a known schema name.
   fn try_type_ref_by_title(&self, schema: &ObjectSchema) -> Option<TypeRef> {
-    let title = schema.title.as_ref()?;
     if schema.schema_type.is_some() {
       return None;
     }
-    self.context.graph().get(title)?;
-    Some(self.type_ref(title))
+    let title = schema.title.as_ref()?;
+    self.context.graph().contains(title).then(|| self.type_ref(title))
   }
 
   /// Looks up a union type by its set of variant `$ref` targets.
@@ -365,12 +357,11 @@ impl TypeResolver {
       return Ok(None);
     }
 
-    let spec = self.spec();
-    if !schema.has_null_variant(spec) {
+    if !schema.has_null_variant(self.spec()) {
       return Ok(None);
     }
 
-    let Some(variant) = schema.find_non_null_variant(spec) else {
+    let Some(variant) = schema.find_non_null_variant(self.spec()) else {
       return Ok(None);
     };
 
@@ -597,9 +588,7 @@ impl TypeResolver {
   /// `$ref` or a primitive type. Such unions are unwrapped to `Option<T>`
   /// rather than generating a separate enum.
   pub(crate) fn is_wrapper_union(&self, schema: &ObjectSchema) -> Result<bool> {
-    let spec = self.spec();
-
-    let Some(variant) = schema.single_non_null_variant(spec) else {
+    let Some(variant) = schema.single_non_null_variant(self.spec()) else {
       return Ok(false);
     };
 
@@ -613,7 +602,7 @@ impl TypeResolver {
       return Ok(false);
     }
 
-    if resolved.has_inline_union_array_items(spec) {
+    if resolved.has_inline_union_array_items(self.spec()) {
       return Ok(false);
     }
 
@@ -630,17 +619,15 @@ impl TypeResolver {
   /// inner union's variants to the outer level. Returns `None` if the
   /// schema is not a nested union pattern.
   pub(crate) fn try_flatten_nested_union(&self, outer: &ObjectSchema) -> Result<Option<ObjectSchema>> {
-    let spec = self.spec();
-
-    if !outer.has_inline_single_variant(spec) {
+    if !outer.has_inline_single_variant(self.spec()) {
       return Ok(None);
     }
 
-    let variant = outer.single_non_null_variant(spec).unwrap();
+    let variant = outer.single_non_null_variant(self.spec()).unwrap();
     let inner = self.resolve(variant)?;
 
     if !inner.has_union() {
-      if let Some(items) = inner.inline_array_items(spec)
+      if let Some(items) = inner.inline_array_items(self.spec())
         && items.has_union()
       {
         let (item_variants, _) = items.union_variants_with_kind().unwrap();
