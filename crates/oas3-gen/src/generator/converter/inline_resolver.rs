@@ -7,7 +7,7 @@ use oas3::spec::ObjectSchema;
 use super::{
   ConversionOutput, TypeResolver,
   structs::StructConverter,
-  union_types::{UnionKind, variants_to_cache_key},
+  union_types::variants_to_cache_key,
   unions::{EnumConverter, UnionConverter},
 };
 use crate::{
@@ -118,7 +118,6 @@ impl InlineTypeResolver {
     schema: &ObjectSchema,
     refs: &BTreeSet<String>,
     base_name: &str,
-    kind: UnionKind,
   ) -> Result<ConversionOutput<TypeRef>> {
     if let Some(name) = self.find_union_by_refs(refs) {
       return Ok(ConversionOutput::new(self.type_ref(&name)));
@@ -159,7 +158,7 @@ impl InlineTypeResolver {
           .as_ref()
           .and_then(|key| cache.get_generated_enum_name(key))
       },
-      |name| UnionConverter::new(self.context.clone()).convert_union(name, schema, kind),
+      |name| UnionConverter::new(self.context.clone()).convert_union(name, schema),
     )?;
 
     if refs.len() >= 2 {
@@ -243,7 +242,10 @@ impl InlineTypeResolver {
       return Ok(None);
     }
 
-    let main_type = generated.last().cloned().unwrap();
+    let Some(main_type) = generated.last().cloned() else {
+      return Ok(None);
+    };
+
     let enum_cache_key = self
       .context
       .cache

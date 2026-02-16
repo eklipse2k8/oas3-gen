@@ -1,29 +1,18 @@
+use bon::Builder;
 use itertools::Itertools;
-use oas3::spec::ObjectSchema;
+use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema};
 
 use crate::generator::ast::{
   DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumToken, EnumVariantToken,
   RustType, SerdeAttribute, VariantDef,
 };
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) enum UnionKind {
-  OneOf,
-  AnyOf,
-}
-
-impl UnionKind {
-  /// Returns the union kind based on whether the schema defines `oneOf` or `anyOf` variants.
-  ///
-  /// If the schema's `one_of` array is empty, assumes the union is defined via `anyOf`.
-  /// Otherwise, treats it as a `oneOf` union where exactly one variant must match.
-  pub(crate) fn from_schema(schema: &ObjectSchema) -> Self {
-    if schema.one_of.is_empty() {
-      UnionKind::AnyOf
-    } else {
-      UnionKind::OneOf
-    }
-  }
+/// Represents a nested union that has been promoted to a flat variant list.
+#[derive(Clone, Debug, PartialEq, Builder)]
+pub(crate) struct FlattenedUnion {
+  pub(crate) variants: Vec<ObjectOrReference<ObjectSchema>>,
+  pub(crate) description: Option<String>,
+  pub(crate) discriminator: Option<Discriminator>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -57,14 +46,14 @@ impl RustType {
   #[builder]
   pub(crate) fn untagged_enum(
     name: &str,
-    schema: &ObjectSchema,
+    docs: Documentation,
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> Self {
     RustType::Enum(
       EnumDef::builder()
         .name(EnumToken::from_raw(name))
-        .docs(Documentation::from_optional(schema.description.as_ref()))
+        .docs(docs)
         .variants(variants)
         .serde_attrs(vec![SerdeAttribute::Untagged])
         .case_insensitive(false)

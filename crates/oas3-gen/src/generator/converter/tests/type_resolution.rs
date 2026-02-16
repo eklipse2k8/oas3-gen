@@ -911,7 +911,7 @@ fn try_nullable_union_edge_cases() {
 }
 
 #[test]
-fn is_wrapper_union() {
+fn test_is_wrapper_union() {
   let type_a = make_object_schema_with_property("field_a", make_string_schema());
   let type_b = make_object_schema_with_property("field_b", make_string_schema());
 
@@ -989,6 +989,87 @@ fn try_flatten_nested_union() {
     type_names.iter().any(|n| n == "NestedUnion"),
     "should generate NestedUnion type, got: {type_names:?}"
   );
+}
+
+#[test]
+fn try_flatten_nested_union_returns_flattened_struct() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+  let type_b = make_object_schema_with_property("field_b", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let inner_union = ObjectSchema {
+    one_of: vec![make_ref("TypeA"), make_ref("TypeB")],
+    description: Some("inner desc".to_string()),
+    ..Default::default()
+  };
+
+  let nested_schema = ObjectSchema {
+    one_of: vec![
+      ObjectOrReference::Object(inner_union),
+      ObjectOrReference::Object(null_schema()),
+    ],
+    ..Default::default()
+  };
+
+  let flattened = resolver
+    .try_flatten_nested_union(&nested_schema)
+    .expect("should flatten nested union")
+    .expect("should have flattened result");
+
+  assert_eq!(flattened.one_of.len(), 2);
+  assert_eq!(flattened.description.as_deref(), Some("inner desc"));
+  assert!(flattened.discriminator.is_none());
+}
+
+#[test]
+fn try_flatten_nested_union_prefers_outer_description() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+
+  let graph = create_test_graph(BTreeMap::from([("TypeA".to_string(), type_a)]));
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let inner_union = ObjectSchema {
+    one_of: vec![make_ref("TypeA")],
+    description: Some("inner desc".to_string()),
+    ..Default::default()
+  };
+
+  let nested_schema = ObjectSchema {
+    description: Some("outer desc".to_string()),
+    one_of: vec![
+      ObjectOrReference::Object(inner_union),
+      ObjectOrReference::Object(null_schema()),
+    ],
+    ..Default::default()
+  };
+
+  let result = resolver
+    .try_flatten_nested_union(&nested_schema)
+    .expect("outer description should take precedence")
+    .expect("should have flattened result");
+  assert_eq!(result.description.as_deref(), Some("outer desc"));
+}
+
+#[test]
+fn try_flatten_nested_union_returns_none_for_ref_variant() {
+  let graph = create_empty_test_graph();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let schema = ObjectSchema {
+    one_of: vec![make_ref("TypeA"), ObjectOrReference::Object(null_schema())],
+    ..Default::default()
+  };
+
+  let result = resolver.try_flatten_nested_union(&schema).expect("should not error");
+  assert!(result.is_none(), "$ref variant should not be flattened");
 }
 
 #[test]

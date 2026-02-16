@@ -7,12 +7,8 @@ use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType, VariantContent},
     converter::{
-      SchemaConverter,
-      cache::SharedSchemaCache,
-      hashing::CanonicalSchema,
-      type_resolver::TypeResolver,
-      union_types::{UnionKind, variants_to_cache_key},
-      unions::UnionConverter,
+      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
+      union_types::variants_to_cache_key, unions::UnionConverter,
     },
     naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
@@ -105,7 +101,7 @@ fn test_relaxed_enum_generates_known_variant() {
   let union_converter = UnionConverter::new(context);
 
   let optimized_output = union_converter
-    .convert_union("SplootEnum", &anyof_schema, UnionKind::AnyOf)
+    .convert_union("SplootEnum", &anyof_schema)
     .expect("Should convert anyOf union");
 
   let optimized_result = optimized_output.into_vec();
@@ -465,7 +461,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
   let union_converter = UnionConverter::new(context.clone());
 
   let first_output = union_converter
-    .convert_union("FloofRelaxed", &anyof_schema, UnionKind::AnyOf)
+    .convert_union("FloofRelaxed", &anyof_schema)
     .expect("Should convert first anyOf union");
   let first_result = first_output.into_vec();
 
@@ -490,7 +486,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
   };
 
   let second_output = union_converter
-    .convert_union("SplootRelaxed", &anyof_schema, UnionKind::AnyOf)
+    .convert_union("SplootRelaxed", &anyof_schema)
     .expect("Should convert second anyOf union");
   let second_result = second_output.into_vec();
 

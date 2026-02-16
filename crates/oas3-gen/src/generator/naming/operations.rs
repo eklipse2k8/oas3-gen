@@ -54,7 +54,9 @@ where
     _ => ids.iter().map(|s| split_snake_case(s.as_ref())).collect(),
   };
 
-  let (first, rest) = segments.split_first().unwrap();
+  let Some((first, rest)) = segments.split_first() else {
+    return to_owned();
+  };
   let mut prefix_len = common_prefix_len(first, rest);
   let mut suffix_len = common_suffix_len(first, rest);
 

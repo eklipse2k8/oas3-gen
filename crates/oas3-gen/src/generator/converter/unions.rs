@@ -7,7 +7,7 @@ use super::{
   ConversionOutput,
   methods::MethodGenerator,
   relaxed_enum::RelaxedEnumBuilder,
-  union_types::{CollisionStrategy, UnionKind, UnionVariantSpec, variants_to_cache_key},
+  union_types::{CollisionStrategy, UnionVariantSpec, variants_to_cache_key},
   value_enums::ValueEnumBuilder,
   variants::VariantBuilder,
 };
@@ -107,19 +107,14 @@ impl UnionConverter {
   ///
   /// Returns the main enum type plus any inline types generated for anonymous
   /// variant schemas.
-  pub(crate) fn convert_union(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    kind: UnionKind,
-  ) -> anyhow::Result<ConversionOutput<RustType>> {
-    if kind == UnionKind::AnyOf
+  pub(crate) fn convert_union(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
+    if !schema.any_of.is_empty()
       && let Some(output) = self.relaxed_enum_builder.try_build_relaxed_enum(name, schema)
     {
       return Ok(output);
     }
 
-    let output = self.collect_union_variants(name, schema, kind)?;
+    let output = self.collect_union_variants(name, schema)?;
 
     let should_register_enum = !schema.enum_values.is_empty() || schema.has_relaxed_anyof_enum();
     if should_register_enum {
@@ -147,15 +142,11 @@ impl UnionConverter {
   ///
   /// Attempts to upgrade to a discriminated enum if the schema contains a
   /// `discriminator` mapping; otherwise produces an untagged enum.
-  fn collect_union_variants(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    kind: UnionKind,
-  ) -> anyhow::Result<ConversionOutput<RustType>> {
-    let variants_src = match kind {
-      UnionKind::OneOf => &schema.one_of,
-      UnionKind::AnyOf => &schema.any_of,
+  fn collect_union_variants(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
+    let variants_src = if schema.one_of.is_empty() {
+      &schema.any_of
+    } else {
+      &schema.one_of
     };
 
     let variant_specs = self.collect_union_variant_specs(variants_src)?;
@@ -183,7 +174,7 @@ impl UnionConverter {
       .unwrap_or_else(|| {
         RustType::untagged_enum()
           .name(name)
-          .schema(schema)
+          .docs(Documentation::from_optional(schema.description.as_ref()))
           .variants(variants)
           .methods(methods)
           .call()

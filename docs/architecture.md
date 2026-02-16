@@ -126,7 +126,7 @@ crates/
 │           │   ├── type_resolver.rs # Central type mapping and conversion logic
 │           │   ├── type_usage_recorder.rs # Tracks request/response type usage
 │           │   ├── unions.rs      # UnionConverter for oneOf/anyOf handling
-│           │   ├── union_types.rs # Shared union types (UnionKind, CollisionStrategy, etc.)
+│           │   ├── union_types.rs # Shared union types (FlattenedUnion, CollisionStrategy, etc.)
 │           │   ├── value_enums.rs # Builds value enums with collision handling
 │           │   ├── variants.rs    # Builds union variant definitions
 │           │   └── tests/         # Converter tests

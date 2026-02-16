@@ -39,7 +39,6 @@ use crate::{
       cache::SharedSchemaCache,
       discriminator::DiscriminatorConverter,
       structs::StructConverter,
-      union_types::UnionKind,
       unions::{EnumConverter, UnionConverter},
     },
     metrics::{GenerationStats, GenerationWarning},
@@ -341,7 +340,7 @@ impl SchemaConverter {
       return self.struct_converter.convert_all_of_schema(name);
     }
 
-    if let Some((_, kind)) = schema.union_variants_with_kind() {
+    if schema.union_variants_with_kind().is_some() {
       if schema.discriminator.is_none() && self.type_resolver.is_wrapper_union(schema)? {
         return self.convert_nullable_enum(name, schema);
       }
@@ -349,13 +348,13 @@ impl SchemaConverter {
       if let Some(flattened) = self.type_resolver.try_flatten_nested_union(schema)? {
         return self
           .union_converter
-          .convert_union(name, &flattened, UnionKind::from_schema(&flattened))
+          .convert_union(name, &flattened)
           .map(ConversionOutput::into_vec);
       }
 
       return self
         .union_converter
-        .convert_union(name, schema, kind)
+        .convert_union(name, schema)
         .map(ConversionOutput::into_vec);
     }
 

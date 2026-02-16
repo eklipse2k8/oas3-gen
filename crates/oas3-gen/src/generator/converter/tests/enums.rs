@@ -15,7 +15,7 @@ use crate::{
     },
     converter::{
       SchemaConverter,
-      union_types::{CollisionStrategy, UnionKind},
+      union_types::CollisionStrategy,
       unions::{EnumConverter, UnionConverter},
     },
     metrics::GenerationStats,
@@ -636,7 +636,7 @@ fn test_relaxed_enum_detects_freeform_pattern() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf);
+  let result = union_converter.convert_union("TestEnum", &schema);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -714,7 +714,7 @@ fn test_relaxed_enum_rejects_no_freeform() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("TestEnum", &schema, UnionKind::AnyOf);
+  let result = union_converter.convert_union("TestEnum", &schema);
   assert!(result.is_ok());
   let output = result.unwrap();
   let types = output.into_vec();
@@ -1258,7 +1258,7 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("my-test-enum", &schema, UnionKind::OneOf);
+  let result = union_converter.convert_union("my-test-enum", &schema);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -1325,7 +1325,7 @@ fn test_union_with_underscored_raw_name_converts_correctly() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("my_test_enum", &schema, UnionKind::OneOf);
+  let result = union_converter.convert_union("my_test_enum", &schema);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -1446,7 +1446,7 @@ fn test_already_pascalcase_name_not_double_converted() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("MyPascalCaseEnum", &schema, UnionKind::OneOf);
+  let result = union_converter.convert_union("MyPascalCaseEnum", &schema);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -1512,7 +1512,7 @@ fn test_relaxed_enum_with_raw_name() {
     ..Default::default()
   };
 
-  let result = union_converter.convert_union("my-relaxed-enum", &schema, UnionKind::AnyOf);
+  let result = union_converter.convert_union("my-relaxed-enum", &schema);
   assert!(result.is_ok());
 
   let output = result.unwrap();
@@ -1623,6 +1623,74 @@ fn test_nested_anyof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
     !variant_names.iter().any(|n| n.starts_with("Variant")),
     "should NOT have Variant0-style wrapper variants, got {variant_names:?}"
   );
+
+  Ok(())
+}
+
+#[test]
+fn test_nested_nullable_relaxed_anyof_produces_known_other_enum() -> anyhow::Result<()> {
+  let outer_schema = ObjectSchema {
+    any_of: vec![
+      ObjectOrReference::Object(ObjectSchema {
+        any_of: vec![
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            const_value: Some(json!("known1")),
+            ..Default::default()
+          }),
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            const_value: Some(json!("known2")),
+            ..Default::default()
+          }),
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+            ..Default::default()
+          }),
+        ],
+        ..Default::default()
+      }),
+      ObjectOrReference::Object(ObjectSchema {
+        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
+        ..Default::default()
+      }),
+    ],
+    ..Default::default()
+  };
+
+  let schemas = BTreeMap::from([("NullableRelaxed".to_string(), outer_schema.clone())]);
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let result = converter.convert_schema("NullableRelaxed", &outer_schema)?;
+
+  let outer_enum = result.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == "NullableRelaxed" => Some(e),
+    _ => None,
+  });
+  assert!(outer_enum.is_some(), "should produce NullableRelaxed enum");
+  let outer_enum = outer_enum.unwrap();
+
+  let variant_names = outer_enum
+    .variants
+    .iter()
+    .map(|v| v.name.to_string())
+    .collect::<Vec<_>>();
+  assert!(
+    variant_names.contains(&"Known".to_string()),
+    "should have Known variant, got {variant_names:?}"
+  );
+  assert!(
+    variant_names.contains(&"Other".to_string()),
+    "should have Other variant, got {variant_names:?}"
+  );
+
+  let has_known_enum = result.iter().any(|t| match t {
+    RustType::Enum(e) => e.name.to_string().ends_with("Known") && e.name != "NullableRelaxed",
+    _ => false,
+  });
+  assert!(has_known_enum, "should generate inner known values enum");
 
   Ok(())
 }

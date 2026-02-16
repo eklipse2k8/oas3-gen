@@ -8,7 +8,6 @@ use oas3::{
 use crate::{
   generator::{
     ast::{VariantContent, VariantDef},
-    converter::union_types::UnionKind,
     naming::{
       constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
       identifiers::{sanitize, to_rust_type_name},
@@ -152,7 +151,7 @@ pub(crate) trait SchemaExt {
   ///
   /// This is the preferred method when you need both the variants and the union kind
   /// (oneOf vs anyOf) together, avoiding duplicate logic.
-  fn union_variants_with_kind(&self) -> Option<(&[ObjectOrReference<ObjectSchema>], UnionKind)>;
+  fn union_variants_with_kind(&self) -> Option<&[ObjectOrReference<ObjectSchema>]>;
 
   /// Returns true if any variant in the union is a null type.
   fn has_null_variant(&self, spec: &Spec) -> bool;
@@ -163,9 +162,6 @@ pub(crate) trait SchemaExt {
   /// Returns the single non-null variant if this union has exactly one.
   /// Returns None if there are 0 or 2+ non-null variants.
   fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>>;
-
-  /// Returns true if this is a single-variant union where the variant is inline (not a $ref).
-  fn has_inline_single_variant(&self, spec: &Spec) -> bool;
 
   /// Returns the single `SchemaType` if exactly one is defined, or the non-null type
   /// from a two-type nullable set (e.g., `[string, null]` -> `string`).
@@ -411,16 +407,11 @@ impl SchemaExt for ObjectSchema {
     self.any_of.iter().chain(&self.one_of)
   }
 
-  fn union_variants_with_kind(&self) -> Option<(&[ObjectOrReference<ObjectSchema>], UnionKind)> {
-    let kind = UnionKind::from_schema(self);
-    let variants = match kind {
-      UnionKind::OneOf => &self.one_of,
-      UnionKind::AnyOf => &self.any_of,
-    };
-    if variants.is_empty() {
-      None
-    } else {
-      Some((variants, kind))
+  fn union_variants_with_kind(&self) -> Option<&[ObjectOrReference<ObjectSchema>]> {
+    match (!self.one_of.is_empty(), !self.any_of.is_empty()) {
+      (true, false) => Some(&self.one_of),
+      (false, true) => Some(&self.any_of),
+      _ => None,
     }
   }
 
@@ -436,12 +427,6 @@ impl SchemaExt for ObjectSchema {
     let mut non_null_variants = self.union_variants().filter(|v| !variant_is_nullable(v, spec));
     let first = non_null_variants.next()?;
     non_null_variants.next().is_none().then_some(first)
-  }
-
-  fn has_inline_single_variant(&self, spec: &Spec) -> bool {
-    self
-      .single_non_null_variant(spec)
-      .is_some_and(|v| extract_schema_ref_name(v).is_none())
   }
 
   fn single_type_or_nullable(&self) -> Option<SchemaType> {

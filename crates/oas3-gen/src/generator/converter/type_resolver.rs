@@ -4,11 +4,7 @@ use anyhow::{Context, Result};
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
-use super::{
-  ConversionOutput,
-  inline_resolver::InlineTypeResolver,
-  union_types::{UnionKind, variants_to_cache_key},
-};
+use super::{ConversionOutput, inline_resolver::InlineTypeResolver, union_types::variants_to_cache_key};
 use crate::{
   generator::{
     ast::{RustPrimitive, TypeRef},
@@ -168,7 +164,7 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(self.resolve_type(schema)?));
     }
 
-    let Some((variants, _)) = schema.union_variants_with_kind() else {
+    let Some(variants) = schema.union_variants_with_kind() else {
       return Ok(ConversionOutput::new(self.type_ref(&ref_name)));
     };
 
@@ -232,7 +228,7 @@ impl TypeResolver {
     property_name: &str,
     schema: &ObjectSchema,
   ) -> Result<ConversionOutput<TypeRef>> {
-    let (variants, _) = schema.union_variants_with_kind().unwrap();
+    let variants = schema.union_variants_with_kind().unwrap();
 
     if let Some(type_ref) = self.try_nullable_union(schema)? {
       return Ok(ConversionOutput::new(type_ref));
@@ -257,14 +253,7 @@ impl TypeResolver {
     base_name: &str,
   ) -> Result<ConversionOutput<TypeRef>> {
     let refs = extract_union_fingerprint(variants);
-    let kind = if schema.one_of.is_empty() {
-      UnionKind::AnyOf
-    } else {
-      UnionKind::OneOf
-    };
-    self
-      .inline_resolver
-      .resolve_inline_union(schema, &refs, base_name, kind)
+    self.inline_resolver.resolve_inline_union(schema, &refs, base_name)
   }
 
   /// Attempts to resolve an array schema with inline item definitions.
@@ -308,7 +297,7 @@ impl TypeResolver {
 
   /// Creates a union type for array items containing `oneOf`/`anyOf`.
   fn inline_union_array_item(&self, items: &ObjectSchema, singular: &str) -> Result<ConversionOutput<TypeRef>> {
-    let (variants, _) = items.union_variants_with_kind().unwrap();
+    let variants = items.union_variants_with_kind().unwrap();
     let kind_name = format!("{singular}{VARIANT_KIND_SUFFIX}");
     let name = CommonVariantName::union_name_or(variants, &kind_name, || kind_name.clone());
 
@@ -349,7 +338,7 @@ impl TypeResolver {
   /// For unions like `oneOf: [{ $ref: "#/.../Foo" }, { type: null }]`,
   /// returns `Option<Foo>` instead of generating a separate enum type.
   pub(crate) fn try_nullable_union(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
-    let Some((variants, _)) = schema.union_variants_with_kind() else {
+    let Some(variants) = schema.union_variants_with_kind() else {
       return Ok(None);
     };
 
@@ -619,18 +608,20 @@ impl TypeResolver {
   /// inner union's variants to the outer level. Returns `None` if the
   /// schema is not a nested union pattern.
   pub(crate) fn try_flatten_nested_union(&self, outer: &ObjectSchema) -> Result<Option<ObjectSchema>> {
-    if !outer.has_inline_single_variant(self.spec()) {
+    let Some(variant) = outer.single_non_null_variant(self.spec()) else {
+      return Ok(None);
+    };
+    if extract_schema_ref_name(variant).is_some() {
       return Ok(None);
     }
 
-    let variant = outer.single_non_null_variant(self.spec()).unwrap();
     let inner = self.resolve(variant)?;
 
     if !inner.has_union() {
       if let Some(items) = inner.inline_array_items(self.spec())
         && items.has_union()
       {
-        let (item_variants, _) = items.union_variants_with_kind().unwrap();
+        let item_variants = items.union_variants_with_kind().unwrap();
         let variants_vec = item_variants.to_vec();
         let is_one_of = !items.one_of.is_empty();
         return Ok(Some(ObjectSchema {
@@ -644,7 +635,7 @@ impl TypeResolver {
       return Ok(None);
     }
 
-    let (inner_variants, _) = inner.union_variants_with_kind().unwrap();
+    let inner_variants = inner.union_variants_with_kind().unwrap();
     let variants_vec = inner_variants.to_vec();
     let is_one_of = !inner.one_of.is_empty();
 
