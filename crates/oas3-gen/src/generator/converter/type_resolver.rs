@@ -228,7 +228,9 @@ impl TypeResolver {
     property_name: &str,
     schema: &ObjectSchema,
   ) -> Result<ConversionOutput<TypeRef>> {
-    let variants = schema.union_variants_with_kind().unwrap();
+    let Some(variants) = schema.union_variants_with_kind() else {
+      anyhow::bail!("Expected oneOf or anyOf variants for inline union");
+    };
 
     if let Some(type_ref) = self.try_nullable_union(schema)? {
       return Ok(ConversionOutput::new(type_ref));
@@ -297,7 +299,9 @@ impl TypeResolver {
 
   /// Creates a union type for array items containing `oneOf`/`anyOf`.
   fn inline_union_array_item(&self, items: &ObjectSchema, singular: &str) -> Result<ConversionOutput<TypeRef>> {
-    let variants = items.union_variants_with_kind().unwrap();
+    let Some(variants) = items.union_variants_with_kind() else {
+      anyhow::bail!("expected oneOf or anyOf variants for inline union array item");
+    };
     let kind_name = format!("{singular}{VARIANT_KIND_SUFFIX}");
     let name = CommonVariantName::union_name_or(variants, &kind_name, || kind_name.clone());
 
@@ -587,19 +591,12 @@ impl TypeResolver {
 
     let resolved = self.resolve(variant)?;
 
-    if resolved.has_union() || resolved.additional_properties.is_some() {
-      return Ok(false);
-    }
-
-    if resolved.has_inline_union_array_items(self.spec()) {
-      return Ok(false);
-    }
-
-    if resolved.has_enum_values() && resolved.enum_values.len() > 1 {
-      return Ok(true);
-    }
-
-    Ok(resolved.is_primitive())
+    Ok(
+      !resolved.has_union()
+        && resolved.additional_properties.is_none()
+        && !resolved.has_inline_union_array_items(self.spec())
+        && (resolved.is_primitive() || resolved.enum_values.len() > 1),
+    )
   }
 
   /// Attempts to flatten a nested union structure.
