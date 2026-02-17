@@ -13,6 +13,27 @@ pub(crate) struct FlattenedUnion {
   pub(crate) variants: Vec<ObjectOrReference<ObjectSchema>>,
   pub(crate) description: Option<String>,
   pub(crate) discriminator: Option<Discriminator>,
+  pub(crate) is_one_of: bool,
+}
+
+impl From<FlattenedUnion> for ObjectSchema {
+  fn from(flattened: FlattenedUnion) -> Self {
+    ObjectSchema {
+      description: flattened.description,
+      discriminator: flattened.discriminator,
+      one_of: if flattened.is_one_of {
+        flattened.variants.clone()
+      } else {
+        vec![]
+      },
+      any_of: if flattened.is_one_of {
+        vec![]
+      } else {
+        flattened.variants
+      },
+      ..Default::default()
+    }
+  }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

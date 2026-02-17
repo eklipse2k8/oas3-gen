@@ -4,7 +4,11 @@ use anyhow::{Context, Result};
 use inflections::Inflect;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
-use super::{ConversionOutput, inline_resolver::InlineTypeResolver, union_types::variants_to_cache_key};
+use super::{
+  ConversionOutput,
+  inline_resolver::InlineTypeResolver,
+  union_types::{FlattenedUnion, variants_to_cache_key},
+};
 use crate::{
   generator::{
     ast::{RustPrimitive, TypeRef},
@@ -601,47 +605,48 @@ impl TypeResolver {
 
   /// Attempts to flatten a nested union structure.
   ///
-  /// For patterns like `oneOf: [{ oneOf: [...] }, null]`, promotes the
-  /// inner union's variants to the outer level. Returns `None` if the
-  /// schema is not a nested union pattern.
-  pub(crate) fn try_flatten_nested_union(&self, outer: &ObjectSchema) -> Result<Option<ObjectSchema>> {
+  /// For patterns like `oneOf: [{ oneOf: [...] }, null]`, promotes the inner union's variants to the outer level.
+  /// Returns `None` if the schema is not a nested union pattern.
+  pub(crate) fn try_flatten_nested_union(&self, outer: &ObjectSchema) -> Result<Option<FlattenedUnion>> {
     let Some(variant) = outer.single_non_null_variant(self.spec()) else {
       return Ok(None);
     };
+
     if extract_schema_ref_name(variant).is_some() {
       return Ok(None);
     }
 
     let inner = self.resolve(variant)?;
 
-    if !inner.has_union() {
-      if let Some(items) = inner.inline_array_items(self.spec())
-        && items.has_union()
-      {
-        let item_variants = items.union_variants_with_kind().unwrap();
-        let variants_vec = item_variants.to_vec();
-        let is_one_of = !items.one_of.is_empty();
-        return Ok(Some(ObjectSchema {
-          description: outer.description.clone().or_else(|| items.description.clone()),
-          discriminator: items.discriminator.clone(),
-          one_of: if is_one_of { variants_vec.clone() } else { vec![] },
-          any_of: if is_one_of { vec![] } else { variants_vec },
-          ..Default::default()
-        }));
-      }
-      return Ok(None);
+    if inner.has_union() {
+      let Some(variants) = inner.union_variants_with_kind() else {
+        return Ok(None);
+      };
+
+      return Ok(Some(
+        FlattenedUnion::builder()
+          .variants(variants.to_owned())
+          .maybe_description(outer.description.clone().or_else(|| inner.description.clone()))
+          .maybe_discriminator(inner.discriminator.clone().or_else(|| outer.discriminator.clone()))
+          .is_one_of(!inner.one_of.is_empty())
+          .build(),
+      ));
     }
 
-    let inner_variants = inner.union_variants_with_kind().unwrap();
-    let variants_vec = inner_variants.to_vec();
-    let is_one_of = !inner.one_of.is_empty();
-
-    Ok(Some(ObjectSchema {
-      description: outer.description.clone().or_else(|| inner.description.clone()),
-      discriminator: inner.discriminator.clone().or_else(|| outer.discriminator.clone()),
-      one_of: if is_one_of { variants_vec.clone() } else { vec![] },
-      any_of: if is_one_of { vec![] } else { variants_vec },
-      ..Default::default()
-    }))
+    if let Some(items) = inner.inline_array_items(self.spec())
+      && items.has_union()
+      && let Some(variants) = items.union_variants_with_kind()
+    {
+      Ok(Some(
+        FlattenedUnion::builder()
+          .variants(variants.to_owned())
+          .maybe_description(outer.description.clone().or_else(|| items.description.clone()))
+          .maybe_discriminator(items.discriminator.clone())
+          .is_one_of(!items.one_of.is_empty())
+          .build(),
+      ))
+    } else {
+      Ok(None)
+    }
   }
 }

@@ -348,7 +348,7 @@ impl SchemaConverter {
       if let Some(flattened) = self.type_resolver.try_flatten_nested_union(schema)? {
         return self
           .union_converter
-          .convert_union(name, &flattened)
+          .convert_union(name, &flattened.into())
           .map(ConversionOutput::into_vec);
       }
 

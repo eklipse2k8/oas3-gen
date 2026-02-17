@@ -1022,7 +1022,7 @@ fn try_flatten_nested_union_returns_flattened_struct() {
     .expect("should flatten nested union")
     .expect("should have flattened result");
 
-  assert_eq!(flattened.one_of.len(), 2);
+  assert_eq!(flattened.variants.len(), 2);
   assert_eq!(flattened.description.as_deref(), Some("inner desc"));
   assert!(flattened.discriminator.is_none());
 }
