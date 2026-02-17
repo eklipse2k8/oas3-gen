@@ -133,6 +133,140 @@ mod tests {
   }
 
   #[test]
+  fn test_deserialize_hypothetical_version_flattened_union() {
+    let citation_json = json!({"type": "citation", "start": 0, "end": 3, "build": "doc.pdf"});
+    let parsed_a: HypotheticalVersion = serde_json::from_value(citation_json).unwrap();
+    assert!(
+      matches!(
+        parsed_a,
+        HypotheticalVersion::Citation(CitationAnnotation { end: 3, .. })
+      ),
+      "citation should deserialize to HypotheticalVersion::Citation"
+    );
+
+    let link_json = json!({"type": "link", "start": 4, "end": 8, "url": "https://example.com"});
+    let parsed_b = serde_json::from_value::<HypotheticalVersion>(link_json);
+    assert!(parsed_b.is_ok(), "link object should deserialize into flattened union");
+
+    let array_json = json!([{"type": "citation", "start": 0, "end": 1, "build": "x"}]);
+    let result = serde_json::from_value::<HypotheticalVersion>(array_json);
+    assert!(
+      result.is_err(),
+      "flattened hypothetical union should not deserialize array wrapper"
+    );
+  }
+
+  #[test]
+  fn test_deserialize_usage_counters_flattened_union() {
+    let counter_a_value = json!({"type": "counter_a", "output_tokens": 7});
+    let parsed_a: UsageCounters = serde_json::from_value(counter_a_value).unwrap();
+    assert!(
+      matches!(parsed_a, UsageCounters::A(UsageCounterA { output_tokens: 7, .. })),
+      "counter_a should deserialize to UsageCounters::A"
+    );
+
+    let parsed_b = serde_json::from_value::<UsageCounters>(json!({"type": "counter_b", "output_tokens": 11}));
+    assert!(
+      parsed_b.is_ok(),
+      "counter_b object should deserialize into flattened union"
+    );
+
+    let array_json = json!([{"type": "counter_a", "output_tokens": 3}]);
+    let array_result = serde_json::from_value::<UsageCounters>(array_json);
+    assert!(
+      array_result.is_err(),
+      "flattened usage counters should not deserialize array wrapper"
+    );
+
+    let null_result = serde_json::from_value::<UsageCounters>(json!(null));
+    assert!(
+      null_result.is_err(),
+      "flattened usage counters should not deserialize null directly"
+    );
+  }
+
+  #[test]
+  fn test_tool_result_iterations_nullable_usage_counters() {
+    let with_iterations_json = json!({
+      "type": "tool_result",
+      "tool_use_id": "tool_123",
+      "content": "done",
+      "iterations": {"type": "counter_a", "output_tokens": 2}
+    });
+    let block: ContentBlock = serde_json::from_value(with_iterations_json).unwrap();
+    let ContentBlock::ToolResult(tr) = block else {
+      panic!("Expected ToolResultBlock when iterations is present");
+    };
+    assert!(
+      matches!(
+        tr.iterations,
+        Some(UsageCounters::A(UsageCounterA { output_tokens: 2, .. }))
+      ),
+      "iterations should parse as UsageCounters::A"
+    );
+
+    let with_null_iterations_json = json!({
+      "type": "tool_result",
+      "tool_use_id": "tool_456",
+      "content": "done",
+      "iterations": null
+    });
+    let block: ContentBlock = serde_json::from_value(with_null_iterations_json).unwrap();
+    let ContentBlock::ToolResult(tr) = block else {
+      panic!("Expected ToolResultBlock when iterations is null");
+    };
+    assert!(tr.iterations.is_none(), "null iterations should deserialize to None");
+  }
+
+  #[test]
+  fn test_recipe_list_nullable_fields_and_additional_properties() {
+    let recipe_json = json!({
+      "type": "object",
+      "ingredients": {"flour": "2 cups", "salt": "1 tsp"},
+      "required": ["flour"],
+      "servings": 4,
+      "notes": {"difficulty": "easy"}
+    });
+    let recipe: RecipeList = serde_json::from_value(recipe_json).unwrap();
+    let ingredients = recipe.ingredients.as_ref().unwrap();
+    assert_eq!(
+      ingredients.get("flour"),
+      Some(&json!("2 cups")),
+      "ingredients value mismatch"
+    );
+    assert_eq!(
+      recipe.required.as_ref().unwrap(),
+      &vec!["flour".to_string()],
+      "required list mismatch"
+    );
+    assert_eq!(
+      recipe.additional_properties.get("servings"),
+      Some(&json!(4)),
+      "servings should be captured as additional property"
+    );
+    assert_eq!(
+      recipe.additional_properties.get("notes").unwrap()["difficulty"],
+      "easy",
+      "nested additional property should roundtrip"
+    );
+
+    let nullable_json = json!({
+      "type": "object",
+      "ingredients": null,
+      "required": null
+    });
+    let nullable_recipe: RecipeList = serde_json::from_value(nullable_json).unwrap();
+    assert!(
+      nullable_recipe.ingredients.is_none(),
+      "null ingredients should deserialize to None"
+    );
+    assert!(
+      nullable_recipe.required.is_none(),
+      "null required should deserialize to None"
+    );
+  }
+
+  #[test]
   fn test_deserialize_text_block_with_annotations() {
     let json = json!({
       "type": "text",

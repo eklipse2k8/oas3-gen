@@ -647,6 +647,18 @@
 				],
 				"default": null
 			},
+			"HypotheticalVersion": {
+				"description": "Hypothetical nested nullable union for flattening coverage",
+				"anyOf": [
+					{
+						"oneOf": [
+							{ "$ref": "#/components/schemas/CitationAnnotation" },
+							{ "$ref": "#/components/schemas/LinkAnnotation" }
+						]
+					},
+					{ "type": "null" }
+				]
+			},
 			"UsageCounterA": {
 				"properties": {
 					"output_tokens": {

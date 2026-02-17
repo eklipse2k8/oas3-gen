@@ -438,6 +438,14 @@ pub enum GetEventsResponse {
   ///default: Unknown response
   Unknown,
 }
+/// Hypothetical nested nullable union for flattening coverage
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum HypotheticalVersion {
+  #[default]
+  Citation(CitationAnnotation),
+  Link(LinkAnnotation),
+}
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
