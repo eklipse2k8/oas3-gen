@@ -108,6 +108,26 @@ fn union_to_type_ref_conversion() {
       ],
       None,
     ),
+    (
+      "multi_variant_inner_oneof_not_collapsed",
+      vec![
+        ObjectOrReference::Object(ObjectSchema {
+          one_of: vec![
+            ObjectOrReference::Object(make_string_schema()),
+            ObjectOrReference::Object(ObjectSchema {
+              schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+              items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+                make_string_schema(),
+              ))))),
+              ..Default::default()
+            }),
+          ],
+          ..Default::default()
+        }),
+        ObjectOrReference::Object(null_schema()),
+      ],
+      None,
+    ),
   ];
 
   for (case_name, variants, expected_type) in cases {

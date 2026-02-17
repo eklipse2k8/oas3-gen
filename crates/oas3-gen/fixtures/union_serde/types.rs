@@ -427,7 +427,7 @@ impl GetEventsRequest {
       return Ok(GetEventsResponse::Ok(data));
     }
     let _ = req.bytes().await?;
-    Ok(GetEventsResponse::Unknown)
+    return Ok(GetEventsResponse::Unknown);
   }
 }
 /// Response types for getEvents
@@ -589,6 +589,14 @@ pub enum Metadata {
   String(String),
   Object(std::collections::HashMap<String, serde_json::Value>),
 }
+/// Test nullable union wrapping an inner oneOf (string or array). This pattern appears in the OpenAI Responses API for the input field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum NullableStringOrArray {
+  #[default]
+  String(String),
+  Array(Vec<TextBlock>),
+}
 /// Test nullable union with primitives
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
@@ -664,7 +672,7 @@ impl SendContentRequest {
       return Ok(SendContentResponse::BadRequest(data));
     }
     let _ = req.bytes().await?;
-    Ok(SendContentResponse::Unknown)
+    return Ok(SendContentResponse::Unknown);
   }
 }
 /// Response types for sendContent

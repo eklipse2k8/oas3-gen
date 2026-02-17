@@ -384,6 +384,10 @@ impl TypeResolver {
       return Ok(None);
     }
 
+    if resolved.has_union() && resolved.union_variants_with_kind().is_some_and(|(v, _)| v.len() > 1) {
+      return Ok(None);
+    }
+
     Ok(Some(self.resolve_type(&resolved)?.with_option()))
   }
 

@@ -459,6 +459,29 @@ mod tests {
   }
 
   #[test]
+  fn test_nullable_string_or_array() {
+    let string_json = json!("hello");
+    let result: NullableStringOrArray = serde_json::from_value(string_json.clone()).unwrap();
+    assert!(
+      matches!(result, NullableStringOrArray::String(ref s) if s == "hello"),
+      "string variant deserialization failed"
+    );
+    let roundtrip = serde_json::to_value(&result).unwrap();
+    assert_eq!(roundtrip, string_json, "string variant roundtrip failed");
+
+    let array_json = json!([{"type": "text", "text": "world"}]);
+    let result: NullableStringOrArray = serde_json::from_value(array_json).unwrap();
+    assert!(matches!(result, NullableStringOrArray::Array(ref items) if items.len() == 1), "array variant deserialization failed");
+    let serialized = serde_json::to_value(&result).unwrap();
+    let back: NullableStringOrArray = serde_json::from_value(serialized).unwrap();
+    assert_eq!(result, back, "array variant roundtrip failed");
+
+    let null_json = json!(null);
+    let result: Option<NullableStringOrArray> = serde_json::from_value(null_json).unwrap();
+    assert!(result.is_none(), "null case failed");
+  }
+
+  #[test]
   fn test_type_construction() {
     let text = ContentBlock::Text(text_block("Hello"));
     assert!(matches!(text, ContentBlock::Text(_)), "text construction failed");
