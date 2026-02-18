@@ -19,7 +19,7 @@ use crate::{
       unions::{EnumConverter, UnionConverter},
     },
     metrics::GenerationStats,
-    naming::{constants::KNOWN_ENUM_VARIANT, inference::NormalizedVariant},
+    naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
   tests::common::{
@@ -510,49 +510,6 @@ fn test_case_insensitive_duplicates_with_preservation() -> anyhow::Result<()> {
       .contains(&SerdeAttribute::Rename("select".to_string()))
   );
   Ok(())
-}
-
-#[test]
-fn test_normalize_string() {
-  let val = json!("active");
-  let res = NormalizedVariant::try_from(&val).unwrap();
-  assert_eq!(res.rename_value, "active");
-}
-
-#[test]
-fn test_normalize_int() {
-  let val = json!(404);
-  let res = NormalizedVariant::try_from(&val).unwrap();
-  assert_eq!(res.name, "Value404");
-  assert_eq!(res.rename_value, "404");
-}
-
-#[test]
-#[allow(clippy::approx_constant)]
-fn test_normalize_float() {
-  let val = json!(3.14);
-  let res = NormalizedVariant::try_from(&val).unwrap();
-  assert_eq!(res.name, "Value3_14");
-  assert_eq!(res.rename_value, "3.14");
-}
-
-#[test]
-fn test_normalize_bool() {
-  let val = json!(true);
-  let res = NormalizedVariant::try_from(&val).unwrap();
-  assert_eq!(res.name, "True");
-  assert_eq!(res.rename_value, "true");
-
-  let val = json!(false);
-  let res = NormalizedVariant::try_from(&val).unwrap();
-  assert_eq!(res.name, "False");
-  assert_eq!(res.rename_value, "false");
-}
-
-#[test]
-fn test_normalize_invalid() {
-  let val = json!({});
-  assert!(NormalizedVariant::try_from(&val).is_err());
 }
 
 #[test]

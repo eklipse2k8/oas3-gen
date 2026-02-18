@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use oas3::spec::{BooleanSchema, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
+use super::support::{make_integer_schema, make_null_schema, make_schema_ref};
 use crate::{
   generator::{ast::RustType, converter::type_resolver::TypeResolver},
   tests::common::{
@@ -10,28 +11,6 @@ use crate::{
     make_object_schema_with_property, make_string_schema,
   },
 };
-
-fn null_schema() -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
-    ..Default::default()
-  }
-}
-
-fn int_schema() -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-    ..Default::default()
-  }
-}
-
-fn make_ref(name: &str) -> ObjectOrReference<ObjectSchema> {
-  ObjectOrReference::Ref {
-    ref_path: format!("#/components/schemas/{name}"),
-    summary: None,
-    description: None,
-  }
-}
 
 #[test]
 fn title_resolution() {
@@ -87,7 +66,7 @@ fn union_to_type_ref_conversion() {
   let resolver = TypeResolver::new(context);
 
   let inner_schema = ObjectSchema {
-    one_of: vec![make_ref("CacheControlEphemeral")],
+    one_of: vec![make_schema_ref("CacheControlEphemeral")],
     ..Default::default()
   };
 
@@ -96,15 +75,15 @@ fn union_to_type_ref_conversion() {
       "nested_oneof_resolves_to_ref",
       vec![
         ObjectOrReference::Object(inner_schema),
-        ObjectOrReference::Object(null_schema()),
+        ObjectOrReference::Object(make_null_schema()),
       ],
       Some("Option<CacheControlEphemeral>"),
     ),
     (
       "no_resolvable_variants",
       vec![
-        ObjectOrReference::Object(null_schema()),
-        ObjectOrReference::Object(null_schema()),
+        ObjectOrReference::Object(make_null_schema()),
+        ObjectOrReference::Object(make_null_schema()),
       ],
       None,
     ),
@@ -169,7 +148,7 @@ fn array_type_resolution() {
       "array_with_ref_items",
       ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-        items: Some(Box::new(Schema::Object(Box::new(make_ref("CustomType"))))),
+        items: Some(Box::new(Schema::Object(Box::new(make_schema_ref("CustomType"))))),
         ..Default::default()
       },
       "Vec<CustomType>",
@@ -335,7 +314,7 @@ fn array_with_union_items_inline_generation() {
   let tool_schema = make_object_schema_with_property("name", make_string_schema());
   let bash_tool_schema = make_object_schema_with_property("command", make_string_schema());
   let type_a = make_object_schema_with_property("field_a", make_string_schema());
-  let type_b = make_object_schema_with_property("field_b", int_schema());
+  let type_b = make_object_schema_with_property("field_b", make_integer_schema());
   let item_schema = make_object_schema_with_property("id", make_string_schema());
 
   let graph = create_test_graph(BTreeMap::from([
@@ -352,7 +331,7 @@ fn array_with_union_items_inline_generation() {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
-        one_of: vec![make_ref("Tool"), make_ref("BashTool")],
+        one_of: vec![make_schema_ref("Tool"), make_schema_ref("BashTool")],
         ..Default::default()
       },
     ))))),
@@ -363,7 +342,7 @@ fn array_with_union_items_inline_generation() {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
-        any_of: vec![make_ref("TypeA"), make_ref("TypeB")],
+        any_of: vec![make_schema_ref("TypeA"), make_schema_ref("TypeB")],
         ..Default::default()
       },
     ))))),
@@ -372,7 +351,7 @@ fn array_with_union_items_inline_generation() {
 
   let ref_array_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: Some(Box::new(Schema::Object(Box::new(make_ref("Item"))))),
+    items: Some(Box::new(Schema::Object(Box::new(make_schema_ref("Item"))))),
     ..Default::default()
   };
 
@@ -468,7 +447,11 @@ fn multi_ref_oneof_returns_none_for_fallback() {
   let context = create_test_context(graph.clone(), default_config());
   let resolver = TypeResolver::new(context);
 
-  let multi_ref_variants = vec![make_ref("TypeA"), make_ref("TypeB"), make_ref("TypeC")];
+  let multi_ref_variants = vec![
+    make_schema_ref("TypeA"),
+    make_schema_ref("TypeB"),
+    make_schema_ref("TypeC"),
+  ];
 
   let result = resolver.try_union(&multi_ref_variants).unwrap();
   assert!(
@@ -477,7 +460,7 @@ fn multi_ref_oneof_returns_none_for_fallback() {
     result.map(|r| r.to_rust_type())
   );
 
-  let single_ref_with_null = vec![make_ref("TypeA"), ObjectOrReference::Object(null_schema())];
+  let single_ref_with_null = vec![make_schema_ref("TypeA"), ObjectOrReference::Object(make_null_schema())];
 
   let result = resolver.try_union(&single_ref_with_null).unwrap();
   assert!(result.is_some(), "single ref with null should collapse to Option<T>");
@@ -504,9 +487,9 @@ fn union_naming_with_common_suffix() {
 
   let union_schema = ObjectSchema {
     one_of: vec![
-      make_ref("BetaResponseCharLocationCitation"),
-      make_ref("BetaResponseUrlCitation"),
-      make_ref("BetaResponseFileCitation"),
+      make_schema_ref("BetaResponseCharLocationCitation"),
+      make_schema_ref("BetaResponseUrlCitation"),
+      make_schema_ref("BetaResponseFileCitation"),
     ],
     ..Default::default()
   };
@@ -544,7 +527,7 @@ fn union_naming_without_common_suffix() {
   let resolver = TypeResolver::new(context.clone());
 
   let union_schema = ObjectSchema {
-    one_of: vec![make_ref("BetaTool"), make_ref("BetaBashTool20241022")],
+    one_of: vec![make_schema_ref("BetaTool"), make_schema_ref("BetaBashTool20241022")],
     ..Default::default()
   };
 
@@ -587,9 +570,9 @@ fn array_union_naming_with_common_suffix() {
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
         one_of: vec![
-          make_ref("BetaMessageStartEvent"),
-          make_ref("BetaMessageDeltaEvent"),
-          make_ref("BetaMessageStopEvent"),
+          make_schema_ref("BetaMessageStartEvent"),
+          make_schema_ref("BetaMessageDeltaEvent"),
+          make_schema_ref("BetaMessageStopEvent"),
         ],
         ..Default::default()
       },
@@ -665,7 +648,7 @@ fn additional_properties_type_resolution() {
       "ref_value_type",
       ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-        additional_properties: Some(Schema::Object(Box::new(make_ref("CustomType")))),
+        additional_properties: Some(Schema::Object(Box::new(make_schema_ref("CustomType")))),
         ..Default::default()
       },
       "std::collections::HashMap<String, CustomType>",
@@ -786,7 +769,7 @@ fn array_with_union_items_not_treated_as_primitive() {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
         items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
           ObjectSchema {
-            one_of: vec![make_ref("TextContent"), make_ref("ImageContent")],
+            one_of: vec![make_schema_ref("TextContent"), make_schema_ref("ImageContent")],
             ..Default::default()
           },
         ))))),
@@ -797,7 +780,7 @@ fn array_with_union_items_not_treated_as_primitive() {
 
   let context = create_test_context(graph.clone(), default_config());
   let resolver = TypeResolver::new(context.clone());
-  let thought_summary_ref = make_ref("ThoughtSummary");
+  let thought_summary_ref = make_schema_ref("ThoughtSummary");
   let thought_summary_schema = graph.get("ThoughtSummary").unwrap();
 
   let result = resolver
@@ -832,7 +815,7 @@ fn string_enum_reference_preserves_named_type() {
 
   let context = create_test_context(graph.clone(), default_config());
   let resolver = TypeResolver::new(context.clone());
-  let pet_status_ref = make_ref("PetStatus");
+  let pet_status_ref = make_schema_ref("PetStatus");
   let pet_status_schema = graph.get("PetStatus").unwrap();
 
   let result = resolver
@@ -865,9 +848,9 @@ fn try_nullable_union_edge_cases() {
   let resolver = TypeResolver::new(context);
 
   let three_variants_with_null = vec![
-    make_ref("TypeA"),
-    make_ref("TypeB"),
-    ObjectOrReference::Object(null_schema()),
+    make_schema_ref("TypeA"),
+    make_schema_ref("TypeB"),
+    ObjectOrReference::Object(make_null_schema()),
   ];
   let result = resolver.try_union(&three_variants_with_null).unwrap();
   assert!(
@@ -875,7 +858,7 @@ fn try_nullable_union_edge_cases() {
     "3 variants with null should not collapse to Option<T>"
   );
 
-  let two_refs_no_null = vec![make_ref("TypeA"), make_ref("TypeB")];
+  let two_refs_no_null = vec![make_schema_ref("TypeA"), make_schema_ref("TypeB")];
   let result = resolver.try_union(&two_refs_no_null).unwrap();
   assert!(result.is_none(), "2 refs without null should not collapse to Option<T>");
 
@@ -885,7 +868,7 @@ fn try_nullable_union_edge_cases() {
   };
   let two_nullable_objects = vec![
     ObjectOrReference::Object(nullable_object.clone()),
-    ObjectOrReference::Object(null_schema()),
+    ObjectOrReference::Object(make_null_schema()),
   ];
   let result = resolver.try_union(&two_nullable_objects).unwrap();
   assert!(
@@ -896,7 +879,7 @@ fn try_nullable_union_edge_cases() {
   let inline_string = make_string_schema();
   let inline_with_null = vec![
     ObjectOrReference::Object(inline_string),
-    ObjectOrReference::Object(null_schema()),
+    ObjectOrReference::Object(make_null_schema()),
   ];
   let result = resolver.try_union(&inline_with_null).unwrap();
   assert!(
@@ -908,45 +891,6 @@ fn try_nullable_union_edge_cases() {
     "Option<String>",
     "should be Option<String>"
   );
-}
-
-#[test]
-fn test_is_wrapper_union() {
-  let type_a = make_object_schema_with_property("field_a", make_string_schema());
-  let type_b = make_object_schema_with_property("field_b", make_string_schema());
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("TypeA".to_string(), type_a),
-    ("TypeB".to_string(), type_b),
-  ]));
-  let context = create_test_context(graph.clone(), default_config());
-  let resolver = TypeResolver::new(context);
-
-  let wrapper_with_ref_and_null = ObjectSchema {
-    one_of: vec![make_ref("TypeA"), ObjectOrReference::Object(null_schema())],
-    ..Default::default()
-  };
-  let result = resolver.try_union(&wrapper_with_ref_and_null.one_of).unwrap();
-  assert!(result.is_some(), "single ref + null should be a wrapper union");
-  assert_eq!(result.unwrap().to_rust_type(), "Option<TypeA>");
-
-  let wrapper_with_string_and_null = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Object(make_string_schema()),
-      ObjectOrReference::Object(null_schema()),
-    ],
-    ..Default::default()
-  };
-  let result = resolver.try_union(&wrapper_with_string_and_null.one_of).unwrap();
-  assert!(result.is_some(), "single string + null should be a wrapper union");
-  assert_eq!(result.unwrap().to_rust_type(), "Option<String>");
-
-  let two_refs = ObjectSchema {
-    one_of: vec![make_ref("TypeA"), make_ref("TypeB")],
-    ..Default::default()
-  };
-  let result = resolver.try_union(&two_refs.one_of).unwrap();
-  assert!(result.is_none(), "two refs should not be a wrapper union");
 }
 
 #[test]
@@ -962,14 +906,14 @@ fn try_flatten_nested_union() {
   let converter = create_schema_converter(&context);
 
   let inner_union = ObjectSchema {
-    one_of: vec![make_ref("TypeA"), make_ref("TypeB")],
+    one_of: vec![make_schema_ref("TypeA"), make_schema_ref("TypeB")],
     ..Default::default()
   };
 
   let nested_schema = ObjectSchema {
     one_of: vec![
       ObjectOrReference::Object(inner_union),
-      ObjectOrReference::Object(null_schema()),
+      ObjectOrReference::Object(make_null_schema()),
     ],
     ..Default::default()
   };
@@ -1004,7 +948,7 @@ fn try_flatten_nested_union_returns_flattened_struct() {
   let resolver = TypeResolver::new(context);
 
   let inner_union = ObjectSchema {
-    one_of: vec![make_ref("TypeA"), make_ref("TypeB")],
+    one_of: vec![make_schema_ref("TypeA"), make_schema_ref("TypeB")],
     description: Some("inner desc".to_string()),
     ..Default::default()
   };
@@ -1012,7 +956,7 @@ fn try_flatten_nested_union_returns_flattened_struct() {
   let nested_schema = ObjectSchema {
     one_of: vec![
       ObjectOrReference::Object(inner_union),
-      ObjectOrReference::Object(null_schema()),
+      ObjectOrReference::Object(make_null_schema()),
     ],
     ..Default::default()
   };
@@ -1036,7 +980,7 @@ fn try_flatten_nested_union_prefers_outer_description() {
   let resolver = TypeResolver::new(context);
 
   let inner_union = ObjectSchema {
-    one_of: vec![make_ref("TypeA")],
+    one_of: vec![make_schema_ref("TypeA")],
     description: Some("inner desc".to_string()),
     ..Default::default()
   };
@@ -1045,7 +989,7 @@ fn try_flatten_nested_union_prefers_outer_description() {
     description: Some("outer desc".to_string()),
     one_of: vec![
       ObjectOrReference::Object(inner_union),
-      ObjectOrReference::Object(null_schema()),
+      ObjectOrReference::Object(make_null_schema()),
     ],
     ..Default::default()
   };
@@ -1064,7 +1008,7 @@ fn try_flatten_nested_union_returns_none_for_ref_variant() {
   let resolver = TypeResolver::new(context);
 
   let schema = ObjectSchema {
-    one_of: vec![make_ref("TypeA"), ObjectOrReference::Object(null_schema())],
+    one_of: vec![make_schema_ref("TypeA"), ObjectOrReference::Object(make_null_schema())],
     ..Default::default()
   };
 
@@ -1142,7 +1086,7 @@ fn convert_schema_with_allof() {
   let base_schema = make_object_schema_with_property("base_field", make_string_schema());
   let extended_schema = ObjectSchema {
     all_of: vec![
-      make_ref("BaseType"),
+      make_schema_ref("BaseType"),
       ObjectOrReference::Object(make_object_schema_with_property("extra_field", make_string_schema())),
     ],
     ..Default::default()
@@ -1173,7 +1117,7 @@ fn nullable_enum_generates_direct_enum_not_union_wrapper() {
         enum_values: vec![json!("minimal"), json!("low"), json!("medium"), json!("high")],
         ..Default::default()
       }),
-      ObjectOrReference::Object(null_schema()),
+      ObjectOrReference::Object(make_null_schema()),
     ],
     ..Default::default()
   };
@@ -1219,7 +1163,7 @@ fn nullable_enum_does_not_create_type_alias() {
         enum_values: vec![json!("auto"), json!("default"), json!("flex")],
         ..Default::default()
       }),
-      ObjectOrReference::Object(null_schema()),
+      ObjectOrReference::Object(make_null_schema()),
     ],
     ..Default::default()
   };

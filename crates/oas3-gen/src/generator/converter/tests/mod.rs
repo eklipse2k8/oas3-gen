@@ -9,5 +9,6 @@ mod intersection_union;
 pub mod metadata_tests;
 mod operations;
 mod structs;
+mod support;
 mod type_aliases;
 mod type_resolution;

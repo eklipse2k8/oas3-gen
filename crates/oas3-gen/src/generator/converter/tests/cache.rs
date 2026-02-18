@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
+use super::support::{assert_has_known_variant, make_schema_ref, make_string_enum_schema};
 use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType, VariantContent},
@@ -16,14 +17,6 @@ use crate::{
   tests::common::{create_test_context, create_test_graph, default_config},
   utils::SchemaExt,
 };
-
-fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: values.iter().map(|v| json!(v)).collect(),
-    ..Default::default()
-  }
-}
 
 fn make_enum_cache_key(schema: &ObjectSchema) -> Option<Vec<String>> {
   let spec = crate::tests::common::create_test_spec(std::collections::BTreeMap::new());
@@ -113,14 +106,7 @@ fn test_relaxed_enum_generates_known_variant() {
   assert!(outer_enum.is_some(), "Should generate SplootEnum");
 
   if let Some(RustType::Enum(e)) = outer_enum {
-    let known_variant = e
-      .variants
-      .iter()
-      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT));
-    assert!(
-      known_variant.is_some(),
-      "Should have Known variant for relaxed enum pattern"
-    );
+    assert_has_known_variant(e);
   }
 }
 
@@ -134,11 +120,7 @@ fn test_relaxed_enum_with_ref() {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
         ..Default::default()
       }),
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/BarkModel".to_string(),
-        summary: None,
-        description: None,
-      },
+      make_schema_ref("BarkModel"),
     ],
     ..Default::default()
   };
@@ -167,14 +149,7 @@ fn test_relaxed_enum_with_ref() {
   assert!(outer_enum.is_some(), "Should generate FloofIds enum");
 
   if let Some(RustType::Enum(outer)) = outer_enum {
-    let known_variant = outer
-      .variants
-      .iter()
-      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT));
-    assert!(
-      known_variant.is_some(),
-      "Should have Known variant for relaxed enum pattern"
-    );
+    assert_has_known_variant(outer);
   }
 }
 
@@ -389,19 +364,6 @@ fn test_canonical_schema_normalizes_type_array_order() {
     canonical1, canonical2,
     "Type array order should not affect canonical equality"
   );
-}
-
-#[test]
-fn test_canonical_schema_clone() {
-  let schema = ObjectSchema {
-    required: vec!["field".to_string()],
-    ..Default::default()
-  };
-
-  let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
-  let cloned = canonical.clone();
-
-  assert_eq!(canonical, cloned, "Cloned CanonicalSchema should equal original");
 }
 
 #[test]

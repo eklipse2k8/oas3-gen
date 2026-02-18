@@ -2,25 +2,11 @@ use std::collections::BTreeMap;
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
+use super::support::{assert_single_type_alias, make_array_schema, make_schema_ref, make_string_schema};
 use crate::{
   generator::{ast::RustType, converter::SchemaConverter},
   tests::common::{create_test_context, create_test_graph, default_config},
 };
-
-fn make_string_schema() -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    ..Default::default()
-  }
-}
-
-fn make_array_schema(items: Option<Schema>) -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: items.map(Box::new),
-    ..Default::default()
-  }
-}
 
 #[test]
 fn test_primitive_type_aliases() -> anyhow::Result<()> {
@@ -49,13 +35,7 @@ fn test_primitive_type_aliases() -> anyhow::Result<()> {
     let context = create_test_context(graph.clone(), default_config());
     let converter = SchemaConverter::new(&context);
     let result = converter.convert_schema(name, graph.get(name).unwrap())?;
-
-    assert_eq!(result.len(), 1, "expected single type for {name}");
-    let RustType::TypeAlias(alias) = &result[0] else {
-      panic!("expected type alias for {name}")
-    };
-    assert_eq!(alias.name, name, "name mismatch for {name}");
-    assert_eq!(alias.target.to_rust_type(), expected_type, "type mismatch for {name}");
+    assert_single_type_alias(&result, name, expected_type);
   }
   Ok(())
 }
@@ -92,13 +72,7 @@ fn test_array_type_aliases() -> anyhow::Result<()> {
     let context = create_test_context(graph.clone(), default_config());
     let converter = SchemaConverter::new(&context);
     let result = converter.convert_schema(name, graph.get(name).unwrap())?;
-
-    assert_eq!(result.len(), 1, "expected single type for {name}");
-    let RustType::TypeAlias(alias) = &result[0] else {
-      panic!("expected type alias for {name}")
-    };
-    assert_eq!(alias.name, name, "name mismatch for {name}");
-    assert_eq!(alias.target.to_rust_type(), expected_type, "type mismatch for {name}");
+    assert_single_type_alias(&result, name, expected_type);
   }
   Ok(())
 }
@@ -120,11 +94,7 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
     ..Default::default()
   };
 
-  let corgis_schema_array = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Corgi".to_string(),
-    summary: None,
-    description: None,
-  }))));
+  let corgis_schema_array = make_array_schema(Some(Schema::Object(Box::new(make_schema_ref("Corgi")))));
 
   let graph = create_test_graph(BTreeMap::from([
     ("Corgi".to_string(), corgi_schema),
@@ -134,14 +104,7 @@ fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("Corgis", graph.get("Corgis").unwrap())?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("expected type alias for array schema")
-  };
-
-  assert_eq!(alias.name, "Corgis");
-  assert_eq!(alias.target.to_rust_type(), "Vec<Corgi>");
+  assert_single_type_alias(&result, "Corgis", "Vec<Corgi>");
   Ok(())
 }
 
@@ -183,18 +146,7 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
-        one_of: vec![
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/BarkFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/SplootFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-        ],
+        one_of: vec![make_schema_ref("BarkFrappe"), make_schema_ref("SplootFrappe")],
         ..Default::default()
       },
     ))))),
@@ -275,18 +227,7 @@ fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()
     schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Array, SchemaType::Null])),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
-        one_of: vec![
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/BarkFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/SplootFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-        ],
+        one_of: vec![make_schema_ref("BarkFrappe"), make_schema_ref("SplootFrappe")],
         ..Default::default()
       },
     ))))),

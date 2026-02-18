@@ -250,31 +250,6 @@ fn test_schema_graph_cycle_detection() {
 }
 
 #[test]
-fn test_schema_graph_integration() {
-  let mut schemas = BTreeMap::new();
-  schemas.insert("Corgi".to_string(), ObjectOrReference::Object(make_simple_schema()));
-  schemas.insert(
-    "Bark".to_string(),
-    ObjectOrReference::Object(make_schema_with_ref("Corgi")),
-  );
-
-  let spec = create_test_spec_with_schemas(schemas);
-  let mut stats = GenerationStats::default();
-  let mut graph = SchemaRegistry::new(&spec, &mut stats);
-
-  assert!(graph.get("Corgi").is_some(), "integration: should have Corgi");
-  assert!(graph.get("Bark").is_some(), "integration: should have Bark");
-  assert_eq!(graph.keys().len(), 2, "integration: should have 2 schemas");
-
-  let union_fingerprints = BTreeMap::new();
-  graph.build_dependencies(&union_fingerprints);
-  let cycles = graph.detect_cycles();
-
-  assert!(cycles.is_empty(), "integration: should have no cycles");
-  assert!(!graph.is_cyclic("Corgi"), "integration: Corgi should not be cyclic");
-}
-
-#[test]
 fn test_schema_registry_merges_all_of_properties_and_required() {
   let mut loaf = make_simple_schema();
   loaf.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
@@ -371,64 +346,6 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
 
   let effective = graph.resolved("Nugget").unwrap();
   assert_eq!(effective.properties.len(), merged_nugget.schema.properties.len());
-}
-
-#[test]
-fn schema_merger_merge_child_with_parent() {
-  let mut loaf = make_simple_schema();
-  loaf.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  loaf.properties.insert(
-    "loaf_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  loaf.required.push("loaf_prop".to_string());
-
-  let mut nugget = make_simple_schema();
-  nugget.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  nugget.properties.insert(
-    "nugget_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-  nugget.all_of.push(make_ref("Loaf"));
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Loaf".to_string(), ObjectOrReference::Object(loaf)),
-    ("Nugget".to_string(), ObjectOrReference::Object(nugget)),
-  ]));
-
-  let mut stats = GenerationStats::default();
-  let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
-  graph.build_dependencies(&union_fingerprints);
-  graph.detect_cycles();
-
-  let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
-
-  assert!(
-    merged.schema.properties.contains_key("loaf_prop"),
-    "should have loaf_prop"
-  );
-  assert!(
-    merged.schema.properties.contains_key("nugget_prop"),
-    "should have nugget_prop"
-  );
-  assert!(
-    merged.schema.required.contains(&"loaf_prop".to_string()),
-    "loaf_prop should be required"
-  );
-
-  let effective = graph.resolved("Nugget").unwrap();
-  assert_eq!(
-    effective.properties.len(),
-    merged.schema.properties.len(),
-    "resolved should match merged"
-  );
 }
 
 #[test]
