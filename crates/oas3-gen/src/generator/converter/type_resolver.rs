@@ -589,7 +589,7 @@ impl TypeResolver {
     Ok(
       !resolved.has_union()
         && resolved.additional_properties.is_none()
-        && !resolved.has_inline_union_array_items(self.spec())
+        && !(resolved.is_array() && self.has_union_items(&resolved))
         && (resolved.is_primitive() || resolved.enum_values.len() > 1),
     )
   }

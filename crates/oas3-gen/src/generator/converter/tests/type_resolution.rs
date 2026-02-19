@@ -1181,3 +1181,82 @@ fn nullable_enum_does_not_create_type_alias() {
     "nullable enum should NOT create a type alias - Option wrapping happens at usage site"
   );
 }
+
+#[test]
+fn is_wrapper_union_false_for_array_with_ref_union_items() {
+  let type_a = make_object_schema_with_property("field_a", make_string_schema());
+  let type_b = make_object_schema_with_property("field_b", make_string_schema());
+
+  let union_type = ObjectSchema {
+    one_of: vec![make_schema_ref("TypeA"), make_schema_ref("TypeB")],
+    ..Default::default()
+  };
+
+  let graph = create_test_graph(BTreeMap::from([
+    ("TypeA".to_string(), type_a),
+    ("TypeB".to_string(), type_b),
+    ("UnionType".to_string(), union_type),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context);
+
+  let cases = [
+    (
+      "ref_union_items_not_wrapper",
+      ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+            items: Some(Box::new(Schema::Object(Box::new(make_schema_ref("UnionType"))))),
+            ..Default::default()
+          }),
+          ObjectOrReference::Object(make_null_schema()),
+        ],
+        ..Default::default()
+      },
+      false,
+    ),
+    (
+      "inline_union_items_not_wrapper",
+      ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+            items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+              ObjectSchema {
+                one_of: vec![make_schema_ref("TypeA"), make_schema_ref("TypeB")],
+                ..Default::default()
+              },
+            ))))),
+            ..Default::default()
+          }),
+          ObjectOrReference::Object(make_null_schema()),
+        ],
+        ..Default::default()
+      },
+      false,
+    ),
+    (
+      "simple_string_items_is_wrapper",
+      ObjectSchema {
+        one_of: vec![
+          ObjectOrReference::Object(ObjectSchema {
+            schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
+            items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
+              make_string_schema(),
+            ))))),
+            ..Default::default()
+          }),
+          ObjectOrReference::Object(make_null_schema()),
+        ],
+        ..Default::default()
+      },
+      true,
+    ),
+  ];
+
+  for (case_name, schema, expected) in cases {
+    let result = resolver.is_wrapper_union(&schema).unwrap();
+    assert_eq!(result, expected, "failed for case: {case_name}");
+  }
+}
