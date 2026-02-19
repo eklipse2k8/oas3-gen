@@ -75,7 +75,7 @@ impl TypeResolver {
 
     let union_variants = if !schema.one_of.is_empty() {
       Some(&schema.one_of)
-    } else if schema.has_intersection() {
+    } else if !schema.any_of.is_empty() {
       Some(&schema.any_of)
     } else {
       None
