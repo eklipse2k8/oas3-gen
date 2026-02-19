@@ -14,7 +14,7 @@ use crate::{
   generator::{
     ast::{RustType, TypeRef},
     converter::{ConverterContext, SchemaConverter, cache::SharedSchemaCache},
-    naming::identifiers::{strip_parent_prefix, to_rust_type_name},
+    naming::identifiers::strip_parent_prefix,
   },
   utils::SchemaExt,
 };
@@ -93,7 +93,7 @@ impl InlineTypeResolver {
     enum_values: &[String],
   ) -> Result<ConversionOutput<TypeRef>> {
     let base_name = format!("{parent_name}{}", property_name.to_pascal_case());
-    let forced_name = self.context.cache.borrow().get_enum_name(enum_values);
+    let forced_name = self.context.cache().get_enum_name(enum_values);
 
     self.resolve_with_cache(
       schema,
@@ -119,16 +119,17 @@ impl InlineTypeResolver {
     refs: &BTreeSet<String>,
     base_name: &str,
   ) -> Result<ConversionOutput<TypeRef>> {
-    if let Some(name) = self.find_union_by_refs(refs) {
-      return Ok(ConversionOutput::new(self.type_ref(&name)));
+    if refs.len() > 1
+      && let Some(name) = self.context.cache().find_union(refs).map(String::from)
+    {
+      return Ok(ConversionOutput::new(self.context.graph().type_ref(&name)));
     }
 
     let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
 
     let enum_cache_key = self
       .context
-      .cache
-      .borrow()
+      .cache()
       .get_precomputed_enum_cache_key(schema)
       .ok()
       .flatten()
@@ -141,7 +142,7 @@ impl InlineTypeResolver {
       });
 
     {
-      let cache = self.context.cache.borrow();
+      let cache = self.context.cache();
       if refs.len() >= 2
         && let Some(name) = cache.get_union_name(refs, discriminator)
       {
@@ -162,7 +163,7 @@ impl InlineTypeResolver {
     )?;
 
     if refs.len() >= 2 {
-      self.context.cache.borrow_mut().register_union(
+      self.context.cache_mut().register_union(
         refs.clone(),
         schema.discriminator.as_ref().map(|d| d.property_name.clone()),
         result.result.base_type.to_string(),
@@ -222,11 +223,8 @@ impl InlineTypeResolver {
       return Ok(None);
     }
 
-    {
-      let cache = self.context.cache.borrow();
-      if let Some(cached) = cache.get_type_name(schema)? {
-        return Ok(Some(ConversionOutput::new(cached)));
-      }
+    if let Some(cached) = self.context.cache().get_type_name(schema)? {
+      return Ok(Some(ConversionOutput::new(cached)));
     }
 
     let effective = if schema.all_of.is_empty() {
@@ -235,7 +233,7 @@ impl InlineTypeResolver {
       self.context.graph().merge_all_of(schema)
     };
 
-    let unique_name = self.context.cache.borrow_mut().make_unique_name(base_name);
+    let unique_name = self.context.cache_mut().make_unique_name(base_name);
     let generated = convert_fn(&unique_name, &effective)?;
 
     if generated.is_empty() {
@@ -248,8 +246,7 @@ impl InlineTypeResolver {
 
     let enum_cache_key = self
       .context
-      .cache
-      .borrow()
+      .cache()
       .get_precomputed_enum_cache_key(schema)
       .ok()
       .flatten()
@@ -259,15 +256,13 @@ impl InlineTypeResolver {
       });
     let registration = self
       .context
-      .cache
-      .borrow()
+      .cache()
       .prepare_registration(schema, &unique_name, enum_cache_key)?;
     let named_type = SharedSchemaCache::apply_name_to_type(main_type, &registration.assigned_name);
     let final_name = registration.assigned_name.clone();
     self
       .context
-      .cache
-      .borrow_mut()
+      .cache_mut()
       .commit_registration(registration, vec![], named_type);
 
     Ok(Some(ConversionOutput::with_inline_types(final_name, generated)))
@@ -292,7 +287,7 @@ impl InlineTypeResolver {
     C: FnOnce(&SharedSchemaCache) -> Option<String>,
   {
     {
-      let cache = self.context.cache.borrow();
+      let cache = self.context.cache();
       if let Some(existing_name) = cache.get_type_name(schema)? {
         return Ok(ConversionOutput::new(TypeRef::new(existing_name)));
       }
@@ -304,15 +299,14 @@ impl InlineTypeResolver {
     let name = if let Some(forced) = forced_name {
       forced
     } else {
-      self.context.cache.borrow().get_preferred_name(schema, base_name)?
+      self.context.cache().get_preferred_name(schema, base_name)?
     };
 
     let result = generator(&name)?;
 
     let enum_cache_key = self
       .context
-      .cache
-      .borrow()
+      .cache()
       .get_precomputed_enum_cache_key(schema)
       .ok()
       .flatten()
@@ -322,37 +316,15 @@ impl InlineTypeResolver {
       });
     let registration = self
       .context
-      .cache
-      .borrow()
+      .cache()
       .prepare_registration(schema, &name, enum_cache_key)?;
     let named_type = SharedSchemaCache::apply_name_to_type(result.result.clone(), &registration.assigned_name);
     let type_name = registration.assigned_name.clone();
     self
       .context
-      .cache
-      .borrow_mut()
+      .cache_mut()
       .commit_registration(registration, result.inline_types, named_type);
 
     Ok(ConversionOutput::new(TypeRef::new(type_name)))
-  }
-
-  /// Creates a type reference for a named schema, applying `Box` if cyclic.
-  fn type_ref(&self, schema_name: &str) -> TypeRef {
-    let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
-    if self.context.graph().is_cyclic(schema_name) {
-      type_ref = type_ref.with_boxed();
-    }
-    type_ref
-  }
-
-  /// Looks up a union type by its set of variant `$ref` targets.
-  ///
-  /// Returns `None` if fewer than 2 refs are provided or no matching
-  /// union exists in the schema registry's union fingerprint cache.
-  fn find_union_by_refs(&self, refs: &BTreeSet<String>) -> Option<String> {
-    if refs.len() < 2 {
-      return None;
-    }
-    self.context.cache.borrow().find_union(refs).map(String::from)
   }
 }

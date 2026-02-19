@@ -120,7 +120,7 @@ impl RelaxedEnumBuilder {
     cache_key: &[String],
   ) -> (String, Option<RustType>) {
     let cached_result = {
-      let cache = self.context.cache.borrow();
+      let cache = self.context.cache();
       cache
         .get_enum_name(cache_key)
         .map(|name| (name.clone(), cache.is_enum_generated(cache_key)))
@@ -151,7 +151,7 @@ impl RelaxedEnumBuilder {
       Documentation::from_lines(["Known values for the string enum."]),
     );
 
-    let mut cache = self.context.cache.borrow_mut();
+    let mut cache = self.context.cache_mut();
     cache.register_enum(cache_key.to_vec(), name.clone());
     cache.mark_name_used(name.clone());
 

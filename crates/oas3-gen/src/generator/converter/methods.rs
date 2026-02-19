@@ -203,12 +203,9 @@ impl MethodGenerator {
       return Some(struct_def.clone());
     }
 
-    {
-      let cache = self.context.cache.borrow();
-      if let Some(struct_def) = cache.get_struct_def(&base_name) {
-        struct_cache.insert(base_name.clone(), struct_def.clone());
-        return Some(struct_def.clone());
-      }
+    if let Some(struct_def) = self.context.cache().get_struct_def(&base_name) {
+      struct_cache.insert(base_name.clone(), struct_def.clone());
+      return Some(struct_def.clone());
     }
 
     let schema = self.context.graph().get(&base_name)?;

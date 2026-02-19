@@ -1,7 +1,8 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use inflections::Inflect;
+use itertools::Itertools;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
@@ -13,13 +14,9 @@ use crate::{
   generator::{
     ast::{RustPrimitive, TypeRef},
     converter::ConverterContext,
-    naming::{
-      constants::VARIANT_KIND_SUFFIX,
-      identifiers::{strip_parent_prefix, to_rust_type_name},
-      inference::CommonVariantName,
-    },
+    naming::{constants::VARIANT_KIND_SUFFIX, identifiers::strip_parent_prefix, inference::CommonVariantName},
   },
-  utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
+  utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path, variant_is_nullable},
 };
 
 #[derive(Clone, Debug)]
@@ -48,18 +45,9 @@ impl TypeResolver {
     schema_ref.resolve(self.spec()).context("Schema resolution failed")
   }
 
-  /// Creates a type reference for a named schema, applying boxing if cyclic.
-  pub(crate) fn type_ref(&self, schema_name: &str) -> TypeRef {
-    let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
-    if self.context.graph().is_cyclic(schema_name) {
-      type_ref = type_ref.with_boxed();
-    }
-    type_ref
-  }
-
   /// Resolves a schema to its Rust type reference.
   pub(crate) fn resolve_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
-    if let Some(type_ref) = self.context.cache.borrow().get_type_ref(schema)? {
+    if let Some(type_ref) = self.context.cache().get_type_ref(schema)? {
       return Ok(type_ref);
     }
 
@@ -169,7 +157,7 @@ impl TypeResolver {
     }
 
     let Some(variants) = schema.union_variants_with_kind() else {
-      return Ok(ConversionOutput::new(self.type_ref(&ref_name)));
+      return Ok(ConversionOutput::new(self.context.graph().type_ref(&ref_name)));
     };
 
     if schema.has_null_variant(self.spec())
@@ -177,7 +165,9 @@ impl TypeResolver {
     {
       let resolved = self.resolve(non_null)?;
       if resolved.has_inline_union_array_items(self.spec()) {
-        return Ok(ConversionOutput::new(self.type_ref(&ref_name).with_option()));
+        return Ok(ConversionOutput::new(
+          self.context.graph().type_ref(&ref_name).with_option(),
+        ));
       }
     }
 
@@ -187,7 +177,7 @@ impl TypeResolver {
       return Ok(ConversionOutput::new(type_ref));
     }
 
-    Ok(ConversionOutput::new(self.type_ref(&ref_name)))
+    Ok(ConversionOutput::new(self.context.graph().type_ref(&ref_name)))
   }
 
   /// Creates an inline enum type from a schema with enum values.
@@ -310,7 +300,7 @@ impl TypeResolver {
     let name = CommonVariantName::union_name_or(variants, &kind_name, || kind_name.clone());
 
     let final_name = {
-      let cache = self.context.cache.borrow();
+      let cache = self.context.cache();
       if cache.name_conflicts_with_different_schema(&name, items)? {
         cache.make_unique_name(&name)
       } else {
@@ -330,15 +320,11 @@ impl TypeResolver {
       return None;
     }
     let title = schema.title.as_ref()?;
-    self.context.graph().contains(title).then(|| self.type_ref(title))
-  }
-
-  /// Looks up a union type by its set of variant `$ref` targets.
-  fn find_union_by_refs(&self, refs: &BTreeSet<String>) -> Option<String> {
-    if refs.len() < 2 {
-      return None;
-    }
-    self.context.cache.borrow().find_union(refs).map(String::from)
+    self
+      .context
+      .graph()
+      .contains(title)
+      .then(|| self.context.graph().type_ref(title))
   }
 
   /// Attempts to recognize a nullable union (exactly one non-null variant).
@@ -349,21 +335,28 @@ impl TypeResolver {
     let Some(variants) = schema.union_variants_with_kind() else {
       return Ok(None);
     };
+    self.try_nullable_variants(variants)
+  }
 
+  /// Attempts to recognize a nullable pattern from a variants slice.
+  ///
+  /// Returns `Some(Option<T>)` when the variants contain exactly two
+  /// entries: one null and one non-null. The non-null variant is resolved
+  /// to its type and wrapped in `Option`. Returns `None` if the pattern
+  /// doesn't match or a new enum type must be generated.
+  fn try_nullable_variants(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
     if variants.len() != 2 {
       return Ok(None);
     }
 
-    if !schema.has_null_variant(self.spec()) {
-      return Ok(None);
-    }
+    let spec = self.spec();
 
-    let Some(variant) = schema.find_non_null_variant(self.spec()) else {
+    let Ok(variant) = variants.iter().filter(|v| !variant_is_nullable(v, spec)).exactly_one() else {
       return Ok(None);
     };
 
     if let Some(ref_name) = extract_schema_ref_name(variant) {
-      return Ok(Some(self.type_ref(&ref_name).with_option()));
+      return Ok(Some(self.context.graph().type_ref(&ref_name).with_option()));
     }
 
     let resolved = self.resolve(variant)?;
@@ -391,15 +384,13 @@ impl TypeResolver {
   pub(crate) fn try_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
     let refs = extract_union_fingerprint(variants);
 
-    if let Some(name) = self.find_union_by_refs(&refs) {
-      return Ok(Some(self.type_ref(&name)));
+    if refs.len() > 1
+      && let Some(name) = self.context.cache().find_union(&refs).map(String::from)
+    {
+      return Ok(Some(self.context.graph().type_ref(&name)));
     }
 
-    let temp_schema = ObjectSchema {
-      one_of: variants.to_vec(),
-      ..Default::default()
-    };
-    if let Some(nullable) = self.try_nullable_union(&temp_schema)? {
+    if let Some(nullable) = self.try_nullable_variants(variants)? {
       return Ok(Some(nullable));
     }
 
@@ -435,7 +426,7 @@ impl TypeResolver {
       }
     }
 
-    Ok(first_ref.map(|name| self.type_ref(&name)))
+    Ok(first_ref.map(|name| self.context.graph().type_ref(&name)))
   }
 
   /// Attempts to extract a simple type from a resolved schema.
@@ -457,13 +448,13 @@ impl TypeResolver {
     if let [single_variant] = schema.one_of.as_slice()
       && let Some(name) = extract_schema_ref_name(single_variant)
     {
-      return Ok(Some(self.type_ref(&name)));
+      return Ok(Some(self.context.graph().type_ref(&name)));
     }
 
     if let Some(ref title) = schema.title
       && self.context.graph().get(title).is_some()
     {
-      return Ok(Some(self.type_ref(title)));
+      return Ok(Some(self.context.graph().type_ref(title)));
     }
 
     Ok(None)
@@ -543,7 +534,7 @@ impl TypeResolver {
       Schema::Object(schema_ref) => {
         if let ObjectOrReference::Ref { ref_path, .. } = &**schema_ref {
           let name = parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
-          return Ok(self.type_ref(&name));
+          return Ok(self.context.graph().type_ref(&name));
         }
 
         let resolved = self.resolve(schema_ref)?;

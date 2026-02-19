@@ -19,7 +19,7 @@ pub(crate) mod value_enums;
 pub(crate) mod variants;
 
 use std::{
-  cell::RefCell,
+  cell::{Ref, RefCell, RefMut},
   collections::{BTreeSet, HashMap},
   rc::Rc,
   sync::Arc,
@@ -280,6 +280,14 @@ impl ConverterContext {
   pub(crate) fn merge_usage(&self, other: SerdeUsageRecorder) {
     self.type_usage.borrow_mut().merge(other);
   }
+
+  pub(crate) fn cache(&self) -> Ref<'_, SharedSchemaCache> {
+    self.cache.borrow()
+  }
+
+  pub(crate) fn cache_mut(&self) -> RefMut<'_, SharedSchemaCache> {
+    self.cache.borrow_mut()
+  }
 }
 
 /// Main entry point for converting OpenAPI schemas into Rust AST.
@@ -320,7 +328,7 @@ impl SchemaConverter {
 
   /// Returns `true` if the schema registry contains a schema with the given name.
   pub(crate) fn contains(&self, name: &str) -> bool {
-    self.context.cache.borrow().contains_schema_name(name)
+    self.context.cache().contains_schema_name(name)
   }
 
   /// Converts a named OpenAPI schema into one or more Rust type definitions.
@@ -493,7 +501,7 @@ impl SchemaConverter {
     let ordered = enums.into_iter().chain(non_enums).collect::<Vec<_>>();
 
     {
-      let mut cache = self.context().cache.borrow_mut();
+      let mut cache = self.context().cache_mut();
       for (name, schema) in &ordered {
         let _ = cache.register_top_level_schema(schema, name);
       }

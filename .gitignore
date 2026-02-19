@@ -16,6 +16,7 @@
 opencode.*
 GEMINI.md
 claude.sh
+refactor/
 
 # No IDE files
 .idea/

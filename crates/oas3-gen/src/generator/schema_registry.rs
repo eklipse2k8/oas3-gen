@@ -8,8 +8,12 @@ use petgraph::{algo::kosaraju_scc, graphmap::DiGraphMap, visit::Dfs};
 
 use crate::{
   generator::{
+    ast::TypeRef,
     metrics::{GenerationStats, GenerationWarning},
-    naming::name_index::{ScanResult, TypeNameIndex},
+    naming::{
+      identifiers::to_rust_type_name,
+      name_index::{ScanResult, TypeNameIndex},
+    },
     operation_registry::OperationRegistry,
   },
   utils::{
@@ -290,6 +294,16 @@ impl SchemaRegistry {
   /// Checks if a schema participates in a dependency cycle.
   pub(crate) fn is_cyclic(&self, schema_name: &str) -> bool {
     self.cyclic_schemas.contains(schema_name)
+  }
+
+  /// Creates a type reference for a named schema, applying `Box` wrapping if the
+  /// schema participates in a dependency cycle.
+  pub(crate) fn type_ref(&self, schema_name: &str) -> TypeRef {
+    let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
+    if self.is_cyclic(schema_name) {
+      type_ref = type_ref.with_boxed();
+    }
+    type_ref
   }
 
   /// Flattens an `all_of` inheritance hierarchy into a single schema.

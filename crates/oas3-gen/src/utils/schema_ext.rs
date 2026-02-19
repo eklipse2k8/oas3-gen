@@ -643,7 +643,7 @@ fn extract_variant_entries(schema: &ObjectSchema) -> Vec<VariantDef> {
   schema.enum_values.iter().variants().collect()
 }
 
-fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spec: &Spec) -> bool {
+pub(crate) fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spec: &Spec) -> bool {
   variant.resolve(spec).is_ok_and(|schema| schema.is_nullable_object())
 }
 

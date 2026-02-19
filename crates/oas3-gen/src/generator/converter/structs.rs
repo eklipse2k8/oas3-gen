@@ -144,7 +144,7 @@ impl StructConverter {
       kind.unwrap_or(StructKind::Schema),
     )?;
 
-    self.context.cache.borrow_mut().register_struct_def(
+    self.context.cache_mut().register_struct_def(
       struct_name.as_str(),
       match &result.result {
         RustType::Struct(def) => def.clone(),
