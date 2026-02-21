@@ -1,13 +1,8 @@
-use std::{
-  collections::{BTreeMap, BTreeMap as ResponseMap},
-  rc::Rc,
-};
+use std::{collections::BTreeMap, rc::Rc};
 
 use http::Method;
-use oas3::spec::{
-  MediaType, ObjectOrReference, ObjectSchema, Operation, Parameter, ParameterIn, RequestBody, Response, SchemaType,
-  SchemaTypeSet,
-};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Operation, Parameter};
+use serde_json::json;
 
 use crate::{
   generator::{
@@ -25,35 +20,6 @@ fn setup_converter(schemas: BTreeMap<String, ObjectSchema>) -> (OperationConvert
   let converter = OperationConverter::new(context, schema_converter);
   let usage = SerdeUsageRecorder::new();
   (converter, usage)
-}
-
-fn create_parameter(
-  name: &str,
-  location: ParameterIn,
-  schema_type: SchemaType,
-  format: Option<&str>,
-  required: bool,
-) -> ObjectOrReference<Parameter> {
-  ObjectOrReference::Object(Parameter {
-    name: name.to_string(),
-    location,
-    required: Some(required),
-    schema: Some(ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(schema_type)),
-      format: format.map(String::from),
-      ..Default::default()
-    })),
-    description: None,
-    deprecated: None,
-    allow_empty_value: None,
-    allow_reserved: None,
-    explode: None,
-    style: None,
-    content: None,
-    example: None,
-    examples: BTreeMap::default(),
-    extensions: BTreeMap::default(),
-  })
 }
 
 fn extract_request_struct<'a>(types: &'a [RustType], expected_name: &str) -> &'a StructDef {
@@ -101,47 +67,32 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
 fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
 
-  let operation = Operation {
-    operation_id: Some("getKibbleImage".to_string()),
-    responses: Some(ResponseMap::from([(
-      "200".to_string(),
-      ObjectOrReference::Object(Response {
-        description: Some("The kibble image or fluff".to_string()),
-        content: BTreeMap::from([
-          (
-            "application/json".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Object(ObjectSchema {
-                schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-                properties: BTreeMap::from([(
-                  "url".to_string(),
-                  ObjectOrReference::Object(ObjectSchema {
-                    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-                    ..Default::default()
-                  }),
-                )]),
-                ..Default::default()
-              })),
-              ..Default::default()
-            },
-          ),
-          (
-            "image/webp".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Object(ObjectSchema {
-                schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-                format: Some("binary".to_string()),
-                ..Default::default()
-              })),
-              ..Default::default()
-            },
-          ),
-        ]),
-        ..Default::default()
-      }),
-    )])),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "operationId": "getKibbleImage",
+    "responses": {
+      "200": {
+        "description": "The kibble image or fluff",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "url": { "type": "string" }
+              }
+            }
+          },
+          "image/webp": {
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("get_kibble_image", Method::GET, "/kibble/image", operation);
   let result = converter.convert(&entry)?;
@@ -169,29 +120,23 @@ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
-  let corgi_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
+  let corgi_schema: ObjectSchema = serde_json::from_value::<ObjectSchema>(json!({
+    "type": "object"
+  }))?;
+
   let (converter, _usage) = setup_converter(BTreeMap::from([("Corgi".to_string(), corgi_schema)]));
 
-  let operation = Operation {
-    request_body: Some(ObjectOrReference::Object(RequestBody {
-      content: BTreeMap::from([(
-        "application/json".to_string(),
-        MediaType {
-          schema: Some(ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/Corgi".to_string(),
-            summary: None,
-            description: None,
-          }),
-          ..Default::default()
-        },
-      )]),
-      ..Default::default()
-    })),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "requestBody": {
+      "content": {
+        "application/json": {
+          "schema": { "$ref": "#/components/schemas/Corgi" }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("zoom_corgi", Method::POST, "/corgis", operation);
   let result = converter.convert(&entry)?;
@@ -231,32 +176,25 @@ fn test_operation_with_request_body_ref() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_response_type() -> anyhow::Result<()> {
-  let corgi_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
+  let corgi_schema: ObjectSchema = serde_json::from_value::<ObjectSchema>(json!({
+    "type": "object"
+  }))?;
+
   let (converter, _usage) = setup_converter(BTreeMap::from([("Corgi".to_string(), corgi_schema)]));
 
-  let operation = Operation {
-    responses: Some(ResponseMap::from([(
-      "200".to_string(),
-      ObjectOrReference::Object(Response {
-        content: BTreeMap::from([(
-          "application/json".to_string(),
-          MediaType {
-            schema: Some(ObjectOrReference::Ref {
-              ref_path: "#/components/schemas/Corgi".to_string(),
-              summary: None,
-              description: None,
-            }),
-            ..Default::default()
-          },
-        )]),
-        ..Default::default()
-      }),
-    )])),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Corgi" }
+          }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("get_corgi", Method::GET, "/corgi", operation);
   let result = converter.convert(&entry)?;
@@ -268,19 +206,12 @@ fn test_operation_with_response_type() -> anyhow::Result<()> {
 #[test]
 #[allow(clippy::type_complexity)]
 fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
-  let cases: &[(&str, &str, SchemaType, Option<&str>, &str, &str)] = &[
-    (
-      "id",
-      "getById",
-      SchemaType::Integer,
-      Some("int64"),
-      "GetByIdRequest",
-      "i64",
-    ),
+  let cases: &[(&str, &str, &str, Option<&str>, &str, &str)] = &[
+    ("id", "getById", "integer", Some("int64"), "GetByIdRequest", "i64"),
     (
       "count",
       "getByCount",
-      SchemaType::Integer,
+      "integer",
       Some("int32"),
       "GetByCountRequest",
       "i32",
@@ -288,23 +219,16 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     (
       "amount",
       "getByAmount",
-      SchemaType::Number,
+      "number",
       Some("double"),
       "GetByAmountRequest",
       "f64",
     ),
-    (
-      "active",
-      "getByActive",
-      SchemaType::Boolean,
-      None,
-      "GetByActiveRequest",
-      "bool",
-    ),
+    ("active", "getByActive", "boolean", None, "GetByActiveRequest", "bool"),
     (
       "uuid",
       "getByUuid",
-      SchemaType::String,
+      "string",
       Some("uuid"),
       "GetByUuidRequest",
       "uuid::Uuid",
@@ -312,7 +236,7 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
     (
       "timestamp",
       "getByTimestamp",
-      SchemaType::String,
+      "string",
       Some("date-time"),
       "GetByTimestampRequest",
       "chrono::DateTime<chrono::Utc>",
@@ -321,14 +245,23 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
 
   for (param_name, op_id, schema_type, format, expected_struct, expected_type) in cases {
     let (converter, _usage) = setup_converter(BTreeMap::new());
-    let mut operation = Operation::default();
-    operation.parameters.push(create_parameter(
-      param_name,
-      ParameterIn::Path,
-      *schema_type,
-      *format,
-      true,
-    ));
+
+    let param_json = json!({
+      "name": param_name,
+      "in": "path",
+      "required": true,
+      "schema": {
+        "type": schema_type,
+        "format": format
+      }
+    });
+
+    let mut operation: Operation = Operation::default();
+    operation
+      .parameters
+      .push(ObjectOrReference::Object(serde_json::from_value::<Parameter>(
+        param_json,
+      )?));
 
     let path = format!("/items/{{{param_name}}}");
     let snake_op_id = inflections::case::to_snake_case(op_id);
@@ -341,12 +274,14 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
       2,
       "Should generate request struct and path struct for {op_id}"
     );
+
     let request_type_name = result
       .operation_info
       .request_type
       .as_ref()
       .map(StructToken::as_str)
       .expect("Request type should exist");
+
     assert_eq!(
       request_type_name, *expected_struct,
       "Request struct name mismatch for {op_id}"
@@ -371,21 +306,30 @@ fn test_path_parameter_type_mapping() -> anyhow::Result<()> {
 #[test]
 fn test_operation_with_multiple_path_parameters() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
-  let mut operation = Operation::default();
-  operation.parameters.push(create_parameter(
-    "userId",
-    ParameterIn::Path,
-    SchemaType::Integer,
-    Some("int64"),
-    true,
-  ));
-  operation.parameters.push(create_parameter(
-    "postId",
-    ParameterIn::Path,
-    SchemaType::String,
-    None,
-    true,
-  ));
+
+  let operation_json = json!({
+    "parameters": [
+      {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      {
+        "name": "postId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ]
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry(
     "get_user_post",
@@ -425,45 +369,32 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
   for (content_type, expected_category) in content_types {
     let (converter, _usage) = setup_converter(BTreeMap::new());
 
-    let operation = Operation {
-      operation_id: Some("downloadFile".to_string()),
-      responses: Some(ResponseMap::from([
-        (
-          "200".to_string(),
-          ObjectOrReference::Object(Response {
-            content: BTreeMap::from([(
-              content_type.to_string(),
-              MediaType {
-                schema: Some(ObjectOrReference::Object(ObjectSchema {
-                  schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-                  format: Some("binary".to_string()),
-                  ..Default::default()
-                })),
-                ..Default::default()
-              },
-            )]),
-            ..Default::default()
-          }),
-        ),
-        (
-          "4XX".to_string(),
-          ObjectOrReference::Object(Response {
-            content: BTreeMap::from([(
-              "application/json".to_string(),
-              MediaType {
-                schema: Some(ObjectOrReference::Object(ObjectSchema {
-                  schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-                  ..Default::default()
-                })),
-                ..Default::default()
-              },
-            )]),
-            ..Default::default()
-          }),
-        ),
-      ])),
-      ..Default::default()
-    };
+    let operation_json = json!({
+      "operationId": "downloadFile",
+      "responses": {
+        "200": {
+          "content": {
+            content_type: {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "4XX": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    });
+
+    let operation = serde_json::from_value::<Operation>(operation_json)?;
 
     let entry = make_entry("download_file", Method::GET, "/files/download", operation);
     let result = converter.convert(&entry)?;
@@ -534,55 +465,33 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
 
 #[test]
 fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
-  let event_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "message".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    required: vec!["message".to_string()],
-    ..Default::default()
-  };
+  let event_schema = serde_json::from_value::<ObjectSchema>(json!({
+    "type": "object",
+    "properties": {
+      "message": { "type": "string" }
+    },
+    "required": ["message"]
+  }))?;
 
   let (converter, _usage) = setup_converter(BTreeMap::from([("EventPayload".to_string(), event_schema)]));
 
-  let operation = Operation {
-    operation_id: Some("getEvents".to_string()),
-    responses: Some(ResponseMap::from([(
-      "200".to_string(),
-      ObjectOrReference::Object(Response {
-        content: BTreeMap::from([
-          (
-            "application/json".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Ref {
-                ref_path: "#/components/schemas/EventPayload".to_string(),
-                summary: None,
-                description: None,
-              }),
-              ..Default::default()
-            },
-          ),
-          (
-            "text/event-stream".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Ref {
-                ref_path: "#/components/schemas/EventPayload".to_string(),
-                summary: None,
-                description: None,
-              }),
-              ..Default::default()
-            },
-          ),
-        ]),
-        ..Default::default()
-      }),
-    )])),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "operationId": "getEvents",
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/EventPayload" }
+          },
+          "text/event-stream": {
+            "schema": { "$ref": "#/components/schemas/EventPayload" }
+          }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("get_events", Method::GET, "/events", operation);
   let result = converter.convert(&entry)?;
@@ -646,26 +555,22 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
 fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
 
-  let operation = Operation {
-    operation_id: Some("getItem".to_string()),
-    responses: Some(ResponseMap::from([(
-      "200".to_string(),
-      ObjectOrReference::Object(Response {
-        content: BTreeMap::from([(
-          "application/json".to_string(),
-          MediaType {
-            schema: Some(ObjectOrReference::Object(ObjectSchema {
-              schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-              ..Default::default()
-            })),
-            ..Default::default()
-          },
-        )]),
-        ..Default::default()
-      }),
-    )])),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "operationId": "getItem",
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("get_item", Method::GET, "/items", operation);
   let result = converter.convert(&entry)?;
@@ -691,52 +596,36 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
 
 #[test]
 fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
-  let error_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
+  let error_schema = serde_json::from_value::<ObjectSchema>(json!({
+    "type": "object"
+  }))?;
+
   let (converter, _usage) = setup_converter(BTreeMap::from([("Error".to_string(), error_schema)]));
 
-  let operation = Operation {
-    operation_id: Some("getItem".to_string()),
-    responses: Some(ResponseMap::from([
-      (
-        "200".to_string(),
-        ObjectOrReference::Object(Response {
-          content: BTreeMap::from([(
-            "application/json".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Object(ObjectSchema {
-                schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-                ..Default::default()
-              })),
-              ..Default::default()
-            },
-          )]),
-          ..Default::default()
-        }),
-      ),
-      (
-        "default".to_string(),
-        ObjectOrReference::Object(Response {
-          description: Some("Error response".to_string()),
-          content: BTreeMap::from([(
-            "application/json".to_string(),
-            MediaType {
-              schema: Some(ObjectOrReference::Ref {
-                ref_path: "#/components/schemas/Error".to_string(),
-                summary: None,
-                description: None,
-              }),
-              ..Default::default()
-            },
-          )]),
-          ..Default::default()
-        }),
-      ),
-    ])),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "operationId": "getItem",
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "default": {
+        "description": "Error response",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("get_item", Method::GET, "/items", operation);
   let result = converter.convert(&entry)?;
@@ -775,27 +664,23 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
 fn test_response_with_primitive_type() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
 
-  let operation = Operation {
-    operation_id: Some("getCount".to_string()),
-    responses: Some(ResponseMap::from([(
-      "200".to_string(),
-      ObjectOrReference::Object(Response {
-        content: BTreeMap::from([(
-          "application/json".to_string(),
-          MediaType {
-            schema: Some(ObjectOrReference::Object(ObjectSchema {
-              schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-              format: Some("int64".to_string()),
-              ..Default::default()
-            })),
-            ..Default::default()
-          },
-        )]),
-        ..Default::default()
-      }),
-    )])),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "operationId": "getCount",
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("get_count", Method::GET, "/count", operation);
   let result = converter.convert(&entry)?;
@@ -828,18 +713,16 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
 fn test_response_with_no_content() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
 
-  let operation = Operation {
-    operation_id: Some("deleteItem".to_string()),
-    responses: Some(ResponseMap::from([(
-      "204".to_string(),
-      ObjectOrReference::Object(Response {
-        description: Some("No content".to_string()),
-        content: BTreeMap::new(),
-        ..Default::default()
-      }),
-    )])),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "operationId": "deleteItem",
+    "responses": {
+      "204": {
+        "description": "No content"
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("delete_item", Method::DELETE, "/items/{id}", operation);
   let result = converter.convert(&entry)?;
@@ -868,62 +751,42 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
 
 #[test]
 fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
-  let model_params_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "model".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-  let agent_params_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "agent".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
+  let model_params_schema = serde_json::from_value::<ObjectSchema>(json!({
+    "type": "object",
+    "properties": {
+      "model": { "type": "string" }
+    }
+  }))?;
+
+  let agent_params_schema = serde_json::from_value::<ObjectSchema>(json!({
+    "type": "object",
+    "properties": {
+      "agent": { "type": "string" }
+    }
+  }))?;
 
   let (converter, _usage) = setup_converter(BTreeMap::from([
     ("CreateModelParams".to_string(), model_params_schema),
     ("CreateAgentParams".to_string(), agent_params_schema),
   ]));
 
-  let operation = Operation {
-    request_body: Some(ObjectOrReference::Object(RequestBody {
-      required: Some(true),
-      content: BTreeMap::from([(
-        "application/json".to_string(),
-        MediaType {
-          schema: Some(ObjectOrReference::Object(ObjectSchema {
-            one_of: vec![
-              ObjectOrReference::Ref {
-                ref_path: "#/components/schemas/CreateModelParams".to_string(),
-                summary: None,
-                description: None,
-              },
-              ObjectOrReference::Ref {
-                ref_path: "#/components/schemas/CreateAgentParams".to_string(),
-                summary: None,
-                description: None,
-              },
-            ],
-            ..Default::default()
-          })),
-          ..Default::default()
-        },
-      )]),
-      ..Default::default()
-    })),
-    ..Default::default()
-  };
+  let operation_json = json!({
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/CreateModelParams" },
+              { "$ref": "#/components/schemas/CreateAgentParams" }
+            ]
+          }
+        }
+      }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
 
   let entry = make_entry("create_interaction", Method::POST, "/interactions", operation);
   let result = converter.convert(&entry)?;

@@ -1,43 +1,52 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
-use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
+use oas3::spec::Spec;
+use serde_json::json;
 
 use crate::{
   generator::{
     ast::{RustType, SerdeAttribute},
     converter::{SchemaConverter, discriminator::DiscriminatorConverter},
+    metrics::GenerationStats,
+    schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_context, create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config, parse_schema},
 };
+
+fn create_graph_from_json(
+  components_schemas: &serde_json::Value,
+) -> Arc<crate::generator::schema_registry::SchemaRegistry> {
+  let spec_json = json!({
+    "openapi": "3.1.0",
+    "info": { "title": "Test API", "version": "1.0.0" },
+    "paths": {},
+    "components": { "schemas": components_schemas }
+  });
+  let spec = serde_json::from_value::<Spec>(spec_json).expect("failed to parse spec from JSON");
+  let mut stats = GenerationStats::default();
+  let mut graph = SchemaRegistry::new(&spec, &mut stats);
+  let union_fingerprints = BTreeMap::new();
+  graph.build_dependencies(&union_fingerprints);
+  graph.detect_cycles();
+  Arc::new(graph)
+}
 
 #[test]
 fn discriminated_base_struct_renamed() -> anyhow::Result<()> {
-  let mut entity_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    additional_properties: Some(Schema::Boolean(BooleanSchema(false))),
-    ..Default::default()
-  };
-  entity_schema.properties.insert(
-    "id".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  entity_schema.properties.insert(
-    "@odata.type".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  entity_schema.discriminator = Some(Discriminator {
-    property_name: "@odata.type".to_string(),
-    mapping: Some(BTreeMap::from([(
-      "#microsoft.graph.corgi".to_string(),
-      "#/components/schemas/Corgi".to_string(),
-    )])),
-  });
+  let entity_schema = parse_schema(json!({
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "id": { "type": "string" },
+      "@odata.type": { "type": "string" }
+    },
+    "discriminator": {
+      "propertyName": "@odata.type",
+      "mapping": {
+        "#microsoft.graph.corgi": "#/components/schemas/Corgi"
+      }
+    }
+  }));
 
   let graph = create_test_graph(BTreeMap::from([("Cardigan".to_string(), entity_schema)]));
   let context = create_test_context(graph.clone(), default_config());
@@ -59,34 +68,21 @@ fn discriminated_base_struct_renamed() -> anyhow::Result<()> {
 
 #[test]
 fn discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
-  let mut bark_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    additional_properties: Some(Schema::Boolean(BooleanSchema(false))),
-    ..Default::default()
-  };
-  bark_schema.properties.insert(
-    "sploot_role".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      enum_values: vec![
-        serde_json::Value::String("corgi".to_string()),
-        serde_json::Value::String("frappe".to_string()),
-      ],
-      ..Default::default()
-    }),
-  );
-  bark_schema.properties.insert(
-    "bark_content".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  bark_schema.required = vec!["sploot_role".to_string(), "bark_content".to_string()];
-  bark_schema.discriminator = Some(Discriminator {
-    property_name: "sploot_role".to_string(),
-    mapping: None,
-  });
+  let bark_schema = parse_schema(json!({
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "sploot_role": {
+        "type": "string",
+        "enum": ["corgi", "frappe"]
+      },
+      "bark_content": { "type": "string" }
+    },
+    "required": ["sploot_role", "bark_content"],
+    "discriminator": {
+      "propertyName": "sploot_role"
+    }
+  }));
 
   let graph = create_test_graph(BTreeMap::from([("Bark".to_string(), bark_schema)]));
   let context = create_test_context(graph.clone(), default_config());
@@ -130,31 +126,21 @@ fn discriminator_with_enum_remains_visible() -> anyhow::Result<()> {
 
 #[test]
 fn discriminator_with_single_enum_is_hidden() -> anyhow::Result<()> {
-  let mut howl_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    additional_properties: Some(Schema::Boolean(BooleanSchema(false))),
-    ..Default::default()
-  };
-  howl_schema.properties.insert(
-    "howl_role".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      enum_values: vec![serde_json::Value::String("only_value".to_string())],
-      ..Default::default()
-    }),
-  );
-  howl_schema.properties.insert(
-    "howl_content".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  howl_schema.required = vec!["howl_role".to_string(), "howl_content".to_string()];
-  howl_schema.discriminator = Some(Discriminator {
-    property_name: "howl_role".to_string(),
-    mapping: None,
-  });
+  let howl_schema = parse_schema(json!({
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "howl_role": {
+        "type": "string",
+        "enum": ["only_value"]
+      },
+      "howl_content": { "type": "string" }
+    },
+    "required": ["howl_role", "howl_content"],
+    "discriminator": {
+      "propertyName": "howl_role"
+    }
+  }));
 
   let graph = create_test_graph(BTreeMap::from([("Howl".to_string(), howl_schema)]));
   let context = create_test_context(graph.clone(), default_config());
@@ -192,32 +178,20 @@ fn discriminator_with_single_enum_is_hidden() -> anyhow::Result<()> {
 
 #[test]
 fn discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
-  let mut cardigan_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
-  cardigan_schema.properties.insert(
-    "@toebeans.type".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  cardigan_schema.properties.insert(
-    "tag_id".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  cardigan_schema.required = vec!["@toebeans.type".to_string()];
-  cardigan_schema.discriminator = Some(Discriminator {
-    property_name: "@toebeans.type".to_string(),
-    mapping: Some(BTreeMap::from([(
-      "#microsoft.graph.corgi".to_string(),
-      "#/components/schemas/Corgi".to_string(),
-    )])),
-  });
+  let cardigan_schema = parse_schema(json!({
+    "type": "object",
+    "properties": {
+      "@toebeans.type": { "type": "string" },
+      "tag_id": { "type": "string" }
+    },
+    "required": ["@toebeans.type"],
+    "discriminator": {
+      "propertyName": "@toebeans.type",
+      "mapping": {
+        "#microsoft.graph.corgi": "#/components/schemas/Corgi"
+      }
+    }
+  }));
 
   let graph = create_test_graph(BTreeMap::from([("Cardigan".to_string(), cardigan_schema)]));
   let context = create_test_context(graph.clone(), default_config());
@@ -249,33 +223,25 @@ fn discriminator_without_enum_is_hidden() -> anyhow::Result<()> {
 
 #[test]
 fn discriminator_handler_detect_parent() {
-  let mut loaf_schema = ObjectSchema::default();
-  loaf_schema.properties.insert(
-    "type".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  loaf_schema.discriminator = Some(Discriminator {
-    property_name: "type".to_string(),
-    mapping: Some(BTreeMap::from([(
-      "nugget".to_string(),
-      "#/components/schemas/Nugget".to_string(),
-    )])),
+  let components = json!({
+    "Loaf": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" }
+      },
+      "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+          "nugget": "#/components/schemas/Nugget"
+        }
+      }
+    },
+    "Nugget": {
+      "allOf": [{ "$ref": "#/components/schemas/Loaf" }]
+    }
   });
 
-  let mut nugget_schema = ObjectSchema::default();
-  nugget_schema.all_of.push(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Loaf".to_string(),
-    summary: None,
-    description: None,
-  });
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("Loaf".to_string(), loaf_schema),
-    ("Nugget".to_string(), nugget_schema),
-  ]));
+  let graph = create_graph_from_json(&components);
   let context = create_test_context(graph.clone(), default_config());
   let handler = DiscriminatorConverter::new(context);
 
@@ -287,40 +253,29 @@ fn discriminator_handler_detect_parent() {
 
 #[test]
 fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
-  let mut loaf_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
-  loaf_schema.properties.insert(
-    "type".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  loaf_schema.required = vec!["type".to_string()];
-  loaf_schema.discriminator = Some(Discriminator {
-    property_name: "type".to_string(),
-    mapping: Some(BTreeMap::from([(
-      "nugget".to_string(),
-      "#/components/schemas/Nugget".to_string(),
-    )])),
-  });
+  let loaf_schema = parse_schema(json!({
+    "type": "object",
+    "properties": {
+      "type": { "type": "string" }
+    },
+    "required": ["type"],
+    "discriminator": {
+      "propertyName": "type",
+      "mapping": {
+        "nugget": "#/components/schemas/Nugget"
+      }
+    }
+  }));
 
-  let mut nugget_schema = ObjectSchema::default();
-  nugget_schema.all_of.push(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Loaf".to_string(),
-    summary: None,
-    description: None,
-  });
-  nugget_schema.properties.insert(
-    "count".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      default: Some(serde_json::json!(0)),
-      ..Default::default()
-    }),
-  );
+  let nugget_schema = parse_schema(json!({
+    "allOf": [{ "$ref": "#/components/schemas/Loaf" }],
+    "properties": {
+      "count": {
+        "type": "integer",
+        "default": 0
+      }
+    }
+  }));
 
   let graph = create_test_graph(BTreeMap::from([
     ("Loaf".to_string(), loaf_schema),
@@ -349,42 +304,26 @@ fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
 
 #[test]
 fn discriminator_deduplicates_same_schema_mappings() -> anyhow::Result<()> {
-  let frappe_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: Some(BTreeMap::from([
-        (
-          "sploot_frappe".to_string(),
-          "#/components/schemas/SplootFrappe".to_string(),
-        ),
-        (
-          "SplootFrappe".to_string(),
-          "#/components/schemas/SplootFrappe".to_string(),
-        ),
-      ])),
-    }),
-    ..Default::default()
-  };
+  let frappe_schema = parse_schema(json!({
+    "type": "object",
+    "properties": {
+      "type": { "type": "string" }
+    },
+    "discriminator": {
+      "propertyName": "type",
+      "mapping": {
+        "sploot_frappe": "#/components/schemas/SplootFrappe",
+        "SplootFrappe": "#/components/schemas/SplootFrappe"
+      }
+    }
+  }));
 
-  let sploot_frappe_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "data".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
+  let sploot_frappe_schema = parse_schema(json!({
+    "type": "object",
+    "properties": {
+      "data": { "type": "string" }
+    }
+  }));
 
   let graph = create_test_graph(BTreeMap::from([
     ("Frappe".to_string(), frappe_schema.clone()),
@@ -421,43 +360,34 @@ fn discriminator_deduplicates_same_schema_mappings() -> anyhow::Result<()> {
 
 #[test]
 fn discriminator_mappings_alphabetical_order() {
-  let park_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: Some(BTreeMap::from([
-        ("stumpy".to_string(), "#/components/schemas/Stumpy".to_string()),
-        ("floof".to_string(), "#/components/schemas/Floof".to_string()),
-        ("frappe".to_string(), "#/components/schemas/Frappe".to_string()),
-        ("sploot".to_string(), "#/components/schemas/Sploot".to_string()),
-      ])),
-    }),
-    ..Default::default()
-  };
+  let components = json!({
+    "Park": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" }
+      },
+      "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+          "stumpy": "#/components/schemas/Stumpy",
+          "floof": "#/components/schemas/Floof",
+          "frappe": "#/components/schemas/Frappe",
+          "sploot": "#/components/schemas/Sploot"
+        }
+      }
+    },
+    "Floof": { "type": "object" },
+    "Sploot": { "type": "object" },
+    "Frappe": { "type": "object" },
+    "Stumpy": { "type": "object" }
+  });
 
-  let empty_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("Park".to_string(), park_schema.clone()),
-    ("Floof".to_string(), empty_schema.clone()),
-    ("Sploot".to_string(), empty_schema.clone()),
-    ("Frappe".to_string(), empty_schema.clone()),
-    ("Stumpy".to_string(), empty_schema.clone()),
-  ]));
+  let graph = create_graph_from_json(&components);
+  let park_schema = graph.get("Park").unwrap();
 
   let context = create_test_context(graph.clone(), default_config());
   let handler = DiscriminatorConverter::new(context);
-  let mappings = handler.build_variants_from_mapping("Park", &park_schema);
+  let mappings = handler.build_variants_from_mapping("Park", park_schema);
 
   let variant_names: Vec<&str> = mappings.iter().map(|v| v.variant_name.as_str()).collect();
   assert_eq!(

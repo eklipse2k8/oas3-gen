@@ -1,10 +1,5 @@
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  f64::consts::PI,
-  sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
-use oas3::spec::{Discriminator, Info, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use serde_json::json;
 
 use crate::{
@@ -24,17 +19,19 @@ use crate::{
   },
   tests::common::{
     config_with_no_helpers, config_with_preserve_case, create_test_context, create_test_graph, default_config,
+    parse_schema, parse_schemas,
   },
 };
 
 #[test]
 fn test_simple_string_enum() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: vec![json!("value1"), json!("value2")],
-    ..Default::default()
-  };
-  let graph = create_test_graph(BTreeMap::from([("SimpleEnum".to_string(), enum_schema)]));
+  let graph = create_test_graph(parse_schemas(vec![(
+    "SimpleEnum",
+    json!({
+      "type": "string",
+      "enum": ["value1", "value2"]
+    }),
+  )]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("SimpleEnum", graph.get("SimpleEnum").unwrap())?;
@@ -53,59 +50,41 @@ fn test_simple_string_enum() -> anyhow::Result<()> {
 
 #[test]
 fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
-  let variant1 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("type_a")),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "TestUnion",
+      json!({
+        "oneOf": [
+          { "$ref": "#/components/schemas/VariantA" },
+          { "$ref": "#/components/schemas/VariantB" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "type_a": "#/components/schemas/VariantA",
+            "type_b": "#/components/schemas/VariantB"
+          }
+        }
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let variant2 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("type_b")),
-        ..Default::default()
+    ),
+    (
+      "VariantA",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "type_a" }
+        }
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/VariantA".to_string(),
-        summary: None,
-        description: None,
-      },
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/VariantB".to_string(),
-        summary: None,
-        description: None,
-      },
-    ],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: Some(BTreeMap::from([
-        ("type_a".to_string(), "#/components/schemas/VariantA".to_string()),
-        ("type_b".to_string(), "#/components/schemas/VariantB".to_string()),
-      ])),
-    }),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("TestUnion".to_string(), union_schema),
-    ("VariantA".to_string(), variant1),
-    ("VariantB".to_string(), variant2),
+    ),
+    (
+      "VariantB",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "type_b" }
+        }
+      }),
+    ),
   ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
@@ -130,50 +109,34 @@ fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
 
 #[test]
 fn test_anyof_without_discriminator_has_no_rename_attrs() -> anyhow::Result<()> {
-  let variant1 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "field1".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "TestUnion",
+      json!({
+        "anyOf": [
+          { "$ref": "#/components/schemas/VariantA" },
+          { "$ref": "#/components/schemas/VariantB" }
+        ]
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let variant2 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "field2".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-        ..Default::default()
+    ),
+    (
+      "VariantA",
+      json!({
+        "type": "object",
+        "properties": {
+          "field1": { "type": "string" }
+        }
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/VariantA".to_string(),
-        summary: None,
-        description: None,
-      },
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/VariantB".to_string(),
-        summary: None,
-        description: None,
-      },
-    ],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("TestUnion".to_string(), union_schema),
-    ("VariantA".to_string(), variant1),
-    ("VariantB".to_string(), variant2),
+    ),
+    (
+      "VariantB",
+      json!({
+        "type": "object",
+        "properties": {
+          "field2": { "type": "integer" }
+        }
+      }),
+    ),
   ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
@@ -193,59 +156,41 @@ fn test_anyof_without_discriminator_has_no_rename_attrs() -> anyhow::Result<()> 
 
 #[test]
 fn test_anyof_with_discriminator_no_untagged() -> anyhow::Result<()> {
-  let variant1 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("type_a")),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "TestUnion",
+      json!({
+        "anyOf": [
+          { "$ref": "#/components/schemas/VariantA" },
+          { "$ref": "#/components/schemas/VariantB" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "type_a": "#/components/schemas/VariantA",
+            "type_b": "#/components/schemas/VariantB"
+          }
+        }
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let variant2 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("type_b")),
-        ..Default::default()
+    ),
+    (
+      "VariantA",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "type_a" }
+        }
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/VariantA".to_string(),
-        summary: None,
-        description: None,
-      },
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/VariantB".to_string(),
-        summary: None,
-        description: None,
-      },
-    ],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: Some(BTreeMap::from([
-        ("type_a".to_string(), "#/components/schemas/VariantA".to_string()),
-        ("type_b".to_string(), "#/components/schemas/VariantB".to_string()),
-      ])),
-    }),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("TestUnion".to_string(), union_schema),
-    ("VariantA".to_string(), variant1),
-    ("VariantB".to_string(), variant2),
+    ),
+    (
+      "VariantB",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "type_b" }
+        }
+      }),
+    ),
   ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
@@ -262,13 +207,134 @@ fn test_anyof_with_discriminator_no_untagged() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_integer_enum_values() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-    enum_values: vec![json!(0), json!(1), json!(42), json!(-5)],
-    ..Default::default()
+fn test_empty_enum_converts_to_string() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "EmptyEnum",
+    json!({
+      "type": "string",
+      "enum": []
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("EmptyEnum", graph.get("EmptyEnum").unwrap())?;
+
+  assert_eq!(result.len(), 1);
+  let RustType::TypeAlias(alias) = &result[0] else {
+    panic!("Expected type alias for empty enum")
   };
-  let graph = create_test_graph(BTreeMap::from([("IntEnum".to_string(), enum_schema)]));
+
+  assert_eq!(alias.name, "EmptyEnum");
+  assert_eq!(alias.target.to_rust_type(), "String");
+  Ok(())
+}
+
+#[test]
+#[allow(clippy::approx_constant)]
+fn test_float_enum_values() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "FloatEnum",
+    json!({
+      "type": "number",
+      "enum": [0.0, 1.5, 3.14, -2.5]
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("FloatEnum", graph.get("FloatEnum").unwrap())?;
+
+  assert_eq!(result.len(), 1);
+  let RustType::Enum(enum_def) = &result[0] else {
+    panic!("Expected enum")
+  };
+
+  assert_eq!(enum_def.name.to_string(), "FloatEnum");
+  assert_eq!(enum_def.variants.len(), 4);
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Value0"));
+  assert!(
+    enum_def.variants[0]
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("0".to_string()))
+  );
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Value1_5"));
+  assert!(
+    enum_def.variants[1]
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("1.5".to_string()))
+  );
+  Ok(())
+}
+
+#[test]
+fn test_boolean_enum_values() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "BoolEnum",
+    json!({
+      "type": "boolean",
+      "enum": [true, false]
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("BoolEnum", graph.get("BoolEnum").unwrap())?;
+
+  assert_eq!(result.len(), 1);
+  let RustType::Enum(enum_def) = &result[0] else {
+    panic!("Expected enum")
+  };
+
+  assert_eq!(enum_def.name.to_string(), "BoolEnum");
+  assert_eq!(enum_def.variants.len(), 2);
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("True"));
+  assert!(
+    enum_def.variants[0]
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("true".to_string()))
+  );
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("False"));
+  assert!(
+    enum_def.variants[1]
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("false".to_string()))
+  );
+  Ok(())
+}
+
+#[test]
+fn test_mixed_type_enum_values() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "MixedEnum",
+    json!({
+      "enum": ["string", 42, 1.5, true]
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("MixedEnum", graph.get("MixedEnum").unwrap())?;
+
+  assert_eq!(result.len(), 1);
+  let RustType::Enum(enum_def) = &result[0] else {
+    panic!("Expected enum")
+  };
+
+  assert_eq!(enum_def.name.to_string(), "MixedEnum");
+  assert_eq!(enum_def.variants.len(), 4);
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("String"));
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Value42"));
+  assert_eq!(enum_def.variants[2].name, EnumVariantToken::new("Value1_5"));
+  assert_eq!(enum_def.variants[3].name, EnumVariantToken::new("True"));
+  Ok(())
+}
+
+#[test]
+fn test_integer_enum_values() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "IntEnum",
+    json!({
+      "type": "integer",
+      "enum": [0, 1, 42, -5]
+    }),
+  )]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("IntEnum", graph.get("IntEnum").unwrap())?;
@@ -308,172 +374,14 @@ fn test_integer_enum_values() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_float_enum_values() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
-    enum_values: vec![json!(0.0), json!(1.5), json!(PI), json!(-2.5)],
-    ..Default::default()
-  };
-  let graph = create_test_graph(BTreeMap::from([("FloatEnum".to_string(), enum_schema)]));
-  let context = create_test_context(graph.clone(), default_config());
-  let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("FloatEnum", graph.get("FloatEnum").unwrap())?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::Enum(enum_def) = &result[0] else {
-    panic!("Expected enum")
-  };
-
-  assert_eq!(enum_def.name.to_string(), "FloatEnum");
-  assert_eq!(enum_def.variants.len(), 4);
-  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Value0"));
-  assert!(
-    enum_def.variants[0]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("0".to_string()))
-  );
-  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Value1_5"));
-  assert!(
-    enum_def.variants[1]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("1.5".to_string()))
-  );
-  Ok(())
-}
-
-#[test]
-fn test_boolean_enum_values() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-    enum_values: vec![json!(true), json!(false)],
-    ..Default::default()
-  };
-  let graph = create_test_graph(BTreeMap::from([("BoolEnum".to_string(), enum_schema)]));
-  let context = create_test_context(graph.clone(), default_config());
-  let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("BoolEnum", graph.get("BoolEnum").unwrap())?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::Enum(enum_def) = &result[0] else {
-    panic!("Expected enum")
-  };
-
-  assert_eq!(enum_def.name.to_string(), "BoolEnum");
-  assert_eq!(enum_def.variants.len(), 2);
-  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("True"));
-  assert!(
-    enum_def.variants[0]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("true".to_string()))
-  );
-  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("False"));
-  assert!(
-    enum_def.variants[1]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("false".to_string()))
-  );
-  Ok(())
-}
-
-#[test]
-fn test_mixed_type_enum_values() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    enum_values: vec![json!("string"), json!(42), json!(1.5), json!(true)],
-    ..Default::default()
-  };
-  let graph = create_test_graph(BTreeMap::from([("MixedEnum".to_string(), enum_schema)]));
-  let context = create_test_context(graph.clone(), default_config());
-  let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("MixedEnum", graph.get("MixedEnum").unwrap())?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::Enum(enum_def) = &result[0] else {
-    panic!("Expected enum")
-  };
-
-  assert_eq!(enum_def.name.to_string(), "MixedEnum");
-  assert_eq!(enum_def.variants.len(), 4);
-  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("String"));
-  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Value42"));
-  assert_eq!(enum_def.variants[2].name, EnumVariantToken::new("Value1_5"));
-  assert_eq!(enum_def.variants[3].name, EnumVariantToken::new("True"));
-  Ok(())
-}
-
-#[test]
-fn test_empty_enum_converts_to_string() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: vec![],
-    ..Default::default()
-  };
-  let graph = create_test_graph(BTreeMap::from([("EmptyEnum".to_string(), enum_schema)]));
-  let context = create_test_context(graph.clone(), default_config());
-  let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("EmptyEnum", graph.get("EmptyEnum").unwrap())?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("Expected type alias for empty enum")
-  };
-
-  assert_eq!(alias.name, "EmptyEnum");
-  assert_eq!(alias.target.to_rust_type(), "String");
-  Ok(())
-}
-
-#[test]
-fn test_case_insensitive_duplicates_with_deduplication() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: vec![json!("ITEM"), json!("item"), json!("SELECT"), json!("select")],
-    ..Default::default()
-  };
-  let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
-  let context = create_test_context(graph.clone(), default_config());
-  let converter = SchemaConverter::new(&context);
-  let result = converter.convert_schema("CaseEnum", graph.get("CaseEnum").unwrap())?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::Enum(enum_def) = &result[0] else {
-    panic!("Expected enum")
-  };
-
-  assert_eq!(enum_def.name.to_string(), "CaseEnum");
-  assert_eq!(enum_def.variants.len(), 2);
-  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Item"));
-  assert!(
-    enum_def.variants[0]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("ITEM".to_string()))
-  );
-  assert!(
-    enum_def.variants[0]
-      .serde_attrs
-      .contains(&SerdeAttribute::Alias("item".to_string()))
-  );
-  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Select"));
-  assert!(
-    enum_def.variants[1]
-      .serde_attrs
-      .contains(&SerdeAttribute::Rename("SELECT".to_string()))
-  );
-  assert!(
-    enum_def.variants[1]
-      .serde_attrs
-      .contains(&SerdeAttribute::Alias("select".to_string()))
-  );
-  Ok(())
-}
-
-#[test]
 fn test_case_insensitive_duplicates_with_preservation() -> anyhow::Result<()> {
-  let enum_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: vec![json!("ITEM"), json!("item"), json!("SELECT"), json!("select")],
-    ..Default::default()
-  };
-  let graph = create_test_graph(BTreeMap::from([("CaseEnum".to_string(), enum_schema)]));
+  let graph = create_test_graph(parse_schemas(vec![(
+    "CaseEnum",
+    json!({
+      "type": "string",
+      "enum": ["ITEM", "item", "SELECT", "select"]
+    }),
+  )]));
   let context = create_test_context(graph.clone(), config_with_preserve_case());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("CaseEnum", graph.get("CaseEnum").unwrap())?;
@@ -513,6 +421,51 @@ fn test_case_insensitive_duplicates_with_preservation() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_case_insensitive_duplicates_with_deduplication() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "CaseEnum",
+    json!({
+      "type": "string",
+      "enum": ["ITEM", "item", "SELECT", "select"]
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("CaseEnum", graph.get("CaseEnum").unwrap())?;
+
+  assert_eq!(result.len(), 1);
+  let RustType::Enum(enum_def) = &result[0] else {
+    panic!("Expected enum")
+  };
+
+  assert_eq!(enum_def.name.to_string(), "CaseEnum");
+  assert_eq!(enum_def.variants.len(), 2);
+  assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Item"));
+  assert!(
+    enum_def.variants[0]
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("ITEM".to_string()))
+  );
+  assert!(
+    enum_def.variants[0]
+      .serde_attrs
+      .contains(&SerdeAttribute::Alias("item".to_string()))
+  );
+  assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Select"));
+  assert!(
+    enum_def.variants[1]
+      .serde_attrs
+      .contains(&SerdeAttribute::Rename("SELECT".to_string()))
+  );
+  assert!(
+    enum_def.variants[1]
+      .serde_attrs
+      .contains(&SerdeAttribute::Alias("select".to_string()))
+  );
+  Ok(())
+}
+
+#[test]
 fn test_collision_strategy_enum() {
   let s1 = CollisionStrategy::Preserve;
   let s2 = CollisionStrategy::Deduplicate;
@@ -521,14 +474,13 @@ fn test_collision_strategy_enum() {
 
 #[test]
 fn test_preserve_strategy_with_multiple_collisions() {
-  let graph = create_test_graph(BTreeMap::default());
+  let graph = create_test_graph(parse_schemas(vec![]));
   let context = create_test_context(graph, config_with_preserve_case());
   let converter = EnumConverter::new(context);
 
-  let schema = ObjectSchema {
-    enum_values: vec![json!("active"), json!("Active"), json!("ACTIVE")],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "enum": ["active", "Active", "ACTIVE"]
+  }));
 
   let result = converter.convert_value_enum("Status", &schema);
 
@@ -544,27 +496,14 @@ fn test_preserve_strategy_with_multiple_collisions() {
 
 #[test]
 fn test_relaxed_enum_detects_freeform_pattern() {
-  let spec = oas3::Spec {
-    openapi: "3.1.0".to_string(),
-    info: Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
+  let spec = serde_json::from_value::<oas3::Spec>(json!({
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Test",
+      "version": "1.0.0"
+    }
+  }))
+  .unwrap();
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -573,25 +512,13 @@ fn test_relaxed_enum_detects_freeform_pattern() {
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
-  let schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("known1")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("known2")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "anyOf": [
+      { "type": "string", "const": "known1" },
+      { "type": "string", "const": "known2" },
+      { "type": "string" }
+    ]
+  }));
 
   let result = union_converter.convert_union("TestEnum", &schema);
   assert!(result.is_ok());
@@ -626,27 +553,14 @@ fn test_relaxed_enum_detects_freeform_pattern() {
 
 #[test]
 fn test_relaxed_enum_rejects_no_freeform() {
-  let spec = oas3::Spec {
-    openapi: "3.1.0".to_string(),
-    info: Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
+  let spec = serde_json::from_value::<oas3::Spec>(json!({
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Test",
+      "version": "1.0.0"
+    }
+  }))
+  .unwrap();
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -655,21 +569,12 @@ fn test_relaxed_enum_rejects_no_freeform() {
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
-  let schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("known1")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("known2")),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "anyOf": [
+      { "type": "string", "const": "known1" },
+      { "type": "string", "const": "known2" }
+    ]
+  }));
 
   let result = union_converter.convert_union("TestEnum", &schema);
   assert!(result.is_ok());
@@ -685,46 +590,35 @@ fn test_relaxed_enum_rejects_no_freeform() {
 
 #[test]
 fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
-  let text_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("text")),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "ResponseFormat",
+      json!({
+        "description": "Response format option",
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "auto",
+            "description": "`auto` is the default value"
+          },
+          { "$ref": "#/components/schemas/TextFormat" }
+        ]
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let parent_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("auto")),
-        description: Some("`auto` is the default value".to_string()),
-        ..Default::default()
+    ),
+    (
+      "TextFormat",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "text" }
+        }
       }),
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/TextFormat".to_string(),
-        description: None,
-        summary: None,
-      },
-    ],
-    description: Some("Response format option".to_string()),
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([
-    ("ResponseFormat".to_string(), parent_schema.clone()),
-    ("TextFormat".to_string(), text_schema),
-  ]);
-  let graph = create_test_graph(schemas);
+    ),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("ResponseFormat", &parent_schema)?;
+  let result = converter.convert_schema("ResponseFormat", graph.get("ResponseFormat").unwrap())?;
 
   assert!(!result.is_empty());
   let RustType::Enum(enum_def) = &result[result.len() - 1] else {
@@ -775,8 +669,8 @@ fn test_const_unit_variant_in_enum() {
     value: 42,
   });
 
-  let auto_json = serde_json::to_string(&auto).unwrap();
-  let data_json = serde_json::to_value(&data).unwrap();
+  let auto_json = serde_json::to_string::<TestEnum>(&auto).unwrap();
+  let data_json = serde_json::to_value::<&TestEnum>(&data).unwrap();
 
   assert_eq!(auto_json, "null");
   assert_eq!(data_json["type"], "data");
@@ -829,8 +723,8 @@ fn test_openapi_response_format_serialization() {
     json_schema: serde_json::json!({"type": "object"}),
   });
 
-  let text_json = serde_json::to_value(&text).unwrap();
-  let json_schema_json = serde_json::to_value(&json_schema).unwrap();
+  let text_json = serde_json::to_value::<&ResponseFormat>(&text).unwrap();
+  let json_schema_json = serde_json::to_value::<&ResponseFormat>(&json_schema).unwrap();
 
   assert_eq!(text_json["type"], "text");
   assert_eq!(json_schema_json["type"], "json_schema");
@@ -839,63 +733,37 @@ fn test_openapi_response_format_serialization() {
 
 #[test]
 fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
-  let simple_struct_schema = ObjectSchema {
-    title: Some("Simple".to_string()),
-    properties: BTreeMap::from([(
-      "opt_field".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let required_struct_schema = ObjectSchema {
-    title: Some("SingleParam".to_string()),
-    properties: BTreeMap::from([(
-      "req_field".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    required: vec!["req_field".to_string()],
-    ..Default::default()
-  };
-
-  let complex_struct_schema = ObjectSchema {
-    title: Some("Complex".to_string()),
-    properties: BTreeMap::from([
-      (
-        "req1".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          ..Default::default()
-        }),
-      ),
-      (
-        "req2".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          ..Default::default()
-        }),
-      ),
-    ]),
-    required: vec!["req1".to_string(), "req2".to_string()],
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Object(simple_struct_schema),
-      ObjectOrReference::Object(required_struct_schema),
-      ObjectOrReference::Object(complex_struct_schema),
-    ],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("TestUnion".to_string(), union_schema)]));
+  let graph = create_test_graph(parse_schemas(vec![(
+    "TestUnion",
+    json!({
+      "oneOf": [
+        {
+          "title": "Simple",
+          "type": "object",
+          "properties": {
+            "opt_field": { "type": "string" }
+          }
+        },
+        {
+          "title": "SingleParam",
+          "type": "object",
+          "properties": {
+            "req_field": { "type": "string" }
+          },
+          "required": ["req_field"]
+        },
+        {
+          "title": "Complex",
+          "type": "object",
+          "properties": {
+            "req1": { "type": "string" },
+            "req2": { "type": "string" }
+          },
+          "required": ["req1", "req2"]
+        }
+      ]
+    }),
+  )]));
 
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
@@ -952,26 +820,21 @@ fn test_enum_helper_methods_generation() -> anyhow::Result<()> {
 
 #[test]
 fn test_enum_helper_methods_disabled_flag() -> anyhow::Result<()> {
-  let simple_struct_schema = ObjectSchema {
-    title: Some("Simple".to_string()),
-    properties: BTreeMap::from([(
-      "opt_field".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
+  let graph = create_test_graph(parse_schemas(vec![(
+    "TestUnion",
+    json!({
+      "oneOf": [
+        {
+          "title": "Simple",
+          "type": "object",
+          "properties": {
+            "opt_field": { "type": "string" }
+          }
+        }
+      ]
+    }),
+  )]));
 
-  let union_schema = ObjectSchema {
-    one_of: vec![ObjectOrReference::Object(simple_struct_schema)],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("TestUnion".to_string(), union_schema)]));
-
-  // no_helpers = true
   let context = create_test_context(graph.clone(), config_with_no_helpers());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
@@ -986,24 +849,20 @@ fn test_enum_helper_methods_disabled_flag() -> anyhow::Result<()> {
 
 #[test]
 fn test_enum_helper_naming_stripping() -> anyhow::Result<()> {
-  let simple_schema = ObjectSchema {
-    title: Some("ResponseFormatText".to_string()),
-    properties: BTreeMap::from([(
-      "dummy".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![ObjectOrReference::Object(simple_schema)],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("ResponseFormat".to_string(), union_schema)]));
+  let graph = create_test_graph(parse_schemas(vec![(
+    "ResponseFormat",
+    json!({
+      "oneOf": [
+        {
+          "title": "ResponseFormatText",
+          "type": "object",
+          "properties": {
+            "dummy": { "type": "string" }
+          }
+        }
+      ]
+    }),
+  )]));
 
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
@@ -1021,36 +880,27 @@ fn test_enum_helper_naming_stripping() -> anyhow::Result<()> {
 
 #[test]
 fn test_enum_helper_method_name_collision() -> anyhow::Result<()> {
-  let schema1 = ObjectSchema {
-    title: Some("StatusActive".to_string()),
-    properties: BTreeMap::from([(
-      "opt_field".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let schema2 = ObjectSchema {
-    title: Some("Active".to_string()),
-    properties: BTreeMap::from([(
-      "opt_field2".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![ObjectOrReference::Object(schema1), ObjectOrReference::Object(schema2)],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("Status".to_string(), union_schema)]));
+  let graph = create_test_graph(parse_schemas(vec![(
+    "Status",
+    json!({
+      "oneOf": [
+        {
+          "title": "StatusActive",
+          "type": "object",
+          "properties": {
+            "opt_field": { "type": "string" }
+          }
+        },
+        {
+          "title": "Active",
+          "type": "object",
+          "properties": {
+            "opt_field2": { "type": "string" }
+          }
+        }
+      ]
+    }),
+  )]));
 
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
@@ -1096,52 +946,32 @@ fn test_enum_helper_skips_without_default_trait() {
 
 #[test]
 fn test_discriminator_deduplicates_same_type_mappings() -> anyhow::Result<()> {
-  let interaction_event = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([
-      (
-        "type".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          ..Default::default()
-        }),
-      ),
-      (
-        "data".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          ..Default::default()
-        }),
-      ),
-    ]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![ObjectOrReference::Ref {
-      ref_path: "#/components/schemas/InteractionEvent".to_string(),
-      summary: None,
-      description: None,
-    }],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: Some(BTreeMap::from([
-        (
-          "InteractionEvent".to_string(),
-          "#/components/schemas/InteractionEvent".to_string(),
-        ),
-        (
-          "interaction_event".to_string(),
-          "#/components/schemas/InteractionEvent".to_string(),
-        ),
-      ])),
-    }),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("InteractionSseEvent".to_string(), union_schema),
-    ("InteractionEvent".to_string(), interaction_event),
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "InteractionSseEvent",
+      json!({
+        "oneOf": [
+          { "$ref": "#/components/schemas/InteractionEvent" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "InteractionEvent": "#/components/schemas/InteractionEvent",
+            "interaction_event": "#/components/schemas/InteractionEvent"
+          }
+        }
+      }),
+    ),
+    (
+      "InteractionEvent",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "data": { "type": "string" }
+        }
+      }),
+    ),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
@@ -1170,27 +1000,14 @@ fn test_discriminator_deduplicates_same_type_mappings() -> anyhow::Result<()> {
 
 #[test]
 fn test_union_with_hyphenated_raw_name_converts_correctly() {
-  let spec = oas3::Spec {
-    openapi: "3.1.0".to_string(),
-    info: Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
+  let spec = serde_json::from_value::<oas3::Spec>(json!({
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Test",
+      "version": "1.0.0"
+    }
+  }))
+  .unwrap();
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -1199,21 +1016,12 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
-  let schema = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("option-a")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("option-b")),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "oneOf": [
+      { "type": "string", "const": "option-a" },
+      { "type": "string", "const": "option-b" }
+    ]
+  }));
 
   let result = union_converter.convert_union("my-test-enum", &schema);
   assert!(result.is_ok());
@@ -1237,27 +1045,14 @@ fn test_union_with_hyphenated_raw_name_converts_correctly() {
 
 #[test]
 fn test_union_with_underscored_raw_name_converts_correctly() {
-  let spec = oas3::Spec {
-    openapi: "3.1.0".to_string(),
-    info: Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
+  let spec = serde_json::from_value::<oas3::Spec>(json!({
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Test",
+      "version": "1.0.0"
+    }
+  }))
+  .unwrap();
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -1266,21 +1061,12 @@ fn test_union_with_underscored_raw_name_converts_correctly() {
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
-  let schema = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("option-a")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("option-b")),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "oneOf": [
+      { "type": "string", "const": "option-a" },
+      { "type": "string", "const": "option-b" }
+    ]
+  }));
 
   let result = union_converter.convert_union("my_test_enum", &schema);
   assert!(result.is_ok());
@@ -1304,24 +1090,19 @@ fn test_union_with_underscored_raw_name_converts_correctly() {
 
 #[test]
 fn test_union_with_inline_struct_and_raw_name() -> anyhow::Result<()> {
-  let inline_object_variant = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "data_field".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![ObjectOrReference::Object(inline_object_variant)],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([("my-union-type".to_string(), union_schema)]));
+  let graph = create_test_graph(parse_schemas(vec![(
+    "my-union-type",
+    json!({
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "data_field": { "type": "string" }
+          }
+        }
+      ]
+    }),
+  )]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("my-union-type", graph.get("my-union-type").unwrap())?;
@@ -1358,27 +1139,14 @@ fn test_union_with_inline_struct_and_raw_name() -> anyhow::Result<()> {
 
 #[test]
 fn test_already_pascalcase_name_not_double_converted() {
-  let spec = oas3::Spec {
-    openapi: "3.1.0".to_string(),
-    info: Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
+  let spec = serde_json::from_value::<oas3::Spec>(json!({
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Test",
+      "version": "1.0.0"
+    }
+  }))
+  .unwrap();
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -1387,21 +1155,12 @@ fn test_already_pascalcase_name_not_double_converted() {
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
-  let schema = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("OptionA")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("OptionB")),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "oneOf": [
+      { "type": "string", "const": "OptionA" },
+      { "type": "string", "const": "OptionB" }
+    ]
+  }));
 
   let result = union_converter.convert_union("MyPascalCaseEnum", &schema);
   assert!(result.is_ok());
@@ -1425,27 +1184,14 @@ fn test_already_pascalcase_name_not_double_converted() {
 
 #[test]
 fn test_relaxed_enum_with_raw_name() {
-  let spec = oas3::Spec {
-    openapi: "3.1.0".to_string(),
-    info: Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: None,
-    webhooks: BTreeMap::default(),
-    components: None,
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  };
+  let spec = serde_json::from_value::<oas3::Spec>(json!({
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Test",
+      "version": "1.0.0"
+    }
+  }))
+  .unwrap();
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -1454,20 +1200,12 @@ fn test_relaxed_enum_with_raw_name() {
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context);
 
-  let schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("known-value")),
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "anyOf": [
+      { "type": "string", "const": "known-value" },
+      { "type": "string" }
+    ]
+  }));
 
   let result = union_converter.convert_union("my-relaxed-enum", &schema);
   assert!(result.is_ok());
@@ -1500,53 +1238,36 @@ fn test_relaxed_enum_with_raw_name() {
 
 #[test]
 fn test_nested_anyof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
-  let custom_config_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "mode".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let outer_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        description: Some("The cooking method configuration".to_string()),
-        any_of: vec![
-          ObjectOrReference::Object(ObjectSchema {
-            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-            const_value: Some(json!("auto")),
-            ..Default::default()
-          }),
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/CustomCookingConfig".to_string(),
-            description: None,
-            summary: None,
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "CookingStrategy",
+      json!({
+        "anyOf": [
+          {
+            "description": "The cooking method configuration",
+            "anyOf": [
+              { "type": "string", "const": "auto" },
+              { "$ref": "#/components/schemas/CustomCookingConfig" }
+            ]
           },
-        ],
-        ..Default::default()
+          { "type": "null" }
+        ]
       }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
-        ..Default::default()
+    ),
+    (
+      "CustomCookingConfig",
+      json!({
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string" }
+        }
       }),
-    ],
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([
-    ("CookingStrategy".to_string(), outer_schema.clone()),
-    ("CustomCookingConfig".to_string(), custom_config_schema),
-  ]);
-  let graph = create_test_graph(schemas);
+    ),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("CookingStrategy", &outer_schema)?;
+  let result = converter.convert_schema("CookingStrategy", graph.get("CookingStrategy").unwrap())?;
 
   let enum_def = result.iter().find_map(|t| match t {
     RustType::Enum(e) if e.name == "CookingStrategy" => Some(e),
@@ -1586,41 +1307,25 @@ fn test_nested_anyof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
 
 #[test]
 fn test_nested_nullable_relaxed_anyof_produces_known_other_enum() -> anyhow::Result<()> {
-  let outer_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        any_of: vec![
-          ObjectOrReference::Object(ObjectSchema {
-            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-            const_value: Some(json!("known1")),
-            ..Default::default()
-          }),
-          ObjectOrReference::Object(ObjectSchema {
-            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-            const_value: Some(json!("known2")),
-            ..Default::default()
-          }),
-          ObjectOrReference::Object(ObjectSchema {
-            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-            ..Default::default()
-          }),
-        ],
-        ..Default::default()
-      }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
-        ..Default::default()
-      }),
-    ],
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([("NullableRelaxed".to_string(), outer_schema.clone())]);
-  let graph = create_test_graph(schemas);
+  let graph = create_test_graph(parse_schemas(vec![(
+    "NullableRelaxed",
+    json!({
+      "anyOf": [
+        {
+          "anyOf": [
+            { "type": "string", "const": "known1" },
+            { "type": "string", "const": "known2" },
+            { "type": "string" }
+          ]
+        },
+        { "type": "null" }
+      ]
+    }),
+  )]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("NullableRelaxed", &outer_schema)?;
+  let result = converter.convert_schema("NullableRelaxed", graph.get("NullableRelaxed").unwrap())?;
 
   let outer_enum = result.iter().find_map(|t| match t {
     RustType::Enum(e) if e.name == "NullableRelaxed" => Some(e),
@@ -1654,52 +1359,35 @@ fn test_nested_nullable_relaxed_anyof_produces_known_other_enum() -> anyhow::Res
 
 #[test]
 fn test_nested_oneof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
-  let option_a_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "value".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let outer_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        one_of: vec![
-          ObjectOrReference::Object(ObjectSchema {
-            schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-            const_value: Some(json!("default")),
-            ..Default::default()
-          }),
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/OptionA".to_string(),
-            description: None,
-            summary: None,
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "NestedUnion",
+      json!({
+        "anyOf": [
+          {
+            "oneOf": [
+              { "type": "string", "const": "default" },
+              { "$ref": "#/components/schemas/OptionA" }
+            ]
           },
-        ],
-        ..Default::default()
+          { "type": "null" }
+        ]
       }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
-        ..Default::default()
+    ),
+    (
+      "OptionA",
+      json!({
+        "type": "object",
+        "properties": {
+          "value": { "type": "string" }
+        }
       }),
-    ],
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([
-    ("NestedUnion".to_string(), outer_schema.clone()),
-    ("OptionA".to_string(), option_a_schema),
-  ]);
-  let graph = create_test_graph(schemas);
+    ),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("NestedUnion", &outer_schema)?;
+  let result = converter.convert_schema("NestedUnion", graph.get("NestedUnion").unwrap())?;
 
   let enum_def = result.iter().find_map(|t| match t {
     RustType::Enum(e) if e.name == "NestedUnion" => Some(e),
@@ -1734,57 +1422,40 @@ fn test_nested_oneof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
 
 #[test]
 fn test_anyof_with_nullable_map_type_generates_enum() -> anyhow::Result<()> {
-  let map_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-        title: Some("Prompt Variables".to_string()),
-        description: Some("Optional map of values to substitute".to_string()),
-        additional_properties: Some(Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema {
-          any_of: vec![
-            ObjectOrReference::Object(ObjectSchema {
-              schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-              ..Default::default()
-            }),
-            ObjectOrReference::Ref {
-              ref_path: "#/components/schemas/InputContent".to_string(),
-              description: None,
-              summary: None,
-            },
-          ],
-          ..Default::default()
-        })))),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "ResponsePromptVariables",
+      json!({
+        "anyOf": [
+          {
+            "type": "object",
+            "title": "Prompt Variables",
+            "description": "Optional map of values to substitute",
+            "additionalProperties": {
+              "anyOf": [
+                { "type": "string" },
+                { "$ref": "#/components/schemas/InputContent" }
+              ]
+            }
+          },
+          { "type": "null" }
+        ]
       }),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
-        ..Default::default()
+    ),
+    (
+      "InputContent",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" }
+        }
       }),
-    ],
-    ..Default::default()
-  };
-
-  let input_content = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([
-    ("ResponsePromptVariables".to_string(), map_schema.clone()),
-    ("InputContent".to_string(), input_content),
-  ]);
-  let graph = create_test_graph(schemas);
+    ),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("ResponsePromptVariables", &map_schema)?;
+  let result = converter.convert_schema("ResponsePromptVariables", graph.get("ResponsePromptVariables").unwrap())?;
 
   assert!(
     !result.is_empty(),
@@ -1820,48 +1491,40 @@ fn test_anyof_with_nullable_map_type_generates_enum() -> anyhow::Result<()> {
 
 #[test]
 fn test_anyof_with_string_enum_and_object_generates_inline_enum() -> anyhow::Result<()> {
-  let function_call_option = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "name".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        description: Some("The name of the function to call.".to_string()),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "FunctionCall",
+      json!({
+        "description": "Controls which function is called by the model.",
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "`none` or `auto` mode",
+            "enum": ["none", "auto"],
+            "title": "FunctionCallMode"
+          },
+          { "$ref": "#/components/schemas/FunctionCallOption" }
+        ]
       }),
-    )]),
-    required: vec!["name".to_string()],
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    description: Some("Controls which function is called by the model.".to_string()),
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        description: Some("`none` or `auto` mode".to_string()),
-        enum_values: vec![json!("none"), json!("auto")],
-        title: Some("FunctionCallMode".to_string()),
-        ..Default::default()
+    ),
+    (
+      "FunctionCallOption",
+      json!({
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the function to call."
+          }
+        },
+        "required": ["name"]
       }),
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/FunctionCallOption".to_string(),
-        description: None,
-        summary: None,
-      },
-    ],
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([
-    ("FunctionCall".to_string(), union_schema.clone()),
-    ("FunctionCallOption".to_string(), function_call_option),
-  ]);
-  let graph = create_test_graph(schemas);
+    ),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("FunctionCall", &union_schema)?;
+  let result = converter.convert_schema("FunctionCall", graph.get("FunctionCall").unwrap())?;
 
   let binding = context.cache.borrow();
   let cached_types = &binding.types.types;
@@ -1926,45 +1589,34 @@ fn test_anyof_with_string_enum_and_object_generates_inline_enum() -> anyhow::Res
 
 #[test]
 fn test_oneof_with_string_enum_variant_generates_inline_enum() -> anyhow::Result<()> {
-  let text_format = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        const_value: Some(json!("text")),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "ResponseFormat",
+      json!({
+        "oneOf": [
+          {
+            "type": "string",
+            "title": "ResponseMode",
+            "enum": ["streaming", "batch"]
+          },
+          { "$ref": "#/components/schemas/TextFormat" }
+        ]
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        title: Some("ResponseMode".to_string()),
-        enum_values: vec![json!("streaming"), json!("batch")],
-        ..Default::default()
+    ),
+    (
+      "TextFormat",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "const": "text" }
+        }
       }),
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/TextFormat".to_string(),
-        description: None,
-        summary: None,
-      },
-    ],
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([
-    ("ResponseFormat".to_string(), union_schema.clone()),
-    ("TextFormat".to_string(), text_format),
-  ]);
-  let graph = create_test_graph(schemas);
+    ),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("ResponseFormat", &union_schema)?;
+  let result = converter.convert_schema("ResponseFormat", graph.get("ResponseFormat").unwrap())?;
 
   let binding = context.cache.borrow();
   let cached_types = &binding.types.types;
@@ -2025,43 +1677,33 @@ fn test_oneof_with_string_enum_variant_generates_inline_enum() -> anyhow::Result
 
 #[test]
 fn test_anyof_with_single_value_enum_uses_primitive() -> anyhow::Result<()> {
-  let object_variant = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "name".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "TestUnion",
+      json!({
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": ["auto"]
+          },
+          { "$ref": "#/components/schemas/ObjectVariant" }
+        ]
       }),
-    )]),
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        enum_values: vec![json!("auto")],
-        ..Default::default()
+    ),
+    (
+      "ObjectVariant",
+      json!({
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        }
       }),
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/ObjectVariant".to_string(),
-        description: None,
-        summary: None,
-      },
-    ],
-    ..Default::default()
-  };
-
-  let schemas = BTreeMap::from([
-    ("TestUnion".to_string(), union_schema.clone()),
-    ("ObjectVariant".to_string(), object_variant),
-  ]);
-  let graph = create_test_graph(schemas);
+    ),
+  ]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("TestUnion", &union_schema)?;
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
 
   let enum_def = result.iter().find_map(|t| match t {
     RustType::Enum(e) if e.name == "TestUnion" => Some(e),

@@ -1,9 +1,13 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+  collections::BTreeMap,
+  hash::{DefaultHasher, Hash, Hasher},
+  sync::Arc,
+};
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::ObjectSchema;
 use serde_json::json;
 
-use super::support::{assert_has_known_variant, make_schema_ref, make_string_enum_schema};
+use super::support::assert_has_known_variant;
 use crate::{
   generator::{
     ast::{EnumDef, EnumToken, EnumVariantToken, RustType, VariantContent},
@@ -14,12 +18,14 @@ use crate::{
     naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_context, create_test_graph, default_config},
+  tests::common::{
+    create_test_context, create_test_graph, create_test_spec, default_config, parse_schema, parse_schemas,
+  },
   utils::SchemaExt,
 };
 
 fn make_enum_cache_key(schema: &ObjectSchema) -> Option<Vec<String>> {
-  let spec = crate::tests::common::create_test_spec(std::collections::BTreeMap::new());
+  let spec = create_test_spec(BTreeMap::new());
   let variants = schema.extract_enum_entries(&spec);
   (!variants.is_empty()).then(|| variants_to_cache_key(&variants))
 }
@@ -31,20 +37,17 @@ fn create_test_converter(graph: &Arc<SchemaRegistry>) -> SchemaConverter {
 
 #[test]
 fn test_canonical_schema_equality_and_ordering() {
-  let schema1 = ObjectSchema {
-    required: vec!["name".to_string(), "tag_id".to_string()],
-    ..Default::default()
-  };
+  let schema1 = parse_schema(json!({
+    "required": ["name", "tag_id"]
+  }));
 
-  let schema2 = ObjectSchema {
-    required: vec!["tag_id".to_string(), "name".to_string()],
-    ..Default::default()
-  };
+  let schema2 = parse_schema(json!({
+    "required": ["tag_id", "name"]
+  }));
 
-  let schema3 = ObjectSchema {
-    required: vec!["different".to_string()],
-    ..Default::default()
-  };
+  let schema3 = parse_schema(json!({
+    "required": ["different"]
+  }));
 
   let first = CanonicalSchema::from_schema(&schema1).expect("should succeed");
   let repeated = CanonicalSchema::from_schema(&schema1).expect("should succeed");
@@ -71,30 +74,32 @@ fn test_canonical_schema_equality_and_ordering() {
 
 #[test]
 fn test_relaxed_enum_generates_known_variant() {
-  let enum_schema = make_string_enum_schema(&["bark", "sploot", "loaf"]);
-
-  let anyof_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "PembrokeEnum",
+      json!({
+        "type": "string",
+        "enum": ["bark", "sploot", "loaf"]
       }),
-      ObjectOrReference::Object(enum_schema.clone()),
-    ],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("PembrokeEnum".to_string(), enum_schema),
-    ("SplootEnum".to_string(), anyof_schema.clone()),
+    ),
+    (
+      "SplootEnum",
+      json!({
+        "anyOf": [
+          { "type": "string" },
+          { "$ref": "#/components/schemas/PembrokeEnum" }
+        ]
+      }),
+    ),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
   let _type_resolver = TypeResolver::new(context.clone());
   let union_converter = UnionConverter::new(context);
 
+  let sploot_schema = graph.get("SplootEnum").unwrap();
   let optimized_output = union_converter
-    .convert_union("SplootEnum", &anyof_schema)
+    .convert_union("SplootEnum", sploot_schema)
     .expect("Should convert anyOf union");
 
   let optimized_result = optimized_output.into_vec();
@@ -112,22 +117,23 @@ fn test_relaxed_enum_generates_known_variant() {
 
 #[test]
 fn test_relaxed_enum_with_ref() {
-  let bark_model_enum = make_string_enum_schema(&["corgi-v1", "corgi-v2"]);
-
-  let floof_ids_shared = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "BarkModel",
+      json!({
+        "type": "string",
+        "enum": ["corgi-v1", "corgi-v2"]
       }),
-      make_schema_ref("BarkModel"),
-    ],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("BarkModel".to_string(), bark_model_enum),
-    ("FloofIds".to_string(), floof_ids_shared.clone()),
+    ),
+    (
+      "FloofIds",
+      json!({
+        "anyOf": [
+          { "type": "string" },
+          { "$ref": "#/components/schemas/BarkModel" }
+        ]
+      }),
+    ),
   ]));
 
   let converter = create_test_converter(&graph);
@@ -185,10 +191,9 @@ fn test_name_uniqueness() {
 
 #[test]
 fn test_precomputed_names() {
-  let schema = ObjectSchema {
-    required: vec!["tag_id".to_string()],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "required": ["tag_id"]
+  }));
 
   let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
   let mut precomputed_names = BTreeMap::new();
@@ -234,15 +239,20 @@ fn test_cache_operations() {
     "Should retrieve registered enum name"
   );
 
-  let new_schema = ObjectSchema {
-    required: vec!["name".to_string()],
-    ..Default::default()
-  };
+  let new_schema = parse_schema(json!({
+    "required": ["name"]
+  }));
   let result = cache.get_type_name(&new_schema).expect("should succeed");
   assert_eq!(result, None, "Should return None for uncached schema");
 
-  let schema1 = make_string_enum_schema(&["a", "b"]);
-  let schema2 = make_string_enum_schema(&["x", "y"]);
+  let schema1 = parse_schema(json!({
+    "type": "string",
+    "enum": ["a", "b"]
+  }));
+  let schema2 = parse_schema(json!({
+    "type": "string",
+    "enum": ["x", "y"]
+  }));
 
   let enum1 = RustType::Enum(EnumDef {
     name: EnumToken::new("FirstEnum"),
@@ -285,20 +295,15 @@ fn test_cache_operations() {
 
 #[test]
 fn test_canonical_schema_as_btreemap_key() {
-  use std::collections::BTreeMap;
-
-  let schema_a = ObjectSchema {
-    required: vec!["alpha".to_string()],
-    ..Default::default()
-  };
-  let schema_b = ObjectSchema {
-    required: vec!["beta".to_string()],
-    ..Default::default()
-  };
-  let schema_a_reordered = ObjectSchema {
-    required: vec!["alpha".to_string()],
-    ..Default::default()
-  };
+  let schema_a = parse_schema(json!({
+    "required": ["alpha"]
+  }));
+  let schema_b = parse_schema(json!({
+    "required": ["beta"]
+  }));
+  let schema_a_reordered = parse_schema(json!({
+    "required": ["alpha"]
+  }));
 
   let canonical_a = CanonicalSchema::from_schema(&schema_a).expect("should succeed");
   let canonical_b = CanonicalSchema::from_schema(&schema_b).expect("should succeed");
@@ -328,14 +333,12 @@ fn test_canonical_schema_as_btreemap_key() {
 
 #[test]
 fn test_canonical_schema_normalizes_enum_order() {
-  let schema1 = ObjectSchema {
-    enum_values: vec![json!("z"), json!("a"), json!("m")],
-    ..Default::default()
-  };
-  let schema2 = ObjectSchema {
-    enum_values: vec![json!("a"), json!("m"), json!("z")],
-    ..Default::default()
-  };
+  let schema1 = parse_schema(json!({
+    "enum": ["z", "a", "m"]
+  }));
+  let schema2 = parse_schema(json!({
+    "enum": ["a", "m", "z"]
+  }));
 
   let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
   let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
@@ -348,14 +351,12 @@ fn test_canonical_schema_normalizes_enum_order() {
 
 #[test]
 fn test_canonical_schema_normalizes_type_array_order() {
-  let schema1 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::String, SchemaType::Null])),
-    ..Default::default()
-  };
-  let schema2 = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Null, SchemaType::String])),
-    ..Default::default()
-  };
+  let schema1 = parse_schema(json!({
+    "type": ["string", "null"]
+  }));
+  let schema2 = parse_schema(json!({
+    "type": ["null", "string"]
+  }));
 
   let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
   let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
@@ -368,15 +369,9 @@ fn test_canonical_schema_normalizes_type_array_order() {
 
 #[test]
 fn test_canonical_schema_hash_consistency() {
-  use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-  };
-
-  let schema = ObjectSchema {
-    required: vec!["a".to_string(), "b".to_string()],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "required": ["a", "b"]
+  }));
 
   let canonical = CanonicalSchema::from_schema(&schema).expect("should succeed");
 
@@ -400,30 +395,40 @@ fn test_canonical_schema_hash_consistency() {
 
 #[test]
 fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
-  let enum_schema = make_string_enum_schema(&["waddle", "sploot", "loaf", "zoom"]);
-
-  let anyof_schema = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "PembrokeEnum",
+      json!({
+        "type": "string",
+        "enum": ["waddle", "sploot", "loaf", "zoom"]
       }),
-      ObjectOrReference::Object(enum_schema.clone()),
-    ],
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("PembrokeEnum".to_string(), enum_schema),
-    ("FloofRelaxed".to_string(), anyof_schema.clone()),
-    ("SplootRelaxed".to_string(), anyof_schema.clone()),
+    ),
+    (
+      "FloofRelaxed",
+      json!({
+        "anyOf": [
+          { "type": "string" },
+          { "$ref": "#/components/schemas/PembrokeEnum" }
+        ]
+      }),
+    ),
+    (
+      "SplootRelaxed",
+      json!({
+        "anyOf": [
+          { "type": "string" },
+          { "$ref": "#/components/schemas/PembrokeEnum" }
+        ]
+      }),
+    ),
   ]));
 
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context.clone());
 
+  let floof_schema = graph.get("FloofRelaxed").unwrap();
   let first_output = union_converter
-    .convert_union("FloofRelaxed", &anyof_schema)
+    .convert_union("FloofRelaxed", floof_schema)
     .expect("Should convert first anyOf union");
   let first_result = first_output.into_vec();
 
@@ -447,8 +452,9 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
     panic!("FloofRelaxed should be an enum");
   };
 
+  let sploot_schema = graph.get("SplootRelaxed").unwrap();
   let second_output = union_converter
-    .convert_union("SplootRelaxed", &anyof_schema)
+    .convert_union("SplootRelaxed", sploot_schema)
     .expect("Should convert second anyOf union");
   let second_result = second_output.into_vec();
 
@@ -481,11 +487,13 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
 
 #[test]
 fn test_canonical_schema_with_large_numbers_succeeds() {
-  let schema = ObjectSchema {
-    minimum: Some(serde_json::from_str("-9223372036854776000").unwrap()),
-    maximum: Some(serde_json::from_str("9223372036854776000").unwrap()),
-    ..Default::default()
-  };
+  let schema = serde_json::from_str::<ObjectSchema>(
+    r#"{
+    "minimum": -9223372036854776000,
+    "maximum": 9223372036854776000
+  }"#,
+  )
+  .unwrap();
 
   let result = CanonicalSchema::from_schema(&schema);
   assert!(
@@ -496,17 +504,21 @@ fn test_canonical_schema_with_large_numbers_succeeds() {
 
 #[test]
 fn test_canonical_schema_large_numbers_are_normalized() {
-  let schema1 = ObjectSchema {
-    minimum: Some(serde_json::from_str("-9223372036854776000").unwrap()),
-    maximum: Some(serde_json::from_str("9223372036854776000").unwrap()),
-    ..Default::default()
-  };
+  let schema1 = serde_json::from_str::<ObjectSchema>(
+    r#"{
+    "minimum": -9223372036854776000,
+    "maximum": 9223372036854776000
+  }"#,
+  )
+  .unwrap();
 
-  let schema2 = ObjectSchema {
-    minimum: Some(serde_json::from_str("-9999999999999999999").unwrap()),
-    maximum: Some(serde_json::from_str("9999999999999999999").unwrap()),
-    ..Default::default()
-  };
+  let schema2 = serde_json::from_str::<ObjectSchema>(
+    r#"{
+    "minimum": -9999999999999999999,
+    "maximum": 9999999999999999999
+  }"#,
+  )
+  .unwrap();
 
   let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
   let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");

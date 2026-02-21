@@ -1,5 +1,4 @@
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
-use serde_json::json;
+use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
 
 use crate::generator::{
   ast::{EnumDef, EnumVariantToken, RustType},
@@ -16,13 +15,6 @@ pub(super) fn make_schema_ref(name: &str) -> ObjectOrReference<ObjectSchema> {
   }
 }
 
-pub(super) fn make_string_schema() -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    ..Default::default()
-  }
-}
-
 pub(super) fn make_integer_schema() -> ObjectSchema {
   ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
@@ -33,22 +25,6 @@ pub(super) fn make_integer_schema() -> ObjectSchema {
 pub(super) fn make_null_schema() -> ObjectSchema {
   ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Null)),
-    ..Default::default()
-  }
-}
-
-pub(super) fn make_array_schema(items: Option<Schema>) -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: items.map(Box::new),
-    ..Default::default()
-  }
-}
-
-pub(super) fn make_string_enum_schema(values: &[&str]) -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    enum_values: values.iter().map(|value| json!(value)).collect(),
     ..Default::default()
   }
 }

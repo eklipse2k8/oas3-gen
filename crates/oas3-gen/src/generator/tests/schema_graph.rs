@@ -1,9 +1,6 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{
-  BooleanSchema, Components, Discriminator, Info, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet,
-  Spec,
-};
+use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet, Spec};
 use serde_json::json;
 
 use crate::{
@@ -11,70 +8,11 @@ use crate::{
     metrics::{GenerationStats, GenerationWarning},
     schema_registry::SchemaRegistry,
   },
+  tests::common::parse_schema,
   utils::parse_schema_ref_path,
 };
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
-
-fn create_test_spec_with_schemas(schemas: BTreeMap<String, ObjectOrReference<ObjectSchema>>) -> Spec {
-  Spec {
-    openapi: "3.0.0".to_string(),
-    info: Info {
-      title: "Test".to_string(),
-      summary: None,
-      version: "1.0.0".to_string(),
-      description: None,
-      terms_of_service: None,
-      contact: None,
-      license: None,
-      extensions: BTreeMap::default(),
-    },
-    servers: vec![],
-    paths: Option::default(),
-    webhooks: BTreeMap::default(),
-    components: Some(Components {
-      schemas,
-      ..Default::default()
-    }),
-    security: vec![],
-    tags: vec![],
-    external_docs: None,
-    extensions: BTreeMap::default(),
-  }
-}
-
-fn make_simple_schema() -> ObjectSchema {
-  ObjectSchema {
-    schema_type: None,
-    properties: BTreeMap::new(),
-    ..Default::default()
-  }
-}
-
-fn make_schema_with_ref(ref_name: &str) -> ObjectSchema {
-  let mut properties = BTreeMap::new();
-  properties.insert(
-    "related".to_string(),
-    ObjectOrReference::Ref {
-      ref_path: format!("{SCHEMA_REF_PREFIX}{ref_name}"),
-      summary: None,
-      description: None,
-    },
-  );
-  ObjectSchema {
-    schema_type: None,
-    properties,
-    ..Default::default()
-  }
-}
-
-fn make_ref(name: &str) -> ObjectOrReference<ObjectSchema> {
-  ObjectOrReference::Ref {
-    ref_path: format!("{SCHEMA_REF_PREFIX}{name}"),
-    summary: None,
-    description: None,
-  }
-}
 
 #[test]
 fn test_parse_ref() {
@@ -90,38 +28,47 @@ fn test_parse_ref() {
   }
 }
 
+fn spec_with_schemas(schemas_json: &serde_json::Value) -> Spec {
+  let spec_json = json!({
+    "openapi": "3.0.0",
+    "info": {"title": "Test", "version": "1.0.0"},
+    "components": {"schemas": schemas_json}
+  });
+  serde_json::from_value(spec_json).expect("failed to parse spec from JSON")
+}
+
 #[test]
 fn test_ref_collector() {
-  let spec = create_test_spec_with_schemas(BTreeMap::new());
+  let spec = spec_with_schemas(&json!({}));
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
 
-  let schema = make_schema_with_ref("Corgi");
+  let schema = parse_schema(json!({
+    "properties": {
+      "related": {"$ref": "#/components/schemas/Corgi"}
+    }
+  }));
   let refs = registry.collect(&schema, &union_fingerprints);
   assert_eq!(refs.len(), 1, "simple ref: expected 1 ref");
   assert!(refs.contains("Corgi"), "simple ref: should contain Corgi");
 
-  let mut properties = BTreeMap::new();
-  properties.insert("waddler".to_string(), make_ref("Corgi"));
-  properties.insert("sploot".to_string(), make_ref("Sploot"));
-  let schema = ObjectSchema {
-    schema_type: None,
-    properties,
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "properties": {
+      "waddler": {"$ref": "#/components/schemas/Corgi"},
+      "sploot": {"$ref": "#/components/schemas/Sploot"}
+    }
+  }));
   let refs = registry.collect(&schema, &union_fingerprints);
   assert_eq!(refs.len(), 2, "multiple refs: expected 2 refs");
   assert!(refs.contains("Corgi"), "multiple refs: should contain Corgi");
   assert!(refs.contains("Sploot"), "multiple refs: should contain Sploot");
 
-  let schema = ObjectSchema {
-    schema_type: None,
-    one_of: vec![make_ref("Corgi")],
-    any_of: vec![make_ref("Bark")],
-    all_of: vec![make_ref("Frappe")],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "oneOf": [{"$ref": "#/components/schemas/Corgi"}],
+    "anyOf": [{"$ref": "#/components/schemas/Bark"}],
+    "allOf": [{"$ref": "#/components/schemas/Frappe"}]
+  }));
   let refs = registry.collect(&schema, &union_fingerprints);
   assert_eq!(refs.len(), 3, "combinators: expected 3 refs");
   assert!(refs.contains("Corgi"), "combinators: should contain Corgi");
@@ -131,11 +78,10 @@ fn test_ref_collector() {
 
 #[test]
 fn test_schema_registry() {
-  let mut schemas = BTreeMap::new();
-  schemas.insert("Corgi".to_string(), ObjectOrReference::Object(make_simple_schema()));
-  schemas.insert("Bark".to_string(), ObjectOrReference::Object(make_simple_schema()));
-
-  let spec = create_test_spec_with_schemas(schemas);
+  let spec = spec_with_schemas(&json!({
+    "Corgi": {"type": "object"},
+    "Bark": {"type": "object"}
+  }));
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
 
@@ -144,14 +90,15 @@ fn test_schema_registry() {
   assert!(registry.get("NonExistent").is_none(), "should not have NonExistent");
   assert_eq!(registry.keys().len(), 2, "should have 2 schemas");
 
-  let mut schemas = BTreeMap::new();
-  schemas.insert("Corgi".to_string(), ObjectOrReference::Object(make_simple_schema()));
-  schemas.insert(
-    "Bark".to_string(),
-    ObjectOrReference::Object(make_schema_with_ref("Corgi")),
-  );
-
-  let spec = create_test_spec_with_schemas(schemas);
+  let spec = spec_with_schemas(&json!({
+    "Corgi": {"type": "object"},
+    "Bark": {
+      "type": "object",
+      "properties": {
+        "related": {"$ref": "#/components/schemas/Corgi"}
+      }
+    }
+  }));
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
   let union_fingerprints = BTreeMap::new();
@@ -165,14 +112,21 @@ fn test_schema_registry() {
 #[test]
 fn test_schema_graph_cycle_detection() {
   {
-    let mut schemas = BTreeMap::new();
-    schemas.insert("A".to_string(), ObjectOrReference::Object(make_simple_schema()));
-    schemas.insert("B".to_string(), ObjectOrReference::Object(make_schema_with_ref("A")));
-    let mut c_schema = make_simple_schema();
-    c_schema.properties.insert("b".to_string(), make_ref("B"));
-    schemas.insert("C".to_string(), ObjectOrReference::Object(c_schema));
-
-    let spec = create_test_spec_with_schemas(schemas);
+    let spec = spec_with_schemas(&json!({
+      "A": {"type": "object"},
+      "B": {
+        "type": "object",
+        "properties": {
+          "a": {"$ref": "#/components/schemas/A"}
+        }
+      },
+      "C": {
+        "type": "object",
+        "properties": {
+          "b": {"$ref": "#/components/schemas/B"}
+        }
+      }
+    }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
@@ -186,16 +140,20 @@ fn test_schema_graph_cycle_detection() {
   }
 
   {
-    let mut a_schema = make_simple_schema();
-    a_schema.properties.insert("b".to_string(), make_ref("B"));
-    let mut b_schema = make_simple_schema();
-    b_schema.properties.insert("a".to_string(), make_ref("A"));
-
-    let mut schemas = BTreeMap::new();
-    schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
-    schemas.insert("B".to_string(), ObjectOrReference::Object(b_schema));
-
-    let spec = create_test_spec_with_schemas(schemas);
+    let spec = spec_with_schemas(&json!({
+      "A": {
+        "type": "object",
+        "properties": {
+          "b": {"$ref": "#/components/schemas/B"}
+        }
+      },
+      "B": {
+        "type": "object",
+        "properties": {
+          "a": {"$ref": "#/components/schemas/A"}
+        }
+      }
+    }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
@@ -209,13 +167,14 @@ fn test_schema_graph_cycle_detection() {
   }
 
   {
-    let mut a_schema = make_simple_schema();
-    a_schema.properties.insert("self_ref".to_string(), make_ref("A"));
-
-    let mut schemas = BTreeMap::new();
-    schemas.insert("A".to_string(), ObjectOrReference::Object(a_schema));
-
-    let spec = create_test_spec_with_schemas(schemas);
+    let spec = spec_with_schemas(&json!({
+      "A": {
+        "type": "object",
+        "properties": {
+          "self_ref": {"$ref": "#/components/schemas/A"}
+        }
+      }
+    }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
@@ -227,16 +186,20 @@ fn test_schema_graph_cycle_detection() {
   }
 
   {
-    let mut user_schema = make_simple_schema();
-    user_schema.properties.insert("posts".to_string(), make_ref("Post"));
-    let mut post_schema = make_simple_schema();
-    post_schema.properties.insert("author".to_string(), make_ref("User"));
-
-    let mut schemas = BTreeMap::new();
-    schemas.insert("User".to_string(), ObjectOrReference::Object(user_schema));
-    schemas.insert("Post".to_string(), ObjectOrReference::Object(post_schema));
-
-    let spec = create_test_spec_with_schemas(schemas);
+    let spec = spec_with_schemas(&json!({
+      "User": {
+        "type": "object",
+        "properties": {
+          "posts": {"$ref": "#/components/schemas/Post"}
+        }
+      },
+      "Post": {
+        "type": "object",
+        "properties": {
+          "author": {"$ref": "#/components/schemas/User"}
+        }
+      }
+    }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
     let union_fingerprints = BTreeMap::new();
@@ -251,34 +214,24 @@ fn test_schema_graph_cycle_detection() {
 
 #[test]
 fn test_schema_registry_merges_all_of_properties_and_required() {
-  let mut loaf = make_simple_schema();
-  loaf.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  loaf.required.push("tag_id".to_string());
-  loaf.properties.insert(
-    "tag_id".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-  loaf.additional_properties = Some(Schema::Boolean(BooleanSchema(true)));
-
-  let mut nugget = make_simple_schema();
-  nugget.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  nugget.required.push("name".to_string());
-  nugget.properties.insert(
-    "name".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  nugget.all_of.push(make_ref("Loaf"));
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Loaf".to_string(), ObjectOrReference::Object(loaf.clone())),
-    ("Nugget".to_string(), ObjectOrReference::Object(nugget.clone())),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Loaf": {
+      "type": "object",
+      "required": ["tag_id"],
+      "properties": {
+        "tag_id": {"type": "integer"}
+      },
+      "additionalProperties": true
+    },
+    "Nugget": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"}
+      },
+      "allOf": [{"$ref": "#/components/schemas/Loaf"}]
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
@@ -297,36 +250,27 @@ fn test_schema_registry_merges_all_of_properties_and_required() {
 
 #[test]
 fn test_schema_registry_merges_and_tracks_discriminator_parents() {
-  let mut loaf_schema = make_simple_schema();
-  loaf_schema.properties.insert(
-    "kind".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  loaf_schema.discriminator = Some(Discriminator {
-    property_name: "kind".to_string(),
-    mapping: Some(BTreeMap::from([(
-      "nugget".to_string(),
-      format!("{SCHEMA_REF_PREFIX}Nugget"),
-    )])),
-  });
-
-  let mut nugget_schema = make_simple_schema();
-  nugget_schema.properties.insert(
-    "nugget_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-  nugget_schema.all_of.push(make_ref("Loaf"));
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Loaf".to_string(), ObjectOrReference::Object(loaf_schema.clone())),
-    ("Nugget".to_string(), ObjectOrReference::Object(nugget_schema.clone())),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Loaf": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string"}
+      },
+      "discriminator": {
+        "propertyName": "kind",
+        "mapping": {
+          "nugget": "#/components/schemas/Nugget"
+        }
+      }
+    },
+    "Nugget": {
+      "type": "object",
+      "properties": {
+        "nugget_prop": {"type": "integer"}
+      },
+      "allOf": [{"$ref": "#/components/schemas/Loaf"}]
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
@@ -350,31 +294,21 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
 
 #[test]
 fn schema_merger_conflict_resolution() {
-  let mut loaf = make_simple_schema();
-  loaf.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  loaf.properties.insert(
-    "prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-
-  let mut nugget = make_simple_schema();
-  nugget.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  nugget.properties.insert(
-    "prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-  nugget.all_of.push(make_ref("Loaf"));
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Loaf".to_string(), ObjectOrReference::Object(loaf)),
-    ("Nugget".to_string(), ObjectOrReference::Object(nugget)),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Loaf": {
+      "type": "object",
+      "properties": {
+        "prop": {"type": "string"}
+      }
+    },
+    "Nugget": {
+      "type": "object",
+      "properties": {
+        "prop": {"type": "integer"}
+      },
+      "allOf": [{"$ref": "#/components/schemas/Loaf"}]
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
@@ -398,44 +332,31 @@ fn schema_merger_conflict_resolution() {
 
 #[test]
 fn schema_merger_merge_multiple_all_of() {
-  let mut corgi = make_simple_schema();
-  corgi.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  corgi.properties.insert(
-    "corgi_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
-    }),
-  );
-  corgi.required.push("corgi_prop".to_string());
-
-  let mut fluff = make_simple_schema();
-  fluff.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  fluff.properties.insert(
-    "fluff_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
-    }),
-  );
-
-  let mut composite = make_simple_schema();
-  composite.schema_type = Some(SchemaTypeSet::Single(SchemaType::Object));
-  composite.all_of.push(make_ref("Corgi"));
-  composite.all_of.push(make_ref("Fluff"));
-  composite.properties.insert(
-    "own_prop".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-      ..Default::default()
-    }),
-  );
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Corgi".to_string(), ObjectOrReference::Object(corgi)),
-    ("Fluff".to_string(), ObjectOrReference::Object(fluff)),
-    ("Composite".to_string(), ObjectOrReference::Object(composite)),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Corgi": {
+      "type": "object",
+      "required": ["corgi_prop"],
+      "properties": {
+        "corgi_prop": {"type": "string"}
+      }
+    },
+    "Fluff": {
+      "type": "object",
+      "properties": {
+        "fluff_prop": {"type": "integer"}
+      }
+    },
+    "Composite": {
+      "type": "object",
+      "allOf": [
+        {"$ref": "#/components/schemas/Corgi"},
+        {"$ref": "#/components/schemas/Fluff"}
+      ],
+      "properties": {
+        "own_prop": {"type": "boolean"}
+      }
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
@@ -465,44 +386,32 @@ fn schema_merger_merge_multiple_all_of() {
   );
 }
 
-fn make_variant_schema_with_const(property_name: &str, const_value: &str) -> ObjectSchema {
-  let mut properties = BTreeMap::new();
-  properties.insert(
-    property_name.to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      const_value: Some(json!(const_value)),
-      ..Default::default()
-    }),
-  );
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties,
-    required: vec![property_name.to_string()],
-    ..Default::default()
-  }
-}
-
 #[test]
 fn implicit_discriminator_mapping_from_const_values() {
-  let allergies = make_variant_schema_with_const("type", "allergies");
-  let diet = make_variant_schema_with_const("type", "diet");
-
-  let health = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: None,
-    }),
-    ..Default::default()
-  };
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
-    ("Diet".to_string(), ObjectOrReference::Object(diet)),
-    ("Health".to_string(), ObjectOrReference::Object(health)),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Allergies": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "allergies"}
+      },
+      "required": ["type"]
+    },
+    "Diet": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "diet"}
+      },
+      "required": ["type"]
+    },
+    "Health": {
+      "type": "object",
+      "oneOf": [
+        {"$ref": "#/components/schemas/Allergies"},
+        {"$ref": "#/components/schemas/Diet"}
+      ],
+      "discriminator": {"propertyName": "type"}
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -527,34 +436,29 @@ fn implicit_discriminator_mapping_from_const_values() {
 
 #[test]
 fn implicit_discriminator_mapping_warns_on_missing_const() {
-  let allergies = make_variant_schema_with_const("type", "allergies");
-  let diet = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "type".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
-
-  let health = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: None,
-    }),
-    ..Default::default()
-  };
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
-    ("Diet".to_string(), ObjectOrReference::Object(diet)),
-    ("Health".to_string(), ObjectOrReference::Object(health)),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Allergies": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "allergies"}
+      },
+      "required": ["type"]
+    },
+    "Diet": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string"}
+      }
+    },
+    "Health": {
+      "type": "object",
+      "oneOf": [
+        {"$ref": "#/components/schemas/Allergies"},
+        {"$ref": "#/components/schemas/Diet"}
+      ],
+      "discriminator": {"propertyName": "type"}
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -575,24 +479,30 @@ fn implicit_discriminator_mapping_warns_on_missing_const() {
 
 #[test]
 fn implicit_discriminator_mapping_warns_on_duplicate_const() {
-  let allergies = make_variant_schema_with_const("type", "same_value");
-  let diet = make_variant_schema_with_const("type", "same_value");
-
-  let health = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: None,
-    }),
-    ..Default::default()
-  };
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
-    ("Diet".to_string(), ObjectOrReference::Object(diet)),
-    ("Health".to_string(), ObjectOrReference::Object(health)),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Allergies": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "same_value"}
+      },
+      "required": ["type"]
+    },
+    "Diet": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "same_value"}
+      },
+      "required": ["type"]
+    },
+    "Health": {
+      "type": "object",
+      "oneOf": [
+        {"$ref": "#/components/schemas/Allergies"},
+        {"$ref": "#/components/schemas/Diet"}
+      ],
+      "discriminator": {"propertyName": "type"}
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -613,27 +523,36 @@ fn implicit_discriminator_mapping_warns_on_duplicate_const() {
 
 #[test]
 fn explicit_mapping_takes_precedence_over_const() {
-  let allergies = make_variant_schema_with_const("type", "allergies");
-  let diet = make_variant_schema_with_const("type", "diet");
-
-  let health = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: Some(BTreeMap::from([
-        ("allergy_override".to_string(), format!("{SCHEMA_REF_PREFIX}Allergies")),
-        ("diet_override".to_string(), format!("{SCHEMA_REF_PREFIX}Diet")),
-      ])),
-    }),
-    ..Default::default()
-  };
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
-    ("Diet".to_string(), ObjectOrReference::Object(diet)),
-    ("Health".to_string(), ObjectOrReference::Object(health)),
-  ]));
+  let spec = spec_with_schemas(&json!({
+    "Allergies": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "allergies"}
+      },
+      "required": ["type"]
+    },
+    "Diet": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "diet"}
+      },
+      "required": ["type"]
+    },
+    "Health": {
+      "type": "object",
+      "oneOf": [
+        {"$ref": "#/components/schemas/Allergies"},
+        {"$ref": "#/components/schemas/Diet"}
+      ],
+      "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+          "allergy_override": "#/components/schemas/Allergies",
+          "diet_override": "#/components/schemas/Diet"
+        }
+      }
+    }
+  }));
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
@@ -655,28 +574,36 @@ fn explicit_mapping_takes_precedence_over_const() {
 
 #[test]
 fn effective_mapping_synthesizes_from_cache() {
-  let allergies = make_variant_schema_with_const("type", "allergies");
-  let diet = make_variant_schema_with_const("type", "diet");
-
-  let health = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    one_of: vec![make_ref("Allergies"), make_ref("Diet")],
-    discriminator: Some(Discriminator {
-      property_name: "type".to_string(),
-      mapping: None,
-    }),
-    ..Default::default()
-  };
-
-  let spec = create_test_spec_with_schemas(BTreeMap::from([
-    ("Allergies".to_string(), ObjectOrReference::Object(allergies)),
-    ("Diet".to_string(), ObjectOrReference::Object(diet)),
-    ("Health".to_string(), ObjectOrReference::Object(health.clone())),
-  ]));
+  let health_json = json!({
+    "type": "object",
+    "oneOf": [
+      {"$ref": "#/components/schemas/Allergies"},
+      {"$ref": "#/components/schemas/Diet"}
+    ],
+    "discriminator": {"propertyName": "type"}
+  });
+  let spec = spec_with_schemas(&json!({
+    "Allergies": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "allergies"}
+      },
+      "required": ["type"]
+    },
+    "Diet": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "const": "diet"}
+      },
+      "required": ["type"]
+    },
+    "Health": health_json.clone()
+  }));
 
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
 
+  let health: ObjectSchema = serde_json::from_value(health_json).expect("failed to parse health schema");
   let effective = registry.effective_mapping(&health);
   assert!(effective.is_some(), "effective mapping should be available");
 

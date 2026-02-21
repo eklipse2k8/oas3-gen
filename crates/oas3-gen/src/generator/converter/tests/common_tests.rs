@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{BooleanSchema, Discriminator, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
+use oas3::spec::{SchemaType, SchemaTypeSet};
+use serde_json::json;
 
 use crate::{
   generator::{
     converter::inline_resolver::InlineTypeResolver, metrics::GenerationStats, schema_registry::SchemaRegistry,
   },
-  tests::common::{create_test_context, create_test_graph, create_test_spec, default_config},
+  tests::common::{create_test_context, create_test_graph, create_test_spec, default_config, parse_schema},
 };
 
 #[test]
@@ -23,10 +24,9 @@ fn test_inline_resolver_uses_cached_enum() -> anyhow::Result<()> {
 
   let inline_resolver = InlineTypeResolver::new(context);
 
-  let schema = ObjectSchema {
-    enum_values: vec![serde_json::json!("A"), serde_json::json!("B")],
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "enum": ["A", "B"]
+  }));
 
   let result = inline_resolver.resolve_inline_enum("Loaf", "Sploot", &schema, &enum_values)?;
 
@@ -47,17 +47,12 @@ fn test_inline_resolver_generates_unique_names() -> anyhow::Result<()> {
 
   let inline_resolver = InlineTypeResolver::new(context);
 
-  let schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "tag_id".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
+  let schema = parse_schema(json!({
+    "type": "object",
+    "properties": {
+      "tag_id": { "type": "string" }
+    }
+  }));
 
   let result = inline_resolver.resolve_inline_struct("Loaf", "Nugget", &schema)?;
 
@@ -67,35 +62,24 @@ fn test_inline_resolver_generates_unique_names() -> anyhow::Result<()> {
 
 #[test]
 fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
-  let corgi_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(
-      "tag_id".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    required: vec!["tag_id".to_string()],
-    discriminator: Some(Discriminator {
-      property_name: "kind".to_string(),
-      mapping: None,
-    }),
-    additional_properties: Some(Schema::Boolean(BooleanSchema(true))),
-    ..Default::default()
-  };
+  let corgi_schema = parse_schema(json!({
+    "type": "object",
+    "properties": {
+      "tag_id": { "type": "string" }
+    },
+    "required": ["tag_id"],
+    "discriminator": {
+      "propertyName": "kind"
+    },
+    "additionalProperties": true
+  }));
 
-  let fluff_schema = ObjectSchema {
-    properties: BTreeMap::from([(
-      "waddle".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-        ..Default::default()
-      }),
-    )]),
-    required: vec!["waddle".to_string()],
-    ..Default::default()
-  };
+  let fluff_schema = parse_schema(json!({
+    "properties": {
+      "waddle": { "type": "boolean" }
+    },
+    "required": ["waddle"]
+  }));
 
   let spec = create_test_spec(BTreeMap::from([
     ("Corgi".to_string(), corgi_schema.clone()),
@@ -105,41 +89,22 @@ fn test_inline_schema_merger_combines_all_sources() -> anyhow::Result<()> {
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
 
-  let inline_allof = ObjectSchema {
-    properties: BTreeMap::from([(
-      "sploot".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-        ..Default::default()
-      }),
-    )]),
-    required: vec!["sploot".to_string()],
-    ..Default::default()
-  };
-
-  let target_schema = ObjectSchema {
-    all_of: vec![
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/Corgi".to_string(),
-        summary: None,
-        description: None,
-      },
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/Fluff".to_string(),
-        summary: None,
-        description: None,
-      },
-      ObjectOrReference::Object(inline_allof),
+  let target_schema = parse_schema(json!({
+    "allOf": [
+      { "$ref": "#/components/schemas/Corgi" },
+      { "$ref": "#/components/schemas/Fluff" },
+      {
+        "type": "object",
+        "properties": {
+          "sploot": { "type": "integer" }
+        },
+        "required": ["sploot"]
+      }
     ],
-    properties: BTreeMap::from([(
-      "bark".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Number)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  };
+    "properties": {
+      "bark": { "type": "number" }
+    }
+  }));
 
   let merged = registry.merge_inline(&target_schema)?;
 

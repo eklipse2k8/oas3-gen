@@ -96,3 +96,14 @@ pub(crate) fn make_field(name: &str, deprecated: bool) -> FieldDef {
     .deprecated(deprecated)
     .build()
 }
+
+pub(crate) fn parse_schema(json_value: serde_json::Value) -> ObjectSchema {
+  serde_json::from_value(json_value).expect("failed to parse schema from JSON")
+}
+
+pub(crate) fn parse_schemas(pairs: Vec<(&str, serde_json::Value)>) -> BTreeMap<String, ObjectSchema> {
+  pairs
+    .into_iter()
+    .map(|(name, json)| (name.to_string(), parse_schema(json)))
+    .collect()
+}
