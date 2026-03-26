@@ -80,7 +80,7 @@ cargo run -- list --help
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |
 | `--no-helpers` | Disable generation of ergonomic helper methods for enum variants |
 | `--customize` / `-c` | Custom serde_as type overrides (format: type_name=custom::Path); repeatable |
-| `--all-headers` | Emit header constants for all header parameters in components, not just those used in operations |
+| `--all-headers` | Emit header constants for all parameters defined in components, not just those used in operations |
 | `--enable-builders` | Enable bon builder derives on schema structs and builder methods on request structs |
 | `--doc-format` | Format documentation comments using mdformat (requires `mdformat` installed) |
 | `--only` | Include only the specified comma-separated operation IDs |

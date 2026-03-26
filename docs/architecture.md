@@ -56,6 +56,7 @@ crates/
 │           │   ├── orchestrator.rs
 │           │   ├── operation_registry.rs
 │           │   ├── schema_graph.rs
+│           │   ├── support.rs
 │           │   ├── undeclared_path_params.rs
 │           │   └── untyped_params.rs
 │           ├── postprocess/       # Type postprocessing and refinement
@@ -142,6 +143,7 @@ crates/
 │           │       ├── metadata_tests.rs
 │           │       ├── operations.rs
 │           │       ├── structs.rs
+│           │       ├── support.rs
 │           │       ├── type_aliases.rs
 │           │       └── type_resolution.rs
 │           └── codegen/           # AST -> Rust source generation
@@ -231,7 +233,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Code Generation
 
-- **oas3** (0.20): OpenAPI 3.1 spec parser with JSON and YAML support
+- **oas3** (0.21): OpenAPI 3.1 spec parser with JSON and YAML support
 - **quote** (1.0): Token stream generation
 - **proc-macro2** (1.0): Token manipulation
 - **syn** (2.0): Rust syntax parser with full parsing support
@@ -278,8 +280,8 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **cruet** (0.15): Advanced string inflection and pluralization
 - **any_ascii** (0.3): ASCII transliteration for identifiers
 - **percent-encoding** (2.3): URL encoding for path templates
-- **string_cache** (0.9): Interned strings for performance
-- **strum** (0.27): String enum derivations
+- **string_cache** (0.9): Interned strings for performance with serde support
+- **strum** (0.28): String enum derivations
 
 ### Iterator & Collection Processing
 

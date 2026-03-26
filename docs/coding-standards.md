@@ -448,4 +448,4 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
    - converter/ for OpenAPI to AST transformation
    - codegen/ for AST to Rust source code generation
 3. Locate module: enums, structs, operations, type_resolver, attributes, cache, etc.
-4. Check utilities for cross-cutting concerns: utils/schema_ext.rs, utils/text.rs, naming/identifiers.rs
+4. Check utilities for cross-cutting concerns: utils/schema_ext.rs, utils/refs.rs, naming/identifiers.rs
