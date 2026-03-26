@@ -573,6 +573,92 @@ fn explicit_mapping_takes_precedence_over_const() {
 }
 
 #[test]
+fn test_ref_collector_additional_properties() {
+  let spec = spec_with_schemas(&json!({}));
+  let mut stats = GenerationStats::default();
+  let registry = SchemaRegistry::new(&spec, &mut stats);
+  let union_fingerprints = BTreeMap::new();
+
+  let schema = parse_schema(json!({
+    "additionalProperties": {
+      "$ref": "#/components/schemas/VaccineRecord"
+    }
+  }));
+  let refs = registry.collect(&schema, &union_fingerprints);
+  assert_eq!(refs.len(), 1, "direct additional_properties ref: expected 1 ref");
+  assert!(refs.contains("VaccineRecord"), "should contain VaccineRecord");
+
+  let schema = parse_schema(json!({
+    "additionalProperties": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/VaccineRecord"
+      }
+    }
+  }));
+  let refs = registry.collect(&schema, &union_fingerprints);
+  assert_eq!(refs.len(), 1, "nested additional_properties array ref: expected 1 ref");
+  assert!(refs.contains("VaccineRecord"), "should contain VaccineRecord via items");
+
+  let schema = parse_schema(json!({
+    "properties": {
+      "name": {"type": "string"}
+    },
+    "additionalProperties": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/Metric"
+      }
+    }
+  }));
+  let refs = registry.collect(&schema, &union_fingerprints);
+  assert_eq!(refs.len(), 1, "properties + additional_properties: expected 1 ref");
+  assert!(
+    refs.contains("Metric"),
+    "should contain Metric from additional_properties"
+  );
+
+  let schema = parse_schema(json!({
+    "additionalProperties": true
+  }));
+  let refs = registry.collect(&schema, &union_fingerprints);
+  assert!(refs.is_empty(), "boolean additional_properties: expected 0 refs");
+}
+
+#[test]
+fn test_additional_properties_reachability() {
+  let spec = spec_with_schemas(&json!({
+    "VaccineRecord": {
+      "type": "object",
+      "required": ["date_administered"],
+      "properties": {
+        "date_administered": {"type": "string", "format": "date"},
+        "veterinarian": {"type": "string"}
+      }
+    },
+    "PetVaccinations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/VaccineRecord"
+        }
+      }
+    }
+  }));
+  let mut stats = GenerationStats::default();
+  let mut registry = SchemaRegistry::new(&spec, &mut stats);
+  let union_fingerprints = BTreeMap::new();
+  registry.build_dependencies(&union_fingerprints);
+
+  let pet_vaccinations_deps = registry.collect(registry.get("PetVaccinations").unwrap(), &union_fingerprints);
+  assert!(
+    pet_vaccinations_deps.contains("VaccineRecord"),
+    "PetVaccinations should depend on VaccineRecord via additionalProperties"
+  );
+}
+
+#[test]
 fn effective_mapping_synthesizes_from_cache() {
   let health_json = json!({
     "type": "object",

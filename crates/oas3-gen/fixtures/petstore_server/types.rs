@@ -34,6 +34,7 @@ pub struct Cat {
   pub lives: i32,
   pub name: String,
   pub tag: Option<String>,
+  pub vaccinations: Option<std::collections::HashMap<String, Vec<VaccineRecord>>>,
 }
 pub type Cats = Vec<Cat>;
 /// Create a pet
@@ -388,6 +389,13 @@ pub struct Pet {
   pub id: i64,
   pub name: String,
   pub tag: Option<String>,
+  pub vaccinations: Option<std::collections::HashMap<String, Vec<VaccineRecord>>>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+pub struct PetVaccinations {
+  /// Additional properties not defined in the schema.
+  #[serde(flatten)]
+  pub additional_properties: std::collections::HashMap<String, Vec<VaccineRecord>>,
 }
 pub type Pets = Vec<Pet>;
 /// Info for a specific pet
@@ -508,4 +516,10 @@ pub struct UploadRequestBody {
   /// The pet's name
   #[validate(length(min = 1u64))]
   pub name: String,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+pub struct VaccineRecord {
+  pub date_administered: chrono::NaiveDate,
+  pub veterinarian: Option<String>,
 }

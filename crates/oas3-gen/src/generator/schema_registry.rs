@@ -409,6 +409,15 @@ impl SchemaRegistry {
       }
     }
 
+    if let Some(Schema::Object(ref schema_ref)) = schema.additional_properties {
+      if let Some(ref_name) = extract_schema_ref_name(schema_ref) {
+        refs.insert(ref_name);
+      }
+      if let ObjectOrReference::Object(inline) = &**schema_ref {
+        refs.extend(self.collect(inline, union_fingerprints));
+      }
+    }
+
     refs
   }
 

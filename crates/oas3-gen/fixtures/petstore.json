@@ -341,6 +341,28 @@
 					"propertyName": "type"
 				}
 			},
+			"VaccineRecord": {
+				"type": "object",
+				"required": ["date_administered"],
+				"properties": {
+					"date_administered": {
+						"type": "string",
+						"format": "date"
+					},
+					"veterinarian": {
+						"type": "string"
+					}
+				}
+			},
+			"PetVaccinations": {
+				"type": "object",
+				"additionalProperties": {
+					"type": "array",
+					"items": {
+						"$ref": "#/components/schemas/VaccineRecord"
+					}
+				}
+			},
 			"Pet": {
 				"type": "object",
 				"required": ["id", "name"],
@@ -354,6 +376,9 @@
 					},
 					"allergies": {
 						"$ref": "#/components/schemas/Health"
+					},
+					"vaccinations": {
+						"$ref": "#/components/schemas/PetVaccinations"
 					},
 					"tag": {
 						"type": "string"
