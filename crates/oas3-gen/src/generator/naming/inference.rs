@@ -187,10 +187,10 @@ impl TryFrom<&serde_json::Value> for NormalizedVariant {
         rename_value: str_val.clone(),
       }),
       serde_json::Value::Number(num) => {
-        let raw_str = if num.is_i64() {
-          num.as_i64().unwrap().to_string()
-        } else if num.is_f64() {
-          num.as_f64().unwrap().to_string()
+        let raw_str = if let Some(i) = num.as_i64() {
+          i.to_string()
+        } else if let Some(f) = num.as_f64() {
+          f.to_string()
         } else {
           return Err(UnsupportedJsonValue);
         };

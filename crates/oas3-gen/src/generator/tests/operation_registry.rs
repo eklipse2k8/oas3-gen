@@ -2,62 +2,59 @@ use std::collections::HashSet;
 
 use http::Method;
 use oas3::Spec;
+use serde_json::{Map, Value, json};
 
+use super::support::parse_spec;
 use crate::generator::{
   ast::OperationKind,
   naming::operations::{compute_stable_id, generate_operation_id},
   operation_registry::OperationRegistry,
 };
 
-fn create_test_spec(operations: Vec<(&str, &str, Option<&str>)>) -> Spec {
-  use std::{collections::HashMap, fmt::Write};
+type TestOperation<'a> = (&'a str, &'a str, Option<&'a str>);
 
-  let mut paths_map: HashMap<&str, Vec<(&str, Option<&str>)>> = HashMap::new();
-
+fn create_test_spec(operations: &[TestOperation<'_>]) -> Spec {
+  let mut paths = Map::new();
   for (path, method, operation_id) in operations {
-    paths_map.entry(path).or_default().push((method, operation_id));
-  }
+    let path_entry = paths
+      .entry((*path).to_string())
+      .or_insert_with(|| Value::Object(Map::new()));
+    let Value::Object(path_methods) = path_entry else {
+      panic!("path entry should be a JSON object");
+    };
 
-  let mut paths_json = String::from(r"{");
-  let mut first_path = true;
-
-  for (path, methods) in paths_map {
-    if !first_path {
-      paths_json.push(',');
-    }
-    first_path = false;
-
-    write!(paths_json, r#""{path}": {{"#).unwrap();
-
-    let mut first_method = true;
-    for (method, operation_id) in methods {
-      if !first_method {
-        paths_json.push(',');
-      }
-      first_method = false;
-
-      let op_id_json = operation_id.map_or_else(String::new, |id| format!(r#""operationId": "{id}""#));
-
-      write!(paths_json, r#""{method}": {{ {op_id_json} }}"#).unwrap();
+    let mut operation = Map::new();
+    if let Some(operation_id) = operation_id {
+      operation.insert("operationId".to_string(), Value::String((*operation_id).to_string()));
     }
 
-    paths_json.push('}');
+    path_methods.insert((*method).to_string(), Value::Object(operation));
   }
 
-  paths_json.push('}');
+  let spec_json = json!({
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Test API",
+      "version": "1.0.0"
+    },
+    "paths": Value::Object(paths)
+  });
+  parse_spec(&spec_json.to_string())
+}
 
-  let spec_json = format!(
-    r#"{{
-      "openapi": "3.1.0",
-      "info": {{
-        "title": "Test API",
-        "version": "1.0.0"
-      }},
-      "paths": {paths_json}
-    }}"#
-  );
+fn sorted_stable_ids(registry: &OperationRegistry) -> Vec<String> {
+  let mut ids = registry
+    .operations()
+    .map(|entry| entry.stable_id.clone())
+    .collect::<Vec<String>>();
+  ids.sort_unstable();
+  ids
+}
 
-  oas3::from_json(&spec_json).expect("Failed to parse test spec")
+fn assert_stable_ids(registry: &OperationRegistry, expected_ids: &[&str], context: &str) {
+  let actual = sorted_stable_ids(registry);
+  let expected = expected_ids.iter().map(|id| (*id).to_string()).collect::<Vec<_>>();
+  assert_eq!(actual, expected, "{context}");
 }
 
 #[test]
@@ -113,129 +110,116 @@ fn test_generate_operation_id() {
 }
 
 #[test]
-fn test_operation_registry() {
-  {
-    let spec = create_test_spec(vec![
-      ("/users", "get", Some("listUsers")),
-      ("/users/{id}", "get", None),
-      ("/posts", "post", Some("createPost")),
-    ]);
+fn test_operation_registry_collects_operations_and_metadata() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("listUsers")),
+    ("/users/{id}", "get", None),
+    ("/posts", "post", Some("createPost")),
+  ]);
 
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.entries.len(), 3, "expected 3 operations");
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 3, "expected 3 operations");
 
-    let mut entries = registry.operations().collect::<Vec<_>>();
-    entries.sort_by(|a, b| a.stable_id.cmp(&b.stable_id));
+  let mut entries = registry.operations().collect::<Vec<_>>();
+  entries.sort_by(|a, b| a.stable_id.cmp(&b.stable_id));
 
-    let entry = &entries[1];
-    assert_eq!(entry.stable_id, "get_users_by_id");
-    assert_eq!(entry.method, Method::GET);
-    assert_eq!(entry.path, "/users/{id}");
+  let by_id_entry = &entries[1];
+  assert_eq!(by_id_entry.stable_id, "get_users_by_id");
+  assert_eq!(by_id_entry.method, Method::GET);
+  assert_eq!(by_id_entry.path, "/users/{id}");
 
-    let entry = &entries[2];
-    assert_eq!(entry.stable_id, "list_users");
-    assert_eq!(entry.method, Method::GET);
-    assert_eq!(entry.path, "/users");
+  let list_entry = &entries[2];
+  assert_eq!(list_entry.stable_id, "list_users");
+  assert_eq!(list_entry.method, Method::GET);
+  assert_eq!(list_entry.path, "/users");
 
-    let mut ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    ids.sort_unstable();
-    assert_eq!(ids, vec!["create_post", "get_users_by_id", "list_users"]);
-  }
+  assert_stable_ids(
+    &registry,
+    &["create_post", "get_users_by_id", "list_users"],
+    "stable IDs should match expected set",
+  );
+}
 
-  {
-    let spec = create_test_spec(vec![
-      ("/users", "get", None),
-      ("/users", "post", None),
-      ("/users/{id}", "get", None),
-      ("/users/{id}", "put", None),
-      ("/users/{id}", "delete", None),
-    ]);
+#[test]
+fn test_operation_registry_generates_unique_ids_without_operation_ids() {
+  let spec = create_test_spec(&[
+    ("/users", "get", None),
+    ("/users", "post", None),
+    ("/users/{id}", "get", None),
+    ("/users/{id}", "put", None),
+    ("/users/{id}", "delete", None),
+  ]);
 
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.entries.len(), 5, "expected 5 operations for uniqueness test");
-    let ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    let unique_count = ids.iter().collect::<HashSet<_>>().len();
-    assert_eq!(unique_count, 5, "all stable IDs should be unique");
-  }
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 5, "expected 5 operations");
 
-  {
-    let spec = create_test_spec(vec![
-      ("/users", "get", Some("GetUsers")),
-      ("/users", "post", Some("getUsers")),
-    ]);
+  let ids = sorted_stable_ids(&registry);
+  let unique_count = ids.iter().collect::<HashSet<_>>().len();
+  assert_eq!(unique_count, 5, "all stable IDs should be unique");
+}
 
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(
-      registry.entries.len(),
-      2,
-      "both operations should be included with unique ids"
-    );
+#[test]
+fn test_operation_registry_resolves_conflicting_operation_ids() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("GetUsers")),
+    ("/users", "post", Some("getUsers")),
+  ]);
 
-    let mut ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    ids.sort_unstable();
-    assert_eq!(ids, vec!["users", "users_2"], "common prefix 'get' should be stripped");
-  }
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(
+    registry.entries.len(),
+    2,
+    "both operations should be included with unique ids",
+  );
+  assert_stable_ids(
+    &registry,
+    &["users", "users_2"],
+    "common prefix 'get' should be stripped while preserving uniqueness",
+  );
+}
 
-  {
-    let spec_json = r#"{
+#[test]
+fn test_operation_registry_handles_empty_paths() {
+  let spec = parse_spec(
+    r#"{
       "openapi": "3.1.0",
       "info": {
         "title": "Empty API",
         "version": "1.0.0"
       },
       "paths": {}
-    }"#;
-    let spec: Spec = oas3::from_json(spec_json).unwrap();
-    let registry = OperationRegistry::new(&spec);
+    }"#,
+  );
 
-    assert_eq!(registry.entries.len(), 0);
-    assert!(registry.entries.is_empty());
-    assert_eq!(registry.operations().count(), 0);
-  }
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 0);
+  assert!(registry.entries.is_empty());
+  assert_eq!(registry.operations().count(), 0);
+}
 
-  {
-    let spec = create_test_spec(vec![
-      ("/users", "get", Some("listUsers")),
-      ("/users/{id}", "get", None),
-      ("/posts", "post", Some("createPost")),
-    ]);
+#[test]
+fn test_operation_registry_applies_exclude_filters() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("listUsers")),
+    ("/users/{id}", "get", None),
+    ("/posts", "post", Some("createPost")),
+  ]);
+  let mut excluded = HashSet::new();
+  excluded.insert("list_users".to_string());
 
-    let mut excluded = HashSet::new();
-    excluded.insert("list_users".to_string());
+  let registry = OperationRegistry::with_filters(&spec, None, Some(&excluded));
+  assert_eq!(registry.entries.len(), 2, "filtered registry should have 2 operations");
+  assert_stable_ids(
+    &registry,
+    &["create_post", "get_users_by_id"],
+    "excluded operation should not be present",
+  );
+}
 
-    let registry = OperationRegistry::with_filters(&spec, None, Some(&excluded));
-
-    assert_eq!(registry.entries.len(), 2, "filtered registry should have 2 operations");
-
-    let ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    assert!(
-      !ids.contains(&"list_users".to_string()),
-      "list_users should be excluded"
-    );
-    assert!(
-      ids.contains(&"get_users_by_id".to_string()),
-      "get_users_by_id should be included"
-    );
-    assert!(
-      ids.contains(&"create_post".to_string()),
-      "create_post should be included"
-    );
-  }
-
-  {
-    let spec_json = r#"{
+#[test]
+fn test_operation_registry_includes_webhooks() {
+  let spec = parse_spec(
+    r#"{
       "openapi": "3.1.0",
       "info": {"title": "Webhook API", "version": "1.0.0"},
       "paths": {},
@@ -247,137 +231,114 @@ fn test_operation_registry() {
           }
         }
       }
-    }"#;
+    }"#,
+  );
 
-    let spec: Spec = oas3::from_json(spec_json).unwrap();
-    let registry = OperationRegistry::new(&spec);
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 1);
 
-    assert_eq!(registry.entries.len(), 1);
+  let entry = registry.operations().next().expect("webhook operation should exist");
+  assert_eq!(entry.stable_id, "pet_added_hook");
+  assert_eq!(entry.path, "webhooks/petAdded");
+  assert_eq!(entry.kind, OperationKind::Webhook);
+  assert_eq!(entry.method, Method::POST);
+}
 
-    let entry = registry.operations().next().unwrap();
-    assert_eq!(entry.stable_id, "pet_added_hook");
-    assert_eq!(entry.path, "webhooks/petAdded");
-    assert_eq!(entry.kind, OperationKind::Webhook);
-    assert_eq!(entry.method, Method::POST);
-  }
+#[test]
+fn test_operation_registry_strips_common_prefix_with_numeric_suffixes() {
+  let spec = create_test_spec(&[
+    ("/api/v1/users", "get", Some("listItems")),
+    ("/api/v2/users", "get", Some("listItems")),
+    ("/api/v3/users", "get", Some("listItems")),
+  ]);
 
-  {
-    let spec = create_test_spec(vec![
-      ("/api/v1/users", "get", Some("listItems")),
-      ("/api/v2/users", "get", Some("listItems")),
-      ("/api/v3/users", "get", Some("listItems")),
-    ]);
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(
+    registry.entries.len(),
+    3,
+    "all operations should be registered with unique ids",
+  );
+  assert_stable_ids(
+    &registry,
+    &["items", "items_2", "items_3"],
+    "common prefix 'list' should be stripped",
+  );
+}
 
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(
-      registry.entries.len(),
-      3,
-      "all operations should be registered with unique ids"
-    );
+#[test]
+fn test_operation_registry_strips_common_prefix_for_verb_only_ids() {
+  let spec = create_test_spec(&[
+    (
+      "/me/mail/folders/messages",
+      "get",
+      Some("me_mail_folders_messages_list"),
+    ),
+    (
+      "/me/mail/folders/messages/{id}",
+      "get",
+      Some("me_mail_folders_messages_get"),
+    ),
+    (
+      "/me/mail/folders/messages/{id}",
+      "delete",
+      Some("me_mail_folders_messages_delete"),
+    ),
+  ]);
 
-    let mut ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    ids.sort_unstable();
-    assert_eq!(
-      ids,
-      vec!["items", "items_2", "items_3"],
-      "common prefix 'list' should be stripped"
-    );
-  }
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 3);
+  assert_stable_ids(
+    &registry,
+    &["delete", "get", "list"],
+    "common prefix should be stripped",
+  );
+}
 
-  {
-    let spec = create_test_spec(vec![
-      (
-        "/me/mail/folders/messages",
-        "get",
-        Some("me_mail_folders_messages_list"),
-      ),
-      (
-        "/me/mail/folders/messages/{id}",
-        "get",
-        Some("me_mail_folders_messages_get"),
-      ),
-      (
-        "/me/mail/folders/messages/{id}",
-        "delete",
-        Some("me_mail_folders_messages_delete"),
-      ),
-    ]);
+#[test]
+fn test_operation_registry_strips_common_suffix() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("list_users_request")),
+    ("/users", "post", Some("create_users_request")),
+    ("/users/{id}", "delete", Some("delete_users_request")),
+  ]);
 
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.entries.len(), 3);
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 3);
+  assert_stable_ids(
+    &registry,
+    &["create", "delete", "list"],
+    "common suffix should be stripped",
+  );
+}
 
-    let mut ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    ids.sort_unstable();
-    assert_eq!(ids, vec!["delete", "get", "list"], "common prefix should be stripped");
-  }
+#[test]
+fn test_operation_registry_retains_middle_segment_after_affix_stripping() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("api_users_list")),
+    ("/posts", "get", Some("api_posts_list")),
+  ]);
 
-  {
-    let spec = create_test_spec(vec![
-      ("/users", "get", Some("list_users_request")),
-      ("/users", "post", Some("create_users_request")),
-      ("/users/{id}", "delete", Some("delete_users_request")),
-    ]);
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 2);
+  assert_stable_ids(
+    &registry,
+    &["posts", "users"],
+    "middle segment should remain when prefix and suffix are stripped",
+  );
+}
 
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.entries.len(), 3);
+#[test]
+fn test_operation_registry_does_not_simplify_when_no_common_affixes() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("listUsers")),
+    ("/posts", "post", Some("createPost")),
+  ]);
 
-    let mut ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    ids.sort_unstable();
-    assert_eq!(
-      ids,
-      vec!["create", "delete", "list"],
-      "common suffix should be stripped"
-    );
-  }
-
-  {
-    let spec = create_test_spec(vec![
-      ("/users", "get", Some("api_users_list")),
-      ("/posts", "get", Some("api_posts_list")),
-    ]);
-
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.entries.len(), 2);
-
-    let mut ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    ids.sort_unstable();
-    assert_eq!(
-      ids,
-      vec!["posts", "users"],
-      "middle segment retained when prefix/suffix stripped"
-    );
-  }
-
-  {
-    let spec = create_test_spec(vec![
-      ("/users", "get", Some("listUsers")),
-      ("/posts", "post", Some("createPost")),
-    ]);
-
-    let registry = OperationRegistry::new(&spec);
-    assert_eq!(registry.entries.len(), 2);
-
-    let mut ids = registry
-      .operations()
-      .map(|entry| entry.stable_id.clone())
-      .collect::<Vec<String>>();
-    ids.sort_unstable();
-    assert_eq!(
-      ids,
-      vec!["create_post", "list_users"],
-      "no simplification when no common affixes"
-    );
-  }
+  let registry = OperationRegistry::new(&spec);
+  assert_eq!(registry.entries.len(), 2);
+  assert_stable_ids(
+    &registry,
+    &["create_post", "list_users"],
+    "IDs should remain unchanged when there are no common affixes",
+  );
 }

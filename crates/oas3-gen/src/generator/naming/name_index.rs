@@ -9,7 +9,7 @@ use oas3::{
 use super::identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name};
 use crate::{
   generator::{
-    converter::{hashing::CanonicalSchema, union_types::entries_to_cache_key},
+    converter::{hashing::CanonicalSchema, union_types::variants_to_cache_key},
     naming::constants::KNOWN_ENUM_VARIANT,
   },
   utils::SchemaExt,
@@ -120,7 +120,7 @@ impl<'a> TypeNameIndex<'a> {
       if schema.has_relaxed_anyof_enum() {
         rust_name.push_str(KNOWN_ENUM_VARIANT);
       }
-      index.add_enum_candidate(entries_to_cache_key(&entries), rust_name, true);
+      index.add_enum_candidate(variants_to_cache_key(&entries), rust_name, true);
     }
 
     index
@@ -142,7 +142,7 @@ impl<'a> TypeNameIndex<'a> {
 
         let enum_cache_key = if prop_schema.should_register_as_enum() {
           let entries = prop_schema.extract_enum_entries(self.spec);
-          let key = entries_to_cache_key(&entries);
+          let key = variants_to_cache_key(&entries);
           index.add_enum_candidate(key.clone(), rust_name.clone(), false);
           Some(key)
         } else {

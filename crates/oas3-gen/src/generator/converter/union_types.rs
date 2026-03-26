@@ -1,28 +1,37 @@
+use bon::Builder;
 use itertools::Itertools;
-use oas3::spec::ObjectSchema;
-use serde_json::Value;
+use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema};
 
 use crate::generator::ast::{
   DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumToken, EnumVariantToken,
   RustType, SerdeAttribute, VariantDef,
 };
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) enum UnionKind {
-  OneOf,
-  AnyOf,
+/// Represents a nested union that has been promoted to a flat variant list.
+#[derive(Clone, Debug, PartialEq, Builder)]
+pub(crate) struct FlattenedUnion {
+  pub(crate) variants: Vec<ObjectOrReference<ObjectSchema>>,
+  pub(crate) description: Option<String>,
+  pub(crate) discriminator: Option<Discriminator>,
+  pub(crate) is_one_of: bool,
 }
 
-impl UnionKind {
-  /// Returns the union kind based on whether the schema defines `oneOf` or `anyOf` variants.
-  ///
-  /// If the schema's `one_of` array is empty, assumes the union is defined via `anyOf`.
-  /// Otherwise, treats it as a `oneOf` union where exactly one variant must match.
-  pub(crate) fn from_schema(schema: &ObjectSchema) -> Self {
-    if schema.one_of.is_empty() {
-      UnionKind::AnyOf
-    } else {
-      UnionKind::OneOf
+impl From<FlattenedUnion> for ObjectSchema {
+  fn from(flattened: FlattenedUnion) -> Self {
+    ObjectSchema {
+      description: flattened.description,
+      discriminator: flattened.discriminator,
+      one_of: if flattened.is_one_of {
+        flattened.variants.clone()
+      } else {
+        vec![]
+      },
+      any_of: if flattened.is_one_of {
+        vec![]
+      } else {
+        flattened.variants
+      },
+      ..Default::default()
     }
   }
 }
@@ -33,29 +42,13 @@ pub(crate) enum CollisionStrategy {
   Deduplicate,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct EnumValueEntry {
-  pub(crate) value: Value,
-  pub(crate) docs: Documentation,
-  pub(crate) deprecated: bool,
-}
-
-impl EnumValueEntry {
-  /// Extracts a cache key from this enum entry's value, if it is a string.
-  ///
-  /// Returns `Some(value)` for string enum values, or `None` for non-string values
-  /// (integers, booleans, etc.) which cannot be used as cache keys.
-  pub(crate) fn cache_key(&self) -> Option<String> {
-    self.value.as_str().map(String::from)
-  }
-}
-
-/// Builds a sorted list of cache keys from enum value entries for type deduplication.
+/// Builds a sorted list of cache keys from variant definitions for type deduplication.
 ///
-/// Filters out non-string entries, then sorts alphabetically to produce a canonical
-/// key that identifies equivalent enum types regardless of their declaration order.
-pub(crate) fn entries_to_cache_key(entries: &[EnumValueEntry]) -> Vec<String> {
-  entries.iter().filter_map(EnumValueEntry::cache_key).sorted().collect()
+/// Uses each variant's serde name (the wire-format value) as the cache key,
+/// sorted alphabetically to produce a canonical key that identifies equivalent
+/// enum types regardless of their declaration order.
+pub(crate) fn variants_to_cache_key(variants: &[VariantDef]) -> Vec<String> {
+  variants.iter().map(VariantDef::serde_name).sorted().collect()
 }
 
 #[derive(Clone, Debug)]
@@ -74,14 +67,14 @@ impl RustType {
   #[builder]
   pub(crate) fn untagged_enum(
     name: &str,
-    schema: &ObjectSchema,
+    docs: Documentation,
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
   ) -> Self {
     RustType::Enum(
       EnumDef::builder()
         .name(EnumToken::from_raw(name))
-        .docs(Documentation::from_optional(schema.description.as_ref()))
+        .docs(docs)
         .variants(variants)
         .serde_attrs(vec![SerdeAttribute::Untagged])
         .case_insensitive(false)

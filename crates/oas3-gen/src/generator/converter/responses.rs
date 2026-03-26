@@ -19,7 +19,7 @@ use crate::{
       responses as naming_responses,
     },
   },
-  utils::{SchemaExt as _, parse_schema_ref_path},
+  utils::{SchemaExt as _, parse_schema_ref_path, schema_ext::SchemaExtIters},
 };
 
 /// Extracted metadata about operation responses for code generation.
@@ -68,8 +68,8 @@ impl ResponseConverter {
 
     let variants = responses
       .iter()
-      .filter_map(|(status_str, resp_ref)| {
-        let response = resp_ref.resolve(spec).ok()?;
+      .resolve_all(spec)
+      .flat_map(|(status_str, response)| {
         let status_code = status_str
           .parse::<StatusCodeToken>()
           .unwrap_or(StatusCodeToken::Default);
@@ -79,14 +79,13 @@ impl ResponseConverter {
             .unwrap_or_default(),
         );
 
-        Some(Self::split_variants_by_content_type(
+        Self::split_variants_by_content_type(
           status_code,
           &status_code.to_variant_token(),
           response.description.as_ref(),
           &media_types,
-        ))
+        )
       })
-      .flatten()
       .collect_vec();
 
     let variants = Self::with_default_variant(variants);

@@ -7,7 +7,7 @@ use super::{
   ConversionOutput,
   methods::MethodGenerator,
   relaxed_enum::RelaxedEnumBuilder,
-  union_types::{CollisionStrategy, UnionKind, UnionVariantSpec, entries_to_cache_key},
+  union_types::{CollisionStrategy, UnionVariantSpec, variants_to_cache_key},
   value_enums::ValueEnumBuilder,
   variants::VariantBuilder,
 };
@@ -56,11 +56,11 @@ impl EnumConverter {
       CollisionStrategy::Deduplicate
     };
 
-    let entries = schema.extract_enum_entries(self.context.graph().spec());
+    let variants = schema.extract_enum_entries(self.context.graph().spec());
 
-    self.value_enum_builder.build_enum_from_values(
+    self.value_enum_builder.build_enum_from_variants(
       name,
-      &entries,
+      variants,
       strategy,
       Documentation::from_optional(schema.description.as_ref()),
     )
@@ -107,27 +107,22 @@ impl UnionConverter {
   ///
   /// Returns the main enum type plus any inline types generated for anonymous
   /// variant schemas.
-  pub(crate) fn convert_union(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    kind: UnionKind,
-  ) -> anyhow::Result<ConversionOutput<RustType>> {
-    if kind == UnionKind::AnyOf
+  pub(crate) fn convert_union(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
+    if !schema.any_of.is_empty()
       && let Some(output) = self.relaxed_enum_builder.try_build_relaxed_enum(name, schema)
     {
       return Ok(output);
     }
 
-    let output = self.collect_union_variants(name, schema, kind)?;
+    let output = self.collect_union_variants(name, schema)?;
 
     let should_register_enum = !schema.enum_values.is_empty() || schema.has_relaxed_anyof_enum();
     if should_register_enum {
-      let entries = schema.extract_enum_entries(self.context.graph().spec());
-      if !entries.is_empty()
+      let variants = schema.extract_enum_entries(self.context.graph().spec());
+      if !variants.is_empty()
         && let RustType::Enum(e) = &output.result
       {
-        let cache_key = entries_to_cache_key(&entries);
+        let cache_key = variants_to_cache_key(&variants);
         self
           .context
           .cache
@@ -147,15 +142,11 @@ impl UnionConverter {
   ///
   /// Attempts to upgrade to a discriminated enum if the schema contains a
   /// `discriminator` mapping; otherwise produces an untagged enum.
-  fn collect_union_variants(
-    &self,
-    name: &str,
-    schema: &ObjectSchema,
-    kind: UnionKind,
-  ) -> anyhow::Result<ConversionOutput<RustType>> {
-    let variants_src = match kind {
-      UnionKind::OneOf => &schema.one_of,
-      UnionKind::AnyOf => &schema.any_of,
+  fn collect_union_variants(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
+    let variants_src = if schema.one_of.is_empty() {
+      &schema.any_of
+    } else {
+      &schema.one_of
     };
 
     let variant_specs = self.collect_union_variant_specs(variants_src)?;
@@ -183,7 +174,7 @@ impl UnionConverter {
       .unwrap_or_else(|| {
         RustType::untagged_enum()
           .name(name)
-          .schema(schema)
+          .docs(Documentation::from_optional(schema.description.as_ref()))
           .variants(variants)
           .methods(methods)
           .call()

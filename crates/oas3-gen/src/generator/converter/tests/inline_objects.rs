@@ -1,43 +1,29 @@
-use std::collections::BTreeMap;
-
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use serde_json::json;
 
 use crate::{
   generator::{ast::RustType, converter::SchemaConverter},
-  tests::common::{create_test_context, create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config, parse_schemas},
 };
 
 #[test]
 fn test_inline_object_generation() -> anyhow::Result<()> {
-  let mut loaf_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
-
-  let mut config_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
-  config_schema.properties.insert(
-    "timeout".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      ..Default::default()
+  let schemas = parse_schemas(vec![(
+    "Loaf",
+    json!({
+      "type": "object",
+      "properties": {
+        "loaf_config": {
+          "type": "object",
+          "properties": {
+            "timeout": { "type": "integer" },
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
     }),
-  );
-  config_schema.properties.insert(
-    "enabled".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Boolean)),
-      ..Default::default()
-    }),
-  );
+  )]);
 
-  loaf_schema
-    .properties
-    .insert("loaf_config".to_string(), ObjectOrReference::Object(config_schema));
-
-  let graph = create_test_graph(BTreeMap::from([("Loaf".to_string(), loaf_schema)]));
+  let graph = create_test_graph(schemas);
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("Loaf", graph.get("Loaf").unwrap())?;
@@ -82,28 +68,21 @@ fn test_inline_object_generation() -> anyhow::Result<()> {
 
 #[test]
 fn test_inline_object_without_type_field() -> anyhow::Result<()> {
-  let mut cardigan_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    ..Default::default()
-  };
-
-  let mut meta_schema = ObjectSchema {
-    schema_type: None,
-    ..Default::default()
-  };
-  meta_schema.properties.insert(
-    "key".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-      ..Default::default()
+  let schemas = parse_schemas(vec![(
+    "Cardigan",
+    json!({
+      "type": "object",
+      "properties": {
+        "fluff": {
+          "properties": {
+            "key": { "type": "string" }
+          }
+        }
+      }
     }),
-  );
+  )]);
 
-  cardigan_schema
-    .properties
-    .insert("fluff".to_string(), ObjectOrReference::Object(meta_schema));
-
-  let graph = create_test_graph(BTreeMap::from([("Cardigan".to_string(), cardigan_schema)]));
+  let graph = create_test_graph(schemas);
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("Cardigan", graph.get("Cardigan").unwrap())?;

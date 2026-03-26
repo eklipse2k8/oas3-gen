@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::ObjectSchema;
+use serde_json::json;
 
 use crate::{
   generator::{ast::RustType, converter::SchemaConverter},
@@ -9,48 +10,40 @@ use crate::{
 
 #[test]
 fn test_intersection_of_union_allof_anyof() -> anyhow::Result<()> {
-  let mut corgi_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    description: Some("Must be a corgi with a tag_id, and must be either a Pembroke or a Cardigan.".to_string()),
-    ..Default::default()
-  };
+  let corgi_json = json!({
+    "type": "object",
+    "description": "Must be a corgi with a tag_id, and must be either a Pembroke or a Cardigan.",
+    "allOf": [
+      {
+        "required": ["tag_id"],
+        "properties": {
+          "tag_id": {
+            "type": "string"
+          }
+        }
+      }
+    ],
+    "anyOf": [
+      {
+        "required": ["stumpy_legs"],
+        "properties": {
+          "stumpy_legs": {
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "required": ["floof_ears"],
+        "properties": {
+          "floof_ears": {
+            "type": "integer"
+          }
+        }
+      }
+    ]
+  });
 
-  corgi_schema.all_of.push(ObjectOrReference::Object(ObjectSchema {
-    required: vec!["tag_id".to_string()],
-    properties: BTreeMap::from([(
-      "tag_id".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  }));
-
-  corgi_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
-    required: vec!["stumpy_legs".to_string()],
-    properties: BTreeMap::from([(
-      "stumpy_legs".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  }));
-
-  corgi_schema.any_of.push(ObjectOrReference::Object(ObjectSchema {
-    required: vec!["floof_ears".to_string()],
-    properties: BTreeMap::from([(
-      "floof_ears".to_string(),
-      ObjectOrReference::Object(ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-        ..Default::default()
-      }),
-    )]),
-    ..Default::default()
-  }));
-
+  let corgi_schema = serde_json::from_value::<ObjectSchema>(corgi_json)?;
   let graph = create_test_graph(BTreeMap::from([("Corgi".to_string(), corgi_schema)]));
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);

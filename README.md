@@ -221,7 +221,7 @@ Terminal Output:
 ```text
 Generates idiomatic, type-safe Rust code from an OpenAPI v3.1 (OAS31) specification
 
-Usage: oas3-gen generate [OPTIONS] --input <FILE> --output <FILE> [MODE]
+Usage: oas3-gen generate [OPTIONS] --input <FILE> [MODE]
 
 Arguments:
   [MODE]  Sets the generation mode [default: types] [possible values: types, client, client-mod, server-mod]
@@ -236,9 +236,9 @@ Code Generation:
       --enum-mode <ENUM_MODE>  Specifies how to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
       --no-helpers             Disable generation of ergonomic helper methods for enum variants
   -c, --customize <TYPE=PATH>  Custom serde_as type overrides (format: type_name=custom::Path)
+      --all-headers            Emit header constants for all parameters defined in components, not just those used in operations
       --enable-builders        Enable bon builder derives on schema structs and builder methods on request structs
       --doc-format             Format documentation comments using mdformat (requires mdformat installed)
-      --all-headers            Emit header constants for all component-level header parameters
 
 Operation Filtering:
       --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
@@ -251,14 +251,19 @@ Operation Filtering:
 ```text
 List information from OpenAPI specification
 
-Usage: oas3-gen list <COMMAND>
+Usage: oas3-gen list [OPTIONS] <COMMAND>
 
 Commands:
   operations  List all operations defined in the OpenAPI specification
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+  -h, --help     Print help
+  -V, --version  Print version
+
+Terminal Output:
+      --color <WHEN>   Coloring [default: auto] [possible values: always, auto, never]
+      --theme <THEME>  Theme [default: auto] [possible values: dark, light, auto]
 ```
 
 ### Examples

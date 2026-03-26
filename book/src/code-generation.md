@@ -120,13 +120,16 @@ pub trait ApiServer: Send + Sync {
     fn list_pets(
         &self,
         request: ListPetsRequest,
-    ) -> impl Future<Output = Result<ListPetsResponse, ListPetsError>> + Send;
+    ) -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
 }
 
-pub fn router<S: ApiServer + 'static>(state: Arc<S>) -> Router {
+pub fn router<S>(service: S) -> Router
+where
+    S: ApiServer + Clone + Send + Sync + 'static,
+{
     Router::new()
-        .route("/pets", get(list_pets_handler::<S>))
-        .with_state(state)
+        .route("/pets", get(list_pets::<S>))
+        .with_state(service)
 }
 ```
 

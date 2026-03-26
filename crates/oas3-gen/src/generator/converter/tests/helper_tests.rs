@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::ObjectSchema;
 use serde_json::json;
 
 use crate::{
@@ -13,77 +13,56 @@ use crate::{
 
 #[test]
 fn test_enum_helper_with_const_discriminator() -> anyhow::Result<()> {
-  let pembroke_schema = ObjectSchema {
-    title: Some("Pembroke".to_string()),
-    properties: BTreeMap::from([
-      (
-        "type".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(json!("pembroke")),
-          ..Default::default()
-        }),
-      ),
-      (
-        "waddle".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          ..Default::default()
-        }),
-      ),
-    ]),
-    required: vec!["type".to_string(), "waddle".to_string()],
-    ..Default::default()
-  };
-
-  let cardigan_schema = ObjectSchema {
-    title: Some("Cardigan".to_string()),
-    properties: BTreeMap::from([
-      (
-        "type".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(json!("cardigan")),
-          ..Default::default()
-        }),
-      ),
-      (
-        "sploot".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          ..Default::default()
-        }),
-      ),
-    ]),
-    required: vec!["type".to_string(), "sploot".to_string()],
-    ..Default::default()
-  };
-
-  let union_schema = ObjectSchema {
-    one_of: vec![
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/Pembroke".to_string(),
-        summary: None,
-        description: None,
+  let pembroke_json = json!({
+    "title": "Pembroke",
+    "type": "object",
+    "properties": {
+      "type": {
+        "type": "string",
+        "const": "pembroke"
       },
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/Cardigan".to_string(),
-        summary: None,
-        description: None,
+      "waddle": {
+        "type": "string"
+      }
+    },
+    "required": ["type", "waddle"]
+  });
+
+  let cardigan_json = json!({
+    "title": "Cardigan",
+    "type": "object",
+    "properties": {
+      "type": {
+        "type": "string",
+        "const": "cardigan"
       },
+      "sploot": {
+        "type": "string"
+      }
+    },
+    "required": ["type", "sploot"]
+  });
+
+  let corgi_json = json!({
+    "oneOf": [
+      { "$ref": "#/components/schemas/Pembroke" },
+      { "$ref": "#/components/schemas/Cardigan" }
     ],
-    discriminator: Some(oas3::spec::Discriminator {
-      property_name: "type".to_string(),
-      mapping: Some(BTreeMap::from([
-        ("pembroke".to_string(), "#/components/schemas/Pembroke".to_string()),
-        ("cardigan".to_string(), "#/components/schemas/Cardigan".to_string()),
-      ])),
-    }),
-    ..Default::default()
-  };
+    "discriminator": {
+      "propertyName": "type",
+      "mapping": {
+        "pembroke": "#/components/schemas/Pembroke",
+        "cardigan": "#/components/schemas/Cardigan"
+      }
+    }
+  });
+
+  let pembroke_schema = serde_json::from_value::<ObjectSchema>(pembroke_json)?;
+  let cardigan_schema = serde_json::from_value::<ObjectSchema>(cardigan_json)?;
+  let corgi_schema = serde_json::from_value::<ObjectSchema>(corgi_json)?;
 
   let graph = create_test_graph(BTreeMap::from([
-    ("Corgi".to_string(), union_schema),
+    ("Corgi".to_string(), corgi_schema),
     ("Pembroke".to_string(), pembroke_schema),
     ("Cardigan".to_string(), cardigan_schema),
   ]));

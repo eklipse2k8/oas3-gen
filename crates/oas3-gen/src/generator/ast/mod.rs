@@ -25,12 +25,13 @@ pub use documentation::Documentation;
 use http::Method;
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
-use oas3::spec::ParameterIn;
+use oas3::spec::{ObjectSchema, ParameterIn};
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
 pub use serde_attrs::SerdeAttribute;
+use serde_json::Value;
 pub use server::{HandlerBodyInfo, ServerRequestTraitDef, ServerTraitMethod};
 pub use status_codes::StatusCodeToken;
 pub use tokens::{
@@ -40,7 +41,10 @@ pub use types::{RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
-use crate::generator::{ast::constants::HttpHeaderRef, metrics::GenerationWarning};
+use crate::{
+  generator::{ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant},
+  utils::schema_ext::SchemaIters,
+};
 
 /// Node used to generate file header
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
@@ -623,6 +627,64 @@ impl VariantDef {
   #[must_use]
   pub fn unboxed_type_name(&self) -> Option<String> {
     self.content.single_type().map(TypeRef::unboxed_base_type_name)
+  }
+}
+
+impl SchemaIters for std::slice::Iter<'_, Value> {
+  fn variants(self) -> impl Iterator<Item = VariantDef> {
+    self.filter_map(|value| {
+      Some(
+        VariantDef::builder()
+          .value(value)?
+          .content(VariantContent::Unit)
+          .build(),
+      )
+    })
+  }
+}
+
+impl<S: variant_def_builder::State> VariantDefBuilder<S>
+where
+  S::Name: variant_def_builder::IsSet,
+  S::SerdeAttrs: variant_def_builder::IsSet,
+  S::Content: variant_def_builder::IsSet,
+  S::Docs: variant_def_builder::IsUnset,
+  S::Deprecated: variant_def_builder::IsUnset,
+{
+  pub fn schema(
+    self,
+    schema: &ObjectSchema,
+  ) -> VariantDefBuilder<variant_def_builder::SetDeprecated<variant_def_builder::SetDocs<S>>> {
+    self
+      .docs(Documentation::from_optional(schema.description.as_ref()))
+      .deprecated(schema.deprecated.unwrap_or(false))
+  }
+}
+
+impl<S: variant_def_builder::State> VariantDefBuilder<S>
+where
+  S::Name: variant_def_builder::IsUnset,
+  S::SerdeAttrs: variant_def_builder::IsUnset,
+{
+  pub fn value(
+    self,
+    value: &Value,
+  ) -> Option<VariantDefBuilder<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>>> {
+    Some(self.normalized(NormalizedVariant::try_from(value).ok()?))
+  }
+
+  pub fn normalized(
+    self,
+    normalized: NormalizedVariant,
+  ) -> VariantDefBuilder<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>> {
+    let attributes = if normalized.name == normalized.rename_value {
+      vec![]
+    } else {
+      vec![SerdeAttribute::Rename(normalized.rename_value)]
+    };
+    self
+      .name(EnumVariantToken::from(normalized.name))
+      .serde_attrs(attributes)
   }
 }
 

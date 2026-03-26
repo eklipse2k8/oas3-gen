@@ -42,10 +42,12 @@ impl ResponseEnumDeduplicator {
         continue;
       }
 
-      let canonical = group
+      let Some(canonical) = group
         .iter()
         .min_by(|a, b| a.name.len().cmp(&b.name.len()).then(a.name.cmp(&b.name)))
-        .unwrap();
+      else {
+        continue;
+      };
 
       for candidate in group {
         if candidate.name != canonical.name {

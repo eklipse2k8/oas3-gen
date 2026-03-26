@@ -8,11 +8,18 @@ use petgraph::{algo::kosaraju_scc, graphmap::DiGraphMap, visit::Dfs};
 
 use crate::{
   generator::{
+    ast::TypeRef,
     metrics::{GenerationStats, GenerationWarning},
-    naming::name_index::{ScanResult, TypeNameIndex},
+    naming::{
+      identifiers::to_rust_type_name,
+      name_index::{ScanResult, TypeNameIndex},
+    },
     operation_registry::OperationRegistry,
   },
-  utils::{SchemaExt, UnionFingerprints, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path},
+  utils::{
+    SchemaExt, UnionFingerprints, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path,
+    schema_ext::SchemaExtIters,
+  },
 };
 
 /// Identifies how a schema maps to a discriminator value in a polymorphic hierarchy.
@@ -200,6 +207,11 @@ impl SchemaRegistry {
     self.schemas.get(name)
   }
 
+  /// Returns whether a schema with the given name exists in the registry.
+  pub(crate) fn contains(&self, name: &str) -> bool {
+    self.schemas.contains_key(name)
+  }
+
   /// Returns all schema names in the registry.
   ///
   /// Returns a vector of references to the names of all schemas defined
@@ -282,6 +294,16 @@ impl SchemaRegistry {
   /// Checks if a schema participates in a dependency cycle.
   pub(crate) fn is_cyclic(&self, schema_name: &str) -> bool {
     self.cyclic_schemas.contains(schema_name)
+  }
+
+  /// Creates a type reference for a named schema, applying `Box` wrapping if the
+  /// schema participates in a dependency cycle.
+  pub(crate) fn type_ref(&self, schema_name: &str) -> TypeRef {
+    let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
+    if self.is_cyclic(schema_name) {
+      type_ref = type_ref.with_boxed();
+    }
+    type_ref
   }
 
   /// Flattens an `all_of` inheritance hierarchy into a single schema.
@@ -379,6 +401,15 @@ impl SchemaRegistry {
     if let Some(ref items_box) = schema.items
       && let Schema::Object(ref schema_ref) = **items_box
     {
+      if let Some(ref_name) = extract_schema_ref_name(schema_ref) {
+        refs.insert(ref_name);
+      }
+      if let ObjectOrReference::Object(inline) = &**schema_ref {
+        refs.extend(self.collect(inline, union_fingerprints));
+      }
+    }
+
+    if let Some(Schema::Object(ref schema_ref)) = schema.additional_properties {
       if let Some(ref_name) = extract_schema_ref_name(schema_ref) {
         refs.insert(ref_name);
       }
@@ -588,7 +619,7 @@ impl SchemaRegistry {
     schema
       .all_of
       .iter()
-      .filter_map(|r| r.resolve(&self.spec).ok())
+      .resolve_all(&self.spec)
       .find_map(|parent| parent.additional_properties.clone())
   }
 

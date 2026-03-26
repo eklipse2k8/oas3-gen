@@ -1,212 +1,111 @@
-use std::collections::BTreeMap;
+use serde_json::json;
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
-
+use super::support::assert_single_type_alias;
 use crate::{
   generator::{ast::RustType, converter::SchemaConverter},
-  tests::common::{create_test_context, create_test_graph, default_config},
+  tests::common::{create_test_context, create_test_graph, default_config, parse_schemas},
 };
-
-fn make_string_schema() -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-    ..Default::default()
-  }
-}
-
-fn make_array_schema(items: Option<Schema>) -> ObjectSchema {
-  ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: items.map(Box::new),
-    ..Default::default()
-  }
-}
 
 #[test]
 fn test_primitive_type_aliases() -> anyhow::Result<()> {
-  let cases = [
-    (
-      "TagId",
-      ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-        ..Default::default()
-      },
-      "String",
-    ),
-    (
-      "SplootAt",
-      ObjectSchema {
-        schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-        format: Some("int64".to_string()),
-        ..Default::default()
-      },
-      "i64",
-    ),
-  ];
-
-  for (name, schema, expected_type) in cases {
-    let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
+  let schemas = parse_schemas(vec![
+    ("TagId", json!({"type": "string"})),
+    ("SplootAt", json!({"type": "integer", "format": "int64"})),
+  ]);
+  let cases = [("TagId", "String"), ("SplootAt", "i64")];
+  for (name, expected_type) in cases {
+    let graph = create_test_graph(schemas.clone());
     let context = create_test_context(graph.clone(), default_config());
     let converter = SchemaConverter::new(&context);
     let result = converter.convert_schema(name, graph.get(name).unwrap())?;
-
-    assert_eq!(result.len(), 1, "expected single type for {name}");
-    let RustType::TypeAlias(alias) = &result[0] else {
-      panic!("expected type alias for {name}")
-    };
-    assert_eq!(alias.name, name, "name mismatch for {name}");
-    assert_eq!(alias.target.to_rust_type(), expected_type, "type mismatch for {name}");
+    assert_single_type_alias(&result, name, expected_type);
   }
   Ok(())
 }
 
 #[test]
 fn test_array_type_aliases() -> anyhow::Result<()> {
-  let barks_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
-    make_string_schema(),
-  )))));
-
-  let floof_array_schema = make_array_schema(None);
-
-  let ball_matrix_schema = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Object(
-    ObjectSchema {
-      schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-      items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
-        ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-          ..Default::default()
-        },
-      ))))),
-      ..Default::default()
-    },
-  )))));
-
+  let schemas = parse_schemas(vec![
+    ("Barks", json!({"type": "array", "items": {"type": "string"}})),
+    ("FloofArray", json!({"type": "array"})),
+    (
+      "BallMatrix",
+      json!({"type": "array", "items": {"type": "array", "items": {"type": "integer"}}}),
+    ),
+  ]);
   let cases = [
-    ("Barks", barks_schema, "Vec<String>"),
-    ("FloofArray", floof_array_schema, "Vec<serde_json::Value>"),
-    ("BallMatrix", ball_matrix_schema, "Vec<Vec<i64>>"),
+    ("Barks", "Vec<String>"),
+    ("FloofArray", "Vec<serde_json::Value>"),
+    ("BallMatrix", "Vec<Vec<i64>>"),
   ];
-
-  for (name, schema, expected_type) in cases {
-    let graph = create_test_graph(BTreeMap::from([(name.to_string(), schema)]));
+  for (name, expected_type) in cases {
+    let graph = create_test_graph(schemas.clone());
     let context = create_test_context(graph.clone(), default_config());
     let converter = SchemaConverter::new(&context);
     let result = converter.convert_schema(name, graph.get(name).unwrap())?;
-
-    assert_eq!(result.len(), 1, "expected single type for {name}");
-    let RustType::TypeAlias(alias) = &result[0] else {
-      panic!("expected type alias for {name}")
-    };
-    assert_eq!(alias.name, name, "name mismatch for {name}");
-    assert_eq!(alias.target.to_rust_type(), expected_type, "type mismatch for {name}");
+    assert_single_type_alias(&result, name, expected_type);
   }
   Ok(())
 }
 
 #[test]
 fn test_array_type_alias_with_ref_items() -> anyhow::Result<()> {
-  let corgi_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([
-      (
-        "tag_id".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
-          ..Default::default()
-        }),
-      ),
-      ("name".to_string(), ObjectOrReference::Object(make_string_schema())),
-    ]),
-    ..Default::default()
-  };
-
-  let corgis_schema_array = make_array_schema(Some(Schema::Object(Box::new(ObjectOrReference::Ref {
-    ref_path: "#/components/schemas/Corgi".to_string(),
-    summary: None,
-    description: None,
-  }))));
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("Corgi".to_string(), corgi_schema),
-    ("Corgis".to_string(), corgis_schema_array),
-  ]));
-
+  let schemas = parse_schemas(vec![
+    (
+      "Corgi",
+      json!({
+        "type": "object",
+        "properties": {
+          "tag_id": {"type": "integer"},
+          "name": {"type": "string"}
+        }
+      }),
+    ),
+    (
+      "Corgis",
+      json!({"type": "array", "items": {"$ref": "#/components/schemas/Corgi"}}),
+    ),
+  ]);
+  let graph = create_test_graph(schemas);
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("Corgis", graph.get("Corgis").unwrap())?;
-
-  assert_eq!(result.len(), 1);
-  let RustType::TypeAlias(alias) = &result[0] else {
-    panic!("expected type alias for array schema")
-  };
-
-  assert_eq!(alias.name, "Corgis");
-  assert_eq!(alias.target.to_rust_type(), "Vec<Corgi>");
+  assert_single_type_alias(&result, "Corgis", "Vec<Corgi>");
   Ok(())
 }
 
 #[test]
 fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
-  let bark_frappe = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([
-      (
-        "type".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("bark")),
-          ..Default::default()
-        }),
-      ),
-      ("message".to_string(), ObjectOrReference::Object(make_string_schema())),
-    ]),
-    ..Default::default()
-  };
-
-  let sploot_frappe = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([
-      (
-        "type".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("sploot")),
-          ..Default::default()
-        }),
-      ),
-      ("url".to_string(), ObjectOrReference::Object(make_string_schema())),
-    ]),
-    ..Default::default()
-  };
-
-  let frappe_list_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
-    items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
-      ObjectSchema {
-        one_of: vec![
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/BarkFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/SplootFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-        ],
-        ..Default::default()
-      },
-    ))))),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("BarkFrappe".to_string(), bark_frappe),
-    ("SplootFrappe".to_string(), sploot_frappe),
-    ("FrappeList".to_string(), frappe_list_schema),
-  ]));
-
+  let schemas = parse_schemas(vec![
+    (
+      "BarkFrappe",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "const": "bark"},
+          "message": {"type": "string"}
+        }
+      }),
+    ),
+    (
+      "SplootFrappe",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "const": "sploot"},
+          "url": {"type": "string"}
+        }
+      }),
+    ),
+    (
+      "FrappeList",
+      json!({
+        "type": "array",
+        "items": {"oneOf": [{"$ref": "#/components/schemas/BarkFrappe"}, {"$ref": "#/components/schemas/SplootFrappe"}]}
+      }),
+    ),
+  ]);
+  let graph = create_test_graph(schemas);
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("FrappeList", graph.get("FrappeList").unwrap())?;
@@ -239,66 +138,36 @@ fn test_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
 
 #[test]
 fn test_nullable_array_type_alias_with_inline_union_items() -> anyhow::Result<()> {
-  let bark_frappe = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([
-      (
-        "type".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("bark")),
-          ..Default::default()
-        }),
-      ),
-      ("message".to_string(), ObjectOrReference::Object(make_string_schema())),
-    ]),
-    ..Default::default()
-  };
-
-  let sploot_frappe = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([
-      (
-        "type".to_string(),
-        ObjectOrReference::Object(ObjectSchema {
-          schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
-          const_value: Some(serde_json::json!("sploot")),
-          ..Default::default()
-        }),
-      ),
-      ("url".to_string(), ObjectOrReference::Object(make_string_schema())),
-    ]),
-    ..Default::default()
-  };
-
-  let nullable_frappe_list_schema = ObjectSchema {
-    schema_type: Some(SchemaTypeSet::Multiple(vec![SchemaType::Array, SchemaType::Null])),
-    items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
-      ObjectSchema {
-        one_of: vec![
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/BarkFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/SplootFrappe".to_string(),
-            summary: None,
-            description: None,
-          },
-        ],
-        ..Default::default()
-      },
-    ))))),
-    ..Default::default()
-  };
-
-  let graph = create_test_graph(BTreeMap::from([
-    ("BarkFrappe".to_string(), bark_frappe),
-    ("SplootFrappe".to_string(), sploot_frappe),
-    ("OptionFrappeList".to_string(), nullable_frappe_list_schema),
-  ]));
-
+  let schemas = parse_schemas(vec![
+    (
+      "BarkFrappe",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "const": "bark"},
+          "message": {"type": "string"}
+        }
+      }),
+    ),
+    (
+      "SplootFrappe",
+      json!({
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "const": "sploot"},
+          "url": {"type": "string"}
+        }
+      }),
+    ),
+    (
+      "OptionFrappeList",
+      json!({
+        "type": ["array", "null"],
+        "items": {"oneOf": [{"$ref": "#/components/schemas/BarkFrappe"}, {"$ref": "#/components/schemas/SplootFrappe"}]}
+      }),
+    ),
+  ]);
+  let graph = create_test_graph(schemas);
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
   let result = converter.convert_schema("OptionFrappeList", graph.get("OptionFrappeList").unwrap())?;

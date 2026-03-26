@@ -7,18 +7,21 @@ use super::{
   requests::{BodyInfo, RequestConverter, RequestOutput},
   responses::ResponseConverter,
 };
-use crate::generator::{
-  ast::{
-    Documentation, EnumToken, FieldDef, HandlerBodyInfo, MethodNameToken, OperationInfo, ParameterLocation, ParsedPath,
-    ResponseEnumDef, RustType, ServerRequestTraitDef, ServerTraitMethod, StructMethod, StructToken, TraitToken,
-    constants::HttpHeaderRef,
+use crate::{
+  generator::{
+    ast::{
+      Documentation, EnumToken, FieldDef, HandlerBodyInfo, MethodNameToken, OperationInfo, ParameterLocation,
+      ParsedPath, ResponseEnumDef, RustType, ServerRequestTraitDef, ServerTraitMethod, StructMethod, StructToken,
+      TraitToken, constants::HttpHeaderRef,
+    },
+    metrics::GenerationWarning,
+    naming::{
+      identifiers::to_rust_type_name,
+      operations::{generate_unique_request_name, generate_unique_response_name},
+    },
+    operation_registry::OperationEntry,
   },
-  metrics::GenerationWarning,
-  naming::{
-    identifiers::to_rust_type_name,
-    operations::{generate_unique_request_name, generate_unique_response_name},
-  },
-  operation_registry::OperationEntry,
+  utils::schema_ext::SchemaExtIters,
 };
 
 /// Result of converting a single OpenAPI operation.
@@ -107,7 +110,7 @@ impl OperationsProcessor {
         .components
         .iter()
         .flat_map(|components| components.parameters.values())
-        .filter_map(|parameter| parameter.resolve(spec).ok())
+        .resolve_all(spec)
         .filter(|parameter| parameter.location == ParameterIn::Header)
         .map(|parameter| HttpHeaderRef::from(&parameter.name)),
     );
