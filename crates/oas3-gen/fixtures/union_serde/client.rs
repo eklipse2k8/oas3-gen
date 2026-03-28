@@ -57,7 +57,7 @@ impl UnionSerializationTestApiClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("content");
     let response = self.client.post(url).json(&request.body).send().await?;
-    SendContentRequest::parse_response(response).await
+    Ok(SendContentRequest::parse_response(response).await?)
   }
   /// Get events with discriminated union
   ///
@@ -70,6 +70,6 @@ impl UnionSerializationTestApiClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("events");
     let response = self.client.get(url).send().await?;
-    GetEventsRequest::parse_response(response).await
+    Ok(GetEventsRequest::parse_response(response).await?)
   }
 }
