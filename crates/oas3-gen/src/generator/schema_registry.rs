@@ -486,7 +486,7 @@ impl SchemaRegistry {
   ) -> BTreeSet<String> {
     let initial_refs = operation_registry
       .operations()
-      .flat_map(|entry| self.collect_refs_from_operation(&entry.operation, union_fingerprints))
+      .flat_map(|entry| self.collect_refs_from_operation(&entry.path, &entry.operation, union_fingerprints))
       .collect::<BTreeSet<_>>();
 
     let graph = DiGraphMap::<&str, ()>::from_edges(
@@ -801,18 +801,27 @@ impl SchemaRegistry {
     }
   }
 
-  /// Collects schema references from an operation.
+  /// Collects schema references from an operation and its path-level parameters.
   ///
-  /// Scans parameters, request bodies, and responses to identify all
-  /// schema references that an operation directly depends on.
+  /// Scans both path-level and operation-level parameters, request bodies, and
+  /// responses to identify all schema references that an operation depends on.
   fn collect_refs_from_operation(
     &self,
+    path: &str,
     operation: &Operation,
     union_fingerprints: &UnionFingerprints,
   ) -> BTreeSet<String> {
     let mut refs = BTreeSet::new();
 
-    for param in &operation.parameters {
+    let path_params = self
+      .spec
+      .paths
+      .as_ref()
+      .and_then(|p| p.get(path))
+      .map(|item| item.parameters.as_slice())
+      .unwrap_or_default();
+
+    for param in path_params.iter().chain(&operation.parameters) {
       if let Ok(resolved_param) = param.resolve(&self.spec)
         && let Some(ref schema_ref) = resolved_param.schema
       {
