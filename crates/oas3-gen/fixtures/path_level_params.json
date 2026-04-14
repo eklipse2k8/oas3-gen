@@ -1,0 +1,132 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Path-level parameters reachability test",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/offices/{officeId}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/OfficeId" }
+      ],
+      "get": {
+        "operationId": "getOffice",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/offices/{officeId}/briefing": {
+      "parameters": [
+        { "$ref": "#/components/parameters/OfficeId" }
+      ],
+      "get": {
+        "operationId": "getOfficeBriefing",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items": {
+      "get": {
+        "operationId": "listItems",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/ItemCategory" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "OfficeId": {
+        "name": "officeId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OfficeIdUnion"
+        }
+      }
+    },
+    "schemas": {
+      "ForecastOfficeId": {
+        "type": "string",
+        "description": "Forecast office identifier",
+        "enum": ["AKQ", "ALY", "BGM"]
+      },
+      "RegionalHQId": {
+        "type": "string",
+        "description": "Regional HQ identifier",
+        "enum": ["ARH", "CRH", "ERH"]
+      },
+      "NationalHQId": {
+        "type": "string",
+        "description": "National HQ identifier",
+        "enum": ["NHQ"]
+      },
+      "OfficeIdUnion": {
+        "description": "Any office identifier",
+        "oneOf": [
+          { "$ref": "#/components/schemas/ForecastOfficeId" },
+          { "$ref": "#/components/schemas/RegionalHQId" },
+          { "$ref": "#/components/schemas/NationalHQId" }
+        ]
+      },
+      "ItemCategory": {
+        "type": "string",
+        "enum": ["electronics", "clothing", "food"]
+      },
+      "UnreferencedSchema": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 mod operation_registry;
 mod orchestrator;
+mod path_level_params;
 mod schema_graph;
 mod support;
 mod undeclared_path_params;
