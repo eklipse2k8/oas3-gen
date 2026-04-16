@@ -1,15 +1,16 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{BooleanSchema, ObjectOrReference, ObjectSchema, Schema};
+use oas3::spec::{BooleanSchema, ObjectSchema, Schema};
 use serde_json::json;
 
-use super::support::{make_integer_schema, make_null_schema, make_schema_ref};
+use super::support::{make_integer_schema, make_null_schema, make_schema_object, make_schema_ref};
 use crate::{
   generator::{ast::RustType, converter::type_resolver::TypeResolver},
   tests::common::{
     create_empty_test_graph, create_schema_converter, create_test_context, create_test_graph, default_config,
     make_object_schema_with_property, make_string_schema, parse_schema,
   },
+  utils::SchemaResolveExt,
 };
 
 #[test]
@@ -67,17 +68,14 @@ fn union_to_type_ref_conversion() {
   let cases = [
     (
       "nested_oneof_resolves_to_ref",
-      vec![
-        ObjectOrReference::Object(inner_schema),
-        ObjectOrReference::Object(make_null_schema()),
-      ],
+      vec![make_schema_object(inner_schema), make_schema_object(make_null_schema())],
       Some("Option<CacheControlEphemeral>"),
     ),
     (
       "no_resolvable_variants",
       vec![
-        ObjectOrReference::Object(make_null_schema()),
-        ObjectOrReference::Object(make_null_schema()),
+        make_schema_object(make_null_schema()),
+        make_schema_object(make_null_schema()),
       ],
       None,
     ),
@@ -326,7 +324,7 @@ fn array_with_union_items_inline_generation() {
       "CreateMessageParams",
       "tools",
       &oneof_array_schema,
-      &ObjectOrReference::Object(oneof_array_schema.clone()),
+      &make_schema_object(oneof_array_schema.clone()),
     )
     .unwrap();
   assert_eq!(
@@ -361,7 +359,7 @@ fn array_with_union_items_inline_generation() {
       "Response",
       "items",
       &anyof_array_schema,
-      &ObjectOrReference::Object(anyof_array_schema.clone()),
+      &make_schema_object(anyof_array_schema.clone()),
     )
     .unwrap();
   assert_eq!(
@@ -384,7 +382,7 @@ fn array_with_union_items_inline_generation() {
       "Parent",
       "items",
       &ref_array_schema,
-      &ObjectOrReference::Object(ref_array_schema.clone()),
+      &make_schema_object(ref_array_schema.clone()),
     )
     .unwrap();
   assert_eq!(ref_result.result.to_rust_type(), "Vec<Item>", "ref array type mismatch");
@@ -426,7 +424,7 @@ fn multi_ref_oneof_returns_none_for_fallback() {
     result.map(|r| r.to_rust_type())
   );
 
-  let single_ref_with_null = vec![make_schema_ref("TypeA"), ObjectOrReference::Object(make_null_schema())];
+  let single_ref_with_null = vec![make_schema_ref("TypeA"), make_schema_object(make_null_schema())];
 
   let result = resolver.try_union(&single_ref_with_null).unwrap();
   assert!(result.is_some(), "single ref with null should collapse to Option<T>");
@@ -464,7 +462,7 @@ fn union_naming_with_common_suffix() {
       "BetaResponse",
       "citation",
       &union_schema,
-      &ObjectOrReference::Object(union_schema.clone()),
+      &make_schema_object(union_schema.clone()),
     )
     .unwrap();
 
@@ -503,7 +501,7 @@ fn union_naming_without_common_suffix() {
       "Request",
       "tool",
       &union_schema,
-      &ObjectOrReference::Object(union_schema.clone()),
+      &make_schema_object(union_schema.clone()),
     )
     .unwrap();
 
@@ -548,7 +546,7 @@ fn array_union_naming_with_common_suffix() {
       "Stream",
       "events",
       &array_schema,
-      &ObjectOrReference::Object(array_schema.clone()),
+      &make_schema_object(array_schema.clone()),
     )
     .unwrap();
 
@@ -641,6 +639,35 @@ fn additional_properties_type_resolution() {
     "serde_json::Value",
     "additionalProperties: false should resolve to serde_json::Value"
   );
+}
+
+#[test]
+fn boolean_property_schemas_resolve_to_value() {
+  let schema = parse_schema(json!({
+    "type": "object",
+    "properties": {
+      "anything": true,
+      "impossible": false
+    }
+  }));
+
+  let graph = create_empty_test_graph();
+  let context = create_test_context(graph.clone(), default_config());
+  let resolver = TypeResolver::new(context.clone());
+
+  for property_name in ["anything", "impossible"] {
+    let property_ref = schema.properties.get(property_name).unwrap();
+    let property_schema = property_ref.resolve_object(context.graph().spec()).unwrap();
+    let result = resolver
+      .resolve_property("BooleanSchemaContainer", property_name, &property_schema, property_ref)
+      .unwrap();
+
+    assert_eq!(
+      result.result.to_rust_type(),
+      "serde_json::Value",
+      "boolean schema property should resolve to Value for {property_name}"
+    );
+  }
 }
 
 #[allow(clippy::approx_constant)]
@@ -788,7 +815,7 @@ fn try_nullable_union_edge_cases() {
   let three_variants_with_null = vec![
     make_schema_ref("TypeA"),
     make_schema_ref("TypeB"),
-    ObjectOrReference::Object(make_null_schema()),
+    make_schema_object(make_null_schema()),
   ];
   let result = resolver.try_union(&three_variants_with_null).unwrap();
   assert!(
@@ -804,8 +831,8 @@ fn try_nullable_union_edge_cases() {
     "type": ["object", "null"]
   }));
   let two_nullable_objects = vec![
-    ObjectOrReference::Object(nullable_object.clone()),
-    ObjectOrReference::Object(make_null_schema()),
+    make_schema_object(nullable_object.clone()),
+    make_schema_object(make_null_schema()),
   ];
   let result = resolver.try_union(&two_nullable_objects).unwrap();
   assert!(
@@ -815,8 +842,8 @@ fn try_nullable_union_edge_cases() {
 
   let inline_string = make_string_schema();
   let inline_with_null = vec![
-    ObjectOrReference::Object(inline_string),
-    ObjectOrReference::Object(make_null_schema()),
+    make_schema_object(inline_string),
+    make_schema_object(make_null_schema()),
   ];
   let result = resolver.try_union(&inline_with_null).unwrap();
   assert!(

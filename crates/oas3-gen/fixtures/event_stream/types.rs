@@ -41,19 +41,19 @@ pub enum EventsResponse {
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct StreamEvent {
-  /// Event data payload
-  pub data: String,
   /// Unique event identifier
   pub id: String,
+  /// Event data payload
+  pub data: String,
   /// Event timestamp
   pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct TypedEvent {
-  pub payload: EventPayload,
   /// Event type
   #[serde(rename = "type")]
   pub r#type: TypedEventType,
+  pub payload: EventPayload,
 }
 /// Event type
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]

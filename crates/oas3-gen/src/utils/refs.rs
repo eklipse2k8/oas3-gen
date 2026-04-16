@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, Ref};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Ref, Schema};
 
 /// Parses a schema `$ref` path and extracts the referenced schema name.
 ///
@@ -23,20 +23,31 @@ pub fn parse_schema_ref_path(ref_path: &str) -> Option<String> {
   }
 }
 
-/// Extracts the schema name from an [`ObjectOrReference`] variant.
+/// Extracts the schema name from a schema reference.
 ///
 /// Returns [`Some`] with the schema name if the object is a reference
 /// ([`ObjectOrReference::Ref`]) to an internal component. Returns [`None`]
 /// if the object is an inline schema ([`ObjectOrReference::Object`]) or if
 /// the reference points to an external document.
-///
-/// This is a convenience wrapper around [`parse_schema_ref_path`] that
-/// handles the common case where you have an [`ObjectOrReference<ObjectSchema>`]
-/// and need to determine if it references a named component.
-pub fn extract_schema_ref_name(obj_ref: &ObjectOrReference<ObjectSchema>) -> Option<String> {
-  match obj_ref {
-    ObjectOrReference::Ref { ref_path, .. } => parse_schema_ref_path(ref_path),
-    ObjectOrReference::Object(_) => None,
+pub trait SchemaRefName {
+  fn schema_ref_name(&self) -> Option<String>;
+}
+
+impl SchemaRefName for Schema {
+  fn schema_ref_name(&self) -> Option<String> {
+    match self {
+      Schema::Object(schema_ref) => schema_ref.schema_ref_name(),
+      Schema::Boolean(_) => None,
+    }
+  }
+}
+
+impl SchemaRefName for ObjectOrReference<ObjectSchema> {
+  fn schema_ref_name(&self) -> Option<String> {
+    match self {
+      ObjectOrReference::Ref { ref_path, .. } => parse_schema_ref_path(ref_path),
+      ObjectOrReference::Object(_) => None,
+    }
   }
 }
 
@@ -44,8 +55,8 @@ pub fn extract_schema_ref_name(obj_ref: &ObjectOrReference<ObjectSchema>) -> Opt
 ///
 /// Collects all named schema references into a sorted set for union deduplication.
 /// This is used to identify union types (oneOf/anyOf) that share the same set of variants.
-pub fn extract_union_fingerprint(variants: &[ObjectOrReference<ObjectSchema>]) -> BTreeSet<String> {
-  variants.iter().filter_map(extract_schema_ref_name).collect()
+pub fn extract_union_fingerprint<T: SchemaRefName>(variants: &[T]) -> BTreeSet<String> {
+  variants.iter().filter_map(SchemaRefName::schema_ref_name).collect()
 }
 
 /// Maps union type fingerprints to generated type names.

@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, Operation, Response},
+  spec::{Operation, Response},
 };
 
-use crate::{generator::naming::identifiers::to_rust_type_name, utils::parse_schema_ref_path};
+use crate::{generator::naming::identifiers::to_rust_type_name, utils::SchemaRefName};
 
 const SUCCESS_RESPONSE_PREFIX: char = '2';
 
@@ -80,8 +80,5 @@ pub fn extract_schema_name_from_response(response: &Response) -> Option<String> 
     .next()?
     .schema
     .as_ref()
-    .and_then(|schema_ref| match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => parse_schema_ref_path(ref_path),
-      ObjectOrReference::Object(_) => None,
-    })
+    .and_then(SchemaRefName::schema_ref_name)
 }

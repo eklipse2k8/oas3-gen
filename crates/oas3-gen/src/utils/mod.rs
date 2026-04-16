@@ -3,7 +3,6 @@ pub mod schema_ext;
 pub mod spec;
 
 pub(crate) use refs::{
-  UnionFingerprints, build_union_fingerprints, extract_schema_ref_name, extract_union_fingerprint,
-  parse_schema_ref_path,
+  SchemaRefName, UnionFingerprints, build_union_fingerprints, extract_union_fingerprint, parse_schema_ref_path,
 };
-pub(crate) use schema_ext::{SchemaExt, variant_is_nullable};
+pub(crate) use schema_ext::{SchemaExt, SchemaResolveExt, variant_is_nullable};

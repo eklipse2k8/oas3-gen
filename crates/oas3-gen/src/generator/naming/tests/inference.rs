@@ -38,6 +38,18 @@ fn make_const_schema(value: Value) -> ObjectSchema {
   }
 }
 
+fn schema_object(schema: ObjectSchema) -> Schema {
+  Schema::Object(Box::new(ObjectOrReference::Object(schema)))
+}
+
+fn schema_ref(name: &str) -> Schema {
+  Schema::Object(Box::new(ObjectOrReference::Ref {
+    ref_path: format!("#/components/schemas/{name}"),
+    summary: None,
+    description: None,
+  }))
+}
+
 #[test]
 fn test_derive_method_names() {
   let cases = vec![
@@ -139,8 +151,8 @@ fn test_compute_best_name() {
 fn test_inline_type_scanner_known_suffix_patterns() {
   let voice_ids_shared = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(make_string_schema()),
-      ObjectOrReference::Object(make_string_enum_schema(vec![
+      schema_object(make_string_schema()),
+      schema_object(make_string_enum_schema(vec![
         json!("alloy"),
         json!("ash"),
         json!("ballad"),
@@ -151,10 +163,10 @@ fn test_inline_type_scanner_known_suffix_patterns() {
 
   let format_type = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(make_string_schema()),
-      ObjectOrReference::Object(make_const_schema(json!("json"))),
-      ObjectOrReference::Object(make_const_schema(json!("text"))),
-      ObjectOrReference::Object(make_const_schema(json!("xml"))),
+      schema_object(make_string_schema()),
+      schema_object(make_const_schema(json!("json"))),
+      schema_object(make_const_schema(json!("text"))),
+      schema_object(make_const_schema(json!("xml"))),
     ],
     ..Default::default()
   };
@@ -198,14 +210,7 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
   let chat_model = make_string_enum_schema(vec![json!("gpt-4"), json!("gpt-3.5-turbo")]);
 
   let model_ids_shared = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(make_string_schema()),
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/ChatModel".to_string(),
-        summary: None,
-        description: None,
-      },
-    ],
+    any_of: vec![schema_object(make_string_schema()), schema_ref("ChatModel")],
     ..Default::default()
   };
 
@@ -277,7 +282,7 @@ fn test_infer_name_from_context() {
   let mut schema_with_property = ObjectSchema::default();
   schema_with_property
     .properties
-    .insert("user".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+    .insert("user".to_string(), schema_object(ObjectSchema::default()));
   let result = schema_with_property.infer_name_from_context("/api/check-access", "200");
   assert_eq!(
     result, "userResponse",
@@ -390,7 +395,7 @@ fn test_infer_variant_name_object_variants() {
 
   let object_with_single_property = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("items".to_string(), ObjectOrReference::Object(ObjectSchema::default()))]
+    properties: [("items".to_string(), schema_object(ObjectSchema::default()))]
       .into_iter()
       .collect(),
     ..Default::default()
@@ -404,8 +409,8 @@ fn test_infer_variant_name_object_variants() {
   let object_with_single_required = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: [
-      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
-      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("id".to_string(), schema_object(ObjectSchema::default())),
+      ("name".to_string(), schema_object(ObjectSchema::default())),
     ]
     .into_iter()
     .collect(),
@@ -421,8 +426,8 @@ fn test_infer_variant_name_object_variants() {
   let object_with_multiple_properties = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: [
-      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
-      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("id".to_string(), schema_object(ObjectSchema::default())),
+      ("name".to_string(), schema_object(ObjectSchema::default())),
     ]
     .into_iter()
     .collect(),
@@ -521,7 +526,7 @@ fn schema_ext_is_primitive() {
 
   schema
     .properties
-    .insert("foo".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+    .insert("foo".to_string(), schema_object(ObjectSchema::default()));
   assert!(!schema.is_primitive(), "schema with properties should not be primitive");
 
   let string_enum_schema = ObjectSchema {
@@ -565,7 +570,7 @@ fn schema_ext_is_nullable_object() {
   let mut nullable_with_props = nullable_object.clone();
   nullable_with_props
     .properties
-    .insert("x".into(), ObjectOrReference::Object(ObjectSchema::default()));
+    .insert("x".into(), schema_object(ObjectSchema::default()));
   assert!(
     !nullable_with_props.is_nullable_object(),
     "object|null with properties should not be nullable"
@@ -578,14 +583,14 @@ fn schema_ext_has_inline_union_array_items() {
 
   let type_a = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("field_a".to_string(), ObjectOrReference::Object(make_string_schema()))]
+    properties: [("field_a".to_string(), schema_object(make_string_schema()))]
       .into_iter()
       .collect(),
     ..Default::default()
   };
   let type_b = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("field_b".to_string(), ObjectOrReference::Object(make_string_schema()))]
+    properties: [("field_b".to_string(), schema_object(make_string_schema()))]
       .into_iter()
       .collect(),
     ..Default::default()
@@ -600,18 +605,7 @@ fn schema_ext_has_inline_union_array_items() {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
-        one_of: vec![
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/TypeA".to_string(),
-            summary: None,
-            description: None,
-          },
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/TypeB".to_string(),
-            summary: None,
-            description: None,
-          },
-        ],
+        one_of: vec![schema_ref("TypeA"), schema_ref("TypeB")],
         ..Default::default()
       },
     ))))),
@@ -763,11 +757,11 @@ fn extract_common_variant_prefix_cases() {
 fn test_union_schemas_do_not_generate_enum_candidates() {
   let integer_or_inf_union = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
+      schema_object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
         ..Default::default()
       }),
-      ObjectOrReference::Object(make_const_schema(json!("inf"))),
+      schema_object(make_const_schema(json!("inf"))),
     ],
     ..Default::default()
   };
@@ -776,7 +770,7 @@ fn test_union_schemas_do_not_generate_enum_candidates() {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: [(
       "max_output_tokens".to_string(),
-      ObjectOrReference::Object(integer_or_inf_union.clone()),
+      schema_object(integer_or_inf_union.clone()),
     )]
     .into_iter()
     .collect(),
@@ -785,12 +779,9 @@ fn test_union_schemas_do_not_generate_enum_candidates() {
 
   let parent_schema_b = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [(
-      "max_output_tokens".to_string(),
-      ObjectOrReference::Object(integer_or_inf_union),
-    )]
-    .into_iter()
-    .collect(),
+    properties: [("max_output_tokens".to_string(), schema_object(integer_or_inf_union))]
+      .into_iter()
+      .collect(),
     ..Default::default()
   };
 
@@ -822,7 +813,7 @@ fn test_regular_enums_still_generate_enum_candidates() {
 
   let parent_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("status".to_string(), ObjectOrReference::Object(status_enum))]
+    properties: [("status".to_string(), schema_object(status_enum))]
       .into_iter()
       .collect(),
     ..Default::default()

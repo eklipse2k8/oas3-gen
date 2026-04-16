@@ -17,6 +17,20 @@ use axum::{
 
 use super::types::*;
 pub trait ApiServer: Send + Sync {
+  /// List all pets
+  ///
+  /// * Path: `GET /{api_version}/pets`
+  fn list_pets(
+    &self,
+    request: ListPetsRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
+  /// Create a pet
+  ///
+  /// * Path: `POST /{api_version}/pets`
+  fn create_pets(
+    &self,
+    request: CreatePetsRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<CreatePetsResponse>> + Send;
   /// List all cats
   ///
   /// * Path: `GET /cats`
@@ -38,20 +52,45 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: UploadPetImageRequest,
   ) -> impl std::future::Future<Output = anyhow::Result<ShowPetByIdResponse>> + Send;
-  /// List all pets
-  ///
-  /// * Path: `GET /{api_version}/pets`
-  fn list_pets(
-    &self,
-    request: ListPetsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
-  /// Create a pet
-  ///
-  /// * Path: `POST /{api_version}/pets`
-  fn create_pets(
-    &self,
-    request: CreatePetsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<CreatePetsResponse>> + Send;
+}
+pub async fn list_pets<S>(
+  State(service): State<S>,
+  Path(path): Path<ListPetsRequestPath>,
+  Query(query): Query<ListPetsRequestQuery>,
+  headers: HeaderMap,
+) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = ListPetsRequest {
+    path,
+    query,
+    header: (&headers).try_into().unwrap_or_default(),
+  };
+  let result: anyhow::Result<ListPetsResponse> = service.list_pets(request).await;
+  match result {
+    Ok(response) => response.into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn create_pets<S>(State(service): State<S>, Path(path): Path<CreatePetsRequestPath>) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = CreatePetsRequest { path };
+  let result: anyhow::Result<CreatePetsResponse> = service.create_pets(request).await;
+  match result {
+    Ok(response) => response.into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
 }
 pub async fn list_cats<S>(
   State(service): State<S>,
@@ -107,45 +146,6 @@ where
 {
   let request = UploadPetImageRequest { path, body };
   let result: anyhow::Result<ShowPetByIdResponse> = service.upload_pet_image(request).await;
-  match result {
-    Ok(response) => response.into_response(),
-    Err(e) => (
-      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-      format!("Internal error: {e}"),
-    )
-      .into_response(),
-  }
-}
-pub async fn list_pets<S>(
-  State(service): State<S>,
-  Path(path): Path<ListPetsRequestPath>,
-  Query(query): Query<ListPetsRequestQuery>,
-  headers: HeaderMap,
-) -> impl IntoResponse
-where
-  S: ApiServer + Clone + Send + Sync + 'static,
-{
-  let request = ListPetsRequest {
-    path,
-    query,
-    header: (&headers).try_into().unwrap_or_default(),
-  };
-  let result: anyhow::Result<ListPetsResponse> = service.list_pets(request).await;
-  match result {
-    Ok(response) => response.into_response(),
-    Err(e) => (
-      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-      format!("Internal error: {e}"),
-    )
-      .into_response(),
-  }
-}
-pub async fn create_pets<S>(State(service): State<S>, Path(path): Path<CreatePetsRequestPath>) -> impl IntoResponse
-where
-  S: ApiServer + Clone + Send + Sync + 'static,
-{
-  let request = CreatePetsRequest { path };
-  let result: anyhow::Result<CreatePetsResponse> = service.create_pets(request).await;
   match result {
     Ok(response) => response.into_response(),
     Err(e) => (

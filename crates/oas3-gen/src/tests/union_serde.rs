@@ -64,7 +64,8 @@ mod tests {
     assert_eq!(tu.id, "tool_123", "tool id mismatch");
     assert_eq!(tu.name, "calculator", "tool name mismatch");
 
-    let base64_json = json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": [104, 101, 108, 108, 111]}});
+    let base64_json =
+      json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "aGVsbG8="}});
     let block: ContentBlock = serde_json::from_value(base64_json).expect("image with base64");
     let ContentBlock::Image(ref img) = block else {
       panic!("Expected ImageBlock with base64, got {block:?}");

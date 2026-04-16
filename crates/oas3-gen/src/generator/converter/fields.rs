@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Context as _;
 use itertools::{Either, Itertools};
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema};
+use oas3::spec::{ObjectSchema, Schema};
 use regex::Regex;
 
 use super::{ConversionOutput, type_resolver::TypeResolver};
@@ -62,11 +62,11 @@ impl FieldConverter {
     &self,
     parent_name: &str,
     prop_name: &str,
-    schema_ref: &ObjectOrReference<ObjectSchema>,
+    schema_ref: &Schema,
     is_required: bool,
   ) -> anyhow::Result<ResolvedFieldData> {
     let spec = self.context.graph().spec();
-    let schema = schema_ref.resolve(spec)?;
+    let schema = self.type_resolver.resolve(schema_ref)?;
 
     let (type_ref, inline_types) = if schema.has_inline_enum(spec) {
       let result = self
@@ -100,7 +100,6 @@ impl FieldConverter {
     schema_name: Option<&str>,
     kind: StructKind,
   ) -> anyhow::Result<ConversionOutput<Vec<FieldDef>>> {
-    let spec = self.context.graph().spec();
     let required = schema.required.iter().collect::<BTreeSet<_>>();
     let discriminator_mapping = schema_name.and_then(|name| self.context.graph().mapping(name));
 
@@ -108,8 +107,9 @@ impl FieldConverter {
     let mut inline_types = vec![];
 
     for (prop_name, prop_schema_ref) in &schema.properties {
-      let prop_schema = prop_schema_ref
-        .resolve(spec)
+      let prop_schema = self
+        .type_resolver
+        .resolve(prop_schema_ref)
         .context(format!("Schema resolution failed for property '{prop_name}'"))?;
 
       let resolved = self
@@ -194,7 +194,7 @@ impl FieldConverter {
       BTreeSet::from([SerdeAttribute::Rename(prop_name.to_string())])
     };
 
-    let serde_as_attr = self.customization_for_type(&final_type);
+    let serde_as_attr = self.customization_for_type(&final_type, prop_schema);
 
     let field = FieldDef::builder()
       .schema(prop_schema)
@@ -214,19 +214,31 @@ impl FieldConverter {
     }
   }
 
-  fn customization_for_type(&self, type_ref: &TypeRef) -> Option<SerdeAsFieldAttr> {
+  fn customization_for_type(&self, type_ref: &TypeRef, prop_schema: &ObjectSchema) -> Option<SerdeAsFieldAttr> {
+    let is_base64_byte =
+      matches!(type_ref.base_type, RustPrimitive::Bytes) && prop_schema.format.as_deref() == Some("byte");
+
     let key = match &type_ref.base_type {
       RustPrimitive::DateTime => "date_time",
       RustPrimitive::Date => "date",
       RustPrimitive::Time => "time",
       RustPrimitive::Duration => "duration",
       RustPrimitive::Uuid => "uuid",
+      RustPrimitive::Bytes if is_base64_byte => "byte",
       RustPrimitive::Custom(name) => name,
       _ => return None,
     };
-    let custom_type = self.context.config().customizations.get(key)?;
+
+    let custom_type = self
+      .context
+      .config()
+      .customizations
+      .get(key)
+      .cloned()
+      .or_else(|| is_base64_byte.then(|| "serde_with::base64::Base64".to_string()))?;
+
     Some(SerdeAsFieldAttr::CustomOverride {
-      custom_type: custom_type.clone(),
+      custom_type,
       optional: type_ref.nullable,
       is_array: type_ref.is_array,
     })

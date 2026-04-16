@@ -4,7 +4,6 @@ use std::{
 };
 
 use inflections::Inflect;
-use oas3::spec::{ObjectOrReference, ObjectSchema};
 
 use crate::{
   generator::{
@@ -14,7 +13,7 @@ use crate::{
       identifiers::{split_pascal_case, to_rust_type_name},
     },
   },
-  utils::extract_schema_ref_name,
+  utils::SchemaRefName,
 };
 
 pub(crate) struct CommonVariantName {
@@ -24,7 +23,7 @@ pub(crate) struct CommonVariantName {
 
 impl CommonVariantName {
   pub(crate) fn union_name_or<S>(
-    variants: &[ObjectOrReference<ObjectSchema>],
+    variants: &[impl SchemaRefName],
     suffix_part: S,
     fallback: impl FnOnce() -> String,
   ) -> String
@@ -55,10 +54,10 @@ impl CommonVariantName {
 /// be appended for clarity.
 ///
 /// Returns `None` if fewer than 2 variants have references or no common prefix exists.
-pub(crate) fn extract_common_variant_prefix(variants: &[ObjectOrReference<ObjectSchema>]) -> Option<CommonVariantName> {
+pub(crate) fn extract_common_variant_prefix(variants: &[impl SchemaRefName]) -> Option<CommonVariantName> {
   let ref_names = variants
     .iter()
-    .filter_map(extract_schema_ref_name)
+    .filter_map(SchemaRefName::schema_ref_name)
     .collect::<Vec<String>>();
 
   if ref_names.len() < 2 {

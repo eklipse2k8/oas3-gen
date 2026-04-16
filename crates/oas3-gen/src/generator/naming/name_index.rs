@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use inflections::Inflect;
 use oas3::{
   Spec,
-  spec::{ObjectOrReference, ObjectSchema},
+  spec::{ObjectOrReference, ObjectSchema, Schema},
 };
 
 use super::identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name};
@@ -130,7 +130,10 @@ impl<'a> TypeNameIndex<'a> {
     let mut index = CandidateIndex::default();
 
     for (prop_name, prop_schema_ref) in &schema.properties {
-      let ObjectOrReference::Object(prop_schema) = prop_schema_ref else {
+      let Schema::Object(prop_schema_ref) = prop_schema_ref else {
+        continue;
+      };
+      let ObjectOrReference::Object(prop_schema) = prop_schema_ref.as_ref() else {
         continue;
       };
 
@@ -157,9 +160,12 @@ impl<'a> TypeNameIndex<'a> {
       }
     }
 
-    for sub in schema.all_of.iter().filter_map(|r| match r {
-      ObjectOrReference::Object(s) => Some(s),
-      ObjectOrReference::Ref { .. } => None,
+    for sub in schema.all_of.iter().filter_map(|schema_ref| match schema_ref {
+      Schema::Object(schema_ref) => match schema_ref.as_ref() {
+        ObjectOrReference::Object(schema) => Some(schema),
+        ObjectOrReference::Ref { .. } => None,
+      },
+      Schema::Boolean(_) => None,
     }) {
       index = index.merge(self.collect_inline_candidates(parent_name, sub)?);
     }

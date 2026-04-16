@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet, Spec};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
 use serde_json::json;
 
 use crate::generator::{
@@ -75,7 +75,11 @@ pub(crate) fn make_string_schema() -> ObjectSchema {
 pub(crate) fn make_object_schema_with_property(prop_name: &str, prop_schema: ObjectSchema) -> ObjectSchema {
   ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: BTreeMap::from([(prop_name.to_string(), ObjectOrReference::Object(prop_schema))]),
+    properties: [(
+      prop_name.to_string(),
+      Schema::Object(Box::new(ObjectOrReference::Object(prop_schema))),
+    )]
+    .into(),
     ..Default::default()
   }
 }

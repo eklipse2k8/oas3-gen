@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use oas3::spec::ObjectOrReference;
+use oas3::spec::{ObjectOrReference, Schema};
 
 use super::{
   inline_resolver::InlineTypeResolver,
@@ -150,19 +150,22 @@ impl BodyInfo {
 
     let inline_resolver = InlineTypeResolver::new(context.clone());
     let (generated_types, type_name) = match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => {
-        let Some(name) = parse_schema_ref_path(ref_path) else {
-          return Ok(Self::empty(!is_required));
-        };
-        (vec![], to_rust_type_name(&name))
-      }
-      ObjectOrReference::Object(schema) => {
-        let base_name = schema.infer_name_from_context(&entry.path, REQUEST_BODY_SUFFIX);
-        let Some(output) = inline_resolver.try_inline_schema(schema, &base_name)? else {
-          return Ok(Self::empty(!is_required));
-        };
-        (output.inline_types, output.result)
-      }
+      Schema::Boolean(_) => (vec![], RustPrimitive::Value.to_string()),
+      Schema::Object(schema_ref) => match schema_ref.as_ref() {
+        ObjectOrReference::Ref { ref_path, .. } => {
+          let Some(name) = parse_schema_ref_path(ref_path) else {
+            return Ok(Self::empty(!is_required));
+          };
+          (vec![], to_rust_type_name(&name))
+        }
+        ObjectOrReference::Object(schema) => {
+          let base_name = schema.infer_name_from_context(&entry.path, REQUEST_BODY_SUFFIX);
+          let Some(output) = inline_resolver.try_inline_schema(schema, &base_name)? else {
+            return Ok(Self::empty(!is_required));
+          };
+          (output.inline_types, output.result)
+        }
+      },
     };
 
     let body_type = TypeRef::new(&type_name);

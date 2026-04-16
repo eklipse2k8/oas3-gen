@@ -447,7 +447,7 @@ impl SchemaConverter {
       return Ok(vec![]);
     };
 
-    let resolved = non_null_variant.resolve(spec)?;
+    let resolved = self.type_resolver.resolve(non_null_variant)?;
     if resolved.has_enum_values() && resolved.enum_values.len() > 1 {
       return Ok(vec![self.enum_converter.convert_value_enum(name, &resolved)]);
     }

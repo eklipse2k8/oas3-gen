@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use oas3::{
   Spec,
-  spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response, SchemaType, SchemaTypeSet},
+  spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response, Schema, SchemaType, SchemaTypeSet},
 };
 use serde_json::json;
 
@@ -45,17 +45,17 @@ fn create_response_with_schema_ref(ref_name: &str, content_type: &str) -> Respon
   let content = BTreeMap::from([(
     content_type.to_string(),
     MediaType {
-      schema: Some(ObjectOrReference::Ref {
+      schema: Some(Schema::Object(Box::new(ObjectOrReference::Ref {
         ref_path: format!("#/components/schemas/{ref_name}"),
         summary: None,
         description: None,
-      }),
+      }))),
       ..Default::default()
     },
   )]);
 
   Response {
-    content,
+    content: content.into(),
     ..Default::default()
   }
 }
@@ -64,23 +64,23 @@ fn create_response_with_inline_schema(content_type: &str) -> Response {
   let content = BTreeMap::from([(
     content_type.to_string(),
     MediaType {
-      schema: Some(ObjectOrReference::Object(ObjectSchema {
+      schema: Some(Schema::Object(Box::new(ObjectOrReference::Object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
         ..Default::default()
-      })),
+      })))),
       ..Default::default()
     },
   )]);
 
   Response {
-    content,
+    content: content.into(),
     ..Default::default()
   }
 }
 
 fn make_empty_response() -> Response {
   Response {
-    content: BTreeMap::new(),
+    content: BTreeMap::new().into(),
     ..Default::default()
   }
 }
@@ -170,7 +170,7 @@ fn test_extract_response_type_name() {
 
   for (responses, expected, desc) in cases {
     let operation = Operation {
-      responses,
+      responses: responses.map(Into::into),
       ..Default::default()
     };
     let result = extract_response_type_name(&spec, &operation);
@@ -254,7 +254,7 @@ fn test_extract_all_response_types() {
 
   for case in cases {
     let operation = Operation {
-      responses: case.responses,
+      responses: case.responses.map(Into::into),
       ..Default::default()
     };
     let types = extract_all_response_types(&spec, &operation);

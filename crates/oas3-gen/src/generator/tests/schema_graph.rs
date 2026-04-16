@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet, Spec};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
 use serde_json::json;
 
 use crate::{
@@ -319,7 +319,9 @@ fn schema_merger_conflict_resolution() {
   let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
 
   let prop = merged.schema.properties.get("prop").unwrap();
-  if let ObjectOrReference::Object(schema) = prop {
+  if let Schema::Object(schema_ref) = prop
+    && let ObjectOrReference::Object(schema) = schema_ref.as_ref()
+  {
     assert_eq!(
       schema.schema_type,
       Some(SchemaTypeSet::Single(SchemaType::Integer)),

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 use itertools::Itertools;
-use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response};
+use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response, Schema};
 
 use super::{ConverterContext, SerdeUsageRecorder, TypeResolver, inline_resolver::InlineTypeResolver};
 use crate::{
@@ -213,10 +213,13 @@ impl ResponseConverter {
     };
 
     match schema_ref {
-      ObjectOrReference::Ref { ref_path, .. } => {
-        Ok(parse_schema_ref_path(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
-      }
-      ObjectOrReference::Object(schema) => self.resolve_inline_schema(schema, path, status_code),
+      Schema::Boolean(_) => Ok(Some(TypeRef::new(RustPrimitive::Value))),
+      Schema::Object(schema_ref) => match schema_ref.as_ref() {
+        ObjectOrReference::Ref { ref_path, .. } => {
+          Ok(parse_schema_ref_path(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
+        }
+        ObjectOrReference::Object(schema) => self.resolve_inline_schema(schema, path, status_code),
+      },
     }
   }
 

@@ -16,7 +16,9 @@ use crate::{
     converter::ConverterContext,
     naming::{constants::VARIANT_KIND_SUFFIX, identifiers::strip_parent_prefix, inference::CommonVariantName},
   },
-  utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path, variant_is_nullable},
+  utils::{
+    SchemaExt, SchemaRefName, SchemaResolveExt, extract_union_fingerprint, parse_schema_ref_path, variant_is_nullable,
+  },
 };
 
 #[derive(Clone, Debug)]
@@ -41,8 +43,10 @@ impl TypeResolver {
   }
 
   /// Resolves a schema reference to its underlying schema.
-  pub(crate) fn resolve(&self, schema_ref: &ObjectOrReference<ObjectSchema>) -> Result<ObjectSchema> {
-    schema_ref.resolve(self.spec()).context("Schema resolution failed")
+  pub(crate) fn resolve(&self, schema_ref: &Schema) -> Result<ObjectSchema> {
+    schema_ref
+      .resolve_object(self.spec())
+      .context("Schema resolution failed")
   }
 
   /// Resolves a schema to its Rust type reference.
@@ -108,9 +112,11 @@ impl TypeResolver {
     parent_name: &str,
     property_name: &str,
     schema: &ObjectSchema,
-    schema_ref: &ObjectOrReference<ObjectSchema>,
+    schema_ref: &Schema,
   ) -> Result<ConversionOutput<TypeRef>> {
-    if let ObjectOrReference::Ref { ref_path, .. } = schema_ref {
+    if let Schema::Object(schema_ref) = schema_ref
+      && let ObjectOrReference::Ref { ref_path, .. } = schema_ref.as_ref()
+    {
       return self.resolve_ref(ref_path, schema);
     }
 
@@ -245,7 +251,7 @@ impl TypeResolver {
   fn union_type(
     &self,
     schema: &ObjectSchema,
-    variants: &[ObjectOrReference<ObjectSchema>],
+    variants: &[Schema],
     base_name: &str,
   ) -> Result<ConversionOutput<TypeRef>> {
     let refs = extract_union_fingerprint(variants);
@@ -344,7 +350,7 @@ impl TypeResolver {
   /// entries: one null and one non-null. The non-null variant is resolved
   /// to its type and wrapped in `Option`. Returns `None` if the pattern
   /// doesn't match or a new enum type must be generated.
-  fn try_nullable_variants(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
+  fn try_nullable_variants(&self, variants: &[Schema]) -> Result<Option<TypeRef>> {
     if variants.len() != 2 {
       return Ok(None);
     }
@@ -355,7 +361,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    if let Some(ref_name) = extract_schema_ref_name(variant) {
+    if let Some(ref_name) = variant.schema_ref_name() {
       return Ok(Some(self.context.graph().type_ref(&ref_name).with_option()));
     }
 
@@ -370,10 +376,10 @@ impl TypeResolver {
 
   /// Returns `true` if the array schema has items containing a union.
   fn has_union_items(&self, schema: &ObjectSchema) -> bool {
-    let Some(Schema::Object(o)) = schema.items.as_ref().map(AsRef::as_ref) else {
+    let Some(items) = schema.items.as_deref() else {
       return false;
     };
-    self.resolve(o).is_ok_and(|items| items.has_union())
+    self.resolve(items).is_ok_and(|items| items.has_union())
   }
 
   /// Attempts to resolve a union to an existing type or simple form.
@@ -381,7 +387,7 @@ impl TypeResolver {
   /// Returns `Some` if the union matches a known type by refs, is a
   /// nullable wrapper, or can be simplified to a single ref or primitive.
   /// Returns `None` if a new enum type must be generated.
-  pub(crate) fn try_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
+  pub(crate) fn try_union(&self, variants: &[Schema]) -> Result<Option<TypeRef>> {
     let refs = extract_union_fingerprint(variants);
 
     if refs.len() > 1
@@ -401,11 +407,11 @@ impl TypeResolver {
   ///
   /// Handles cases like single-ref unions with null variants, unions
   /// containing only primitives, or single-variant unions.
-  fn union_fallback(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
+  fn union_fallback(&self, variants: &[Schema]) -> Result<Option<TypeRef>> {
     let mut first_ref: Option<String> = None;
 
     for variant in variants {
-      if let Some(name) = extract_schema_ref_name(variant) {
+      if let Some(name) = variant.schema_ref_name() {
         if first_ref.is_some() {
           return Ok(None);
         }
@@ -446,7 +452,7 @@ impl TypeResolver {
     }
 
     if let [single_variant] = schema.one_of.as_slice()
-      && let Some(name) = extract_schema_ref_name(single_variant)
+      && let Some(name) = single_variant.schema_ref_name()
     {
       return Ok(Some(self.context.graph().type_ref(&name)));
     }
@@ -532,12 +538,12 @@ impl TypeResolver {
     match additional {
       Schema::Boolean(_) => Ok(TypeRef::new(RustPrimitive::Value)),
       Schema::Object(schema_ref) => {
-        if let ObjectOrReference::Ref { ref_path, .. } = &**schema_ref {
+        if let ObjectOrReference::Ref { ref_path, .. } = schema_ref.as_ref() {
           let name = parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
           return Ok(self.context.graph().type_ref(&name));
         }
 
-        let resolved = self.resolve(schema_ref)?;
+        let resolved = self.resolve(additional)?;
 
         if resolved.is_empty_object() {
           return Ok(TypeRef::new(RustPrimitive::Value));
@@ -553,15 +559,18 @@ impl TypeResolver {
   /// Handles both ref and inline item definitions. Unboxes the result
   /// since array items don't need boxing for cycle breaking.
   fn array_item_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
-    let Some(Schema::Object(items_ref)) = schema.items.as_ref().map(AsRef::as_ref) else {
+    let Some(items_ref) = schema.items.as_deref() else {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };
 
     let items = self.resolve(items_ref)?;
 
-    let type_ref = match &**items_ref {
-      ObjectOrReference::Ref { ref_path, .. } => self.resolve_ref(ref_path, &items)?.result,
-      ObjectOrReference::Object(_) => self.resolve_type(&items)?,
+    let type_ref = match items_ref {
+      Schema::Object(schema_ref) => match schema_ref.as_ref() {
+        ObjectOrReference::Ref { ref_path, .. } => self.resolve_ref(ref_path, &items)?.result,
+        ObjectOrReference::Object(_) => self.resolve_type(&items)?,
+      },
+      Schema::Boolean(_) => self.resolve_type(&items)?,
     };
 
     Ok(TypeRef {
@@ -580,7 +589,7 @@ impl TypeResolver {
       return Ok(false);
     };
 
-    if extract_schema_ref_name(variant).is_some() {
+    if variant.schema_ref_name().is_some() {
       return Ok(true);
     }
 
@@ -603,7 +612,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    if extract_schema_ref_name(variant).is_some() {
+    if variant.schema_ref_name().is_some() {
       return Ok(None);
     }
 

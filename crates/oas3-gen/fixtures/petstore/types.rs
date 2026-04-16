@@ -145,7 +145,7 @@ pub struct ListCatsRequest {
 impl ListCatsRequest {
   /// Create a new request with the given parameters.
   #[builder]
-  pub fn new(limit: Option<i32>, x_sort_order: Option<ListCatsRequestHeaderXSortOrder>) -> anyhow::Result<Self> {
+  pub fn new(limit: Option<i32>, x_sort_order: Option<ListPetsRequestHeaderXSortOrder>) -> anyhow::Result<Self> {
     let request = Self {
       query: ListCatsRequestQuery { limit },
       header: ListCatsRequestHeader { x_sort_order },
@@ -169,7 +169,7 @@ impl ListCatsRequest {
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct ListCatsRequestHeader {
   /// Sort order for the results
-  pub x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
+  pub x_sort_order: Option<ListPetsRequestHeaderXSortOrder>,
 }
 impl core::convert::TryFrom<&ListCatsRequestHeader> for http::HeaderMap {
   type Error = http::header::InvalidHeaderValue;
@@ -186,22 +186,6 @@ impl core::convert::TryFrom<ListCatsRequestHeader> for http::HeaderMap {
   type Error = http::header::InvalidHeaderValue;
   fn try_from(headers: ListCatsRequestHeader) -> core::result::Result<Self, Self::Error> {
     http::HeaderMap::try_from(&headers)
-  }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
-pub enum ListCatsRequestHeaderXSortOrder {
-  #[serde(rename = "asc")]
-  #[default]
-  Asc,
-  #[serde(rename = "desc")]
-  Desc,
-}
-impl core::fmt::Display for ListCatsRequestHeaderXSortOrder {
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    match self {
-      Self::Asc => write!(f, "asc"),
-      Self::Desc => write!(f, "desc"),
-    }
   }
 }
 #[serde_with::skip_serializing_none]
@@ -235,7 +219,7 @@ impl ListPetsRequest {
   pub fn new(
     api_version: String,
     limit: Option<i32>,
-    x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
+    x_sort_order: Option<ListPetsRequestHeaderXSortOrder>,
     x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
   ) -> anyhow::Result<Self> {
     let request = Self {
@@ -273,7 +257,7 @@ impl ListPetsRequest {
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct ListPetsRequestHeader {
   /// Sort order for the results
-  pub x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
+  pub x_sort_order: Option<ListPetsRequestHeaderXSortOrder>,
   /// Only include pets with a tag
   pub x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
 }
@@ -302,6 +286,22 @@ impl core::convert::TryFrom<ListPetsRequestHeader> for http::HeaderMap {
   type Error = http::header::InvalidHeaderValue;
   fn try_from(headers: ListPetsRequestHeader) -> core::result::Result<Self, Self::Error> {
     http::HeaderMap::try_from(&headers)
+  }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
+pub enum ListPetsRequestHeaderXSortOrder {
+  #[serde(rename = "asc")]
+  #[default]
+  Asc,
+  #[serde(rename = "desc")]
+  Desc,
+}
+impl core::fmt::Display for ListPetsRequestHeaderXSortOrder {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Asc => write!(f, "asc"),
+      Self::Desc => write!(f, "desc"),
+    }
   }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
@@ -349,11 +349,11 @@ pub enum ListPetsResponse {
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct Pet {
-  pub allergies: Option<Box<Health>>,
   pub id: i64,
   pub name: String,
-  pub tag: Option<String>,
+  pub allergies: Option<Box<Health>>,
   pub vaccinations: Option<std::collections::HashMap<String, Vec<VaccineRecord>>>,
+  pub tag: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct PetVaccinations {
@@ -471,11 +471,11 @@ pub struct UploadPetImageRequestPath {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default, bon::Builder)]
 pub struct UploadRequestBody {
-  /// The pet's image file
-  pub image: Vec<u8>,
   /// The pet's name
   #[validate(length(min = 1u64))]
   pub name: String,
+  /// The pet's image file
+  pub image: Vec<u8>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]

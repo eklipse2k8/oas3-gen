@@ -72,17 +72,19 @@ impl ArrayOrSingle {
     })
   }
 }
+#[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct Base64ImageSource {
-  pub data: Vec<u8>,
-  pub media_type: MediaType,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("base64"))]
   #[builder(skip = Some("base64"))]
   pub r#type: Option<&'static str>,
+  pub media_type: MediaType,
+  #[serde_as(as = "serde_with::base64::Base64")]
+  pub data: Vec<u8>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -90,16 +92,16 @@ pub struct Base64ImageSource {
 )]
 #[serde(default)]
 pub struct CitationAnnotation {
-  #[validate(length(min = 1u64))]
-  #[builder(name = build_value)]
-  pub build: String,
-  pub end: i64,
-  pub start: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("citation"))]
   #[builder(skip = Some("citation"))]
   pub r#type: Option<&'static str>,
+  pub start: i64,
+  pub end: i64,
+  #[validate(length(min = 1u64))]
+  #[builder(name = build_value)]
+  pub build: String,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -107,14 +109,14 @@ pub struct CitationAnnotation {
 )]
 #[serde(default)]
 pub struct CodeBlock {
-  #[validate(length(min = 1u64))]
-  pub code: String,
-  pub language: Option<String>,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("code"))]
   #[builder(skip = Some("code"))]
   pub r#type: Option<&'static str>,
+  #[validate(length(min = 1u64))]
+  pub code: String,
+  pub language: Option<String>,
 }
 /// A union of content block types with discriminator
 #[derive(Debug, Clone, PartialEq)]
@@ -200,36 +202,36 @@ impl ContentBlock {
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockDeltaEvent {
-  /// Delta content for streaming
-  pub delta: Box<Delta>,
-  pub index: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("content_block_delta"))]
   #[builder(skip = Some("content_block_delta"))]
   pub r#type: Option<&'static str>,
+  pub index: i64,
+  /// Delta content for streaming
+  pub delta: Box<Delta>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockStartEvent {
-  /// A union of content block types with discriminator
-  pub content_block: Box<ContentBlock>,
-  pub index: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("content_block_start"))]
   #[builder(skip = Some("content_block_start"))]
   pub r#type: Option<&'static str>,
+  pub index: i64,
+  /// A union of content block types with discriminator
+  pub content_block: Box<ContentBlock>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockStopEvent {
-  pub index: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("content_block_stop"))]
   #[builder(skip = Some("content_block_stop"))]
   pub r#type: Option<&'static str>,
+  pub index: i64,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
@@ -240,9 +242,9 @@ pub struct ContentRequest {
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct ContentResponse {
+  pub id: String,
   /// A union of content block types with discriminator
   pub content: Box<ContentBlock>,
-  pub id: String,
   pub usage: Option<Usage>,
 }
 /// Delta content for streaming
@@ -296,18 +298,18 @@ impl Delta {
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct ErrorDetails {
-  pub message: String,
   #[serde(rename = "type")]
   pub r#type: ErrorType,
+  pub message: String,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ErrorResponse {
-  pub error: ErrorDetails,
   #[serde(rename = "type")]
   #[default("error".to_string())]
   #[builder(default = "error".to_string())]
   pub r#type: String,
+  pub error: ErrorDetails,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum ErrorType {
@@ -450,14 +452,14 @@ pub enum HypotheticalVersion {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ImageBlock {
-  pub alt_text: Option<String>,
-  /// Image source can be base64 or URL
-  pub source: Box<ImageSource>,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("image"))]
   #[builder(skip = Some("image"))]
   pub r#type: Option<&'static str>,
+  /// Image source can be base64 or URL
+  pub source: Box<ImageSource>,
+  pub alt_text: Option<String>,
 }
 /// Image source can be base64 or URL
 #[derive(Debug, Clone, PartialEq)]
@@ -516,12 +518,12 @@ impl ImageSource {
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct InputJsonDelta {
-  pub partial_json: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("input_json_delta"))]
   #[builder(skip = Some("input_json_delta"))]
   pub r#type: Option<&'static str>,
+  pub partial_json: String,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -529,13 +531,13 @@ pub struct InputJsonDelta {
 )]
 #[serde(default)]
 pub struct LinkAnnotation {
-  pub end: i64,
-  pub start: i64,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("link"))]
   #[builder(skip = Some("link"))]
   pub r#type: Option<&'static str>,
+  pub start: i64,
+  pub end: i64,
   #[validate(url, length(min = 1u64))]
   pub url: String,
 }
@@ -563,22 +565,22 @@ impl core::fmt::Display for MediaType {
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct Message {
-  pub content: Vec<ContentBlock>,
   pub id: String,
-  pub model: String,
   pub role: Role,
+  pub content: Vec<ContentBlock>,
+  pub model: String,
   pub stop_reason: Option<StopReason>,
   pub usage: Option<Usage>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct MessageStartEvent {
-  pub message: Message,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("message_start"))]
   #[builder(skip = Some("message_start"))]
   pub r#type: Option<&'static str>,
+  pub message: Message,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
@@ -713,25 +715,25 @@ impl core::fmt::Display for StopReason {
 )]
 #[serde(default)]
 pub struct TextBlock {
-  pub annotations: Option<Vec<Annotation>>,
-  pub recipes: Option<Vec<RecipeList>>,
-  #[validate(length(min = 1u64))]
-  pub text: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("text"))]
   #[builder(skip = Some("text"))]
   pub r#type: Option<&'static str>,
+  #[validate(length(min = 1u64))]
+  pub text: String,
+  pub annotations: Option<Vec<Annotation>>,
+  pub recipes: Option<Vec<RecipeList>>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct TextDelta {
-  pub text: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("text_delta"))]
   #[builder(skip = Some("text_delta"))]
   pub r#type: Option<&'static str>,
+  pub text: String,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -739,17 +741,17 @@ pub struct TextDelta {
 )]
 #[serde(default)]
 pub struct ToolResultBlock {
-  /// Tool result can be text or array of content blocks
-  pub content: ToolResultContent,
-  pub is_error: Option<bool>,
-  pub iterations: Option<UsageCounters>,
-  #[validate(length(min = 1u64))]
-  pub tool_use_id: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("tool_result"))]
   #[builder(skip = Some("tool_result"))]
   pub r#type: Option<&'static str>,
+  #[validate(length(min = 1u64))]
+  pub tool_use_id: String,
+  /// Tool result can be text or array of content blocks
+  pub content: ToolResultContent,
+  pub iterations: Option<UsageCounters>,
+  pub is_error: Option<bool>,
 }
 /// Tool result can be text or array of content blocks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -824,16 +826,16 @@ impl ToolResultContentBlock {
 )]
 #[serde(default)]
 pub struct ToolUseBlock {
-  #[validate(length(min = 1u64))]
-  pub id: String,
-  pub input: std::collections::HashMap<String, serde_json::Value>,
-  #[validate(length(min = 1u64))]
-  pub name: String,
   #[doc(hidden)]
   #[serde(default, rename = "type", skip_deserializing)]
   #[default(Some("tool_use"))]
   #[builder(skip = Some("tool_use"))]
   pub r#type: Option<&'static str>,
+  #[validate(length(min = 1u64))]
+  pub id: String,
+  #[validate(length(min = 1u64))]
+  pub name: String,
+  pub input: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(

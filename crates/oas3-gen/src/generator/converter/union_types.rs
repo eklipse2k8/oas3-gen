@@ -1,6 +1,6 @@
 use bon::Builder;
 use itertools::Itertools;
-use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema};
+use oas3::spec::{Discriminator, ObjectSchema, Schema};
 
 use crate::generator::ast::{
   DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumToken, EnumVariantToken,
@@ -10,7 +10,7 @@ use crate::generator::ast::{
 /// Represents a nested union that has been promoted to a flat variant list.
 #[derive(Clone, Debug, PartialEq, Builder)]
 pub(crate) struct FlattenedUnion {
-  pub(crate) variants: Vec<ObjectOrReference<ObjectSchema>>,
+  pub(crate) variants: Vec<Schema>,
   pub(crate) description: Option<String>,
   pub(crate) discriminator: Option<Discriminator>,
   pub(crate) is_one_of: bool,
