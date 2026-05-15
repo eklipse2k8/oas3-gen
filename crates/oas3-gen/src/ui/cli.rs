@@ -139,6 +139,12 @@ pub struct GenerateCommand {
   #[arg(long, default_value_t = false, display_order = 16, help_heading = "Code Generation")]
   pub enable_builders: bool,
 
+  /// Emit `std::collections::HashMap` and `Vec` instead of `indexmap::IndexMap`/`IndexSet`
+  /// for generated map fields and `uniqueItems` arrays. JSON key/element order is no longer
+  /// preserved at runtime when this is enabled.
+  #[arg(long, default_value_t = false, display_order = 18, help_heading = "Code Generation")]
+  pub no_ordered_collections: bool,
+
   /// Format documentation comments using mdformat (requires mdformat installed)
   #[arg(long, default_value_t = false, display_order = 17, help_heading = "Code Generation")]
   pub doc_format: bool,

@@ -140,6 +140,16 @@ where
 
 Generated schemas, fields, enum variants, union variants, operations, and header constants follow the order written in the OpenAPI document. `additionalProperties` map types are emitted as `indexmap::IndexMap<String, T>`, and arrays with `uniqueItems: true` are emitted as `indexmap::IndexSet<T>` so runtime collections keep insertion order. Projects that use generated map or unique-array types need `indexmap` available in `Cargo.toml`.
 
+### `--no-ordered-collections`
+
+```text
+--no-ordered-collections
+```
+
+Opts out of the `indexmap` runtime types. With the flag set, `additionalProperties` and standalone object map schemas resolve to `std::collections::HashMap<String, T>`, and arrays with `uniqueItems: true` resolve to `Vec<T>` (the same type as a normal array — uniqueness is no longer expressed at the type level). Use this when downstream code cannot depend on `indexmap` or does not need JSON key/element order to survive a deserialize-then-serialize round trip.
+
+The declaration order of items written into the generated source (struct fields, enum variants, operation methods, etc.) is unaffected by this flag.
+
 ---
 
 ## Visibility

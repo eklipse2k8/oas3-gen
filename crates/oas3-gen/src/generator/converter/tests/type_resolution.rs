@@ -7,8 +7,8 @@ use super::support::{make_integer_schema, make_null_schema, make_schema_object, 
 use crate::{
   generator::{ast::RustType, converter::type_resolver::TypeResolver},
   tests::common::{
-    create_empty_test_graph, create_schema_converter, create_test_context, create_test_graph, default_config,
-    make_object_schema_with_property, make_string_schema, parse_schema,
+    config_with_hashed_collections, create_empty_test_graph, create_schema_converter, create_test_context,
+    create_test_graph, default_config, make_object_schema_with_property, make_string_schema, parse_schema,
   },
   utils::SchemaResolveExt,
 };
@@ -1010,6 +1010,42 @@ fn unique_items_flag_preserved() {
     result.to_rust_type(),
     "Vec<String>",
     "non-unique array should resolve to Vec"
+  );
+}
+
+#[test]
+fn hashed_collection_policy_emits_vec_and_hashmap() {
+  let graph = create_empty_test_graph();
+  let context = create_test_context(graph.clone(), config_with_hashed_collections());
+  let resolver = TypeResolver::new(context);
+
+  let unique_array = parse_schema(json!({
+    "type": "array",
+    "items": { "type": "string" },
+    "uniqueItems": true
+  }));
+
+  let result = resolver.resolve_type(&unique_array).unwrap();
+  assert!(
+    !result.unique_items,
+    "unique_items must be dropped from TypeRef under the hashed policy"
+  );
+  assert_eq!(
+    result.to_rust_type(),
+    "Vec<String>",
+    "unique array should fall back to Vec under the hashed policy"
+  );
+
+  let map_schema = parse_schema(json!({
+    "type": "object",
+    "additionalProperties": { "type": "string" }
+  }));
+
+  let result = resolver.resolve_type(&map_schema).unwrap();
+  assert_eq!(
+    result.to_rust_type(),
+    "std::collections::HashMap<String, String>",
+    "map schema should resolve to HashMap under the hashed policy"
   );
 }
 

@@ -8,8 +8,9 @@ use crossterm::style::Stylize;
 
 use crate::{
   generator::{
-    ClientModMode, ClientMode, CodegenConfig, EnumCasePolicy, EnumDeserializePolicy, EnumHelperPolicy, GenerationMode,
-    GenerationTarget, HeaderScope, ODataPolicy, SchemaScope, ServerModMode, TypesMode,
+    ClientModMode, ClientMode, CodegenConfig, CollectionTypePolicy, EnumCasePolicy, EnumDeserializePolicy,
+    EnumHelperPolicy, GenerationMode, GenerationTarget, HeaderScope, ODataPolicy, SchemaScope, ServerModMode,
+    TypesMode,
     ast::documentation::init_doc_format,
     codegen::{GeneratedFileType, Visibility},
     metrics::GenerationStats,
@@ -42,6 +43,7 @@ pub struct GenerateConfig {
   pub excluded_operations: Option<HashSet<String>>,
   pub no_helpers: bool,
   pub enable_builders: bool,
+  pub no_ordered_collections: bool,
   pub doc_format: bool,
   pub customizations: HashMap<String, String>,
 }
@@ -92,6 +94,11 @@ impl GenerateConfig {
         HeaderScope::All
       } else {
         HeaderScope::ReferencedOnly
+      })
+      .collection_types(if self.no_ordered_collections {
+        CollectionTypePolicy::Hashed
+      } else {
+        CollectionTypePolicy::Ordered
       })
       .enable_builders(self.enable_builders)
       .customizations(self.customizations.clone())
@@ -166,6 +173,7 @@ impl GenerateConfig {
       all_schemas,
       all_headers,
       enable_builders,
+      no_ordered_collections,
       doc_format,
       only,
       exclude,
@@ -198,6 +206,7 @@ impl GenerateConfig {
       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
       no_helpers,
       enable_builders,
+      no_ordered_collections,
       doc_format,
       customizations,
     })

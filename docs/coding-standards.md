@@ -74,6 +74,25 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 - JSON arrays -> Vec unless uniqueness is required; `uniqueItems` generated types use IndexSet
 - Internal bookkeeping -> HashMap only if order truly doesn't matter
 
+### Generated-code map and set types are policy-driven
+
+The runtime collection types emitted into generated code (the map type used for
+`additionalProperties` / standalone object maps, and the array type used when
+`uniqueItems: true`) are controlled by `CollectionTypePolicy` on `CodegenConfig`:
+
+| Policy variant | Map type | `uniqueItems` array type |
+| --- | --- | --- |
+| `Ordered` (default) | `indexmap::IndexMap<String, T>` | `indexmap::IndexSet<T>` |
+| `Hashed` (`--no-ordered-collections`) | `std::collections::HashMap<String, T>` | `Vec<T>` |
+
+When adding a new emission point that materializes a map or unique-array type
+in generated code, route the type path through `config.map_type_path()` or
+`config.ordered_collections()` rather than hard-coding `indexmap::IndexMap` /
+`indexmap::IndexSet`. The internal generator data structures (registries,
+caches, naming maps) remain on `IndexMap`/`IndexSet`/`BTreeMap` per the
+guidance above — the policy only affects the literal type names emitted into
+the user's source tree.
+
 ## Itertools for Deterministic Iteration
 
 Use `itertools` APIs instead of reimplementing equivalent functionality. These are well-tested, familiar to Rust engineers, and reduce code size while improving readability.
@@ -410,7 +429,7 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
 - Makes intent explicit at call sites and enables exhaustive pattern matching
 - Good: `enum EnumCasePolicy { Preserve, Deduplicate }` with `config.enum_case == EnumCasePolicy::Preserve`
 - Bad: `preserve_case: bool` with `config.preserve_case`
-- Example: `CodegenConfig` uses `EnumCasePolicy`, `EnumHelperPolicy`, `EnumDeserializePolicy`, `ODataPolicy`
+- Example: `CodegenConfig` uses `EnumCasePolicy`, `EnumHelperPolicy`, `EnumDeserializePolicy`, `ODataPolicy`, `CollectionTypePolicy`
 - Prevents invalid combinations and makes code more self-documenting
 
 ### Attribute Types with ToTokens

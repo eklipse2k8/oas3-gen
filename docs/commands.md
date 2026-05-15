@@ -48,6 +48,9 @@ cargo run -- generate types -i spec.json -o output.rs --all-headers
 # Enable bon builder derives on generated structs
 cargo run -- generate client-mod -i spec.json -o output/ --enable-builders
 
+# Emit std::collections::HashMap/Vec instead of indexmap types in generated code
+cargo run -- generate types -i spec.json -o output.rs --no-ordered-collections
+
 # Format documentation comments using mdformat
 cargo run -- generate types -i spec.json -o output.rs --doc-format
 
@@ -82,6 +85,7 @@ cargo run -- list --help
 | `--customize` / `-c` | Custom serde_as type overrides (format: type_name=custom::Path); repeatable |
 | `--all-headers` | Emit header constants for all parameters defined in components, not just those used in operations |
 | `--enable-builders` | Enable bon builder derives on schema structs and builder methods on request structs |
+| `--no-ordered-collections` | Emit `std::collections::HashMap<String, T>` for map fields and `Vec<T>` for `uniqueItems` arrays instead of the default `indexmap::IndexMap`/`IndexSet`. Use when consumers cannot depend on `indexmap` or do not need JSON key/element order preserved through a deserialize-then-serialize round trip |
 | `--doc-format` | Format documentation comments using mdformat (requires `mdformat` installed) |
 | `--only` | Include only the specified comma-separated operation IDs |
 | `--exclude` | Exclude the specified comma-separated operation IDs |

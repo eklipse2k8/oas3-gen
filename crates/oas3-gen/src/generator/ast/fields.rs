@@ -211,6 +211,7 @@ where
 {
   pub fn additional_properties(
     self,
+    map_type_path: &str,
     value_type: &TypeRef,
   ) -> FieldDefBuilder<SetSerdeAttrs<SetRustType<SetDocs<SetName<S>>>>> {
     self
@@ -219,7 +220,7 @@ where
         "Additional properties not defined in the schema.",
       ]))
       .rust_type(TypeRef::new(format!(
-        "indexmap::IndexMap<String, {}>",
+        "{map_type_path}<String, {}>",
         value_type.to_rust_type()
       )))
       .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))

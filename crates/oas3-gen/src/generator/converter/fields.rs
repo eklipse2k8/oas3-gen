@@ -134,7 +134,12 @@ impl FieldConverter {
         Schema::Boolean(b) if !b.0 => {}
         Schema::Object(_) | Schema::Boolean(_) => {
           let value_type = self.type_resolver.additional_properties_type(additional)?;
-          fields.push(FieldDef::builder().additional_properties(&value_type).build());
+          let map_type_path = self.context.config().map_type_path();
+          fields.push(
+            FieldDef::builder()
+              .additional_properties(map_type_path, &value_type)
+              .build(),
+          );
         }
       }
     }

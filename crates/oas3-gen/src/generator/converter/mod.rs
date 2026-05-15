@@ -118,6 +118,25 @@ pub enum HeaderScope {
   All,
 }
 
+/// Policy for the runtime collection types emitted in generated code.
+///
+/// Map types (`additionalProperties` and standalone object maps) and arrays
+/// marked `uniqueItems: true` can either preserve JSON key/element order at
+/// runtime via `indexmap`, or use the standard library equivalents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CollectionTypePolicy {
+  /// Emit `indexmap::IndexMap<String, T>` for map types and
+  /// `indexmap::IndexSet<T>` for `uniqueItems` arrays, so the order of keys
+  /// or elements received over the wire is retained when the generated type
+  /// is re-serialized.
+  #[default]
+  Ordered,
+  /// Emit `std::collections::HashMap<String, T>` for map types and
+  /// `Vec<T>` for arrays (ignoring `uniqueItems` at the type level), matching
+  /// the pre-0.26 generator output.
+  Hashed,
+}
+
 /// Configuration for code generation.
 ///
 /// Uses typed enums instead of booleans to make intent explicit at call sites
@@ -138,6 +157,8 @@ pub struct CodegenConfig {
   pub schema_scope: SchemaScope,
   #[builder(default)]
   pub header_scope: HeaderScope,
+  #[builder(default)]
+  pub collection_types: CollectionTypePolicy,
   #[builder(default)]
   pub enable_builders: bool,
   #[builder(default)]
@@ -190,6 +211,23 @@ impl CodegenConfig {
   #[must_use]
   pub fn enable_builders(&self) -> bool {
     self.enable_builders
+  }
+
+  /// Returns `true` when generated map and unique-array fields should emit
+  /// `indexmap` types that preserve JSON key/element order at runtime.
+  #[must_use]
+  pub fn ordered_collections(&self) -> bool {
+    self.collection_types == CollectionTypePolicy::Ordered
+  }
+
+  /// Returns the fully qualified Rust path used for map-like fields
+  /// (`additionalProperties` and standalone object maps).
+  #[must_use]
+  pub fn map_type_path(&self) -> &'static str {
+    match self.collection_types {
+      CollectionTypePolicy::Ordered => "indexmap::IndexMap",
+      CollectionTypePolicy::Hashed => "std::collections::HashMap",
+    }
   }
 }
 

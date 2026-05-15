@@ -7,7 +7,8 @@ use crate::{
   generator::{
     ast::{Documentation, FieldDef, FieldNameToken, RustPrimitive, TypeRef},
     converter::{
-      CodegenConfig, ConverterContext, EnumCasePolicy, EnumHelperPolicy, SchemaConverter, cache::SharedSchemaCache,
+      CodegenConfig, CollectionTypePolicy, ConverterContext, EnumCasePolicy, EnumHelperPolicy, SchemaConverter,
+      cache::SharedSchemaCache,
     },
     metrics::GenerationStats,
     schema_registry::SchemaRegistry,
@@ -55,6 +56,13 @@ pub(crate) fn config_with_preserve_case() -> CodegenConfig {
 pub(crate) fn config_with_no_helpers() -> CodegenConfig {
   CodegenConfig {
     enum_helpers: EnumHelperPolicy::Disable,
+    ..Default::default()
+  }
+}
+
+pub(crate) fn config_with_hashed_collections() -> CodegenConfig {
+  CodegenConfig {
+    collection_types: CollectionTypePolicy::Hashed,
     ..Default::default()
   }
 }

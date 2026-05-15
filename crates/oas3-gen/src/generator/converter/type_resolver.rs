@@ -273,7 +273,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    let unique = schema.unique_items.unwrap_or(false);
+    let unique = self.preserve_unique_items(schema);
     let singular = cruet::to_singular(property_name).to_pascal_case();
 
     let result = if items.is_inline_object() {
@@ -441,7 +441,7 @@ impl TypeResolver {
   fn try_simple_fallback_type(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
     if schema.is_array() {
       let item = self.array_item_type(schema)?;
-      let unique = schema.unique_items.unwrap_or(false);
+      let unique = self.preserve_unique_items(schema);
       return Ok(Some(
         TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique),
       ));
@@ -485,7 +485,7 @@ impl TypeResolver {
       SchemaType::Null => Ok(TypeRef::new(RustPrimitive::Unit).with_option()),
       SchemaType::Array => {
         let item = self.array_item_type(schema)?;
-        let unique = schema.unique_items.unwrap_or(false);
+        let unique = self.preserve_unique_items(schema);
         Ok(TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique))
       }
     }
@@ -506,10 +506,13 @@ impl TypeResolver {
       .unwrap_or(default)
   }
 
-  /// Attempts to recognize an object schema as an `IndexMap<String, T>`.
+  /// Attempts to recognize an object schema as a map type.
   ///
   /// Returns `Some` only if `additionalProperties` is set and `properties`
-  /// is empty (pure map type rather than a struct with extra fields).
+  /// is empty (pure map type rather than a struct with extra fields). The
+  /// concrete map type follows
+  /// [`CollectionTypePolicy`](crate::generator::CollectionTypePolicy):
+  /// `indexmap::IndexMap` when ordered, `std::collections::HashMap` when hashed.
   fn try_map_type(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
     let Some(ref additional) = schema.additional_properties else {
       return Ok(None);
@@ -525,9 +528,18 @@ impl TypeResolver {
 
     let value = self.additional_properties_type(additional)?;
     Ok(Some(TypeRef::new(format!(
-      "indexmap::IndexMap<String, {}>",
+      "{}<String, {}>",
+      self.context.config().map_type_path(),
       value.to_rust_type()
     ))))
+  }
+
+  /// Resolves whether an array schema's `uniqueItems` flag should propagate to
+  /// the generated type. With the ordered policy this returns the schema flag
+  /// directly; with the hashed policy it returns `false` so the array stays a
+  /// `Vec<T>` regardless of the spec.
+  fn preserve_unique_items(&self, schema: &ObjectSchema) -> bool {
+    self.context.config().ordered_collections() && schema.unique_items.unwrap_or(false)
   }
 
   /// Resolves the value type for `additionalProperties`.
