@@ -2,10 +2,7 @@ use std::{collections::BTreeSet, hash::Hash};
 
 use indexmap::{IndexMap, IndexSet};
 use inflections::Inflect;
-use oas3::{
-  Spec,
-  spec::{ObjectOrReference, ObjectSchema, Schema},
-};
+use oas3::{Spec, spec::ObjectSchema};
 
 use super::identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name};
 use crate::{
@@ -13,7 +10,7 @@ use crate::{
     converter::{hashing::CanonicalSchema, union_types::variants_to_cache_key},
     naming::constants::KNOWN_ENUM_VARIANT,
   },
-  utils::{SchemaExt, SchemaMap},
+  utils::{SchemaExt, SchemaInspect, SchemaMap},
 };
 
 const RESERVED_TYPE_NAMES: &[&str] = &["Enum", "Struct", "Type", "Object"];
@@ -131,10 +128,7 @@ impl<'a> TypeNameIndex<'a> {
     let mut index = CandidateIndex::default();
 
     for (prop_name, prop_schema_ref) in &schema.properties {
-      let Schema::Object(prop_schema_ref) = prop_schema_ref else {
-        continue;
-      };
-      let ObjectOrReference::Object(prop_schema) = prop_schema_ref.as_ref() else {
+      let Some(prop_schema) = prop_schema_ref.as_inline() else {
         continue;
       };
 
@@ -161,13 +155,7 @@ impl<'a> TypeNameIndex<'a> {
       }
     }
 
-    for sub in schema.all_of.iter().filter_map(|schema_ref| match schema_ref {
-      Schema::Object(schema_ref) => match schema_ref.as_ref() {
-        ObjectOrReference::Object(schema) => Some(schema),
-        ObjectOrReference::Ref { .. } => None,
-      },
-      Schema::Boolean(_) => None,
-    }) {
+    for sub in schema.all_of.iter().filter_map(SchemaInspect::as_inline) {
       index = index.merge(self.collect_inline_candidates(parent_name, sub)?);
     }
 

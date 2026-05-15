@@ -14,7 +14,7 @@ use crate::{
       inference::{NormalizedVariant, extract_common_variant_prefix},
     },
   },
-  utils::refs::SchemaRefName,
+  utils::refs::{SchemaInspect, SchemaRefName},
 };
 
 pub(crate) trait SchemaResolveExt {
@@ -23,18 +23,24 @@ pub(crate) trait SchemaResolveExt {
 
 impl SchemaResolveExt for ObjectOrReference<ObjectSchema> {
   fn resolve_object(&self, spec: &Spec) -> Result<ObjectSchema, RefError> {
-    Schema::Object(Box::new(self.clone())).resolve_object(spec)
+    match self {
+      ObjectOrReference::Object(schema) => Ok(schema.clone()),
+      ObjectOrReference::Ref { ref_path, .. } => match Schema::from_ref(spec, ref_path)? {
+        Schema::Object(resolved) => match *resolved {
+          ObjectOrReference::Object(schema) => Ok(schema),
+          ObjectOrReference::Ref { ref_path, .. } => Err(RefError::Unresolvable(ref_path)),
+        },
+        Schema::Boolean(_) => Ok(ObjectSchema::default()),
+      },
+    }
   }
 }
 
 impl SchemaResolveExt for Schema {
   fn resolve_object(&self, spec: &Spec) -> Result<ObjectSchema, RefError> {
-    let Schema::Object(obj) = self.resolve(spec)? else {
-      return Ok(ObjectSchema::default());
-    };
-    match *obj {
-      ObjectOrReference::Object(obj) => Ok(obj),
-      ObjectOrReference::Ref { ref_path, .. } => Err(RefError::Unresolvable(ref_path)),
+    match self {
+      Schema::Object(obj_ref) => obj_ref.resolve_object(spec),
+      Schema::Boolean(_) => Ok(ObjectSchema::default()),
     }
   }
 }
@@ -401,13 +407,9 @@ impl SchemaExt for ObjectSchema {
 
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema> {
     let items = self.items.as_deref()?;
-
-    if let Schema::Object(schema_ref) = items
-      && matches!(schema_ref.as_ref(), ObjectOrReference::Ref { .. })
-    {
+    if items.ref_path().is_some() {
       return None;
     }
-
     items.resolve_object(spec).ok()
   }
 
@@ -696,13 +698,7 @@ pub(crate) fn variant_is_nullable(variant: &Schema, spec: &Spec) -> bool {
 /// ```
 ///
 pub(crate) fn has_mixed_string_variants<'a>(variants: impl Iterator<Item = &'a Schema>) -> bool {
-  let objects = variants.filter_map(|variant| match variant {
-    Schema::Object(schema_ref) => match schema_ref.as_ref() {
-      ObjectOrReference::Object(schema) => Some(schema),
-      ObjectOrReference::Ref { .. } => None,
-    },
-    Schema::Boolean(_) => None,
-  });
+  let objects = variants.filter_map(Schema::as_inline);
 
   let mut has_freeform = false;
   let mut has_constrained = false;

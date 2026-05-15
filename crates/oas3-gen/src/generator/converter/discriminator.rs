@@ -113,11 +113,7 @@ impl DiscriminatorConverter {
         is_reachable(&name).then_some((tag.clone(), name))
       })
       .fold(IndexMap::<String, Vec<String>>::new(), |mut acc, (tag, name)| {
-        if let Some(tags) = acc.get_mut(&name) {
-          tags.push(tag);
-        } else {
-          acc.insert(name, vec![tag]);
-        }
+        acc.entry(name).or_default().push(tag);
         acc
       })
       .into_iter()
@@ -208,11 +204,7 @@ impl DiscriminatorConverter {
         Some((type_name, tag.clone()))
       })
       .fold(IndexMap::<String, Vec<String>>::new(), |mut acc, (type_name, tag)| {
-        if let Some(tags) = acc.get_mut(&type_name) {
-          tags.push(tag);
-        } else {
-          acc.insert(type_name, vec![tag]);
-        }
+        acc.entry(type_name).or_default().push(tag);
         acc
       })
       .into_iter()

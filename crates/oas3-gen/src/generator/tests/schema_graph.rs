@@ -1,4 +1,4 @@
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
+use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet, Spec};
 use serde_json::json;
 
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
     schema_registry::SchemaRegistry,
   },
   tests::common::parse_schema,
-  utils::{UnionFingerprints, parse_schema_ref_path},
+  utils::{SchemaInspect, UnionFingerprints, parse_schema_ref_path},
 };
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
@@ -317,17 +317,12 @@ fn schema_merger_conflict_resolution() {
   let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
 
   let prop = merged.schema.properties.get("prop").unwrap();
-  if let Schema::Object(schema_ref) = prop
-    && let ObjectOrReference::Object(schema) = schema_ref.as_ref()
-  {
-    assert_eq!(
-      schema.schema_type,
-      Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      "nugget property should override loaf"
-    );
-  } else {
-    panic!("Expected Object schema");
-  }
+  let schema = prop.as_inline().expect("Expected Object schema");
+  assert_eq!(
+    schema.schema_type,
+    Some(SchemaTypeSet::Single(SchemaType::Integer)),
+    "nugget property should override loaf"
+  );
 }
 
 #[test]

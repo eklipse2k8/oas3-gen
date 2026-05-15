@@ -50,6 +50,57 @@ impl SchemaRefName for ObjectOrReference<ObjectSchema> {
   }
 }
 
+/// Decomposes a [`Schema`] into its inline object or `$ref` path without forcing the caller
+/// through the nested `Schema::Object(Box<ObjectOrReference<_>>)` shape that `oas3` exposes.
+pub trait SchemaInspect {
+  /// Returns the inline [`ObjectSchema`] when this schema is a `Schema::Object`
+  /// holding an `ObjectOrReference::Object`. Returns `None` for boolean schemas
+  /// and `$ref` references.
+  fn as_inline(&self) -> Option<&ObjectSchema>;
+
+  /// Returns the `$ref` path when this schema is a `Schema::Object` holding an
+  /// `ObjectOrReference::Ref`. Returns `None` for boolean and inline schemas.
+  fn ref_path(&self) -> Option<&str>;
+}
+
+impl SchemaInspect for Schema {
+  fn as_inline(&self) -> Option<&ObjectSchema> {
+    let Schema::Object(obj_ref) = self else {
+      return None;
+    };
+    match obj_ref.as_ref() {
+      ObjectOrReference::Object(schema) => Some(schema),
+      ObjectOrReference::Ref { .. } => None,
+    }
+  }
+
+  fn ref_path(&self) -> Option<&str> {
+    let Schema::Object(obj_ref) = self else {
+      return None;
+    };
+    match obj_ref.as_ref() {
+      ObjectOrReference::Ref { ref_path, .. } => Some(ref_path),
+      ObjectOrReference::Object(_) => None,
+    }
+  }
+}
+
+impl SchemaInspect for ObjectOrReference<ObjectSchema> {
+  fn as_inline(&self) -> Option<&ObjectSchema> {
+    match self {
+      ObjectOrReference::Object(schema) => Some(schema),
+      ObjectOrReference::Ref { .. } => None,
+    }
+  }
+
+  fn ref_path(&self) -> Option<&str> {
+    match self {
+      ObjectOrReference::Ref { ref_path, .. } => Some(ref_path),
+      ObjectOrReference::Object(_) => None,
+    }
+  }
+}
+
 /// Extracts a union fingerprint from a slice of schema references.
 ///
 /// Collects named schema references in declaration order for union deduplication.

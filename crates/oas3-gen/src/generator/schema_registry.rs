@@ -1,7 +1,7 @@
 use indexmap::{IndexMap, IndexSet};
 use oas3::{
   Spec,
-  spec::{Discriminator, ObjectOrReference, ObjectSchema, Operation, Schema, SchemaTypeSet},
+  spec::{Discriminator, ObjectSchema, Operation, Schema, SchemaTypeSet},
 };
 use petgraph::{algo::kosaraju_scc, graphmap::DiGraphMap, visit::Dfs};
 
@@ -16,8 +16,8 @@ use crate::{
     operation_registry::OperationRegistry,
   },
   utils::{
-    SchemaExt, SchemaMap, SchemaRefName, SchemaResolveExt, SchemaSet, UnionFingerprints, extract_union_fingerprint,
-    parse_schema_ref_path, schema_ext::SchemaExtIters,
+    SchemaExt, SchemaInspect, SchemaMap, SchemaRefName, SchemaResolveExt, SchemaSet, UnionFingerprints,
+    extract_union_fingerprint, parse_schema_ref_path, schema_ext::SchemaExtIters,
   },
 };
 
@@ -88,9 +88,7 @@ impl MergeAccumulator {
   /// suitable for `anyOf` composition where fields may be optional.
   fn merge_optional_from(&mut self, source: &ObjectSchema) {
     for (name, prop) in &source.properties {
-      if !self.properties.contains_key(name) {
-        self.properties.insert(name.clone(), prop.clone());
-      }
+      self.properties.entry(name.clone()).or_insert_with(|| prop.clone());
     }
   }
 
@@ -283,16 +281,13 @@ impl SchemaRegistry {
     }
 
     let synthesized = schema.union_variants().try_fold(IndexMap::new(), |mut acc, variant| {
-      let Schema::Object(schema_ref) = variant else {
-        return Some(acc);
-      };
-      let ObjectOrReference::Ref { ref_path, .. } = schema_ref.as_ref() else {
+      let Some(ref_path) = variant.ref_path() else {
         return Some(acc);
       };
       let name = parse_schema_ref_path(ref_path)?;
       let dm = self.discriminator_cache.get(&name)?;
       (dm.field_name == discriminator.property_name).then(|| {
-        acc.insert(dm.field_value.clone(), ref_path.clone());
+        acc.insert(dm.field_value.clone(), ref_path.to_owned());
         acc
       })
     })?;
@@ -338,31 +333,24 @@ impl SchemaRegistry {
     let mut acc = MergeAccumulator::default();
 
     for all_of_ref in &schema.all_of {
-      match all_of_ref {
-        Schema::Object(schema_ref) => match schema_ref.as_ref() {
-          ObjectOrReference::Ref { ref_path, .. } => {
-            if let Some(name) = parse_schema_ref_path(ref_path)
-              && let Some(merged) = self.merged_schemas.get(&name)
-            {
-              acc.merge_from(&merged.schema);
-              continue;
-            }
-
-            let resolved = all_of_ref
-              .resolve_object(&self.spec)
-              .map_err(|e| anyhow::anyhow!("Schema resolution failed for inline allOf reference: {e}"))?;
-            acc.merge_from(&resolved);
-          }
-          ObjectOrReference::Object(inline) => {
-            let inner_merged = self.merge_inline(inline)?;
-            acc.merge_from(&inner_merged);
-          }
-        },
-        Schema::Boolean(_) => {
-          let inline = all_of_ref.resolve_object(&self.spec)?;
-          let inner_merged = self.merge_inline(&inline)?;
-          acc.merge_from(&inner_merged);
+      if let Some(ref_path) = all_of_ref.ref_path() {
+        if let Some(name) = parse_schema_ref_path(ref_path)
+          && let Some(merged) = self.merged_schemas.get(&name)
+        {
+          acc.merge_from(&merged.schema);
+          continue;
         }
+        let resolved = all_of_ref
+          .resolve_object(&self.spec)
+          .map_err(|e| anyhow::anyhow!("Schema resolution failed for inline allOf reference: {e}"))?;
+        acc.merge_from(&resolved);
+      } else if let Some(inline) = all_of_ref.as_inline() {
+        let inner_merged = self.merge_inline(inline)?;
+        acc.merge_from(&inner_merged);
+      } else {
+        let inline = all_of_ref.resolve_object(&self.spec)?;
+        let inner_merged = self.merge_inline(&inline)?;
+        acc.merge_from(&inner_merged);
       }
     }
 
@@ -391,9 +379,7 @@ impl SchemaRegistry {
       if let Some(ref_name) = prop_schema.schema_ref_name() {
         refs.insert(ref_name);
       }
-      if let Schema::Object(schema_ref) = prop_schema
-        && let ObjectOrReference::Object(inline) = schema_ref.as_ref()
-      {
+      if let Some(inline) = prop_schema.as_inline() {
         refs.extend(self.collect(inline, union_fingerprints));
       }
     }
@@ -402,9 +388,7 @@ impl SchemaRegistry {
       if let Some(ref_name) = schema_ref.schema_ref_name() {
         refs.insert(ref_name);
       }
-      if let Schema::Object(schema_ref) = schema_ref
-        && let ObjectOrReference::Object(inline) = schema_ref.as_ref()
-      {
+      if let Some(inline) = schema_ref.as_inline() {
         refs.extend(self.collect(inline, union_fingerprints));
       }
     }
@@ -418,24 +402,20 @@ impl SchemaRegistry {
       }
     }
 
-    if let Some(ref items_box) = schema.items {
-      if let Some(ref_name) = items_box.as_ref().schema_ref_name() {
+    if let Some(items) = schema.items.as_deref() {
+      if let Some(ref_name) = items.schema_ref_name() {
         refs.insert(ref_name);
       }
-      if let Schema::Object(schema_ref) = items_box.as_ref()
-        && let ObjectOrReference::Object(inline) = schema_ref.as_ref()
-      {
+      if let Some(inline) = items.as_inline() {
         refs.extend(self.collect(inline, union_fingerprints));
       }
     }
 
-    if let Some(ref schema_ref) = schema.additional_properties {
-      if let Some(ref_name) = schema_ref.schema_ref_name() {
+    if let Some(additional) = &schema.additional_properties {
+      if let Some(ref_name) = additional.schema_ref_name() {
         refs.insert(ref_name);
       }
-      if let Schema::Object(schema_ref) = schema_ref
-        && let ObjectOrReference::Object(inline) = schema_ref.as_ref()
-      {
+      if let Some(inline) = additional.as_inline() {
         refs.extend(self.collect(inline, union_fingerprints));
       }
     }
@@ -453,10 +433,8 @@ impl SchemaRegistry {
     if let Some(ref_name) = schema_ref.schema_ref_name() {
       refs.insert(ref_name);
     }
-    if let Schema::Object(schema_ref) = schema_ref
-      && let ObjectOrReference::Object(inline_schema) = schema_ref.as_ref()
-    {
-      refs.extend(self.collect(inline_schema, union_fingerprints));
+    if let Some(inline) = schema_ref.as_inline() {
+      refs.extend(self.collect(inline, union_fingerprints));
     }
     refs
   }
@@ -623,20 +601,15 @@ impl SchemaRegistry {
   /// back to the raw schema if no merged version exists. For inline objects,
   /// returns the object directly.
   fn resolve_schema_ref<'a>(&'a self, schema_ref: &'a Schema) -> Option<&'a ObjectSchema> {
-    match schema_ref {
-      Schema::Object(schema_ref) => match schema_ref.as_ref() {
-        ObjectOrReference::Ref { ref_path, .. } => {
-          let name = parse_schema_ref_path(ref_path)?;
-          self
-            .merged_schemas
-            .get(&name)
-            .map(|m| &m.schema)
-            .or_else(|| self.schemas.get(&name))
-        }
-        ObjectOrReference::Object(schema) => Some(schema),
-      },
-      Schema::Boolean(_) => None,
+    if let Some(ref_path) = schema_ref.ref_path() {
+      let name = parse_schema_ref_path(ref_path)?;
+      return self
+        .merged_schemas
+        .get(&name)
+        .map(|m| &m.schema)
+        .or_else(|| self.schemas.get(&name));
     }
+    schema_ref.as_inline()
   }
 
   /// Searches for `additionalProperties` in a schema's inheritance chain.
@@ -757,13 +730,7 @@ impl SchemaRegistry {
   /// Returns `None` if the property doesn't exist, has no `const_value`,
   /// or the `const_value` is not a string.
   fn extract_const_discriminator_value(schema: &ObjectSchema, property_name: &str) -> Option<String> {
-    let prop_ref = schema.properties.get(property_name)?;
-    let Schema::Object(schema_ref) = prop_ref else {
-      return None;
-    };
-    let ObjectOrReference::Object(prop_schema) = schema_ref.as_ref() else {
-      return None;
-    };
+    let prop_schema = schema.properties.get(property_name)?.as_inline()?;
     prop_schema.const_value.as_ref()?.as_str().map(String::from)
   }
 

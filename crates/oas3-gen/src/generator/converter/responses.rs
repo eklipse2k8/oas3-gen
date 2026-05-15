@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 use itertools::Itertools;
-use oas3::spec::{MediaType, ObjectOrReference, ObjectSchema, Operation, Response, Schema};
+use oas3::spec::{MediaType, ObjectSchema, Operation, Response, Schema};
 
 use super::{ConverterContext, SerdeUsageRecorder, TypeResolver, inline_resolver::InlineTypeResolver};
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
       responses as naming_responses,
     },
   },
-  utils::{SchemaExt as _, parse_schema_ref_path, schema_ext::SchemaExtIters},
+  utils::{SchemaExt as _, SchemaInspect, parse_schema_ref_path, schema_ext::SchemaExtIters},
 };
 
 /// Extracted metadata about operation responses for code generation.
@@ -212,15 +212,19 @@ impl ResponseConverter {
       return Ok(None);
     };
 
-    match schema_ref {
-      Schema::Boolean(_) => Ok(Some(TypeRef::new(RustPrimitive::Value))),
-      Schema::Object(schema_ref) => match schema_ref.as_ref() {
-        ObjectOrReference::Ref { ref_path, .. } => {
-          Ok(parse_schema_ref_path(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))))
-        }
-        ObjectOrReference::Object(schema) => self.resolve_inline_schema(schema, path, status_code),
-      },
+    if matches!(schema_ref, Schema::Boolean(_)) {
+      return Ok(Some(TypeRef::new(RustPrimitive::Value)));
     }
+
+    if let Some(ref_path) = schema_ref.ref_path() {
+      return Ok(parse_schema_ref_path(ref_path).map(|name| TypeRef::new(to_rust_type_name(&name))));
+    }
+
+    if let Some(schema) = schema_ref.as_inline() {
+      return self.resolve_inline_schema(schema, path, status_code);
+    }
+
+    Ok(None)
   }
 
   /// Resolves an inline response schema to a type reference.

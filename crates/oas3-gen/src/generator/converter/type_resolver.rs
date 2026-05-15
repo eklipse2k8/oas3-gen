@@ -3,7 +3,7 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use inflections::Inflect;
 use itertools::Itertools;
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
+use oas3::spec::{ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
   ConversionOutput,
@@ -17,7 +17,8 @@ use crate::{
     naming::{constants::VARIANT_KIND_SUFFIX, identifiers::strip_parent_prefix, inference::CommonVariantName},
   },
   utils::{
-    SchemaExt, SchemaRefName, SchemaResolveExt, extract_union_fingerprint, parse_schema_ref_path, variant_is_nullable,
+    SchemaExt, SchemaInspect, SchemaRefName, SchemaResolveExt, extract_union_fingerprint, parse_schema_ref_path,
+    variant_is_nullable,
   },
 };
 
@@ -114,9 +115,7 @@ impl TypeResolver {
     schema: &ObjectSchema,
     schema_ref: &Schema,
   ) -> Result<ConversionOutput<TypeRef>> {
-    if let Schema::Object(schema_ref) = schema_ref
-      && let ObjectOrReference::Ref { ref_path, .. } = schema_ref.as_ref()
-    {
+    if let Some(ref_path) = schema_ref.ref_path() {
       return self.resolve_ref(ref_path, schema);
     }
 
@@ -547,23 +546,20 @@ impl TypeResolver {
   /// Boolean `true` maps to `serde_json::Value`; schema references
   /// and inline schemas are resolved to their respective types.
   pub(crate) fn additional_properties_type(&self, additional: &Schema) -> Result<TypeRef> {
-    match additional {
-      Schema::Boolean(_) => Ok(TypeRef::new(RustPrimitive::Value)),
-      Schema::Object(schema_ref) => {
-        if let ObjectOrReference::Ref { ref_path, .. } = schema_ref.as_ref() {
-          let name = parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
-          return Ok(self.context.graph().type_ref(&name));
-        }
-
-        let resolved = self.resolve(additional)?;
-
-        if resolved.is_empty_object() {
-          return Ok(TypeRef::new(RustPrimitive::Value));
-        }
-
-        self.resolve_type(&resolved)
-      }
+    if matches!(additional, Schema::Boolean(_)) {
+      return Ok(TypeRef::new(RustPrimitive::Value));
     }
+
+    if let Some(ref_path) = additional.ref_path() {
+      let name = parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
+      return Ok(self.context.graph().type_ref(&name));
+    }
+
+    let resolved = self.resolve(additional)?;
+    if resolved.is_empty_object() {
+      return Ok(TypeRef::new(RustPrimitive::Value));
+    }
+    self.resolve_type(&resolved)
   }
 
   /// Resolves the item type for an array schema.
@@ -577,12 +573,10 @@ impl TypeResolver {
 
     let items = self.resolve(items_ref)?;
 
-    let type_ref = match items_ref {
-      Schema::Object(schema_ref) => match schema_ref.as_ref() {
-        ObjectOrReference::Ref { ref_path, .. } => self.resolve_ref(ref_path, &items)?.result,
-        ObjectOrReference::Object(_) => self.resolve_type(&items)?,
-      },
-      Schema::Boolean(_) => self.resolve_type(&items)?,
+    let type_ref = if let Some(ref_path) = items_ref.ref_path() {
+      self.resolve_ref(ref_path, &items)?.result
+    } else {
+      self.resolve_type(&items)?
     };
 
     Ok(TypeRef {
