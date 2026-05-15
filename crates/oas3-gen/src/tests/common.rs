@@ -3,16 +3,19 @@ use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
 use serde_json::json;
 
-use crate::generator::{
-  ast::{Documentation, FieldDef, FieldNameToken, RustPrimitive, TypeRef},
-  converter::{
-    CodegenConfig, ConverterContext, EnumCasePolicy, EnumHelperPolicy, SchemaConverter, cache::SharedSchemaCache,
+use crate::{
+  generator::{
+    ast::{Documentation, FieldDef, FieldNameToken, RustPrimitive, TypeRef},
+    converter::{
+      CodegenConfig, ConverterContext, EnumCasePolicy, EnumHelperPolicy, SchemaConverter, cache::SharedSchemaCache,
+    },
+    metrics::GenerationStats,
+    schema_registry::SchemaRegistry,
   },
-  metrics::GenerationStats,
-  schema_registry::SchemaRegistry,
+  utils::{SchemaMap, UnionFingerprints},
 };
 
-pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec {
+pub(crate) fn create_test_spec(schemas: impl IntoIterator<Item = (String, ObjectSchema)>) -> Spec {
   let mut spec_json = json!({
     "openapi": "3.0.0",
     "info": { "title": "Test API", "version": "1.0.0" },
@@ -28,11 +31,11 @@ pub(crate) fn create_test_spec(schemas: BTreeMap<String, ObjectSchema>) -> Spec 
   serde_json::from_value(spec_json).unwrap()
 }
 
-pub(crate) fn create_test_graph(schemas: BTreeMap<String, ObjectSchema>) -> Arc<SchemaRegistry> {
+pub(crate) fn create_test_graph(schemas: impl IntoIterator<Item = (String, ObjectSchema)>) -> Arc<SchemaRegistry> {
   let spec = create_test_spec(schemas);
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
   Arc::new(graph)
@@ -105,7 +108,7 @@ pub(crate) fn parse_schema(json_value: serde_json::Value) -> ObjectSchema {
   serde_json::from_value(json_value).expect("failed to parse schema from JSON")
 }
 
-pub(crate) fn parse_schemas(pairs: Vec<(&str, serde_json::Value)>) -> BTreeMap<String, ObjectSchema> {
+pub(crate) fn parse_schemas(pairs: Vec<(&str, serde_json::Value)>) -> SchemaMap {
   pairs
     .into_iter()
     .map(|(name, json)| (name.to_string(), parse_schema(json)))

@@ -13,12 +13,10 @@ pub async fn list_operations(input: &Path, colors: &Colors) -> anyhow::Result<()
 
   let registry = OperationRegistry::new(&spec);
 
-  let mut operations: Vec<_> = registry
+  let operations: Vec<_> = registry
     .operations()
     .map(|entry| (entry.stable_id.clone(), entry.method.clone(), entry.path.clone()))
     .collect();
-
-  operations.sort_by(|a, b| a.0.cmp(&b.0));
 
   let mut table = Table::new();
   table

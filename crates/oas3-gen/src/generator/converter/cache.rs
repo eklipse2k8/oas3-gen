@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use indexmap::IndexMap;
 use oas3::spec::ObjectSchema;
 
 use super::hashing::CanonicalSchema;
@@ -11,7 +12,7 @@ use crate::{
       name_index::SchemaPrecomputed,
     },
   },
-  utils::{SchemaExt, UnionFingerprints, build_union_fingerprints},
+  utils::{SchemaExt, SchemaMap, UnionFingerprint, UnionFingerprints, build_union_fingerprints},
 };
 
 #[derive(Default, Debug, Clone)]
@@ -54,8 +55,8 @@ impl NameRegistry {
 #[derive(Default, Debug, Clone)]
 struct SchemaIdentity {
   schema_to_type: BTreeMap<CanonicalSchema, String>,
-  precomputed: BTreeMap<CanonicalSchema, String>,
-  metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
+  precomputed: IndexMap<CanonicalSchema, String>,
+  metadata: IndexMap<CanonicalSchema, SchemaPrecomputed>,
 }
 
 impl SchemaIdentity {
@@ -63,11 +64,11 @@ impl SchemaIdentity {
   /// deterministic naming across code generation runs.
   fn set_precomputed(
     &mut self,
-    names: BTreeMap<CanonicalSchema, String>,
-    metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
+    names: impl IntoIterator<Item = (CanonicalSchema, String)>,
+    metadata: impl IntoIterator<Item = (CanonicalSchema, SchemaPrecomputed)>,
   ) {
-    self.precomputed = names;
-    self.metadata = metadata;
+    self.precomputed = names.into_iter().collect();
+    self.metadata = metadata.into_iter().collect();
   }
 
   /// Returns the type name previously assigned to this canonical schema, or `None`
@@ -103,14 +104,14 @@ impl SchemaIdentity {
 #[derive(Default, Debug, Clone)]
 struct EnumRegistry {
   value_sets_to_type: BTreeMap<Vec<String>, String>,
-  precomputed: BTreeMap<Vec<String>, String>,
+  precomputed: IndexMap<Vec<String>, String>,
 }
 
 impl EnumRegistry {
   /// Stores a mapping of enum value sets to their precomputed type names for
   /// deterministic deduplication of identical enums.
-  fn set_precomputed(&mut self, names: BTreeMap<Vec<String>, String>) {
-    self.precomputed = names;
+  fn set_precomputed(&mut self, names: impl IntoIterator<Item = (Vec<String>, String)>) {
+    self.precomputed = names.into_iter().collect();
   }
 
   /// Returns the type name for an enum with the given values, checking the runtime
@@ -138,34 +139,34 @@ impl EnumRegistry {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone)]
 struct UnionKey {
-  refs: BTreeSet<String>,
+  refs: UnionFingerprint,
   discriminator: Option<String>,
 }
 
 impl UnionKey {
   /// Creates a composite key for union deduplication from variant schema references
   /// and an optional discriminator property name.
-  fn new(refs: BTreeSet<String>, discriminator: Option<String>) -> Self {
+  fn new(refs: UnionFingerprint, discriminator: Option<String>) -> Self {
     Self { refs, discriminator }
   }
 }
 
 #[derive(Default, Debug, Clone)]
 struct UnionRegistry {
-  union_keys_to_type: BTreeMap<UnionKey, String>,
+  union_keys_to_type: IndexMap<UnionKey, String>,
 }
 
 impl UnionRegistry {
   /// Returns the type name for a union with the given variant references and
   /// discriminator, or `None` if no such union has been registered.
-  fn lookup(&self, refs: &BTreeSet<String>, discriminator: Option<&str>) -> Option<&str> {
-    let key = UnionKey::new(refs.clone(), discriminator.map(String::from));
+  fn lookup(&self, refs: &[String], discriminator: Option<&str>) -> Option<&str> {
+    let key = UnionKey::new(refs.to_vec(), discriminator.map(String::from));
     self.union_keys_to_type.get(&key).map(String::as_str)
   }
 
   /// Records that a union with the given variant references and discriminator has
   /// been generated with the specified type name.
-  fn register(&mut self, refs: BTreeSet<String>, discriminator: Option<String>, type_name: String) {
+  fn register(&mut self, refs: UnionFingerprint, discriminator: Option<String>, type_name: String) {
     let key = UnionKey::new(refs, discriminator);
     self.union_keys_to_type.insert(key, type_name);
   }
@@ -283,9 +284,9 @@ impl SharedSchemaCache {
   /// naming that persists across code generation runs.
   pub(crate) fn set_precomputed_names(
     &mut self,
-    schema_names: BTreeMap<CanonicalSchema, String>,
-    enum_names: BTreeMap<Vec<String>, String>,
-    schema_metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
+    schema_names: impl IntoIterator<Item = (CanonicalSchema, String)>,
+    enum_names: impl IntoIterator<Item = (Vec<String>, String)>,
+    schema_metadata: impl IntoIterator<Item = (CanonicalSchema, SchemaPrecomputed)>,
   ) {
     self.schemas.set_precomputed(schema_names, schema_metadata);
     self.enums.set_precomputed(enum_names);
@@ -336,13 +337,13 @@ impl SharedSchemaCache {
 
   /// Returns the type name for a union with the given variant references and
   /// discriminator, or `None` if no such union has been registered.
-  pub(crate) fn get_union_name(&self, refs: &BTreeSet<String>, discriminator: Option<&str>) -> Option<String> {
+  pub(crate) fn get_union_name(&self, refs: &[String], discriminator: Option<&str>) -> Option<String> {
     self.unions.lookup(refs, discriminator).map(String::from)
   }
 
   /// Records that a union with the given variant references and discriminator has
   /// been generated with the specified type name.
-  pub(crate) fn register_union(&mut self, refs: BTreeSet<String>, discriminator: Option<String>, name: String) {
+  pub(crate) fn register_union(&mut self, refs: UnionFingerprint, discriminator: Option<String>, name: String) {
     self.unions.register(refs, discriminator, name);
   }
 
@@ -514,7 +515,7 @@ impl SharedSchemaCache {
   ///
   /// This should be called after parsing the OpenAPI spec to populate the cache
   /// with top-level schema names and union deduplication mappings.
-  pub(crate) fn initialize_from_schemas(&mut self, schemas: &BTreeMap<String, ObjectSchema>) {
+  pub(crate) fn initialize_from_schemas(&mut self, schemas: &SchemaMap) {
     let schema_names = schemas
       .keys()
       .flat_map(|schema_name| {
@@ -527,7 +528,7 @@ impl SharedSchemaCache {
   }
 
   /// Returns the schema name for a union with the given variant references, or `None` if not registered.
-  pub(crate) fn find_union(&self, refs: &BTreeSet<String>) -> Option<&str> {
+  pub(crate) fn find_union(&self, refs: &[String]) -> Option<&str> {
     self.union_fingerprints.get(refs).map(String::as_str)
   }
 

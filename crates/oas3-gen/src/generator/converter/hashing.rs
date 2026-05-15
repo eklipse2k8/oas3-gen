@@ -8,7 +8,7 @@ use serde_json::{Number, Value};
 /// Opaque representation of a schema's canonical form.
 ///
 /// Used for caching and deduplication of generated types.
-/// Normalizes fields like `required`, `type`, `enum` to ensure semantically
+/// Normalizes fields like `required` and `type` to ensure semantically
 /// identical schemas produce the same canonical representation.
 #[derive(Debug, Clone, Eq)]
 pub struct CanonicalSchema(String);
@@ -17,8 +17,8 @@ impl CanonicalSchema {
   /// Creates a canonical representation of an OpenAPI schema for cache-key equality.
   ///
   /// Serializes the schema to JSON, normalizes order-independent arrays (`required`,
-  /// `type`, `enum`) by sorting them alphabetically, then converts to RFC 8785
-  /// canonical JSON. Two schemas that differ only in array element ordering or
+  /// `type`) by sorting them alphabetically, then converts to RFC 8785
+  /// canonical JSON. Two schemas that differ only in order-independent array ordering or
   /// JSON key ordering will produce identical `CanonicalSchema` values.
   pub fn from_schema(schema: &ObjectSchema) -> anyhow::Result<Self> {
     let mut value = serde_json::to_value(schema).context("Failed to serialize schema for canonicalization")?;
@@ -66,7 +66,7 @@ impl Hash for CanonicalSchema {
 /// Normalizes JSON Schema values for canonical comparison.
 ///
 /// Recursively traverses the JSON value and:
-/// - Alphabetically sorts order-independent arrays (`required`, `type`, `enum`)
+/// - Alphabetically sorts order-independent arrays (`required`, `type`)
 /// - Clamps large integers to the IEEE 754 safe integer range
 ///
 /// This ensures schemas like `{"required": ["b", "a"]}` and `{"required": ["a", "b"]}`
@@ -80,10 +80,6 @@ fn normalize_schema_semantics(value: &mut Value) {
       }
 
       if let Some(Value::Array(arr)) = map.get_mut("type") {
-        sort_string_array_in_place(arr);
-      }
-
-      if let Some(Value::Array(arr)) = map.get_mut("enum") {
         sort_string_array_in_place(arr);
       }
 

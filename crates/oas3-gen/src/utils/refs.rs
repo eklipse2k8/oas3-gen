@@ -1,5 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
-
+use indexmap::{IndexMap, IndexSet};
 use oas3::spec::{ObjectOrReference, ObjectSchema, Ref, Schema};
 
 /// Parses a schema `$ref` path and extracts the referenced schema name.
@@ -53,27 +52,36 @@ impl SchemaRefName for ObjectOrReference<ObjectSchema> {
 
 /// Extracts a union fingerprint from a slice of schema references.
 ///
-/// Collects all named schema references into a sorted set for union deduplication.
-/// This is used to identify union types (oneOf/anyOf) that share the same set of variants.
-pub fn extract_union_fingerprint<T: SchemaRefName>(variants: &[T]) -> BTreeSet<String> {
-  variants.iter().filter_map(SchemaRefName::schema_ref_name).collect()
+/// Collects named schema references in declaration order for union deduplication.
+/// This is used to identify union types (oneOf/anyOf) that share the same ordered variants.
+pub fn extract_union_fingerprint<T: SchemaRefName>(variants: &[T]) -> UnionFingerprint {
+  variants
+    .iter()
+    .filter_map(SchemaRefName::schema_ref_name)
+    .collect::<IndexSet<_>>()
+    .into_iter()
+    .collect()
 }
+
+pub type SchemaMap = IndexMap<String, ObjectSchema>;
+pub type SchemaSet = IndexSet<String>;
+pub type UnionFingerprint = Vec<String>;
 
 /// Maps union type fingerprints to generated type names.
 ///
-/// Union types (e.g., `oneOf` or `anyOf` in OpenAPI) that contain the same set of
+/// Union types (e.g., `oneOf` or `anyOf` in OpenAPI) that contain the same ordered sequence of
 /// schema references are identified by a fingerprint. This type maps those
-/// fingerprints to stable names, ensuring consistent type generation across the API.
-pub type UnionFingerprints = BTreeMap<BTreeSet<String>, String>;
+/// fingerprints to stable names while preserving declaration order semantics.
+pub type UnionFingerprints = IndexMap<UnionFingerprint, String>;
 
 /// Builds union fingerprints from a collection of schemas.
 ///
 /// Scans all schemas for `oneOf` and `anyOf` compositions and creates a mapping
-/// from the set of referenced schema names to the parent schema name. This enables
-/// deduplication of union types that share the same set of variants.
+/// from the ordered referenced schema names to the parent schema name. This enables
+/// deduplication of union types that share the same ordered variants.
 ///
 /// Only unions with 2 or more named references are included.
-pub fn build_union_fingerprints(schemas: &BTreeMap<String, ObjectSchema>) -> UnionFingerprints {
+pub fn build_union_fingerprints(schemas: &SchemaMap) -> UnionFingerprints {
   let mut fingerprints = UnionFingerprints::new();
   for (name, schema) in schemas {
     for variants in [&schema.one_of, &schema.any_of] {

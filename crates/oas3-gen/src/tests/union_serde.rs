@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
-  use std::collections::HashMap;
-
+  use indexmap::IndexMap;
   use serde_json::json;
 
   use crate::fixtures::union_serde::*;
@@ -774,7 +773,7 @@ mod tests {
     let json = serde_json::to_value(&string_metadata).unwrap();
     assert_eq!(json, "simple metadata", "string metadata serialization failed");
 
-    let object_data: HashMap<String, serde_json::Value> =
+    let object_data: IndexMap<String, serde_json::Value> =
       [("key".to_string(), json!("value")), ("count".to_string(), json!(42))]
         .into_iter()
         .collect();
@@ -783,7 +782,7 @@ mod tests {
     assert_eq!(json["key"], "value", "object metadata key mismatch");
     assert_eq!(json["count"], 42, "object metadata count mismatch");
 
-    let session_data: HashMap<String, serde_json::Value> =
+    let session_data: IndexMap<String, serde_json::Value> =
       [("session_id".to_string(), json!("abc123"))].into_iter().collect();
     let request_with_metadata = ContentRequest {
       blocks: vec![ContentBlock::Text(text_block("Hello"))],

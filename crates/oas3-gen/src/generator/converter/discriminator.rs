@@ -1,8 +1,6 @@
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  rc::Rc,
-};
+use std::rc::Rc;
 
+use indexmap::{IndexMap, IndexSet};
 use oas3::spec::ObjectSchema;
 
 use crate::{
@@ -114,8 +112,12 @@ impl DiscriminatorConverter {
         let name = parse_schema_ref_path(ref_path)?;
         is_reachable(&name).then_some((tag.clone(), name))
       })
-      .fold(BTreeMap::<String, Vec<String>>::new(), |mut acc, (tag, name)| {
-        acc.entry(name).or_default().push(tag);
+      .fold(IndexMap::<String, Vec<String>>::new(), |mut acc, (tag, name)| {
+        if let Some(tags) = acc.get_mut(&name) {
+          tags.push(tag);
+        } else {
+          acc.insert(name, vec![tag]);
+        }
         acc
       })
       .into_iter()
@@ -174,7 +176,7 @@ impl DiscriminatorConverter {
   ///
   /// This ensures a union-to-discriminated conversion will not lose any
   /// discriminator cases.
-  fn all_mappings_have_variants(variants: &[VariantDef], mapping: &BTreeMap<String, String>) -> bool {
+  fn all_mappings_have_variants(variants: &[VariantDef], mapping: &IndexMap<String, String>) -> bool {
     if variants.is_empty() || mapping.is_empty() {
       return false;
     }
@@ -182,7 +184,7 @@ impl DiscriminatorConverter {
     let known_types = variants
       .iter()
       .filter_map(VariantDef::unboxed_type_name)
-      .collect::<BTreeSet<_>>();
+      .collect::<IndexSet<_>>();
 
     mapping.values().all(|ref_path| {
       parse_schema_ref_path(ref_path).is_some_and(|name| known_types.contains(&to_rust_type_name(&name)))
@@ -197,7 +199,7 @@ impl DiscriminatorConverter {
   /// Mapping entries without matching variants are skipped.
   fn convert_to_discriminated_variants(
     variants: &[VariantDef],
-    mapping: &BTreeMap<String, String>,
+    mapping: &IndexMap<String, String>,
   ) -> Vec<DiscriminatedVariant> {
     mapping
       .iter()
@@ -205,8 +207,12 @@ impl DiscriminatorConverter {
         let type_name = parse_schema_ref_path(ref_path).map(|n| to_rust_type_name(&n))?;
         Some((type_name, tag.clone()))
       })
-      .fold(BTreeMap::<String, Vec<String>>::new(), |mut acc, (type_name, tag)| {
-        acc.entry(type_name).or_default().push(tag);
+      .fold(IndexMap::<String, Vec<String>>::new(), |mut acc, (type_name, tag)| {
+        if let Some(tags) = acc.get_mut(&type_name) {
+          tags.push(tag);
+        } else {
+          acc.insert(type_name, vec![tag]);
+        }
         acc
       })
       .into_iter()

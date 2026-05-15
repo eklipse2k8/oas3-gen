@@ -1,5 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::BTreeSet, hash::Hash};
 
+use indexmap::{IndexMap, IndexSet};
 use inflections::Inflect;
 use oas3::{
   Spec,
@@ -12,12 +13,12 @@ use crate::{
     converter::{hashing::CanonicalSchema, union_types::variants_to_cache_key},
     naming::constants::KNOWN_ENUM_VARIANT,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, SchemaMap},
 };
 
 const RESERVED_TYPE_NAMES: &[&str] = &["Enum", "Struct", "Type", "Object"];
 
-type NameCandidates = BTreeSet<(String, bool)>;
+type NameCandidates = IndexSet<(String, bool)>;
 
 #[derive(Default, Clone, Debug)]
 pub struct SchemaPrecomputed {
@@ -26,16 +27,16 @@ pub struct SchemaPrecomputed {
 
 #[derive(Default)]
 pub struct ScanResult {
-  pub names: BTreeMap<CanonicalSchema, String>,
-  pub enum_names: BTreeMap<Vec<String>, String>,
-  pub schema_metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
+  pub names: IndexMap<CanonicalSchema, String>,
+  pub enum_names: IndexMap<Vec<String>, String>,
+  pub schema_metadata: IndexMap<CanonicalSchema, SchemaPrecomputed>,
 }
 
 #[derive(Default)]
 struct CandidateIndex {
-  schemas: BTreeMap<CanonicalSchema, NameCandidates>,
-  enums: BTreeMap<Vec<String>, NameCandidates>,
-  metadata: BTreeMap<CanonicalSchema, SchemaPrecomputed>,
+  schemas: IndexMap<CanonicalSchema, NameCandidates>,
+  enums: IndexMap<Vec<String>, NameCandidates>,
+  metadata: IndexMap<CanonicalSchema, SchemaPrecomputed>,
 }
 
 impl CandidateIndex {
@@ -76,12 +77,12 @@ impl CandidateIndex {
 }
 
 pub struct TypeNameIndex<'a> {
-  schemas: &'a BTreeMap<String, ObjectSchema>,
+  schemas: &'a SchemaMap,
   spec: &'a Spec,
 }
 
 impl<'a> TypeNameIndex<'a> {
-  pub fn new(schemas: &'a BTreeMap<String, ObjectSchema>, spec: &'a Spec) -> Self {
+  pub fn new(schemas: &'a SchemaMap, spec: &'a Spec) -> Self {
     Self { schemas, spec }
   }
 
@@ -178,10 +179,10 @@ impl<'a> TypeNameIndex<'a> {
   }
 }
 
-fn resolve_names<K: Ord>(
-  candidates: BTreeMap<K, NameCandidates>,
+fn resolve_names<K: Eq + Hash>(
+  candidates: IndexMap<K, NameCandidates>,
   used_names: &mut BTreeSet<String>,
-) -> BTreeMap<K, String> {
+) -> IndexMap<K, String> {
   candidates
     .into_iter()
     .map(|(key, name_candidates)| {

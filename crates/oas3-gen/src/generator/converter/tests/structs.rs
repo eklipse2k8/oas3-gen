@@ -11,6 +11,7 @@ use crate::{
     schema_registry::SchemaRegistry,
   },
   tests::common::{create_test_context, create_test_graph, default_config, parse_schema},
+  utils::UnionFingerprints,
 };
 
 fn create_graph_from_json(
@@ -25,7 +26,7 @@ fn create_graph_from_json(
   let spec = serde_json::from_value::<Spec>(spec_json).expect("failed to parse spec from JSON");
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
   Arc::new(graph)
@@ -359,7 +360,7 @@ fn discriminator_deduplicates_same_schema_mappings() -> anyhow::Result<()> {
 }
 
 #[test]
-fn discriminator_mappings_alphabetical_order() {
+fn discriminator_mappings_preserve_mapping_order() {
   let components = json!({
     "Park": {
       "type": "object",
@@ -392,7 +393,7 @@ fn discriminator_mappings_alphabetical_order() {
   let variant_names: Vec<&str> = mappings.iter().map(|v| v.variant_name.as_str()).collect();
   assert_eq!(
     variant_names,
-    vec!["Floof", "Frappe", "Sploot", "Stumpy"],
-    "Mappings should be in alphabetical order by schema name"
+    vec!["Stumpy", "Floof", "Frappe", "Sploot"],
+    "Mappings should follow discriminator mapping order"
   );
 }

@@ -1,5 +1,6 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
+use indexmap::IndexSet;
 use oas3::spec::ParameterIn;
 
 use super::{
@@ -44,7 +45,7 @@ pub(crate) struct OperationsOutput {
   pub(crate) operations: Vec<OperationInfo>,
   pub(crate) warnings: Vec<GenerationWarning>,
   pub(crate) usage_recorder: SerdeUsageRecorder,
-  pub(crate) unique_headers: BTreeSet<HttpHeaderRef>,
+  pub(crate) unique_headers: IndexSet<HttpHeaderRef>,
 }
 
 /// Orchestrates conversion of all operations in a specification.
@@ -73,7 +74,7 @@ impl OperationsProcessor {
     let mut types = vec![];
     let mut operations = vec![];
     let mut warnings = vec![];
-    let mut unique_headers = BTreeSet::new();
+    let mut unique_headers = IndexSet::new();
 
     for entry in entries {
       match self.converter.convert(entry) {
@@ -103,7 +104,7 @@ impl OperationsProcessor {
     }
   }
 
-  fn extend_component_headers(&self, unique_headers: &mut BTreeSet<HttpHeaderRef>) {
+  fn extend_component_headers(&self, unique_headers: &mut IndexSet<HttpHeaderRef>) {
     let spec = self.context.graph().spec();
     unique_headers.extend(
       spec

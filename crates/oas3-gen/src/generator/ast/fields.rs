@@ -219,7 +219,7 @@ where
         "Additional properties not defined in the schema.",
       ]))
       .rust_type(TypeRef::new(format!(
-        "std::collections::HashMap<String, {}>",
+        "indexmap::IndexMap<String, {}>",
         value_type.to_rust_type()
       )))
       .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))

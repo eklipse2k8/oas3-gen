@@ -575,7 +575,7 @@ fn additional_properties_type_resolution() {
         "type": "object",
         "additionalProperties": { "type": "boolean" }
       })),
-      "std::collections::HashMap<String, bool>",
+      "indexmap::IndexMap<String, bool>",
     ),
     (
       "string_value_type",
@@ -583,7 +583,7 @@ fn additional_properties_type_resolution() {
         "type": "object",
         "additionalProperties": { "type": "string" }
       })),
-      "std::collections::HashMap<String, String>",
+      "indexmap::IndexMap<String, String>",
     ),
     (
       "integer_value_type",
@@ -591,7 +591,7 @@ fn additional_properties_type_resolution() {
         "type": "object",
         "additionalProperties": { "type": "integer" }
       })),
-      "std::collections::HashMap<String, i64>",
+      "indexmap::IndexMap<String, i64>",
     ),
     (
       "ref_value_type",
@@ -599,7 +599,7 @@ fn additional_properties_type_resolution() {
         "type": "object",
         "additionalProperties": { "$ref": "#/components/schemas/CustomType" }
       })),
-      "std::collections::HashMap<String, CustomType>",
+      "indexmap::IndexMap<String, CustomType>",
     ),
     (
       "empty_schema_value_type",
@@ -607,7 +607,7 @@ fn additional_properties_type_resolution() {
         "type": "object",
         "additionalProperties": {}
       })),
-      "std::collections::HashMap<String, serde_json::Value>",
+      "indexmap::IndexMap<String, serde_json::Value>",
     ),
     (
       "boolean_true",
@@ -615,7 +615,7 @@ fn additional_properties_type_resolution() {
         "type": "object",
         "additionalProperties": true
       })),
-      "std::collections::HashMap<String, serde_json::Value>",
+      "indexmap::IndexMap<String, serde_json::Value>",
     ),
     (
       "boolean_false_not_map",
@@ -994,8 +994,8 @@ fn unique_items_flag_preserved() {
   assert!(result.unique_items, "unique_items flag should be preserved in TypeRef");
   assert_eq!(
     result.to_rust_type(),
-    "Vec<String>",
-    "unique array still generates Vec<> in to_rust_type (codegen handles BTreeSet conversion)"
+    "indexmap::IndexSet<String>",
+    "unique array should resolve to IndexSet"
   );
 
   let non_unique_array = parse_schema(json!({

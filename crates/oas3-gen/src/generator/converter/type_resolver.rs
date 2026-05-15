@@ -262,7 +262,7 @@ impl TypeResolver {
   ///
   /// Returns `None` if the schema is not an array or has no inline items.
   /// For arrays with inline object, union, or enum items, generates the
-  /// item type and wraps it in `Vec<T>` or `BTreeSet<T>` (for unique items).
+  /// item type and wraps it in `Vec<T>` or `IndexSet<T>` (for unique items).
   pub(crate) fn try_inline_array(
     &self,
     parent_name: &str,
@@ -506,7 +506,7 @@ impl TypeResolver {
       .unwrap_or(default)
   }
 
-  /// Attempts to recognize an object schema as a `HashMap<String, T>`.
+  /// Attempts to recognize an object schema as an `IndexMap<String, T>`.
   ///
   /// Returns `Some` only if `additionalProperties` is set and `properties`
   /// is empty (pure map type rather than a struct with extra fields).
@@ -525,7 +525,7 @@ impl TypeResolver {
 
     let value = self.additional_properties_type(additional)?;
     Ok(Some(TypeRef::new(format!(
-      "std::collections::HashMap<String, {}>",
+      "indexmap::IndexMap<String, {}>",
       value.to_rust_type()
     ))))
   }

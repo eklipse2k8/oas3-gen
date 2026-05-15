@@ -170,8 +170,13 @@ fn test_enum_deduplication() {
       include_str!("../../../fixtures/enum_deduplication.json"),
       vec![
         ("pub enum Status", 1, "Status enum should be defined exactly once"),
+        (
+          "pub enum StructCStatus",
+          1,
+          "Reordered enum values should produce a separate enum",
+        ),
         ("pub status: Option<Status>", 1, "StructA should use Status"),
-        ("status: Option<Status>", 3, "Multiple structs should use Status"),
+        ("status: Option<Status>", 2, "StructA and StructB should use Status"),
       ],
       vec![],
     ),
@@ -196,6 +201,62 @@ fn test_enum_deduplication() {
       assert_not_contains(&output.code, pattern, context);
     }
   }
+}
+
+#[test]
+fn preserves_schema_property_enum_and_collection_order() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Order API", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Zebra": {
+          "type": "object",
+          "properties": {
+            "zeta": { "type": "string" },
+            "alpha": { "type": "string" }
+          }
+        },
+        "Alpha": {
+          "type": "string",
+          "enum": ["third", "first", "second"]
+        },
+        "Beta": {
+          "type": "object",
+          "properties": {
+            "second": { "type": "string" }
+          }
+        },
+        "UniqueNames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "Labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }"#;
+
+  let orchestrator = make_orchestrator(parse_spec(spec_json), true);
+  let output = generate_types(&orchestrator, "order.json");
+
+  assert_patterns_in_order(&output.code, &["pub struct Zebra", "pub enum Alpha", "pub struct Beta"]);
+  assert_patterns_in_order(&output.code, &["pub zeta", "pub alpha"]);
+  assert_patterns_in_order(&output.code, &["Third", "First", "Second"]);
+  assert_contains(
+    &output.code,
+    "pub type UniqueNames = indexmap::IndexSet<String>;",
+    "uniqueItems arrays should preserve insertion order",
+  );
+  assert_contains(
+    &output.code,
+    "indexmap::IndexMap<String, String>",
+    "additionalProperties maps should preserve insertion order",
+  );
 }
 
 #[test]
@@ -238,6 +299,17 @@ fn test_customization_generates_serde_as_attributes() {
     r#"#[serde_as(as = "Option<crate::MyDateTime>")]"#,
     "optional field should have serde_as attribute wrapped in Option",
   );
+}
+
+fn assert_patterns_in_order(code: &str, patterns: &[&str]) {
+  let mut last = 0;
+  for pattern in patterns {
+    let next = code[last..]
+      .find(pattern)
+      .map_or_else(|| panic!("missing ordered pattern '{pattern}'"), |idx| last + idx);
+    assert!(next >= last, "pattern '{pattern}' appeared out of order");
+    last = next + pattern.len();
+  }
 }
 
 #[test]

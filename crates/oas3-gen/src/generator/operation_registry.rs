@@ -108,7 +108,7 @@ impl RegistrationContext {
       .into_iter()
       .zip(simplified_keys)
       .filter_map(|(old, new)| {
-        self.entries.swap_remove(&old).map(|mut entry| {
+        self.entries.shift_remove(&old).map(|mut entry| {
           entry.stable_id.clone_from(&new);
           (new, entry)
         })

@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
-
 use http::Method;
+use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 
@@ -419,8 +418,8 @@ impl ToTokens for RouterFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let vis = self.vis.to_tokens();
 
-    let routes_by_path: BTreeMap<String, Vec<&ServerTraitMethod>> =
-      self.methods.iter().fold(BTreeMap::new(), |mut acc, method| {
+    let routes_by_path: IndexMap<String, Vec<&ServerTraitMethod>> =
+      self.methods.iter().fold(IndexMap::new(), |mut acc, method| {
         let path = method.path.to_axum_path();
         acc.entry(path).or_default().push(method);
         acc

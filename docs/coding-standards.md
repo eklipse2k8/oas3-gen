@@ -52,16 +52,15 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 ### IndexMap/IndexSet (insertion order)
 
 - `OperationRegistry`: Preserves operation order from OpenAPI spec for logical client method ordering
+- Schema storage, type generation, dependency traversal, discriminator mappings, and header references
 - Use when spec author's ordering is meaningful and should be reflected in generated code
-- Operations should appear in client in same order as spec
+- Operations, schemas, properties, enum variants, and union variants should appear in the same order as the spec
 
 ### BTreeMap/BTreeSet (sorted order)
 
-- Schema storage, type generation, dependency graphs
-- Produces alphabetically sorted output independent of spec ordering
-- More stable across spec changes (reordering schemas doesn't change generated output)
-- Makes generated code easier to navigate and review
-- Example: `deduplicate_and_order_types()` intentionally uses BTreeMap for sorting
+- Use only for order-insensitive canonical output that is not derived from spec declaration order
+- Examples: grouped `use` statements, derive attributes, regex constant lookup tables
+- Do not use for schemas, fields, enum values, union variants, operations, or generated type ordering
 
 ### HashMap/HashSet (non-deterministic)
 
@@ -71,7 +70,8 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 ### Rule of thumb
 
 - Operations/endpoints -> IndexMap (spec order matters)
-- Types/schemas/dependencies -> BTreeMap (alphabetical is better)
+- Types/schemas/dependencies -> IndexMap/IndexSet (spec order matters)
+- JSON arrays -> Vec unless uniqueness is required; `uniqueItems` generated types use IndexSet
 - Internal bookkeeping -> HashMap only if order truly doesn't matter
 
 ## Itertools for Deterministic Iteration

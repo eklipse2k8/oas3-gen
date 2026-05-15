@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use indexmap::IndexSet;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use serde_json::{Value, json};
 
@@ -13,7 +14,7 @@ use crate::{
     },
   },
   tests::common::create_test_spec,
-  utils::SchemaExt,
+  utils::{SchemaExt, SchemaMap},
 };
 
 fn make_string_schema() -> ObjectSchema {
@@ -129,7 +130,7 @@ fn test_compute_best_name() {
       "ExistingName",
     ),
     (vec![("NetUser", false), ("WebUser", false)], vec![], "User"),
-    (vec![("Cat", false), ("Bat", false)], vec![], "Bat"),
+    (vec![("Cat", false), ("Bat", false)], vec![], "Cat"),
     (vec![("MyGroup", false), ("YourGroup", false)], vec!["Group"], "Group2"),
   ];
 
@@ -137,7 +138,7 @@ fn test_compute_best_name() {
     let candidates = candidate_pairs
       .iter()
       .map(|(s, b)| ((*s).to_string(), *b))
-      .collect::<BTreeSet<(String, bool)>>();
+      .collect::<IndexSet<(String, bool)>>();
     let used = used_list.into_iter().map(String::from).collect::<BTreeSet<String>>();
     assert_eq!(
       compute_best_name(&candidates, &used),
@@ -171,7 +172,7 @@ fn test_inline_type_scanner_known_suffix_patterns() {
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([
+  let schemas = SchemaMap::from([
     ("VoiceIdsShared".to_string(), voice_ids_shared),
     ("FormatType".to_string(), format_type),
   ]);
@@ -214,7 +215,7 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([
+  let schemas = SchemaMap::from([
     ("Status".to_string(), status),
     ("ChatModel".to_string(), chat_model),
     ("ModelIdsShared".to_string(), model_ids_shared),
@@ -232,7 +233,7 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
     "Regular enum should not have 'Known' suffix"
   );
 
-  let chat_model_values = vec!["gpt-3.5-turbo".to_string(), "gpt-4".to_string()];
+  let chat_model_values = vec!["gpt-4".to_string(), "gpt-3.5-turbo".to_string()];
   let chat_model_name = result.enum_names.get(&chat_model_values);
   assert!(
     chat_model_name.is_some(),
@@ -785,7 +786,7 @@ fn test_union_schemas_do_not_generate_enum_candidates() {
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([
+  let schemas = SchemaMap::from([
     ("ParentA".to_string(), parent_schema_a),
     ("ParentB".to_string(), parent_schema_b),
   ]);
@@ -819,13 +820,13 @@ fn test_regular_enums_still_generate_enum_candidates() {
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([("Parent".to_string(), parent_schema)]);
+  let schemas = SchemaMap::from([("Parent".to_string(), parent_schema)]);
 
   let spec = create_test_spec(BTreeMap::new());
   let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
-  let status_values = vec!["active".to_string(), "done".to_string(), "pending".to_string()];
+  let status_values = vec!["active".to_string(), "pending".to_string(), "done".to_string()];
   assert!(
     result.enum_names.contains_key(&status_values),
     "Regular string enums (not unions) should still generate enum candidates"

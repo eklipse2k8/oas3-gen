@@ -16,6 +16,7 @@ Rust code.
 - [Schema Filtering](#schema-filtering)
 - [Header Emission](#header-emission)
 - [Builder Generation](#builder-generation)
+- [Ordering and Collections](#ordering-and-collections)
 - [Documentation Formatting](#documentation-formatting)
 
 ---
@@ -132,6 +133,12 @@ where
         .with_state(service)
 }
 ```
+
+---
+
+## Ordering and Collections
+
+Generated schemas, fields, enum variants, union variants, operations, and header constants follow the order written in the OpenAPI document. `additionalProperties` map types are emitted as `indexmap::IndexMap<String, T>`, and arrays with `uniqueItems: true` are emitted as `indexmap::IndexSet<T>` so runtime collections keep insertion order. Projects that use generated map or unique-array types need `indexmap` available in `Cargo.toml`.
 
 ---
 
