@@ -20,7 +20,7 @@ pub(crate) mod variants;
 
 use std::{
   cell::{Ref, RefCell, RefMut},
-  collections::{BTreeSet, HashMap},
+  collections::HashMap,
   rc::Rc,
   sync::Arc,
 };
@@ -45,7 +45,7 @@ use crate::{
     naming::{constants::DISCRIMINATED_BASE_SUFFIX, identifiers::to_rust_type_name},
     schema_registry::SchemaRegistry,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, SchemaSet},
 };
 
 /// Policy for handling enum variant name collisions.
@@ -118,6 +118,25 @@ pub enum HeaderScope {
   All,
 }
 
+/// Policy for the runtime collection types emitted in generated code.
+///
+/// Map types (`additionalProperties` and standalone object maps) and arrays
+/// marked `uniqueItems: true` can either preserve JSON key/element order at
+/// runtime via `indexmap`, or use the standard library equivalents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CollectionTypePolicy {
+  /// Emit `indexmap::IndexMap<String, T>` for map types and
+  /// `indexmap::IndexSet<T>` for `uniqueItems` arrays, so the order of keys
+  /// or elements received over the wire is retained when the generated type
+  /// is re-serialized.
+  #[default]
+  Ordered,
+  /// Emit `std::collections::HashMap<String, T>` for map types and
+  /// `Vec<T>` for arrays (ignoring `uniqueItems` at the type level), matching
+  /// the pre-0.26 generator output.
+  Hashed,
+}
+
 /// Configuration for code generation.
 ///
 /// Uses typed enums instead of booleans to make intent explicit at call sites
@@ -138,6 +157,8 @@ pub struct CodegenConfig {
   pub schema_scope: SchemaScope,
   #[builder(default)]
   pub header_scope: HeaderScope,
+  #[builder(default)]
+  pub collection_types: CollectionTypePolicy,
   #[builder(default)]
   pub enable_builders: bool,
   #[builder(default)]
@@ -191,6 +212,23 @@ impl CodegenConfig {
   pub fn enable_builders(&self) -> bool {
     self.enable_builders
   }
+
+  /// Returns `true` when generated map and unique-array fields should emit
+  /// `indexmap` types that preserve JSON key/element order at runtime.
+  #[must_use]
+  pub fn ordered_collections(&self) -> bool {
+    self.collection_types == CollectionTypePolicy::Ordered
+  }
+
+  /// Returns the fully qualified Rust path used for map-like fields
+  /// (`additionalProperties` and standalone object maps).
+  #[must_use]
+  pub fn map_type_path(&self) -> &'static str {
+    match self.collection_types {
+      CollectionTypePolicy::Ordered => "indexmap::IndexMap",
+      CollectionTypePolicy::Hashed => "std::collections::HashMap",
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -199,7 +237,7 @@ pub(crate) struct ConverterContext {
   pub(crate) config: CodegenConfig,
   pub(crate) cache: RefCell<SharedSchemaCache>,
   pub(crate) type_usage: RefCell<SerdeUsageRecorder>,
-  pub(crate) reachable_schemas: Option<Arc<BTreeSet<String>>>,
+  pub(crate) reachable_schemas: Option<Arc<SchemaSet>>,
 }
 
 impl ConverterContext {
@@ -212,7 +250,7 @@ impl ConverterContext {
     graph: Arc<SchemaRegistry>,
     config: CodegenConfig,
     cache: SharedSchemaCache,
-    reachable_schemas: Option<Arc<BTreeSet<String>>>,
+    reachable_schemas: Option<Arc<SchemaSet>>,
   ) -> Self {
     Self {
       graph,
@@ -447,7 +485,7 @@ impl SchemaConverter {
       return Ok(vec![]);
     };
 
-    let resolved = non_null_variant.resolve(spec)?;
+    let resolved = self.type_resolver.resolve(non_null_variant)?;
     if resolved.has_enum_values() && resolved.enum_values.len() > 1 {
       return Ok(vec![self.enum_converter.convert_value_enum(name, &resolved)]);
     }
@@ -480,11 +518,10 @@ impl SchemaConverter {
   /// Converts all schemas from the OpenAPI spec to Rust types.
   ///
   /// Processes schemas in two phases: first registers all top-level schemas to enable
-  /// deduplication, then converts each to Rust types. Enums are processed before other
-  /// types to ensure their names are available for reference.
+  /// deduplication, then converts each to Rust types in specification order.
   pub(crate) fn convert_all_schemas(
     &self,
-    operation_reachable: Option<&BTreeSet<String>>,
+    operation_reachable: Option<&SchemaSet>,
     stats: &mut GenerationStats,
   ) -> Vec<RustType> {
     let schemas = self.context.graph().schemas();
@@ -494,11 +531,7 @@ impl SchemaConverter {
       .filter(|(name, _)| operation_reachable.is_none_or(|filter| filter.contains(name.as_str())))
       .collect::<Vec<_>>();
 
-    let (enums, non_enums): (Vec<_>, Vec<_>) = filtered
-      .into_iter()
-      .partition(|(_, schema)| !schema.enum_values.is_empty());
-
-    let ordered = enums.into_iter().chain(non_enums).collect::<Vec<_>>();
+    let ordered = filtered;
 
     {
       let mut cache = self.context().cache_mut();

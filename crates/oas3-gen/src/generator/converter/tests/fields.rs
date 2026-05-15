@@ -17,6 +17,10 @@ fn config_with_customizations(customizations: HashMap<String, String>) -> Codege
   }
 }
 
+fn object_schema(schema: ObjectSchema) -> Schema {
+  Schema::Object(Box::new(ObjectOrReference::Object(schema)))
+}
+
 #[test]
 fn test_datetime_field_with_customization() -> anyhow::Result<()> {
   let mut schema = ObjectSchema {
@@ -25,7 +29,7 @@ fn test_datetime_field_with_customization() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "sploot_at".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
       ..Default::default()
@@ -84,7 +88,7 @@ fn test_optional_datetime_field_with_customization() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "waddle_at".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
       ..Default::default()
@@ -132,7 +136,7 @@ fn test_array_of_datetime_with_customization() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "toebeans".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
       items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
         ObjectSchema {
@@ -187,7 +191,7 @@ fn test_date_field_with_customization() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "corgi_date".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date".to_string()),
       ..Default::default()
@@ -236,7 +240,7 @@ fn test_uuid_field_with_customization() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "tag_id".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("uuid".to_string()),
       ..Default::default()
@@ -285,7 +289,7 @@ fn test_no_serde_as_attr_without_customization() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "sploot_at".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
       ..Default::default()
@@ -320,6 +324,147 @@ fn test_no_serde_as_attr_without_customization() -> anyhow::Result<()> {
   assert!(
     !struct_def.outer_attrs.contains(&OuterAttr::SerdeAs),
     "Struct should not have #[serde_with::serde_as] when no fields have serde_as_attr"
+  );
+
+  Ok(())
+}
+
+#[test]
+fn test_byte_format_emits_base64_serde_as() -> anyhow::Result<()> {
+  let mut schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+  schema.properties.insert(
+    "payload".to_string(),
+    object_schema(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      format: Some("byte".to_string()),
+      ..Default::default()
+    }),
+  );
+  schema.required = vec!["payload".to_string()];
+
+  let graph = create_test_graph(BTreeMap::from([("Frappe".to_string(), schema)]));
+  let context = create_test_context(graph.clone(), CodegenConfig::default());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Frappe", graph.get("Frappe").unwrap())?;
+
+  let struct_def = result
+    .iter()
+    .find_map(|ty| match ty {
+      RustType::Struct(def) => Some(def),
+      _ => None,
+    })
+    .expect("Struct should be present");
+
+  let field = struct_def
+    .fields
+    .iter()
+    .find(|f| f.name == "payload")
+    .expect("payload field should exist");
+
+  assert_eq!(field.rust_type.base_type, RustPrimitive::Bytes);
+  assert_eq!(
+    field.serde_as_attr.as_ref().expect("Should have serde_as_attr"),
+    &SerdeAsFieldAttr::CustomOverride {
+      custom_type: "serde_with::base64::Base64".to_string(),
+      optional: false,
+      is_array: false,
+    }
+  );
+  assert!(struct_def.outer_attrs.contains(&OuterAttr::SerdeAs));
+
+  Ok(())
+}
+
+#[test]
+fn test_binary_format_does_not_emit_base64() -> anyhow::Result<()> {
+  let mut schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+  schema.properties.insert(
+    "payload".to_string(),
+    object_schema(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      format: Some("binary".to_string()),
+      ..Default::default()
+    }),
+  );
+  schema.required = vec!["payload".to_string()];
+
+  let graph = create_test_graph(BTreeMap::from([("Frappe".to_string(), schema)]));
+  let context = create_test_context(graph.clone(), CodegenConfig::default());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Frappe", graph.get("Frappe").unwrap())?;
+
+  let struct_def = result
+    .iter()
+    .find_map(|ty| match ty {
+      RustType::Struct(def) => Some(def),
+      _ => None,
+    })
+    .expect("Struct should be present");
+
+  let field = struct_def
+    .fields
+    .iter()
+    .find(|f| f.name == "payload")
+    .expect("payload field should exist");
+
+  assert_eq!(field.rust_type.base_type, RustPrimitive::Bytes);
+  assert!(
+    field.serde_as_attr.is_none(),
+    "format: binary should not emit a base64 serde_as attribute"
+  );
+
+  Ok(())
+}
+
+#[test]
+fn test_byte_format_customization_overrides_base64() -> anyhow::Result<()> {
+  let mut schema = ObjectSchema {
+    schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
+    ..Default::default()
+  };
+  schema.properties.insert(
+    "payload".to_string(),
+    object_schema(ObjectSchema {
+      schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
+      format: Some("byte".to_string()),
+      ..Default::default()
+    }),
+  );
+  schema.required = vec!["payload".to_string()];
+
+  let customizations = HashMap::from([("byte".to_string(), "crate::MyBase64".to_string())]);
+  let graph = create_test_graph(BTreeMap::from([("Frappe".to_string(), schema)]));
+  let context = create_test_context(graph.clone(), config_with_customizations(customizations));
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Frappe", graph.get("Frappe").unwrap())?;
+
+  let struct_def = result
+    .iter()
+    .find_map(|ty| match ty {
+      RustType::Struct(def) => Some(def),
+      _ => None,
+    })
+    .expect("Struct should be present");
+
+  let field = struct_def
+    .fields
+    .iter()
+    .find(|f| f.name == "payload")
+    .expect("payload field should exist");
+
+  assert_eq!(
+    field.serde_as_attr.as_ref().expect("Should have serde_as_attr"),
+    &SerdeAsFieldAttr::CustomOverride {
+      custom_type: "crate::MyBase64".to_string(),
+      optional: false,
+      is_array: false,
+    }
   );
 
   Ok(())
@@ -387,7 +532,7 @@ fn test_string_field_no_customization() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "name".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       ..Default::default()
     }),
@@ -431,7 +576,7 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
   };
   schema.properties.insert(
     "sploot_at".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date-time".to_string()),
       ..Default::default()
@@ -439,7 +584,7 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
   );
   schema.properties.insert(
     "corgi_date".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("date".to_string()),
       ..Default::default()
@@ -447,7 +592,7 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
   );
   schema.properties.insert(
     "tag_id".to_string(),
-    ObjectOrReference::Object(ObjectSchema {
+    object_schema(ObjectSchema {
       schema_type: Some(SchemaTypeSet::Single(SchemaType::String)),
       format: Some("uuid".to_string()),
       ..Default::default()

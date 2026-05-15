@@ -1,6 +1,5 @@
 use bon::Builder;
-use itertools::Itertools;
-use oas3::spec::{Discriminator, ObjectOrReference, ObjectSchema};
+use oas3::spec::{Discriminator, ObjectSchema, Schema};
 
 use crate::generator::ast::{
   DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumToken, EnumVariantToken,
@@ -10,7 +9,7 @@ use crate::generator::ast::{
 /// Represents a nested union that has been promoted to a flat variant list.
 #[derive(Clone, Debug, PartialEq, Builder)]
 pub(crate) struct FlattenedUnion {
-  pub(crate) variants: Vec<ObjectOrReference<ObjectSchema>>,
+  pub(crate) variants: Vec<Schema>,
   pub(crate) description: Option<String>,
   pub(crate) discriminator: Option<Discriminator>,
   pub(crate) is_one_of: bool,
@@ -42,13 +41,12 @@ pub(crate) enum CollisionStrategy {
   Deduplicate,
 }
 
-/// Builds a sorted list of cache keys from variant definitions for type deduplication.
+/// Builds an ordered list of cache keys from variant definitions for type deduplication.
 ///
-/// Uses each variant's serde name (the wire-format value) as the cache key,
-/// sorted alphabetically to produce a canonical key that identifies equivalent
-/// enum types regardless of their declaration order.
+/// Uses each variant's serde name (the wire-format value) as the cache key in
+/// declaration order so generated enum reuse preserves the spec's written order.
 pub(crate) fn variants_to_cache_key(variants: &[VariantDef]) -> Vec<String> {
-  variants.iter().map(VariantDef::serde_name).sorted().collect()
+  variants.iter().map(VariantDef::serde_name).collect()
 }
 
 #[derive(Clone, Debug)]

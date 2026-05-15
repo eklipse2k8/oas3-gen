@@ -332,7 +332,7 @@ fn test_canonical_schema_as_btreemap_key() {
 }
 
 #[test]
-fn test_canonical_schema_normalizes_enum_order() {
+fn test_canonical_schema_preserves_enum_order() {
   let schema1 = parse_schema(json!({
     "enum": ["z", "a", "m"]
   }));
@@ -343,9 +343,9 @@ fn test_canonical_schema_normalizes_enum_order() {
   let canonical1 = CanonicalSchema::from_schema(&schema1).expect("should succeed");
   let canonical2 = CanonicalSchema::from_schema(&schema2).expect("should succeed");
 
-  assert_eq!(
+  assert_ne!(
     canonical1, canonical2,
-    "Enum value order should not affect canonical equality"
+    "Enum value order should affect canonical equality"
   );
 }
 

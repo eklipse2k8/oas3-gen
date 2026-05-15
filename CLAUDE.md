@@ -10,14 +10,18 @@ OpenAPI-to-Rust code generator that parses OpenAPI 3.1 specifications and genera
 
 **Workspace crates:**
 
-- **oas3-gen**: Main CLI tool for code generation
-- **oas3-gen-support**: Runtime support library for generated code
+- **oas3-gen** (`crates/oas3-gen`): Main CLI tool for code generation
+- **oas3-gen-support** (`crates/oas3-gen-support`): Runtime support library for generated code
+
+Edition 2024, MSRV 1.89. All external dependencies are pinned in the root `[workspace.dependencies]` — crates pull them in with `dep = { workspace = true }`.
 
 ## Quick Start
 
 ```bash
 cargo build                    # Build
 cargo test                     # Test
+cargo clippy --all -- -W clippy::pedantic   # Lint
+cargo +nightly fmt --all       # Format (requires nightly toolchain)
 cargo run -- generate types -i spec.json -o types.rs        # Generate types (JSON)
 cargo run -- generate types -i spec.yaml -o types.rs        # Generate types (YAML)
 cargo run -- generate client -i spec.json -o client.rs      # Generate client

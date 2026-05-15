@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
 use anyhow::Result;
 use inflections::Inflect;
@@ -16,7 +16,7 @@ use crate::{
     converter::{ConverterContext, SchemaConverter, cache::SharedSchemaCache},
     naming::identifiers::strip_parent_prefix,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, UnionFingerprint},
 };
 
 /// Resolves anonymous inline schemas into named Rust types with cache deduplication.
@@ -116,7 +116,7 @@ impl InlineTypeResolver {
   pub(crate) fn resolve_inline_union(
     &self,
     schema: &ObjectSchema,
-    refs: &BTreeSet<String>,
+    refs: &UnionFingerprint,
     base_name: &str,
   ) -> Result<ConversionOutput<TypeRef>> {
     if refs.len() > 1

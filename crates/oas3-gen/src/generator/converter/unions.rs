@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
 use anyhow::Context;
-use oas3::spec::{ObjectOrReference, ObjectSchema};
+use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
   ConversionOutput,
@@ -17,7 +17,7 @@ use crate::{
     converter::{ConverterContext, discriminator::DiscriminatorConverter},
     naming::{identifiers::ensure_unique, inference::strip_common_affixes},
   },
-  utils::{SchemaExt, extract_schema_ref_name},
+  utils::{SchemaExt, SchemaRefName, SchemaResolveExt},
 };
 
 #[derive(Clone, Debug)]
@@ -189,25 +189,22 @@ impl UnionConverter {
   /// (from `$ref` path, schema `title`, or positional fallback), and ensures
   /// uniqueness across all variants. Null schemas are skipped as they represent
   /// nullable wrappers rather than distinct variants.
-  fn collect_union_variant_specs(
-    &self,
-    variants_src: &[ObjectOrReference<ObjectSchema>],
-  ) -> anyhow::Result<Vec<UnionVariantSpec>> {
+  fn collect_union_variant_specs(&self, variants_src: &[Schema]) -> anyhow::Result<Vec<UnionVariantSpec>> {
     let mut specs = vec![];
     let mut seen_names = BTreeSet::new();
 
     for (i, variant_ref) in variants_src.iter().enumerate() {
       let resolved = variant_ref
-        .resolve(self.context.graph().spec())
+        .resolve_object(self.context.graph().spec())
         .context(format!("Schema resolution failed for union variant {i}"))?;
 
       if resolved.is_null() {
         continue;
       }
 
-      let ref_name = extract_schema_ref_name(variant_ref).or_else(|| {
+      let ref_name = variant_ref.schema_ref_name().or_else(|| {
         if resolved.all_of.len() == 1 {
-          extract_schema_ref_name(&resolved.all_of[0])
+          resolved.all_of[0].schema_ref_name()
         } else {
           None
         }

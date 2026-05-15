@@ -95,7 +95,11 @@ impl TypeRef {
     }
 
     if self.is_array {
-      result = format!("Vec<{result}>");
+      result = if self.unique_items {
+        format!("indexmap::IndexSet<{result}>")
+      } else {
+        format!("Vec<{result}>")
+      };
     }
 
     if self.nullable {
@@ -129,11 +133,19 @@ impl TypeRef {
 
   fn format_array_example(&self, example: &serde_json::Value) -> String {
     let serde_json::Value::Array(items) = example else {
-      return "vec![]".to_string();
+      return if self.unique_items {
+        "indexmap::IndexSet::new()".to_string()
+      } else {
+        "vec![]".to_string()
+      };
     };
 
     if items.is_empty() {
-      return "vec![]".to_string();
+      return if self.unique_items {
+        "indexmap::IndexSet::new()".to_string()
+      } else {
+        "vec![]".to_string()
+      };
     }
 
     let element_type = TypeRef {
@@ -149,7 +161,11 @@ impl TypeRef {
       .map(|item| element_type.format_example(item))
       .collect::<Vec<String>>();
 
-    format!("vec![{}]", formatted_items.join(", "))
+    if self.unique_items {
+      format!("indexmap::IndexSet::from([{}])", formatted_items.join(", "))
+    } else {
+      format!("vec![{}]", formatted_items.join(", "))
+    }
   }
 }
 
@@ -338,7 +354,11 @@ impl ToTokens for TypeRef {
     }
 
     if self.is_array {
-      type_tokens = quote! { Vec<#type_tokens> };
+      type_tokens = if self.unique_items {
+        quote! { indexmap::IndexSet<#type_tokens> }
+      } else {
+        quote! { Vec<#type_tokens> }
+      };
     }
 
     if self.nullable {

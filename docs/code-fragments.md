@@ -325,7 +325,7 @@ Implementations:
 
 3. **Visibility threading**: Most fragments accept `Visibility` to generate appropriate `pub`/`pub(crate)` modifiers
 
-4. **BTreeMap/BTreeSet for determinism**: Regex lookups and derive collections use sorted collections
+4. **Spec order first**: Schema, field, enum, union, and header output uses insertion-ordered collections; sorted collections are reserved for canonical fragments such as grouped imports and derives
 
 5. **Option-based conditional generation**: Many fragments return empty `quote! {}` for None/empty cases
 

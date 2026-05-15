@@ -3,7 +3,7 @@ use std::rc::Rc;
 use anyhow::{Context, Result};
 use inflections::Inflect;
 use itertools::Itertools;
-use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, Spec};
+use oas3::spec::{ObjectSchema, Schema, SchemaType, Spec};
 
 use super::{
   ConversionOutput,
@@ -16,7 +16,10 @@ use crate::{
     converter::ConverterContext,
     naming::{constants::VARIANT_KIND_SUFFIX, identifiers::strip_parent_prefix, inference::CommonVariantName},
   },
-  utils::{SchemaExt, extract_schema_ref_name, extract_union_fingerprint, parse_schema_ref_path, variant_is_nullable},
+  utils::{
+    SchemaExt, SchemaInspect, SchemaRefName, SchemaResolveExt, extract_union_fingerprint, parse_schema_ref_path,
+    variant_is_nullable,
+  },
 };
 
 #[derive(Clone, Debug)]
@@ -41,8 +44,10 @@ impl TypeResolver {
   }
 
   /// Resolves a schema reference to its underlying schema.
-  pub(crate) fn resolve(&self, schema_ref: &ObjectOrReference<ObjectSchema>) -> Result<ObjectSchema> {
-    schema_ref.resolve(self.spec()).context("Schema resolution failed")
+  pub(crate) fn resolve(&self, schema_ref: &Schema) -> Result<ObjectSchema> {
+    schema_ref
+      .resolve_object(self.spec())
+      .context("Schema resolution failed")
   }
 
   /// Resolves a schema to its Rust type reference.
@@ -108,9 +113,9 @@ impl TypeResolver {
     parent_name: &str,
     property_name: &str,
     schema: &ObjectSchema,
-    schema_ref: &ObjectOrReference<ObjectSchema>,
+    schema_ref: &Schema,
   ) -> Result<ConversionOutput<TypeRef>> {
-    if let ObjectOrReference::Ref { ref_path, .. } = schema_ref {
+    if let Some(ref_path) = schema_ref.ref_path() {
       return self.resolve_ref(ref_path, schema);
     }
 
@@ -245,7 +250,7 @@ impl TypeResolver {
   fn union_type(
     &self,
     schema: &ObjectSchema,
-    variants: &[ObjectOrReference<ObjectSchema>],
+    variants: &[Schema],
     base_name: &str,
   ) -> Result<ConversionOutput<TypeRef>> {
     let refs = extract_union_fingerprint(variants);
@@ -256,7 +261,7 @@ impl TypeResolver {
   ///
   /// Returns `None` if the schema is not an array or has no inline items.
   /// For arrays with inline object, union, or enum items, generates the
-  /// item type and wraps it in `Vec<T>` or `BTreeSet<T>` (for unique items).
+  /// item type and wraps it in `Vec<T>` or `IndexSet<T>` (for unique items).
   pub(crate) fn try_inline_array(
     &self,
     parent_name: &str,
@@ -267,7 +272,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    let unique = schema.unique_items.unwrap_or(false);
+    let unique = self.preserve_unique_items(schema);
     let singular = cruet::to_singular(property_name).to_pascal_case();
 
     let result = if items.is_inline_object() {
@@ -344,7 +349,7 @@ impl TypeResolver {
   /// entries: one null and one non-null. The non-null variant is resolved
   /// to its type and wrapped in `Option`. Returns `None` if the pattern
   /// doesn't match or a new enum type must be generated.
-  fn try_nullable_variants(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
+  fn try_nullable_variants(&self, variants: &[Schema]) -> Result<Option<TypeRef>> {
     if variants.len() != 2 {
       return Ok(None);
     }
@@ -355,7 +360,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    if let Some(ref_name) = extract_schema_ref_name(variant) {
+    if let Some(ref_name) = variant.schema_ref_name() {
       return Ok(Some(self.context.graph().type_ref(&ref_name).with_option()));
     }
 
@@ -370,10 +375,10 @@ impl TypeResolver {
 
   /// Returns `true` if the array schema has items containing a union.
   fn has_union_items(&self, schema: &ObjectSchema) -> bool {
-    let Some(Schema::Object(o)) = schema.items.as_ref().map(AsRef::as_ref) else {
+    let Some(items) = schema.items.as_deref() else {
       return false;
     };
-    self.resolve(o).is_ok_and(|items| items.has_union())
+    self.resolve(items).is_ok_and(|items| items.has_union())
   }
 
   /// Attempts to resolve a union to an existing type or simple form.
@@ -381,7 +386,7 @@ impl TypeResolver {
   /// Returns `Some` if the union matches a known type by refs, is a
   /// nullable wrapper, or can be simplified to a single ref or primitive.
   /// Returns `None` if a new enum type must be generated.
-  pub(crate) fn try_union(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
+  pub(crate) fn try_union(&self, variants: &[Schema]) -> Result<Option<TypeRef>> {
     let refs = extract_union_fingerprint(variants);
 
     if refs.len() > 1
@@ -401,11 +406,11 @@ impl TypeResolver {
   ///
   /// Handles cases like single-ref unions with null variants, unions
   /// containing only primitives, or single-variant unions.
-  fn union_fallback(&self, variants: &[ObjectOrReference<ObjectSchema>]) -> Result<Option<TypeRef>> {
+  fn union_fallback(&self, variants: &[Schema]) -> Result<Option<TypeRef>> {
     let mut first_ref: Option<String> = None;
 
     for variant in variants {
-      if let Some(name) = extract_schema_ref_name(variant) {
+      if let Some(name) = variant.schema_ref_name() {
         if first_ref.is_some() {
           return Ok(None);
         }
@@ -435,7 +440,7 @@ impl TypeResolver {
   fn try_simple_fallback_type(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
     if schema.is_array() {
       let item = self.array_item_type(schema)?;
-      let unique = schema.unique_items.unwrap_or(false);
+      let unique = self.preserve_unique_items(schema);
       return Ok(Some(
         TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique),
       ));
@@ -446,7 +451,7 @@ impl TypeResolver {
     }
 
     if let [single_variant] = schema.one_of.as_slice()
-      && let Some(name) = extract_schema_ref_name(single_variant)
+      && let Some(name) = single_variant.schema_ref_name()
     {
       return Ok(Some(self.context.graph().type_ref(&name)));
     }
@@ -479,7 +484,7 @@ impl TypeResolver {
       SchemaType::Null => Ok(TypeRef::new(RustPrimitive::Unit).with_option()),
       SchemaType::Array => {
         let item = self.array_item_type(schema)?;
-        let unique = schema.unique_items.unwrap_or(false);
+        let unique = self.preserve_unique_items(schema);
         Ok(TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique))
       }
     }
@@ -500,10 +505,13 @@ impl TypeResolver {
       .unwrap_or(default)
   }
 
-  /// Attempts to recognize an object schema as a `HashMap<String, T>`.
+  /// Attempts to recognize an object schema as a map type.
   ///
   /// Returns `Some` only if `additionalProperties` is set and `properties`
-  /// is empty (pure map type rather than a struct with extra fields).
+  /// is empty (pure map type rather than a struct with extra fields). The
+  /// concrete map type follows
+  /// [`CollectionTypePolicy`](crate::generator::CollectionTypePolicy):
+  /// `indexmap::IndexMap` when ordered, `std::collections::HashMap` when hashed.
   fn try_map_type(&self, schema: &ObjectSchema) -> Result<Option<TypeRef>> {
     let Some(ref additional) = schema.additional_properties else {
       return Ok(None);
@@ -519,9 +527,18 @@ impl TypeResolver {
 
     let value = self.additional_properties_type(additional)?;
     Ok(Some(TypeRef::new(format!(
-      "std::collections::HashMap<String, {}>",
+      "{}<String, {}>",
+      self.context.config().map_type_path(),
       value.to_rust_type()
     ))))
+  }
+
+  /// Resolves whether an array schema's `uniqueItems` flag should propagate to
+  /// the generated type. With the ordered policy this returns the schema flag
+  /// directly; with the hashed policy it returns `false` so the array stays a
+  /// `Vec<T>` regardless of the spec.
+  fn preserve_unique_items(&self, schema: &ObjectSchema) -> bool {
+    self.context.config().ordered_collections() && schema.unique_items.unwrap_or(false)
   }
 
   /// Resolves the value type for `additionalProperties`.
@@ -529,23 +546,20 @@ impl TypeResolver {
   /// Boolean `true` maps to `serde_json::Value`; schema references
   /// and inline schemas are resolved to their respective types.
   pub(crate) fn additional_properties_type(&self, additional: &Schema) -> Result<TypeRef> {
-    match additional {
-      Schema::Boolean(_) => Ok(TypeRef::new(RustPrimitive::Value)),
-      Schema::Object(schema_ref) => {
-        if let ObjectOrReference::Ref { ref_path, .. } = &**schema_ref {
-          let name = parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
-          return Ok(self.context.graph().type_ref(&name));
-        }
-
-        let resolved = self.resolve(schema_ref)?;
-
-        if resolved.is_empty_object() {
-          return Ok(TypeRef::new(RustPrimitive::Value));
-        }
-
-        self.resolve_type(&resolved)
-      }
+    if matches!(additional, Schema::Boolean(_)) {
+      return Ok(TypeRef::new(RustPrimitive::Value));
     }
+
+    if let Some(ref_path) = additional.ref_path() {
+      let name = parse_schema_ref_path(ref_path).ok_or_else(|| anyhow::anyhow!("Invalid reference: {ref_path}"))?;
+      return Ok(self.context.graph().type_ref(&name));
+    }
+
+    let resolved = self.resolve(additional)?;
+    if resolved.is_empty_object() {
+      return Ok(TypeRef::new(RustPrimitive::Value));
+    }
+    self.resolve_type(&resolved)
   }
 
   /// Resolves the item type for an array schema.
@@ -553,15 +567,16 @@ impl TypeResolver {
   /// Handles both ref and inline item definitions. Unboxes the result
   /// since array items don't need boxing for cycle breaking.
   fn array_item_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
-    let Some(Schema::Object(items_ref)) = schema.items.as_ref().map(AsRef::as_ref) else {
+    let Some(items_ref) = schema.items.as_deref() else {
       return Ok(TypeRef::new(RustPrimitive::Value));
     };
 
     let items = self.resolve(items_ref)?;
 
-    let type_ref = match &**items_ref {
-      ObjectOrReference::Ref { ref_path, .. } => self.resolve_ref(ref_path, &items)?.result,
-      ObjectOrReference::Object(_) => self.resolve_type(&items)?,
+    let type_ref = if let Some(ref_path) = items_ref.ref_path() {
+      self.resolve_ref(ref_path, &items)?.result
+    } else {
+      self.resolve_type(&items)?
     };
 
     Ok(TypeRef {
@@ -580,7 +595,7 @@ impl TypeResolver {
       return Ok(false);
     };
 
-    if extract_schema_ref_name(variant).is_some() {
+    if variant.schema_ref_name().is_some() {
       return Ok(true);
     }
 
@@ -603,7 +618,7 @@ impl TypeResolver {
       return Ok(None);
     };
 
-    if extract_schema_ref_name(variant).is_some() {
+    if variant.schema_ref_name().is_some() {
       return Ok(None);
     }
 

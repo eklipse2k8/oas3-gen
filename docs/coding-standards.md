@@ -52,16 +52,15 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 ### IndexMap/IndexSet (insertion order)
 
 - `OperationRegistry`: Preserves operation order from OpenAPI spec for logical client method ordering
+- Schema storage, type generation, dependency traversal, discriminator mappings, and header references
 - Use when spec author's ordering is meaningful and should be reflected in generated code
-- Operations should appear in client in same order as spec
+- Operations, schemas, properties, enum variants, and union variants should appear in the same order as the spec
 
 ### BTreeMap/BTreeSet (sorted order)
 
-- Schema storage, type generation, dependency graphs
-- Produces alphabetically sorted output independent of spec ordering
-- More stable across spec changes (reordering schemas doesn't change generated output)
-- Makes generated code easier to navigate and review
-- Example: `deduplicate_and_order_types()` intentionally uses BTreeMap for sorting
+- Use only for order-insensitive canonical output that is not derived from spec declaration order
+- Examples: grouped `use` statements, derive attributes, regex constant lookup tables
+- Do not use for schemas, fields, enum values, union variants, operations, or generated type ordering
 
 ### HashMap/HashSet (non-deterministic)
 
@@ -71,8 +70,28 @@ CRITICAL: Choose collection types carefully to ensure deterministic code generat
 ### Rule of thumb
 
 - Operations/endpoints -> IndexMap (spec order matters)
-- Types/schemas/dependencies -> BTreeMap (alphabetical is better)
+- Types/schemas/dependencies -> IndexMap/IndexSet (spec order matters)
+- JSON arrays -> Vec unless uniqueness is required; `uniqueItems` generated types use IndexSet
 - Internal bookkeeping -> HashMap only if order truly doesn't matter
+
+### Generated-code map and set types are policy-driven
+
+The runtime collection types emitted into generated code (the map type used for
+`additionalProperties` / standalone object maps, and the array type used when
+`uniqueItems: true`) are controlled by `CollectionTypePolicy` on `CodegenConfig`:
+
+| Policy variant | Map type | `uniqueItems` array type |
+| --- | --- | --- |
+| `Ordered` (default) | `indexmap::IndexMap<String, T>` | `indexmap::IndexSet<T>` |
+| `Hashed` (`--no-ordered-collections`) | `std::collections::HashMap<String, T>` | `Vec<T>` |
+
+When adding a new emission point that materializes a map or unique-array type
+in generated code, route the type path through `config.map_type_path()` or
+`config.ordered_collections()` rather than hard-coding `indexmap::IndexMap` /
+`indexmap::IndexSet`. The internal generator data structures (registries,
+caches, naming maps) remain on `IndexMap`/`IndexSet`/`BTreeMap` per the
+guidance above — the policy only affects the literal type names emitted into
+the user's source tree.
 
 ## Itertools for Deterministic Iteration
 
@@ -410,7 +429,7 @@ This makes ownership clear, simplifies call sites, and prevents "parameter threa
 - Makes intent explicit at call sites and enables exhaustive pattern matching
 - Good: `enum EnumCasePolicy { Preserve, Deduplicate }` with `config.enum_case == EnumCasePolicy::Preserve`
 - Bad: `preserve_case: bool` with `config.preserve_case`
-- Example: `CodegenConfig` uses `EnumCasePolicy`, `EnumHelperPolicy`, `EnumDeserializePolicy`, `ODataPolicy`
+- Example: `CodegenConfig` uses `EnumCasePolicy`, `EnumHelperPolicy`, `EnumDeserializePolicy`, `ODataPolicy`, `CollectionTypePolicy`
 - Prevents invalid combinations and makes code more self-documenting
 
 ### Attribute Types with ToTokens

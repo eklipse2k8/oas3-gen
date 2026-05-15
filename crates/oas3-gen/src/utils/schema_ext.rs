@@ -2,7 +2,7 @@ use inflections::Inflect;
 use itertools::Itertools;
 use oas3::{
   Spec,
-  spec::{FromRef, ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet},
+  spec::{FromRef, ObjectOrReference, ObjectSchema, RefError, Schema, SchemaType, SchemaTypeSet},
 };
 
 use crate::{
@@ -14,8 +14,36 @@ use crate::{
       inference::{NormalizedVariant, extract_common_variant_prefix},
     },
   },
-  utils::refs::extract_schema_ref_name,
+  utils::refs::{SchemaInspect, SchemaRefName},
 };
+
+pub(crate) trait SchemaResolveExt {
+  fn resolve_object(&self, spec: &Spec) -> Result<ObjectSchema, RefError>;
+}
+
+impl SchemaResolveExt for ObjectOrReference<ObjectSchema> {
+  fn resolve_object(&self, spec: &Spec) -> Result<ObjectSchema, RefError> {
+    match self {
+      ObjectOrReference::Object(schema) => Ok(schema.clone()),
+      ObjectOrReference::Ref { ref_path, .. } => match Schema::from_ref(spec, ref_path)? {
+        Schema::Object(resolved) => match *resolved {
+          ObjectOrReference::Object(schema) => Ok(schema),
+          ObjectOrReference::Ref { ref_path, .. } => Err(RefError::Unresolvable(ref_path)),
+        },
+        Schema::Boolean(_) => Ok(ObjectSchema::default()),
+      },
+    }
+  }
+}
+
+impl SchemaResolveExt for Schema {
+  fn resolve_object(&self, spec: &Spec) -> Result<ObjectSchema, RefError> {
+    match self {
+      Schema::Object(obj_ref) => obj_ref.resolve_object(spec),
+      Schema::Boolean(_) => Ok(ObjectSchema::default()),
+    }
+  }
+}
 
 pub trait SchemaIters {
   fn variants(self) -> impl Iterator<Item = VariantDef>;
@@ -33,11 +61,26 @@ impl<T: FromRef> Resolvable for &ObjectOrReference<T> {
   }
 }
 
+impl Resolvable for &Schema {
+  type Output = ObjectSchema;
+  fn try_resolve(self, spec: &Spec) -> Option<ObjectSchema> {
+    self.resolve_object(spec).ok()
+  }
+}
+
 /// Resolve a Map or filter out items
 impl<'a, K, T: FromRef> Resolvable for (&'a K, &'a ObjectOrReference<T>) {
   type Output = (&'a K, T);
   fn try_resolve(self, spec: &Spec) -> Option<(&'a K, T)> {
     let value = self.1.resolve(spec).ok()?;
+    Some((self.0, value))
+  }
+}
+
+impl<'a, K> Resolvable for (&'a K, &'a Schema) {
+  type Output = (&'a K, ObjectSchema);
+  fn try_resolve(self, spec: &Spec) -> Option<(&'a K, ObjectSchema)> {
+    let value = self.1.resolve_object(spec).ok()?;
     Some((self.0, value))
   }
 }
@@ -145,23 +188,23 @@ pub(crate) trait SchemaExt {
   /// ```text
   /// schema.any_of = [A, B], schema.one_of = [C] => yields A, B, C
   /// ```
-  fn union_variants(&self) -> impl Iterator<Item = &ObjectOrReference<ObjectSchema>>;
+  fn union_variants(&self) -> impl Iterator<Item = &Schema>;
 
   /// Returns the union variants slice and kind, or None if not a union.
   ///
   /// This is the preferred method when you need both the variants and the union kind
   /// (oneOf vs anyOf) together, avoiding duplicate logic.
-  fn union_variants_with_kind(&self) -> Option<&[ObjectOrReference<ObjectSchema>]>;
+  fn union_variants_with_kind(&self) -> Option<&[Schema]>;
 
   /// Returns true if any variant in the union is a null type.
   fn has_null_variant(&self, spec: &Spec) -> bool;
 
   /// Returns the first non-null variant in a union, if present.
-  fn find_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>>;
+  fn find_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a Schema>;
 
   /// Returns the single non-null variant if this union has exactly one.
   /// Returns None if there are 0 or 2+ non-null variants.
-  fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>>;
+  fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a Schema>;
 
   /// Returns the single `SchemaType` if exactly one is defined, or the non-null type
   /// from a two-type nullable set (e.g., `[string, null]` -> `string`).
@@ -363,17 +406,11 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn inline_array_items<'a>(&'a self, spec: &'a Spec) -> Option<ObjectSchema> {
-    let items_box = self.items.as_ref()?;
-    let items_schema_ref = match items_box.as_ref() {
-      Schema::Object(o) => o,
-      Schema::Boolean(_) => return None,
-    };
-
-    if matches!(&**items_schema_ref, ObjectOrReference::Ref { .. }) {
+    let items = self.items.as_deref()?;
+    if items.ref_path().is_some() {
       return None;
     }
-
-    items_schema_ref.resolve(spec).ok()
+    items.resolve_object(spec).ok()
   }
 
   fn has_enum_values(&self) -> bool {
@@ -403,11 +440,11 @@ impl SchemaExt for ObjectSchema {
     !self.any_of.is_empty() && has_mixed_string_variants(self.any_of.iter())
   }
 
-  fn union_variants(&self) -> impl Iterator<Item = &ObjectOrReference<ObjectSchema>> {
+  fn union_variants(&self) -> impl Iterator<Item = &Schema> {
     self.any_of.iter().chain(&self.one_of)
   }
 
-  fn union_variants_with_kind(&self) -> Option<&[ObjectOrReference<ObjectSchema>]> {
+  fn union_variants_with_kind(&self) -> Option<&[Schema]> {
     match (!self.one_of.is_empty(), !self.any_of.is_empty()) {
       (true, false) => Some(&self.one_of),
       (false, true) => Some(&self.any_of),
@@ -419,11 +456,11 @@ impl SchemaExt for ObjectSchema {
     self.union_variants().any(|v| variant_is_nullable(v, spec))
   }
 
-  fn find_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>> {
+  fn find_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a Schema> {
     self.union_variants().find(|v| !variant_is_nullable(v, spec))
   }
 
-  fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a ObjectOrReference<ObjectSchema>> {
+  fn single_non_null_variant<'a>(&'a self, spec: &Spec) -> Option<&'a Schema> {
     let mut non_null_variants = self.union_variants().filter(|v| !variant_is_nullable(v, spec));
     let first = non_null_variants.next()?;
     non_null_variants.next().is_none().then_some(first)
@@ -522,7 +559,7 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn infer_name_from_ref_properties(&self) -> Option<String> {
-    let mut ref_names = self.properties.values().filter_map(extract_schema_ref_name);
+    let mut ref_names = self.properties.values().filter_map(SchemaRefName::schema_ref_name);
 
     if let Some(first) = ref_names.next()
       && ref_names.next().is_none()
@@ -643,8 +680,10 @@ fn extract_variant_entries(schema: &ObjectSchema) -> Vec<VariantDef> {
   schema.enum_values.iter().variants().collect()
 }
 
-pub(crate) fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spec: &Spec) -> bool {
-  variant.resolve(spec).is_ok_and(|schema| schema.is_nullable_object())
+pub(crate) fn variant_is_nullable(variant: &Schema, spec: &Spec) -> bool {
+  variant
+    .resolve_object(spec)
+    .is_ok_and(|schema| schema.is_nullable_object())
 }
 
 /// Checks if variants contain both freeform strings and constrained strings.
@@ -658,13 +697,8 @@ pub(crate) fn variant_is_nullable(variant: &ObjectOrReference<ObjectSchema>, spe
 /// anyOf: [{ type: string, enum: ["a"] }, { type: string, enum: ["b"] }] => false
 /// ```
 ///
-pub(crate) fn has_mixed_string_variants<'a>(
-  variants: impl Iterator<Item = &'a ObjectOrReference<ObjectSchema>>,
-) -> bool {
-  let objects = variants.filter_map(|variant| match variant {
-    ObjectOrReference::Object(s) => Some(s),
-    ObjectOrReference::Ref { .. } => None,
-  });
+pub(crate) fn has_mixed_string_variants<'a>(variants: impl Iterator<Item = &'a Schema>) -> bool {
+  let objects = variants.filter_map(Schema::as_inline);
 
   let mut has_freeform = false;
   let mut has_constrained = false;

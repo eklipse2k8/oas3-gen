@@ -1,4 +1,4 @@
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet};
+use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 
 use crate::generator::{
   ast::{EnumDef, EnumVariantToken, RustType},
@@ -7,12 +7,16 @@ use crate::generator::{
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
 
-pub(super) fn make_schema_ref(name: &str) -> ObjectOrReference<ObjectSchema> {
-  ObjectOrReference::Ref {
+pub(super) fn make_schema_ref(name: &str) -> Schema {
+  Schema::Object(Box::new(ObjectOrReference::Ref {
     ref_path: format!("{SCHEMA_REF_PREFIX}{name}"),
     summary: None,
     description: None,
-  }
+  }))
+}
+
+pub(super) fn make_schema_object(schema: ObjectSchema) -> Schema {
+  Schema::Object(Box::new(ObjectOrReference::Object(schema)))
 }
 
 pub(super) fn make_integer_schema() -> ObjectSchema {

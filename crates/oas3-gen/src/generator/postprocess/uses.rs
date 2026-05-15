@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
+use std::collections::BTreeSet;
+
+use indexmap::{IndexMap, map::Entry};
 
 use crate::generator::{
   ast::{MethodKind, RustType, SerdeImpl, ValidationAttribute},
@@ -15,7 +17,7 @@ impl RustTypeDeduplication {
   }
 
   pub(crate) fn process(self) -> Vec<RustType> {
-    let mut map = BTreeMap::new();
+    let mut map = IndexMap::new();
 
     for t in &self.types {
       let name = t.type_name().to_string();

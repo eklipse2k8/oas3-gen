@@ -8,7 +8,7 @@ use crate::fixtures::petstore_server::*;
 fn test_list_pets_request_compiles() {
   let request = ListPetsRequest::builder()
     .api_version("v1".to_string())
-    .x_sort_order(ListCatsRequestHeaderXSortOrder::Asc)
+    .x_sort_order(ListPetsRequestHeaderXSortOrder::Asc)
     .x_only(vec![ListPetsRequestHeaderXonly::Bird, ListPetsRequestHeaderXonly::Fish])
     .limit(50)
     .build();

@@ -11,12 +11,14 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.25.3/status.svg)](https://deps.rs/crate/oas3-gen/0.25.3)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.26.0/status.svg)](https://deps.rs/crate/oas3-gen/0.26.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.2?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.2.md)
 <!-- prettier-ignore-end -->
 
 `oas3-gen` is a command-line interface (CLI) for generating idiomatic Rust type definitions from an OpenAPI v3.1.x specification. The tool produces clean, production-ready code designed for seamless integration into any Rust project. Its primary function is to provide a robust and reliable method for type generation, ensuring the resulting code is correct, efficient, and well-documented.
+
+Generated output preserves the declaration order written in the OpenAPI document for schemas, fields, enum variants, union variants, operations, and header constants. Map-like generated types use `indexmap::IndexMap`, and arrays marked with `uniqueItems: true` use `indexmap::IndexSet` so runtime insertion order is preserved too. Pass `--no-ordered-collections` to opt out of the `indexmap` runtime types and emit `std::collections::HashMap<String, T>` plus `Vec<T>` instead.
 
 ## Quick Start
 
@@ -180,6 +182,7 @@ The generated router automatically:
 | OpenAPI 3.1 | Most common spec parsing support |
 | Operation Filtering | Include/exclude specific operations |
 | Operation Types | Request/response type generation |
+| Order Preserving | Mirrors OpenAPI declaration order in generated code |
 | Schema Composition | Handles allOf/oneOf/anyOf correctly |
 | Server Generation | Axum server trait scaffolding |
 | Serde Integration | Automatic derive for serialization |
@@ -239,6 +242,7 @@ Code Generation:
       --all-headers            Emit header constants for all parameters defined in components, not just those used in operations
       --enable-builders        Enable bon builder derives on schema structs and builder methods on request structs
       --doc-format             Format documentation comments using mdformat (requires mdformat installed)
+      --no-ordered-collections Emit std::collections::HashMap and Vec instead of indexmap::IndexMap/IndexSet for map fields and uniqueItems arrays
 
 Operation Filtering:
       --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
@@ -304,6 +308,9 @@ oas3-gen generate client-mod -i openapi.json -o generated --customize datetime=M
 
 # Enable bon builder derives for ergonomic struct construction
 oas3-gen generate client-mod -i openapi.json -o generated --enable-builders
+
+# Opt out of indexmap runtime types (emit std::collections::HashMap and Vec)
+oas3-gen generate client-mod -i openapi.json -o generated --no-ordered-collections
 
 # Format documentation comments with mdformat
 oas3-gen generate client-mod -i openapi.json -o generated --doc-format

@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use oas3::spec::{ObjectOrReference, ObjectSchema, SchemaType, SchemaTypeSet, Spec};
+use oas3::spec::{ObjectSchema, SchemaType, SchemaTypeSet, Spec};
 use serde_json::json;
 
 use crate::{
@@ -9,7 +7,7 @@ use crate::{
     schema_registry::SchemaRegistry,
   },
   tests::common::parse_schema,
-  utils::parse_schema_ref_path,
+  utils::{SchemaInspect, UnionFingerprints, parse_schema_ref_path},
 };
 
 const SCHEMA_REF_PREFIX: &str = "#/components/schemas/";
@@ -42,7 +40,7 @@ fn test_ref_collector() {
   let spec = spec_with_schemas(&json!({}));
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
 
   let schema = parse_schema(json!({
     "properties": {
@@ -101,7 +99,7 @@ fn test_schema_registry() {
   }));
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   graph.build_dependencies(&union_fingerprints);
 
   assert_eq!(graph.keys().len(), 2, "build deps: should have 2 schemas");
@@ -129,7 +127,7 @@ fn test_schema_graph_cycle_detection() {
     }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
-    let union_fingerprints = BTreeMap::new();
+    let union_fingerprints = UnionFingerprints::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
@@ -156,7 +154,7 @@ fn test_schema_graph_cycle_detection() {
     }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
-    let union_fingerprints = BTreeMap::new();
+    let union_fingerprints = UnionFingerprints::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
@@ -177,7 +175,7 @@ fn test_schema_graph_cycle_detection() {
     }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
-    let union_fingerprints = BTreeMap::new();
+    let union_fingerprints = UnionFingerprints::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
@@ -202,7 +200,7 @@ fn test_schema_graph_cycle_detection() {
     }));
     let mut stats = GenerationStats::default();
     let mut graph = SchemaRegistry::new(&spec, &mut stats);
-    let union_fingerprints = BTreeMap::new();
+    let union_fingerprints = UnionFingerprints::new();
     graph.build_dependencies(&union_fingerprints);
     let cycles = graph.detect_cycles();
 
@@ -235,7 +233,7 @@ fn test_schema_registry_merges_all_of_properties_and_required() {
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
@@ -274,7 +272,7 @@ fn test_schema_registry_merges_and_tracks_discriminator_parents() {
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
@@ -312,22 +310,19 @@ fn schema_merger_conflict_resolution() {
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
   let merged = graph.merged("Nugget").expect("merged schema should exist for Nugget");
 
   let prop = merged.schema.properties.get("prop").unwrap();
-  if let ObjectOrReference::Object(schema) = prop {
-    assert_eq!(
-      schema.schema_type,
-      Some(SchemaTypeSet::Single(SchemaType::Integer)),
-      "nugget property should override loaf"
-    );
-  } else {
-    panic!("Expected Object schema");
-  }
+  let schema = prop.as_inline().expect("Expected Object schema");
+  assert_eq!(
+    schema.schema_type,
+    Some(SchemaTypeSet::Single(SchemaType::Integer)),
+    "nugget property should override loaf"
+  );
 }
 
 #[test]
@@ -360,7 +355,7 @@ fn schema_merger_merge_multiple_all_of() {
 
   let mut stats = GenerationStats::default();
   let mut graph = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   graph.build_dependencies(&union_fingerprints);
   graph.detect_cycles();
 
@@ -577,7 +572,7 @@ fn test_ref_collector_additional_properties() {
   let spec = spec_with_schemas(&json!({}));
   let mut stats = GenerationStats::default();
   let registry = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
 
   let schema = parse_schema(json!({
     "additionalProperties": {
@@ -648,7 +643,7 @@ fn test_additional_properties_reachability() {
   }));
   let mut stats = GenerationStats::default();
   let mut registry = SchemaRegistry::new(&spec, &mut stats);
-  let union_fingerprints = BTreeMap::new();
+  let union_fingerprints = UnionFingerprints::new();
   registry.build_dependencies(&union_fingerprints);
 
   let pet_vaccinations_deps = registry.collect(registry.get("PetVaccinations").unwrap(), &union_fingerprints);

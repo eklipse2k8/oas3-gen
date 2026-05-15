@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use indexmap::IndexSet;
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
 use serde_json::{Value, json};
 
@@ -13,7 +14,7 @@ use crate::{
     },
   },
   tests::common::create_test_spec,
-  utils::SchemaExt,
+  utils::{SchemaExt, SchemaMap},
 };
 
 fn make_string_schema() -> ObjectSchema {
@@ -36,6 +37,18 @@ fn make_const_schema(value: Value) -> ObjectSchema {
     const_value: Some(value),
     ..Default::default()
   }
+}
+
+fn schema_object(schema: ObjectSchema) -> Schema {
+  Schema::Object(Box::new(ObjectOrReference::Object(schema)))
+}
+
+fn schema_ref(name: &str) -> Schema {
+  Schema::Object(Box::new(ObjectOrReference::Ref {
+    ref_path: format!("#/components/schemas/{name}"),
+    summary: None,
+    description: None,
+  }))
 }
 
 #[test]
@@ -117,7 +130,7 @@ fn test_compute_best_name() {
       "ExistingName",
     ),
     (vec![("NetUser", false), ("WebUser", false)], vec![], "User"),
-    (vec![("Cat", false), ("Bat", false)], vec![], "Bat"),
+    (vec![("Cat", false), ("Bat", false)], vec![], "Cat"),
     (vec![("MyGroup", false), ("YourGroup", false)], vec!["Group"], "Group2"),
   ];
 
@@ -125,7 +138,7 @@ fn test_compute_best_name() {
     let candidates = candidate_pairs
       .iter()
       .map(|(s, b)| ((*s).to_string(), *b))
-      .collect::<BTreeSet<(String, bool)>>();
+      .collect::<IndexSet<(String, bool)>>();
     let used = used_list.into_iter().map(String::from).collect::<BTreeSet<String>>();
     assert_eq!(
       compute_best_name(&candidates, &used),
@@ -139,8 +152,8 @@ fn test_compute_best_name() {
 fn test_inline_type_scanner_known_suffix_patterns() {
   let voice_ids_shared = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(make_string_schema()),
-      ObjectOrReference::Object(make_string_enum_schema(vec![
+      schema_object(make_string_schema()),
+      schema_object(make_string_enum_schema(vec![
         json!("alloy"),
         json!("ash"),
         json!("ballad"),
@@ -151,15 +164,15 @@ fn test_inline_type_scanner_known_suffix_patterns() {
 
   let format_type = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(make_string_schema()),
-      ObjectOrReference::Object(make_const_schema(json!("json"))),
-      ObjectOrReference::Object(make_const_schema(json!("text"))),
-      ObjectOrReference::Object(make_const_schema(json!("xml"))),
+      schema_object(make_string_schema()),
+      schema_object(make_const_schema(json!("json"))),
+      schema_object(make_const_schema(json!("text"))),
+      schema_object(make_const_schema(json!("xml"))),
     ],
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([
+  let schemas = SchemaMap::from([
     ("VoiceIdsShared".to_string(), voice_ids_shared),
     ("FormatType".to_string(), format_type),
   ]);
@@ -198,18 +211,11 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
   let chat_model = make_string_enum_schema(vec![json!("gpt-4"), json!("gpt-3.5-turbo")]);
 
   let model_ids_shared = ObjectSchema {
-    any_of: vec![
-      ObjectOrReference::Object(make_string_schema()),
-      ObjectOrReference::Ref {
-        ref_path: "#/components/schemas/ChatModel".to_string(),
-        summary: None,
-        description: None,
-      },
-    ],
+    any_of: vec![schema_object(make_string_schema()), schema_ref("ChatModel")],
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([
+  let schemas = SchemaMap::from([
     ("Status".to_string(), status),
     ("ChatModel".to_string(), chat_model),
     ("ModelIdsShared".to_string(), model_ids_shared),
@@ -227,7 +233,7 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
     "Regular enum should not have 'Known' suffix"
   );
 
-  let chat_model_values = vec!["gpt-3.5-turbo".to_string(), "gpt-4".to_string()];
+  let chat_model_values = vec!["gpt-4".to_string(), "gpt-3.5-turbo".to_string()];
   let chat_model_name = result.enum_names.get(&chat_model_values);
   assert!(
     chat_model_name.is_some(),
@@ -277,7 +283,7 @@ fn test_infer_name_from_context() {
   let mut schema_with_property = ObjectSchema::default();
   schema_with_property
     .properties
-    .insert("user".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+    .insert("user".to_string(), schema_object(ObjectSchema::default()));
   let result = schema_with_property.infer_name_from_context("/api/check-access", "200");
   assert_eq!(
     result, "userResponse",
@@ -390,7 +396,7 @@ fn test_infer_variant_name_object_variants() {
 
   let object_with_single_property = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("items".to_string(), ObjectOrReference::Object(ObjectSchema::default()))]
+    properties: [("items".to_string(), schema_object(ObjectSchema::default()))]
       .into_iter()
       .collect(),
     ..Default::default()
@@ -404,8 +410,8 @@ fn test_infer_variant_name_object_variants() {
   let object_with_single_required = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: [
-      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
-      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("id".to_string(), schema_object(ObjectSchema::default())),
+      ("name".to_string(), schema_object(ObjectSchema::default())),
     ]
     .into_iter()
     .collect(),
@@ -421,8 +427,8 @@ fn test_infer_variant_name_object_variants() {
   let object_with_multiple_properties = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: [
-      ("id".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
-      ("name".to_string(), ObjectOrReference::Object(ObjectSchema::default())),
+      ("id".to_string(), schema_object(ObjectSchema::default())),
+      ("name".to_string(), schema_object(ObjectSchema::default())),
     ]
     .into_iter()
     .collect(),
@@ -521,7 +527,7 @@ fn schema_ext_is_primitive() {
 
   schema
     .properties
-    .insert("foo".to_string(), ObjectOrReference::Object(ObjectSchema::default()));
+    .insert("foo".to_string(), schema_object(ObjectSchema::default()));
   assert!(!schema.is_primitive(), "schema with properties should not be primitive");
 
   let string_enum_schema = ObjectSchema {
@@ -565,7 +571,7 @@ fn schema_ext_is_nullable_object() {
   let mut nullable_with_props = nullable_object.clone();
   nullable_with_props
     .properties
-    .insert("x".into(), ObjectOrReference::Object(ObjectSchema::default()));
+    .insert("x".into(), schema_object(ObjectSchema::default()));
   assert!(
     !nullable_with_props.is_nullable_object(),
     "object|null with properties should not be nullable"
@@ -578,14 +584,14 @@ fn schema_ext_has_inline_union_array_items() {
 
   let type_a = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("field_a".to_string(), ObjectOrReference::Object(make_string_schema()))]
+    properties: [("field_a".to_string(), schema_object(make_string_schema()))]
       .into_iter()
       .collect(),
     ..Default::default()
   };
   let type_b = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("field_b".to_string(), ObjectOrReference::Object(make_string_schema()))]
+    properties: [("field_b".to_string(), schema_object(make_string_schema()))]
       .into_iter()
       .collect(),
     ..Default::default()
@@ -600,18 +606,7 @@ fn schema_ext_has_inline_union_array_items() {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Array)),
     items: Some(Box::new(Schema::Object(Box::new(ObjectOrReference::Object(
       ObjectSchema {
-        one_of: vec![
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/TypeA".to_string(),
-            summary: None,
-            description: None,
-          },
-          ObjectOrReference::Ref {
-            ref_path: "#/components/schemas/TypeB".to_string(),
-            summary: None,
-            description: None,
-          },
-        ],
+        one_of: vec![schema_ref("TypeA"), schema_ref("TypeB")],
         ..Default::default()
       },
     ))))),
@@ -763,11 +758,11 @@ fn extract_common_variant_prefix_cases() {
 fn test_union_schemas_do_not_generate_enum_candidates() {
   let integer_or_inf_union = ObjectSchema {
     any_of: vec![
-      ObjectOrReference::Object(ObjectSchema {
+      schema_object(ObjectSchema {
         schema_type: Some(SchemaTypeSet::Single(SchemaType::Integer)),
         ..Default::default()
       }),
-      ObjectOrReference::Object(make_const_schema(json!("inf"))),
+      schema_object(make_const_schema(json!("inf"))),
     ],
     ..Default::default()
   };
@@ -776,7 +771,7 @@ fn test_union_schemas_do_not_generate_enum_candidates() {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
     properties: [(
       "max_output_tokens".to_string(),
-      ObjectOrReference::Object(integer_or_inf_union.clone()),
+      schema_object(integer_or_inf_union.clone()),
     )]
     .into_iter()
     .collect(),
@@ -785,16 +780,13 @@ fn test_union_schemas_do_not_generate_enum_candidates() {
 
   let parent_schema_b = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [(
-      "max_output_tokens".to_string(),
-      ObjectOrReference::Object(integer_or_inf_union),
-    )]
-    .into_iter()
-    .collect(),
+    properties: [("max_output_tokens".to_string(), schema_object(integer_or_inf_union))]
+      .into_iter()
+      .collect(),
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([
+  let schemas = SchemaMap::from([
     ("ParentA".to_string(), parent_schema_a),
     ("ParentB".to_string(), parent_schema_b),
   ]);
@@ -822,19 +814,19 @@ fn test_regular_enums_still_generate_enum_candidates() {
 
   let parent_schema = ObjectSchema {
     schema_type: Some(SchemaTypeSet::Single(SchemaType::Object)),
-    properties: [("status".to_string(), ObjectOrReference::Object(status_enum))]
+    properties: [("status".to_string(), schema_object(status_enum))]
       .into_iter()
       .collect(),
     ..Default::default()
   };
 
-  let schemas = BTreeMap::from([("Parent".to_string(), parent_schema)]);
+  let schemas = SchemaMap::from([("Parent".to_string(), parent_schema)]);
 
   let spec = create_test_spec(BTreeMap::new());
   let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
-  let status_values = vec!["active".to_string(), "done".to_string(), "pending".to_string()];
+  let status_values = vec!["active".to_string(), "pending".to_string(), "done".to_string()];
   assert!(
     result.enum_names.contains_key(&status_values),
     "Regular string enums (not unions) should still generate enum candidates"
