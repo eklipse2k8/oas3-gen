@@ -233,17 +233,17 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Code Generation
 
-- **oas3** (0.21): OpenAPI 3.1 spec parser with JSON and YAML support
+- **oas3** (0.22): OpenAPI 3.1 spec parser with JSON and YAML support
 - **quote** (1.0): Token stream generation
 - **proc-macro2** (1.0): Token manipulation
 - **syn** (2.0): Rust syntax parser with full parsing support
 - **prettyplease** (0.2): Code formatter
-- **bon** (3.8): Builder pattern derive macros
+- **bon** (3.9): Builder pattern derive macros
 
 ### CLI & Terminal
 
-- **clap** (4.5): Argument parsing with derives and color support
-- **tokio** (1.49): Async runtime for multi-threaded I/O
+- **clap** (4.6): Argument parsing with derives and color support
+- **tokio** (1.52): Async runtime for multi-threaded I/O
 - **anyhow** (1.0): Error handling with context
 - **thiserror** (2.0): Custom error type derivation
 - **crossterm** (0.29): Terminal interaction
@@ -255,7 +255,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 - **serde** (1.0): Serialization framework
 - **serde_json** (1.0): JSON with order preservation
-- **serde_with** (3.16): Enhanced serde utilities and chrono support
+- **serde_with** (3.20): Enhanced serde utilities and chrono support
 - **serde_path_to_error** (0.1): Detailed deserialization error paths
 - **json-canon** (0.1): Canonical JSON representation
 - **quick-xml** (>=0.38): XML parsing for content negotiation
@@ -270,14 +270,14 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 - **better_default** (1.0): Enhanced `#[default(value)]` attribute
 - **chrono** (>=0.4.42): Date/time types with serde support
-- **uuid** (1.19): UUID type support with serde
-- **indexmap** (2.13): Insertion-ordered maps with serde
+- **uuid** (1.23): UUID type support with serde
+- **indexmap** (2.14): Insertion-ordered maps with serde
 - **http** (1.4): HTTP primitives and status codes
 
 ### String & Identifier Processing
 
 - **inflections** (1.1): Case conversions (snake_case, camelCase, etc.)
-- **cruet** (0.15): Advanced string inflection and pluralization
+- **cruet** (1.0): Advanced string inflection and pluralization
 - **any_ascii** (0.3): ASCII transliteration for identifiers
 - **percent-encoding** (2.3): URL encoding for path templates
 - **string_cache** (0.9): Interned strings for performance with serde support
@@ -308,4 +308,4 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Development & Testing
 
-- **tempfile** (3.25): Temporary test files and directories
+- **tempfile** (3.27): Temporary test files and directories
