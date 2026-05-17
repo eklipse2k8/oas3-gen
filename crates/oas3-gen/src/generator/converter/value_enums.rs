@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
 
+use itertools::Itertools;
+
 use super::union_types::CollisionStrategy;
 use crate::generator::ast::{Documentation, EnumDef, EnumToken, EnumVariantToken, RustType, VariantDef};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ValueEnumBuilder {
   case_insensitive: bool,
+  sort_variants: bool,
 }
 
 impl ValueEnumBuilder {
@@ -14,8 +17,14 @@ impl ValueEnumBuilder {
   /// When `case_insensitive` is `true`, the generated enum will deserialize values
   /// regardless of letter case (e.g., `"active"`, `"ACTIVE"`, and `"Active"` all
   /// deserialize to the same variant).
-  pub(crate) fn new(case_insensitive: bool) -> Self {
-    Self { case_insensitive }
+  ///
+  /// When `sort_variants` is `true`, generated variants are emitted in alphabetical
+  /// order by Rust variant name regardless of declaration order in the OpenAPI spec.
+  pub(crate) fn new(case_insensitive: bool, sort_variants: bool) -> Self {
+    Self {
+      case_insensitive,
+      sort_variants,
+    }
   }
 
   /// Constructs a Rust enum from pre-built variant definitions.
@@ -56,6 +65,15 @@ impl ValueEnumBuilder {
         (acc, seen)
       },
     );
+
+    let resolved_variants = if self.sort_variants {
+      resolved_variants
+        .into_iter()
+        .sorted_by(|a, b| a.name.as_str().cmp(b.name.as_str()))
+        .collect()
+    } else {
+      resolved_variants
+    };
 
     RustType::Enum(
       EnumDef::builder()

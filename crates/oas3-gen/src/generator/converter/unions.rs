@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
 use anyhow::Context;
+use itertools::Itertools;
 use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
@@ -34,9 +35,10 @@ impl EnumConverter {
   /// [`ValueEnumBuilder`].
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let case_insensitive = context.config().case_insensitive_enums();
+    let sort_variants = context.config().sort_enum_variants();
     Self {
       context,
-      value_enum_builder: ValueEnumBuilder::new(case_insensitive),
+      value_enum_builder: ValueEnumBuilder::new(case_insensitive, sort_variants),
     }
   }
 
@@ -161,6 +163,13 @@ impl UnionConverter {
     let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
 
     variants = strip_common_affixes(variants);
+
+    if self.context.config().sort_enum_variants() {
+      variants = variants
+        .into_iter()
+        .sorted_by(|a, b| a.name.as_str().cmp(b.name.as_str()))
+        .collect();
+    }
 
     let methods = if self.context.config().no_helpers() {
       vec![]

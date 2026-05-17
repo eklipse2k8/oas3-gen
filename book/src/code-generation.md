@@ -9,6 +9,7 @@ Rust code.
 - [Generation Modes](#generation-modes)
 - [Visibility](#visibility)
 - [Enum Mode](#enum-mode)
+- [Enum Layout](#enum-layout)
 - [Helper Methods](#helper-methods)
 - [OData Support](#odata-support)
 - [Type Customization](#type-customization)
@@ -327,6 +328,73 @@ impl<'de> serde::Deserialize<'de> for Status {
 - `"Active"` → `Status::Active`
 - `"PENDING"` → `Status::Pending`
 - `"pending"` → `Status::Pending`
+
+---
+
+## Enum Layout
+
+```text
+--enum-layout <LAYOUT>
+```
+
+Controls the order in which enum variants are emitted in generated Rust code.
+
+| Value | Behavior |
+|-------|----------|
+| `spec` (default) | Preserve variant order from the OpenAPI document |
+| `sorted` | Sort variants alphabetically by Rust variant name |
+
+`sorted` applies to value enums (string `enum`), `oneOf`/`anyOf` union variants,
+and discriminated enum variants. HTTP response (status-code) enums are unaffected
+and continue to use status-code order.
+
+Use `sorted` to stabilize generated source against spec re-orderings so that
+`[A, B]` and `[B, A]` produce identical Rust code.
+
+The `#[default]` attribute on `Default`-deriving enums always tracks the first
+variant in declaration order. Switching from `spec` to `sorted` therefore shifts
+the default variant to whichever name sorts first alphabetically.
+
+### Input Schema
+
+```json
+{
+  "type": "string",
+  "enum": ["zeta", "alpha", "gamma", "beta"]
+}
+```
+
+### Example: `--enum-layout spec` (default)
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Status {
+    #[serde(rename = "zeta")]
+    Zeta,
+    #[serde(rename = "alpha")]
+    Alpha,
+    #[serde(rename = "gamma")]
+    Gamma,
+    #[serde(rename = "beta")]
+    Beta,
+}
+```
+
+### Example: `--enum-layout sorted`
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Status {
+    #[serde(rename = "alpha")]
+    Alpha,
+    #[serde(rename = "beta")]
+    Beta,
+    #[serde(rename = "gamma")]
+    Gamma,
+    #[serde(rename = "zeta")]
+    Zeta,
+}
+```
 
 ---
 
@@ -805,6 +873,7 @@ pub struct Widget {
 | `mode` | `types` | Generation mode: `types`, `client`, `client-mod`, `server-mod` |
 | `-C, --visibility` | `public` | Item visibility: `public`, `crate`, `file` |
 | `--enum-mode` | `merge` | Enum duplicate handling: `merge`, `preserve`, `relaxed` |
+| `--enum-layout` | `spec` | Variant ordering: `spec`, `sorted` |
 | `--no-helpers` | `false` | Disable enum constructor helpers |
 | `--odata-support` | `false` | Make `@odata.*` fields optional |
 | `-c, --customize` | *(none)* | Custom type mapping (repeatable) |

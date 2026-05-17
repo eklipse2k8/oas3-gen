@@ -225,7 +225,8 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
   let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
-  let status_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
+  let mut status_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
+  status_values.sort();
   let status_name = result.enum_names.get(&status_values);
   assert!(status_name.is_some(), "Regular enum should have a precomputed name");
   assert!(
@@ -233,7 +234,8 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
     "Regular enum should not have 'Known' suffix"
   );
 
-  let chat_model_values = vec!["gpt-4".to_string(), "gpt-3.5-turbo".to_string()];
+  let mut chat_model_values = vec!["gpt-4".to_string(), "gpt-3.5-turbo".to_string()];
+  chat_model_values.sort();
   let chat_model_name = result.enum_names.get(&chat_model_values);
   assert!(
     chat_model_name.is_some(),
@@ -826,7 +828,8 @@ fn test_regular_enums_still_generate_enum_candidates() {
   let index = TypeNameIndex::new(&schemas, &spec);
   let result = index.scan_and_compute_names().expect("Should scan successfully");
 
-  let status_values = vec!["active".to_string(), "pending".to_string(), "done".to_string()];
+  let mut status_values = vec!["active".to_string(), "pending".to_string(), "done".to_string()];
+  status_values.sort();
   assert!(
     result.enum_names.contains_key(&status_values),
     "Regular string enums (not unions) should still generate enum candidates"

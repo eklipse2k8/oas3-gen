@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use indexmap::{IndexMap, IndexSet};
+use itertools::Itertools;
 use oas3::spec::ObjectSchema;
 
 use crate::{
@@ -55,7 +56,13 @@ impl DiscriminatorConverter {
       .ok_or_else(|| anyhow::anyhow!("missing discriminator property for schema '{name}'"))?;
 
     let enum_name = to_rust_type_name(name);
-    let variants = self.build_variants_from_mapping(&enum_name, schema);
+    let mut variants = self.build_variants_from_mapping(&enum_name, schema);
+    if self.context.config().sort_enum_variants() {
+      variants = variants
+        .into_iter()
+        .sorted_by(|a, b| a.variant_name.as_str().cmp(b.variant_name.as_str()))
+        .collect();
+    }
 
     let fallback_name = split_pascal_case(&enum_name)
       .last()
@@ -154,7 +161,13 @@ impl DiscriminatorConverter {
       return None;
     }
 
-    let discriminated_variants = Self::convert_to_discriminated_variants(variants, mapping);
+    let mut discriminated_variants = Self::convert_to_discriminated_variants(variants, mapping);
+    if self.context.config().sort_enum_variants() {
+      discriminated_variants = discriminated_variants
+        .into_iter()
+        .sorted_by(|a, b| a.variant_name.as_str().cmp(b.variant_name.as_str()))
+        .collect();
+    }
 
     Some(
       RustType::discriminated_enum()

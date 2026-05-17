@@ -81,6 +81,7 @@ cargo run -- list --help
 | `--visibility` / `-C` | Visibility level for generated types (public, crate, or file; default: public) |
 | `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |
+| `--enum-layout` | Order of enum variants in generated code (spec, sorted; default: spec). With `sorted`, variants are emitted alphabetically by Rust variant name, so `[A, B]` and `[B, A]` produce identical Rust source |
 | `--no-helpers` | Disable generation of ergonomic helper methods for enum variants |
 | `--customize` / `-c` | Custom serde_as type overrides (format: type_name=custom::Path); repeatable |
 | `--all-headers` | Emit header constants for all parameters defined in components, not just those used in operations |

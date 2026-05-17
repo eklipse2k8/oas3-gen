@@ -36,9 +36,10 @@ impl RelaxedEnumBuilder {
   /// from the codegen configuration.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let case_insensitive = context.config().case_insensitive_enums();
+    let sort_variants = context.config().sort_enum_variants();
     Self {
       context,
-      value_enum_builder: ValueEnumBuilder::new(case_insensitive),
+      value_enum_builder: ValueEnumBuilder::new(case_insensitive, sort_variants),
     }
   }
 

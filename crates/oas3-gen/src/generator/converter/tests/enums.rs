@@ -18,8 +18,8 @@ use crate::{
     schema_registry::SchemaRegistry,
   },
   tests::common::{
-    config_with_no_helpers, config_with_preserve_case, create_test_context, create_test_graph, default_config,
-    parse_schema, parse_schemas,
+    config_with_no_helpers, config_with_preserve_case, config_with_sorted_enums, create_test_context,
+    create_test_graph, default_config, parse_schema, parse_schemas,
   },
 };
 
@@ -1731,5 +1731,194 @@ fn test_anyof_with_single_value_enum_uses_primitive() -> anyhow::Result<()> {
     VariantContent::Unit => panic!("expected tuple variant"),
   }
 
+  Ok(())
+}
+
+#[test]
+fn test_sorted_layout_value_enum_sorts_variants_alphabetically() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "Status",
+    json!({
+      "type": "string",
+      "enum": ["zeta", "alpha", "gamma", "beta"]
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), config_with_sorted_enums());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Status", graph.get("Status").unwrap())?;
+
+  let RustType::Enum(enum_def) = &result[0] else {
+    panic!("Expected enum")
+  };
+
+  let names = enum_def
+    .variants
+    .iter()
+    .map(|v| v.name.as_str().to_string())
+    .collect::<Vec<_>>();
+  assert_eq!(names, vec!["Alpha", "Beta", "Gamma", "Zeta"]);
+  Ok(())
+}
+
+#[test]
+fn test_default_layout_value_enum_preserves_spec_order() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "Status",
+    json!({
+      "type": "string",
+      "enum": ["zeta", "alpha", "gamma", "beta"]
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Status", graph.get("Status").unwrap())?;
+
+  let RustType::Enum(enum_def) = &result[0] else {
+    panic!("Expected enum")
+  };
+
+  let names = enum_def
+    .variants
+    .iter()
+    .map(|v| v.name.as_str().to_string())
+    .collect::<Vec<_>>();
+  assert_eq!(names, vec!["Zeta", "Alpha", "Gamma", "Beta"]);
+  Ok(())
+}
+
+#[test]
+fn test_sorted_layout_value_enum_permutation_invariance() -> anyhow::Result<()> {
+  let permutations = [
+    vec!["alpha", "beta", "gamma"],
+    vec!["beta", "alpha", "gamma"],
+    vec!["gamma", "beta", "alpha"],
+  ];
+
+  let mut emitted_orders = vec![];
+  for variants in permutations {
+    let graph = create_test_graph(parse_schemas(vec![(
+      "Status",
+      json!({
+        "type": "string",
+        "enum": variants
+      }),
+    )]));
+    let context = create_test_context(graph.clone(), config_with_sorted_enums());
+    let converter = SchemaConverter::new(&context);
+    let result = converter.convert_schema("Status", graph.get("Status").unwrap())?;
+    let RustType::Enum(enum_def) = &result[0] else {
+      panic!("Expected enum")
+    };
+    emitted_orders.push(
+      enum_def
+        .variants
+        .iter()
+        .map(|v| v.name.as_str().to_string())
+        .collect::<Vec<_>>(),
+    );
+  }
+
+  let expected = vec!["Alpha".to_string(), "Beta".to_string(), "Gamma".to_string()];
+  for order in &emitted_orders {
+    assert_eq!(order, &expected, "all permutations should produce identical output");
+  }
+  Ok(())
+}
+
+#[test]
+fn test_sorted_layout_union_variants_sorted_alphabetically() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "TestUnion",
+      json!({
+        "oneOf": [
+          { "$ref": "#/components/schemas/Zebra" },
+          { "$ref": "#/components/schemas/Apple" },
+          { "$ref": "#/components/schemas/Mango" }
+        ]
+      }),
+    ),
+    (
+      "Zebra",
+      json!({ "type": "object", "properties": { "stripes": { "type": "integer" } } }),
+    ),
+    (
+      "Apple",
+      json!({ "type": "object", "properties": { "color": { "type": "string" } } }),
+    ),
+    (
+      "Mango",
+      json!({ "type": "object", "properties": { "ripe": { "type": "boolean" } } }),
+    ),
+  ]));
+  let context = create_test_context(graph.clone(), config_with_sorted_enums());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
+
+  let enum_def = result
+    .iter()
+    .find_map(|t| match t {
+      RustType::Enum(e) if e.name == EnumToken::new("TestUnion") => Some(e),
+      _ => None,
+    })
+    .expect("TestUnion enum should exist");
+
+  let names = enum_def
+    .variants
+    .iter()
+    .map(|v| v.name.as_str().to_string())
+    .collect::<Vec<_>>();
+  assert_eq!(names, vec!["Apple", "Mango", "Zebra"]);
+  Ok(())
+}
+
+#[test]
+fn test_sorted_layout_discriminated_enum_sorts_variants() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "TestUnion",
+      json!({
+        "oneOf": [
+          { "$ref": "#/components/schemas/Zeta" },
+          { "$ref": "#/components/schemas/Alpha" },
+          { "$ref": "#/components/schemas/Mango" }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "zeta": "#/components/schemas/Zeta",
+            "alpha": "#/components/schemas/Alpha",
+            "mango": "#/components/schemas/Mango"
+          }
+        }
+      }),
+    ),
+    (
+      "Zeta",
+      json!({ "type": "object", "properties": { "kind": { "type": "string", "const": "zeta" } } }),
+    ),
+    (
+      "Alpha",
+      json!({ "type": "object", "properties": { "kind": { "type": "string", "const": "alpha" } } }),
+    ),
+    (
+      "Mango",
+      json!({ "type": "object", "properties": { "kind": { "type": "string", "const": "mango" } } }),
+    ),
+  ]));
+  let context = create_test_context(graph.clone(), config_with_sorted_enums());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
+
+  let RustType::DiscriminatedEnum(enum_def) = result.last().unwrap() else {
+    panic!("Expected DiscriminatedEnum as last type")
+  };
+
+  let names = enum_def
+    .variants
+    .iter()
+    .map(|v| v.variant_name.as_str().to_string())
+    .collect::<Vec<_>>();
+  assert_eq!(names, vec!["Alpha", "Mango", "Zeta"]);
   Ok(())
 }

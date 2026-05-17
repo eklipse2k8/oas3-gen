@@ -9,14 +9,14 @@ use crossterm::style::Stylize;
 use crate::{
   generator::{
     ClientModMode, ClientMode, CodegenConfig, CollectionTypePolicy, EnumCasePolicy, EnumDeserializePolicy,
-    EnumHelperPolicy, GenerationMode, GenerationTarget, HeaderScope, ODataPolicy, SchemaScope, ServerModMode,
-    TypesMode,
+    EnumHelperPolicy, EnumLayoutPolicy, GenerationMode, GenerationTarget, HeaderScope, ODataPolicy, SchemaScope,
+    ServerModMode, TypesMode,
     ast::documentation::init_doc_format,
     codegen::{GeneratedFileType, Visibility},
     metrics::GenerationStats,
     orchestrator::{GeneratedFinalOutput, Orchestrator},
   },
-  ui::{Colors, EnumCaseMode, GenerateCommand, GenerateMode},
+  ui::{Colors, EnumCaseMode, EnumLayout, GenerateCommand, GenerateMode},
   utils::spec::SpecLoader,
 };
 
@@ -39,6 +39,7 @@ pub struct GenerateConfig {
   pub odata_support: bool,
   pub preserve_case_variants: bool,
   pub case_insensitive_enums: bool,
+  pub enum_layout: EnumLayout,
   pub only_operations: Option<HashSet<String>>,
   pub excluded_operations: Option<HashSet<String>>,
   pub no_helpers: bool,
@@ -99,6 +100,10 @@ impl GenerateConfig {
         CollectionTypePolicy::Hashed
       } else {
         CollectionTypePolicy::Ordered
+      })
+      .enum_layout(match self.enum_layout {
+        EnumLayout::Spec => EnumLayoutPolicy::Spec,
+        EnumLayout::Sorted => EnumLayoutPolicy::Sorted,
       })
       .enable_builders(self.enable_builders)
       .customizations(self.customizations.clone())
@@ -169,6 +174,7 @@ impl GenerateConfig {
       visibility,
       odata_support,
       enum_mode,
+      enum_layout,
       no_helpers,
       all_schemas,
       all_headers,
@@ -202,6 +208,7 @@ impl GenerateConfig {
       odata_support,
       preserve_case_variants: enum_policies.preserve_case_variants,
       case_insensitive_enums: enum_policies.case_insensitive_enums,
+      enum_layout,
       only_operations: only.map(|ops| ops.into_iter().collect()),
       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
       no_helpers,

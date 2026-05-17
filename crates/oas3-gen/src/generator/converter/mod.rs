@@ -118,6 +118,25 @@ pub enum HeaderScope {
   All,
 }
 
+/// Policy for the layout (ordering) of variants in generated enums.
+///
+/// Controls whether enum variants appear in OpenAPI spec declaration order
+/// or are sorted alphabetically by Rust variant name. Sorted output stabilizes
+/// generated code against spec re-orderings so that `[A, B]` and `[B, A]`
+/// produce identical Rust source.
+///
+/// Applies to value enums (string `enum`), `oneOf`/`anyOf` union variants,
+/// and discriminated enum variants. Response (HTTP status) enums are not
+/// affected and continue to use status-code order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnumLayoutPolicy {
+  /// Preserve enum variant order from the OpenAPI spec.
+  #[default]
+  Spec,
+  /// Sort enum variants alphabetically by Rust variant name.
+  Sorted,
+}
+
 /// Policy for the runtime collection types emitted in generated code.
 ///
 /// Map types (`additionalProperties` and standalone object maps) and arrays
@@ -159,6 +178,8 @@ pub struct CodegenConfig {
   pub header_scope: HeaderScope,
   #[builder(default)]
   pub collection_types: CollectionTypePolicy,
+  #[builder(default)]
+  pub enum_layout: EnumLayoutPolicy,
   #[builder(default)]
   pub enable_builders: bool,
   #[builder(default)]
@@ -218,6 +239,13 @@ impl CodegenConfig {
   #[must_use]
   pub fn ordered_collections(&self) -> bool {
     self.collection_types == CollectionTypePolicy::Ordered
+  }
+
+  /// Returns `true` when enum variants should be sorted alphabetically by
+  /// Rust variant name in generated code.
+  #[must_use]
+  pub fn sort_enum_variants(&self) -> bool {
+    self.enum_layout == EnumLayoutPolicy::Sorted
   }
 
   /// Returns the fully qualified Rust path used for map-like fields

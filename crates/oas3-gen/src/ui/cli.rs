@@ -106,6 +106,16 @@ pub struct GenerateCommand {
   )]
   pub enum_mode: EnumCaseMode,
 
+  /// Controls how enum variants are ordered in generated code
+  #[arg(
+    long,
+    value_enum,
+    default_value_t,
+    display_order = 12,
+    help_heading = "Code Generation"
+  )]
+  pub enum_layout: EnumLayout,
+
   /// Disable generation of ergonomic helper methods for enum variants
   #[arg(long, default_value_t = false, display_order = 13, help_heading = "Code Generation")]
   pub no_helpers: bool,
@@ -213,6 +223,15 @@ pub enum EnumCaseMode {
   Preserve,
   /// Merge duplicates and enable relaxed (case-insensitive) deserialization
   Relaxed,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EnumLayout {
+  #[default]
+  /// Preserve enum variant order from the OpenAPI spec
+  Spec,
+  /// Sort enum variants alphabetically by Rust variant name
+  Sorted,
 }
 
 #[derive(Subcommand, Debug)]

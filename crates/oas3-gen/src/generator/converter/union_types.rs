@@ -1,4 +1,5 @@
 use bon::Builder;
+use itertools::Itertools;
 use oas3::spec::{Discriminator, ObjectSchema, Schema};
 
 use crate::generator::ast::{
@@ -41,12 +42,14 @@ pub(crate) enum CollisionStrategy {
   Deduplicate,
 }
 
-/// Builds an ordered list of cache keys from variant definitions for type deduplication.
+/// Builds a sorted list of cache keys from variant definitions for type deduplication.
 ///
-/// Uses each variant's serde name (the wire-format value) as the cache key in
-/// declaration order so generated enum reuse preserves the spec's written order.
+/// Uses each variant's serde name (the wire-format value) as the cache key,
+/// sorted alphabetically so enums with identical value sets dedupe regardless
+/// of their declaration order in the spec. The cache key is internal and does
+/// not affect the order of variants emitted in generated code.
 pub(crate) fn variants_to_cache_key(variants: &[VariantDef]) -> Vec<String> {
-  variants.iter().map(VariantDef::serde_name).collect()
+  variants.iter().map(VariantDef::serde_name).sorted().collect()
 }
 
 #[derive(Clone, Debug)]

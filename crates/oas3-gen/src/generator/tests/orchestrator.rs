@@ -170,15 +170,17 @@ fn test_enum_deduplication() {
       include_str!("../../../fixtures/enum_deduplication.json"),
       vec![
         ("pub enum Status", 1, "Status enum should be defined exactly once"),
-        (
-          "pub enum StructCStatus",
-          1,
-          "Reordered enum values should produce a separate enum",
-        ),
         ("pub status: Option<Status>", 1, "StructA should use Status"),
-        ("status: Option<Status>", 2, "StructA and StructB should use Status"),
+        (
+          "status: Option<Status>",
+          3,
+          "StructA, StructB, and reordered StructC should all use Status",
+        ),
       ],
-      vec![],
+      vec![(
+        "pub enum StructCStatus",
+        "Reordered enum values should still dedupe to the shared Status enum",
+      )],
     ),
     (
       include_str!("../../../fixtures/relaxed_enum_deduplication.json"),
