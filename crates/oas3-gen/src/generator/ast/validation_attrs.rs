@@ -3,7 +3,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use serde_json::Number;
 
-use crate::generator::ast::{RustPrimitive, StructToken, TypeRef, types::render_unsigned_integer};
+use crate::generator::ast::{Rounding, RustPrimitive, StructToken, TypeRef, types::render_unsigned_integer};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RegexKey {
@@ -185,19 +185,31 @@ impl ToTokens for ValidationAttribute {
       } => {
         let mut parts = vec![];
         if let Some(m) = min {
-          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
+          let lit = primitive
+            .format_range_bound(m, Rounding::Ceil)
+            .parse::<TokenStream>()
+            .unwrap();
           parts.push(quote! { min = #lit });
         }
         if let Some(m) = max {
-          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
+          let lit = primitive
+            .format_range_bound(m, Rounding::Floor)
+            .parse::<TokenStream>()
+            .unwrap();
           parts.push(quote! { max = #lit });
         }
         if let Some(m) = exclusive_min {
-          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
+          let lit = primitive
+            .format_range_bound(m, Rounding::Floor)
+            .parse::<TokenStream>()
+            .unwrap();
           parts.push(quote! { exclusive_min = #lit });
         }
         if let Some(m) = exclusive_max {
-          let lit = primitive.format_number(m).parse::<TokenStream>().unwrap();
+          let lit = primitive
+            .format_range_bound(m, Rounding::Ceil)
+            .parse::<TokenStream>()
+            .unwrap();
           parts.push(quote! { exclusive_max = #lit });
         }
         quote! { range(#(#parts),*) }

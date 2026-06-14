@@ -66,6 +66,42 @@ fn test_validation_attribute_range_display() {
     attr_float.to_token_stream().to_string(),
     "range (min = 0.5 , max = 1.0)"
   );
+
+  let attr_float_encoded_int = ValidationAttribute::Range {
+    primitive: RustPrimitive::I64,
+    min: Some(serde_json::json!(-1.0).as_number().unwrap().clone()),
+    max: Some(serde_json::json!(1.0).as_number().unwrap().clone()),
+    exclusive_min: None,
+    exclusive_max: None,
+  };
+  assert_eq!(
+    attr_float_encoded_int.to_token_stream().to_string(),
+    "range (min = - 1i64 , max = 1i64)"
+  );
+
+  let attr_fractional = ValidationAttribute::Range {
+    primitive: RustPrimitive::I64,
+    min: Some(serde_json::json!(1.5).as_number().unwrap().clone()),
+    max: Some(serde_json::json!(2.5).as_number().unwrap().clone()),
+    exclusive_min: None,
+    exclusive_max: None,
+  };
+  assert_eq!(
+    attr_fractional.to_token_stream().to_string(),
+    "range (min = 2i64 , max = 2i64)"
+  );
+
+  let attr_fractional_exclusive = ValidationAttribute::Range {
+    primitive: RustPrimitive::I64,
+    min: None,
+    max: None,
+    exclusive_min: Some(serde_json::json!(1.5).as_number().unwrap().clone()),
+    exclusive_max: Some(serde_json::json!(2.5).as_number().unwrap().clone()),
+  };
+  assert_eq!(
+    attr_fractional_exclusive.to_token_stream().to_string(),
+    "range (exclusive_min = 1i64 , exclusive_max = 3i64)"
+  );
 }
 
 #[test]
