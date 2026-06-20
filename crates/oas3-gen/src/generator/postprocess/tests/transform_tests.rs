@@ -307,8 +307,9 @@ fn test_server_struct_request_only_gets_deserialize() {
     "Server request-only struct should have Deserialize"
   );
   assert!(
-    !def.derives().contains(&DeriveTrait::Serialize),
-    "Server request-only struct should NOT have Serialize"
+    def.derives().contains(&DeriveTrait::Serialize),
+    "Server request-only struct that derives Validate must also derive Serialize: \
+     validator::ValidationError::add_param requires Serialize on every parameterised value"
   );
   assert!(
     def.derives().contains(&DeriveTrait::Validate),
@@ -318,9 +319,130 @@ fn test_server_struct_request_only_gets_deserialize() {
     !def.fields[0].validation_attrs.is_empty(),
     "Server request struct should retain validation attrs"
   );
+}
+
+#[test]
+fn test_server_request_only_without_validation_stays_deserialize_only() {
+  let def = StructDef {
+    name: StructToken::new("PlainServerRequest"),
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("field"))
+        .rust_type(TypeRef::new("String"))
+        .build(),
+    ],
+    kind: StructKind::Schema,
+    ..Default::default()
+  };
+  let def = process_struct_for_server(def, TypeUsage::RequestOnly);
+
   assert!(
-    !def.outer_attrs.contains(&OuterAttr::SkipSerializingNone),
-    "Server request-only struct should NOT have SkipSerializingNone"
+    def.derives().contains(&DeriveTrait::Deserialize),
+    "Server request-only struct should have Deserialize"
+  );
+  assert!(
+    !def.derives().contains(&DeriveTrait::Validate),
+    "an unvalidated struct should not derive Validate"
+  );
+  assert!(
+    !def.derives().contains(&DeriveTrait::Serialize),
+    "Server request-only struct without Validate must stay Deserialize-only (the asymmetry is preserved)"
+  );
+}
+
+#[test]
+fn test_server_validate_closure_propagates_serialize() {
+  use crate::generator::ast::{DiscriminatedEnumDef, DiscriminatedVariant, EnumToken, SerdeImpl, SerdeMode};
+
+  let request = StructDef {
+    name: StructToken::new("PushRequest"),
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("name"))
+        .rust_type(TypeRef::new("String"))
+        .validation_attrs(vec![ValidationAttribute::Length {
+          min: Some(1),
+          max: None,
+        }])
+        .build(),
+      FieldDef::builder()
+        .name(FieldNameToken::new("change"))
+        .rust_type(TypeRef::new("Change"))
+        .build(),
+    ],
+    kind: StructKind::Schema,
+    ..Default::default()
+  };
+
+  let change = DiscriminatedEnumDef::builder()
+    .name(EnumToken::new("Change"))
+    .discriminator_field("type".to_string())
+    .variants(vec![
+      DiscriminatedVariant::builder()
+        .discriminator_values(vec!["mediaItem".to_string()])
+        .variant_name(EnumVariantToken::new("MediaItem"))
+        .type_name(TypeRef::new("MediaItemChange"))
+        .build(),
+    ])
+    .serde_mode(SerdeMode::DeserializeOnly)
+    .build();
+
+  let variant = StructDef {
+    name: StructToken::new("MediaItemChange"),
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("uuid"))
+        .rust_type(TypeRef::new("String"))
+        .build(),
+    ],
+    kind: StructKind::Schema,
+    ..Default::default()
+  };
+
+  let types = postprocess_types_for_server(
+    vec![
+      RustType::Struct(request),
+      RustType::DiscriminatedEnum(change),
+      RustType::Struct(variant),
+    ],
+    BTreeMap::from([(EnumToken::new("PushRequest"), (true, false))]),
+  );
+
+  let find_struct = |name: &str| {
+    types.iter().find_map(|t| match t {
+      RustType::Struct(def) if def.name.as_str() == name => Some(def.clone()),
+      _ => None,
+    })
+  };
+
+  let request = find_struct("PushRequest").expect("PushRequest");
+  assert!(
+    request.derives().contains(&DeriveTrait::Serialize) && request.derives().contains(&DeriveTrait::Deserialize),
+    "the validated request must derive both Serialize and Deserialize"
+  );
+
+  let variant = find_struct("MediaItemChange").expect("MediaItemChange");
+  assert!(
+    variant.derives().contains(&DeriveTrait::Serialize),
+    "a struct in the Validate closure must derive Serialize even on the server (request) side"
+  );
+
+  let change = types
+    .iter()
+    .find_map(|t| match t {
+      RustType::DiscriminatedEnum(def) if def.name.as_str() == "Change" => Some(def.clone()),
+      _ => None,
+    })
+    .expect("Change union");
+  assert_eq!(
+    change.is_serializable(),
+    SerdeImpl::Custom,
+    "a discriminated union in the Validate closure must emit a custom Serialize impl in server-mod"
+  );
+  assert_eq!(
+    change.is_deserializable(),
+    SerdeImpl::Custom,
+    "the union keeps its custom Deserialize impl"
   );
 }
 
@@ -415,30 +537,32 @@ fn test_server_enum_bidirectional_gets_both() {
   );
 }
 
+fn create_plain_struct(name: &str) -> StructDef {
+  StructDef {
+    name: StructToken::new(name),
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("field"))
+        .rust_type(TypeRef::new("String"))
+        .build(),
+    ],
+    kind: StructKind::Schema,
+    ..Default::default()
+  }
+}
+
 #[test]
 fn test_client_vs_server_serde_inversion() {
-  let client_req = process_struct_helper(
-    create_struct("ClientReq", StructKind::Schema, false),
-    TypeUsage::RequestOnly,
-  );
-  let server_req = process_struct_for_server(
-    create_struct("ServerReq", StructKind::Schema, false),
-    TypeUsage::RequestOnly,
-  );
+  let client_req = process_struct_helper(create_plain_struct("ClientReq"), TypeUsage::RequestOnly);
+  let server_req = process_struct_for_server(create_plain_struct("ServerReq"), TypeUsage::RequestOnly);
 
   assert!(client_req.derives().contains(&DeriveTrait::Serialize));
   assert!(!client_req.derives().contains(&DeriveTrait::Deserialize));
   assert!(!server_req.derives().contains(&DeriveTrait::Serialize));
   assert!(server_req.derives().contains(&DeriveTrait::Deserialize));
 
-  let client_resp = process_struct_helper(
-    create_struct("ClientResp", StructKind::Schema, false),
-    TypeUsage::ResponseOnly,
-  );
-  let server_resp = process_struct_for_server(
-    create_struct("ServerResp", StructKind::Schema, false),
-    TypeUsage::ResponseOnly,
-  );
+  let client_resp = process_struct_helper(create_plain_struct("ClientResp"), TypeUsage::ResponseOnly);
+  let server_resp = process_struct_for_server(create_plain_struct("ServerResp"), TypeUsage::ResponseOnly);
 
   assert!(!client_resp.derives().contains(&DeriveTrait::Serialize));
   assert!(client_resp.derives().contains(&DeriveTrait::Deserialize));
