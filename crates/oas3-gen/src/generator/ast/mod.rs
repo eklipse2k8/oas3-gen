@@ -37,7 +37,7 @@ pub use status_codes::StatusCodeToken;
 pub use tokens::{
   DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TraitToken, TypeAliasToken,
 };
-pub use types::{RustPrimitive, TypeRef};
+pub use types::{Rounding, RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 pub use crate::generator::ast::fields::{FieldCollection, FieldDef};

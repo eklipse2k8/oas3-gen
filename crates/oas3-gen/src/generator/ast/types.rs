@@ -187,6 +187,13 @@ impl From<&serde_json::Value> for TypeRef {
   }
 }
 
+/// Direction for rounding a float-encoded bound to an integer literal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rounding {
+  Ceil,
+  Floor,
+}
+
 /// Rust primitive and standard library types
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, strum::Display)]
 #[strum(serialize_all = "lowercase")]
@@ -323,6 +330,29 @@ impl RustPrimitive {
     } else {
       num.to_string()
     }
+  }
+
+  pub fn format_range_bound(&self, num: &Number, rounding: Rounding) -> String {
+    if self.is_float() {
+      return self.format_number(num);
+    }
+    if let Some(value) = num.as_i64() {
+      return render_integer(self, value);
+    }
+    if let Some(value) = num.as_u64() {
+      return render_unsigned_integer(self, value);
+    }
+    if let Some(f) = num.as_f64() {
+      let rounded = match rounding {
+        Rounding::Ceil => f.ceil(),
+        Rounding::Floor => f.floor(),
+      };
+      #[allow(clippy::cast_possible_truncation)]
+      if rounded >= i64::MIN as f64 && rounded <= i64::MAX as f64 {
+        return render_integer(self, rounded as i64);
+      }
+    }
+    num.to_string()
   }
 
   fn format_string_value(&self, s: &str) -> String {
