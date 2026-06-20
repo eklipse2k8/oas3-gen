@@ -7,10 +7,13 @@ no-default-features = false
 feature-depth = 1
 
 [advisories]
-ignore = []
+ignore = [
+  # proc-macro-error2: Remove once change to validator crate is published
+  "RUSTSEC-2026-0173",
+]
 
 [licenses]
-allow = ["BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
+allow = ["BSD-2-Clause", "ISC", "MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
 exceptions = []
 
 [bans]

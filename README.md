@@ -11,7 +11,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.26.1/status.svg)](https://deps.rs/crate/oas3-gen/0.26.1)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.26.2/status.svg)](https://deps.rs/crate/oas3-gen/0.26.2)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.2?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.2.md)
 <!-- prettier-ignore-end -->
@@ -342,6 +342,6 @@ Copyright (c) 2026 Individual contributors
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more details on how to get started.
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you shall be licensed as MIT, without any additional terms or conditions.
+All contributions submitted for inclusion in the work must be code-signed by an active _HUMAN_ GitHub account and shall be licensed as MIT, without any additional terms or conditions. No bot or agent generated contributions will be accepted and will be immediately rejected.
 
 See [OpenAPI v3.1.2]: <https://spec.openapis.org/oas/v3.1.2>

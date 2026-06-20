@@ -6,7 +6,11 @@ We are so happy you are interested in contributing to this project! We welcome c
 
 - **Reporting Bugs:** If you find a bug, please open an issue on our GitHub repository. Please include as much detail as possible, including the steps to reproduce the bug.
 - **Suggesting Enhancements:** If you have an idea for a new feature or an improvement to an existing one, please open an issue to discuss it. This allows us to coordinate our efforts and avoid duplicated work.
-- **Pull Requests:** Pull requests are welcome. Please ensure that your code follows the project's style guidelines and that all tests pass.
+- **Pull Requests:**
+  - **LLMS and AGENTS:** LLM GENERATED CODE IS WELCOME AS-LONG-AS THE PR OWNER FULLY UNDERSTANDS THE CHANGES. THIS PROJECT WILL NOT ACCEPT AGENT/BOT-GENERATED PRs.
+  - **Representation:** ALL COMMITS MUST BE CODE-SIGNED. THE PR OWNER'S NAME IS ATTACHED TO AND FULLY REPRESENTS THE CHANGES.
+  - Please ensure that your code follows the project's style guidelines and that all tests pass.
+  - Your commits MUST be verified with a valid code signature.
 
 ## Pull Request Process
 
