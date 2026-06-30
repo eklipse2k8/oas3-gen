@@ -150,6 +150,7 @@ impl RelaxedEnumBuilder {
       known_variants,
       CollisionStrategy::Preserve,
       Documentation::from_lines(["Known values for the string enum."]),
+      None,
     );
 
     let mut cache = self.context.cache_mut();

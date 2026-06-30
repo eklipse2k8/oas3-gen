@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use itertools::Itertools;
 
 use super::union_types::CollisionStrategy;
-use crate::generator::ast::{Documentation, EnumDef, EnumToken, EnumVariantToken, RustType, VariantDef};
+use crate::generator::ast::{Documentation, EnumDef, EnumToken, EnumVariantToken, RustPrimitive, RustType, VariantDef};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ValueEnumBuilder {
@@ -42,6 +42,7 @@ impl ValueEnumBuilder {
     variants: Vec<VariantDef>,
     strategy: CollisionStrategy,
     docs: Documentation,
+    scalar_repr: Option<RustPrimitive>,
   ) -> RustType {
     let (resolved_variants, _) = variants.into_iter().enumerate().fold(
       (vec![], BTreeMap::<String, usize>::new()),
@@ -82,6 +83,7 @@ impl ValueEnumBuilder {
         .variants(resolved_variants)
         .case_insensitive(self.case_insensitive)
         .generate_display(true)
+        .maybe_scalar_repr(scalar_repr)
         .build(),
     )
   }

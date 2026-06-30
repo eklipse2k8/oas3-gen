@@ -815,6 +815,96 @@ mod tests {
   }
 
   #[test]
+  fn test_integer_enum_serialization() {
+    let cases = [
+      (SampleRate::Value8000, 8000),
+      (SampleRate::Value16000, 16000),
+      (SampleRate::Value24000, 24000),
+      (SampleRate::Value44100, 44100),
+      (SampleRate::Value48000, 48000),
+    ];
+    for (variant, expected) in cases {
+      let json = serde_json::to_value(&variant).unwrap();
+      assert!(
+        json.is_i64() || json.is_u64(),
+        "SampleRate {variant:?} should serialize to a JSON integer, got {json:?}"
+      );
+      assert_eq!(
+        json,
+        json!(expected),
+        "SampleRate serialization mismatch for {variant:?}"
+      );
+
+      let deserialized: SampleRate = serde_json::from_value(json!(expected)).unwrap();
+      assert_eq!(
+        deserialized, variant,
+        "SampleRate deserialization mismatch for {expected}"
+      );
+    }
+
+    assert_eq!(
+      SampleRate::default(),
+      SampleRate::Value8000,
+      "default should be Value8000"
+    );
+
+    let err = serde_json::from_value::<SampleRate>(json!(12345));
+    assert!(err.is_err(), "unknown integer value should fail to deserialize");
+
+    let string_err = serde_json::from_value::<SampleRate>(json!("8000"));
+    assert!(
+      string_err.is_err(),
+      "string value should not deserialize into integer enum"
+    );
+  }
+
+  #[test]
+  fn test_float_enum_serialization() {
+    let cases = [
+      (PlaybackRate::Value0_5, 0.5),
+      (PlaybackRate::Value1, 1.0),
+      (PlaybackRate::Value1_5, 1.5),
+      (PlaybackRate::Value2, 2.0),
+    ];
+    for (variant, expected) in cases {
+      let json = serde_json::to_value(&variant).unwrap();
+      assert!(
+        json.is_f64(),
+        "PlaybackRate {variant:?} should serialize to a JSON float, got {json:?}"
+      );
+      assert_eq!(
+        json,
+        json!(expected),
+        "PlaybackRate serialization mismatch for {variant:?}"
+      );
+
+      let deserialized: PlaybackRate = serde_json::from_value(json!(expected)).unwrap();
+      assert_eq!(
+        deserialized, variant,
+        "PlaybackRate deserialization mismatch for {expected}"
+      );
+    }
+
+    let from_int: PlaybackRate = serde_json::from_value(json!(2)).unwrap();
+    assert_eq!(from_int, PlaybackRate::Value2, "integer 2 should deserialize to Value2");
+
+    assert_eq!(
+      PlaybackRate::default(),
+      PlaybackRate::Value0_5,
+      "default should be Value0_5"
+    );
+
+    let err = serde_json::from_value::<PlaybackRate>(json!(3.7));
+    assert!(err.is_err(), "unknown float value should fail to deserialize");
+
+    let set: std::collections::HashSet<PlaybackRate> =
+      [PlaybackRate::Value0_5, PlaybackRate::Value2, PlaybackRate::Value0_5]
+        .into_iter()
+        .collect();
+    assert_eq!(set.len(), 2, "Eq/Hash should dedupe float enum variants");
+  }
+
+  #[test]
   fn test_request_types() {
     let _ = GetEventsRequest {};
 

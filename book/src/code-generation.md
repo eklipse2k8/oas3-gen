@@ -10,6 +10,7 @@ Rust code.
 - [Visibility](#visibility)
 - [Enum Mode](#enum-mode)
 - [Enum Layout](#enum-layout)
+- [Numeric-Backed Enums](#numeric-backed-enums)
 - [Helper Methods](#helper-methods)
 - [OData Support](#odata-support)
 - [Type Customization](#type-customization)
@@ -395,6 +396,101 @@ pub enum Status {
     Zeta,
 }
 ```
+
+---
+
+## Numeric-Backed Enums
+
+When a schema restricts its values with an `enum` array and a `type` of
+`integer` or `number`, you want the generated enum to read and write JSON
+numbers. By default, `serde` represents an enum variant by its name, so a
+variant would be written as the string `"8000"` rather than the number `8000`.
+To produce numbers, the generator writes the `Serialize` and `Deserialize`
+implementations itself.
+
+Consider a schema that lists the sample rates an audio API accepts:
+
+```json
+{
+  "type": "integer",
+  "enum": [8000, 16000, 24000, 44100, 48000]
+}
+```
+
+The generator emits one variant per value, a serializer that turns each variant
+into its number, and a deserializer that maps numbers back to variants:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
+pub enum SampleRate {
+    #[default]
+    Value8000,
+    /* ... */
+    Value48000,
+}
+
+impl serde::Serialize for SampleRate {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let value: i64 = match self {
+            Self::Value8000 => 8000i64,
+            /* ... */
+            Self::Value48000 => 48000i64,
+        };
+        serializer.serialize_i64(value)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SampleRate {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = i64::deserialize(deserializer)?;
+        match value {
+            8000i64 => Ok(Self::Value8000),
+            /* ... */
+            _ => Err(serde::de::Error::custom(/* ... */)),
+        }
+    }
+}
+```
+
+Now `SampleRate::Value8000` serializes to `8000`, and `8000` deserializes back
+to `SampleRate::Value8000`. A number that isn't in the list produces an error
+that lists the accepted values.
+
+The JSON number you read and write depends on the schema's type and `format`.
+Signed integers go through `i64`, unsigned integers through `u64`, and `number`
+schemas through `f64`. Because JSON has a single number type, the choice only
+affects the Rust type used internally, not the bytes on the wire.
+
+### Floating-Point Values
+
+A `number` enum is backed by `f64`. Rust does not let you match on
+floating-point literals, so the deserializer compares bit patterns instead:
+
+```rust
+impl<'de> serde::Deserialize<'de> for PlaybackRate {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = f64::deserialize(deserializer)?;
+        match value.to_bits() {
+            bits if bits == (0.5f64).to_bits() => Ok(Self::Value0_5),
+            /* ... */
+            _ => Err(serde::de::Error::custom(/* ... */)),
+        }
+    }
+}
+```
+
+Because every variant is a unit variant, these enums derive `Eq` and `Hash`,
+so you can use them as keys in a `HashMap` or members of a `HashSet` — even the
+floating-point ones.
 
 ---
 

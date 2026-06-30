@@ -109,7 +109,13 @@ impl DerivesProvider for EnumDef {
 
   fn is_serializable(&self) -> SerdeImpl {
     match self.serde_mode {
-      SerdeMode::SerializeOnly | SerdeMode::Both => SerdeImpl::Derive,
+      SerdeMode::SerializeOnly | SerdeMode::Both => {
+        if self.scalar_repr.is_some() {
+          SerdeImpl::Custom
+        } else {
+          SerdeImpl::Derive
+        }
+      }
       SerdeMode::DeserializeOnly | SerdeMode::None => SerdeImpl::None,
     }
   }
@@ -117,7 +123,7 @@ impl DerivesProvider for EnumDef {
   fn is_deserializable(&self) -> SerdeImpl {
     match self.serde_mode {
       SerdeMode::DeserializeOnly | SerdeMode::Both => {
-        if self.case_insensitive {
+        if self.case_insensitive || self.scalar_repr.is_some() {
           SerdeImpl::Custom
         } else {
           SerdeImpl::Derive

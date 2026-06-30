@@ -498,11 +498,7 @@ impl TypeResolver {
       SchemaType::Integer => RustPrimitive::I64,
       _ => return RustPrimitive::Value,
     };
-    schema
-      .format
-      .as_ref()
-      .and_then(|f| RustPrimitive::from_format(f))
-      .unwrap_or(default)
+    RustPrimitive::with_format_override(default, schema.format.as_deref())
   }
 
   /// Attempts to recognize an object schema as a map type.

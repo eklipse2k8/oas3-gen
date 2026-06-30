@@ -665,6 +665,112 @@ impl core::fmt::Display for Role {
     }
   }
 }
+/// Audio sample rate in Hz (integer-backed enum)
+#[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
+pub enum SampleRate {
+  #[default]
+  Value8000,
+  Value16000,
+  Value24000,
+  Value44100,
+  Value48000,
+}
+impl core::fmt::Display for SampleRate {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Value8000 => write!(f, "8000"),
+      Self::Value16000 => write!(f, "16000"),
+      Self::Value24000 => write!(f, "24000"),
+      Self::Value44100 => write!(f, "44100"),
+      Self::Value48000 => write!(f, "48000"),
+    }
+  }
+}
+impl serde::Serialize for SampleRate {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    let value: i64 = match self {
+      Self::Value8000 => 8000i64,
+      Self::Value16000 => 16000i64,
+      Self::Value24000 => 24000i64,
+      Self::Value44100 => 44100i64,
+      Self::Value48000 => 48000i64,
+    };
+    serializer.serialize_i64(value)
+  }
+}
+impl<'de> serde::Deserialize<'de> for SampleRate {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = i64::deserialize(deserializer)?;
+    match value {
+      8000i64 => Ok(Self::Value8000),
+      16000i64 => Ok(Self::Value16000),
+      24000i64 => Ok(Self::Value24000),
+      44100i64 => Ok(Self::Value44100),
+      48000i64 => Ok(Self::Value48000),
+      _ => Err(serde::de::Error::custom(format!(
+        "unknown variant {}, expected one of: {}",
+        value, "8000, 16000, 24000, 44100, 48000"
+      ))),
+    }
+  }
+}
+/// Playback speed multiplier (float-backed enum)
+#[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
+pub enum PlaybackRate {
+  #[default]
+  Value0_5,
+  Value1,
+  Value1_5,
+  Value2,
+}
+impl core::fmt::Display for PlaybackRate {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Value0_5 => write!(f, "0.5"),
+      Self::Value1 => write!(f, "1"),
+      Self::Value1_5 => write!(f, "1.5"),
+      Self::Value2 => write!(f, "2"),
+    }
+  }
+}
+impl serde::Serialize for PlaybackRate {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    let value: f64 = match self {
+      Self::Value0_5 => 0.5f64,
+      Self::Value1 => 1f64,
+      Self::Value1_5 => 1.5f64,
+      Self::Value2 => 2f64,
+    };
+    serializer.serialize_f64(value)
+  }
+}
+impl<'de> serde::Deserialize<'de> for PlaybackRate {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = f64::deserialize(deserializer)?;
+    match value.to_bits() {
+      bits if bits == (0.5f64).to_bits() => Ok(Self::Value0_5),
+      bits if bits == (1f64).to_bits() => Ok(Self::Value1),
+      bits if bits == (1.5f64).to_bits() => Ok(Self::Value1_5),
+      bits if bits == (2f64).to_bits() => Ok(Self::Value2),
+      _ => Err(serde::de::Error::custom(format!(
+        "unknown variant {}, expected one of: {}",
+        value, "0.5, 1, 1.5, 2"
+      ))),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum StopReason {
   #[serde(rename = "end_turn")]

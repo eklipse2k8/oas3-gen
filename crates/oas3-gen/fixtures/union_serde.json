@@ -524,6 +524,18 @@
 				"type": "string",
 				"enum": ["user", "assistant"]
 			},
+			"SampleRate": {
+				"description": "Audio sample rate in Hz (integer-backed enum)",
+				"type": "integer",
+				"enum": [8000, 16000, 24000, 44100, 48000],
+				"default": 24000
+			},
+			"PlaybackRate": {
+				"description": "Playback speed multiplier (float-backed enum)",
+				"type": "number",
+				"enum": [0.5, 1.0, 1.5, 2.0],
+				"default": 1.0
+			},
 			"StopReason": {
 				"type": "string",
 				"enum": ["end_turn", "max_tokens", "stop_sequence", "tool_use"]

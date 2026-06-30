@@ -268,6 +268,25 @@ impl RustPrimitive {
     matches!(self, RustPrimitive::F32 | RustPrimitive::F64)
   }
 
+  pub fn is_unsigned_integer(&self) -> bool {
+    matches!(
+      self,
+      RustPrimitive::U8
+        | RustPrimitive::U16
+        | RustPrimitive::U32
+        | RustPrimitive::U64
+        | RustPrimitive::U128
+        | RustPrimitive::Usize
+    )
+  }
+
+  /// Returns `format`-overridden primitive, or `default` when no recognized
+  /// `format` is present. Shared by the type resolver and value-enum converter
+  /// so numeric `format` handling stays in one place.
+  pub fn with_format_override(default: RustPrimitive, format: Option<&str>) -> RustPrimitive {
+    format.and_then(RustPrimitive::from_format).unwrap_or(default)
+  }
+
   pub fn from_format(format: &str) -> Option<Self> {
     match format {
       "int8" => Some(RustPrimitive::I8),

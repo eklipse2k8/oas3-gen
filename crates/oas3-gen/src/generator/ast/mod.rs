@@ -579,6 +579,7 @@ pub struct EnumDef {
   pub serde_mode: SerdeMode,
   #[builder(default)]
   pub generate_display: bool,
+  pub scalar_repr: Option<RustPrimitive>,
 }
 
 impl EnumDef {

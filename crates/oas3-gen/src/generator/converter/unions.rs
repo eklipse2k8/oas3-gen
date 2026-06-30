@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, rc::Rc};
 
 use anyhow::Context;
 use itertools::Itertools;
-use oas3::spec::{ObjectSchema, Schema};
+use oas3::spec::{ObjectSchema, Schema, SchemaType};
 
 use super::{
   ConversionOutput,
@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
   generator::{
-    ast::{Documentation, EnumVariantToken, RustType},
+    ast::{Documentation, EnumVariantToken, RustPrimitive, RustType},
     converter::{ConverterContext, discriminator::DiscriminatorConverter},
     naming::{identifiers::ensure_unique, inference::strip_common_affixes},
   },
@@ -59,13 +59,34 @@ impl EnumConverter {
     };
 
     let variants = schema.extract_enum_entries(self.context.graph().spec());
+    let scalar_repr = Self::scalar_repr(schema);
 
     self.value_enum_builder.build_enum_from_variants(
       name,
       variants,
       strategy,
       Documentation::from_optional(schema.description.as_ref()),
+      scalar_repr,
     )
+  }
+
+  /// Determines the backing scalar primitive for a numeric value enum.
+  ///
+  /// Returns `Some` for `type: integer` / `type: number` schemas (honoring any
+  /// numeric `format`), and `None` for string-backed enums, which use the
+  /// derived serde path.
+  fn scalar_repr(schema: &ObjectSchema) -> Option<RustPrimitive> {
+    match schema.single_type() {
+      Some(SchemaType::Integer) => Some(RustPrimitive::with_format_override(
+        RustPrimitive::I64,
+        schema.format.as_deref(),
+      )),
+      Some(SchemaType::Number) => Some(RustPrimitive::with_format_override(
+        RustPrimitive::F64,
+        schema.format.as_deref(),
+      )),
+      _ => None,
+    }
   }
 }
 
