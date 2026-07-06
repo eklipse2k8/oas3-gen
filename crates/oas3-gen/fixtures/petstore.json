@@ -59,6 +59,17 @@
 								"enum": ["cat", "dog", "fish", "bird"]
 							}
 						}
+					},
+					{
+						"name": "x-compatibility-date",
+						"in": "header",
+						"description": "API compatibility date",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"format": "date",
+							"enum": ["2026-06-09"]
+						}
 					}
 				],
 				"responses": {

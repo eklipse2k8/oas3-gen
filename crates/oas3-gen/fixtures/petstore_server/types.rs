@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");
 pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
+pub const X_COMPATIBILITY_DATE: http::HeaderName = http::HeaderName::from_static("x-compatibility-date");
 pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
 pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
 #[serde_with::skip_serializing_none]
@@ -124,11 +125,14 @@ pub struct ListPetsRequestHeader {
   pub x_sort_order: Option<ListPetsRequestHeaderXSortOrder>,
   /// Only include pets with a tag
   pub x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
+  /// API compatibility date
+  #[default(Default::default())]
+  pub x_compatibility_date: chrono::NaiveDate,
 }
 impl core::convert::TryFrom<&ListPetsRequestHeader> for http::HeaderMap {
   type Error = http::header::InvalidHeaderValue;
   fn try_from(headers: &ListPetsRequestHeader) -> core::result::Result<Self, Self::Error> {
-    let mut map = http::HeaderMap::with_capacity(2usize);
+    let mut map = http::HeaderMap::with_capacity(3usize);
     if let Some(value) = &headers.x_sort_order {
       let header_value = http::HeaderValue::try_from(value.to_string())?;
       map.insert(X_SORT_ORDER, header_value);
@@ -143,6 +147,8 @@ impl core::convert::TryFrom<&ListPetsRequestHeader> for http::HeaderMap {
       )?;
       map.insert(X_ONLY, header_value);
     }
+    let header_value = http::HeaderValue::try_from(&headers.x_compatibility_date.to_string())?;
+    map.insert(X_COMPATIBILITY_DATE, header_value);
     Ok(map)
   }
 }
@@ -164,6 +170,11 @@ impl core::convert::TryFrom<&http::HeaderMap> for ListPetsRequestHeader {
         .get(X_ONLY)
         .and_then(|v| v.to_str().ok())
         .map(|value| value.split(',').map(str::trim).filter_map(|s| s.parse().ok()).collect()),
+      x_compatibility_date: headers
+        .get(X_COMPATIBILITY_DATE)
+        .and_then(|v| v.to_str().ok())
+        .map(|value| value.parse().unwrap_or_default())
+        .unwrap_or_default(),
     })
   }
 }
@@ -191,11 +202,16 @@ impl ListPetsRequest {
     limit: Option<i32>,
     x_sort_order: Option<ListPetsRequestHeaderXSortOrder>,
     x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
+    x_compatibility_date: chrono::NaiveDate,
   ) -> anyhow::Result<Self> {
     let request = Self {
       path: ListPetsRequestPath { api_version },
       query: ListPetsRequestQuery { limit },
-      header: ListPetsRequestHeader { x_sort_order, x_only },
+      header: ListPetsRequestHeader {
+        x_sort_order,
+        x_only,
+        x_compatibility_date,
+      },
     };
     request.validate()?;
     Ok(request)

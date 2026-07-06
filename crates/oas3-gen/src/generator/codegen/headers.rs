@@ -77,19 +77,19 @@ impl ToTokens for HeaderFieldInsertionFragment {
     let header_const = ConstToken::from_raw(original_name);
     let ty = &self.field.rust_type;
 
-    let insertion = if self.field.is_required() {
-      let header_value = header_value_expr(ty, quote! { &headers.#field_name });
-      quote! {
-        let header_value = http::HeaderValue::try_from(#header_value)?;
-        map.insert(#header_const, header_value);
-      }
-    } else {
+    let insertion = if self.field.rust_type.nullable {
       let header_value = header_value_expr(ty, quote! { value });
       quote! {
         if let Some(value) = &headers.#field_name {
           let header_value = http::HeaderValue::try_from(#header_value)?;
           map.insert(#header_const, header_value);
         }
+      }
+    } else {
+      let header_value = header_value_expr(ty, quote! { &headers.#field_name });
+      quote! {
+        let header_value = http::HeaderValue::try_from(#header_value)?;
+        map.insert(#header_const, header_value);
       }
     };
 
@@ -180,7 +180,7 @@ impl ToTokens for HeaderFieldExtractionFragment {
 
     let header_const = ConstToken::from_raw(original_name);
     let parse_expr = header_parse_expr(&self.field.rust_type, &quote! { value });
-    let default_suffix = self.field.is_required().then(|| quote! { .unwrap_or_default() });
+    let default_suffix = (!self.field.rust_type.nullable).then(|| quote! { .unwrap_or_default() });
 
     tokens.extend(quote! {
       #field_name: headers
