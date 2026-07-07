@@ -68,6 +68,7 @@ The `book/` folder contains user-facing documentation built with mdBook. **All f
 - `book/src/SUMMARY.md` - Table of contents
 - `book/src/introduction.md` - Getting started guide
 - `book/src/code-generation.md` - Complete CLI flag reference with examples
+- `book/src/builders.md` - Builder pattern reference for generated types
 
 **When to update:**
 - Adding new CLI flags or options

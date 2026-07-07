@@ -7,6 +7,9 @@ use serde_json::Number;
 
 use crate::generator::ast::{DefaultAtom, FileHeaderNode, StructToken};
 
+const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
+const I64_RANGE_END_AS_F64: f64 = 9_223_372_036_854_775_808.0;
+
 static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
   CustomFormat::builder()
     .grouping(Grouping::Standard)
@@ -367,7 +370,7 @@ impl RustPrimitive {
         Rounding::Floor => f.floor(),
       };
       #[allow(clippy::cast_possible_truncation)]
-      if rounded >= i64::MIN as f64 && rounded <= i64::MAX as f64 {
+      if (I64_MIN_AS_F64..I64_RANGE_END_AS_F64).contains(&rounded) {
         return render_integer(self, rounded as i64);
       }
     }
