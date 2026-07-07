@@ -32,7 +32,7 @@ impl SpecLoader {
       .and_then(OsStr::to_str)
       .map_or(SpecFormat::default(), SpecFormat::from_extension);
 
-    let file = AsyncMmapFile::open(path).await?;
+    let file = unsafe { AsyncMmapFile::open(path).await? };
 
     Ok(Self { file, format })
   }

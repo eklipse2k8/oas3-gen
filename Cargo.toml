@@ -55,7 +55,7 @@ comfy-table = { version = "7.2" }
 crossterm = { version = "0.29", default-features = false }
 cruet = { version = "1.0" }
 eventsource-stream = { version = "0.2" }
-fmmap = { version = "0.4", features = ["tokio"] }
+fmmap = { version = "0.5", features = ["tokio"] }
 futures = { version = "0.3" }
 futures-core = { version = "0.3" }
 http = { version = "1.4" }
@@ -78,7 +78,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }
 serde_with = { version = "3.20", features = ["base64", "chrono"] }
-string_cache = { version = "0.9", features = ["serde"] }
+string_cache = { version = "0.10", features = ["serde"] }
 strum = { version = "0.28", features = ["derive"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
 tempfile = { version = "3.27" }
