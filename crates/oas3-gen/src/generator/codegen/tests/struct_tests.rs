@@ -287,6 +287,49 @@ fn test_header_params_struct_generates_try_from_header_map() {
 }
 
 #[test]
+fn test_required_header_with_default_uses_unconditional_insert() {
+  let def = StructDef {
+    name: StructToken::new("RequestHeader"),
+    docs: Documentation::default(),
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("x_compatibility_date"))
+        .rust_type(TypeRef::new("String"))
+        .default_value(serde_json::Value::String("2026-06-09".to_string()))
+        .original_name("X-Compatibility-Date")
+        .build(),
+    ],
+    kind: StructKind::HeaderParams,
+    ..Default::default()
+  };
+
+  let client_code = StructFragment::new(
+    def.clone(),
+    BTreeMap::new(),
+    Visibility::Public,
+    GenerationTarget::Client,
+  )
+  .into_token_stream()
+  .to_string();
+  assert!(
+    !client_code.contains("if let Some"),
+    "required field with default must use unconditional insert: {client_code}"
+  );
+  assert!(
+    client_code.contains("map . insert (X_COMPATIBILITY_DATE"),
+    "missing header insert: {client_code}"
+  );
+
+  let server_code = StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Server)
+    .into_token_stream()
+    .to_string();
+  assert!(
+    server_code.contains(". unwrap_or_default ()"),
+    "required field with default must unwrap extraction: {server_code}"
+  );
+}
+
+#[test]
 fn test_non_header_params_struct_does_not_generate_try_from_header_map() {
   let def = base_struct(StructKind::Schema);
   let tokens =

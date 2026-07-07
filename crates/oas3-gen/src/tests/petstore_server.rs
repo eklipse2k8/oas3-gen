@@ -10,6 +10,7 @@ fn test_list_pets_request_compiles() {
     .api_version("v1".to_string())
     .x_sort_order(ListPetsRequestHeaderXSortOrder::Asc)
     .x_only(vec![ListPetsRequestHeaderXonly::Bird, ListPetsRequestHeaderXonly::Fish])
+    .x_compatibility_date(chrono::NaiveDate::from_ymd_opt(2026, 6, 9).unwrap())
     .limit(50)
     .build();
   assert!(request.is_ok(), "request should be valid");
@@ -26,6 +27,11 @@ fn test_list_pets_request_compiles() {
     headers.get("x-only").unwrap().to_str().unwrap(),
     "bird,fish",
     "header map should contain x-only values"
+  );
+  assert_eq!(
+    headers.get("x-compatibility-date").unwrap().to_str().unwrap(),
+    "2026-06-09",
+    "header map should contain required x-compatibility-date"
   );
 }
 
