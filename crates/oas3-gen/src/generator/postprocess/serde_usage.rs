@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use petgraph::{Graph, graph::NodeIndex};
 
 use crate::generator::{
   ast::{
-    DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumToken, OuterAttr, RustPrimitive, RustType, SerdeImpl,
-    SerdeMode, StructDef, StructKind, TypeRef,
+    DeriveTrait, DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumToken, OuterAttr, RustPrimitive, RustType,
+    SerdeImpl, SerdeMode, StructDef, StructKind, TypeRef,
   },
   converter::GenerationTarget,
 };
@@ -45,6 +45,7 @@ pub(crate) struct SerdeUsage {
   graph: Graph<EnumToken, ()>,
   indices: BTreeMap<EnumToken, NodeIndex>,
   pub(super) usage: BTreeMap<EnumToken, UsageFlags>,
+  serialize_required: BTreeSet<EnumToken>,
   target: GenerationTarget,
 }
 
@@ -55,12 +56,14 @@ impl SerdeUsage {
       graph,
       indices,
       usage: seed_usage,
+      serialize_required: BTreeSet::new(),
       target,
     }
   }
 
   pub(crate) fn apply(mut self, types: &mut [RustType]) {
     self.propagate();
+    self.serialize_required = self.serialize_closure(types);
     self.update_types(types);
   }
 
@@ -110,6 +113,59 @@ impl SerdeUsage {
     match &type_ref.base_type {
       RustPrimitive::Custom(name) => Some(name.as_ref().into()),
       _ => None,
+    }
+  }
+
+  fn retains_validate(&self, def: &StructDef) -> bool {
+    if !def.derives().contains(&DeriveTrait::Validate) {
+      return false;
+    }
+    let key: EnumToken = def.name.as_str().into();
+    let validation_cleared = def.kind == StructKind::Schema && self.get_usage(&key) == TypeUsage::ResponseOnly;
+    !validation_cleared
+  }
+
+  fn serialize_closure(&self, types: &[RustType]) -> BTreeSet<EnumToken> {
+    let mut closure = BTreeSet::new();
+    let mut worklist = types
+      .iter()
+      .filter_map(|rust_type| match rust_type {
+        RustType::Struct(def) if self.retains_validate(def) => Some(EnumToken::from(def.name.as_str())),
+        _ => None,
+      })
+      .collect::<VecDeque<_>>();
+
+    while let Some(type_name) = worklist.pop_front() {
+      if !closure.insert(type_name.clone()) {
+        continue;
+      }
+      let Some(&idx) = self.indices.get(&type_name) else {
+        continue;
+      };
+      for dep_idx in self.graph.neighbors(idx) {
+        if let Some(dep) = self.graph.node_weight(dep_idx) {
+          worklist.push_back(dep.clone());
+        }
+      }
+    }
+
+    closure
+  }
+
+  fn serde_mode_for(&self, name: &EnumToken, usage: TypeUsage) -> SerdeMode {
+    let mode = usage.to_serde_mode(self.target);
+    if self.serialize_required.contains(name) {
+      Self::with_serialize(mode)
+    } else {
+      mode
+    }
+  }
+
+  fn with_serialize(mode: SerdeMode) -> SerdeMode {
+    match mode {
+      SerdeMode::DeserializeOnly => SerdeMode::Both,
+      SerdeMode::None => SerdeMode::SerializeOnly,
+      SerdeMode::SerializeOnly | SerdeMode::Both => mode,
     }
   }
 
@@ -203,7 +259,7 @@ impl SerdeUsage {
     match def.kind {
       StructKind::Schema => {
         let key: EnumToken = def.name.as_str().into();
-        self.get_usage(&key).to_serde_mode(self.target)
+        self.serde_mode_for(&key, self.get_usage(&key))
       }
       StructKind::OperationRequest | StructKind::HeaderParams => SerdeMode::None,
       StructKind::PathParams => match self.target {
@@ -230,10 +286,10 @@ impl SerdeUsage {
   }
 
   fn update_enum(&self, def: &mut EnumDef) {
-    def.serde_mode = self.get_usage(&def.name).to_serde_mode(self.target);
+    def.serde_mode = self.serde_mode_for(&def.name, self.get_usage(&def.name));
   }
 
   fn update_discriminated_enum(&self, def: &mut DiscriminatedEnumDef) {
-    def.serde_mode = self.get_usage(&def.name).to_serde_mode(self.target);
+    def.serde_mode = self.serde_mode_for(&def.name, self.get_usage(&def.name));
   }
 }
