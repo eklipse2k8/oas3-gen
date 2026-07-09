@@ -645,10 +645,15 @@ impl SchemaExt for ObjectSchema {
       ];
     }
 
-    self
-      .union_variants()
-      .resolve_all(spec)
-      .flat_map(|s| extract_variant_entries(&s))
+    let resolved_variants = self.union_variants().resolve_all(spec).collect::<Vec<_>>();
+
+    if !resolved_variants.iter().all(is_enum_like_variant) {
+      return vec![];
+    }
+
+    resolved_variants
+      .iter()
+      .flat_map(extract_variant_entries)
       .unique_by(VariantDef::serde_name)
       .collect()
   }
@@ -656,6 +661,17 @@ impl SchemaExt for ObjectSchema {
   fn should_register_as_enum(&self) -> bool {
     self.has_enum_values() || self.has_relaxed_anyof_enum()
   }
+}
+
+/// Returns `true` if a resolved union variant can participate in a value enum.
+///
+/// A union is only representable as a value enum when every non-null variant
+/// contributes discrete values: an explicit `enum`, a `const`, an unconstrained
+/// (freeform) string for relaxed enums, or `null`. Structural variants such as
+/// objects, arrays, or references to structs disqualify the whole union, since
+/// its set of values cannot be enumerated.
+fn is_enum_like_variant(schema: &ObjectSchema) -> bool {
+  schema.is_null() || schema.is_unconstrained_string() || !schema.enum_values.is_empty() || schema.const_value.is_some()
 }
 
 fn extract_variant_entries(schema: &ObjectSchema) -> Vec<VariantDef> {

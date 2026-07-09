@@ -186,6 +186,7 @@ impl RelaxedEnumBuilder {
         EnumMethod::new(
           method_name,
           EnumMethodKind::KnownValueConstructor {
+            wrapper_variant: EnumVariantToken::new(KNOWN_ENUM_VARIANT),
             known_type: known_type.clone(),
             known_variant: variant.name.clone(),
           },

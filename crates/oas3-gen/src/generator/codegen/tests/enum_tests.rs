@@ -655,6 +655,7 @@ fn test_known_value_constructor_methods() {
       EnumMethod::new(
         "gemini_25_pro",
         EnumMethodKind::KnownValueConstructor {
+          wrapper_variant: EnumVariantToken::new(KNOWN_ENUM_VARIANT),
           known_type: EnumToken::new("ModelOptionKnown"),
           known_variant: EnumVariantToken::new("Gemini25Pro"),
         },
@@ -663,6 +664,7 @@ fn test_known_value_constructor_methods() {
       EnumMethod::new(
         "gemini_25_flash",
         EnumMethodKind::KnownValueConstructor {
+          wrapper_variant: EnumVariantToken::new(KNOWN_ENUM_VARIANT),
           known_type: EnumToken::new("ModelOptionKnown"),
           known_variant: EnumVariantToken::new("Gemini25Flash"),
         },

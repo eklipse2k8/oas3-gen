@@ -9,8 +9,9 @@ use super::structs::StructConverter;
 use crate::{
   generator::{
     ast::{
-      BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumVariantToken, FieldDef,
-      FieldNameToken, MethodKind, MethodNameToken, RustType, StructDef, StructMethod, TypeRef, VariantDef,
+      BuilderField, BuilderNestedStruct, Documentation, EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken,
+      FieldDef, FieldNameToken, MethodKind, MethodNameToken, RustType, StructDef, StructMethod, TypeRef,
+      VariantContent, VariantDef,
     },
     converter::ConverterContext,
     naming::{
@@ -67,12 +68,22 @@ impl MethodGenerator {
       .collect::<BTreeMap<String, StructDef>>();
 
     let eligible = self.collect_eligible_variants(variants, &mut struct_cache);
+    let enum_value_variants = self.collect_enum_value_variants(variants, inline_types);
 
-    if eligible.is_empty() {
+    if eligible.is_empty() && enum_value_variants.is_empty() {
       return vec![];
     }
 
-    Self::build_methods_from_eligible(&enum_name, &eligible, variants)
+    let mut seen = BTreeSet::new();
+    let mut methods = Self::build_methods_from_eligible(&enum_name, &eligible, variants, &mut seen);
+
+    for group in &enum_value_variants {
+      methods.extend(Self::build_wrapped_enum_value_constructors(
+        &enum_name, group, &mut seen,
+      ));
+    }
+
+    methods
   }
 
   /// Filters variants to those eligible for constructor generation.
@@ -104,6 +115,104 @@ impl MethodGenerator {
     eligible
   }
 
+  /// Collects union variants that wrap a value enum, along with that enum's values.
+  ///
+  /// A variant wrapping a value enum (e.g. `Preset(ImageSizePreset)`) can expose one
+  /// convenience constructor per enum value, mirroring the `Known(T)` variant of a
+  /// relaxed enum. Array-typed variants and variants whose wrapped type is not a
+  /// value enum are skipped.
+  fn collect_enum_value_variants(
+    &self,
+    variants: &[VariantDef],
+    inline_types: &[RustType],
+  ) -> Vec<WrappedEnumConstructors> {
+    variants
+      .iter()
+      .filter_map(|variant| {
+        let type_ref = variant.single_wrapped_type()?;
+        if type_ref.is_array {
+          return None;
+        }
+
+        let values = self.resolve_enum_value_defs(type_ref, inline_types);
+        if values.is_empty() {
+          return None;
+        }
+
+        Some(WrappedEnumConstructors {
+          wrapper_variant: variant.name.clone(),
+          enum_type: EnumToken::new(type_ref.unboxed_base_type_name()),
+          values,
+        })
+      })
+      .collect()
+  }
+
+  /// Resolves the unit variant definitions of a wrapped value enum.
+  ///
+  /// Prefers an inline enum definition (exact generated variants), falling back to
+  /// the named schema in the graph. Only unit variants are returned, so nested
+  /// union enums with tuple variants do not produce spurious constructors.
+  fn resolve_enum_value_defs(&self, type_ref: &TypeRef, inline_types: &[RustType]) -> Vec<VariantDef> {
+    let base_name = type_ref.unboxed_base_type_name();
+
+    let variants = inline_types
+      .iter()
+      .find_map(|t| match t {
+        RustType::Enum(e) if e.name.as_str() == base_name => Some(e.variants.clone()),
+        _ => None,
+      })
+      .or_else(|| {
+        let spec = self.context.graph().spec();
+        self
+          .context
+          .graph()
+          .get(&base_name)
+          .filter(|schema| schema.has_enum_values())
+          .map(|schema| schema.extract_enum_entries(spec))
+      })
+      .unwrap_or_default();
+
+    variants
+      .into_iter()
+      .filter(|v| matches!(v.content, VariantContent::Unit))
+      .collect()
+  }
+
+  /// Builds one constructor per value of a wrapped value enum.
+  ///
+  /// For a variant `Preset(ImageSizePreset)`, produces methods like
+  /// `fn auto_2k() -> Self { Self::Preset(ImageSizePreset::Auto2k) }`. Method names
+  /// are derived by stripping words shared with the enum name and deduplicated
+  /// against the shared `seen` set so they never collide with struct constructors.
+  fn build_wrapped_enum_value_constructors(
+    enum_name: &str,
+    group: &WrappedEnumConstructors,
+    seen: &mut BTreeSet<String>,
+  ) -> Vec<EnumMethod> {
+    let value_names = group.values.iter().map(|v| v.name.to_string()).collect::<Vec<String>>();
+    let method_names = derive_method_names(enum_name, &value_names);
+
+    group
+      .values
+      .iter()
+      .zip_eq(method_names)
+      .map(|(value, base_name)| {
+        let method_name = ensure_unique(&base_name, seen);
+        seen.insert(method_name.clone());
+        EnumMethod::new(
+          MethodNameToken::from_raw(&method_name),
+          EnumMethodKind::KnownValueConstructor {
+            wrapper_variant: group.wrapper_variant.clone(),
+            known_type: group.enum_type.clone(),
+            known_variant: value.name.clone(),
+          },
+          value.docs.clone(),
+        )
+      })
+      .collect()
+  }
+
   /// Constructs method definitions from eligible variant specifications.
   ///
   /// Derives method names by stripping common prefixes shared with `enum_name`,
@@ -113,6 +222,7 @@ impl MethodGenerator {
     enum_name: &str,
     eligible: &[(EnumVariantToken, EnumMethodKind)],
     variants: &[VariantDef],
+    seen: &mut BTreeSet<String>,
   ) -> Vec<EnumMethod> {
     let variant_names = eligible
       .iter()
@@ -120,12 +230,11 @@ impl MethodGenerator {
       .collect::<Vec<String>>();
     let method_names = derive_method_names(enum_name, &variant_names);
 
-    let mut seen = BTreeSet::new();
     eligible
       .iter()
       .zip_eq(method_names)
       .map(|((variant_name, kind), base_name)| {
-        let method_name = ensure_unique(&base_name, &seen);
+        let method_name = ensure_unique(&base_name, seen);
         seen.insert(method_name.clone());
         let docs = variants
           .iter()
@@ -289,6 +398,15 @@ impl MethodGenerator {
 }
 
 type BuilderFieldTuple = (Vec<Vec<BuilderField>>, Vec<Option<BuilderNestedStruct>>);
+
+/// A union variant that wraps a value enum, paired with that enum's unit values.
+///
+/// Used to generate one convenience constructor per enum value on the union type.
+struct WrappedEnumConstructors {
+  wrapper_variant: EnumVariantToken,
+  enum_type: EnumToken,
+  values: Vec<VariantDef>,
+}
 
 impl BuilderField {
   /// Creates a builder field from a nested struct's field with owner tracking.

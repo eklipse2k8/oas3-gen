@@ -12,10 +12,14 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[serde(default)]
 pub struct ContentRequest {
   pub blocks: Vec<ContentBlock>,
   /// Flexible metadata that can be string or object
   pub metadata: Option<Metadata>,
+  /// The size of the generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.
+  #[default(Some(Default::default()))]
+  pub image_size: Option<ContentRequestImageSize>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct ContentResponse {
@@ -943,6 +947,53 @@ pub struct UsageCounterB {
   #[default(Some("counter_b".to_string()))]
   pub r#type: Option<String>,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default, bon::Builder)]
+#[serde(default)]
+pub struct ImageSize {
+  /// The width of the generated image.
+  #[validate(range(max = 14_142i64, exclusive_min = 0i64))]
+  #[default(Some(512i64))]
+  pub width: Option<i64>,
+  /// The height of the generated image.
+  #[validate(range(max = 14_142i64, exclusive_min = 0i64))]
+  #[default(Some(512i64))]
+  pub height: Option<i64>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
+pub enum ImageSizePreset {
+  #[serde(rename = "square_hd")]
+  #[default]
+  SquareHd,
+  #[serde(rename = "square")]
+  Square,
+  #[serde(rename = "portrait_4_3")]
+  Portrait43,
+  #[serde(rename = "portrait_16_9")]
+  Portrait169,
+  #[serde(rename = "landscape_4_3")]
+  Landscape43,
+  #[serde(rename = "landscape_16_9")]
+  Landscape169,
+  #[serde(rename = "auto_1K")]
+  Auto1k,
+  #[serde(rename = "auto_2K")]
+  Auto2k,
+}
+impl core::fmt::Display for ImageSizePreset {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::SquareHd => write!(f, "square_hd"),
+      Self::Square => write!(f, "square"),
+      Self::Portrait43 => write!(f, "portrait_4_3"),
+      Self::Portrait169 => write!(f, "portrait_16_9"),
+      Self::Landscape43 => write!(f, "landscape_4_3"),
+      Self::Landscape169 => write!(f, "landscape_16_9"),
+      Self::Auto1k => write!(f, "auto_1K"),
+      Self::Auto2k => write!(f, "auto_2K"),
+    }
+  }
+}
 /// Send content blocks
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct SendContentRequest {
@@ -1006,4 +1057,41 @@ pub enum GetEventsResponse {
   Ok(EventList),
   ///default: Unknown response
   Unknown,
+}
+/// The size of the generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum ContentRequestImageSize {
+  #[default]
+  ImageSize(ImageSize),
+  Preset(ImageSizePreset),
+}
+impl ContentRequestImageSize {
+  pub fn image_size() -> Self {
+    Self::ImageSize(ImageSize::default())
+  }
+  pub fn square_hd() -> Self {
+    Self::Preset(ImageSizePreset::SquareHd)
+  }
+  pub fn square() -> Self {
+    Self::Preset(ImageSizePreset::Square)
+  }
+  pub fn portrait43() -> Self {
+    Self::Preset(ImageSizePreset::Portrait43)
+  }
+  pub fn portrait169() -> Self {
+    Self::Preset(ImageSizePreset::Portrait169)
+  }
+  pub fn landscape43() -> Self {
+    Self::Preset(ImageSizePreset::Landscape43)
+  }
+  pub fn landscape169() -> Self {
+    Self::Preset(ImageSizePreset::Landscape169)
+  }
+  pub fn auto1k() -> Self {
+    Self::Preset(ImageSizePreset::Auto1k)
+  }
+  pub fn auto2k() -> Self {
+    Self::Preset(ImageSizePreset::Auto2k)
+  }
 }

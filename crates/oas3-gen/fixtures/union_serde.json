@@ -77,6 +77,28 @@
 					},
 					"metadata": {
 						"$ref": "#/components/schemas/Metadata"
+					},
+					"image_size": {
+						"description": "The size of the generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.",
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/ImageSize"
+							},
+							{
+								"$ref": "#/components/schemas/ImageSizePreset"
+							}
+						],
+						"title": "Image Size",
+						"default": "auto_2K",
+						"x-fal": {
+							"max_area": 4194304,
+							"max_aspect_ratio": 16,
+							"min_area": 1048576,
+							"min_aspect_ratio": 0.0625
+						},
+						"examples": [
+							"auto_2K"
+						]
 					}
 				}
 			},
@@ -706,6 +728,43 @@
 				"required": ["output_tokens", "type"],
 				"title": "UsageCounterB",
 				"type": "object"
+			},
+			"ImageSize": {
+				"x-fal-order-properties": ["width", "height"],
+				"properties": {
+					"width": {
+						"description": "The width of the generated image.",
+						"maximum": 14142,
+						"default": 512,
+						"title": "Width",
+						"exclusiveMinimum": 0,
+						"type": "integer"
+					},
+					"height": {
+						"description": "The height of the generated image.",
+						"maximum": 14142,
+						"default": 512,
+						"title": "Height",
+						"exclusiveMinimum": 0,
+						"type": "integer"
+					}
+				},
+				"title": "ImageSize",
+				"type": "object"
+			},
+			"ImageSizePreset": {
+				"title": "Image Size",
+				"enum": [
+					"square_hd",
+					"square",
+					"portrait_4_3",
+					"portrait_16_9",
+					"landscape_4_3",
+					"landscape_16_9",
+					"auto_1K",
+					"auto_2K"
+				],
+				"type": "string"
 			}
 		}
 	}

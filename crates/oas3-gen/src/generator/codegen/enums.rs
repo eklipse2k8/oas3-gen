@@ -102,10 +102,11 @@ impl HelperMethodParts for EnumMethodFragment {
         quote! { Self::#variant_name(#constructor) }
       }
       EnumMethodKind::KnownValueConstructor {
+        wrapper_variant,
         known_type,
         known_variant,
       } => {
-        quote! { Self::Known(#known_type::#known_variant) }
+        quote! { Self::#wrapper_variant(#known_type::#known_variant) }
       }
     }
   }

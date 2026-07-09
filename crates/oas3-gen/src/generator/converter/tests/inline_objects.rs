@@ -123,3 +123,108 @@ fn test_inline_object_without_type_field() -> anyhow::Result<()> {
 
   Ok(())
 }
+
+#[test]
+fn anyof_mixing_object_and_enum_ref_generates_union_not_enum() -> anyhow::Result<()> {
+  let schemas = parse_schemas(vec![
+    (
+      "ImageSize",
+      json!({
+        "type": "object",
+        "properties": {
+          "width": { "type": "integer" },
+          "height": { "type": "integer" }
+        }
+      }),
+    ),
+    (
+      "ImageSizePreset",
+      json!({
+        "type": "string",
+        "enum": ["square_hd", "square", "auto_2K"]
+      }),
+    ),
+    (
+      "Container",
+      json!({
+        "type": "object",
+        "properties": {
+          "image_size": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ImageSize" },
+              { "$ref": "#/components/schemas/ImageSizePreset" }
+            ]
+          }
+        }
+      }),
+    ),
+  ]);
+
+  let graph = create_test_graph(schemas);
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+
+  let mut result = converter.convert_schema("ImageSize", graph.get("ImageSize").unwrap())?;
+  result.extend(converter.convert_schema("ImageSizePreset", graph.get("ImageSizePreset").unwrap())?);
+  result.extend(converter.convert_schema("Container", graph.get("Container").unwrap())?);
+
+  let binding = context.cache.borrow();
+  let generated = &binding.types.types;
+  let all_types: Vec<&RustType> = result.iter().chain(generated.iter()).collect();
+
+  let container = all_types
+    .iter()
+    .find_map(|ty| match ty {
+      RustType::Struct(def) if def.name == "Container" => Some(def),
+      _ => None,
+    })
+    .expect("Container struct should be present");
+
+  let field = container
+    .fields
+    .iter()
+    .find(|f| f.name == "image_size")
+    .expect("image_size field should exist");
+
+  let field_type = field.rust_type.base_type.to_string();
+  assert_ne!(
+    field_type, "ImageSizePreset",
+    "anyOf mixing an object ref and an enum ref must not collapse to the enum variant"
+  );
+  assert_ne!(
+    field_type, "ImageSize",
+    "anyOf mixing an object ref and an enum ref must not collapse to the object variant"
+  );
+
+  let union = all_types
+    .iter()
+    .find_map(|ty| match ty {
+      RustType::Enum(def) if def.name.as_str() == field_type => Some(def),
+      _ => None,
+    })
+    .expect("a dedicated union enum should be generated for the mixed anyOf");
+
+  assert_eq!(
+    union.variants.len(),
+    2,
+    "union should carry both the object and preset variants"
+  );
+
+  let preset_constructors = union
+    .methods
+    .iter()
+    .filter(|m| {
+      matches!(
+        &m.kind,
+        crate::generator::ast::EnumMethodKind::KnownValueConstructor { wrapper_variant, .. }
+          if wrapper_variant.as_str() == "Preset"
+      )
+    })
+    .count();
+  assert_eq!(
+    preset_constructors, 3,
+    "each preset enum value should get a convenience constructor on the union"
+  );
+
+  Ok(())
+}

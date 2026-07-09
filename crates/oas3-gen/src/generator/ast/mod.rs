@@ -547,6 +547,7 @@ pub enum EnumMethodKind {
     param_type: TypeRef,
   },
   KnownValueConstructor {
+    wrapper_variant: EnumVariantToken,
     known_type: EnumToken,
     known_variant: EnumVariantToken,
   },

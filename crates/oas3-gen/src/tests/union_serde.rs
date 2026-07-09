@@ -451,6 +451,7 @@ mod tests {
         ContentBlock::Code(code_block("x = 1")),
       ],
       metadata: None,
+      image_size: None,
     };
 
     let json = serde_json::to_value(&request).unwrap();
@@ -458,6 +459,45 @@ mod tests {
     assert_eq!(json["blocks"].as_array().unwrap().len(), 2, "blocks length mismatch");
     assert_eq!(json["blocks"][0]["type"], "text", "first block type mismatch");
     assert_eq!(json["blocks"][1]["type"], "code", "second block type mismatch");
+  }
+
+  #[test]
+  fn test_image_size_anyof_union() {
+    let with_struct = ContentRequest {
+      blocks: vec![],
+      metadata: None,
+      image_size: Some(ContentRequestImageSize::ImageSize(ImageSize {
+        width: Some(1024),
+        height: Some(2048),
+      })),
+    };
+    let json = serde_json::to_value(&with_struct).unwrap();
+    assert_eq!(json["image_size"]["width"], 1024, "struct variant width mismatch");
+    assert_eq!(json["image_size"]["height"], 2048, "struct variant height mismatch");
+
+    let with_preset = ContentRequest {
+      blocks: vec![],
+      metadata: None,
+      image_size: Some(ContentRequestImageSize::Preset(ImageSizePreset::Auto2k)),
+    };
+    let json = serde_json::to_value(&with_preset).unwrap();
+    assert_eq!(json["image_size"], "auto_2K", "preset variant mismatch");
+
+    assert_eq!(
+      ContentRequestImageSize::auto2k(),
+      ContentRequestImageSize::Preset(ImageSizePreset::Auto2k),
+      "per-value preset constructor should build the Preset variant"
+    );
+    assert_eq!(
+      ContentRequestImageSize::square_hd(),
+      ContentRequestImageSize::Preset(ImageSizePreset::SquareHd),
+      "per-value preset constructor should build the Preset variant"
+    );
+    assert_eq!(
+      ContentRequestImageSize::image_size(),
+      ContentRequestImageSize::ImageSize(ImageSize::default()),
+      "struct variant constructor should still be generated"
+    );
   }
 
   #[test]
@@ -703,6 +743,7 @@ mod tests {
         }),
       ],
       metadata: None,
+      image_size: None,
     };
 
     let json = serde_json::to_value(&request).unwrap();
@@ -787,6 +828,7 @@ mod tests {
     let request_with_metadata = ContentRequest {
       blocks: vec![ContentBlock::Text(text_block("Hello"))],
       metadata: Some(Metadata::Object(session_data)),
+      image_size: None,
     };
     let json = serde_json::to_value(&request_with_metadata).unwrap();
     assert_eq!(
@@ -912,6 +954,7 @@ mod tests {
       body: ContentRequest {
         blocks: vec![ContentBlock::Text(text_block("Test"))],
         metadata: None,
+        image_size: None,
       },
     };
     assert_eq!(send_content.body.blocks.len(), 1, "body blocks count mismatch");
@@ -919,6 +962,7 @@ mod tests {
     let _body: ContentRequest = ContentRequest {
       blocks: vec![],
       metadata: None,
+      image_size: None,
     };
   }
 
