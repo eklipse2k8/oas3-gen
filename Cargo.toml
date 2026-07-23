@@ -68,21 +68,21 @@ num-format = { version = "0.4" }
 oas3 = { version = "0.22", features = ["yaml-spec"] }
 percent-encoding = { version = "2.3" }
 petgraph = { version = "0.8" }
-prettyplease = { version = "0.2" }
+prettyplease = { version = "0.3" }
 proc-macro2 = { version = "1.0" }
 quick-xml = { version = ">=0.38", default-features = false }
 quote = { version = "1.0" }
-regex = { version = "1.12" }
+regex = { version = "1.13" }
 reqwest = { version = "0.13", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }
-serde_with = { version = "3.20", features = ["base64", "chrono"] }
+serde_with = { version = "3.21", features = ["base64", "chrono"] }
 string_cache = { version = "0.10", features = ["serde"] }
 strum = { version = "0.28", features = ["derive"] }
-syn = { version = "2.0", features = ["full", "parsing"] }
+syn = { version = "3.0", features = ["full", "parsing"] }
 tempfile = { version = "3.27" }
 thiserror = { version = "2.0" }
-tokio = { version = "1.52", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
-uuid = { version = "1.23", features = ["serde"] }
+tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
+uuid = { version = "1.24", features = ["serde"] }
 validator = { version = "0.20" }

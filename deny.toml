@@ -7,10 +7,7 @@ no-default-features = false
 feature-depth = 1
 
 [advisories]
-ignore = [
-  # proc-macro-error2: Remove once change to validator crate is published
-  "RUSTSEC-2026-0173",
-]
+ignore = []
 
 [licenses]
 allow = ["BSD-2-Clause", "ISC", "MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
@@ -25,11 +22,9 @@ external-default-features = "allow"
 allow = []
 deny = []
 skip = [
-  # Duplicated from validation crate
-  "darling:<0.23",
-  "darling_core:<0.23",
-  "darling_macro:<0.23",
   "hashbrown:<0.16",
+  "prettyplease:<0.3",
+  "syn:<3",
 ]
 skip-tree = ["rustix"]
 
