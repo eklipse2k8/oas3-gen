@@ -11,7 +11,7 @@
 
 <!-- prettier-ignore-start -->
 [![crates.io](https://img.shields.io/crates/v/oas3-gen?label=latest)](https://crates.io/crates/oas3-gen)
-[![dependency status](https://deps.rs/crate/oas3-gen/0.26.3/status.svg)](https://deps.rs/crate/oas3-gen/0.26.3)
+[![dependency status](https://deps.rs/crate/oas3-gen/0.27.0/status.svg)](https://deps.rs/crate/oas3-gen/0.27.0)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![openapi](https://badgen.net/badge/OAS/v3.1.2?list=1&color=purple)](https://github.com/OAI/OpenAPI-Specification/blob/main/versions/3.1.2.md)
 <!-- prettier-ignore-end -->
@@ -234,15 +234,18 @@ Required:
   -o, --output <PATH>  Path for generated output (file for types/client, directory for client-mod/server-mod)
 
 Code Generation:
-  -C, --visibility <PUB>       Module visibility for generated items [default: public] [possible values: public, crate, file]
-      --odata-support          Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types)
-      --enum-mode <ENUM_MODE>  Specifies how to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
-      --no-helpers             Disable generation of ergonomic helper methods for enum variants
-  -c, --customize <TYPE=PATH>  Custom serde_as type overrides (format: type_name=custom::Path)
-      --all-headers            Emit header constants for all parameters defined in components, not just those used in operations
-      --enable-builders        Enable bon builder derives on schema structs and builder methods on request structs
-      --doc-format             Format documentation comments using mdformat (requires mdformat installed)
-      --no-ordered-collections Emit std::collections::HashMap and Vec instead of indexmap::IndexMap/IndexSet for map fields and uniqueItems arrays
+  -C, --visibility <PUB>           Module visibility for generated items [default: public] [possible values: public, crate, file]
+      --odata-support              Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types)
+      --enum-layout <ENUM_LAYOUT>  Controls how enum variants are ordered in generated code [default: spec] [possible values: spec, sorted]
+      --enum-mode <ENUM_MODE>      Specifies how to handle enum case sensitivity and duplicates [default: merge] [possible values: merge, preserve, relaxed]
+      --no-helpers                 Disable generation of ergonomic helper methods for enum variants
+  -c, --customize <TYPE=PATH>      Custom serde_as type overrides (format: type_name=custom::Path)
+      --all-headers                Emit header constants for all parameters defined in components, not just those used in operations
+      --enable-builders            Enable bon builder derives on schema structs and builder methods on request structs
+      --doc-format                 Format documentation comments using mdformat (requires mdformat installed)
+      --no-ordered-collections     Emit std::collections::HashMap and Vec instead of indexmap::IndexMap/IndexSet for map fields and uniqueItems arrays
+      --module-version <VERSION>   Version written to the [package] table of the generated Cargo.toml (requires --workspace) [default: 0.0.0]
+  -w, --workspace                  Emit a workspace-compatible Cargo.toml and place generated sources in an inner src/ directory (requires client-mod or server-mod)
 
 Operation Filtering:
       --only <id_1,id_2,...>     Include only the specified comma-separated operation IDs
@@ -303,6 +306,9 @@ oas3-gen generate -i graph-api.json -o types.rs --odata-support
 # Enable relaxed (case-insensitive) enum deserialization
 oas3-gen generate -i openapi.json -o types.rs --enum-mode relaxed
 
+# Sort enum variants alphabetically instead of preserving spec order
+oas3-gen generate -i openapi.json -o types.rs --enum-layout sorted
+
 # Enable custom parsing through serde_as traits
 oas3-gen generate client-mod -i openapi.json -o generated --customize datetime=MyCustomDateTime
 
@@ -314,6 +320,12 @@ oas3-gen generate client-mod -i openapi.json -o generated --no-ordered-collectio
 
 # Format documentation comments with mdformat
 oas3-gen generate client-mod -i openapi.json -o generated --doc-format
+
+# Generate a standalone crate (Cargo.toml + src/) with a pinned package version
+oas3-gen generate client-mod -i openapi.json -o my-api --workspace --module-version 1.0.0
+
+# Show detailed progress information during generation
+oas3-gen generate client-mod -i openapi.json -o generated --verbose
 
 # List all operations in the specification
 oas3-gen list operations -i openapi.json
