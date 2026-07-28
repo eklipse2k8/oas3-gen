@@ -741,10 +741,22 @@ fn test_discriminated_enum() {
       "missing_field (Self :: DISCRIMINATOR_FIELD)",
       "should error on missing discriminator",
     ),
+    (
+      ". as_object_mut () . and_then (| map | map . remove (Self :: DISCRIMINATOR_FIELD))",
+      "should remove the discriminator from the Value before recursing",
+    ),
+    (
+      "match discriminator . as_deref ()",
+      "should match on the stripped discriminator",
+    ),
   ];
   for (expected, msg) in assertions_without {
     assert!(code.contains(expected), "{msg}:\n{code}");
   }
+  assert!(
+    !code.contains("value . get (Self :: DISCRIMINATOR_FIELD)"),
+    "must not leave the discriminator in the Value passed to the variant deserializer:\n{code}"
+  );
 
   let with_fallback = DiscriminatedEnumDef::builder()
     .name("Message".into())

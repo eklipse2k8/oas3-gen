@@ -1,0 +1,162 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Strict Discriminated Union API",
+    "version": "1.0.0",
+    "description": "Discriminated unions whose variants assert additionalProperties:false (so the generated variant structs carry deny_unknown_fields). The Change and Filter unions are used in both the request and the response, so each gets both a custom Serialize and a custom Deserialize impl. Exercises that the discriminator field round-trips through serde even though the variant struct rejects unknown fields and skips deserializing its own discriminator."
+  },
+  "paths": {
+    "/echo": {
+      "post": {
+        "operationId": "echoChange",
+        "summary": "Echo a change back",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Change"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The same change, echoed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Change"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChangeMetadata": {
+        "type": "object",
+        "required": ["uuid", "deviceId"],
+        "properties": {
+          "uuid": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          }
+        }
+      },
+      "Change": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MediaItemChange"
+          },
+          {
+            "$ref": "#/components/schemas/PlaylistChange"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "mediaItem": "#/components/schemas/MediaItemChange",
+            "playlist": "#/components/schemas/PlaylistChange"
+          }
+        }
+      },
+      "MediaItemChange": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ChangeMetadata"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "mediaItem"
+              },
+              "title": {
+                "type": "string"
+              },
+              "filter": {
+                "$ref": "#/components/schemas/Filter"
+              }
+            }
+          }
+        ]
+      },
+      "PlaylistChange": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ChangeMetadata"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "playlist"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "Filter": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/StringFilter"
+          },
+          {
+            "$ref": "#/components/schemas/NumberFilter"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "string": "#/components/schemas/StringFilter",
+            "number": "#/components/schemas/NumberFilter"
+          }
+        }
+      },
+      "StringFilter": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "NumberFilter": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "number"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      }
+    }
+  }
+}

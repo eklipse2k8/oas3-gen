@@ -19,6 +19,7 @@ cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o cr
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --enable-builders --all-schemas
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/intersection_union.json -o crates/oas3-gen/fixtures/intersection_union --enable-builders --all-schemas
 cargo run -- generate client-mod -i crates/oas3-gen/fixtures/event_stream.json -o crates/oas3-gen/fixtures/event_stream --enable-builders --all-schemas
+cargo run -- generate client-mod -i crates/oas3-gen/fixtures/strict_union.json -o crates/oas3-gen/fixtures/strict_union --enable-builders --all-schemas
 
 # Rebuild server fixture
 cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore_server --enable-builders --all-schemas --all-headers
@@ -31,6 +32,7 @@ cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o cr
 | `union_serde/` | `union_serde.json` | client-mod | Union serialization/deserialization tests |
 | `intersection_union/` | `intersection_union.json` | client-mod | Intersection and union type tests |
 | `event_stream/` | `event_stream.json` | client-mod | Server-sent events streaming tests |
+| `strict_union/` | `strict_union.json` | client-mod | Discriminated unions whose variants are `additionalProperties: false`; discriminator round-trip under `deny_unknown_fields` |
 
 ## Code Coverage
 

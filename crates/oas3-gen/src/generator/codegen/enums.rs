@@ -846,8 +846,12 @@ impl ToTokens for DiscriminatedDeserializeImplFragment {
         where
           D: serde::Deserializer<'de>,
         {
-          let value = serde_json::Value::deserialize(deserializer)?;
-          match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+          let mut value = serde_json::Value::deserialize(deserializer)?;
+          let discriminator = value
+            .as_object_mut()
+            .and_then(|map| map.remove(Self::DISCRIMINATOR_FIELD))
+            .and_then(|disc| disc.as_str().map(str::to_owned));
+          match discriminator.as_deref() {
             #(#variant_arms,)*
             #none_handling,
             Some(other) => Err(serde::de::Error::custom(format!(

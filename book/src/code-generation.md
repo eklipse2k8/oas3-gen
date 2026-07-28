@@ -136,6 +136,36 @@ where
 }
 ```
 
+#### Serde derive direction
+
+The generation modes emit **one-directional** serde derives: each type only
+carries the trait the side it lives on actually needs.
+
+| Mode | Request types | Response types |
+| --- | --- | --- |
+| `server-mod` | `Deserialize` | `Serialize` |
+| `client-mod` / `types` | `Serialize` | `Deserialize` |
+
+Two cases override the request side of this asymmetry, because the generated
+code would not otherwise compile:
+
+- **Types reached through `validator::Validate`.** When a request type derives
+  `validator::Validate`, every type in its transitive nested closure also
+  derives `Serialize` (in addition to `Deserialize`). `validator`'s
+  `ValidationError::add_param` requires `Serialize` on every parameterised
+  value, so the whole closure needs it. Response-only types are not validated
+  and keep the one-directional derive.
+- **Discriminated unions in that closure.** A discriminated-union enum
+  (custom serde impls) reached through a validated request emits its custom
+  `Serialize` impl alongside its `Deserialize` impl, so it matches the
+  surrounding closure.
+
+Discriminated-union variant structs flatten `additionalProperties: false`
+into `#[serde(deny_unknown_fields)]`. The generated union `Deserialize` impl
+removes the discriminator field from the JSON object before deserializing the
+chosen variant, so the variant never sees its own discriminator as an unknown
+field.
+
 ---
 
 ## Ordering and Collections

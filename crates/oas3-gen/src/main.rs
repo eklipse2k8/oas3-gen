@@ -36,5 +36,6 @@ mod fixtures {
   pub mod intersection_union;
   pub mod petstore;
   pub mod petstore_server;
+  pub mod strict_union;
   pub mod union_serde;
 }

@@ -9,4 +9,6 @@ mod petstore;
 #[cfg(test)]
 mod petstore_server;
 #[cfg(test)]
+mod strict_union;
+#[cfg(test)]
 mod union_serde;
