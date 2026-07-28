@@ -27,6 +27,7 @@ cargo run -- generate types -i spec.yaml -o types.rs        # Generate types (YA
 cargo run -- generate client -i spec.json -o client.rs      # Generate client
 cargo run -- generate client-mod -i spec.json -o output/    # Generate modular client (types.rs, client.rs, mod.rs)
 cargo run -- generate server-mod -i spec.json -o output/    # Generate modular server (types.rs, server.rs, mod.rs)
+cargo run -- generate client-mod -i spec.json -o my-api -w  # Generate standalone crate (Cargo.toml + src/)
 cargo run -- list operations -i spec.json                   # List all operations in spec
 ```
 

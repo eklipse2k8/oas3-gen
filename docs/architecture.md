@@ -30,7 +30,10 @@ crates/
 │       │   └── commands/          # Command handlers
 │       │       ├── mod.rs
 │       │       ├── generate.rs
-│       │       └── list.rs
+│       │       ├── list.rs
+│       │       └── tests/         # Command tests
+│       │           ├── mod.rs
+│       │           └── generate.rs
 │       ├── utils/                 # Cross-cutting utilities
 │       │   ├── mod.rs
 │       │   ├── refs.rs            # OpenAPI $ref resolution utilities
@@ -149,6 +152,7 @@ crates/
 │           └── codegen/           # AST -> Rust source generation
 │               ├── mod.rs         # SchemaCodeGenerator, Visibility, GeneratedResult
 │               ├── attributes.rs  # Attribute generation
+│               ├── cargo_manifest.rs # CratePackage, CargoManifest for --workspace crate output
 │               ├── client.rs      # HTTP client generation (ClientFragment)
 │               ├── coercion.rs    # Type coercion logic
 │               ├── constants.rs   # Regex and header constant generation
@@ -211,6 +215,7 @@ The generator follows a strict one-way data flow where each stage produces immut
 - [postprocess/uses.rs](../crates/oas3-gen/src/generator/postprocess/uses.rs): RustTypeDeduplication, ModuleImports, HeaderRefCollection
 - [postprocess/validation.rs](../crates/oas3-gen/src/generator/postprocess/validation.rs): NestedValidationProcessor
 - [codegen/mod.rs](../crates/oas3-gen/src/generator/codegen/mod.rs): SchemaCodeGenerator entry point
+- [codegen/cargo_manifest.rs](../crates/oas3-gen/src/generator/codegen/cargo_manifest.rs): Pinned dependency catalog and `Cargo.toml` rendering for `--workspace` crate output
 - [codegen/types.rs](../crates/oas3-gen/src/generator/codegen/types.rs): TypeFragment, TypesFragment for type file generation
 - [codegen/client.rs](../crates/oas3-gen/src/generator/codegen/client.rs): HTTP client generation (ClientFragment)
 - [codegen/server.rs](../crates/oas3-gen/src/generator/codegen/server.rs): HTTP server trait generation (ServerGenerator)
@@ -239,6 +244,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 - **syn** (2.0): Rust syntax parser with full parsing support
 - **prettyplease** (0.2): Code formatter
 - **bon** (3.9): Builder pattern derive macros
+- **toml** (1.1): Renders the `Cargo.toml` emitted by `--workspace` crate output
 
 ### CLI & Terminal
 
@@ -263,7 +269,7 @@ All dependencies are managed at the workspace level in the root `Cargo.toml` and
 
 ### Validation & Patterns
 
-- **validator** (0.20): Validation attributes and derive macros
+- **validator** (0.21): Validation attributes and derive macros
 - **regex** (1.12): Pattern matching and validation
 
 ### Type System Support

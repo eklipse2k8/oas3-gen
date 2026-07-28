@@ -1,4 +1,4 @@
-use crate::generator::codegen::{GeneratedResult, SchemaCodeGenerator};
+use crate::generator::codegen::{CratePackage, GeneratedResult, SchemaCodeGenerator};
 
 pub trait GenerationMode {
   fn generate(&self, codegen: &SchemaCodeGenerator) -> anyhow::Result<GeneratedResult>;
@@ -20,18 +20,38 @@ impl GenerationMode for ClientMode {
   }
 }
 
-pub struct ClientModMode;
+#[derive(Debug, Default)]
+pub struct ClientModMode {
+  package: Option<CratePackage>,
+}
 
-impl GenerationMode for ClientModMode {
-  fn generate(&self, codegen: &SchemaCodeGenerator) -> anyhow::Result<GeneratedResult> {
-    codegen.generate_client_mod()
+impl ClientModMode {
+  #[must_use]
+  pub fn with_package(package: Option<CratePackage>) -> Self {
+    Self { package }
   }
 }
 
-pub struct ServerModMode;
+impl GenerationMode for ClientModMode {
+  fn generate(&self, codegen: &SchemaCodeGenerator) -> anyhow::Result<GeneratedResult> {
+    codegen.generate_client_mod(self.package.as_ref())
+  }
+}
+
+#[derive(Debug, Default)]
+pub struct ServerModMode {
+  package: Option<CratePackage>,
+}
+
+impl ServerModMode {
+  #[must_use]
+  pub fn with_package(package: Option<CratePackage>) -> Self {
+    Self { package }
+  }
+}
 
 impl GenerationMode for ServerModMode {
   fn generate(&self, codegen: &SchemaCodeGenerator) -> anyhow::Result<GeneratedResult> {
-    codegen.generate_server_mod()
+    codegen.generate_server_mod(self.package.as_ref())
   }
 }

@@ -7,7 +7,13 @@ use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use self::{client::ClientFragment, mod_file::ModFileFragment, server::ServerGenerator, types::TypesFragment};
+use self::{
+  cargo_manifest::CargoManifest,
+  client::ClientFragment,
+  mod_file::{ModFileFragment, ModFileKind},
+  server::ServerGenerator,
+  types::TypesFragment,
+};
 use super::ast::{ClientRootNode, GlobalLintsNode, OperationInfo, RustType, ServerRequestTraitDef};
 use crate::generator::{
   ast::{Documentation, FileHeaderNode, constants::HttpHeaderRef},
@@ -15,6 +21,7 @@ use crate::generator::{
 };
 
 pub mod attributes;
+pub mod cargo_manifest;
 pub mod client;
 pub mod coercion;
 pub mod constants;
@@ -30,6 +37,8 @@ pub mod types;
 
 #[cfg(test)]
 mod tests;
+
+pub use cargo_manifest::CratePackage;
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Visibility {
@@ -120,6 +129,7 @@ fn generate_source(
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GeneratedFileType {
   Client,
+  Manifest,
   Module,
   Server,
   Types,
@@ -161,6 +171,12 @@ impl GeneratedResult {
         (GeneratedFileType::Types, types),
       ]),
     }
+  }
+
+  #[must_use]
+  pub fn with_manifest(mut self, manifest: String) -> Self {
+    self.code.insert(GeneratedFileType::Manifest, manifest);
+    self
   }
 
   pub fn code(&self, file_type: &GeneratedFileType) -> Option<&String> {
@@ -231,8 +247,10 @@ impl SchemaCodeGenerator {
 
   /// Generates a modular client with separate `mod.rs`, `client.rs`, and `types.rs` files.
   ///
-  /// The client imports types from the sibling `types` module.
-  pub fn generate_client_mod(&self) -> anyhow::Result<GeneratedResult> {
+  /// The client imports types from the sibling `types` module. When a package is
+  /// supplied, a `Cargo.toml` for compiling the module as its own crate is emitted
+  /// alongside the sources.
+  pub fn generate_client_mod(&self, package: Option<&CratePackage>) -> anyhow::Result<GeneratedResult> {
     let types_code = self.format_tokens(&self.types_fragment())?;
     let client_code = self.format_tokens(&self.client_fragment(true))?;
     let mod_fragment = ModFileFragment::for_client(
@@ -243,13 +261,16 @@ impl SchemaCodeGenerator {
     );
     let mod_code = mod_fragment.generate()?;
 
-    Ok(GeneratedResult::full_client(mod_code, client_code, types_code))
+    let result = GeneratedResult::full_client(mod_code, client_code, types_code);
+    self.attach_manifest(result, package, ModFileKind::Client)
   }
 
   /// Generates a modular server with separate `mod.rs`, `server.rs`, and `types.rs` files.
   ///
-  /// The server trait imports types from the sibling `types` module.
-  pub fn generate_server_mod(&self) -> anyhow::Result<GeneratedResult> {
+  /// The server trait imports types from the sibling `types` module. When a package
+  /// is supplied, a `Cargo.toml` for compiling the module as its own crate is emitted
+  /// alongside the sources.
+  pub fn generate_server_mod(&self, package: Option<&CratePackage>) -> anyhow::Result<GeneratedResult> {
     let types_code = self.format_tokens(&self.types_fragment())?;
     let server_code = self.format_tokens(&self.server_fragment())?;
     let mod_fragment = ModFileFragment::for_server(
@@ -260,7 +281,32 @@ impl SchemaCodeGenerator {
     );
     let mod_code = mod_fragment.generate()?;
 
-    Ok(GeneratedResult::full_server(mod_code, server_code, types_code))
+    let result = GeneratedResult::full_server(mod_code, server_code, types_code);
+    self.attach_manifest(result, package, ModFileKind::Server)
+  }
+
+  /// Adds a `Cargo.toml` whose dependencies are derived from the generated sources.
+  fn attach_manifest(
+    &self,
+    result: GeneratedResult,
+    package: Option<&CratePackage>,
+    kind: ModFileKind,
+  ) -> anyhow::Result<GeneratedResult> {
+    let Some(package) = package else {
+      return Ok(result);
+    };
+
+    let sources = result.code.values().map(String::as_str).collect::<Vec<_>>();
+    let manifest = CargoManifest::new(
+      package.clone(),
+      kind,
+      &self.client.title,
+      self.gen_version.clone(),
+      self.config.collection_types,
+      &sources,
+    )?;
+
+    Ok(result.with_manifest(manifest.render()?))
   }
 
   /// Creates a types generator fragment for all Rust type definitions.

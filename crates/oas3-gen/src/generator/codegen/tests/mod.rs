@@ -1,3 +1,4 @@
+mod cargo_manifest;
 mod client;
 mod coercion_tests;
 mod constants_tests;

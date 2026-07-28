@@ -159,6 +159,28 @@ pub struct GenerateCommand {
   #[arg(long, default_value_t = false, display_order = 17, help_heading = "Code Generation")]
   pub doc_format: bool,
 
+  /// Emit a workspace-compatible `Cargo.toml` and place generated sources in an inner `src/`
+  /// directory. The crate is named after the output directory. Requires client-mod or server-mod.
+  #[arg(
+    short = 'w',
+    long,
+    default_value_t = false,
+    display_order = 19,
+    help_heading = "Code Generation"
+  )]
+  pub workspace: bool,
+
+  /// Version written to the `[package]` table of the generated `Cargo.toml` (requires --workspace)
+  #[arg(
+    long,
+    value_name = "VERSION",
+    default_value = "0.0.0",
+    requires = "workspace",
+    display_order = 19,
+    help_heading = "Code Generation"
+  )]
+  pub module_version: String,
+
   /// Include only the specified comma-separated operation IDs
   #[arg(
     group = "filter",
