@@ -428,7 +428,7 @@ enum ResponseKind {
     request_type: String,
   },
   Typed {
-    resp_type: syn::Type,
+    resp_type: Box<syn::Type>,
     category: ContentCategory,
   },
   Raw,
@@ -490,7 +490,7 @@ impl ResponseParsingFragment {
 
     Self {
       kind: ResponseKind::Typed {
-        resp_type: resp_ty,
+        resp_type: Box::new(resp_ty),
         category,
       },
     }
