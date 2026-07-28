@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--workspace`/`-w` flag for `client-mod` and `server-mod` that emits a workspace-compatible `Cargo.toml` alongside sources in an inner `src/` directory. The package is named after the output directory, the module root is written as `lib.rs`, and dependency versions are hardcoded to the versions the generator was built against
+
 ### Changed
 
 - Improve type safety and attribute handling in code generation ([#42](https://github.com/eklipse2k8/oas3-gen/pull/42))

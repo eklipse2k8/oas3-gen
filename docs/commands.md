@@ -33,6 +33,10 @@ cargo run -- generate client-mod -i spec.json -o output/
 # Generate modular server output (types.rs, server.rs, mod.rs in directory)
 cargo run -- generate server-mod -i spec.json -o output/
 
+# Generate a standalone crate (Cargo.toml + src/{lib,types,client}.rs), named after the output directory
+cargo run -- generate client-mod -i spec.json -o petstore-api --workspace
+cargo run -- generate server-mod -i spec.json -o petstore-server -w
+
 # With verbose output (shows cycles, operations count, etc.)
 cargo run -- generate types -i spec.json -o output.rs --verbose
 
@@ -78,6 +82,8 @@ cargo run -- list --help
 | `[MODE]` | Generation mode: `types` (default), `client`, `client-mod`, or `server-mod` |
 | `--input` / `-i` | (Required) Path to OpenAPI specification file (JSON or YAML, auto-detected) |
 | `--output` / `-o` | (Required) Path for output (file for types/client, directory for client-mod/server-mod) |
+| `--workspace` / `-w` | Emit a workspace-compatible `Cargo.toml` and place sources in an inner `src/` directory with `lib.rs` as the module root. The package is named after the output directory and dependency versions are pinned to the versions the generator was built against. Requires `client-mod` or `server-mod` |
+| `--module-version` | Version written to the `[package]` table of the generated `Cargo.toml` (default: `0.0.0`). Requires `--workspace` |
 | `--visibility` / `-C` | Visibility level for generated types (public, crate, or file; default: public) |
 | `--odata-support` | Enable OData-specific field optionality rules (makes @odata.* fields optional on concrete types) |
 | `--enum-mode` | How to handle enum case sensitivity and duplicates (merge, preserve, relaxed; default: merge) |

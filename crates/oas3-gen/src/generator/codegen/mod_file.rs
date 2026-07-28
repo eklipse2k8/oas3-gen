@@ -1,4 +1,4 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::{ToTokens, quote};
 
 use super::Visibility;
@@ -14,7 +14,7 @@ pub enum ModFileKind {
 }
 
 impl ModFileKind {
-  const fn secondary_module_name(self) -> &'static str {
+  pub(crate) const fn label(self) -> &'static str {
     match self {
       Self::Client => "client",
       Self::Server => "server",
@@ -81,7 +81,7 @@ impl ModFileFragment {
 impl ToTokens for ModFileFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let vis = &self.visibility;
-    let secondary_mod = syn::Ident::new(self.kind.secondary_module_name(), proc_macro2::Span::call_site());
+    let secondary_mod = Ident::new(self.kind.label(), Span::call_site());
 
     tokens.extend(quote! {
       mod types;

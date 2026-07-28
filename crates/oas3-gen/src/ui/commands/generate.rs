@@ -1,6 +1,6 @@
 use std::{
   collections::{HashMap, HashSet},
-  path::PathBuf,
+  path::{Path, PathBuf},
 };
 
 use chrono::{Local, Timelike};
@@ -12,7 +12,7 @@ use crate::{
     EnumHelperPolicy, EnumLayoutPolicy, GenerationMode, GenerationTarget, HeaderScope, ODataPolicy, SchemaScope,
     ServerModMode, TypesMode,
     ast::documentation::init_doc_format,
-    codegen::{GeneratedFileType, Visibility},
+    codegen::{CratePackage, GeneratedFileType, Visibility},
     metrics::GenerationStats,
     orchestrator::{GeneratedFinalOutput, Orchestrator},
   },
@@ -47,6 +47,7 @@ pub struct GenerateConfig {
   pub no_ordered_collections: bool,
   pub doc_format: bool,
   pub customizations: HashMap<String, String>,
+  pub crate_package: Option<CratePackage>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -126,41 +127,47 @@ impl GenerateConfig {
     Ok(())
   }
 
-  async fn write_module_output(&self, output: &GeneratedFinalOutput) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(&self.output).await?;
-    let types_code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
-    let client_code = output
-      .code
-      .code(&GeneratedFileType::Client)
-      .cloned()
-      .unwrap_or_default();
-    let mod_code = output
-      .code
-      .code(&GeneratedFileType::Module)
-      .cloned()
-      .unwrap_or_default();
-    tokio::fs::write(self.output.join("types.rs"), types_code).await?;
-    tokio::fs::write(self.output.join("client.rs"), client_code).await?;
-    tokio::fs::write(self.output.join("mod.rs"), mod_code).await?;
-    Ok(())
+  fn source_dir(&self) -> PathBuf {
+    if self.crate_package.is_some() {
+      self.output.join("src")
+    } else {
+      self.output.clone()
+    }
   }
 
-  async fn write_server_module_output(&self, output: &GeneratedFinalOutput) -> anyhow::Result<()> {
-    tokio::fs::create_dir_all(&self.output).await?;
+  fn root_file_name(&self) -> &'static str {
+    if self.crate_package.is_some() {
+      "lib.rs"
+    } else {
+      "mod.rs"
+    }
+  }
+
+  async fn write_module_output(
+    &self,
+    output: &GeneratedFinalOutput,
+    secondary: &GeneratedFileType,
+    secondary_file_name: &str,
+  ) -> anyhow::Result<()> {
+    let source_dir = self.source_dir();
+    tokio::fs::create_dir_all(&source_dir).await?;
+
     let types_code = output.code.code(&GeneratedFileType::Types).cloned().unwrap_or_default();
-    let server_code = output
-      .code
-      .code(&GeneratedFileType::Server)
-      .cloned()
-      .unwrap_or_default();
-    let mod_code = output
+    let secondary_code = output.code.code(secondary).cloned().unwrap_or_default();
+    let root_code = output
       .code
       .code(&GeneratedFileType::Module)
       .cloned()
       .unwrap_or_default();
-    tokio::fs::write(self.output.join("types.rs"), types_code).await?;
-    tokio::fs::write(self.output.join("server.rs"), server_code).await?;
-    tokio::fs::write(self.output.join("mod.rs"), mod_code).await?;
+
+    tokio::fs::write(source_dir.join("types.rs"), types_code).await?;
+    tokio::fs::write(source_dir.join(secondary_file_name), secondary_code).await?;
+    tokio::fs::write(source_dir.join(self.root_file_name()), root_code).await?;
+
+    if let Some(manifest) = output.code.code(&GeneratedFileType::Manifest) {
+      tokio::fs::write(self.output.join("Cargo.toml"), manifest).await?;
+    }
+
     Ok(())
   }
 }
@@ -181,6 +188,8 @@ impl GenerateConfig {
       enable_builders,
       no_ordered_collections,
       doc_format,
+      workspace,
+      module_version,
       only,
       exclude,
       verbose,
@@ -195,6 +204,7 @@ impl GenerateConfig {
     };
     let enum_policies = EnumPolicies::from(enum_mode);
     let customizations = parse_customizations(customize)?;
+    let crate_package = resolve_crate_package(&mode, &output, workspace, module_version)?;
 
     Ok(Self {
       mode,
@@ -216,11 +226,30 @@ impl GenerateConfig {
       no_ordered_collections,
       doc_format,
       customizations,
+      crate_package,
     })
   }
 }
 
-fn parse_customizations(customize: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
+pub(crate) fn resolve_crate_package(
+  mode: &GenerateMode,
+  output: &Path,
+  workspace: bool,
+  module_version: String,
+) -> anyhow::Result<Option<CratePackage>> {
+  if !workspace {
+    return Ok(None);
+  }
+
+  anyhow::ensure!(
+    matches!(mode, GenerateMode::ClientMod | GenerateMode::ServerMod),
+    "The --workspace flag requires the client-mod or server-mod generation mode"
+  );
+
+  CratePackage::from_output_dir(output, module_version).map(Some)
+}
+
+pub(crate) fn parse_customizations(customize: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
   let Some(entries) = customize else {
     return Ok(HashMap::new());
   };
@@ -420,6 +449,10 @@ impl<'a> GenerateLogger<'a> {
         .with(self.colors.primary())
         .to_string(),
     );
+
+    if let Some(package) = &self.config.crate_package {
+      self.stat("Crate package:", package.name().to_string());
+    }
   }
 
   fn log_success(&self) {
@@ -451,14 +484,14 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
   let orchestrator = config.create_orchestrator(spec);
   let source_path = config.input.display().to_string();
 
-  let mode: &dyn GenerationMode = match config.mode {
-    GenerateMode::Types => &TypesMode,
-    GenerateMode::Client => &ClientMode,
-    GenerateMode::ClientMod => &ClientModMode,
-    GenerateMode::ServerMod => &ServerModMode,
+  let mode: Box<dyn GenerationMode> = match config.mode {
+    GenerateMode::Types => Box::new(TypesMode),
+    GenerateMode::Client => Box::new(ClientMode),
+    GenerateMode::ClientMod => Box::new(ClientModMode::with_package(config.crate_package.clone())),
+    GenerateMode::ServerMod => Box::new(ServerModMode::with_package(config.crate_package.clone())),
   };
 
-  let output = orchestrator.generate(mode, &source_path)?;
+  let output = orchestrator.generate(mode.as_ref(), &source_path)?;
   logger.print_statistics(&output.stats);
   logger.log_writing();
 
@@ -476,76 +509,17 @@ pub async fn generate_code(config: GenerateConfig, colors: &Colors) -> anyhow::R
       config.write_output(code).await?;
     }
     GenerateMode::ClientMod => {
-      config.write_module_output(&output).await?;
+      config
+        .write_module_output(&output, &GeneratedFileType::Client, "client.rs")
+        .await?;
     }
     GenerateMode::ServerMod => {
-      config.write_server_module_output(&output).await?;
+      config
+        .write_module_output(&output, &GeneratedFileType::Server, "server.rs")
+        .await?;
     }
   }
 
   logger.log_success();
   Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_parse_customizations_none() {
-    let result = parse_customizations(None).unwrap();
-    assert!(result.is_empty());
-  }
-
-  #[test]
-  fn test_parse_customizations_empty_vec() {
-    let result = parse_customizations(Some(vec![])).unwrap();
-    assert!(result.is_empty());
-  }
-
-  #[test]
-  fn test_parse_customizations_single_entry() {
-    let result = parse_customizations(Some(vec!["date_time=crate::MyDateTime".to_string()])).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result.get("date_time"), Some(&"crate::MyDateTime".to_string()));
-  }
-
-  #[test]
-  fn test_parse_customizations_multiple_entries() {
-    let result = parse_customizations(Some(vec![
-      "date_time=crate::MyDateTime".to_string(),
-      "date=crate::MyDate".to_string(),
-      "uuid=crate::MyUuid".to_string(),
-    ]))
-    .unwrap();
-
-    assert_eq!(result.len(), 3);
-    assert_eq!(result.get("date_time"), Some(&"crate::MyDateTime".to_string()));
-    assert_eq!(result.get("date"), Some(&"crate::MyDate".to_string()));
-    assert_eq!(result.get("uuid"), Some(&"crate::MyUuid".to_string()));
-  }
-
-  #[test]
-  fn test_parse_customizations_with_module_path() {
-    let result =
-      parse_customizations(Some(vec!["date_time=my_crate::types::custom::IsoDateTime".to_string()])).unwrap();
-    assert_eq!(
-      result.get("date_time"),
-      Some(&"my_crate::types::custom::IsoDateTime".to_string())
-    );
-  }
-
-  #[test]
-  fn test_parse_customizations_invalid_format_no_equals() {
-    let result = parse_customizations(Some(vec!["date_time".to_string()]));
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.to_string().contains("Invalid customize format"));
-  }
-
-  #[test]
-  fn test_parse_customizations_with_equals_in_value() {
-    let result = parse_customizations(Some(vec!["date_time=crate::Type=Something".to_string()])).unwrap();
-    assert_eq!(result.get("date_time"), Some(&"crate::Type=Something".to_string()));
-  }
 }
