@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use proc_macro2::TokenStream;
-use quote::ToTokens;
+use proc_macro2::{Ident, Span, TokenStream};
+use quote::{ToTokens, TokenStreamExt as _, quote};
 use strum::Display;
 
 use super::{
@@ -34,8 +34,19 @@ pub enum DeriveTrait {
 }
 
 impl ToTokens for DeriveTrait {
-  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-    tokens.extend(self.to_string().parse::<TokenStream>().expect("DeriveTrait Token"));
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    match self {
+      DeriveTrait::Debug => tokens.append(Ident::new("Debug", Span::call_site())),
+      DeriveTrait::Clone => tokens.append(Ident::new("Clone", Span::call_site())),
+      DeriveTrait::PartialEq => tokens.append(Ident::new("PartialEq", Span::call_site())),
+      DeriveTrait::Eq => tokens.append(Ident::new("Eq", Span::call_site())),
+      DeriveTrait::Hash => tokens.append(Ident::new("Hash", Span::call_site())),
+      DeriveTrait::Serialize => tokens.append(Ident::new("Serialize", Span::call_site())),
+      DeriveTrait::Deserialize => tokens.append(Ident::new("Deserialize", Span::call_site())),
+      DeriveTrait::Validate => tokens.extend(quote! { validator::Validate }),
+      DeriveTrait::Default => tokens.extend(quote! { oas3_gen_support::Default }),
+      DeriveTrait::Builder => tokens.extend(quote! { bon::Builder }),
+    }
   }
 }
 

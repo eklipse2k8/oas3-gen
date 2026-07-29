@@ -605,16 +605,18 @@ pub struct VariantDef {
 }
 
 impl VariantDef {
+  /// Returns the name this variant serializes to: its `#[serde(rename)]` value when
+  /// present, otherwise the Rust variant name. Both cases borrow from `self`.
   #[must_use]
-  pub fn serde_name(&self) -> String {
+  pub fn serde_name(&self) -> &str {
     self
       .serde_attrs
       .iter()
       .find_map(|attr| match attr {
-        SerdeAttribute::Rename(val) => Some(val.clone()),
+        SerdeAttribute::Rename(val) => Some(val.as_str()),
         _ => None,
       })
-      .unwrap_or_else(|| self.name.to_string())
+      .unwrap_or_else(|| self.name.as_str())
   }
 
   pub fn add_alias(&mut self, value: impl Into<String>) {

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{borrow::Cow, collections::BTreeSet};
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt as _, quote};
@@ -9,7 +9,15 @@ use crate::generator::ast::{
   ValidationAttribute, bon_attrs::BuilderAttribute,
 };
 
-pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Documentation {
+/// Returns the field's docs, extended with example and `multiple_of` notes when present.
+///
+/// Borrows the field's own [`Documentation`] in the common case where neither note
+/// applies, so the vast majority of fields cost no allocation here.
+pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Cow<'_, Documentation> {
+  if field.example_value.is_none() && field.multiple_of.is_none() {
+    return Cow::Borrowed(&field.docs);
+  }
+
   let mut docs = field.docs.clone();
 
   if let Some(ref example) = field.example_value {
@@ -29,7 +37,7 @@ pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Documentation {
     docs.push(format!("Validation: Must be a multiple of {multiple_of}"));
   }
 
-  docs
+  Cow::Owned(docs)
 }
 
 #[derive(Clone, Debug)]

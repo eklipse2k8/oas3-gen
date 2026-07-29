@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
-use quote::quote;
+use quote::{ToTokens as _, quote};
 
 use crate::generator::ast::{
-  Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAttribute, TypeRef, ValidationAttribute,
+  DeriveTrait, Documentation, FieldDef, FieldNameToken, RustPrimitive, SerdeAttribute, TypeRef, ValidationAttribute,
   types::{parse_date_parts, parse_time_parts},
 };
 
@@ -423,6 +423,75 @@ fn discriminator_behavior() {
       result.default_value, case.expected_default_value,
       "{}: default_value mismatch",
       case.name
+    );
+  }
+}
+
+#[test]
+fn test_rust_primitive_tokens_match_display() {
+  let variants = [
+    RustPrimitive::I8,
+    RustPrimitive::I16,
+    RustPrimitive::I32,
+    RustPrimitive::I64,
+    RustPrimitive::I128,
+    RustPrimitive::Isize,
+    RustPrimitive::U8,
+    RustPrimitive::U16,
+    RustPrimitive::U32,
+    RustPrimitive::U64,
+    RustPrimitive::U128,
+    RustPrimitive::Usize,
+    RustPrimitive::F32,
+    RustPrimitive::F64,
+    RustPrimitive::Bool,
+    RustPrimitive::String,
+    RustPrimitive::StaticStr,
+    RustPrimitive::Bytes,
+    RustPrimitive::Date,
+    RustPrimitive::DateTime,
+    RustPrimitive::Time,
+    RustPrimitive::Duration,
+    RustPrimitive::Uuid,
+    RustPrimitive::Value,
+    RustPrimitive::Unit,
+    RustPrimitive::Custom("indexmap::IndexMap<String, Pet>".into()),
+    RustPrimitive::Custom("Pet".into()),
+  ];
+
+  for primitive in variants {
+    let rendered = primitive.to_string();
+    let parsed = syn::parse_str::<syn::Type>(&rendered).expect("Display form must parse as a type");
+    assert_eq!(
+      primitive.to_token_stream().to_string(),
+      parsed.to_token_stream().to_string(),
+      "to_tokens diverged from Display for {rendered}"
+    );
+  }
+}
+
+#[test]
+fn test_derive_trait_tokens_match_display() {
+  let variants = [
+    DeriveTrait::Debug,
+    DeriveTrait::Clone,
+    DeriveTrait::PartialEq,
+    DeriveTrait::Eq,
+    DeriveTrait::Hash,
+    DeriveTrait::Serialize,
+    DeriveTrait::Deserialize,
+    DeriveTrait::Validate,
+    DeriveTrait::Default,
+    DeriveTrait::Builder,
+  ];
+
+  for derive in variants {
+    let rendered = derive.to_string();
+    let parsed = syn::parse_str::<syn::Path>(&rendered).expect("Display form must parse as a path");
+    assert_eq!(
+      derive.to_token_stream().to_string(),
+      parsed.to_token_stream().to_string(),
+      "to_tokens diverged from Display for {rendered}"
     );
   }
 }

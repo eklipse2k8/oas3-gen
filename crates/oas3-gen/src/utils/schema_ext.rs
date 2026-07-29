@@ -654,7 +654,7 @@ impl SchemaExt for ObjectSchema {
     resolved_variants
       .iter()
       .flat_map(extract_variant_entries)
-      .unique_by(VariantDef::serde_name)
+      .unique_by(|v| v.serde_name().to_string())
       .collect()
   }
 

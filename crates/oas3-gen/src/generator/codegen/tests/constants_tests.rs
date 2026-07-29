@@ -115,13 +115,15 @@ fn test_regex_constants_result_skips_non_structs() {
 
 #[test]
 fn test_header_constants_fragment_empty() {
-  let fragment = HeaderConstantsFragment::new(vec![]);
+  let headers = [];
+  let fragment = HeaderConstantsFragment::new(&headers);
   assert!(fragment.into_token_stream().is_empty());
 }
 
 #[test]
 fn test_header_constants_fragment_single() {
-  let fragment = HeaderConstantsFragment::new(vec![HttpHeaderRef::from("x-request-id")]);
+  let headers = [HttpHeaderRef::from("x-request-id")];
+  let fragment = HeaderConstantsFragment::new(&headers);
   let code = fragment.into_token_stream().to_string();
 
   assert!(code.contains("X_REQUEST_ID"), "should contain constant name: {code}");
@@ -137,11 +139,12 @@ fn test_header_constants_fragment_single() {
 
 #[test]
 fn test_header_constants_fragment_multiple() {
-  let fragment = HeaderConstantsFragment::new(vec![
+  let headers = [
     HttpHeaderRef::from("x-request-id"),
     HttpHeaderRef::from("x-correlation-id"),
     HttpHeaderRef::from("content-type"),
-  ]);
+  ];
+  let fragment = HeaderConstantsFragment::new(&headers);
   let code = fragment.into_token_stream().to_string();
 
   assert!(code.contains("X_REQUEST_ID"));

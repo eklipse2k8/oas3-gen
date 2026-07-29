@@ -49,7 +49,7 @@ pub(crate) enum CollisionStrategy {
 /// of their declaration order in the spec. The cache key is internal and does
 /// not affect the order of variants emitted in generated code.
 pub(crate) fn variants_to_cache_key(variants: &[VariantDef]) -> Vec<String> {
-  variants.iter().map(VariantDef::serde_name).sorted().collect()
+  variants.iter().map(|v| v.serde_name().to_string()).sorted().collect()
 }
 
 #[derive(Clone, Debug)]

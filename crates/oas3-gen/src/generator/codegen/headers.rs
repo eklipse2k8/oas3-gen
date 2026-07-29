@@ -3,22 +3,22 @@ use quote::{ToTokens, quote};
 
 use crate::generator::ast::{FieldDef, StructDef, StructKind, TypeRef, tokens::ConstToken};
 
-#[derive(Clone, Debug)]
-pub(crate) struct HeaderMapFragment {
-  def: StructDef,
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HeaderMapFragment<'a> {
+  def: &'a StructDef,
 }
 
-impl HeaderMapFragment {
-  pub(crate) fn new(def: StructDef) -> Self {
+impl<'a> HeaderMapFragment<'a> {
+  pub(crate) fn new(def: &'a StructDef) -> Self {
     Self { def }
   }
 
-  fn should_generate(&self) -> bool {
+  fn should_generate(self) -> bool {
     matches!(self.def.kind, StructKind::HeaderParams) && !self.def.fields.is_empty()
   }
 }
 
-impl ToTokens for HeaderMapFragment {
+impl ToTokens for HeaderMapFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     if !self.should_generate() {
       return;
@@ -26,13 +26,8 @@ impl ToTokens for HeaderMapFragment {
 
     let struct_name = &self.def.name;
     let field_count = self.def.fields.len();
-    let insertions: Vec<HeaderFieldInsertionFragment> = self
-      .def
-      .fields
-      .iter()
-      .cloned()
-      .map(HeaderFieldInsertionFragment::new)
-      .collect();
+    let insertions: Vec<HeaderFieldInsertionFragment<'_>> =
+      self.def.fields.iter().map(HeaderFieldInsertionFragment::new).collect();
 
     tokens.extend(quote! {
       impl core::convert::TryFrom<&#struct_name> for http::HeaderMap {
@@ -56,18 +51,18 @@ impl ToTokens for HeaderMapFragment {
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct HeaderFieldInsertionFragment {
-  field: FieldDef,
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HeaderFieldInsertionFragment<'a> {
+  field: &'a FieldDef,
 }
 
-impl HeaderFieldInsertionFragment {
-  pub(crate) fn new(field: FieldDef) -> Self {
+impl<'a> HeaderFieldInsertionFragment<'a> {
+  pub(crate) fn new(field: &'a FieldDef) -> Self {
     Self { field }
   }
 }
 
-impl ToTokens for HeaderFieldInsertionFragment {
+impl ToTokens for HeaderFieldInsertionFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let field_name = &self.field.name;
     let Some(original_name) = &self.field.original_name else {
@@ -107,33 +102,32 @@ fn header_value_expr(ty: &TypeRef, accessor: TokenStream) -> TokenStream {
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct HeaderFromMapFragment {
-  def: StructDef,
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HeaderFromMapFragment<'a> {
+  def: &'a StructDef,
 }
 
-impl HeaderFromMapFragment {
-  pub(crate) fn new(def: StructDef) -> Self {
+impl<'a> HeaderFromMapFragment<'a> {
+  pub(crate) fn new(def: &'a StructDef) -> Self {
     Self { def }
   }
 
-  fn should_generate(&self) -> bool {
+  fn should_generate(self) -> bool {
     matches!(self.def.kind, StructKind::HeaderParams) && !self.def.fields.is_empty()
   }
 }
 
-impl ToTokens for HeaderFromMapFragment {
+impl ToTokens for HeaderFromMapFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     if !self.should_generate() {
       return;
     }
 
     let struct_name = &self.def.name;
-    let extractions: Vec<HeaderFieldExtractionFragment> = self
+    let extractions: Vec<HeaderFieldExtractionFragment<'_>> = self
       .def
       .fields
       .iter()
-      .cloned()
       .map(HeaderFieldExtractionFragment::new)
       .collect::<Vec<_>>();
 
@@ -159,18 +153,18 @@ impl ToTokens for HeaderFromMapFragment {
   }
 }
 
-#[derive(Clone, Debug)]
-struct HeaderFieldExtractionFragment {
-  field: FieldDef,
+#[derive(Clone, Copy, Debug)]
+struct HeaderFieldExtractionFragment<'a> {
+  field: &'a FieldDef,
 }
 
-impl HeaderFieldExtractionFragment {
-  fn new(field: FieldDef) -> Self {
+impl<'a> HeaderFieldExtractionFragment<'a> {
+  fn new(field: &'a FieldDef) -> Self {
     Self { field }
   }
 }
 
-impl ToTokens for HeaderFieldExtractionFragment {
+impl ToTokens for HeaderFieldExtractionFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let field_name = &self.field.name;
     let Some(original_name) = &self.field.original_name else {

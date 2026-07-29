@@ -8,32 +8,33 @@ use crate::generator::{
 
 pub(crate) trait HelperMethodParts {
   type Kind;
-  fn method(&self) -> MethodNode<Self::Kind>;
+  fn method(&self) -> &MethodNode<Self::Kind>;
   fn parameters(&self) -> impl ToTokens;
   fn implementation(&self) -> TokenStream;
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct HelperMethodFragment<Parts>(Visibility, Parts)
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HelperMethodFragment<'a, Parts>(Visibility, &'a Parts)
 where
   Parts: HelperMethodParts;
 
-impl<Parts> HelperMethodFragment<Parts>
+impl<'a, Parts> HelperMethodFragment<'a, Parts>
 where
   Parts: HelperMethodParts,
 {
-  pub(crate) fn new(vis: Visibility, node: Parts) -> Self {
+  pub(crate) fn new(vis: Visibility, node: &'a Parts) -> Self {
     Self(vis, node)
   }
 }
 
-impl<Parts> ToTokens for HelperMethodFragment<Parts>
+impl<Parts> ToTokens for HelperMethodFragment<'_, Parts>
 where
   Parts: HelperMethodParts,
 {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let method_name = self.1.method().name.clone();
-    let docs = self.1.method().docs.clone();
+    let method = self.1.method();
+    let method_name = &method.name;
+    let docs = &method.docs;
     let parameter = self.1.parameters();
     let implementation = self.1.implementation();
     let vis = &self.0;
@@ -49,16 +50,16 @@ where
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct FieldFunctionParameterFragment(FieldDef);
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FieldFunctionParameterFragment<'a>(&'a FieldDef);
 
-impl FieldFunctionParameterFragment {
-  pub(crate) fn new(field: FieldDef) -> Self {
+impl<'a> FieldFunctionParameterFragment<'a> {
+  pub(crate) fn new(field: &'a FieldDef) -> Self {
     Self(field)
   }
 }
 
-impl ToTokens for FieldFunctionParameterFragment {
+impl ToTokens for FieldFunctionParameterFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.0.name;
     let rust_type = &self.0.rust_type;
@@ -69,19 +70,19 @@ impl ToTokens for FieldFunctionParameterFragment {
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct StructConstructorFragment(TypeRef, Vec<FieldDef>);
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StructConstructorFragment<'a>(&'a TypeRef, &'a [FieldDef]);
 
-impl StructConstructorFragment {
-  pub(crate) fn new(type_token: TypeRef, fields: Vec<FieldDef>) -> Self {
+impl<'a> StructConstructorFragment<'a> {
+  pub(crate) fn new(type_token: &'a TypeRef, fields: &'a [FieldDef]) -> Self {
     Self(type_token, fields)
   }
 }
 
-impl ToTokens for StructConstructorFragment {
+impl ToTokens for StructConstructorFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let base_type = &self.0.base_type;
-    let field_names = self.1.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    let field_names = self.1.iter().map(|f| &f.name).collect::<Vec<_>>();
 
     let parameters = quote! { #(#field_names),* };
 

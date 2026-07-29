@@ -42,7 +42,7 @@ impl PostprocessOutput {
     SerdeUsage::new(&types, seed_usage, target).apply(&mut types);
 
     let dedup_output = RustTypeDeduplication::new(types).process();
-    let uses_output = ModuleImports::new(dedup_output.clone(), target).process();
+    let uses_output = ModuleImports::new(&dedup_output, target).process();
 
     Self {
       types: dedup_output,

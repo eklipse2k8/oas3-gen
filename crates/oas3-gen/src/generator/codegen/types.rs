@@ -20,18 +20,18 @@ use crate::generator::{
   converter::GenerationTarget,
 };
 
-#[derive(Clone, Debug)]
-pub(crate) struct TypeFragment {
-  rust_type: RustType,
-  regex_lookup: BTreeMap<RegexKey, ConstToken>,
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TypeFragment<'a> {
+  rust_type: &'a RustType,
+  regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
   visibility: Visibility,
   target: GenerationTarget,
 }
 
-impl TypeFragment {
+impl<'a> TypeFragment<'a> {
   pub(crate) fn new(
-    rust_type: RustType,
-    regex_lookup: BTreeMap<RegexKey, ConstToken>,
+    rust_type: &'a RustType,
+    regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
     visibility: Visibility,
     target: GenerationTarget,
   ) -> Self {
@@ -44,20 +44,18 @@ impl TypeFragment {
   }
 }
 
-impl ToTokens for TypeFragment {
+impl ToTokens for TypeFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let ts = match &self.rust_type {
+    let ts = match self.rust_type {
       RustType::Struct(def) => {
-        StructFragment::new(def.clone(), self.regex_lookup.clone(), self.visibility, self.target).into_token_stream()
+        StructFragment::new(def, self.regex_lookup, self.visibility, self.target).into_token_stream()
       }
-      RustType::Enum(def) => EnumFragment::new(def.clone(), self.visibility, self.target).into_token_stream(),
-      RustType::TypeAlias(def) => TypeAliasFragment::new(def.clone(), self.visibility).into_token_stream(),
-      RustType::DiscriminatedEnum(def) => {
-        DiscriminatedEnumFragment::new(def.clone(), self.visibility).into_token_stream()
-      }
+      RustType::Enum(def) => EnumFragment::new(def, self.visibility, self.target).into_token_stream(),
+      RustType::TypeAlias(def) => TypeAliasFragment::new(def, self.visibility).into_token_stream(),
+      RustType::DiscriminatedEnum(def) => DiscriminatedEnumFragment::new(def, self.visibility).into_token_stream(),
       RustType::ResponseEnum(def) => match self.target {
-        GenerationTarget::Server => AxumResponseEnumFragment::new(self.visibility, def.clone()).into_token_stream(),
-        GenerationTarget::Client => ResponseEnumFragment::new(self.visibility, def.clone()).into_token_stream(),
+        GenerationTarget::Server => AxumResponseEnumFragment::new(self.visibility, def).into_token_stream(),
+        GenerationTarget::Client => ResponseEnumFragment::new(self.visibility, def).into_token_stream(),
       },
     };
     tokens.extend(ts);
@@ -68,7 +66,7 @@ impl ToTokens for TypeFragment {
 pub(crate) struct TypesFragment {
   rust_types: Rc<Vec<RustType>>,
   header_refs: Rc<Vec<HttpHeaderRef>>,
-  uses: BTreeSet<String>,
+  uses: Rc<BTreeSet<String>>,
   visibility: Visibility,
   target: GenerationTarget,
 }
@@ -77,7 +75,7 @@ impl TypesFragment {
   pub(crate) fn new(
     rust_types: Rc<Vec<RustType>>,
     header_refs: Rc<Vec<HttpHeaderRef>>,
-    uses: BTreeSet<String>,
+    uses: Rc<BTreeSet<String>>,
     visibility: Visibility,
     target: GenerationTarget,
   ) -> Self {
@@ -93,14 +91,14 @@ impl TypesFragment {
 
 impl ToTokens for TypesFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let use_statements = ModuleUsesFragment::new(self.uses.clone());
+    let use_statements = ModuleUsesFragment::new(&self.uses);
     let regex_result = RegexConstantsResult::from_types(&self.rust_types);
-    let header_consts = HeaderConstantsFragment::new((*self.header_refs).clone());
+    let header_consts = HeaderConstantsFragment::new(&self.header_refs);
 
     let type_tokens = self
       .rust_types
       .iter()
-      .map(|ty| TypeFragment::new(ty.clone(), regex_result.lookup.clone(), self.visibility, self.target))
+      .map(|ty| TypeFragment::new(ty, &regex_result.lookup, self.visibility, self.target))
       .collect::<Vec<_>>();
 
     let ts = quote! {
@@ -147,20 +145,20 @@ impl ToTokens for UseFragment {
   }
 }
 
-pub(crate) struct ModuleUsesFragment(BTreeSet<String>);
+pub(crate) struct ModuleUsesFragment<'a>(&'a BTreeSet<String>);
 
-impl ModuleUsesFragment {
-  pub(crate) fn new(uses: BTreeSet<String>) -> Self {
+impl<'a> ModuleUsesFragment<'a> {
+  pub(crate) fn new(uses: &'a BTreeSet<String>) -> Self {
     Self(uses)
   }
 }
 
-impl ToTokens for ModuleUsesFragment {
+impl ToTokens for ModuleUsesFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let mut current_module: Option<&str> = None;
     let mut current_items: Vec<String> = vec![];
 
-    for path in &self.0 {
+    for path in self.0 {
       let Some((module, item)) = path.rsplit_once("::") else {
         continue;
       };

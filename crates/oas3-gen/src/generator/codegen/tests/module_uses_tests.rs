@@ -10,21 +10,24 @@ fn set_from<const N: usize>(items: [&str; N]) -> BTreeSet<String> {
 
 #[test]
 fn empty_set_produces_no_output() {
-  let fragment = ModuleUsesFragment::new(BTreeSet::new());
+  let uses = BTreeSet::new();
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
   assert!(code.is_empty(), "empty set should produce empty output, got: {code}");
 }
 
 #[test]
 fn single_path_without_separator_is_skipped() {
-  let fragment = ModuleUsesFragment::new(set_from(["standalone"]));
+  let uses = set_from(["standalone"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
   assert!(code.is_empty(), "path without :: should be skipped, got: {code}");
 }
 
 #[test]
 fn single_item_from_single_module() {
-  let fragment = ModuleUsesFragment::new(set_from(["serde::Serialize"]));
+  let uses = set_from(["serde::Serialize"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
   assert!(
     code.contains("use serde :: Serialize ;"),
@@ -35,7 +38,8 @@ fn single_item_from_single_module() {
 
 #[test]
 fn multiple_items_from_same_module_grouped() {
-  let fragment = ModuleUsesFragment::new(set_from(["serde::Deserialize", "serde::Serialize"]));
+  let uses = set_from(["serde::Deserialize", "serde::Serialize"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
   assert!(
     code.contains("use serde :: { Deserialize , Serialize } ;"),
@@ -45,7 +49,8 @@ fn multiple_items_from_same_module_grouped() {
 
 #[test]
 fn multiple_modules_produce_separate_statements() {
-  let fragment = ModuleUsesFragment::new(set_from(["serde::Serialize", "std::collections::BTreeMap"]));
+  let uses = set_from(["serde::Serialize", "std::collections::BTreeMap"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
   assert!(
     code.contains("use serde :: Serialize ;"),
@@ -59,11 +64,12 @@ fn multiple_modules_produce_separate_statements() {
 
 #[test]
 fn deeply_nested_module_paths() {
-  let fragment = ModuleUsesFragment::new(set_from([
+  let uses = set_from([
     "std::collections::BTreeMap",
     "std::collections::BTreeSet",
     "std::collections::HashMap",
-  ]));
+  ]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
   assert!(
     code.contains("use std :: collections :: { BTreeMap , BTreeSet , HashMap } ;"),
@@ -73,7 +79,8 @@ fn deeply_nested_module_paths() {
 
 #[test]
 fn btreeset_ordering_deterministic() {
-  let fragment = ModuleUsesFragment::new(set_from(["serde::Serialize", "anyhow::Result", "quote::ToTokens"]));
+  let uses = set_from(["serde::Serialize", "anyhow::Result", "quote::ToTokens"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   let anyhow_pos = code.find("anyhow").expect("should contain anyhow");
@@ -87,12 +94,13 @@ fn btreeset_ordering_deterministic() {
 
 #[test]
 fn mixed_module_depths() {
-  let fragment = ModuleUsesFragment::new(set_from([
+  let uses = set_from([
     "serde::Deserialize",
     "serde::Serialize",
     "std::collections::BTreeMap",
     "std::io::Write",
-  ]));
+  ]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   assert!(
@@ -162,11 +170,8 @@ fn use_fragment_invalid_item_filtered() {
 
 #[test]
 fn items_within_module_alphabetically_sorted() {
-  let fragment = ModuleUsesFragment::new(set_from([
-    "serde::Serialize",
-    "serde::Deserialize",
-    "serde::de::Visitor",
-  ]));
+  let uses = set_from(["serde::Serialize", "serde::Deserialize", "serde::de::Visitor"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   assert!(
@@ -181,11 +186,8 @@ fn items_within_module_alphabetically_sorted() {
 
 #[test]
 fn same_prefix_different_submodules_not_grouped() {
-  let fragment = ModuleUsesFragment::new(set_from([
-    "std::collections::BTreeMap",
-    "std::io::Read",
-    "std::io::Write",
-  ]));
+  let uses = set_from(["std::collections::BTreeMap", "std::io::Read", "std::io::Write"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   assert!(
@@ -200,14 +202,15 @@ fn same_prefix_different_submodules_not_grouped() {
 
 #[test]
 fn many_items_from_same_module_stress_test() {
-  let fragment = ModuleUsesFragment::new(set_from([
+  let uses = set_from([
     "std::collections::BTreeMap",
     "std::collections::BTreeSet",
     "std::collections::HashMap",
     "std::collections::HashSet",
     "std::collections::LinkedList",
     "std::collections::VecDeque",
-  ]));
+  ]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   assert!(
@@ -218,7 +221,8 @@ fn many_items_from_same_module_stress_test() {
 
 #[test]
 fn interleaved_modules_maintain_separation() {
-  let fragment = ModuleUsesFragment::new(set_from(["a::Z", "b::A", "a::A", "b::Z"]));
+  let uses = set_from(["a::Z", "b::A", "a::A", "b::Z"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   assert!(
@@ -237,7 +241,7 @@ fn interleaved_modules_maintain_separation() {
 
 #[test]
 fn real_world_codegen_imports() {
-  let fragment = ModuleUsesFragment::new(set_from([
+  let uses = set_from([
     "proc_macro2::TokenStream",
     "quote::ToTokens",
     "quote::quote",
@@ -246,7 +250,8 @@ fn real_world_codegen_imports() {
     "std::collections::BTreeMap",
     "std::collections::BTreeSet",
     "validator::Validate",
-  ]));
+  ]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   let assertions = [
@@ -267,11 +272,12 @@ fn real_world_codegen_imports() {
 
 #[test]
 fn crate_relative_paths() {
-  let fragment = ModuleUsesFragment::new(set_from([
+  let uses = set_from([
     "crate::generator::ast::TypeRef",
     "crate::generator::ast::StructDef",
     "crate::utils::SchemaExt",
-  ]));
+  ]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
 
   assert!(
@@ -286,7 +292,8 @@ fn crate_relative_paths() {
 
 #[test]
 fn triple_colon_edge_case() {
-  let fragment = ModuleUsesFragment::new(set_from(["a::b::c::d::E"]));
+  let uses = set_from(["a::b::c::d::E"]);
+  let fragment = ModuleUsesFragment::new(&uses);
   let code = fragment.into_token_stream().to_string();
   assert!(
     code.contains("use a :: b :: c :: d :: E ;"),

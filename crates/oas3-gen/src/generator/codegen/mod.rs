@@ -314,7 +314,7 @@ impl SchemaCodeGenerator {
     TypesFragment::new(
       self.rust_types.clone(),
       self.header_refs.clone(),
-      (*self.uses).clone(),
+      self.uses.clone(),
       self.visibility,
       self.config.target,
     )

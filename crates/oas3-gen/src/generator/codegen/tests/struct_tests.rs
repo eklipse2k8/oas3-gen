@@ -61,7 +61,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
 fn generates_struct_with_supplied_derives() {
   let def = base_struct(StructKind::Schema);
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(code.contains("derive"), "missing derive attribute");
   assert!(code.contains("Debug"), "missing Debug derive");
@@ -78,7 +78,7 @@ fn test_validation_attribute_generation() {
       def.fields[0].validation_attrs.clear();
     }
     let tokens =
-      StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+      StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
     let code = tokens.to_string();
     assert_eq!(
       code.contains("validate"),
@@ -98,7 +98,7 @@ fn renders_response_parser_method() {
       .build(),
   );
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(code.contains("fn parse_response"), "missing parse_response method");
   assert!(code.contains("ResponseEnum"), "missing ResponseEnum type");
@@ -128,7 +128,7 @@ fn test_text_response_parsing() {
         .build(),
     );
     let tokens =
-      StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+      StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
     let code = tokens.to_string();
     assert!(code.contains(expected_code), "missing expected code for {desc}");
     assert!(
@@ -152,7 +152,7 @@ fn renders_json_parser_for_custom_struct() {
       .build(),
   );
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(
     code.contains("json_with_diagnostics"),
@@ -175,7 +175,7 @@ fn test_binary_response_parsing() {
       .build(),
   );
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(
     code.contains("req . bytes () . await ? . to_vec ()"),
@@ -197,7 +197,7 @@ fn test_binary_content_type_with_json_schema_uses_json_parsing() {
       .build(),
   );
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(
     code.contains("Diagnostics :: < ErrorResponse > :: json_with_diagnostics"),
@@ -223,7 +223,7 @@ fn test_event_stream_response_generates_from_response() {
       .build(),
   );
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(
     code.contains("from_response"),
@@ -235,7 +235,7 @@ fn test_event_stream_response_generates_from_response() {
 fn test_struct_generates_debug_and_clone() {
   let def = base_struct(StructKind::Schema);
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(code.contains("Debug"), "missing Debug derive");
   assert!(code.contains("Clone"), "missing Clone derive");
@@ -263,7 +263,7 @@ fn test_header_params_struct_generates_try_from_header_map() {
   };
 
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
 
   assert!(
@@ -303,14 +303,9 @@ fn test_required_header_with_default_uses_unconditional_insert() {
     ..Default::default()
   };
 
-  let client_code = StructFragment::new(
-    def.clone(),
-    BTreeMap::new(),
-    Visibility::Public,
-    GenerationTarget::Client,
-  )
-  .into_token_stream()
-  .to_string();
+  let client_code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
   assert!(
     !client_code.contains("if let Some"),
     "required field with default must use unconditional insert: {client_code}"
@@ -320,7 +315,7 @@ fn test_required_header_with_default_uses_unconditional_insert() {
     "missing header insert: {client_code}"
   );
 
-  let server_code = StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Server)
+  let server_code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Server)
     .into_token_stream()
     .to_string();
   assert!(
@@ -333,7 +328,7 @@ fn test_required_header_with_default_uses_unconditional_insert() {
 fn test_non_header_params_struct_does_not_generate_try_from_header_map() {
   let def = base_struct(StructKind::Schema);
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
 
   assert!(
@@ -361,7 +356,7 @@ fn test_header_params_with_primitive_types() {
   };
 
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
 
   assert!(
@@ -402,7 +397,7 @@ fn test_builder_renames_reserved_bon_field_names() {
     };
 
     let tokens =
-      StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+      StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
     let code = tokens.to_string();
     let expected_rename = format!("{field_name}_value");
 
@@ -430,7 +425,7 @@ fn test_builder_skipped_field_named_build_not_renamed() {
   };
 
   let tokens =
-    StructFragment::new(def, BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
+    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
 
   assert!(code.contains("builder (skip"), "hidden field should be skipped: {code}");

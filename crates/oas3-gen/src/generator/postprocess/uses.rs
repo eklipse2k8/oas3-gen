@@ -19,17 +19,17 @@ impl RustTypeDeduplication {
   pub(crate) fn process(self) -> Vec<RustType> {
     let mut map = IndexMap::new();
 
-    for t in &self.types {
+    for t in self.types {
       let name = t.type_name().to_string();
       let priority = t.type_priority();
 
       match map.entry(name) {
         Entry::Vacant(e) => {
-          e.insert(t.clone());
+          e.insert(t);
         }
         Entry::Occupied(mut e) => {
           if priority > e.get().type_priority() {
-            e.insert(t.clone());
+            e.insert(t);
           }
         }
       }
@@ -39,13 +39,13 @@ impl RustTypeDeduplication {
   }
 }
 
-pub(crate) struct ModuleImports {
-  types: Vec<RustType>,
+pub(crate) struct ModuleImports<'a> {
+  types: &'a [RustType],
   target: GenerationTarget,
 }
 
-impl ModuleImports {
-  pub(crate) fn new(types: Vec<RustType>, target: GenerationTarget) -> Self {
+impl<'a> ModuleImports<'a> {
+  pub(crate) fn new(types: &'a [RustType], target: GenerationTarget) -> Self {
     Self { types, target }
   }
 
@@ -56,7 +56,7 @@ impl ModuleImports {
     let mut needs_deserialize = false;
     let mut needs_validate = false;
 
-    for ty in &self.types {
+    for ty in self.types {
       needs_serialize |= ty.is_serializable() == SerdeImpl::Derive;
       needs_deserialize |= ty.is_deserializable() == SerdeImpl::Derive;
 

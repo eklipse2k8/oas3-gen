@@ -84,18 +84,18 @@ impl ToTokens for RegexConstantsResult {
   }
 }
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct HeaderConstantsFragment(Vec<HttpHeaderRef>);
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct HeaderConstantsFragment<'a>(&'a [HttpHeaderRef]);
 
-impl HeaderConstantsFragment {
-  pub(crate) fn new(headers: impl Into<Vec<HttpHeaderRef>>) -> Self {
-    Self(headers.into())
+impl<'a> HeaderConstantsFragment<'a> {
+  pub(crate) fn new(headers: &'a [HttpHeaderRef]) -> Self {
+    Self(headers)
   }
 }
 
-impl ToTokens for HeaderConstantsFragment {
+impl ToTokens for HeaderConstantsFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    for header in &self.0 {
+    for header in self.0 {
       header.to_tokens(tokens);
     }
   }

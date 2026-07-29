@@ -1,7 +1,12 @@
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::{
+  cell::RefCell,
+  collections::{BTreeSet, HashMap},
+  sync::LazyLock,
+};
 
 use num_format::{CustomFormat, Grouping, ToFormattedString};
-use quote::{ToTokens, quote};
+use proc_macro2::{Ident, Span, TokenStream};
+use quote::{ToTokens, TokenStreamExt as _, quote};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
@@ -388,16 +393,67 @@ impl RustPrimitive {
   }
 }
 
+/// Memoized token streams for [`RustPrimitive::Custom`] type expressions.
+///
+/// Custom names are arbitrary type expressions (`Pet`, `HashMap<String, Value>`), so
+/// they still need a `syn` parse. Interning the result keyed on the atom means each
+/// distinct name is parsed once per run rather than once per occurrence.
+fn custom_type_tokens(name: &DefaultAtom) -> TokenStream {
+  thread_local! {
+    static CACHE: RefCell<HashMap<DefaultAtom, TokenStream>> = RefCell::new(HashMap::new());
+  }
+
+  CACHE.with_borrow_mut(|cache| {
+    cache
+      .entry(name.clone())
+      .or_insert_with(|| {
+        syn::parse_str::<syn::Type>(name)
+          .unwrap_or_else(|_| panic!("Failed to parse RustPrimitive: {name}"))
+          .into_token_stream()
+      })
+      .clone()
+  })
+}
+
+fn append_ident(tokens: &mut TokenStream, ident: &str) {
+  tokens.append(Ident::new(ident, Span::call_site()));
+}
+
 impl ToTokens for RustPrimitive {
-  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-    let s = self.to_string();
-    let ty: syn::Type = syn::parse_str(&s).unwrap_or_else(|_| panic!("Failed to parse RustPrimitive: {s}"));
-    ty.to_tokens(tokens);
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    match self {
+      RustPrimitive::I8 => append_ident(tokens, "i8"),
+      RustPrimitive::I16 => append_ident(tokens, "i16"),
+      RustPrimitive::I32 => append_ident(tokens, "i32"),
+      RustPrimitive::I64 => append_ident(tokens, "i64"),
+      RustPrimitive::I128 => append_ident(tokens, "i128"),
+      RustPrimitive::Isize => append_ident(tokens, "isize"),
+      RustPrimitive::U8 => append_ident(tokens, "u8"),
+      RustPrimitive::U16 => append_ident(tokens, "u16"),
+      RustPrimitive::U32 => append_ident(tokens, "u32"),
+      RustPrimitive::U64 => append_ident(tokens, "u64"),
+      RustPrimitive::U128 => append_ident(tokens, "u128"),
+      RustPrimitive::Usize => append_ident(tokens, "usize"),
+      RustPrimitive::F32 => append_ident(tokens, "f32"),
+      RustPrimitive::F64 => append_ident(tokens, "f64"),
+      RustPrimitive::Bool => append_ident(tokens, "bool"),
+      RustPrimitive::String => append_ident(tokens, "String"),
+      RustPrimitive::StaticStr => tokens.extend(quote! { &'static str }),
+      RustPrimitive::Bytes => tokens.extend(quote! { Vec<u8> }),
+      RustPrimitive::Date => tokens.extend(quote! { chrono::NaiveDate }),
+      RustPrimitive::DateTime => tokens.extend(quote! { chrono::DateTime<chrono::Utc> }),
+      RustPrimitive::Time => tokens.extend(quote! { chrono::NaiveTime }),
+      RustPrimitive::Duration => tokens.extend(quote! { chrono::Duration }),
+      RustPrimitive::Uuid => tokens.extend(quote! { uuid::Uuid }),
+      RustPrimitive::Value => tokens.extend(quote! { serde_json::Value }),
+      RustPrimitive::Unit => tokens.extend(quote! { () }),
+      RustPrimitive::Custom(name) => tokens.extend(custom_type_tokens(name)),
+    }
   }
 }
 
 impl ToTokens for TypeRef {
-  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
     let inner = &self.base_type;
     let mut type_tokens = quote! { #inner };
 

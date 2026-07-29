@@ -116,23 +116,23 @@ impl ToTokens for ServerTraitMethodFragment {
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct AxumIntoResponse(ResponseEnumDef);
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AxumIntoResponse<'a>(&'a ResponseEnumDef);
 
-impl AxumIntoResponse {
-  pub(crate) fn new(def: ResponseEnumDef) -> Self {
+impl<'a> AxumIntoResponse<'a> {
+  pub(crate) fn new(def: &'a ResponseEnumDef) -> Self {
     Self(def)
   }
 }
 
-impl ToTokens for AxumIntoResponse {
+impl ToTokens for AxumIntoResponse<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.0.name;
     let variants = self
       .0
       .variants
       .iter()
-      .map(|v| AxumIntoResponseVariant::new(v.clone()))
+      .map(AxumIntoResponseVariant::new)
       .collect::<Vec<_>>();
 
     let ts = quote! {
@@ -149,16 +149,16 @@ impl ToTokens for AxumIntoResponse {
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct AxumIntoResponseVariant(ResponseVariant);
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AxumIntoResponseVariant<'a>(&'a ResponseVariant);
 
-impl AxumIntoResponseVariant {
-  pub(crate) fn new(variant: ResponseVariant) -> Self {
+impl<'a> AxumIntoResponseVariant<'a> {
+  pub(crate) fn new(variant: &'a ResponseVariant) -> Self {
     Self(variant)
   }
 }
 
-impl ToTokens for AxumIntoResponseVariant {
+impl ToTokens for AxumIntoResponseVariant<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let variant = &self.0.variant_name;
     let status_code = HttpStatusCode::new(self.0.status_code);
@@ -177,22 +177,22 @@ impl ToTokens for AxumIntoResponseVariant {
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct AxumResponseEnumFragment {
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AxumResponseEnumFragment<'a> {
   vis: Visibility,
-  def: ResponseEnumDef,
+  def: &'a ResponseEnumDef,
 }
 
-impl AxumResponseEnumFragment {
-  pub(crate) fn new(vis: Visibility, def: ResponseEnumDef) -> Self {
+impl<'a> AxumResponseEnumFragment<'a> {
+  pub(crate) fn new(vis: Visibility, def: &'a ResponseEnumDef) -> Self {
     Self { vis, def }
   }
 }
 
-impl ToTokens for AxumResponseEnumFragment {
+impl ToTokens for AxumResponseEnumFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let response = ResponseEnumFragment::new(self.vis, self.def.clone());
-    let into_response = AxumIntoResponse::new(self.def.clone());
+    let response = ResponseEnumFragment::new(self.vis, self.def);
+    let into_response = AxumIntoResponse::new(self.def);
 
     let ts = quote! {
       #response
