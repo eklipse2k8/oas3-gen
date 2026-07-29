@@ -1,89 +1,64 @@
 # Testing
 
-## Running Tests
+`cargo test` runs the whole workspace. Don't use `--lib` — it only reaches `oas3-gen-support`.
+
+## Fixtures
+
+`main.rs` declares `fixtures/` as a `#[cfg(test)]` module, so `cargo test` compiles generated
+output. Any change to generated code means regenerating, or the build breaks:
 
 ```bash
-# Run all tests (tests both oas3-gen and oas3-gen-support crates)
-cargo test
+F=crates/oas3-gen/fixtures
+cargo run -- generate client-mod -i $F/petstore.json           -o $F/petstore           --enable-builders --all-schemas --all-headers
+cargo run -- generate server-mod -i $F/petstore.json           -o $F/petstore_server    --enable-builders --all-schemas --all-headers
+cargo run -- generate client-mod -i $F/union_serde.json        -o $F/union_serde        --enable-builders --all-schemas
+cargo run -- generate client-mod -i $F/intersection_union.json -o $F/intersection_union --enable-builders --all-schemas
+cargo run -- generate client-mod -i $F/event_stream.json       -o $F/event_stream       --enable-builders --all-schemas
 ```
 
-Note: Use `cargo test` without `--lib` to test the entire workspace. Using `cargo test --lib` only tests the oas3-gen-support library crate.
+Flags differ per fixture — copy the line, don't improvise. `event_stream` is *not* in the
+`#[cfg(test)]` module, so nothing compile-checks it; review its diff by eye.
 
-## Rebuilding Fixtures
+The fixture diff is how generated-output changes get reviewed. Read it before claiming a change
+is correct.
 
-All code changes that affect code generation output require rebuilding the fixture files. Run these commands after making changes:
+## Requirements
 
-```bash
-# Rebuild all client fixtures
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore --enable-builders --all-schemas --all-headers
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/union_serde.json -o crates/oas3-gen/fixtures/union_serde --enable-builders --all-schemas
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/intersection_union.json -o crates/oas3-gen/fixtures/intersection_union --enable-builders --all-schemas
-cargo run -- generate client-mod -i crates/oas3-gen/fixtures/event_stream.json -o crates/oas3-gen/fixtures/event_stream --enable-builders --all-schemas
+- Unit tests in `#[cfg(test)]` modules alongside the code; integration tests in `src/tests/`.
+- Cover happy path, boundaries (empty, special characters), and error cases.
+- Test behavior generally. Never hard-code a value or special-case an assertion to make a test
+  pass — if a test or requirement looks wrong, say so.
+- `cargo test` plus the fixture diff is the verification step. Nothing to add on top.
 
-# Rebuild server fixture
-cargo run -- generate server-mod -i crates/oas3-gen/fixtures/petstore.json -o crates/oas3-gen/fixtures/petstore_server --enable-builders --all-schemas --all-headers
-```
+## Style
 
-| Fixture | Source | Output | Description |
-|---------|--------|--------|-------------|
-| `petstore/` | `petstore.json` | client-mod | Client module for Petstore API |
-| `petstore_server/` | `petstore.json` | server-mod | Server trait for Petstore API |
-| `union_serde/` | `union_serde.json` | client-mod | Union serialization/deserialization tests |
-| `intersection_union/` | `intersection_union.json` | client-mod | Intersection and union type tests |
-| `event_stream/` | `event_stream.json` | client-mod | Server-sent events streaming tests |
-
-## Code Coverage
-
-```bash
-# Generate code coverage report in Markdown format
-cargo tarpaulin --bins --skip-clean -o Markdown
-```
-
-This command generates a `tarpaulin-report.md` file with detailed coverage statistics. View the report to identify untested code paths, then delete the file when finished.
-
-## Test Requirements
-
-- All code changes require unit tests in `#[cfg(test)]` modules
-- Cover: happy paths, edge cases (empty/boundary/special chars), error conditions
-- Run `cargo test` before committing
-- **Feature changes must also update `book/src/` documentation** (see CLAUDE.md)
-
-## Test Style
-
-- Use table-driven tests: Group related cases into arrays of `(input, expected)` tuples and iterate with descriptive assertions
-- Consolidate by logical grouping: Combine tests that exercise the same function with different inputs into a single test
-- Prefer fewer comprehensive tests over many trivial single-assertion tests
-- Extract helper functions (e.g., `make_variant()`) to reduce boilerplate in test setup
-- Include context in assertion messages: `assert_eq!(result, expected, "failed for {input:?}")`
-
-### Example
+Table-driven: an array of `(input, expected)` cases iterated in one test, with the input in the
+assertion message. Prefer few comprehensive tests over many single-assertion ones.
 
 ```rust
 #[test]
 fn test_normalize_numbers() {
-  let cases = [
-    (json!(404), "Value404", "404"),
-    (json!(-42), "Value-42", "-42"),
-    (json!(0), "Value0", "0"),
-  ];
-  for (val, expected_name, expected_rename) in cases {
+  let cases = [(json!(404), "Value404", "404"), (json!(-42), "Value-42", "-42")];
+  for (val, name, rename) in cases {
     let res = normalize(&val).unwrap();
-    assert_eq!(res.name, expected_name, "name mismatch for {val:?}");
-    assert_eq!(res.rename_value, expected_rename, "rename mismatch for {val:?}");
+    assert_eq!(res.name, name, "name mismatch for {val:?}");
+    assert_eq!(res.rename_value, rename, "rename mismatch for {val:?}");
   }
 }
 ```
 
 ## Debugging
 
-When debugging issues in this project, follow these principles:
+- Inspect with `tracing`/`dbg!()` or a throwaway test that exercises the hypothesis.
+- `RUST_BACKTRACE=1` for traces; `cargo-expand` for macro and derive output.
+- Symptoms in generated output usually originate one or two pipeline stages upstream of where
+  they appear — see [architecture.md](architecture.md#pipeline).
+- Find the mechanism before editing. Pick an approach and commit; revisit only on contradicting
+  evidence.
+- Delete scratch files and temporary scripts before finishing.
 
-- Use logging (tracing, log) or macros like `dbg!()` to inspect state
-- Make code changes only if you have high confidence they can solve the problem
-- When debugging, try to determine the root cause rather than addressing symptoms
-- Debug for as long as needed to identify the root cause and identify a fix
-- Use print statements, logs, or temporary code to inspect program state, including descriptive statements or error messages to understand what's happening
-- To test hypotheses, you can also add test statements or functions
-- Revisit your assumptions if unexpected behavior occurs
-- Use `RUST_BACKTRACE=1` to get stack traces, and `cargo-expand` to debug macros and derive logic
-- Read terminal output
+## Coverage
+
+```bash
+cargo tarpaulin --bins --skip-clean -o Markdown   # writes tarpaulin-report.md; delete when done
+```

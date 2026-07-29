@@ -1,84 +1,49 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+OpenAPI 3.1 -> Rust code generator. Cargo workspace, edition 2024, MSRV 1.89.
 
-IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for any rust tasks.
+- `crates/oas3-gen` — CLI (binary). Pipeline: **parse spec -> convert to AST -> generate Rust**.
+- `crates/oas3-gen-support` — runtime library the generated code depends on.
 
-## Project Overview
+**The source is the source of truth.** These docs map the territory and record decisions that
+the code can't state itself. For anything the code already answers — module layout, flag lists,
+fragment names, dependency versions — read the code. Never assert generator behavior you
+haven't confirmed in the source or in `crates/oas3-gen/fixtures/`.
 
-OpenAPI-to-Rust code generator that parses OpenAPI 3.1 specifications and generates comprehensive Rust type definitions with validation.
-
-**Workspace crates:**
-
-- **oas3-gen** (`crates/oas3-gen`): Main CLI tool for code generation
-- **oas3-gen-support** (`crates/oas3-gen-support`): Runtime support library for generated code
-
-Edition 2024, MSRV 1.89. All external dependencies are pinned in the root `[workspace.dependencies]` — crates pull them in with `dep = { workspace = true }`.
-
-## Quick Start
+## Commands
 
 ```bash
-cargo build                    # Build
-cargo test                     # Test
-cargo clippy --all -- -W clippy::pedantic   # Lint
-cargo +nightly fmt --all       # Format (requires nightly toolchain)
-cargo run -- generate types -i spec.json -o types.rs        # Generate types (JSON)
-cargo run -- generate types -i spec.yaml -o types.rs        # Generate types (YAML)
-cargo run -- generate client -i spec.json -o client.rs      # Generate client
-cargo run -- generate client-mod -i spec.json -o output/    # Generate modular client (types.rs, client.rs, mod.rs)
-cargo run -- generate server-mod -i spec.json -o output/    # Generate modular server (types.rs, server.rs, mod.rs)
-cargo run -- generate client-mod -i spec.json -o my-api -w  # Generate standalone crate (Cargo.toml + src/)
-cargo run -- list operations -i spec.json                   # List all operations in spec
+cargo test                                   # includes compiling fixtures/
+cargo clippy --all -- -W clippy::pedantic
+cargo +nightly fmt --all                     # nightly required
+cargo run -- generate <types|client|client-mod|server-mod> -i spec.json -o out
+cargo run -- generate --help                 # authoritative flag list
 ```
 
-## Essential Rules
+## Non-negotiables
 
-1. **NO inline comments** - Code must be self-documenting
-2. **NO emojis** - Token conservation
-3. **Run tests** before committing: `cargo test`
-4. **Rebuild fixtures** after code generation changes (see [testing.md](docs/testing.md))
-5. **Update book/ documentation** - All new and updated features MUST be documented in `book/src/` (see [Book Documentation](#book-documentation))
+1. Rustdoc (`///`, `//!`) on public API; no inline comments. Naming and structure carry intent.
+2. No emojis anywhere.
+3. Collection choice determines whether generation is deterministic — see [coding-standards.md](docs/coding-standards.md#collections).
+4. Rebuild fixtures after any change to generated output — see [testing.md](docs/testing.md).
+5. Document feature changes in `book/src/`.
+6. Scope: deliver what was asked and stop. One converter change rewrites thousands of fixture lines.
 
-## REQUIRED: Read Before Writing Code
+## Gotchas
 
-**Before writing or modifying any code, you MUST read [docs/coding-standards.md](docs/coding-standards.md).** This document contains critical style requirements including:
+- `main.rs` declares `fixtures/` as a `#[cfg(test)]` module, so `cargo test` **compiles** generated
+  output. Stale fixtures break the build. `event_stream` is excluded from that module — nothing
+  compile-checks it.
+- `--doc-format` needs `mdformat` on PATH; its test skips silently when absent.
+- CI runs `cargo clippy --all` and `cargo deny check`, not `cargo test`.
 
-- Turbofish syntax for `.collect::<Vec<_>>()` (not type annotations)
-- `vec![]` over `Vec::new()`
-- Iterator chains and itertools usage patterns
-- Collection type selection (BTreeMap vs IndexMap vs HashMap)
-- State management patterns
+## Docs
 
-Failure to follow these standards will require rework.
-
-## Detailed Documentation
-
-| Document | Contents |
-|----------|----------|
-| [docs/coding-standards.md](docs/coding-standards.md) | Naming conventions, patterns, collection types, SOLID principles |
-| [docs/commands.md](docs/commands.md) | All CLI commands, options, linting, profiling |
-| [docs/testing.md](docs/testing.md) | Test requirements, fixtures, coverage, debugging |
-| [docs/architecture.md](docs/architecture.md) | Pipeline stages, directory structure, dependencies |
-| [docs/code-fragments.md](docs/code-fragments.md) | Complete reference of codegen fragments and composition patterns |
-
-## Book Documentation
-
-The `book/` folder contains user-facing documentation built with mdBook. **All feature changes (new and updated) MUST be documented here.**
-
-**Structure:**
-- `book/src/SUMMARY.md` - Table of contents
-- `book/src/introduction.md` - Getting started guide
-- `book/src/code-generation.md` - Complete CLI flag reference with examples
-- `book/src/builders.md` - Builder pattern reference for generated types
-
-**When to update:**
-- Adding new CLI flags or options
-- Changing default behavior
-- Adding new generation modes
-- Modifying generated code patterns
-
-**Build the book:**
-```bash
-mdbook build book/
-mdbook serve book/    # Preview at http://localhost:3000
-```
+| Read when | Doc |
+|---|---|
+| Writing or changing code | [coding-standards.md](docs/coding-standards.md) |
+| Deciding where code goes | [architecture.md](docs/architecture.md) |
+| Working in `codegen/` | [code-fragments.md](docs/code-fragments.md) |
+| Adding tests, rebuilding fixtures | [testing.md](docs/testing.md) |
+| Tooling beyond the four commands above | [commands.md](docs/commands.md) |
+| Scope, verification, delegation, effort | [agent-guidance.md](docs/agent-guidance.md) |

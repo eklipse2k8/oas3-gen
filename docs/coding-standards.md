@@ -1,470 +1,102 @@
 # Coding Standards
 
-## CRITICAL: Token Conservation Requirements
-
-- **NO inline comments**: Never add explanatory comments, session notes, or relative-to-session notes within code. Code must be self-documenting through clear naming and structure.
-- **NO emojis**: Never use emojis in any context - code, comments, documentation, or messages. Emojis consume valuable tokens.
-- **Doc comments only**: Only use proper Rust doc comments (`///` or `//!`) for public API documentation that will be part of generated rustdoc.
-
-This project prioritizes token efficiency. Every inline comment and emoji wastes tokens that could be used for actual code or logic.
-
-## Naming Conventions
-
-Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/naming.html). Prioritize clarity over brevity (prefer `request` over `req`).
-
-### Casing
-
-| Identifier Type                       | Convention           | Examples                                 |
-| ------------------------------------- | -------------------- | ---------------------------------------- |
-| Crates                                | `kebab-case`         | `oas3-gen`, `oas3-gen-support`           |
-| Modules                               | `snake_case`         | `schema_graph`, `operation_registry`     |
-| Structs, Enums, Traits, Type Aliases  | `UpperCamelCase`     | `SchemaConverter`, `GenerateMode`        |
-| Enum Variants                         | `UpperCamelCase`     | `RequestOnly`, `Bidirectional`           |
-| Functions, Methods                    | `snake_case`         | `generate_code`, `convert_schema`        |
-| Variables, Fields, Parameters         | `snake_case`         | `spec`, `visibility`, `only_operations`  |
-| Constants, Statics                    | `UPPER_SNAKE_CASE`   | `REQUEST_SUFFIX`, `CLIPPY_ALLOWS`        |
-| Generic Type Parameters               | `UpperCamelCase`     | `T`, `E`, `IntoSchema`                   |
-| Macros                                | `snake_case!`        | `vec!`, `quote!`                         |
-
-### Type Suffixes
-
-- `...Converter`: Type conversion | `...Analyzer`: Data inspection | `...Registry`: Collection storage
-- `...Graph`: Graph structures | `...Config`: Configuration | `...Builder`: Builder pattern
-- `...Def`: AST nodes (StructDef, EnumDef, TypeAliasDef)
-
-### Function Patterns
-
-- Constructors: `new()`, `with_<property>()`, `from_<source>()`
-- Getters: `<property>()` (no `get_` prefix)
-- Conversions: `to_<type>()` (non-consuming), `into_<type>()` (consuming)
-- Predicates: `is_<condition>()`, `has_<property>()`
-
-### Generated Code
-
-- Distinguish OpenAPI (source) from Rust AST (target) concepts
-- Operation types: `...Request`, `...RequestBody`, `...Response`
-- Fields: `snake_case` with keyword escaping (`r#type`)
-
-## Collection Types for Deterministic Generation
-
-CRITICAL: Choose collection types carefully to ensure deterministic code generation.
-
-### IndexMap/IndexSet (insertion order)
-
-- `OperationRegistry`: Preserves operation order from OpenAPI spec for logical client method ordering
-- Schema storage, type generation, dependency traversal, discriminator mappings, and header references
-- Use when spec author's ordering is meaningful and should be reflected in generated code
-- Operations, schemas, properties, enum variants, and union variants should appear in the same order as the spec
-
-### BTreeMap/BTreeSet (sorted order)
-
-- Use only for order-insensitive canonical output that is not derived from spec declaration order
-- Examples: grouped `use` statements, derive attributes, regex constant lookup tables
-- Do not use for schemas, fields, enum values, union variants, operations, or generated type ordering
-
-### HashMap/HashSet (non-deterministic)
-
-- NEVER use for anything that affects code generation order
-- Only acceptable for internal logic where order doesn't matter (e.g., temporary deduplication)
-
-### Rule of thumb
-
-- Operations/endpoints -> IndexMap (spec order matters)
-- Types/schemas/dependencies -> IndexMap/IndexSet (spec order matters)
-- JSON arrays -> Vec unless uniqueness is required; `uniqueItems` generated types use IndexSet
-- Internal bookkeeping -> HashMap only if order truly doesn't matter
-
-### Generated-code map and set types are policy-driven
-
-The runtime collection types emitted into generated code (the map type used for
-`additionalProperties` / standalone object maps, and the array type used when
-`uniqueItems: true`) are controlled by `CollectionTypePolicy` on `CodegenConfig`:
-
-| Policy variant | Map type | `uniqueItems` array type |
-| --- | --- | --- |
-| `Ordered` (default) | `indexmap::IndexMap<String, T>` | `indexmap::IndexSet<T>` |
-| `Hashed` (`--no-ordered-collections`) | `std::collections::HashMap<String, T>` | `Vec<T>` |
-
-When adding a new emission point that materializes a map or unique-array type
-in generated code, route the type path through `config.map_type_path()` or
-`config.ordered_collections()` rather than hard-coding `indexmap::IndexMap` /
-`indexmap::IndexSet`. The internal generator data structures (registries,
-caches, naming maps) remain on `IndexMap`/`IndexSet`/`BTreeMap` per the
-guidance above — the policy only affects the literal type names emitted into
-the user's source tree.
-
-## Itertools for Deterministic Iteration
-
-Use `itertools` APIs instead of reimplementing equivalent functionality. These are well-tested, familiar to Rust engineers, and reduce code size while improving readability.
-
-### Sorted Iteration
-
-Prefer itertools' stable sort methods over manual `collect` + `sort` + `into_iter`:
-
-```rust
-use itertools::Itertools;
-
-// Good: itertools sorted_by_key (stable, deterministic)
-let types = schemas.into_iter()
-    .sorted_by_key(|s| s.name.clone())
-    .collect::<Vec<_>>();
-
-// Bad: manual sort (more code, same result)
-let mut types: Vec<_> = schemas.into_iter().collect();
-types.sort_by_key(|s| s.name.clone());
-```
-
-Available methods:
-- `.sorted()` - stable sort by natural `Ord`
-- `.sorted_by(cmp)` - stable sort with custom comparator
-- `.sorted_by_key(f)` - stable sort by extracted key
-- `.sorted_by_cached_key(f)` - same but caches key (use for expensive key functions)
-
-### Deduplication
-
-Use itertools for order-preserving deduplication:
-
-```rust
-// Good: itertools unique (first occurrence retained, order preserved)
-let unique_types = types.into_iter()
-    .unique_by(|t| t.name.clone())
-    .collect::<Vec<_>>();
-
-// Bad: manual HashSet tracking
-let mut seen = HashSet::new();
-let unique_types: Vec<_> = types.into_iter()
-    .filter(|t| seen.insert(t.name.clone()))
-    .collect();
-```
-
-Available methods:
-- `.unique()` - remove duplicates globally, first occurrence retained
-- `.unique_by(f)` - deduplicate by extracted key
-- `.dedup()` - remove consecutive duplicates only (use after sorting for full dedup)
-- `.dedup_with_count()` - dedup + count occurrences
-
-### Merging Pre-Sorted Iterators
-
-Use itertools merge operations for combining sorted sequences:
-
-```rust
-// Good: itertools kmerge for multiple sorted iterators
-let merged = vec![sorted_a, sorted_b, sorted_c]
-    .into_iter()
-    .kmerge()
-    .collect::<Vec<_>>();
-
-// Good: merge two sorted iterators
-let merged = iter_a.merge(iter_b).collect::<Vec<_>>();
-```
-
-### Grouping Consecutive Elements
-
-Use `.chunk_by()` for grouping consecutive elements (NOT HashMap-based):
-
-```rust
-// Good: chunk_by groups consecutive matching keys, preserves order
-let grouped = items.into_iter()
-    .sorted_by_key(|x| x.category.clone())  // sort first for full grouping
-    .chunk_by(|x| x.category.clone());
-
-for (category, group) in &grouped {
-    let items: Vec<_> = group.collect();
-}
-```
-
-### Avoid HashMap-Based Grouping
-
-The `.into_group_map()` and `.counts()` methods return `HashMap`, which has non-deterministic iteration order. If you must use them, always sort the keys:
-
-```rust
-// If using group_map, ALWAYS sort keys before iteration
-let grouped = items.into_iter().into_group_map_by(|t| t.category.clone());
-for key in grouped.keys().sorted() {
-    let items = &grouped[key];
-}
-```
-
-### Other Useful Methods
-
-- `.exactly_one()` - validate iterator has exactly one element
-- `.at_most_one()` - validate zero or one element
-- `.positions(predicate)` - indices matching condition (in order)
-- `.interleave(other)` - alternate between two iterators
-
-### When NOT to Use Itertools
-
-- Simple iteration that std handles well (`.map()`, `.filter()`, `.flat_map()`)
-- When you need lazy evaluation (itertools sorting methods collect eagerly)
-- Performance-critical hot paths where you need control over allocation
-
-## Iterator Flattening (CRITICAL)
-
-### Never Nest Iterators Inside Iterators
-
-Never create nested iterator patterns where inner iterators are created within outer iterator closures. This creates O(n²) complexity and prevents Rust's zero-cost abstractions from optimizing properly.
-
-**Bad - Nested iterators (O(n²)):**
-```rust
-// NEVER: Inner iterator created for each outer iteration
-let result: Vec<Item> = outer_collection
-    .iter()
-    .map(|outer| {
-        inner_collection
-            .iter()
-            .filter(|inner| inner.parent_id == outer.id)
-            .map(|inner| transform(inner))
-            .collect::<Vec<_>>()
-    })
-    .flatten()
-    .collect::<Vec<_>>();
-```
-
-**Good - Flattened approach (O(n)):**
-```rust
-// Pre-process inner collection into a lookup structure
-let inner_by_parent: BTreeMap<Id, Vec<&Inner>> = inner_collection
-    .iter()
-    .into_group_map_by(|inner| inner.parent_id);
-
-// Single-pass iteration over outer collection
-let result: Vec<Item> = outer_collection
-    .iter()
-    .flat_map(|outer| {
-        inner_by_parent
-            .get(&outer.id)
-            .into_iter()
-            .flatten()
-            .map(|inner| transform(inner))
-    })
-    .collect::<Vec<_>>();
-```
-
-### Return Iterators Instead of Collecting Early
-
-Functions should return iterators when possible, deferring `collect()` until the final consumer. This enables chaining and avoids intermediate allocations.
-
-**Bad - Early collection:**
-```rust
-fn get_active_items(items: &[Item]) -> Vec<Item> {
-    items
-        .iter()
-        .filter(|item| item.is_active)
-        .cloned()
-        .collect::<Vec<_>>()  // Forced allocation
-}
-
-// Caller forced to iterate again
-let active = get_active_items(&all_items);
-let processed = active
-    .iter()
-    .map(|item| process(item))
-    .collect::<Vec<_>>();
-```
-
-**Good - Return iterator:**
-```rust
-fn get_active_items(items: &[Item]) -> impl Iterator<Item = &Item> + '_ {
-    items.iter().filter(|item| item.is_active)
-}
-
-// Caller chains directly, single allocation at end
-let processed: Vec<Processed> = get_active_items(&all_items)
-    .map(|item| process(item))
-    .collect::<Vec<_>>();
-```
-
-### Flatten Nested Structures
-
-When working with nested collections, flatten early rather than iterating through layers.
-
-**Bad - Nested iteration:**
-```rust
-let all_fields: Vec<Field> = structs
-    .iter()
-    .map(|s| s.fields.clone())
-    .collect::<Vec<_>>()
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>();
-```
-
-**Good - Immediate flatten:**
-```rust
-let all_fields: Vec<&Field> = structs
-    .iter()
-    .flat_map(|s| &s.fields)
-    .collect::<Vec<_>>();
-```
-
-### Guidelines
-
-- **Pre-process data**: Build lookup tables (maps, indexes) before iteration loops
-- **Use `flat_map`**: Replace nested iteration with `flat_map` for one-to-many relationships
-- **Defer `collect()`**: Return `impl Iterator` from functions when the result will be further processed
-- **Avoid allocation in loops**: Never allocate inside iterator closures that execute multiple times
-- **Profile nested patterns**: If you must nest, ensure the inner collection is O(1) lookup
-
-## Preferred Code Patterns
-
-### Rust 2024 Edition Style
-
-Follow Rust standard library conventions and Rust 2024 idioms:
-
-- **Turbofish for collect**: Prefer `.collect::<Vec<_>>()` over `let x: Vec<_> = ...collect()`
-- **`into_iter()` over `.iter().cloned()`**: Consume owned collections directly when possible
-- **`let-else` for early returns**: Use `let Some(x) = y else { return None; }` pattern
-- **`bool::then` over `if`**: Prefer `condition.then(|| value)` for Option construction
-- **Iterator chains**: Favor iterator methods (`map`, `filter`, `flat_map`) over manual loops; use itertools for sorting, deduplication, and merging
-- **`From`/`Into` traits**: Implement standard conversion traits instead of ad-hoc methods
-- **Type aliases for complex types**: Use `type Foo = (Vec<A>, Vec<B>)` to document tuple semantics
-- **Early returns**: Return early on error/empty cases to reduce nesting
-- **Method chaining**: Keep transformations flowing left-to-right in single expressions
-- **Anonymous trait imports at module level**: When importing a trait solely for method resolution (e.g., `use quote::ToTokens as _;`), place the import at module level, never inline within functions
-
-### State Management
-
-Prefer encapsulated state over passing mutable references between functions:
-
-- **Bad**: `fn process(data: &[Item], cache: &mut Cache) -> Result`
-- **Good**: `impl Processor { fn process(&mut self, data: &[Item]) -> Result }`
-
-Guidelines:
-
-- Keep mutable state inside structs, accessed via `&mut self`
-- Avoid `&mut` parameters for accumulator/cache patterns
-- Use `RefCell` for interior mutability when shared references need mutation
-- Functions should be pure transformations when possible: `fn transform(input: &T) -> U`
-- Side effects belong in methods, not free functions
-
-This makes ownership clear, simplifies call sites, and prevents "parameter threading" where mutable refs pass through multiple layers.
-
-### Reference Counting and Cloning
-
-- Use `Arc<T>` for shared ownership of expensive-to-clone types (e.g., `Arc<ObjectSchema>`)
-- `Arc::clone()` is O(1) and only increments a reference count
-- Prefer `Arc` over deep cloning when passing schemas or large data structures through the conversion pipeline
-- This reduces memory usage and improves performance
-
-### Vec Initialization
-
-- Prefer `vec![]` over `Vec::new()` for consistency
-- Both are idiomatic, but `vec![]` is more concise
-
-### Builder Pattern
-
-- Use builder pattern (via `bon`) for structs with multiple optional fields or complex construction
-- Direct struct initialization is acceptable for simple parameter objects with few required fields
-- Builders improve readability when constructing objects with many fields
-- Example: `FieldDef::builder().name("foo").rust_type(ty).build()`
-
-### Avoid Tuples in Public APIs
-
-- NEVER use tuples as public function return types when returning multiple values
-- Use named structs instead for clarity and maintainability
-- Good: `fn convert() -> Generated<RustType>` with `struct Generated<T> { item: T, inline_types: Vec<RustType> }`
-- Bad: `pub fn convert() -> (RustType, Vec<RustType>)`
-- Tuples lack semantic meaning and make code harder to understand
-- **Exceptions**:
-  - Standard library patterns like `Iterator::enumerate()`, `unzip()` where tuple meaning is well-established
-  - Private helper functions with type aliases: `type FieldTuple = (Vec<Field>, Option<Nested>);`
-  - Intermediate iterator results that are immediately destructured
-
-### Avoid Bespoke Shuttle Structs
-
-- Don't create a dedicated struct solely to pass data between a producer and a single consumer
-- If a generic container already models the return shape (e.g., `ConversionOutput<T>`), use it
-- Let consumers derive secondary values from the raw data rather than pre-computing them in the producer
-- Bad: `struct FieldData { fields, serde_attrs, outer_attrs }` returned from a field collector where `serde_attrs` and `outer_attrs` are derivable from `fields`
-- Good: return `ConversionOutput<Vec<FieldDef>>` and let the struct assembler call `fields.struct_serde_attrs()` itself
-- This keeps producers focused on their core responsibility and avoids coupling them to consumer-specific concerns
-
-### String Enums
-
-- Use `strum` (with `#[derive(EnumString, Display)]`) for simple known string enums
-- Provides automatic string parsing and serialization without boilerplate
-- Good for enums with fixed string representations like HTTP methods, status categories, etc.
-- Example: `#[derive(EnumString, Display)] enum HttpMethod { Get, Post, Put, Delete }`
-
-### String Interning
-
-- Use `string_cache::DefaultAtom` when strings act as symbols (identifiers, type names, field names)
-- `DefaultAtom` provides O(1) equality comparison and reduced memory usage through interning
-- Wrap strings in `DefaultAtom` using `.into()`: `let name: DefaultAtom = "MyStruct".into()`
-- Particularly effective for repeated identifiers in code generation where the same names appear frequently
-- Example: Type names, field names, operation IDs, schema references
-- Don't use for arbitrary user content or large strings that won't be reused
-
-### Error Context with anyhow
-
-- Use `context()` or `with_context()` instead of `map_err()` when adding context to errors
-- `with_context()` can be used when you need a lambda to execute a contextual result. Prefer `context()` for simple strings.
-- Bad: `.map_err(|e| anyhow::anyhow!("Failed for '{}': {e}", name))?`
-- Good: `.context(format!("Failed for '{}'", name))?`
-- The underlying error is automatically chained; don't manually interpolate it into the message
-- Import `use anyhow::Context;` to access the `with_context()` or `context()` method on `Result` types
-
-### Extension Traits for External Types
-
-- Use extension traits to add methods to external library types without modifying them
-- Define trait in a dedicated module (e.g., `utils/schema_ext.rs` for `SchemaExt`)
-- Trait methods should be cohesive - group related functionality
-- Good: `trait SchemaExt { fn is_array(&self) -> bool; fn has_union(&self) -> bool; }`
-- Import the trait where needed: `use crate::utils::SchemaExt;`
-- Example: `SchemaExt` adds type predicates and inference methods to `oas3::spec::ObjectSchema`
-- Prefer extension traits over free functions when the operation is conceptually a method on the type
-
-### Focused Registries over Monolithic Caches
-
-- Split large cache structures into focused, single-responsibility registries
-- Each registry should manage one type of mapping or concern
-- Good: `NameRegistry` (name uniqueness), `SchemaIdentity` (schema-to-type), `EnumRegistry` (enum values-to-type)
-- Bad: `TypeIdentityCache` with mixed concerns (schema maps, enum maps, union maps, name tracking)
-- Benefits: clearer ownership, easier testing, simpler method signatures
-- Example: `SharedSchemaCache` composes `NameRegistry`, `SchemaIdentity`, `EnumRegistry`, `UnionRegistry`
-
-### Type-Safe Enums for Configuration
-
-- Use typed enums instead of boolean flags for configuration options
-- Makes intent explicit at call sites and enables exhaustive pattern matching
-- Good: `enum EnumCasePolicy { Preserve, Deduplicate }` with `config.enum_case == EnumCasePolicy::Preserve`
-- Bad: `preserve_case: bool` with `config.preserve_case`
-- Example: `CodegenConfig` uses `EnumCasePolicy`, `EnumHelperPolicy`, `EnumDeserializePolicy`, `ODataPolicy`, `CollectionTypePolicy`
-- Prevents invalid combinations and makes code more self-documenting
-
-### Attribute Types with ToTokens
-
-- Use typed enums for code generation attributes instead of stringly-typed approaches
-- Implement `ToTokens` for direct code generation integration
-- Good: `enum OuterAttr { SkipSerializingNone, SerdeAs }` implementing `ToTokens`
-- Bad: `extra_attrs: Vec<String>` with manual string construction
-- Consolidate multiple attributes of the same type into single combined attributes during codegen
-- Examples: `OuterAttr`, `SerdeAttribute`, `ValidationAttribute` in `ast/` module
-
-## Design Principles
-
-### SOLID Principles
-
-- Single Responsibility: One concern per module/struct/function
-- Open/Closed: Extend via composition, not modification
-- Liskov Substitution: Subtypes fully replace base types
-- Interface Segregation: Focused traits over monolithic ones
-- Dependency Inversion: Depend on abstractions
-
-### Avoid Duplication
-
-- Never duplicate logic; extract to reusable functions/traits/generics
-- Search for existing implementations before writing new code
-- Refactor duplicated patterns immediately upon discovery
-
-### Code Placement Strategy
-
-1. Review pipeline architecture: Parse/Analyze -> Convert (AST) -> Generate (Rust source)
-2. Identify stage:
-   - utils/ for cross-cutting concerns (extension traits, text processing)
-   - postprocess/ for type postprocessing, validation, and serde mode optimization
-   - naming/ for identifier generation and variant naming
-   - converter/ for OpenAPI to AST transformation
-   - codegen/ for AST to Rust source code generation
-3. Locate module: enums, structs, operations, type_resolver, attributes, cache, etc.
-4. Check utilities for cross-cutting concerns: utils/schema_ext.rs, utils/refs.rs, naming/identifiers.rs
+Normative rules. Where the reason isn't obvious from the rule, it's stated — those are the ones
+that bite. Scope and verification live in [agent-guidance.md](agent-guidance.md).
+
+## Comments
+
+Rustdoc (`///`, `//!`) on public API. No inline comments — the same patterns repeat across
+hundreds of fragments, so explanatory comments become review overhead. No emojis anywhere;
+generated code lands in users' source trees.
+
+Don't add docs, comments, or type annotations to code you didn't change.
+
+## Scope of a change
+
+- No features, refactors, or improvements beyond the request.
+- No error handling or validation for cases that can't occur. Validate at boundaries only: CLI
+  input and the parsed spec. Trust internal invariants.
+- No helpers or abstractions for one-time operations; no designing for hypothetical spec features.
+
+## Collections
+
+Determinism is the whole point: identical spec in, byte-identical Rust out.
+
+| Type | Use for |
+|---|---|
+| `IndexMap`/`IndexSet` | Anything whose order reaches generated output — schemas, fields, enum variants, union variants, operations, discriminator mappings, headers |
+| `BTreeMap`/`BTreeSet` | Canonical output not derived from spec order — grouped `use` statements, derives, regex lookup tables |
+| `HashMap`/`HashSet` | Internal bookkeeping only, where order cannot reach output |
+
+`.into_group_map()` and `.counts()` return `HashMap` — always iterate `.keys().sorted()`.
+
+Generated-code collection types are policy-driven, not hard-coded. `CollectionTypePolicy` on
+`CodegenConfig`: `Ordered` (default) emits `indexmap::IndexMap`/`IndexSet`; `Hashed`
+(`--no-ordered-collections`) emits `std::collections::HashMap`/`Vec`. New emission points must
+route through `config.map_type_path()` / `config.ordered_collections()`. This affects emitted
+type names only — the generator's own structures stay on `IndexMap`/`BTreeMap` per the table.
+
+## Iteration
+
+Use `itertools` rather than reimplementing it: `sorted_by_key`, `unique_by`, `dedup`, `kmerge`,
+`chunk_by`, `exactly_one`, `at_most_one`. Its sorts are stable, which determinism depends on.
+Skip it for plain `map`/`filter`/`flat_map` and where you need laziness (its sorts collect eagerly).
+
+**Never nest an iterator inside an iterator closure.** Building an inner iterator per outer
+element is O(n²) and defeats optimization. Build a lookup map first (`into_group_map_by`), then a
+single `flat_map` pass.
+
+Return `impl Iterator` from functions whose results get processed further; defer `collect()` to
+the final consumer. Never allocate inside a closure that runs per element.
+
+## Naming
+
+Follow the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/naming.html). Clarity
+over brevity (`request`, not `req`). Standard casing: `snake_case` modules/functions/fields,
+`UpperCamelCase` types/variants, `UPPER_SNAKE_CASE` constants, `kebab-case` crates.
+
+Type suffixes signal role: `...Converter` (transformation), `...Analyzer` (inspection),
+`...Registry` (collection), `...Graph`, `...Config`, `...Builder`, `...Def` (AST node),
+`...Fragment` (codegen unit).
+
+Functions: `new`/`with_<prop>`/`from_<source>`; getters without `get_`; `to_<type>` non-consuming
+vs `into_<type>` consuming; `is_`/`has_` predicates.
+
+Keep OpenAPI (source) and Rust AST (target) vocabulary distinct in the same scope. Generated
+operation types are `...Request`, `...RequestBody`, `...Response`; generated fields are
+`snake_case` with keyword escaping (`r#type`).
+
+## Patterns
+
+- `.collect::<Vec<_>>()` turbofish, not a type annotation on the binding.
+- `vec![]` over `Vec::new()`. `into_iter()` over `.iter().cloned()`.
+- `let-else` for early returns; `bool::then` for `Option` construction; early-return over nesting.
+- `From`/`Into` over ad-hoc conversion methods. Type aliases to name tuple semantics.
+- Trait-for-method-resolution imports (`use quote::ToTokens as _;`) at module level, never inside
+  a function.
+- `Arc<T>` for shared ownership of expensive clones (schemas); `Arc::clone` is a refcount bump.
+- `string_cache::DefaultAtom` for symbol-like strings (type/field/operation names) — O(1) equality
+  and interning pay off when identifiers repeat. Not for user content or one-off strings.
+- `bon` builders for many-optional-field structs; direct initialization for simple ones.
+- `strum` (`EnumString`, `Display`) for fixed string enums.
+- Typed enums over boolean flags for config, so call sites read as intent and matches stay
+  exhaustive (`EnumCasePolicy`, `ODataPolicy`, `CollectionTypePolicy`, …).
+- Typed attribute enums implementing `ToTokens` (`OuterAttr`, `SerdeAttribute`,
+  `ValidationAttribute`) over building attribute strings.
+- `anyhow::Context::context()` for error context — `with_context()` only when the message needs
+  computing. Never interpolate the source error; it chains automatically.
+- Extension traits for external types (`SchemaExt` on `oas3::spec::ObjectSchema`) when the
+  operation reads as a method on the type.
+
+## Structure
+
+- Keep mutable state inside a struct behind `&mut self`. Avoid `&mut` accumulator/cache
+  parameters — they thread through layers and obscure ownership. Free functions stay pure.
+- No tuples in public return types; name a struct. Exceptions: std idioms (`enumerate`, `unzip`),
+  private helpers with a type alias, immediately-destructured intermediates.
+- Don't invent a struct just to hand data from one producer to one consumer. If a generic
+  container already models the shape (`ConversionOutput<T>`), use it, and let the consumer derive
+  secondary values instead of pre-computing them upstream.
+- Prefer several focused registries over one mixed-concern cache (`NameRegistry`,
+  `SchemaIdentity`, `EnumRegistry` composed by `SharedSchemaCache`).
+- SOLID applies as usual: one concern per unit, extend by composition, focused traits.
