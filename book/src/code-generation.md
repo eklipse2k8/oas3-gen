@@ -951,6 +951,54 @@ impl PetStoreClient {
 
 ---
 
+## API Name Override
+
+```text
+--api-name <NAME>
+```
+
+Overrides the name of the top-level generated API item: the client struct in
+`client`/`client-mod` modes and the server trait in `server-mod` mode. By
+default the client struct name is derived from the spec's `info.title` (e.g.,
+"Swagger Petstore" becomes `SwaggerPetstoreClient`, falling back to
+`ApiClient` when the title is empty), and the server trait is always named
+`ApiServer`. The value is normalized to `PascalCase`.
+
+```bash
+cargo run -- generate client-mod -i petstore.json -o output/ --api-name PetStoreClient
+```
+
+**Generated client:**
+
+```rust
+#[derive(Debug, Clone)]
+pub struct PetStoreClient {
+    pub client: Client,
+    pub base_url: Url,
+}
+
+impl PetStoreClient {
+    pub fn new() -> Self { /* ... */ }
+}
+```
+
+**Generated server (with `--api-name PetStoreApi`):**
+
+```rust
+pub trait PetStoreApi: Send + Sync {
+    /* ... */
+}
+
+pub fn router<S>(service: S) -> Router
+where
+    S: PetStoreApi + Clone + Send + Sync + 'static,
+{
+    /* ... */
+}
+```
+
+---
+
 ## Schema Filtering
 
 ```text
@@ -1179,6 +1227,7 @@ pub struct Widget {
 | `--odata-support` | `false` | Make `@odata.*` fields optional |
 | `-c, --customize` | *(none)* | Custom type mapping; repeatable |
 | `--fn-name` | *(none)* | Custom function name per operation (`ID=NAME`); repeatable |
+| `--api-name` | *(none)* | Name for the generated client struct or server trait |
 | `--all-headers` | `false` | Emit header constants for all component-level headers |
 | `--enable-builders` | `false` | Enable bon builder derives and methods |
 | `--no-ordered-collections` | `false` | Emit `HashMap`/`Vec` instead of `indexmap` collection types |

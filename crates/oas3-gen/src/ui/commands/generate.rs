@@ -48,6 +48,7 @@ pub struct GenerateConfig {
   pub doc_format: bool,
   pub customizations: HashMap<String, String>,
   pub fn_name_overrides: HashMap<String, String>,
+  pub api_name: Option<String>,
   pub crate_package: Option<CratePackage>,
 }
 
@@ -110,6 +111,7 @@ impl GenerateConfig {
       .enable_builders(self.enable_builders)
       .customizations(self.customizations.clone())
       .fn_name_overrides(self.fn_name_overrides.clone())
+      .maybe_api_name(self.api_name.clone())
       .build();
 
     Orchestrator::new(
@@ -198,6 +200,7 @@ impl GenerateConfig {
       quiet,
       customize,
       fn_name,
+      api_name,
     } = command;
 
     let output = match (&mode, output) {
@@ -231,6 +234,7 @@ impl GenerateConfig {
       doc_format,
       customizations,
       fn_name_overrides,
+      api_name,
       crate_package,
     })
   }

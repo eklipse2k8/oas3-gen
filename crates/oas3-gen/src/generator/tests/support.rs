@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use oas3::Spec;
 
 use crate::generator::{
-  CodegenConfig, SchemaScope, TypesMode,
+  ClientMode, CodegenConfig, GenerationTarget, SchemaScope, ServerModMode, TypesMode,
   codegen::{GeneratedFileType, Visibility},
   orchestrator::Orchestrator,
 };
@@ -71,6 +71,14 @@ pub(super) fn make_orchestrator_with_fn_name_overrides(
   Orchestrator::new(spec, Visibility::default(), config, None, None)
 }
 
+pub(super) fn make_orchestrator_with_api_name(spec: Spec, api_name: &str, target: GenerationTarget) -> Orchestrator {
+  let config = CodegenConfig::builder()
+    .target(target)
+    .api_name(api_name.to_string())
+    .build();
+  Orchestrator::new(spec, Visibility::default(), config, None, None)
+}
+
 pub(super) fn generate_types(orchestrator: &Orchestrator, source_path: &str) -> GeneratedTypes {
   let output = orchestrator
     .generate(&TypesMode, source_path)
@@ -85,6 +93,28 @@ pub(super) fn generate_types(orchestrator: &Orchestrator, source_path: &str) -> 
     operations_converted: output.stats.operations_converted,
     orphaned_schemas_count: output.stats.orphaned_schemas_count,
   }
+}
+
+pub(super) fn generate_client(orchestrator: &Orchestrator, source_path: &str) -> String {
+  let output = orchestrator
+    .generate(&ClientMode, source_path)
+    .expect("client generation should succeed");
+  output
+    .code
+    .code(&GeneratedFileType::Client)
+    .expect("client output should exist")
+    .clone()
+}
+
+pub(super) fn generate_server(orchestrator: &Orchestrator, source_path: &str) -> String {
+  let output = orchestrator
+    .generate(&ServerModMode::default(), source_path)
+    .expect("server generation should succeed");
+  output
+    .code
+    .code(&GeneratedFileType::Server)
+    .expect("server output should exist")
+    .clone()
 }
 
 pub(super) fn assert_contains(code: &str, expected: &str, context: &str) {

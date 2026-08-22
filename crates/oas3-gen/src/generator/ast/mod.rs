@@ -25,7 +25,10 @@ pub use documentation::Documentation;
 use http::Method;
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
-use oas3::spec::{ObjectSchema, ParameterIn};
+use oas3::{
+  Spec,
+  spec::{ObjectSchema, ParameterIn},
+};
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
@@ -44,6 +47,27 @@ pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
 use crate::generator::{
   ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant,
 };
+
+/// API metadata from the spec's `info` object.
+///
+/// Carried into every generated file's header and the crate manifest,
+/// independent of whether the client or server target is generated.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ApiMetadata {
+  pub title: String,
+  pub version: String,
+  pub description: Option<String>,
+}
+
+impl From<&Spec> for ApiMetadata {
+  fn from(spec: &Spec) -> Self {
+    Self {
+      title: spec.info.title.clone(),
+      version: spec.info.version.clone(),
+      description: spec.info.description.clone(),
+    }
+  }
+}
 
 /// Node used to generate file header
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]

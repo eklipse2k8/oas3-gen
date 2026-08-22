@@ -3,11 +3,11 @@ use std::{collections::HashSet, rc::Rc, sync::Arc};
 use oas3::Spec;
 
 use crate::generator::{
-  ast::{ClientRootNode, OperationInfo, RustType, constants::HttpHeaderRef},
+  ast::{ApiMetadata, ClientRootNode, OperationInfo, RustType, ServerRequestTraitDef, constants::HttpHeaderRef},
   codegen::{GeneratedResult, SchemaCodeGenerator, Visibility},
   converter::{
     CodegenConfig, ConverterContext, GenerationTarget, OperationsProcessor, SchemaConverter, SerdeUsageRecorder,
-    build_server_trait, cache::SharedSchemaCache,
+    cache::SharedSchemaCache,
   },
   metrics::GenerationStats,
   mode::GenerationMode,
@@ -68,19 +68,21 @@ impl Orchestrator {
 
   pub fn generate(&self, mode: &dyn GenerationMode, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
     let artifacts = self.collect_generation_artifacts();
-    let serde_usage = artifacts.serde_recorder.into_usage_map();
     let postprocessed = PostprocessOutput::new(
       artifacts.rust_types,
       artifacts.operations_info,
-      serde_usage,
+      artifacts.serde_recorder.into_usage_map(),
       artifacts.config.target,
       artifacts.unique_headers,
     );
 
-    let server_trait_def = if artifacts.config.target == GenerationTarget::Server {
-      build_server_trait(&postprocessed.operations)
-    } else {
-      None
+    let api_name = artifacts.config.api_name.as_deref();
+    let (client, server_trait) = match artifacts.config.target {
+      GenerationTarget::Client => (Some(ClientRootNode::from_spec(&self.spec, api_name)), None),
+      GenerationTarget::Server => (
+        None,
+        ServerRequestTraitDef::from_operations(&postprocessed.operations, api_name),
+      ),
     };
 
     let codegen = SchemaCodeGenerator::builder()
@@ -89,8 +91,9 @@ impl Orchestrator {
       .operations(postprocessed.operations)
       .header_refs(postprocessed.header_refs)
       .uses(postprocessed.uses)
-      .client(ClientRootNode::from(&self.spec))
-      .maybe_server_trait(server_trait_def)
+      .metadata(ApiMetadata::from(&self.spec))
+      .maybe_client(client)
+      .maybe_server_trait(server_trait)
       .visibility(self.visibility)
       .source_path(source_path.to_string())
       .gen_version(OAS3_GEN_VERSION.to_string())

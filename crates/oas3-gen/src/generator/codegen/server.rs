@@ -1,11 +1,14 @@
 use http::Method;
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
-use quote::{ToTokens, format_ident, quote};
+use quote::{ToTokens, quote};
 
 use super::{Visibility, enums::ResponseEnumFragment};
 use crate::generator::{
-  ast::{ContentCategory, HandlerBodyInfo, ResponseEnumDef, ResponseVariant, ServerRequestTraitDef, ServerTraitMethod},
+  ast::{
+    ContentCategory, HandlerBodyInfo, ResponseEnumDef, ResponseVariant, ServerRequestTraitDef, ServerTraitMethod,
+    TraitToken,
+  },
   codegen::http::HttpStatusCode,
 };
 
@@ -43,10 +46,10 @@ impl ToTokens for ServerGenerator {
     let handlers = def
       .methods
       .iter()
-      .map(|m| HandlerFunctionFragment::new(m.clone(), self.visibility))
+      .map(|m| HandlerFunctionFragment::new(m.clone(), def.name.clone(), self.visibility))
       .collect::<Vec<_>>();
 
-    let router = RouterFragment::new(def.methods.clone(), self.visibility);
+    let router = RouterFragment::new(def.methods.clone(), def.name.clone(), self.visibility);
 
     tokens.extend(quote! {
       use axum::{
@@ -206,12 +209,17 @@ impl ToTokens for AxumResponseEnumFragment<'_> {
 #[derive(Clone, Debug)]
 struct HandlerFunctionFragment {
   method: ServerTraitMethod,
+  trait_name: TraitToken,
   vis: Visibility,
 }
 
 impl HandlerFunctionFragment {
-  fn new(method: ServerTraitMethod, vis: Visibility) -> Self {
-    Self { method, vis }
+  fn new(method: ServerTraitMethod, trait_name: TraitToken, vis: Visibility) -> Self {
+    Self {
+      method,
+      trait_name,
+      vis,
+    }
   }
 }
 
@@ -219,7 +227,7 @@ impl ToTokens for HandlerFunctionFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let vis = self.vis.to_tokens();
     let fn_name = &self.method.name;
-    let trait_name = format_ident!("ApiServer");
+    let trait_name = &self.trait_name;
 
     let extractors = ExtractorsFragment::new(self.method.clone());
     let request_construction = RequestConstructionFragment::new(self.method.clone());
@@ -405,18 +413,24 @@ impl ToTokens for RequestConstructionFragment {
 #[derive(Clone, Debug)]
 struct RouterFragment {
   methods: Vec<ServerTraitMethod>,
+  trait_name: TraitToken,
   vis: Visibility,
 }
 
 impl RouterFragment {
-  fn new(methods: Vec<ServerTraitMethod>, vis: Visibility) -> Self {
-    Self { methods, vis }
+  fn new(methods: Vec<ServerTraitMethod>, trait_name: TraitToken, vis: Visibility) -> Self {
+    Self {
+      methods,
+      trait_name,
+      vis,
+    }
   }
 }
 
 impl ToTokens for RouterFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let vis = self.vis.to_tokens();
+    let trait_name = &self.trait_name;
 
     let routes_by_path: IndexMap<String, Vec<&ServerTraitMethod>> =
       self.methods.iter().fold(IndexMap::new(), |mut acc, method| {
@@ -440,7 +454,7 @@ impl ToTokens for RouterFragment {
     tokens.extend(quote! {
       #vis fn router<S>(service: S) -> Router
       where
-        S: ApiServer + Clone + Send + Sync + 'static,
+        S: #trait_name + Clone + Send + Sync + 'static,
       {
         Router::new()
           #(#route_definitions)*
