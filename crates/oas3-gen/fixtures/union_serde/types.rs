@@ -339,13 +339,17 @@ pub struct UrlImageSource {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum MediaType {
+  /// jpeg image
   #[serde(rename = "image/jpeg")]
   #[default]
   ImageJpeg,
+  /// png image
   #[serde(rename = "image/png")]
   ImagePng,
+  /// gif image
   #[serde(rename = "image/gif")]
   ImageGif,
+  /// webp image
   #[serde(rename = "image/webp")]
   ImageWebp,
 }

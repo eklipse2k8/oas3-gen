@@ -41,9 +41,8 @@ pub use types::{Rounding, RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
-use crate::{
-  generator::{ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant},
-  utils::schema_ext::SchemaIters,
+use crate::generator::{
+  ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant,
 };
 
 /// Node used to generate file header
@@ -656,19 +655,6 @@ impl VariantDef {
   #[must_use]
   pub fn unboxed_type_name(&self) -> Option<String> {
     self.content.single_type().map(TypeRef::unboxed_base_type_name)
-  }
-}
-
-impl SchemaIters for std::slice::Iter<'_, Value> {
-  fn variants(self) -> impl Iterator<Item = VariantDef> {
-    self.filter_map(|value| {
-      Some(
-        VariantDef::builder()
-          .value(value)?
-          .content(VariantContent::Unit)
-          .build(),
-      )
-    })
   }
 }
 

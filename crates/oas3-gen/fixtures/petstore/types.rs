@@ -458,9 +458,11 @@ impl UploadPetImageRequest {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
 pub enum ListPetsRequestHeaderXSortOrder {
+  /// ascending
   #[serde(rename = "asc")]
   #[default]
   Asc,
+  /// descending
   #[serde(rename = "desc")]
   Desc,
 }
@@ -474,13 +476,17 @@ impl core::fmt::Display for ListPetsRequestHeaderXSortOrder {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
 pub enum ListPetsRequestHeaderXonly {
+  /// a cat
   #[serde(rename = "cat")]
   #[default]
   Cat,
+  /// a dog
   #[serde(rename = "dog")]
   Dog,
+  /// a fish
   #[serde(rename = "fish")]
   Fish,
+  /// a bird
   #[serde(rename = "bird")]
   Bird,
 }
