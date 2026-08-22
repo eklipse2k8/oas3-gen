@@ -914,6 +914,43 @@ field, you get both `Pet` and `Category` even though you only selected
 
 ---
 
+## Function Name Overrides
+
+```text
+--fn-name <ID=NAME>
+```
+
+Overrides the generated client and server method name for a specific operation.
+The key is the operation's `operationId` as written in the spec (falling back to
+the snake_case operation ID shown by `oas3-gen list operations`). The custom name
+is normalized to `snake_case`. Derived request and response type names follow the
+override, so renaming `listPets` to `fetch_all_pets` also produces
+`FetchAllPetsRequest` and `FetchAllPetsResponse`.
+
+Repeat the flag to rename several operations:
+
+```bash
+cargo run -- generate client-mod -i petstore.json -o output/ \
+  --fn-name listPets=fetch_all_pets \
+  --fn-name showPetById=get_pet
+```
+
+**Generated client:**
+
+```rust
+impl PetStoreClient {
+    pub async fn fetch_all_pets(&self, request: FetchAllPetsRequest) -> anyhow::Result<FetchAllPetsResponse> {
+        /* ... */
+    }
+
+    pub async fn get_pet(&self, request: GetPetRequest) -> anyhow::Result<GetPetResponse> {
+        /* ... */
+    }
+}
+```
+
+---
+
 ## Schema Filtering
 
 ```text
@@ -1141,6 +1178,7 @@ pub struct Widget {
 | `--no-helpers` | `false` | Disable enum constructor helpers |
 | `--odata-support` | `false` | Make `@odata.*` fields optional |
 | `-c, --customize` | *(none)* | Custom type mapping; repeatable |
+| `--fn-name` | *(none)* | Custom function name per operation (`ID=NAME`); repeatable |
 | `--all-headers` | `false` | Emit header constants for all component-level headers |
 | `--enable-builders` | `false` | Enable bon builder derives and methods |
 | `--no-ordered-collections` | `false` | Emit `HashMap`/`Vec` instead of `indexmap` collection types |

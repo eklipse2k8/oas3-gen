@@ -1,4 +1,7 @@
-use std::{collections::HashSet, rc::Rc};
+use std::{
+  collections::{HashMap, HashSet},
+  rc::Rc,
+};
 
 use http::Method;
 use indexmap::IndexMap;
@@ -7,7 +10,7 @@ use oas3::{Spec, spec::Operation};
 use crate::generator::{
   ast::OperationKind,
   naming::{
-    identifiers::ensure_unique_snake_case_id,
+    identifiers::{ensure_unique_snake_case_id, to_rust_field_name},
     operations::{compute_stable_id, trim_common_affixes},
   },
 };
@@ -18,7 +21,9 @@ use crate::generator::{
 /// the HTTP method, path, and the original OpenAPI operation definition.
 #[derive(Debug, Clone)]
 pub struct OperationEntry {
-  /// The stable snake_case identifier used for the generated Rust method name.
+  /// The stable snake_case identifier used for the generated Rust method name
+  /// and as the base for derived request/response type names. Replaced by any
+  /// user-provided function name override.
   pub stable_id: String,
   /// The HTTP method (GET, POST, etc.) for this operation.
   pub method: Method,
@@ -211,6 +216,7 @@ impl OperationSource for WebhookOperationSource {
 struct OperationRegistryBuilder {
   sources: Vec<Box<dyn OperationSource>>,
   filter: OperationFilter,
+  fn_name_overrides: HashMap<String, String>,
 }
 
 impl OperationRegistryBuilder {
@@ -225,6 +231,12 @@ impl OperationRegistryBuilder {
     self
   }
 
+  /// Sets the function name overrides to apply, keyed by operation ID.
+  fn with_fn_name_overrides(mut self, overrides: &HashMap<String, String>) -> Self {
+    self.fn_name_overrides.clone_from(overrides);
+    self
+  }
+
   /// Adds an operation source to this builder.
   fn with_source<S: OperationSource + 'static>(mut self, source: S) -> Self {
     self.sources.push(Box::new(source));
@@ -234,7 +246,7 @@ impl OperationRegistryBuilder {
   /// Consumes this builder and constructs the final [`OperationRegistry`].
   ///
   /// This ingests all operations from registered sources, applies the filter,
-  /// and simplifies the resulting identifiers.
+  /// simplifies the resulting identifiers, and applies function name overrides.
   fn build(self) -> OperationRegistry {
     let mut context = RegistrationContext::default();
 
@@ -244,8 +256,34 @@ impl OperationRegistryBuilder {
 
     context.simplify_keys();
 
-    OperationRegistry {
-      entries: context.into_entries(),
+    let mut entries = context.into_entries();
+    apply_fn_name_overrides(&mut entries, &self.fn_name_overrides);
+
+    OperationRegistry { entries }
+  }
+}
+
+/// Applies user-provided function name overrides by replacing entries' stable IDs.
+///
+/// Overrides are matched by the operation's `operationId` as written in the spec,
+/// falling back to the stable ID for operations without one. Custom names are
+/// normalized to valid snake_case Rust identifiers. The original `operationId`
+/// remains available on `entry.operation.operation_id` for diagnostics.
+fn apply_fn_name_overrides(entries: &mut [OperationEntry], overrides: &HashMap<String, String>) {
+  if overrides.is_empty() {
+    return;
+  }
+
+  for entry in entries {
+    let custom = entry
+      .operation
+      .operation_id
+      .as_deref()
+      .and_then(|id| overrides.get(id))
+      .or_else(|| overrides.get(&entry.stable_id));
+
+    if let Some(custom) = custom {
+      entry.stable_id = to_rust_field_name(custom);
     }
   }
 }
@@ -266,18 +304,21 @@ impl OperationRegistry {
   /// Creates a registry from the given specification without any filtering.
   #[must_use]
   pub fn new(spec: &Spec) -> Self {
-    Self::with_filters(spec, None, None)
+    Self::with_filters(spec, None, None, &HashMap::new())
   }
 
-  /// Creates a registry with optional inclusion and exclusion filters.
+  /// Creates a registry with optional inclusion and exclusion filters and
+  /// function name overrides keyed by operation ID.
   #[must_use]
   pub fn with_filters(
     spec: &Spec,
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
+    fn_name_overrides: &HashMap<String, String>,
   ) -> Self {
     OperationRegistryBuilder::new()
       .with_filter(OperationFilter::new(only_operations, excluded_operations))
+      .with_fn_name_overrides(fn_name_overrides)
       .with_source(HttpOperationSource::new(spec))
       .with_source(WebhookOperationSource::new(spec))
       .build()

@@ -56,7 +56,8 @@ impl Orchestrator {
     only_operations: Option<&HashSet<String>>,
     excluded_operations: Option<&HashSet<String>>,
   ) -> Self {
-    let operation_registry = OperationRegistry::with_filters(&spec, only_operations, excluded_operations);
+    let operation_registry =
+      OperationRegistry::with_filters(&spec, only_operations, excluded_operations, &config.fn_name_overrides);
     Self {
       spec,
       visibility,

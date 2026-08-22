@@ -59,6 +59,18 @@ pub(super) fn make_orchestrator_with_customizations(
   Orchestrator::new(spec, Visibility::default(), config, None, None)
 }
 
+pub(super) fn make_orchestrator_with_fn_name_overrides(
+  spec: Spec,
+  all_schemas: bool,
+  fn_name_overrides: HashMap<String, String>,
+) -> Orchestrator {
+  let config = CodegenConfig::builder()
+    .schema_scope(schema_scope(all_schemas))
+    .fn_name_overrides(fn_name_overrides)
+    .build();
+  Orchestrator::new(spec, Visibility::default(), config, None, None)
+}
+
 pub(super) fn generate_types(orchestrator: &Orchestrator, source_path: &str) -> GeneratedTypes {
   let output = orchestrator
     .generate(&TypesMode, source_path)

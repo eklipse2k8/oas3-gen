@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use super::support::{
   assert_contains, assert_contains_all, assert_not_contains, assert_occurs_at_least, generate_types, make_orchestrator,
-  make_orchestrator_with_customizations, make_orchestrator_with_ops, parse_spec, string_set,
+  make_orchestrator_with_customizations, make_orchestrator_with_fn_name_overrides, make_orchestrator_with_ops,
+  parse_spec, string_set,
 };
 use crate::generator::ast::{ClientRootNode, StructToken};
 
@@ -140,6 +141,52 @@ fn test_all_schemas_overrides_operation_filtering() {
   assert_eq!(
     with_all_schemas.orphaned_schemas_count, 0,
     "with all_schemas: 0 orphaned"
+  );
+}
+
+#[test]
+fn test_fn_name_override_renames_derived_types() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Test API", "version": "1.0.0" },
+    "paths": {
+      "/users": {
+        "get": {
+          "operationId": "listUsers",
+          "parameters": [
+            { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+          ],
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": { "application/json": { "schema": { "type": "string" } } }
+            }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let overrides = HashMap::from([("listUsers".to_string(), "fetch_all_users".to_string())]);
+  let orchestrator = make_orchestrator_with_fn_name_overrides(parse_spec(spec_json), false, overrides);
+  let output = generate_types(&orchestrator, "test.json");
+
+  assert_contains_all(
+    &output.code,
+    &[
+      ("FetchAllUsersRequest", "request type should derive from the override"),
+      ("FetchAllUsersResponse", "response type should derive from the override"),
+    ],
+  );
+  assert_not_contains(
+    &output.code,
+    "ListUsersRequest",
+    "request type should not use the original operation ID",
+  );
+  assert_not_contains(
+    &output.code,
+    "ListUsersResponse",
+    "response type should not use the original operation ID",
   );
 }
 

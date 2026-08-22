@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use http::Method;
 use oas3::Spec;
@@ -207,7 +207,7 @@ fn test_operation_registry_applies_exclude_filters() {
   let mut excluded = HashSet::new();
   excluded.insert("list_users".to_string());
 
-  let registry = OperationRegistry::with_filters(&spec, None, Some(&excluded));
+  let registry = OperationRegistry::with_filters(&spec, None, Some(&excluded), &HashMap::new());
   assert_eq!(registry.entries.len(), 2, "filtered registry should have 2 operations");
   assert_stable_ids(
     &registry,
@@ -340,5 +340,54 @@ fn test_operation_registry_does_not_simplify_when_no_common_affixes() {
     &registry,
     &["create_post", "list_users"],
     "IDs should remain unchanged when there are no common affixes",
+  );
+}
+
+#[test]
+fn test_operation_registry_applies_fn_name_overrides() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("listUsers")),
+    ("/users/{id}", "get", None),
+    ("/posts", "post", Some("createPost")),
+  ]);
+
+  let overrides = HashMap::from([
+    ("listUsers".to_string(), "fetchAllUsers".to_string()),
+    ("get_users_by_id".to_string(), "fetch_user".to_string()),
+    ("missingOp".to_string(), "unused".to_string()),
+  ]);
+
+  let registry = OperationRegistry::with_filters(&spec, None, None, &overrides);
+  assert_stable_ids(
+    &registry,
+    &["create_post", "fetch_all_users", "fetch_user"],
+    "overrides should replace stable IDs (matched by raw operationId or stable ID, normalized to snake_case)",
+  );
+
+  let renamed = registry
+    .operations()
+    .find(|e| e.stable_id == "fetch_all_users")
+    .expect("renamed entry should exist");
+  assert_eq!(
+    renamed.operation.operation_id.as_deref(),
+    Some("listUsers"),
+    "original operationId should remain available for diagnostics"
+  );
+}
+
+#[test]
+fn test_operation_registry_fn_name_override_survives_affix_stripping() {
+  let spec = create_test_spec(&[
+    ("/users", "get", Some("api_users_list")),
+    ("/posts", "get", Some("api_posts_list")),
+  ]);
+
+  let overrides = HashMap::from([("api_users_list".to_string(), "fetch_users".to_string())]);
+
+  let registry = OperationRegistry::with_filters(&spec, None, None, &overrides);
+  assert_stable_ids(
+    &registry,
+    &["fetch_users", "posts"],
+    "override should be preserved verbatim while other stable IDs are trimmed",
   );
 }

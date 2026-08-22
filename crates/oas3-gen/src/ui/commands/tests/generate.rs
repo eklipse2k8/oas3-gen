@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::ui::{
   GenerateMode,
-  commands::generate::{parse_customizations, resolve_crate_package},
+  commands::generate::{parse_customizations, parse_fn_name_overrides, resolve_crate_package},
 };
 
 #[test]
@@ -60,6 +60,55 @@ fn test_parse_customizations_invalid_format_no_equals() {
 fn test_parse_customizations_with_equals_in_value() {
   let result = parse_customizations(Some(vec!["date_time=crate::Type=Something".to_string()])).unwrap();
   assert_eq!(result.get("date_time"), Some(&"crate::Type=Something".to_string()));
+}
+
+#[test]
+fn test_parse_fn_name_overrides() {
+  struct Case {
+    input: Option<Vec<&'static str>>,
+    expected: &'static [(&'static str, &'static str)],
+  }
+
+  let cases = [
+    Case {
+      input: None,
+      expected: &[],
+    },
+    Case {
+      input: Some(vec![]),
+      expected: &[],
+    },
+    Case {
+      input: Some(vec!["listPets=fetch_pets", "showPetById=get_pet"]),
+      expected: &[("listPets", "fetch_pets"), ("showPetById", "get_pet")],
+    },
+  ];
+
+  for case in cases {
+    let input = case.input.map(|v| v.into_iter().map(str::to_string).collect());
+    let result = parse_fn_name_overrides(input).unwrap();
+    assert_eq!(
+      result.len(),
+      case.expected.len(),
+      "wrong entry count for {:?}",
+      case.expected
+    );
+    for (key, value) in case.expected {
+      assert_eq!(
+        result.get(*key),
+        Some(&(*value).to_string()),
+        "wrong value for key {key}"
+      );
+    }
+  }
+}
+
+#[test]
+fn test_parse_fn_name_overrides_invalid_format() {
+  let result = parse_fn_name_overrides(Some(vec!["listPets".to_string()]));
+  assert!(result.is_err());
+  let err = result.unwrap_err();
+  assert!(err.to_string().contains("Invalid fn-name format"));
 }
 
 #[test]

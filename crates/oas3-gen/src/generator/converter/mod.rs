@@ -184,6 +184,9 @@ pub struct CodegenConfig {
   pub enable_builders: bool,
   #[builder(default)]
   pub customizations: HashMap<String, String>,
+  /// Overrides for generated function names, keyed by operation ID.
+  #[builder(default)]
+  pub fn_name_overrides: HashMap<String, String>,
 }
 
 impl CodegenConfig {
