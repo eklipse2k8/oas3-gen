@@ -308,6 +308,12 @@
 			},
 			"MediaType": {
 				"type": "string",
+				"x-enum-descriptions": [
+					"jpeg image",
+					"png image",
+					"gif image",
+					"webp image"
+				],
 				"enum": ["image/jpeg", "image/png", "image/gif", "image/webp"]
 			},
 			"Annotation": {
