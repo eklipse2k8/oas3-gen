@@ -99,6 +99,38 @@ fn test_simple_enum_display_impl() {
 }
 
 #[test]
+fn test_enum_default_variant_placement() {
+  let cases = [(None, "Red"), (Some(2), "Blue")];
+
+  for (marked_idx, expected_variant) in cases {
+    let variants = ["Red", "Green", "Blue"]
+      .into_iter()
+      .enumerate()
+      .map(|(idx, name)| {
+        let mut variant = make_unit_variant(name);
+        variant.default = Some(idx) == marked_idx;
+        variant
+      })
+      .collect::<Vec<_>>();
+    let def = make_simple_enum("Color", variants);
+
+    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
+
+    assert_eq!(
+      code.matches("# [default]").count(),
+      1,
+      "exactly one #[default] expected when marked_idx is {marked_idx:?}"
+    );
+    assert!(
+      code.contains(&format!("# [default] {expected_variant}")),
+      "#[default] should precede {expected_variant} when marked_idx is {marked_idx:?}"
+    );
+  }
+}
+
+#[test]
 fn test_simple_enum_display_impl_with_serde_rename() {
   let renamed_def = EnumDef {
     name: EnumToken::new("Status"),

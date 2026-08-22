@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use itertools::Itertools;
 
 use super::union_types::CollisionStrategy;
-use crate::generator::ast::{Documentation, EnumDef, EnumToken, EnumVariantToken, RustPrimitive, RustType, VariantDef};
+use crate::generator::{
+  ast::{Documentation, EnumDef, EnumToken, EnumVariantToken, RustPrimitive, RustType, SerdeAttribute, VariantDef},
+  naming::inference::NormalizedVariant,
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ValueEnumBuilder {
@@ -36,6 +39,10 @@ impl ValueEnumBuilder {
   ///   `#[serde(alias = "...")]` for additional values.
   /// - [`CollisionStrategy::Preserve`]: Creates distinct variants by appending the
   ///   entry index (e.g., `FooBar`, `FooBar1`).
+  ///
+  /// When `default_value` matches a variant's wire value (its rename or one of its
+  /// aliases), that variant is marked as the enum's `Default`; otherwise the first
+  /// variant remains the fallback default.
   pub(crate) fn build_enum_from_variants(
     &self,
     name: &str,
@@ -43,6 +50,7 @@ impl ValueEnumBuilder {
     strategy: CollisionStrategy,
     docs: Documentation,
     scalar_repr: Option<RustPrimitive>,
+    default_value: Option<&serde_json::Value>,
   ) -> RustType {
     let (resolved_variants, _) = variants.into_iter().enumerate().fold(
       (vec![], BTreeMap::<String, usize>::new()),
@@ -67,7 +75,7 @@ impl ValueEnumBuilder {
       },
     );
 
-    let resolved_variants = if self.sort_variants {
+    let mut resolved_variants = if self.sort_variants {
       resolved_variants
         .into_iter()
         .sorted_by(|a, b| a.name.as_str().cmp(b.name.as_str()))
@@ -75,6 +83,14 @@ impl ValueEnumBuilder {
     } else {
       resolved_variants
     };
+
+    if let Some(default) = default_value.and_then(|v| NormalizedVariant::try_from(v).ok())
+      && let Some(variant) = resolved_variants
+        .iter_mut()
+        .find(|v| variant_matches_value(v, &default.rename_value))
+    {
+      variant.default = true;
+    }
 
     RustType::Enum(
       EnumDef::builder()
@@ -87,4 +103,14 @@ impl ValueEnumBuilder {
         .build(),
     )
   }
+}
+
+/// Returns `true` when the variant serializes to or from `value`, either as its
+/// primary `#[serde(rename)]` value or as one of its `#[serde(alias)]` values.
+fn variant_matches_value(variant: &VariantDef, value: &str) -> bool {
+  variant.serde_name() == value
+    || variant
+      .serde_attrs
+      .iter()
+      .any(|attr| matches!(attr, SerdeAttribute::Alias(alias) if alias == value))
 }

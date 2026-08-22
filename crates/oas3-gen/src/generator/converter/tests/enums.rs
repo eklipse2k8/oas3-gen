@@ -49,6 +49,60 @@ fn test_simple_string_enum() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_enum_default_value_marks_variant() {
+  let cases = [
+    (
+      json!({"type": "string", "enum": ["active", "inactive", "pending"], "default": "pending"}),
+      Some("Pending"),
+    ),
+    (
+      json!({"type": "string", "enum": ["active", "inactive"], "default": "active"}),
+      Some("Active"),
+    ),
+    (json!({"type": "string", "enum": ["active", "inactive"]}), None),
+    (
+      json!({"type": "string", "enum": ["active", "inactive"], "default": "unknown"}),
+      None,
+    ),
+    (
+      json!({"type": "integer", "enum": [1, 2, 3], "default": 2}),
+      Some("Value2"),
+    ),
+    (
+      json!({"type": "number", "enum": [0.5, 1.0, 1.5], "default": 1.0}),
+      Some("Value1"),
+    ),
+    (
+      json!({"enum": ["foo-bar", "foo_bar"], "default": "foo_bar"}),
+      Some("FooBar"),
+    ),
+  ];
+
+  for (schema_json, expected_default) in cases {
+    let graph = create_test_graph(parse_schemas(vec![("TestEnum", schema_json.clone())]));
+    let context = create_test_context(graph.clone(), default_config());
+    let converter = SchemaConverter::new(&context);
+    let result = converter.convert_schema("TestEnum", graph.get("TestEnum").unwrap());
+
+    let Ok(types) = result else {
+      panic!("conversion failed for {schema_json}")
+    };
+    let Some(RustType::Enum(enum_def)) = types.first() else {
+      panic!("expected enum for {schema_json}")
+    };
+
+    let marked = enum_def
+      .variants
+      .iter()
+      .filter(|v| v.default)
+      .map(|v| v.name.to_string())
+      .collect::<Vec<_>>();
+    let expected = expected_default.into_iter().map(str::to_string).collect::<Vec<_>>();
+    assert_eq!(marked, expected, "default variant mismatch for {schema_json}");
+  }
+}
+
+#[test]
 fn test_oneof_with_discriminator_has_rename_attrs() -> anyhow::Result<()> {
   let graph = create_test_graph(parse_schemas(vec![
     (

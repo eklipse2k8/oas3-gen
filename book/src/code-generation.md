@@ -476,9 +476,10 @@ and continue to use status-code order.
 Use `sorted` to stabilize generated source against spec re-orderings so that
 `[A, B]` and `[B, A]` produce identical Rust code.
 
-The `#[default]` attribute on `Default`-deriving enums always tracks the first
-variant in declaration order. Switching from `spec` to `sorted` therefore shifts
-the default variant to whichever name sorts first alphabetically.
+The `#[default]` attribute on `Default`-deriving enums tracks the variant matching
+the schema's `default` value when one is declared; otherwise it falls back to the
+first variant in declaration order. Switching from `spec` to `sorted` therefore
+shifts the fallback default variant to whichever name sorts first alphabetically.
 
 ### Input Schema
 

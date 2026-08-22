@@ -67,6 +67,7 @@ impl EnumConverter {
       strategy,
       Documentation::from_optional(schema.description.as_ref()),
       scalar_repr,
+      schema.default.as_ref(),
     )
   }
 

@@ -169,7 +169,7 @@ pub(crate) struct EnumValueVariantFragment<'a> {
 }
 
 impl<'a> EnumValueVariantFragment<'a> {
-  pub(crate) fn new(variant: &'a VariantDef, idx: usize, has_serde_derive: bool) -> Self {
+  pub(crate) fn new(variant: &'a VariantDef, is_default: bool, has_serde_derive: bool) -> Self {
     let docs = variant.docs.to_token_stream();
     let serde_attrs = if has_serde_derive {
       generate_serde_attrs(&variant.serde_attrs)
@@ -177,7 +177,7 @@ impl<'a> EnumValueVariantFragment<'a> {
       quote! {}
     };
     let deprecated = generate_deprecated_attr(variant.deprecated);
-    let default_attr = (idx == 0).then(|| quote! { #[default] });
+    let default_attr = is_default.then(|| quote! { #[default] });
     let content = variant.content.tuple_types().map(|types| {
       let type_tokens = types.iter().map(|t| quote! { #t }).collect::<Vec<_>>();
       quote! { ( #(#type_tokens),* ) }
@@ -589,12 +589,13 @@ impl ToTokens for EnumFragment<'_> {
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
 
+    let default_idx = self.def.variants.iter().position(|v| v.default).unwrap_or(0);
     let variants: Vec<EnumValueVariantFragment<'_>> = self
       .def
       .variants
       .iter()
       .enumerate()
-      .map(|(idx, v)| EnumValueVariantFragment::new(v, idx, has_serde_derive))
+      .map(|(idx, v)| EnumValueVariantFragment::new(v, idx == default_idx, has_serde_derive))
       .collect();
     let variants = EnumVariants::new(variants);
 

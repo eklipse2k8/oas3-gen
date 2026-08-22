@@ -672,9 +672,9 @@ impl core::fmt::Display for Role {
 /// Audio sample rate in Hz (integer-backed enum)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
 pub enum SampleRate {
-  #[default]
   Value8000,
   Value16000,
+  #[default]
   Value24000,
   Value44100,
   Value48000,
@@ -727,8 +727,8 @@ impl<'de> serde::Deserialize<'de> for SampleRate {
 /// Playback speed multiplier (float-backed enum)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
 pub enum PlaybackRate {
-  #[default]
   Value0_5,
+  #[default]
   Value1,
   Value1_5,
   Value2,

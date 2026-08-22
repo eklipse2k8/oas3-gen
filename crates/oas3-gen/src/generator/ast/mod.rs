@@ -602,6 +602,8 @@ pub struct VariantDef {
   pub serde_attrs: Vec<SerdeAttribute>,
   #[builder(default)]
   pub deprecated: bool,
+  #[builder(default)]
+  pub default: bool,
 }
 
 impl VariantDef {

@@ -886,8 +886,8 @@ mod tests {
 
     assert_eq!(
       SampleRate::default(),
-      SampleRate::Value8000,
-      "default should be Value8000"
+      SampleRate::Value24000,
+      "default should be Value24000 per spec default of 24000"
     );
 
     let err = serde_json::from_value::<SampleRate>(json!(12345));
@@ -932,8 +932,8 @@ mod tests {
 
     assert_eq!(
       PlaybackRate::default(),
-      PlaybackRate::Value0_5,
-      "default should be Value0_5"
+      PlaybackRate::Value1,
+      "default should be Value1 per spec default of 1.0"
     );
 
     let err = serde_json::from_value::<PlaybackRate>(json!(3.7));
