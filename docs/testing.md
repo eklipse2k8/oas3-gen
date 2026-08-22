@@ -14,10 +14,17 @@ cargo run -- generate server-mod -i $F/petstore.json           -o $F/petstore_se
 cargo run -- generate client-mod -i $F/union_serde.json        -o $F/union_serde        --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/intersection_union.json -o $F/intersection_union --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/event_stream.json       -o $F/event_stream       --enable-builders --all-schemas
+
+cargo clippy --fix --allow-dirty --all --all-targets -- -W clippy::pedantic
+cargo +nightly fmt --all
 ```
 
 Flags differ per fixture — copy the line, don't improvise. `event_stream` is *not* in the
 `#[cfg(test)]` module, so nothing compile-checks it; review its diff by eye.
+
+Committed fixtures are post-clippy and post-rustfmt, so the last two commands are part of
+regenerating, not an afterthought — skip them and the diff fills with lint and formatting noise.
+`--all-targets` is what makes clippy reach `fixtures/` at all, since the module is `#[cfg(test)]`.
 
 The fixture diff is how generated-output changes get reviewed. Read it before claiming a change
 is correct.
