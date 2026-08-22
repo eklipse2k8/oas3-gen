@@ -108,7 +108,7 @@ impl SerdeUsage {
 
   fn custom_type_name(type_ref: &TypeRef) -> Option<EnumToken> {
     match &type_ref.base_type {
-      RustPrimitive::Custom(name) => Some(name.as_ref().into()),
+      RustPrimitive::Custom(name) => Some(name.as_str().into()),
       _ => None,
     }
   }

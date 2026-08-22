@@ -130,7 +130,7 @@ impl SerdeUsageRecorder {
   /// require generated serde derives.
   pub(crate) fn mark_response_type_ref(&mut self, type_ref: &TypeRef) {
     if let RustPrimitive::Custom(name) = &type_ref.base_type {
-      self.mark_response(name.as_ref());
+      self.mark_response(name.as_str());
     }
   }
 

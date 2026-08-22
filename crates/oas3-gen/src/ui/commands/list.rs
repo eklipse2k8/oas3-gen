@@ -1,12 +1,17 @@
 use std::path::Path;
 
-use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Row, Table};
+use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, LineStyle, Row, Table, TableStyle};
 
 use crate::{
   generator::operation_registry::OperationRegistry,
   ui::{Colors, colors::IntoComfyColor, term_width},
   utils::spec::SpecLoader,
 };
+
+const TABLE_STYLE: TableStyle = TableStyle::new()
+  .top_border(LineStyle::none().fill('─'))
+  .header_separator(LineStyle::none().fill('─').junction('─'))
+  .bottom_border(LineStyle::none().fill('─'));
 
 pub async fn list_operations(input: &Path, colors: &Colors) -> anyhow::Result<()> {
   let spec = SpecLoader::open(input).await?.parse()?;
@@ -20,7 +25,7 @@ pub async fn list_operations(input: &Path, colors: &Colors) -> anyhow::Result<()
 
   let mut table = Table::new();
   table
-    .load_preset("  ── ──            ")
+    .load_style(TABLE_STYLE)
     .set_content_arrangement(ContentArrangement::Dynamic)
     .set_width(term_width());
 
