@@ -3,8 +3,8 @@ use itertools::Itertools;
 use oas3::spec::{Discriminator, ObjectSchema, Schema};
 
 use crate::generator::ast::{
-  DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumToken, EnumVariantToken,
-  RustType, SerdeAttribute, VariantDef,
+  DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumDefault, EnumMethod, EnumToken,
+  EnumVariantToken, RustType, SerdeAttribute, VariantDef,
 };
 
 /// Represents a nested union that has been promoted to a flat variant list.
@@ -71,6 +71,7 @@ impl RustType {
     docs: Documentation,
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
+    #[builder(default)] default_mode: EnumDefault,
   ) -> Self {
     RustType::Enum(
       EnumDef::builder()
@@ -80,6 +81,7 @@ impl RustType {
         .serde_attrs(vec![SerdeAttribute::Untagged])
         .case_insensitive(false)
         .methods(methods)
+        .default_mode(default_mode)
         .build(),
     )
   }

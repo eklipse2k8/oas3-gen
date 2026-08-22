@@ -581,6 +581,8 @@ pub struct EnumDef {
   #[builder(default)]
   pub generate_display: bool,
   pub scalar_repr: Option<RustPrimitive>,
+  #[builder(default)]
+  pub default_mode: EnumDefault,
 }
 
 impl EnumDef {
@@ -589,6 +591,27 @@ impl EnumDef {
     const FALLBACK_NAMES: &[&str] = &["Unknown", "Other"];
     self.variants.iter().find(|v| FALLBACK_NAMES.contains(&v.name.as_str()))
   }
+}
+
+/// How an enum's `Default` implementation is produced
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum EnumDefault {
+  /// Derive `Default`; the variant flagged `default` (or the first) receives `#[default]`
+  #[default]
+  Derive,
+  /// Hand-written `impl Default` constructing the schema's `default` value
+  Value(EnumDefaultValue),
+  /// No `Default` implementation (e.g. nullable unions without a `default`)
+  None,
+}
+
+/// Payload for a hand-written enum `Default` impl
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumDefaultValue {
+  /// Raw schema `default`, coerced to a literal for primitive payloads
+  pub value: serde_json::Value,
+  /// Resolved variant of the wrapped value enum, when the default selects one
+  pub inner_variant: Option<EnumVariantToken>,
 }
 
 /// Rust enum variant definition

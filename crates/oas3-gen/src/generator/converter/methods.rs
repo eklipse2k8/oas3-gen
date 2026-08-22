@@ -153,7 +153,7 @@ impl MethodGenerator {
   /// Prefers an inline enum definition (exact generated variants), falling back to
   /// the named schema in the graph. Only unit variants are returned, so nested
   /// union enums with tuple variants do not produce spurious constructors.
-  fn resolve_enum_value_defs(&self, type_ref: &TypeRef, inline_types: &[RustType]) -> Vec<VariantDef> {
+  pub(crate) fn resolve_enum_value_defs(&self, type_ref: &TypeRef, inline_types: &[RustType]) -> Vec<VariantDef> {
     let base_name = type_ref.unboxed_base_type_name();
 
     let variants = inline_types

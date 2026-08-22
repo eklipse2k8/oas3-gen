@@ -178,8 +178,11 @@ impl FieldConverter {
       && parent_schema.discriminator.is_none()
       && !parent_schema.has_intersection();
 
+    let is_nullable_union = prop_schema.has_union() && prop_schema.has_null_variant(self.context.graph().spec());
+
     let should_be_optional = !is_required
       || prop_schema.default.is_some()
+      || is_nullable_union
       || (is_discriminator && !discriminator_has_enum)
       || is_odata_optional;
 

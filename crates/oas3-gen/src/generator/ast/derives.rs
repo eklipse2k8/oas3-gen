@@ -5,7 +5,8 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 use strum::Display;
 
 use super::{
-  DiscriminatedEnumDef, EnumDef, ResponseEnumDef, ResponseMediaType, SerdeMode, StructDef, StructKind, VariantContent,
+  DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponseMediaType, SerdeMode, StructDef, StructKind,
+  VariantContent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -96,12 +97,11 @@ impl DerivesProvider for StructDef {
 
 impl DerivesProvider for EnumDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    let mut derives = BTreeSet::from([
-      DeriveTrait::Debug,
-      DeriveTrait::Clone,
-      DeriveTrait::PartialEq,
-      DeriveTrait::Default,
-    ]);
+    let mut derives = BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::PartialEq]);
+
+    if matches!(self.default_mode, EnumDefault::Derive) {
+      derives.insert(DeriveTrait::Default);
+    }
 
     if self.is_simple() {
       derives.insert(DeriveTrait::Eq);

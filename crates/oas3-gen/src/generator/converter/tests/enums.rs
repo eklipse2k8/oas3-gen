@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::{
   generator::{
     ast::{
-      DeriveTrait, DerivesProvider, EnumDef, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken,
+      DeriveTrait, DerivesProvider, EnumDef, EnumDefault, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken,
       RustPrimitive, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
     },
     converter::{
@@ -100,6 +100,138 @@ fn test_enum_default_value_marks_variant() {
     let expected = expected_default.into_iter().map(str::to_string).collect::<Vec<_>>();
     assert_eq!(marked, expected, "default variant mismatch for {schema_json}");
   }
+}
+
+#[test]
+fn test_union_default_mode() {
+  let cases = [
+    // (schema, expected mode, expected flagged variant)
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}]}),
+      "derive",
+      None,
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}], "default": "cheesecake"}),
+      "value",
+      Some("String"),
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}], "default": 3}),
+      "value",
+      Some("Integer"),
+    ),
+    (
+      json!({"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "default": "cheesecake"}),
+      "value",
+      Some("String"),
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]}),
+      "none",
+      None,
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}], "default": "cheesecake"}),
+      "value",
+      Some("String"),
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}], "default": null}),
+      "none",
+      None,
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}], "default": true}),
+      "derive",
+      None,
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}], "default": true}),
+      "none",
+      None,
+    ),
+  ];
+
+  for (schema_json, expected_mode, expected_variant) in cases {
+    let graph = create_test_graph(parse_schemas(vec![("TestUnion", schema_json.clone())]));
+    let context = create_test_context(graph.clone(), default_config());
+    let converter = SchemaConverter::new(&context);
+    let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap());
+
+    let Ok(types) = result else {
+      panic!("conversion failed for {schema_json}")
+    };
+    let Some(RustType::Enum(enum_def)) = types.first() else {
+      panic!("expected enum for {schema_json}")
+    };
+
+    let mode = match &enum_def.default_mode {
+      EnumDefault::Derive => "derive",
+      EnumDefault::Value(_) => "value",
+      EnumDefault::None => "none",
+    };
+    assert_eq!(mode, expected_mode, "default mode mismatch for {schema_json}");
+
+    let flagged = enum_def
+      .variants
+      .iter()
+      .filter(|v| v.default)
+      .map(|v| v.name.to_string())
+      .collect::<Vec<_>>();
+    let expected = expected_variant.into_iter().map(str::to_string).collect::<Vec<_>>();
+    assert_eq!(flagged, expected, "flagged variant mismatch for {schema_json}");
+  }
+}
+
+#[test]
+fn test_union_default_matching_wrapped_value_enum() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "ImageSize",
+      json!({"type": "object", "properties": {"width": {"type": "integer"}}}),
+    ),
+    (
+      "ImageSizePreset",
+      json!({"type": "string", "enum": ["square_hd", "auto_2K"]}),
+    ),
+    (
+      "TestUnion",
+      json!({
+        "anyOf": [
+          { "$ref": "#/components/schemas/ImageSize" },
+          { "$ref": "#/components/schemas/ImageSizePreset" }
+        ],
+        "default": "auto_2K"
+      }),
+    ),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("TestUnion", graph.get("TestUnion").unwrap())?;
+
+  let Some(enum_def) = result.iter().find_map(|t| match t {
+    RustType::Enum(e) if e.name == EnumToken::new("TestUnion") => Some(e),
+    _ => None,
+  }) else {
+    panic!("expected TestUnion enum")
+  };
+
+  let EnumDefault::Value(default) = &enum_def.default_mode else {
+    panic!("expected value default mode, got {:?}", enum_def.default_mode)
+  };
+
+  assert_eq!(default.inner_variant, Some(EnumVariantToken::new("Auto2k")));
+  assert_eq!(default.value, json!("auto_2K"));
+
+  let flagged = enum_def
+    .variants
+    .iter()
+    .filter(|v| v.default)
+    .map(|v| v.name.to_string())
+    .collect::<Vec<_>>();
+  assert_eq!(flagged, vec!["Preset".to_string()]);
+  Ok(())
 }
 
 #[test]

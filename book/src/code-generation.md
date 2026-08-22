@@ -481,6 +481,15 @@ the schema's `default` value when one is declared; otherwise it falls back to th
 first variant in declaration order. Switching from `spec` to `sorted` therefore
 shifts the fallback default variant to whichever name sorts first alphabetically.
 
+Untagged union enums (`oneOf`/`anyOf`) handle defaults differently. When the
+schema declares a `default` that a variant can represent, the enum gets a
+hand-written `impl Default` constructing that value — for a variant wrapping a
+value enum, down to the selected variant (e.g. `Self::Preset(Preset::Auto2k)`),
+otherwise the coerced literal (e.g. `Self::String("cheesecake".to_string())`).
+Nullable unions (a `null` branch) without a usable `default` get no `Default`
+implementation at all, and properties of that type are generated as `Option<T>`
+even when required.
+
 ### Input Schema
 
 ```json

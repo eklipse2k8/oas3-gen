@@ -107,7 +107,7 @@ impl ValueEnumBuilder {
 
 /// Returns `true` when the variant serializes to or from `value`, either as its
 /// primary `#[serde(rename)]` value or as one of its `#[serde(alias)]` values.
-fn variant_matches_value(variant: &VariantDef, value: &str) -> bool {
+pub(crate) fn variant_matches_value(variant: &VariantDef, value: &str) -> bool {
   variant.serde_name() == value
     || variant
       .serde_attrs

@@ -9,14 +9,17 @@ use super::{
   methods::MethodGenerator,
   relaxed_enum::RelaxedEnumBuilder,
   union_types::{CollisionStrategy, UnionVariantSpec, variants_to_cache_key},
-  value_enums::ValueEnumBuilder,
+  value_enums::{ValueEnumBuilder, variant_matches_value},
   variants::VariantBuilder,
 };
 use crate::{
   generator::{
-    ast::{Documentation, EnumVariantToken, RustPrimitive, RustType},
+    ast::{Documentation, EnumDefault, EnumDefaultValue, EnumVariantToken, RustPrimitive, RustType, VariantDef},
     converter::{ConverterContext, discriminator::DiscriminatorConverter},
-    naming::{identifiers::ensure_unique, inference::strip_common_affixes},
+    naming::{
+      identifiers::ensure_unique,
+      inference::{NormalizedVariant, strip_common_affixes},
+    },
   },
   utils::{SchemaExt, SchemaRefName, SchemaResolveExt},
 };
@@ -173,7 +176,7 @@ impl UnionConverter {
       &schema.one_of
     };
 
-    let variant_specs = self.collect_union_variant_specs(variants_src)?;
+    let (variant_specs, has_null_variant) = self.collect_union_variant_specs(variants_src)?;
 
     let (mut variants, inline_types) = itertools::process_results(
       variant_specs.into_iter().map(|spec| {
@@ -183,6 +186,8 @@ impl UnionConverter {
       |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
     )?;
     let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
+
+    let default_mode = self.resolve_default_mode(schema, &mut variants, &inline_types, has_null_variant);
 
     variants = strip_common_affixes(variants);
 
@@ -208,10 +213,84 @@ impl UnionConverter {
           .docs(Documentation::from_optional(schema.description.as_ref()))
           .variants(variants)
           .methods(methods)
+          .default_mode(default_mode)
           .call()
       });
 
     Ok(ConversionOutput::with_inline_types(main_enum, inline_types))
+  }
+
+  fn resolve_default_mode(
+    &self,
+    schema: &ObjectSchema,
+    variants: &mut [VariantDef],
+    inline_types: &[RustType],
+    has_null_variant: bool,
+  ) -> EnumDefault {
+    let default = schema.default.as_ref().filter(|v| !v.is_null());
+    if let Some(value) = default
+      && let Some(payload) = self.match_default_payload(value, variants, inline_types)
+    {
+      return EnumDefault::Value(payload);
+    }
+
+    if has_null_variant {
+      EnumDefault::None
+    } else {
+      EnumDefault::Derive
+    }
+  }
+
+  fn match_default_payload(
+    &self,
+    value: &serde_json::Value,
+    variants: &mut [VariantDef],
+    inline_types: &[RustType],
+  ) -> Option<EnumDefaultValue> {
+    let normalized = NormalizedVariant::try_from(value).ok()?;
+
+    for variant in variants.iter_mut() {
+      let Some(type_ref) = variant.single_wrapped_type() else {
+        continue;
+      };
+      if type_ref.is_array {
+        continue;
+      }
+
+      let enum_variants = self.method_generator.resolve_enum_value_defs(type_ref, inline_types);
+      if !enum_variants.is_empty() {
+        if let Some(inner) = enum_variants
+          .iter()
+          .find(|v| variant_matches_value(v, &normalized.rename_value))
+        {
+          let inner_variant = Some(inner.name.clone());
+          variant.default = true;
+          return Some(EnumDefaultValue {
+            value: value.clone(),
+            inner_variant,
+          });
+        }
+        continue;
+      }
+
+      let accepts = match (&type_ref.base_type, value) {
+        (RustPrimitive::String, serde_json::Value::String(_)) | (RustPrimitive::Bool, serde_json::Value::Bool(_)) => {
+          true
+        }
+        (primitive, serde_json::Value::Number(_)) if primitive.is_float() => true,
+        (primitive, serde_json::Value::Number(n)) if primitive.is_integer() => n.is_i64() || n.is_u64(),
+        _ => false,
+      };
+      if accepts {
+        variant.default = true;
+        return Some(EnumDefaultValue {
+          value: value.clone(),
+          inner_variant: None,
+        });
+      }
+    }
+
+    None
   }
 
   /// Extracts variant specifications from raw union branch references.
@@ -219,10 +298,12 @@ impl UnionConverter {
   /// For each branch, resolves the schema reference, infers a variant name
   /// (from `$ref` path, schema `title`, or positional fallback), and ensures
   /// uniqueness across all variants. Null schemas are skipped as they represent
-  /// nullable wrappers rather than distinct variants.
-  fn collect_union_variant_specs(&self, variants_src: &[Schema]) -> anyhow::Result<Vec<UnionVariantSpec>> {
+  /// nullable wrappers rather than distinct variants; the returned flag records
+  /// whether any null branch was seen.
+  fn collect_union_variant_specs(&self, variants_src: &[Schema]) -> anyhow::Result<(Vec<UnionVariantSpec>, bool)> {
     let mut specs = vec![];
     let mut seen_names = BTreeSet::new();
+    let mut has_null_variant = false;
 
     for (i, variant_ref) in variants_src.iter().enumerate() {
       let resolved = variant_ref
@@ -230,6 +311,7 @@ impl UnionConverter {
         .context(format!("Schema resolution failed for union variant {i}"))?;
 
       if resolved.is_null() {
+        has_null_variant = true;
         continue;
       }
 
@@ -252,6 +334,6 @@ impl UnionConverter {
       });
     }
 
-    Ok(specs)
+    Ok((specs, has_null_variant))
   }
 }

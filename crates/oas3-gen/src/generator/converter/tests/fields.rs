@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 
 use oas3::spec::{ObjectOrReference, ObjectSchema, Schema, SchemaType, SchemaTypeSet};
+use serde_json::json;
 
 use crate::{
   generator::{
     ast::{OuterAttr, RustPrimitive, RustType, SerdeAsFieldAttr},
     converter::{CodegenConfig, SchemaConverter, fields::FieldConverter},
   },
-  tests::common::{create_test_context, create_test_graph, make_field},
+  tests::common::{create_test_context, create_test_graph, default_config, make_field, parse_schemas},
 };
 
 fn config_with_customizations(customizations: HashMap<String, String>) -> CodegenConfig {
@@ -648,6 +649,52 @@ fn test_multiple_customizations() -> anyhow::Result<()> {
     tag_id_field.serde_as_attr,
     Some(SerdeAsFieldAttr::CustomOverride { ref custom_type, .. }) if custom_type == "crate::MyUuid"
   ));
+
+  Ok(())
+}
+
+#[test]
+fn test_nullable_union_field_is_optional() -> anyhow::Result<()> {
+  let union = json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]});
+  let graph = create_test_graph(parse_schemas(vec![(
+    "Holder",
+    json!({
+      "type": "object",
+      "required": ["required_union", "required_plain"],
+      "properties": {
+        "required_union": union,
+        "optional_union": union,
+        "required_plain": { "type": "string" }
+      }
+    }),
+  )]));
+  let context = create_test_context(graph.clone(), default_config());
+  let converter = SchemaConverter::new(&context);
+  let result = converter.convert_schema("Holder", graph.get("Holder").unwrap())?;
+
+  let Some(struct_def) = result.iter().find_map(|ty| match ty {
+    RustType::Struct(def) => Some(def),
+    _ => None,
+  }) else {
+    panic!("Struct should be present")
+  };
+
+  let cases = [
+    ("required_union", true),
+    ("optional_union", true),
+    ("required_plain", false),
+  ];
+  for (name, expected_nullable) in cases {
+    let field = struct_def
+      .fields
+      .iter()
+      .find(|f| f.name == name)
+      .unwrap_or_else(|| panic!("{name} field should exist"));
+    assert_eq!(
+      field.rust_type.nullable, expected_nullable,
+      "nullability mismatch for {name}"
+    );
+  }
 
   Ok(())
 }

@@ -4,12 +4,13 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 use super::{
   Visibility,
   attributes::{generate_deprecated_attr, generate_outer_attrs, generate_serde_attrs},
+  coercion,
 };
 use crate::generator::{
   ast::{
-    DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumMethod, EnumMethodKind,
-    EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive, SerdeMode, TypeRef,
-    VariantContent, VariantDef,
+    DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumDefault, EnumDefaultValue,
+    EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive,
+    SerdeMode, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     attributes::DeriveAttribute,
@@ -116,6 +117,53 @@ impl ToTokens for EnumMethodFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let helper_fragment = HelperMethodFragment::new(self.vis, self);
     helper_fragment.to_tokens(tokens);
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EnumDefaultImplFragment<'a> {
+  name: &'a EnumToken,
+  variant: &'a VariantDef,
+  default: &'a EnumDefaultValue,
+}
+
+impl<'a> EnumDefaultImplFragment<'a> {
+  pub(crate) fn new(name: &'a EnumToken, variant: &'a VariantDef, default: &'a EnumDefaultValue) -> Self {
+    Self { name, variant, default }
+  }
+}
+
+impl ToTokens for EnumDefaultImplFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = self.name;
+    let variant_name = &self.variant.name;
+
+    let construction = if let Some(type_ref) = self.variant.content.single_type() {
+      let payload = if let Some(inner) = &self.default.inner_variant {
+        let enum_type = Ident::new(&type_ref.unboxed_base_type_name(), Span::call_site());
+        quote! { #enum_type::#inner }
+      } else {
+        coercion::json_to_rust_literal(&self.default.value, type_ref)
+      };
+
+      if type_ref.boxed {
+        quote! { Self::#variant_name(Box::new(#payload)) }
+      } else {
+        quote! { Self::#variant_name(#payload) }
+      }
+    } else {
+      quote! { Self::#variant_name }
+    };
+
+    let ts = quote! {
+      impl Default for #name {
+        fn default() -> Self {
+          #construction
+        }
+      }
+    };
+
+    tokens.extend(ts);
   }
 }
 
@@ -589,17 +637,30 @@ impl ToTokens for EnumFragment<'_> {
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
 
-    let default_idx = self.def.variants.iter().position(|v| v.default).unwrap_or(0);
+    let default_idx = match &self.def.default_mode {
+      EnumDefault::Derive => Some(self.def.variants.iter().position(|v| v.default).unwrap_or(0)),
+      EnumDefault::Value(_) | EnumDefault::None => None,
+    };
     let variants: Vec<EnumValueVariantFragment<'_>> = self
       .def
       .variants
       .iter()
       .enumerate()
-      .map(|(idx, v)| EnumValueVariantFragment::new(v, idx == default_idx, has_serde_derive))
+      .map(|(idx, v)| EnumValueVariantFragment::new(v, Some(idx) == default_idx, has_serde_derive))
       .collect();
     let variants = EnumVariants::new(variants);
 
     let methods = EnumMethodsImplFragment::new(name, self.vis, &self.def.methods);
+
+    let default_impl = match &self.def.default_mode {
+      EnumDefault::Value(default) => self
+        .def
+        .variants
+        .iter()
+        .find(|v| v.default)
+        .map(|v| EnumDefaultImplFragment::new(name, v, default).to_token_stream()),
+      EnumDefault::Derive | EnumDefault::None => None,
+    };
 
     let vis = &self.vis;
     let enum_def = quote! {
@@ -610,6 +671,7 @@ impl ToTokens for EnumFragment<'_> {
       #vis enum #name {
         #variants
       }
+      #default_impl
       #methods
     };
 

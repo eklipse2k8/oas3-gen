@@ -2,9 +2,9 @@ use quote::ToTokens;
 
 use crate::generator::{
   ast::{
-    DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumMethod, EnumMethodKind, EnumToken,
-    EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive, SerdeAttribute,
-    SerdeMode, StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
+    DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumDefault, EnumDefaultValue, EnumMethod,
+    EnumMethodKind, EnumToken, EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant,
+    RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -128,6 +128,111 @@ fn test_enum_default_variant_placement() {
       "#[default] should precede {expected_variant} when marked_idx is {marked_idx:?}"
     );
   }
+}
+
+#[test]
+fn test_enum_default_value_impl() {
+  let tuple_variant = |name: &str, primitive: RustPrimitive, default: bool| VariantDef {
+    name: EnumVariantToken::new(name),
+    content: VariantContent::Tuple(vec![TypeRef::new(primitive)]),
+    default,
+    ..Default::default()
+  };
+
+  let cases = [
+    (
+      0,
+      serde_json::json!("cheesecake"),
+      "Self :: String (\"cheesecake\" . to_string ())",
+    ),
+    (1, serde_json::json!(3), "Self :: Integer (3i64)"),
+  ];
+
+  for (default_idx, value, expected_construction) in cases {
+    let mut def = make_simple_enum(
+      "Value",
+      vec![
+        tuple_variant("String", RustPrimitive::String, default_idx == 0),
+        tuple_variant("Integer", RustPrimitive::I64, default_idx == 1),
+      ],
+    );
+    def.default_mode = EnumDefault::Value(EnumDefaultValue {
+      value,
+      inner_variant: None,
+    });
+
+    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
+
+    assert!(
+      code.contains("impl Default for Value"),
+      "manual Default impl expected for {expected_construction}"
+    );
+    assert!(
+      code.contains(expected_construction),
+      "construction mismatch, expected {expected_construction} in {code}"
+    );
+    assert!(
+      !code.contains("oas3_gen_support"),
+      "derive Default should not be emitted for {expected_construction}"
+    );
+    assert!(
+      !code.contains("# [default]"),
+      "no #[default] marker expected for {expected_construction}"
+    );
+  }
+}
+
+#[test]
+fn test_enum_default_value_impl_with_wrapped_enum() {
+  let mut def = make_simple_enum(
+    "Size",
+    vec![
+      VariantDef {
+        name: EnumVariantToken::new("Custom"),
+        content: VariantContent::Tuple(vec![TypeRef::new("Dimensions")]),
+        ..Default::default()
+      },
+      VariantDef {
+        name: EnumVariantToken::new("Preset"),
+        content: VariantContent::Tuple(vec![TypeRef::new("SizePreset")]),
+        default: true,
+        ..Default::default()
+      },
+    ],
+  );
+  def.default_mode = EnumDefault::Value(EnumDefaultValue {
+    value: serde_json::json!("auto_2K"),
+    inner_variant: Some(EnumVariantToken::new("Auto2k")),
+  });
+
+  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
+
+  assert!(
+    code.contains("Self :: Preset (SizePreset :: Auto2k)"),
+    "wrapped enum construction expected, got {code}"
+  );
+  assert!(!code.contains("# [default]"), "no #[default] marker expected");
+}
+
+#[test]
+fn test_enum_default_mode_none_emits_no_default() {
+  let mut def = make_simple_enum("Value", vec![make_unit_variant("Red"), make_unit_variant("Blue")]);
+  def.default_mode = EnumDefault::None;
+
+  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
+
+  assert!(
+    !code.contains("oas3_gen_support"),
+    "derive Default should not be emitted: {code}"
+  );
+  assert!(!code.contains("# [default]"), "no #[default] marker expected: {code}");
+  assert!(!code.contains("impl Default for"), "no Default impl expected: {code}");
 }
 
 #[test]

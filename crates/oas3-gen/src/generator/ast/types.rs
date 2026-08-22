@@ -276,6 +276,19 @@ impl RustPrimitive {
     matches!(self, RustPrimitive::F32 | RustPrimitive::F64)
   }
 
+  pub fn is_integer(&self) -> bool {
+    self.is_unsigned_integer()
+      || matches!(
+        self,
+        RustPrimitive::I8
+          | RustPrimitive::I16
+          | RustPrimitive::I32
+          | RustPrimitive::I64
+          | RustPrimitive::I128
+          | RustPrimitive::Isize
+      )
+  }
+
   pub fn is_unsigned_integer(&self) -> bool {
     matches!(
       self,

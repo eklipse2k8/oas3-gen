@@ -857,10 +857,9 @@ impl core::fmt::Display for ErrorType {
   }
 }
 /// Test nullable union with primitives
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum NullableStringOrNumber {
-  #[default]
   String(String),
   Number(f64),
 }
@@ -1059,12 +1058,16 @@ pub enum GetEventsResponse {
   Unknown,
 }
 /// The size of the generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum ContentRequestImageSize {
-  #[default]
   ImageSize(ImageSize),
   Preset(ImageSizePreset),
+}
+impl Default for ContentRequestImageSize {
+  fn default() -> Self {
+    Self::Preset(ImageSizePreset::Auto2k)
+  }
 }
 impl ContentRequestImageSize {
   pub fn image_size() -> Self {
