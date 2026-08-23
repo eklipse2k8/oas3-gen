@@ -2,6 +2,7 @@
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::enum_variant_names)]
 #![allow(clippy::large_enum_variant)]
+#![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::result_large_err)]
 #![allow(clippy::struct_field_names)]
