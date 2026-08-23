@@ -12,7 +12,14 @@
 				"properties": {
 					"status": {
 						"type": "string",
-						"enum": ["active", "inactive"]
+						"x-enum-descriptions": [
+							"Object is active.",
+							"Object is inactive."
+						],
+						"enum": [
+							"active",
+							"inactive"
+						]
 					}
 				}
 			},
@@ -21,7 +28,14 @@
 				"properties": {
 					"status": {
 						"type": "string",
-						"enum": ["active", "inactive"]
+						"x-enum-descriptions": [
+							"Object is active.",
+							"Object is inactive."
+						],
+						"enum": [
+							"active",
+							"inactive"
+						]
 					}
 				}
 			},
@@ -30,7 +44,14 @@
 				"properties": {
 					"status": {
 						"type": "string",
-						"enum": ["inactive", "active"]
+						"x-enum-descriptions": [
+							"Object is active.",
+							"Object is inactive."
+						],
+						"enum": [
+							"active",
+							"inactive"
+						]
 					}
 				}
 			}

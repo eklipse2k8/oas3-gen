@@ -25,7 +25,10 @@ pub use documentation::Documentation;
 use http::Method;
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
-use oas3::spec::{ObjectSchema, ParameterIn};
+use oas3::{
+  Spec,
+  spec::{ObjectSchema, ParameterIn},
+};
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
@@ -41,10 +44,30 @@ pub use types::{Rounding, RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
-use crate::{
-  generator::{ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant},
-  utils::schema_ext::SchemaIters,
+use crate::generator::{
+  ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant,
 };
+
+/// API metadata from the spec's `info` object.
+///
+/// Carried into every generated file's header and the crate manifest,
+/// independent of whether the client or server target is generated.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ApiMetadata {
+  pub title: String,
+  pub version: String,
+  pub description: Option<String>,
+}
+
+impl From<&Spec> for ApiMetadata {
+  fn from(spec: &Spec) -> Self {
+    Self {
+      title: spec.info.title.clone(),
+      version: spec.info.version.clone(),
+      description: spec.info.description.clone(),
+    }
+  }
+}
 
 /// Node used to generate file header
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, bon::Builder)]
@@ -656,19 +679,6 @@ impl VariantDef {
   #[must_use]
   pub fn unboxed_type_name(&self) -> Option<String> {
     self.content.single_type().map(TypeRef::unboxed_base_type_name)
-  }
-}
-
-impl SchemaIters for std::slice::Iter<'_, Value> {
-  fn variants(self) -> impl Iterator<Item = VariantDef> {
-    self.filter_map(|value| {
-      Some(
-        VariantDef::builder()
-          .value(value)?
-          .content(VariantContent::Unit)
-          .build(),
-      )
-    })
   }
 }
 

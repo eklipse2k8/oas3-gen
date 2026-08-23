@@ -3,6 +3,7 @@ use std::{
   rc::Rc,
 };
 
+use anyhow::Context as _;
 use clap::ValueEnum;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
@@ -14,7 +15,7 @@ use self::{
   server::ServerGenerator,
   types::TypesFragment,
 };
-use super::ast::{ClientRootNode, GlobalLintsNode, OperationInfo, RustType, ServerRequestTraitDef};
+use super::ast::{ApiMetadata, ClientRootNode, GlobalLintsNode, OperationInfo, RustType, ServerRequestTraitDef};
 use crate::generator::{
   ast::{Documentation, FileHeaderNode, constants::HttpHeaderRef},
   converter::CodegenConfig,
@@ -106,7 +107,7 @@ impl ToTokens for FileHeaderNode {
 
 fn generate_source(
   code: &TokenStream,
-  metadata: &ClientRootNode,
+  metadata: &ApiMetadata,
   lint_config: Option<&GlobalLintsNode>,
   source_path: &str,
   gen_version: &str,
@@ -184,6 +185,11 @@ impl GeneratedResult {
   }
 }
 
+/// Generates Rust source files from converted types and operations.
+///
+/// `client` and `server_trait` are gated by the generation target: exactly one
+/// is present, matching the CLI mode. `metadata` is always available for file
+/// headers and the crate manifest.
 #[derive(Debug, Clone)]
 pub struct SchemaCodeGenerator {
   config: CodegenConfig,
@@ -191,7 +197,8 @@ pub struct SchemaCodeGenerator {
   operations: Rc<Vec<OperationInfo>>,
   header_refs: Rc<Vec<HttpHeaderRef>>,
   uses: Rc<BTreeSet<String>>,
-  client: Rc<ClientRootNode>,
+  metadata: ApiMetadata,
+  client: Option<Rc<ClientRootNode>>,
   server_trait: Option<ServerRequestTraitDef>,
   visibility: Visibility,
   source_path: String,
@@ -207,7 +214,8 @@ impl SchemaCodeGenerator {
     operations: Vec<OperationInfo>,
     header_refs: Vec<HttpHeaderRef>,
     uses: BTreeSet<String>,
-    client: ClientRootNode,
+    metadata: ApiMetadata,
+    client: Option<ClientRootNode>,
     server_trait: Option<ServerRequestTraitDef>,
     visibility: Visibility,
     source_path: String,
@@ -219,7 +227,8 @@ impl SchemaCodeGenerator {
       operations: Rc::new(operations),
       header_refs: Rc::new(header_refs),
       uses: Rc::new(uses),
-      client: Rc::new(client),
+      metadata,
+      client: client.map(Rc::new),
       server_trait,
       visibility,
       source_path,
@@ -241,7 +250,10 @@ impl SchemaCodeGenerator {
   ///
   /// The client struct includes methods for each API operation.
   pub fn generate_client(&self) -> anyhow::Result<GeneratedResult> {
-    let code = self.format_tokens_with_lints(&self.client_fragment(false))?;
+    let fragment = self
+      .client_fragment(false)
+      .context("client root node is required for client generation")?;
+    let code = self.format_tokens_with_lints(&fragment)?;
     Ok(GeneratedResult::client(code))
   }
 
@@ -252,9 +264,12 @@ impl SchemaCodeGenerator {
   /// alongside the sources.
   pub fn generate_client_mod(&self, package: Option<&CratePackage>) -> anyhow::Result<GeneratedResult> {
     let types_code = self.format_tokens(&self.types_fragment())?;
-    let client_code = self.format_tokens(&self.client_fragment(true))?;
+    let fragment = self
+      .client_fragment(true)
+      .context("client root node is required for client generation")?;
+    let client_code = self.format_tokens(&fragment)?;
     let mod_fragment = ModFileFragment::for_client(
-      (*self.client).clone(),
+      self.metadata.clone(),
       self.visibility,
       self.source_path.clone(),
       self.gen_version.clone(),
@@ -274,7 +289,7 @@ impl SchemaCodeGenerator {
     let types_code = self.format_tokens(&self.types_fragment())?;
     let server_code = self.format_tokens(&self.server_fragment())?;
     let mod_fragment = ModFileFragment::for_server(
-      (*self.client).clone(),
+      self.metadata.clone(),
       self.visibility,
       self.source_path.clone(),
       self.gen_version.clone(),
@@ -300,7 +315,7 @@ impl SchemaCodeGenerator {
     let manifest = CargoManifest::new(
       package.clone(),
       kind,
-      &self.client.title,
+      &self.metadata.title,
       self.gen_version.clone(),
       self.config.collection_types,
       &sources,
@@ -321,13 +336,16 @@ impl SchemaCodeGenerator {
   }
 
   /// Creates a client fragment for HTTP client code generation.
-  fn client_fragment(&self, with_types_import: bool) -> ClientFragment {
-    let fragment = ClientFragment::new(&self.client, &self.operations, self.visibility);
-    if with_types_import {
+  ///
+  /// Returns `None` when the generator was built without a client root node
+  /// (server target).
+  fn client_fragment(&self, with_types_import: bool) -> Option<ClientFragment> {
+    let fragment = ClientFragment::new(self.client.as_deref()?, &self.operations, self.visibility);
+    Some(if with_types_import {
       fragment.with_types_import()
     } else {
       fragment
-    }
+    })
   }
 
   /// Creates a server fragment for axum server trait generation.
@@ -339,7 +357,7 @@ impl SchemaCodeGenerator {
   fn format_tokens(&self, fragment: &impl ToTokens) -> anyhow::Result<String> {
     generate_source(
       &fragment.to_token_stream(),
-      &self.client,
+      &self.metadata,
       None,
       &self.source_path,
       &self.gen_version,
@@ -351,7 +369,7 @@ impl SchemaCodeGenerator {
     let lints = GlobalLintsNode::default();
     generate_source(
       &fragment.to_token_stream(),
-      &self.client,
+      &self.metadata,
       Some(&lints),
       &self.source_path,
       &self.gen_version,

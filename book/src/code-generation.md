@@ -914,6 +914,91 @@ field, you get both `Pet` and `Category` even though you only selected
 
 ---
 
+## Function Name Overrides
+
+```text
+--fn-name <ID=NAME>
+```
+
+Overrides the generated client and server method name for a specific operation.
+The key is the operation's `operationId` as written in the spec (falling back to
+the snake_case operation ID shown by `oas3-gen list operations`). The custom name
+is normalized to `snake_case`. Derived request and response type names follow the
+override, so renaming `listPets` to `fetch_all_pets` also produces
+`FetchAllPetsRequest` and `FetchAllPetsResponse`.
+
+Repeat the flag to rename several operations:
+
+```bash
+cargo run -- generate client-mod -i petstore.json -o output/ \
+  --fn-name listPets=fetch_all_pets \
+  --fn-name showPetById=get_pet
+```
+
+**Generated client:**
+
+```rust
+impl PetStoreClient {
+    pub async fn fetch_all_pets(&self, request: FetchAllPetsRequest) -> anyhow::Result<FetchAllPetsResponse> {
+        /* ... */
+    }
+
+    pub async fn get_pet(&self, request: GetPetRequest) -> anyhow::Result<GetPetResponse> {
+        /* ... */
+    }
+}
+```
+
+---
+
+## API Name Override
+
+```text
+--api-name <NAME>
+```
+
+Overrides the name of the top-level generated API item: the client struct in
+`client`/`client-mod` modes and the server trait in `server-mod` mode. By
+default the client struct name is derived from the spec's `info.title` (e.g.,
+"Swagger Petstore" becomes `SwaggerPetstoreClient`, falling back to
+`ApiClient` when the title is empty), and the server trait is always named
+`ApiServer`. The value is normalized to `PascalCase`.
+
+```bash
+cargo run -- generate client-mod -i petstore.json -o output/ --api-name PetStoreClient
+```
+
+**Generated client:**
+
+```rust
+#[derive(Debug, Clone)]
+pub struct PetStoreClient {
+    pub client: Client,
+    pub base_url: Url,
+}
+
+impl PetStoreClient {
+    pub fn new() -> Self { /* ... */ }
+}
+```
+
+**Generated server (with `--api-name PetStoreApi`):**
+
+```rust
+pub trait PetStoreApi: Send + Sync {
+    /* ... */
+}
+
+pub fn router<S>(service: S) -> Router
+where
+    S: PetStoreApi + Clone + Send + Sync + 'static,
+{
+    /* ... */
+}
+```
+
+---
+
 ## Schema Filtering
 
 ```text
@@ -1141,6 +1226,8 @@ pub struct Widget {
 | `--no-helpers` | `false` | Disable enum constructor helpers |
 | `--odata-support` | `false` | Make `@odata.*` fields optional |
 | `-c, --customize` | *(none)* | Custom type mapping; repeatable |
+| `--fn-name` | *(none)* | Custom function name per operation (`ID=NAME`); repeatable |
+| `--api-name` | *(none)* | Name for the generated client struct or server trait |
 | `--all-headers` | `false` | Emit header constants for all component-level headers |
 | `--enable-builders` | `false` | Enable bon builder derives and methods |
 | `--no-ordered-collections` | `false` | Emit `HashMap`/`Vec` instead of `indexmap` collection types |

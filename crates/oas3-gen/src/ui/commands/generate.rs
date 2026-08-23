@@ -47,6 +47,8 @@ pub struct GenerateConfig {
   pub no_ordered_collections: bool,
   pub doc_format: bool,
   pub customizations: HashMap<String, String>,
+  pub fn_name_overrides: HashMap<String, String>,
+  pub api_name: Option<String>,
   pub crate_package: Option<CratePackage>,
 }
 
@@ -108,6 +110,8 @@ impl GenerateConfig {
       })
       .enable_builders(self.enable_builders)
       .customizations(self.customizations.clone())
+      .fn_name_overrides(self.fn_name_overrides.clone())
+      .maybe_api_name(self.api_name.clone())
       .build();
 
     Orchestrator::new(
@@ -195,6 +199,8 @@ impl GenerateConfig {
       verbose,
       quiet,
       customize,
+      fn_name,
+      api_name,
     } = command;
 
     let output = match (&mode, output) {
@@ -204,6 +210,7 @@ impl GenerateConfig {
     };
     let enum_policies = EnumPolicies::from(enum_mode);
     let customizations = parse_customizations(customize)?;
+    let fn_name_overrides = parse_fn_name_overrides(fn_name)?;
     let crate_package = resolve_crate_package(&mode, &output, workspace, module_version)?;
 
     Ok(Self {
@@ -226,6 +233,8 @@ impl GenerateConfig {
       no_ordered_collections,
       doc_format,
       customizations,
+      fn_name_overrides,
+      api_name,
       crate_package,
     })
   }
@@ -250,15 +259,27 @@ pub(crate) fn resolve_crate_package(
 }
 
 pub(crate) fn parse_customizations(customize: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
-  let Some(entries) = customize else {
+  parse_key_value_map(customize, "customize", "TYPE=PATH (e.g., date_time=crate::MyDateTime)")
+}
+
+pub(crate) fn parse_fn_name_overrides(fn_name: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
+  parse_key_value_map(fn_name, "fn-name", "ID=NAME (e.g., listPets=fetch_pets)")
+}
+
+fn parse_key_value_map(
+  entries: Option<Vec<String>>,
+  flag: &str,
+  format_hint: &str,
+) -> anyhow::Result<HashMap<String, String>> {
+  let Some(entries) = entries else {
     return Ok(HashMap::new());
   };
 
   let mut map = HashMap::new();
   for entry in entries {
-    let (key, value) = entry.split_once('=').ok_or_else(|| {
-      anyhow::anyhow!("Invalid customize format '{entry}': expected TYPE=PATH (e.g., date_time=crate::MyDateTime)")
-    })?;
+    let (key, value) = entry
+      .split_once('=')
+      .ok_or_else(|| anyhow::anyhow!("Invalid {flag} format '{entry}': expected {format_hint}"))?;
     map.insert(key.to_string(), value.to_string());
   }
   Ok(map)

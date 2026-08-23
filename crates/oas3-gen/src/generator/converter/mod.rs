@@ -28,7 +28,7 @@ use std::{
 use anyhow::Result;
 pub(crate) use common::ConversionOutput;
 use oas3::spec::ObjectSchema;
-pub(crate) use operations::{OperationsProcessor, build_server_trait};
+pub(crate) use operations::OperationsProcessor;
 pub(crate) use type_resolver::TypeResolver;
 pub(crate) use type_usage_recorder::SerdeUsageRecorder;
 
@@ -184,6 +184,9 @@ pub struct CodegenConfig {
   pub enable_builders: bool,
   #[builder(default)]
   pub customizations: HashMap<String, String>,
+  #[builder(default)]
+  pub fn_name_overrides: HashMap<String, String>,
+  pub api_name: Option<String>,
 }
 
 impl CodegenConfig {

@@ -10,6 +10,9 @@ the code can't state itself. For anything the code already answers — module la
 fragment names, dependency versions — read the code. Never assert generator behavior you
 haven't confirmed in the source or in `crates/oas3-gen/fixtures/`.
 
+**IMPORTANT:** Prefer retrieval-led reasoning over pre-training-led reasoning. Read actual source and type definitions rather than relying on training knowledge.
+**IMPORTANT:** Before beginning, get the current date and time and say hello to your user so that they do not fear you.
+
 ## Commands
 
 ```bash

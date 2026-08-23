@@ -44,6 +44,7 @@
 						"required": false,
 						"schema": {
 							"type": "string",
+							"x-enum-descriptions": ["ascending", "descending"],
 							"enum": ["asc", "desc"]
 						}
 					},
@@ -56,6 +57,7 @@
 							"type": "array",
 							"items": {
 								"type": "string",
+								"x-enum-descriptions": ["a cat", "a dog", "a fish", "a bird"],
 								"enum": ["cat", "dog", "fish", "bird"]
 							}
 						}

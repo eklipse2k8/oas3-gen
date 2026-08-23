@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use super::support::{
-  assert_contains, assert_contains_all, assert_not_contains, assert_occurs_at_least, generate_types, make_orchestrator,
-  make_orchestrator_with_customizations, make_orchestrator_with_ops, parse_spec, string_set,
+  assert_contains, assert_contains_all, assert_not_contains, assert_occurs_at_least, generate_client, generate_server,
+  generate_types, make_orchestrator, make_orchestrator_with_api_name, make_orchestrator_with_customizations,
+  make_orchestrator_with_fn_name_overrides, make_orchestrator_with_ops, parse_spec, string_set,
 };
-use crate::generator::ast::{ClientRootNode, StructToken};
+use crate::generator::{GenerationTarget, ast::ApiMetadata};
 
 type PresenceCheck<'a> = (&'a str, usize, &'a str);
 type AbsenceCheck<'a> = (&'a str, &'a str);
@@ -13,11 +14,7 @@ type EnumDedupCase<'a> = (&'a str, Vec<PresenceCheck<'a>>, Vec<AbsenceCheck<'a>>
 #[test]
 fn test_metadata_and_header_generation() {
   let spec = parse_spec(include_str!("../../../fixtures/basic_api.json"));
-  let metadata = ClientRootNode::builder()
-    .name(StructToken::new("PembrokeApiClient"))
-    .info(&spec.info)
-    .servers(&spec.servers)
-    .build();
+  let metadata = ApiMetadata::from(&spec);
 
   assert_eq!(metadata.title, "Basic Test API", "title mismatch");
   assert_eq!(metadata.version, "1.0.0", "version mismatch");
@@ -140,6 +137,137 @@ fn test_all_schemas_overrides_operation_filtering() {
   assert_eq!(
     with_all_schemas.orphaned_schemas_count, 0,
     "with all_schemas: 0 orphaned"
+  );
+}
+
+#[test]
+fn test_fn_name_override_renames_derived_types() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Test API", "version": "1.0.0" },
+    "paths": {
+      "/users": {
+        "get": {
+          "operationId": "listUsers",
+          "parameters": [
+            { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+          ],
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": { "application/json": { "schema": { "type": "string" } } }
+            }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let overrides = HashMap::from([("listUsers".to_string(), "fetch_all_users".to_string())]);
+  let orchestrator = make_orchestrator_with_fn_name_overrides(parse_spec(spec_json), false, overrides);
+  let output = generate_types(&orchestrator, "test.json");
+
+  assert_contains_all(
+    &output.code,
+    &[
+      ("FetchAllUsersRequest", "request type should derive from the override"),
+      ("FetchAllUsersResponse", "response type should derive from the override"),
+    ],
+  );
+  assert_not_contains(
+    &output.code,
+    "ListUsersRequest",
+    "request type should not use the original operation ID",
+  );
+  assert_not_contains(
+    &output.code,
+    "ListUsersResponse",
+    "response type should not use the original operation ID",
+  );
+}
+
+#[test]
+fn test_api_name_overrides_client_struct_name() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Swagger Petstore", "version": "1.0.0" },
+    "paths": {
+      "/pets": {
+        "get": {
+          "operationId": "listPets",
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": { "application/json": { "schema": { "type": "string" } } }
+            }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let default = generate_client(&make_orchestrator(parse_spec(spec_json), false), "test.json");
+  assert_contains(
+    &default,
+    "pub struct SwaggerPetstoreClient",
+    "client name should derive from the title",
+  );
+
+  let orchestrator = make_orchestrator_with_api_name(parse_spec(spec_json), "PetStoreClient", GenerationTarget::Client);
+  let client = generate_client(&orchestrator, "test.json");
+  assert_contains_all(
+    &client,
+    &[
+      ("pub struct PetStoreClient", "struct should use the overridden name"),
+      ("impl PetStoreClient", "impl block should use the overridden name"),
+    ],
+  );
+  assert_not_contains(
+    &client,
+    "SwaggerPetstoreClient",
+    "title-derived name should not appear when overridden",
+  );
+}
+
+#[test]
+fn test_api_name_overrides_server_trait_name() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Swagger Petstore", "version": "1.0.0" },
+    "paths": {
+      "/pets": {
+        "get": {
+          "operationId": "listPets",
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": { "application/json": { "schema": { "type": "string" } } }
+            }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let orchestrator = make_orchestrator_with_api_name(parse_spec(spec_json), "PetStoreApi", GenerationTarget::Server);
+  let server = generate_server(&orchestrator, "test.json");
+  assert_contains_all(
+    &server,
+    &[
+      (
+        "pub trait PetStoreApi: Send + Sync",
+        "trait should use the overridden name",
+      ),
+      (
+        "S: PetStoreApi + Clone + Send + Sync + 'static",
+        "handler and router bounds should use the overridden name",
+      ),
+    ],
+  );
+  assert_not_contains(
+    &server,
+    "ApiServer",
+    "default trait name should not appear when overridden",
   );
 }
 

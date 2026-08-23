@@ -49,6 +49,58 @@ fn test_simple_string_enum() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_enum_variant_docs_from_x_enum_descriptions() {
+  let cases = [
+    (
+      "all values documented",
+      json!({
+        "type": "string",
+        "x-enum-descriptions": ["ascending", "descending"],
+        "enum": ["asc", "desc"]
+      }),
+      vec![vec!["ascending".to_string()], vec!["descending".to_string()]],
+    ),
+    (
+      "no extension yields no docs",
+      json!({"type": "string", "enum": ["asc", "desc"]}),
+      vec![vec![], vec![]],
+    ),
+    (
+      "shorter extension leaves trailing values undocumented",
+      json!({
+        "type": "string",
+        "x-enum-descriptions": ["first only"],
+        "enum": ["a", "b", "c"]
+      }),
+      vec![vec!["first only".to_string()], vec![], vec![]],
+    ),
+  ];
+
+  for (label, schema_json, expected_docs) in cases {
+    let graph = create_test_graph(parse_schemas(vec![("SortOrder", schema_json.clone())]));
+    let context = create_test_context(graph.clone(), default_config());
+    let converter = SchemaConverter::new(&context);
+    let result = converter.convert_schema("SortOrder", graph.get("SortOrder").unwrap());
+
+    let Ok(types) = result else {
+      panic!("conversion failed for {label}")
+    };
+    let Some(RustType::Enum(enum_def)) = types.first() else {
+      panic!("expected enum for {label}")
+    };
+
+    assert_eq!(
+      enum_def.variants.len(),
+      expected_docs.len(),
+      "variant count mismatch for {label}"
+    );
+    for (variant, expected) in enum_def.variants.iter().zip(expected_docs) {
+      assert_eq!(variant.docs, expected, "variant docs mismatch for {label}");
+    }
+  }
+}
+
+#[test]
 fn test_enum_default_value_marks_variant() {
   let cases = [
     (

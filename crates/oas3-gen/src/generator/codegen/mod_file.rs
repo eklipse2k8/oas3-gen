@@ -3,7 +3,7 @@ use quote::{ToTokens, quote};
 
 use super::Visibility;
 use crate::generator::{
-  ast::{ClientRootNode, GlobalLintsNode},
+  ast::{ApiMetadata, GlobalLintsNode},
   codegen::generate_source,
 };
 
@@ -24,7 +24,7 @@ impl ModFileKind {
 
 #[derive(Debug, Clone)]
 pub struct ModFileFragment {
-  metadata: ClientRootNode,
+  metadata: ApiMetadata,
   visibility: Visibility,
   kind: ModFileKind,
   source_path: String,
@@ -33,7 +33,7 @@ pub struct ModFileFragment {
 
 impl ModFileFragment {
   pub fn new(
-    metadata: ClientRootNode,
+    metadata: ApiMetadata,
     visibility: Visibility,
     kind: ModFileKind,
     source_path: String,
@@ -48,21 +48,11 @@ impl ModFileFragment {
     }
   }
 
-  pub fn for_client(
-    metadata: ClientRootNode,
-    visibility: Visibility,
-    source_path: String,
-    gen_version: String,
-  ) -> Self {
+  pub fn for_client(metadata: ApiMetadata, visibility: Visibility, source_path: String, gen_version: String) -> Self {
     Self::new(metadata, visibility, ModFileKind::Client, source_path, gen_version)
   }
 
-  pub fn for_server(
-    metadata: ClientRootNode,
-    visibility: Visibility,
-    source_path: String,
-    gen_version: String,
-  ) -> Self {
+  pub fn for_server(metadata: ApiMetadata, visibility: Visibility, source_path: String, gen_version: String) -> Self {
     Self::new(metadata, visibility, ModFileKind::Server, source_path, gen_version)
   }
 

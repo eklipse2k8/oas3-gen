@@ -7,7 +7,7 @@ use oas3::{
 
 use crate::{
   generator::{
-    ast::{VariantContent, VariantDef},
+    ast::{Documentation, VariantContent, VariantDef},
     naming::{
       constants::{REQUEST_BODY_SUFFIX, RESPONSE_PREFIX, RESPONSE_SUFFIX},
       identifiers::{sanitize, to_rust_type_name},
@@ -43,10 +43,6 @@ impl SchemaResolveExt for Schema {
       Schema::Boolean(_) => Ok(ObjectSchema::default()),
     }
   }
-}
-
-pub trait SchemaIters {
-  fn variants(self) -> impl Iterator<Item = VariantDef>;
 }
 
 pub trait Resolvable {
@@ -262,6 +258,9 @@ pub(crate) trait SchemaExt {
   /// Checks in order: title, single property name, path segments.
   fn infer_name_from_context(&self, path: &str, context: &str) -> String;
 
+  /// Returns `Iterator` of `VariantDef` for constrained values from enums or consts.
+  fn constrained_values_to_variants(&self) -> impl Iterator<Item = VariantDef>;
+
   /// Extracts all enum variant definitions from the schema.
   ///
   /// Handles multiple patterns:
@@ -273,6 +272,11 @@ pub(crate) trait SchemaExt {
   /// Returns fully-constructed `VariantDef`s with normalized names, serde attributes,
   /// documentation, and deprecated status from the source schema when available.
   fn extract_enum_entries(&self, spec: &Spec) -> Vec<VariantDef>;
+
+  /// Returns the enum variant descriptions from the first supported vendor
+  /// extension (`x-enum-descriptions`, `x-speakeasy-enum-descriptions`, or
+  /// `x-google-enum-descriptions`), or an empty vec when none is present.
+  fn extract_enum_descriptions(&self) -> Vec<String>;
 
   /// Returns true if the schema should be registered as an enum in the name index.
   ///
@@ -437,7 +441,7 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn has_relaxed_anyof_enum(&self) -> bool {
-    !self.any_of.is_empty() && has_mixed_string_variants(self.any_of.iter())
+    self.one_of.is_empty() && self.is_relaxed_enum_pattern()
   }
 
   fn union_variants(&self) -> impl Iterator<Item = &Schema> {
@@ -483,7 +487,8 @@ impl SchemaExt for ObjectSchema {
   }
 
   fn is_relaxed_enum_pattern(&self) -> bool {
-    has_mixed_string_variants(self.union_variants())
+    let variants = || self.union_variants().filter_map(Schema::as_inline);
+    variants().any(SchemaExt::is_unconstrained_string) && variants().any(SchemaExt::is_constrained)
   }
 
   fn infer_variant_name(&self, index: usize) -> String {
@@ -627,22 +632,37 @@ impl SchemaExt for ObjectSchema {
       })
   }
 
-  fn extract_enum_entries(&self, spec: &Spec) -> Vec<VariantDef> {
-    if !self.enum_values.is_empty() {
-      return self.enum_values.iter().variants().collect();
-    }
+  fn constrained_values_to_variants(&self) -> impl Iterator<Item = VariantDef> {
+    let descriptions = self.extract_enum_descriptions();
+    let enum_variants = self.enum_values.iter().enumerate().filter_map(move |(index, value)| {
+      Some(
+        VariantDef::builder()
+          .value(value)?
+          .docs(Documentation::from_optional(descriptions.get(index)))
+          .content(VariantContent::Unit)
+          .build(),
+      )
+    });
 
-    if let Some(const_val) = &self.const_value {
-      let Ok(normalized) = NormalizedVariant::try_from(const_val) else {
-        return vec![];
-      };
-      return vec![
+    let const_variant = self
+      .const_value
+      .as_ref()
+      .filter(|_| self.enum_values.is_empty())
+      .and_then(|value| NormalizedVariant::try_from(value).ok())
+      .map(|normalized| {
         VariantDef::builder()
           .normalized(normalized)
           .content(VariantContent::Unit)
           .schema(self)
-          .build(),
-      ];
+          .build()
+      });
+
+    enum_variants.chain(const_variant)
+  }
+
+  fn extract_enum_entries(&self, spec: &Spec) -> Vec<VariantDef> {
+    if self.is_constrained() {
+      return self.constrained_values_to_variants().collect();
     }
 
     let resolved_variants = self.union_variants().resolve_all(spec).collect::<Vec<_>>();
@@ -653,8 +673,25 @@ impl SchemaExt for ObjectSchema {
 
     resolved_variants
       .iter()
-      .flat_map(extract_variant_entries)
+      .flat_map(SchemaExt::constrained_values_to_variants)
       .unique_by(|v| v.serde_name().to_string())
+      .collect()
+  }
+
+  fn extract_enum_descriptions(&self) -> Vec<String> {
+    const SUPPORTED_KEYS: [&str; 3] = [
+      "enum-descriptions",
+      "speakeasy-enum-descriptions",
+      "google-enum-descriptions",
+    ];
+
+    SUPPORTED_KEYS
+      .into_iter()
+      .find_map(|key| self.extensions.get(key)?.as_array())
+      .into_iter()
+      .flatten()
+      .filter_map(serde_json::Value::as_str)
+      .map(str::to_string)
       .collect()
   }
 
@@ -671,67 +708,11 @@ impl SchemaExt for ObjectSchema {
 /// objects, arrays, or references to structs disqualify the whole union, since
 /// its set of values cannot be enumerated.
 fn is_enum_like_variant(schema: &ObjectSchema) -> bool {
-  schema.is_null() || schema.is_unconstrained_string() || !schema.enum_values.is_empty() || schema.const_value.is_some()
-}
-
-fn extract_variant_entries(schema: &ObjectSchema) -> Vec<VariantDef> {
-  if schema.is_unconstrained_string() {
-    return vec![];
-  }
-
-  if let Some(const_val) = &schema.const_value {
-    let Ok(normalized) = NormalizedVariant::try_from(const_val) else {
-      return vec![];
-    };
-
-    return vec![
-      VariantDef::builder()
-        .normalized(normalized)
-        .content(VariantContent::Unit)
-        .schema(schema)
-        .build(),
-    ];
-  }
-
-  schema.enum_values.iter().variants().collect()
+  schema.is_null() || schema.is_string_type() || schema.is_constrained()
 }
 
 pub(crate) fn variant_is_nullable(variant: &Schema, spec: &Spec) -> bool {
   variant
     .resolve_object(spec)
     .is_ok_and(|schema| schema.is_nullable_object())
-}
-
-/// Checks if variants contain both freeform strings and constrained strings.
-///
-/// Used to detect "relaxed enum" patterns where an API accepts known enum values
-/// plus arbitrary strings for forward compatibility.
-///
-/// # Example
-/// ```text
-/// anyOf: [{ type: string }, { type: string, enum: ["a", "b"] }] => true
-/// anyOf: [{ type: string, enum: ["a"] }, { type: string, enum: ["b"] }] => false
-/// ```
-///
-pub(crate) fn has_mixed_string_variants<'a>(variants: impl Iterator<Item = &'a Schema>) -> bool {
-  let objects = variants.filter_map(Schema::as_inline);
-
-  let mut has_freeform = false;
-  let mut has_constrained = false;
-
-  for v in objects {
-    if v.is_unconstrained_string() {
-      if has_constrained {
-        return true;
-      }
-      has_freeform = true;
-    } else if v.is_constrained() {
-      if has_freeform {
-        return true;
-      }
-      has_constrained = true;
-    }
-  }
-
-  false
 }
