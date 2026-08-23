@@ -362,7 +362,11 @@ impl RustPrimitive {
   pub fn format_number(&self, num: &Number) -> String {
     if self.is_float() {
       let s = num.to_string();
-      if s.contains('.') { s } else { format!("{s}.0") }
+      if s.contains('.') || s.contains(['e', 'E']) {
+        s
+      } else {
+        format!("{s}.0")
+      }
     } else if let Some(value) = num.as_i64() {
       render_integer(self, value)
     } else if let Some(value) = num.as_u64() {

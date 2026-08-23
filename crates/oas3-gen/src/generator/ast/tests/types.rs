@@ -137,6 +137,12 @@ fn test_format_example_primitive_types() {
     ),
     (TypeRef::new(RustPrimitive::I32), serde_json::json!(42), "42i32"),
     (TypeRef::new(RustPrimitive::F64), serde_json::json!(3.14), "3.14"),
+    (TypeRef::new(RustPrimitive::F64), serde_json::json!(1e-6), "1e-6"),
+    (
+      TypeRef::new(RustPrimitive::F64),
+      serde_json::json!(2.5e10),
+      "25000000000.0",
+    ),
     (TypeRef::new(RustPrimitive::Bool), serde_json::json!(true), "true"),
     (TypeRef::new(RustPrimitive::Bool), serde_json::json!(false), "false"),
   ];
