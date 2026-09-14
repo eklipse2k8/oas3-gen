@@ -49,7 +49,10 @@ impl UnionSerializationTestApiClient {
   /// Send content blocks
   ///
   /// * Path: `POST /content`
-  pub async fn send_content(&self, request: SendContentRequest) -> anyhow::Result<SendContentResponse> {
+  pub async fn send_content(
+    &self,
+    request: SendContentRequest,
+  ) -> anyhow::Result<ApiResponse<ContentResponse, ErrorResponse>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -62,7 +65,7 @@ impl UnionSerializationTestApiClient {
   /// Get events with discriminated union
   ///
   /// * Path: `GET /events`
-  pub async fn get_events(&self, request: GetEventsRequest) -> anyhow::Result<GetEventsResponse> {
+  pub async fn get_events(&self, request: GetEventsRequest) -> anyhow::Result<ApiResponse<EventList, ()>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url

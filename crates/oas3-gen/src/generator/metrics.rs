@@ -45,7 +45,9 @@ impl GenerationStats {
     match rust_type {
       RustType::Struct(_) => self.record_struct(),
       RustType::Enum(def) => self.record_enum(!def.methods.is_empty()),
-      RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) => self.record_enum(false),
+      RustType::DiscriminatedEnum(_) | RustType::ResponseEnum(_) | RustType::ResponseUnion(_) => {
+        self.record_enum(false);
+      }
       RustType::TypeAlias(_) => self.record_type_alias(),
     }
   }

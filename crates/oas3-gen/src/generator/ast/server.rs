@@ -1,8 +1,8 @@
 use http::Method;
 
 use super::{
-  ContentCategory, Documentation, EnumToken, FieldDef, FileHeaderNode, MethodNameToken, OperationInfo,
-  ParameterLocation, ParsedPath, StructToken, TypeRef,
+  ContentCategory, Documentation, FieldDef, FileHeaderNode, MethodNameToken, OperationInfo, OperationResponse,
+  ParameterLocation, ParsedPath, ResponseEnumDef, StructToken, TypeRef,
 };
 use crate::generator::{ast::tokens::TraitToken, naming::identifiers::to_rust_type_name};
 
@@ -20,7 +20,7 @@ pub struct ServerTraitMethod {
   #[builder(default)]
   pub docs: Documentation,
   pub request_type: Option<StructToken>,
-  pub response_type: Option<EnumToken>,
+  pub response: Option<OperationResponse>,
   pub http_method: Method,
   pub path: ParsedPath,
   pub path_params_type: Option<StructToken>,
@@ -36,6 +36,7 @@ pub struct ServerRequestTraitDef {
   pub docs: Documentation,
   #[builder(default)]
   pub methods: Vec<ServerTraitMethod>,
+  pub response_enum: Option<ResponseEnumDef>,
 }
 
 impl ServerRequestTraitDef {
@@ -44,7 +45,11 @@ impl ServerRequestTraitDef {
   /// Creates a trait (named `ApiServer`, or `api_name` when provided) with one
   /// method per operation, including typed path, query, and header parameter
   /// structs. Returns `None` if there are no operations to include.
-  pub fn from_operations(operations: &[OperationInfo], api_name: Option<&str>) -> Option<Self> {
+  pub fn from_operations(
+    operations: &[OperationInfo],
+    api_name: Option<&str>,
+    response_enum: Option<ResponseEnumDef>,
+  ) -> Option<Self> {
     if operations.is_empty() {
       return None;
     }
@@ -73,7 +78,7 @@ impl ServerRequestTraitDef {
           .name(MethodNameToken::from_raw(&info.stable_id))
           .docs(info.documentation.clone())
           .maybe_request_type(info.request_type.clone())
-          .maybe_response_type(info.response_enum.clone())
+          .maybe_response(info.response.clone())
           .http_method(info.method.clone())
           .path(info.path.clone())
           .maybe_path_params_type(path_params_type)
@@ -88,6 +93,7 @@ impl ServerRequestTraitDef {
       Self::builder()
         .name(TraitToken::new_server(api_name, ""))
         .methods(methods)
+        .maybe_response_enum(response_enum)
         .build(),
     )
   }

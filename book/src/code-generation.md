@@ -7,6 +7,7 @@ generated Rust code.
 ## Table of Contents
 
 - [Generation Modes](#generation-modes)
+- [Responses](#responses)
 - [Workspace Crate Output](#workspace-crate-output)
 - [Visibility](#visibility)
 - [Enum Mode](#enum-mode)
@@ -77,7 +78,7 @@ pub struct PetStoreClient {
 impl PetStoreClient {
     pub fn new() -> Self { /* ... */ }
 
-    pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ListPetsResponse> {
+    pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ApiResponse<Pets, Error>> {
         /* ... */
     }
 }
@@ -126,7 +127,7 @@ pub trait ApiServer: Send + Sync {
     fn list_pets(
         &self,
         request: ListPetsRequest,
-    ) -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
+    ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Pets, Error>>> + Send;
 }
 
 pub fn router<S>(service: S) -> Router
@@ -138,6 +139,78 @@ where
         .with_state(service)
 }
 ```
+
+---
+
+## Responses
+
+Every operation answers with the same generic enum, `ApiResponse<Value, Failure>`, generated
+once per spec into `types.rs`. It has one variant per status code declared anywhere
+in the spec, plus `Other` for status codes an operation does not declare.
+
+| Variant shape | When |
+|---|---|
+| `Ok(Value)`, `Created(Value)`, ... | A 2xx status that carries a body in at least one operation |
+| `NotFound(Failure)`, `Conflict(Failure)`, ... | Any other declared status that carries a body |
+| `NoContent`, `NotModified`, ... | A status that has no body in any operation |
+| `ClientError(http::StatusCode, Failure)` | A range such as `4XX`; the concrete status travels with the body |
+| `Unknown(http::StatusCode, Failure)` | The spec's `default` response, when it declares a body |
+| `Other(http::StatusCode, Vec<u8>)` | A status the operation does not declare and no bodied `default` covers |
+
+`Value` and `Failure` are instantiated per operation from the bodies it declares in each
+class (2xx for `Value`, everything else for `Failure`):
+
+| Bodies declared in the class | Parameter |
+|---|---|
+| None | `()` |
+| One type | That type |
+| One type plus a bodiless status | `Option<Type>` |
+| Several types | An untagged payload union such as `BasicErrorOrValidationError` |
+
+Payload unions are keyed by their member types, so operations declaring the same
+set of bodies share one definition. A type parameter is left off the enum entirely
+when no status in the spec uses it. If a schema is already named `ApiResponse`,
+the response enum is named `ApiResponseType` instead.
+
+**Example** (petstore):
+
+```rust
+/// Response shared by every operation.
+#[derive(Debug, Clone)]
+pub enum ApiResponse<Value, Failure> {
+    ///200
+    Ok(Value),
+    ///201
+    Created,
+    ///default
+    Unknown(http::StatusCode, Failure),
+}
+
+impl PetStoreClient {
+    pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ApiResponse<Pets, Error>> {
+        /* ... */
+    }
+
+    pub async fn create_pets(&self, request: CreatePetsRequest) -> anyhow::Result<ApiResponse<(), Error>> {
+        /* ... */
+    }
+}
+
+match client.list_pets(request).await? {
+    ApiResponse::Ok(pets) => println!("{} pets", pets.len()),
+    ApiResponse::Unknown(status, error) => eprintln!("{status}: {}", error.message),
+    other => anyhow::bail!("list_pets never answers {other:?}"),
+}
+```
+
+A `match` still has to cover variants the operation never produces, since the
+enum is shared; a wildcard arm handles them.
+
+Each request struct keeps a `parse_response` associated function that maps a
+`reqwest::Response` onto the response enum, so the generated client method and any
+hand-written transport share one decoder. Server handlers match the response enum back
+to a status code and a JSON body; a `()` or `None` payload answers with the status
+alone.
 
 ---
 
@@ -198,7 +271,7 @@ description = "Rust client generated from the Swagger Petstore OpenAPI document"
 
 [dependencies]
 anyhow = "1.0"
-bon = { version = "3.9", features = ["implied-bounds"] }
+bon = { version = "3.10", features = ["implied-bounds"] }
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock", "serde"] }
 http = "1.4"
 indexmap = { version = "2.14", features = ["serde"] }
@@ -206,7 +279,7 @@ oas3-gen-support = "0.26.3"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "http2", "native-tls", "query", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-serde_with = { version = "3.21", features = ["base64", "chrono"] }
+serde_with = { version = "3.23", features = ["base64", "chrono"] }
 validator = { version = "0.21", features = ["derive"] }
 ```
 
@@ -865,11 +938,11 @@ cargo run -- generate client-mod -i petstore.json -o output/ \
 
 ```rust
 impl PetStoreClient {
-    pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ListPetsResponse> {
+    pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ApiResponse<Pets, Error>> {
         /* ... */
     }
 
-    pub async fn create_pet(&self, request: CreatePetRequest) -> anyhow::Result<CreatePetResponse> {
+    pub async fn create_pet(&self, request: CreatePetRequest) -> anyhow::Result<ApiResponse<Pet, Error>> {
         /* ... */
     }
 
@@ -923,9 +996,9 @@ field, you get both `Pet` and `Category` even though you only selected
 Overrides the generated client and server method name for a specific operation.
 The key is the operation's `operationId` as written in the spec (falling back to
 the snake_case operation ID shown by `oas3-gen list operations`). The custom name
-is normalized to `snake_case`. Derived request and response type names follow the
+is normalized to `snake_case`. The derived request type name follows the
 override, so renaming `listPets` to `fetch_all_pets` also produces
-`FetchAllPetsRequest` and `FetchAllPetsResponse`.
+`FetchAllPetsRequest`.
 
 Repeat the flag to rename several operations:
 
@@ -939,11 +1012,11 @@ cargo run -- generate client-mod -i petstore.json -o output/ \
 
 ```rust
 impl PetStoreClient {
-    pub async fn fetch_all_pets(&self, request: FetchAllPetsRequest) -> anyhow::Result<FetchAllPetsResponse> {
+    pub async fn fetch_all_pets(&self, request: FetchAllPetsRequest) -> anyhow::Result<ApiResponse<Pets, Error>> {
         /* ... */
     }
 
-    pub async fn get_pet(&self, request: GetPetRequest) -> anyhow::Result<GetPetResponse> {
+    pub async fn get_pet(&self, request: GetPetRequest) -> anyhow::Result<ApiResponse<Pet, Error>> {
         /* ... */
     }
 }

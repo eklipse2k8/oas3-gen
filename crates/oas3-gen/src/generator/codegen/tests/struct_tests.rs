@@ -5,8 +5,9 @@ use quote::ToTokens as _;
 use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind,
-    MethodNameToken, ResponseMediaType, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory,
-    StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute,
+    MethodNameToken, OperationResponse, ResponseMediaType, ResponsePayload, ResponseStatusCategory, ResponseVariant,
+    ResponseVariantCategory, StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod, StructToken, TypeRef,
+    ValidationAttribute, VariantMapping,
   },
   codegen::{Visibility, structs::StructFragment},
   converter::GenerationTarget,
@@ -34,6 +35,18 @@ fn base_struct(kind: StructKind) -> StructDef {
   }
 }
 
+fn sample_response() -> OperationResponse {
+  OperationResponse::builder()
+    .name(EnumToken::new("ResponseEnum"))
+    .value(TypeRef::new("Body"))
+    .failure(TypeRef::new("ErrorBody"))
+    .build()
+}
+
+fn payload_mapping(payload: ResponsePayload) -> VariantMapping {
+  VariantMapping::builder().payload(payload).build()
+}
+
 fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
   let mut def = base_struct(StructKind::OperationRequest);
   let category = variant
@@ -46,7 +59,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
     name: MethodNameToken::new("parse_response"),
     docs: Documentation::from_lines(["Parse response"]),
     kind: MethodKind::ParseResponse {
-      response_enum: EnumToken::new("ResponseEnum"),
+      response: sample_response(),
       status_handlers: vec![StatusHandler {
         status_code,
         dispatch: ResponseStatusCategory::Single(ResponseVariantCategory { category, variant }),
@@ -93,7 +106,6 @@ fn renders_response_parser_method() {
   let def = make_response_parser_struct(
     ResponseVariant::builder()
       .status_code(StatusCodeToken::Ok200)
-      .variant_name(EnumVariantToken::new("Ok"))
       .media_types(vec![ResponseMediaType::new("application/json")])
       .build(),
   );
@@ -101,7 +113,18 @@ fn renders_response_parser_method() {
     StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
   let code = tokens.to_string();
   assert!(code.contains("fn parse_response"), "missing parse_response method");
-  assert!(code.contains("ResponseEnum"), "missing ResponseEnum type");
+  assert!(
+    code.contains("-> anyhow :: Result < ResponseEnum < Body , ErrorBody > >"),
+    "return type should be the response enum instantiation: {code}"
+  );
+  assert!(
+    code.contains("return Ok (ResponseEnum :: Ok) ;"),
+    "bodiless status should map to a unit variant: {code}"
+  );
+  assert!(
+    code.contains("Ok (ResponseEnum :: Other (status , req . bytes () . await ? . to_vec ()))"),
+    "missing Other fallback: {code}"
+  );
 }
 
 #[test]
@@ -122,9 +145,9 @@ fn test_text_response_parsing() {
     let def = make_response_parser_struct(
       ResponseVariant::builder()
         .status_code(StatusCodeToken::Ok200)
-        .variant_name(EnumVariantToken::new("Ok"))
         .media_types(vec![ResponseMediaType::with_schema("text/plain", Some(st.clone()))])
         .maybe_schema_type(Some(st))
+        .mapping(payload_mapping(ResponsePayload::Value))
         .build(),
     );
     let tokens =
@@ -143,12 +166,12 @@ fn renders_json_parser_for_custom_struct() {
   let def = make_response_parser_struct(
     ResponseVariant::builder()
       .status_code(StatusCodeToken::Ok200)
-      .variant_name(EnumVariantToken::new("Ok"))
       .media_types(vec![ResponseMediaType::with_schema(
         "application/json",
         Some(TypeRef::new("MyStruct")),
       )])
       .schema_type(TypeRef::new("MyStruct"))
+      .mapping(payload_mapping(ResponsePayload::Value))
       .build(),
   );
   let tokens =
@@ -166,12 +189,12 @@ fn test_binary_response_parsing() {
   let def = make_response_parser_struct(
     ResponseVariant::builder()
       .status_code(StatusCodeToken::Ok200)
-      .variant_name(EnumVariantToken::new("Ok"))
       .media_types(vec![ResponseMediaType::with_schema(
         "application/octet-stream",
         Some(TypeRef::new("Vec<u8>")),
       )])
       .schema_type(TypeRef::new("Vec<u8>"))
+      .mapping(payload_mapping(ResponsePayload::Value))
       .build(),
   );
   let tokens =
@@ -188,12 +211,12 @@ fn test_binary_content_type_with_json_schema_uses_json_parsing() {
   let def = make_response_parser_struct(
     ResponseVariant::builder()
       .status_code(StatusCodeToken::ClientError4XX)
-      .variant_name(EnumVariantToken::new("ClientError"))
       .media_types(vec![ResponseMediaType::with_schema(
         "application/octet-stream",
         Some(TypeRef::new("ErrorResponse")),
       )])
       .schema_type(TypeRef::new("ErrorResponse"))
+      .mapping(payload_mapping(ResponsePayload::Failure))
       .build(),
   );
   let tokens =
@@ -204,8 +227,8 @@ fn test_binary_content_type_with_json_schema_uses_json_parsing() {
     "binary content-type with JSON schema should use JSON parsing: {code}"
   );
   assert!(
-    !code.contains("to_vec ()"),
-    "should NOT use bytes to_vec() extraction for JSON schema type: {code}"
+    !code.contains("let data = req . bytes ()"),
+    "should NOT use bytes extraction for JSON schema type: {code}"
   );
 }
 
@@ -214,12 +237,12 @@ fn test_event_stream_response_generates_from_response() {
   let def = make_response_parser_struct(
     ResponseVariant::builder()
       .status_code(StatusCodeToken::Ok200)
-      .variant_name(EnumVariantToken::new("Ok"))
       .media_types(vec![ResponseMediaType::with_schema(
         "text/event-stream",
         Some(TypeRef::new("StreamEvent")),
       )])
       .schema_type(TypeRef::new("oas3_gen_support::EventStream<StreamEvent>"))
+      .mapping(payload_mapping(ResponsePayload::Value))
       .build(),
   );
   let tokens =
@@ -228,6 +251,158 @@ fn test_event_stream_response_generates_from_response() {
   assert!(
     code.contains("from_response"),
     "EventStream response should call from_response: {code}"
+  );
+}
+
+#[test]
+fn test_parse_response_slot_shapes() {
+  let body = Some(TypeRef::new("Body"));
+  let value = |ty: TypeRef| {
+    OperationResponse::builder()
+      .name(EnumToken::new("ResponseEnum"))
+      .value(ty)
+      .failure(TypeRef::new("ErrorBody"))
+      .build()
+  };
+  let union_member = VariantMapping::builder()
+    .payload(ResponsePayload::Value)
+    .union_variant(EnumVariantToken::new("Body"))
+    .build();
+  let cases = [
+    (
+      "direct body",
+      StatusCodeToken::Ok200,
+      body.clone(),
+      payload_mapping(ResponsePayload::Value),
+      value(TypeRef::new("Body")),
+      "return Ok (ResponseEnum :: Ok (data)) ;",
+    ),
+    (
+      "optional body",
+      StatusCodeToken::Ok200,
+      body.clone(),
+      payload_mapping(ResponsePayload::Value),
+      value(TypeRef::new("Body").with_option()),
+      "return Ok (ResponseEnum :: Ok (Some (data))) ;",
+    ),
+    (
+      "union member",
+      StatusCodeToken::Ok200,
+      body.clone(),
+      union_member.clone(),
+      value(TypeRef::new("BodyOrOther")),
+      "return Ok (ResponseEnum :: Ok (BodyOrOther :: Body (data))) ;",
+    ),
+    (
+      "optional union member",
+      StatusCodeToken::Ok200,
+      body.clone(),
+      union_member,
+      value(TypeRef::new("BodyOrOther").with_option()),
+      "return Ok (ResponseEnum :: Ok (Some (BodyOrOther :: Body (data)))) ;",
+    ),
+    (
+      "status carried alongside body",
+      StatusCodeToken::ClientError4XX,
+      body,
+      payload_mapping(ResponsePayload::Failure),
+      value(TypeRef::new("Body")),
+      "return Ok (ResponseEnum :: ClientError (status , data)) ;",
+    ),
+    (
+      "no body where the response enum carries one",
+      StatusCodeToken::Ok200,
+      None,
+      payload_mapping(ResponsePayload::Value),
+      value(TypeRef::new("()")),
+      "let _ = req . bytes () . await ? ; return Ok (ResponseEnum :: Ok (())) ;",
+    ),
+    (
+      "no body where the parameter is optional",
+      StatusCodeToken::Ok200,
+      None,
+      payload_mapping(ResponsePayload::Value),
+      value(TypeRef::new("Body").with_option()),
+      "return Ok (ResponseEnum :: Ok (None)) ;",
+    ),
+    (
+      "unit variant carrying the status",
+      StatusCodeToken::ClientError4XX,
+      None,
+      VariantMapping::default(),
+      value(TypeRef::new("Body")),
+      "return Ok (ResponseEnum :: ClientError (status)) ;",
+    ),
+  ];
+
+  for (label, status_code, schema_type, mapping, response, expected) in cases {
+    let mut def = base_struct(StructKind::OperationRequest);
+    let variant = ResponseVariant::builder()
+      .status_code(status_code)
+      .media_types(vec![ResponseMediaType::with_schema(
+        "application/json",
+        schema_type.clone(),
+      )])
+      .maybe_schema_type(schema_type)
+      .mapping(mapping)
+      .build();
+    def.methods.push(StructMethod {
+      name: MethodNameToken::new("parse_response"),
+      docs: Documentation::from_lines(["Parse response"]),
+      kind: MethodKind::ParseResponse {
+        response,
+        status_handlers: vec![StatusHandler {
+          status_code,
+          dispatch: ResponseStatusCategory::Single(ResponseVariantCategory {
+            category: ContentCategory::Json,
+            variant,
+          }),
+        }],
+        default_handler: None,
+      },
+    });
+    let code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
+    assert!(code.contains(expected), "{label}: expected `{expected}` in {code}");
+  }
+}
+
+#[test]
+fn test_parse_response_default_handler_carries_status() {
+  let mut def = base_struct(StructKind::OperationRequest);
+  let variant = ResponseVariant::builder()
+    .status_code(StatusCodeToken::Default)
+    .media_types(vec![ResponseMediaType::with_schema(
+      "application/json",
+      Some(TypeRef::new("ErrorBody")),
+    )])
+    .schema_type(TypeRef::new("ErrorBody"))
+    .mapping(payload_mapping(ResponsePayload::Failure))
+    .build();
+  def.methods.push(StructMethod {
+    name: MethodNameToken::new("parse_response"),
+    docs: Documentation::from_lines(["Parse response"]),
+    kind: MethodKind::ParseResponse {
+      response: sample_response(),
+      status_handlers: vec![],
+      default_handler: Some(ResponseVariantCategory {
+        category: ContentCategory::Json,
+        variant,
+      }),
+    },
+  });
+
+  let code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client)
+    .into_token_stream()
+    .to_string();
+  assert!(
+    code.contains("return Ok (ResponseEnum :: Unknown (status , data)) ;"),
+    "default handler should carry the status: {code}"
+  );
+  assert!(
+    !code.contains("Other"),
+    "declared default replaces the raw fallback: {code}"
   );
 }
 

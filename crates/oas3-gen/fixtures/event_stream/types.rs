@@ -37,23 +37,16 @@ pub struct EventPayload {
 pub struct EventsRequest {}
 impl EventsRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<EventsResponse> {
+  pub async fn parse_response(
+    req: reqwest::Response,
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<StreamEvent>>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let data = <oas3_gen_support::EventStream<StreamEvent>>::from_response(req);
-      return Ok(EventsResponse::Ok(data));
+      return Ok(ApiResponse::Ok(data));
     }
-    let _ = req.bytes().await?;
-    Ok(EventsResponse::Unknown)
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
   }
-}
-/// Response types for streamEvents
-#[derive(Debug)]
-pub enum EventsResponse {
-  ///200: A stream of events
-  Ok(oas3_gen_support::EventStream<StreamEvent>),
-  ///default: Unknown response
-  Unknown,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
@@ -79,23 +72,16 @@ impl TypedEventsRequest {
 }
 impl TypedEventsRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<TypedEventsResponse> {
+  pub async fn parse_response(
+    req: reqwest::Response,
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<TypedEvent>>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let data = <oas3_gen_support::EventStream<TypedEvent>>::from_response(req);
-      return Ok(TypedEventsResponse::Ok(data));
+      return Ok(ApiResponse::Ok(data));
     }
-    let _ = req.bytes().await?;
-    Ok(TypedEventsResponse::Unknown)
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
   }
-}
-/// Response types for streamTypedEvents
-#[derive(Debug)]
-pub enum TypedEventsResponse {
-  ///200: A stream of typed events
-  Ok(oas3_gen_support::EventStream<TypedEvent>),
-  ///default: Unknown response
-  Unknown,
 }
 /// Event type
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
@@ -116,4 +102,15 @@ impl core::fmt::Display for TypedEventType {
       Self::Deleted => write!(f, "deleted"),
     }
   }
+}
+/// Response enum shared by every operation.
+///
+/// `Value` is the operation's success body type and `Failure` its error body type.
+/// A status code is a unit variant when no operation gives it a body.
+#[derive(Debug, Clone)]
+pub enum ApiResponse<Value> {
+  ///200
+  Ok(Value),
+  ///Status code the operation does not declare; carries the raw body.
+  Other(http::StatusCode, Vec<u8>),
 }

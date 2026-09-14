@@ -1014,52 +1014,32 @@ impl SendContentRequest {
 }
 impl SendContentRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<SendContentResponse> {
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ContentResponse, ErrorResponse>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let data = oas3_gen_support::Diagnostics::<ContentResponse>::json_with_diagnostics(req).await?;
-      return Ok(SendContentResponse::Ok(data));
+      return Ok(ApiResponse::Ok(data));
     }
     if status == http::StatusCode::BAD_REQUEST {
       let data = oas3_gen_support::Diagnostics::<ErrorResponse>::json_with_diagnostics(req).await?;
-      return Ok(SendContentResponse::BadRequest(data));
+      return Ok(ApiResponse::BadRequest(data));
     }
-    let _ = req.bytes().await?;
-    Ok(SendContentResponse::Unknown)
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
   }
-}
-/// Response types for sendContent
-#[derive(Debug, Clone)]
-pub enum SendContentResponse {
-  ///200: Success
-  Ok(ContentResponse),
-  ///400: Bad request
-  BadRequest(ErrorResponse),
-  ///default: Unknown response
-  Unknown,
 }
 /// Get events with discriminated union
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetEventsRequest {}
 impl GetEventsRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<GetEventsResponse> {
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<EventList, ()>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let data = oas3_gen_support::Diagnostics::<EventList>::json_with_diagnostics(req).await?;
-      return Ok(GetEventsResponse::Ok(data));
+      return Ok(ApiResponse::Ok(data));
     }
-    let _ = req.bytes().await?;
-    Ok(GetEventsResponse::Unknown)
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
   }
-}
-/// Response types for getEvents
-#[derive(Debug, Clone)]
-pub enum GetEventsResponse {
-  ///200: Event stream
-  Ok(EventList),
-  ///default: Unknown response
-  Unknown,
 }
 /// The size of the generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1101,4 +1081,17 @@ impl ContentRequestImageSize {
   pub fn auto2k() -> Self {
     Self::Preset(ImageSizePreset::Auto2k)
   }
+}
+/// Response enum shared by every operation.
+///
+/// `Value` is the operation's success body type and `Failure` its error body type.
+/// A status code is a unit variant when no operation gives it a body.
+#[derive(Debug, Clone)]
+pub enum ApiResponse<Value, Failure> {
+  ///200
+  Ok(Value),
+  ///400
+  BadRequest(Failure),
+  ///Status code the operation does not declare; carries the raw body.
+  Other(http::StatusCode, Vec<u8>),
 }

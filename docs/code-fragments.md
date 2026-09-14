@@ -24,11 +24,11 @@ The one thing not obvious from the tree — which AST node reaches which top-lev
 | `StructDef` | `StructFragment` | `structs.rs` | struct + impls + `TryFrom` for `HeaderMap` |
 | `EnumDef` | `EnumFragment` | `enums.rs` | value enum, `Display`, optional case-insensitive deser |
 | `DiscriminatedEnumDef` | `DiscriminatedEnumFragment` | `enums.rs` | tagged union + hand-rolled serde |
-| `ResponseEnumDef` | `ResponseEnumFragment` | `enums.rs` | client-side response enum |
-| `ResponseEnumDef` | `AxumResponseEnumFragment` | `server.rs` | server-side enum + `IntoResponse` |
+| `ResponseEnumDef` | `ResponseEnumFragment` | `enums.rs` | the one generic `ApiResponse<Value, Failure>` response enum, both targets |
+| `PayloadUnionDef` | `PayloadUnionFragment` | `enums.rs` | untagged union of body types sharing a status class |
 | `TypeAliasDef` | `TypeAliasFragment` | `type_aliases.rs` | `type Alias = Target;` |
 | `Vec<OperationInfo>` | `ClientFragment` | `client.rs` | `impl Client` with async methods |
-| `ServerRequestTraitDef` | `ServerGenerator` | `server.rs` | trait + axum handlers + router |
+| `ServerRequestTraitDef` | `ServerGenerator` | `server.rs` | trait + axum handlers (response enum match arms) + router |
 
 Shared helpers: `attributes.rs` (derives, serde, validation, docs), `methods.rs` (helper methods,
 parameters), `constants.rs` (regex statics, header names), `coercion.rs` (JSON literal -> Rust

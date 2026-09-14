@@ -10,6 +10,7 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
+use super::{OperationResponse, ResponsePayload};
 use crate::generator::ast::{DefaultAtom, FileHeaderNode, StructToken};
 
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
@@ -491,6 +492,40 @@ impl ToTokens for TypeRef {
     }
 
     type_tokens.to_tokens(tokens);
+  }
+}
+
+impl ToTokens for OperationResponse {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let response_enum = &self.name;
+    let generics = generic_args(
+      self
+        .value
+        .iter()
+        .chain(self.failure.iter())
+        .map(ToTokens::to_token_stream),
+    );
+    quote! { #response_enum #generics }.to_tokens(tokens);
+  }
+}
+
+impl ToTokens for ResponsePayload {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    match self {
+      Self::Value => quote! { Value }.to_tokens(tokens),
+      Self::Failure => quote! { Failure }.to_tokens(tokens),
+      Self::None | Self::Raw => {}
+    }
+  }
+}
+
+/// Renders `<A, B>` for the given arguments, or nothing when there are none.
+pub(crate) fn generic_args(args: impl IntoIterator<Item = TokenStream>) -> TokenStream {
+  let args = args.into_iter().collect::<Vec<_>>();
+  if args.is_empty() {
+    quote! {}
+  } else {
+    quote! { <#(#args),*> }
   }
 }
 

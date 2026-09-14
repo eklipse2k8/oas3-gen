@@ -9,8 +9,9 @@ use super::{
 use crate::generator::{
   ast::{
     DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumDefault, EnumDefaultValue,
-    EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseVariant, RustPrimitive,
-    SerdeMode, TypeRef, VariantContent, VariantDef,
+    EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseEnumVariant,
+    ResponsePayload, ResponseUnionDef, RustPrimitive, SerdeAttribute, SerdeMode, TypeRef, VariantContent, VariantDef,
+    types::generic_args,
   },
   codegen::{
     attributes::DeriveAttribute,
@@ -1016,6 +1017,7 @@ impl ToTokens for DiscriminatedEnumFragment<'_> {
   }
 }
 
+/// Emits the shared response enum, e.g. `pub enum ApiResponse<Value, Failure> { .. }`.
 #[derive(Clone, Copy, Debug)]
 pub struct ResponseEnumFragment<'a> {
   vis: Visibility,
@@ -1027,13 +1029,13 @@ impl<'a> ResponseEnumFragment<'a> {
     Self { vis, def }
   }
 
-  fn variants(&self) -> Vec<ResponseVariantFragment<'a>> {
-    self
-      .def
-      .variants
-      .iter()
-      .map(ResponseVariantFragment::new)
-      .collect::<Vec<ResponseVariantFragment<'_>>>()
+  fn generics(&self) -> TokenStream {
+    generic_args(
+      [ResponsePayload::Value, ResponsePayload::Failure]
+        .into_iter()
+        .filter(|payload| self.def.has_param(*payload))
+        .map(|payload| payload.to_token_stream()),
+    )
   }
 }
 
@@ -1041,15 +1043,68 @@ impl ToTokens for ResponseEnumFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.def.name;
     let docs = &self.def.docs;
-    let variants = EnumVariants::new(self.variants());
+    let generics = self.generics();
+    let variants = EnumVariants::new(
+      self
+        .def
+        .variants
+        .iter()
+        .map(ResponseEnumVariantFragment::new)
+        .collect::<Vec<_>>(),
+    );
     let derives = DeriveAttribute::new(self.def.derives());
     let vis = &self.vis;
 
     let ts = quote! {
       #docs
       #derives
-      #vis enum #name {
+      #vis enum #name #generics {
         #variants
+      }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+/// Emits an untagged enum over the body types an operation shares in one status class.
+#[derive(Clone, Copy, Debug)]
+pub struct ResponseUnionFragment<'a> {
+  vis: Visibility,
+  def: &'a ResponseUnionDef,
+}
+
+impl<'a> ResponseUnionFragment<'a> {
+  pub(crate) fn new(vis: Visibility, def: &'a ResponseUnionDef) -> Self {
+    Self { vis, def }
+  }
+}
+
+impl ToTokens for ResponseUnionFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = &self.def.name;
+    let docs = &self.def.docs;
+    let derives = DeriveAttribute::new(self.def.derives());
+    let vis = &self.vis;
+
+    let derive_traits = self.def.derives();
+    let has_serde_derive = derive_traits
+      .iter()
+      .any(|d| matches!(d, DeriveTrait::Serialize | DeriveTrait::Deserialize));
+    let untagged = has_serde_derive.then(|| generate_serde_attrs(&[SerdeAttribute::Untagged]));
+
+    let variants = self.def.variants.iter().map(|variant| {
+      let variant_name = &variant.name;
+      let rust_type = &variant.rust_type;
+      quote! { #variant_name(#rust_type) }
+    });
+
+    let ts = quote! {
+      #docs
+      #derives
+      #untagged
+      #vis enum #name {
+        #(#variants),*
       }
     };
 
@@ -1078,23 +1133,33 @@ impl<T: ToTokens> ToTokens for EnumVariants<T> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ResponseVariantFragment<'a> {
-  variant: &'a ResponseVariant,
+pub(crate) struct ResponseEnumVariantFragment<'a> {
+  variant: &'a ResponseEnumVariant,
 }
 
-impl<'a> ResponseVariantFragment<'a> {
-  pub(crate) fn new(variant: &'a ResponseVariant) -> Self {
+impl<'a> ResponseEnumVariantFragment<'a> {
+  pub(crate) fn new(variant: &'a ResponseEnumVariant) -> Self {
     Self { variant }
   }
 }
 
-impl ToTokens for ResponseVariantFragment<'_> {
+impl ToTokens for ResponseEnumVariantFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let variant_name = &self.variant.variant_name;
+    let variant_name = &self.variant.name;
     let doc_line = self.variant.doc_line();
-    let content = self.variant.schema_type.as_ref().map(|schema| {
-      quote! { (#schema) }
-    });
+
+    let status = self
+      .variant
+      .status_code
+      .carries_status()
+      .then(|| quote! { http::StatusCode });
+    let body = match self.variant.payload {
+      ResponsePayload::None => None,
+      ResponsePayload::Value | ResponsePayload::Failure => Some(self.variant.payload.to_token_stream()),
+      ResponsePayload::Raw => Some(quote! { Vec<u8> }),
+    };
+    let fields = status.into_iter().chain(body).collect::<Vec<_>>();
+    let content = (!fields.is_empty()).then(|| quote! { (#(#fields),*) });
 
     let ts = quote! {
       #[doc = #doc_line]

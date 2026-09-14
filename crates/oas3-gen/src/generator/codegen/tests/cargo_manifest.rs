@@ -145,7 +145,7 @@ fn test_dependencies_cover_client_and_server_crates() {
       "pub type Ids = indexmap::IndexSet<String>;",
       "indexmap = { version = \"2.14\"",
     ),
-    ("pub struct A { pub id: uuid::Uuid }", "uuid = { version = \"1.24\""),
+    ("pub struct A { pub id: uuid::Uuid }", "uuid = { version = \"1.26\""),
     (
       "pub struct A { pub at: chrono::NaiveDate }",
       "chrono = { version = \"0.4.42\"",

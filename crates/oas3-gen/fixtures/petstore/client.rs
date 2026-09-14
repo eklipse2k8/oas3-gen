@@ -48,7 +48,7 @@ impl SwaggerPetstoreClient {
   /// List all pets
   ///
   /// * Path: `GET /{api_version}/pets`
-  pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ListPetsResponse> {
+  pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ApiResponse<Pets, Error>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -68,7 +68,7 @@ impl SwaggerPetstoreClient {
   /// Create a pet
   ///
   /// * Path: `POST /{api_version}/pets`
-  pub async fn create_pets(&self, request: CreatePetsRequest) -> anyhow::Result<CreatePetsResponse> {
+  pub async fn create_pets(&self, request: CreatePetsRequest) -> anyhow::Result<ApiResponse<(), Error>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -82,7 +82,7 @@ impl SwaggerPetstoreClient {
   /// List all cats
   ///
   /// * Path: `GET /cats`
-  pub async fn list_cats(&self, request: ListCatsRequest) -> anyhow::Result<ListCatsResponse> {
+  pub async fn list_cats(&self, request: ListCatsRequest) -> anyhow::Result<ApiResponse<Cats, Error>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -101,7 +101,7 @@ impl SwaggerPetstoreClient {
   /// Info for a specific pet
   ///
   /// * Path: `GET /pets/{petId}`
-  pub async fn show_pet_by_id(&self, request: ShowPetByIdRequest) -> anyhow::Result<ShowPetByIdResponse> {
+  pub async fn show_pet_by_id(&self, request: ShowPetByIdRequest) -> anyhow::Result<ApiResponse<Pet, Error>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -120,7 +120,7 @@ impl SwaggerPetstoreClient {
   /// Upload pet image and update name
   ///
   /// * Path: `POST /pets/{petId}/upload`
-  pub async fn upload_pet_image(&self, request: UploadPetImageRequest) -> anyhow::Result<ShowPetByIdResponse> {
+  pub async fn upload_pet_image(&self, request: UploadPetImageRequest) -> anyhow::Result<ApiResponse<Pet, Error>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url

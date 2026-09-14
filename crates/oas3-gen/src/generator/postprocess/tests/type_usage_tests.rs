@@ -3,12 +3,31 @@ use std::collections::BTreeMap;
 use super::build_type_usage_map;
 use crate::generator::{
   ast::{
-    EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseMediaType, ResponseVariant, RustPrimitive,
-    RustType, StatusCodeToken, StructDef, StructKind, StructToken, TypeAliasDef, TypeAliasToken, TypeRef,
-    VariantContent, VariantDef, tokens::FieldNameToken,
+    EnumDef, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseEnumVariant, ResponsePayload,
+    ResponseUnionDef, ResponseUnionVariant, RustPrimitive, RustType, StatusCodeToken, StructDef, StructKind,
+    StructToken, TypeAliasDef, TypeAliasToken, TypeRef, VariantContent, VariantDef, tokens::FieldNameToken,
   },
   postprocess::serde_usage::TypeUsage,
 };
+
+fn payload_union(name: &str, members: &[&str]) -> RustType {
+  RustType::ResponseUnion(
+    ResponseUnionDef::builder()
+      .name(EnumToken::new(name))
+      .variants(
+        members
+          .iter()
+          .map(|member| {
+            ResponseUnionVariant::builder()
+              .name(EnumVariantToken::new(*member))
+              .rust_type(TypeRef::new(RustPrimitive::Custom((*member).into())))
+              .build()
+          })
+          .collect(),
+      )
+      .build(),
+  )
+}
 
 fn seeds(entries: &[(&str, (bool, bool))]) -> BTreeMap<EnumToken, (bool, bool)> {
   entries
@@ -360,7 +379,7 @@ fn test_cyclic_dependency_handling() {
 }
 
 #[test]
-fn test_response_enum_does_not_propagate_to_request_type() {
+fn test_payload_union_propagates_to_member_types_only() {
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("CreateUserRequestParams"),
     fields: vec![
@@ -385,27 +404,14 @@ fn test_response_enum_does_not_propagate_to_request_type() {
     ..Default::default()
   });
 
-  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: EnumToken::new("CreateUserResponseEnum"),
-    request_type: Some(StructToken::new("CreateUserRequestParams")),
-    variants: vec![
-      ResponseVariant::builder()
-        .status_code(StatusCodeToken::Ok200)
-        .variant_name(EnumVariantToken::new("Ok"))
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom("User".into())))
-        .build(),
-    ],
-    ..Default::default()
-  });
-
-  let types = vec![request_struct, user_struct, response_enum];
+  let types = vec![
+    request_struct,
+    user_struct,
+    payload_union("UserOrError", &["User", "Error"]),
+  ];
   let seed = seeds(&[
     ("CreateUserRequestParams", (true, false)),
-    ("CreateUserResponseEnum", (false, true)),
+    ("UserOrError", (false, true)),
   ]);
   let usage_map = build_type_usage_map(seed, &types);
 
@@ -415,21 +421,15 @@ fn test_response_enum_does_not_propagate_to_request_type() {
   );
   assert_eq!(usage_map.get(&EnumToken::new("User")), Some(&TypeUsage::ResponseOnly));
   assert_eq!(
-    usage_map.get(&EnumToken::new("CreateUserResponseEnum")),
+    usage_map.get(&EnumToken::new("UserOrError")),
     Some(&TypeUsage::ResponseOnly)
   );
 }
 
 #[test]
-fn test_response_enum_propagates_to_variant_types_only() {
+fn test_response_response_enum_propagates_nothing() {
   let response_a = RustType::Struct(StructDef {
     name: StructToken::new("ResponseA"),
-    kind: StructKind::Schema,
-    ..Default::default()
-  });
-
-  let response_b = RustType::Struct(StructDef {
-    name: StructToken::new("ResponseB"),
     kind: StructKind::Schema,
     ..Default::default()
   });
@@ -440,34 +440,21 @@ fn test_response_enum_propagates_to_variant_types_only() {
     ..Default::default()
   });
 
-  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: EnumToken::new("MyResponseEnum"),
-    request_type: Some(StructToken::new("RequestParams")),
-    variants: vec![
-      ResponseVariant::builder()
-        .status_code(StatusCodeToken::Ok200)
-        .variant_name(EnumVariantToken::new("Ok"))
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom("ResponseA".into())))
-        .build(),
-      ResponseVariant::builder()
-        .status_code(StatusCodeToken::BadRequest400)
-        .variant_name(EnumVariantToken::new("BadRequest"))
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom("ResponseB".into())))
-        .build(),
-    ],
-    ..Default::default()
-  });
+  let response_enum = RustType::ResponseEnum(
+    ResponseEnumDef::builder()
+      .name(EnumToken::new("ApiResponse"))
+      .variants(vec![
+        ResponseEnumVariant::builder()
+          .name(EnumVariantToken::new("Ok"))
+          .status_code(StatusCodeToken::Ok200)
+          .payload(ResponsePayload::Value)
+          .build(),
+      ])
+      .build(),
+  );
 
-  let types = vec![response_a, response_b, request_struct, response_enum];
-  let seed = seeds(&[("RequestParams", (true, false)), ("MyResponseEnum", (false, true))]);
+  let types = vec![response_a, request_struct, response_enum];
+  let seed = seeds(&[("RequestParams", (true, false)), ("ApiResponse", (false, true))]);
   let usage_map = build_type_usage_map(seed, &types);
 
   assert_eq!(
@@ -476,20 +463,17 @@ fn test_response_enum_propagates_to_variant_types_only() {
   );
   assert_eq!(
     usage_map.get(&EnumToken::new("ResponseA")),
-    Some(&TypeUsage::ResponseOnly)
+    Some(&TypeUsage::Bidirectional),
+    "the response enum references no body type, so ResponseA stays an orphan"
   );
   assert_eq!(
-    usage_map.get(&EnumToken::new("ResponseB")),
-    Some(&TypeUsage::ResponseOnly)
-  );
-  assert_eq!(
-    usage_map.get(&EnumToken::new("MyResponseEnum")),
+    usage_map.get(&EnumToken::new("ApiResponse")),
     Some(&TypeUsage::ResponseOnly)
   );
 }
 
 #[test]
-fn test_request_body_chain_with_response_enum() {
+fn test_request_body_chain_with_payload_union() {
   let request_body_struct = RustType::Struct(StructDef {
     name: StructToken::new("CreateChatCompletionRequest"),
     fields: vec![
@@ -539,26 +523,7 @@ fn test_request_body_chain_with_response_enum() {
     ..Default::default()
   });
 
-  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: EnumToken::new("CreateChatCompletionResponseEnum"),
-    request_type: Some(StructToken::new("CreateChatCompletionRequestParams")),
-    variants: vec![
-      ResponseVariant::builder()
-        .status_code(StatusCodeToken::Ok200)
-        .variant_name(EnumVariantToken::new("Ok"))
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom(
-            "CreateChatCompletionResponse".into(),
-          ))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom(
-          "CreateChatCompletionResponse".into(),
-        )))
-        .build(),
-    ],
-    ..Default::default()
-  });
+  let response_union = payload_union("CreateChatCompletionResponseOrError", &["CreateChatCompletionResponse"]);
 
   let types = vec![
     request_body_struct,
@@ -566,14 +531,14 @@ fn test_request_body_chain_with_response_enum() {
     request_body_alias,
     request_params,
     response_struct,
-    response_enum,
+    response_union,
   ];
 
   let seed = seeds(&[
     ("CreateChatCompletionRequest", (true, false)),
     ("CreateChatCompletionRequestBody", (true, false)),
     ("CreateChatCompletionRequestParams", (true, false)),
-    ("CreateChatCompletionResponseEnum", (false, true)),
+    ("CreateChatCompletionResponseOrError", (false, true)),
   ]);
 
   let usage_map = build_type_usage_map(seed, &types);
@@ -596,7 +561,7 @@ fn test_request_body_chain_with_response_enum() {
   assert_eq!(
     usage_map.get(&EnumToken::new("CreateChatCompletionRequestParams")),
     Some(&TypeUsage::RequestOnly),
-    "Request params should remain request-only despite ResponseEnum reference"
+    "Request params should remain request-only"
   );
   assert_eq!(
     usage_map.get(&EnumToken::new("CreateChatCompletionResponse")),
@@ -604,14 +569,14 @@ fn test_request_body_chain_with_response_enum() {
     "Response should be response-only"
   );
   assert_eq!(
-    usage_map.get(&EnumToken::new("CreateChatCompletionResponseEnum")),
+    usage_map.get(&EnumToken::new("CreateChatCompletionResponseOrError")),
     Some(&TypeUsage::ResponseOnly),
-    "Response enum should be response-only"
+    "Payload union should be response-only"
   );
 }
 
 #[test]
-fn test_response_enum_propagates_to_variants_not_request_type() {
+fn test_payload_union_does_not_reach_request_type() {
   let request_struct = RustType::Struct(StructDef {
     name: StructToken::new("RequestParams"),
     kind: StructKind::OperationRequest,
@@ -630,49 +595,72 @@ fn test_response_enum_propagates_to_variants_not_request_type() {
     ..Default::default()
   });
 
-  let response_enum = RustType::ResponseEnum(ResponseEnumDef {
-    name: EnumToken::new("MyResponseEnum"),
-    request_type: Some(StructToken::new("RequestParams")),
-    variants: vec![
-      ResponseVariant::builder()
-        .status_code(StatusCodeToken::Ok200)
-        .variant_name(EnumVariantToken::new("Ok"))
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom("ResponseA".into()))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom("ResponseA".into())))
-        .build(),
-      ResponseVariant::builder()
-        .status_code(StatusCodeToken::BadRequest400)
-        .variant_name(EnumVariantToken::new("BadRequest"))
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom("ResponseB".into()))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom("ResponseB".into())))
-        .build(),
-    ],
-    ..Default::default()
-  });
-
-  let types = vec![request_struct, response_a, response_b, response_enum];
-  let seed = seeds(&[("RequestParams", (true, false)), ("MyResponseEnum", (false, true))]);
+  let types = vec![
+    request_struct,
+    response_a,
+    response_b,
+    payload_union("ResponseAOrResponseB", &["ResponseA", "ResponseB"]),
+  ];
+  let seed = seeds(&[
+    ("RequestParams", (true, false)),
+    ("ResponseAOrResponseB", (false, true)),
+  ]);
   let usage_map = build_type_usage_map(seed, &types);
 
   assert_eq!(
     usage_map.get(&EnumToken::new("ResponseA")),
     Some(&TypeUsage::ResponseOnly),
-    "ResponseA should be response-only (propagated from ResponseEnum)"
+    "ResponseA should be response-only (propagated from the union)"
   );
   assert_eq!(
     usage_map.get(&EnumToken::new("ResponseB")),
     Some(&TypeUsage::ResponseOnly),
-    "ResponseB should be response-only (propagated from ResponseEnum)"
+    "ResponseB should be response-only (propagated from the union)"
   );
   assert_eq!(
     usage_map.get(&EnumToken::new("RequestParams")),
     Some(&TypeUsage::RequestOnly),
-    "RequestParams should stay request-only (ResponseEnum.request_type should not cause propagation)"
+    "RequestParams should stay request-only"
+  );
+}
+
+#[test]
+fn test_propagation_through_composite_map_type() {
+  let result_struct = RustType::Struct(StructDef {
+    name: StructToken::new("ResultBody"),
+    fields: vec![
+      FieldDef::builder()
+        .name(FieldNameToken::new("category_applied_input_types"))
+        .rust_type(TypeRef::new(RustPrimitive::Custom(
+          "indexmap::IndexMap<String, Vec<InputType>>".into(),
+        )))
+        .build(),
+    ],
+    kind: StructKind::Schema,
+    ..Default::default()
+  });
+
+  let input_type_enum = RustType::Enum(EnumDef {
+    name: EnumToken::new("InputType"),
+    variants: vec![
+      VariantDef::builder()
+        .name(EnumVariantToken::new("Text"))
+        .content(VariantContent::Unit)
+        .build(),
+    ],
+    ..Default::default()
+  });
+
+  let types = vec![result_struct, input_type_enum];
+  let usage_map = build_type_usage_map(seeds(&[("ResultBody", (false, true))]), &types);
+
+  assert_eq!(
+    usage_map.get(&EnumToken::new("ResultBody")),
+    Some(&TypeUsage::ResponseOnly)
+  );
+  assert_eq!(
+    usage_map.get(&EnumToken::new("InputType")),
+    Some(&TypeUsage::ResponseOnly),
+    "nested type inside a composite map must inherit its parent's direction"
   );
 }

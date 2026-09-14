@@ -1,5 +1,6 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use itertools::Either;
 use petgraph::{Graph, graph::NodeIndex};
 
 use crate::generator::{
@@ -72,6 +73,10 @@ impl SerdeUsage {
   fn build_graph(types: &[RustType]) -> (Graph<EnumToken, ()>, BTreeMap<EnumToken, NodeIndex>) {
     let mut graph = Graph::new();
     let mut indices = BTreeMap::new();
+    let declared = types
+      .iter()
+      .map(|rust_type| EnumToken::from(rust_type.type_name()))
+      .collect::<BTreeSet<_>>();
 
     for rust_type in types {
       let type_name: EnumToken = rust_type.type_name().into();
@@ -79,7 +84,7 @@ impl SerdeUsage {
         .entry(type_name.clone())
         .or_insert_with(|| graph.add_node(type_name));
 
-      for dep in Self::dependencies(rust_type) {
+      for dep in Self::dependencies(rust_type, &declared) {
         let dep_idx = *indices.entry(dep.clone()).or_insert_with(|| graph.add_node(dep));
         graph.add_edge(idx, dep_idx, ());
       }
@@ -88,8 +93,11 @@ impl SerdeUsage {
     (graph, indices)
   }
 
-  fn dependencies(rust_type: &RustType) -> impl Iterator<Item = EnumToken> + '_ {
-    let refs: Box<dyn Iterator<Item = &TypeRef> + '_> = match rust_type {
+  fn dependencies<'a>(
+    rust_type: &'a RustType,
+    declared: &'a BTreeSet<EnumToken>,
+  ) -> impl Iterator<Item = EnumToken> + 'a {
+    let refs: Box<dyn Iterator<Item = &'a TypeRef> + 'a> = match rust_type {
       RustType::Struct(def) => Box::new(def.fields.iter().map(|f| &f.rust_type)),
       RustType::Enum(def) => Box::new(def.variants.iter().filter_map(|v| v.content.tuple_types()).flatten()),
       RustType::TypeAlias(def) => Box::new(std::iter::once(&def.target)),
@@ -100,17 +108,32 @@ impl SerdeUsage {
           .map(|v| &v.type_name)
           .chain(def.fallback.as_ref().map(|f| &f.type_name)),
       ),
-      RustType::ResponseEnum(def) => Box::new(def.variants.iter().filter_map(|v| v.schema_type.as_ref())),
+      RustType::ResponseEnum(_) => Box::new(std::iter::empty()),
+      RustType::ResponseUnion(def) => Box::new(def.variants.iter().map(|v| &v.rust_type)),
     };
 
-    refs.filter_map(Self::custom_type_name)
+    refs.flat_map(move |type_ref| Self::custom_type_names(type_ref, declared))
   }
 
-  fn custom_type_name(type_ref: &TypeRef) -> Option<EnumToken> {
-    match &type_ref.base_type {
-      RustPrimitive::Custom(name) => Some(name.as_str().into()),
-      _ => None,
+  fn custom_type_names<'a>(
+    type_ref: &'a TypeRef,
+    declared: &'a BTreeSet<EnumToken>,
+  ) -> impl Iterator<Item = EnumToken> + 'a {
+    let RustPrimitive::Custom(name) = &type_ref.base_type else {
+      return Either::Left(None.into_iter());
+    };
+
+    let name = name.as_str();
+    if !name.contains('<') {
+      return Either::Left(Some(EnumToken::from(name)).into_iter());
     }
+
+    Either::Right(
+      name
+        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != ':')
+        .map(EnumToken::from)
+        .filter(|segment| declared.contains(segment)),
+    )
   }
 
   fn propagate_from_seeds(&mut self) {
@@ -181,7 +204,7 @@ impl SerdeUsage {
         RustType::Struct(def) => self.update_struct(def),
         RustType::Enum(def) => self.update_enum(def),
         RustType::DiscriminatedEnum(def) => self.update_discriminated_enum(def),
-        RustType::TypeAlias(_) | RustType::ResponseEnum(_) => {}
+        RustType::TypeAlias(_) | RustType::ResponseEnum(_) | RustType::ResponseUnion(_) => {}
       }
     }
   }

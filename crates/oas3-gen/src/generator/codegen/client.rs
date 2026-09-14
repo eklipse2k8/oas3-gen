@@ -6,8 +6,8 @@ use syn::LitStr;
 
 use super::Visibility;
 use crate::generator::ast::{
-  ClientRootNode, ContentCategory, EnumToken, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody,
-  OperationInfo, OperationKind, ParameterLocation, ParsedPath, StructToken,
+  ClientRootNode, ContentCategory, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody, OperationInfo,
+  OperationKind, OperationResponse, ParameterLocation, ParsedPath, StructToken,
 };
 
 #[derive(Clone, Debug)]
@@ -424,7 +424,7 @@ impl ToTokens for UrlConstructionFragment {
 #[derive(Clone)]
 enum ResponseKind {
   Enum {
-    enum_token: EnumToken,
+    response: OperationResponse,
     request_type: String,
   },
   Typed {
@@ -437,12 +437,9 @@ enum ResponseKind {
 impl std::fmt::Debug for ResponseKind {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::Enum {
-        enum_token,
-        request_type,
-      } => f
+      Self::Enum { response, request_type } => f
         .debug_struct("Enum")
-        .field("enum_token", enum_token)
+        .field("response", response)
         .field("request_type", request_type)
         .finish(),
       Self::Typed { category, .. } => f
@@ -462,10 +459,10 @@ pub(crate) struct ResponseParsingFragment {
 
 impl ResponseParsingFragment {
   pub(crate) fn new(op: &OperationInfo) -> Self {
-    if let Some(enum_token) = &op.response_enum {
+    if let Some(response) = &op.response {
       return Self {
         kind: ResponseKind::Enum {
-          enum_token: enum_token.clone(),
+          response: response.clone(),
           request_type: op.request_type.as_ref().unwrap().to_string(),
         },
       };
@@ -498,7 +495,7 @@ impl ResponseParsingFragment {
 
   pub(crate) fn success_type(&self) -> TokenStream {
     match &self.kind {
-      ResponseKind::Enum { enum_token, .. } => quote! { #enum_token },
+      ResponseKind::Enum { response, .. } => quote! { #response },
       ResponseKind::Typed { resp_type, category } => match category {
         ContentCategory::Text => quote! { String },
         ContentCategory::EventStream => quote! { oas3_gen_support::EventStream<#resp_type> },

@@ -2,10 +2,7 @@ use std::collections::BTreeSet;
 
 use indexmap::{IndexMap, map::Entry};
 
-use crate::generator::{
-  ast::{MethodKind, RustType, SerdeImpl, ValidationAttribute},
-  converter::GenerationTarget,
-};
+use crate::generator::ast::{MethodKind, RustType, SerdeImpl, ValidationAttribute};
 
 pub(crate) struct RustTypeDeduplication {
   types: Vec<RustType>,
@@ -41,12 +38,11 @@ impl RustTypeDeduplication {
 
 pub(crate) struct ModuleImports<'a> {
   types: &'a [RustType],
-  target: GenerationTarget,
 }
 
 impl<'a> ModuleImports<'a> {
-  pub(crate) fn new(types: &'a [RustType], target: GenerationTarget) -> Self {
-    Self { types, target }
+  pub(crate) fn new(types: &'a [RustType]) -> Self {
+    Self { types }
   }
 
   pub(crate) fn process(self) -> BTreeSet<String> {
@@ -78,10 +74,6 @@ impl<'a> ModuleImports<'a> {
     if needs_validate {
       uses.insert("validator::Validate".to_string());
     }
-    if self.target == GenerationTarget::Server {
-      uses.insert("axum::response::IntoResponse".to_string());
-    }
-
     uses
   }
 }

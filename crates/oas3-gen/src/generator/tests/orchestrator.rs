@@ -66,13 +66,13 @@ fn test_operation_filtering() {
   );
   assert_contains(
     &full.code,
-    "AdminActionResponse",
-    "full code should contain AdminActionResponse",
+    "AdminActionRequest",
+    "full code should contain AdminActionRequest",
   );
   assert_not_contains(
     &filtered.code,
-    "AdminActionResponse",
-    "filtered code should not contain AdminActionResponse",
+    "AdminActionRequest",
+    "filtered code should not contain AdminActionRequest",
   );
   assert_contains(
     &filtered.code,
@@ -171,7 +171,10 @@ fn test_fn_name_override_renames_derived_types() {
     &output.code,
     &[
       ("FetchAllUsersRequest", "request type should derive from the override"),
-      ("FetchAllUsersResponse", "response type should derive from the override"),
+      (
+        "ApiResponse<String>",
+        "the shared response enum should be instantiated with the operation's body type",
+      ),
     ],
   );
   assert_not_contains(

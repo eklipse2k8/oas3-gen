@@ -976,10 +976,23 @@ mod tests {
       .unwrap();
     let reqwest_response = reqwest::Response::from(mock_response);
     let result = GetEventsRequest::parse_response(reqwest_response).await.unwrap();
-    let GetEventsResponse::Ok(list) = result else {
+    let ApiResponse::Ok(list) = result else {
       panic!("Expected Ok response, got {result:?}");
     };
     assert_eq!(list.events.len(), 1, "parsed events count mismatch");
+
+    let mock_response = http::Response::builder()
+      .status(418)
+      .header("content-type", "text/plain")
+      .body("teapot".to_string())
+      .unwrap();
+    let reqwest_response = reqwest::Response::from(mock_response);
+    let result = GetEventsRequest::parse_response(reqwest_response).await.unwrap();
+    let ApiResponse::Other(status, body) = result else {
+      panic!("Expected Other response, got {result:?}");
+    };
+    assert_eq!(status, http::StatusCode::IM_A_TEAPOT, "undeclared status is preserved");
+    assert_eq!(body, b"teapot", "undeclared body is preserved verbatim");
 
     let content_json = json!({
       "id": "resp_456",
@@ -994,10 +1007,27 @@ mod tests {
       .unwrap();
     let reqwest_response = reqwest::Response::from(mock_response);
     let result = SendContentRequest::parse_response(reqwest_response).await.unwrap();
-    let SendContentResponse::Ok(resp) = result else {
+    let ApiResponse::Ok(resp) = result else {
       panic!("Expected Ok response, got {result:?}");
     };
     assert_eq!(resp.id, "resp_456", "parsed response id mismatch");
+
+    let error_json = json!({
+      "type": "error",
+      "error": {"type": "invalid_request_error", "message": "Bad request"}
+    })
+    .to_string();
+    let mock_response = http::Response::builder()
+      .status(400)
+      .header("content-type", "application/json")
+      .body(error_json)
+      .unwrap();
+    let reqwest_response = reqwest::Response::from(mock_response);
+    let result = SendContentRequest::parse_response(reqwest_response).await.unwrap();
+    let ApiResponse::BadRequest(err) = result else {
+      panic!("Expected BadRequest response, got {result:?}");
+    };
+    assert_eq!(err.error.message, "Bad request", "parsed error message mismatch");
   }
 
   #[test]
@@ -1005,16 +1035,16 @@ mod tests {
     let event_list = EventList {
       events: vec![Event::Ping(PingEvent { r#type: Some("ping") })],
     };
-    let ok_response = GetEventsResponse::Ok(event_list.clone());
-    let GetEventsResponse::Ok(list) = ok_response else {
+    let ok_response: ApiResponse<EventList, ()> = ApiResponse::Ok(event_list.clone());
+    let ApiResponse::Ok(list) = ok_response else {
       panic!("Expected Ok variant, got {ok_response:?}");
     };
     assert_eq!(list.events.len(), 1, "event list length mismatch");
 
-    let unknown_response = GetEventsResponse::Unknown;
+    let unexpected_response: ApiResponse<EventList, ()> = ApiResponse::Other(http::StatusCode::IM_A_TEAPOT, vec![]);
     assert!(
-      matches!(unknown_response, GetEventsResponse::Unknown),
-      "expected Unknown variant"
+      matches!(unexpected_response, ApiResponse::Other(status, _) if status == http::StatusCode::IM_A_TEAPOT),
+      "expected Other variant"
     );
 
     let content_resp = ContentResponse {
@@ -1025,8 +1055,8 @@ mod tests {
         output_tokens: 20,
       }),
     };
-    let send_ok = SendContentResponse::Ok(content_resp);
-    let SendContentResponse::Ok(resp) = send_ok else {
+    let send_ok: ApiResponse<ContentResponse, ErrorResponse> = ApiResponse::Ok(content_resp);
+    let ApiResponse::Ok(resp) = send_ok else {
       panic!("Expected Ok variant, got {send_ok:?}");
     };
     assert_eq!(resp.id, "resp_123", "response id mismatch");
@@ -1038,17 +1068,11 @@ mod tests {
         message: "Bad request".to_string(),
       },
     };
-    let send_error = SendContentResponse::BadRequest(error_resp);
-    let SendContentResponse::BadRequest(err) = send_error else {
+    let send_error: ApiResponse<ContentResponse, ErrorResponse> = ApiResponse::BadRequest(error_resp);
+    let ApiResponse::BadRequest(err) = send_error else {
       panic!("Expected BadRequest variant, got {send_error:?}");
     };
     assert_eq!(err.error.message, "Bad request", "error message mismatch");
-
-    let send_unknown = SendContentResponse::Unknown;
-    assert!(
-      matches!(send_unknown, SendContentResponse::Unknown),
-      "expected Unknown variant"
-    );
   }
 
   #[test]

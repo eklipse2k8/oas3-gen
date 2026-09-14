@@ -79,10 +79,16 @@ impl Orchestrator {
     let api_name = artifacts.config.api_name.as_deref();
     let (client, server_trait) = match artifacts.config.target {
       GenerationTarget::Client => (Some(ClientRootNode::from_spec(&self.spec, api_name)), None),
-      GenerationTarget::Server => (
-        None,
-        ServerRequestTraitDef::from_operations(&postprocessed.operations, api_name),
-      ),
+      GenerationTarget::Server => {
+        let response_enum = postprocessed.types.iter().find_map(|rust_type| match rust_type {
+          RustType::ResponseEnum(def) => Some(def.clone()),
+          _ => None,
+        });
+        (
+          None,
+          ServerRequestTraitDef::from_operations(&postprocessed.operations, api_name, response_enum),
+        )
+      }
     };
 
     let codegen = SchemaCodeGenerator::builder()

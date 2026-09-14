@@ -1,4 +1,4 @@
-mod response_enum;
+mod response;
 mod serde_usage;
 mod uses;
 mod validation;
@@ -12,7 +12,7 @@ use crate::generator::{
   ast::{EnumToken, OperationInfo, RustType, constants::HttpHeaderRef},
   converter::GenerationTarget,
   postprocess::{
-    response_enum::ResponseEnumDeduplicator,
+    response::ResponseProcessor,
     serde_usage::SerdeUsage,
     uses::{ModuleImports, RustTypeDeduplication},
     validation::NestedValidationProcessor,
@@ -35,14 +35,14 @@ impl PostprocessOutput {
     target: GenerationTarget,
     header_refs: Vec<HttpHeaderRef>,
   ) -> Self {
-    let (mut types, operations) = ResponseEnumDeduplicator::new(types, operations).process();
+    let (mut types, operations) = ResponseProcessor::new(types, operations, target).process();
 
     NestedValidationProcessor::new(&types).process(&mut types);
 
     SerdeUsage::new(&types, seed_usage, target).apply(&mut types);
 
     let dedup_output = RustTypeDeduplication::new(types).process();
-    let uses_output = ModuleImports::new(&dedup_output, target).process();
+    let uses_output = ModuleImports::new(&dedup_output).process();
 
     Self {
       types: dedup_output,

@@ -162,6 +162,18 @@ impl StatusCodeToken {
     matches!(self, Self::Default)
   }
 
+  pub const fn carries_status(self) -> bool {
+    matches!(
+      self,
+      Self::Informational1XX
+        | Self::Success2XX
+        | Self::Redirection3XX
+        | Self::ClientError4XX
+        | Self::ServerError5XX
+        | Self::Default
+    )
+  }
+
   pub const fn is_success(self) -> bool {
     matches!(
       self,

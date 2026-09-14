@@ -11,14 +11,11 @@ use super::{
 use crate::{
   generator::{
     ast::{
-      Documentation, EnumToken, FieldDef, OperationInfo, ParsedPath, ResponseEnumDef, RustType, StructMethod,
-      StructToken, constants::HttpHeaderRef,
+      Documentation, FieldDef, OperationInfo, ParsedPath, ResponseVariant, RustType, StructToken,
+      constants::HttpHeaderRef,
     },
     metrics::GenerationWarning,
-    naming::{
-      identifiers::to_rust_type_name,
-      operations::{generate_unique_request_name, generate_unique_response_name},
-    },
+    naming::{identifiers::to_rust_type_name, operations::generate_unique_request_name},
     operation_registry::OperationEntry,
   },
   utils::schema_ext::SchemaExtIters,
@@ -117,14 +114,12 @@ impl OperationsProcessor {
   }
 }
 
-type ResponseDefinition = (Option<ResponseEnumDef>, Option<StructMethod>);
 type RequestTypes = (Vec<RustType>, Option<StructToken>);
-type ResponseTypes = (Vec<RustType>, Option<EnumToken>);
 
 /// Converts OpenAPI operations into Rust types and metadata.
 ///
 /// Coordinates [`RequestConverter`] and [`ResponseConverter`] to transform
-/// operation definitions into request/response type definitions.
+/// operation definitions into request types and response variants.
 #[derive(Debug, Clone)]
 pub(crate) struct OperationConverter {
   context: Rc<ConverterContext>,
@@ -149,30 +144,31 @@ impl OperationConverter {
 
   /// Converts a single operation entry into types and metadata.
   ///
-  /// Generates request struct (with parameters and body), response enum,
-  /// and collects operation metadata for client/server code generation.
+  /// Generates the request struct (with parameters and body), collects the
+  /// declared response variants, and records operation metadata for
+  /// client/server code generation.
   pub(crate) fn convert(&self, entry: &OperationEntry) -> anyhow::Result<ConversionResult> {
     let base_name = to_rust_type_name(&entry.stable_id);
     let body_info = BodyInfo::new(&self.context, entry)?;
 
     self.context.mark_request_iter(&body_info.type_usage);
 
-    let (response_def, parse_method) = self.response_definition(&base_name, entry);
-    let request_output = self.request(&base_name, entry, &body_info, parse_method)?;
+    let response_variants = self.response_converter.build_variants(&entry.operation, &entry.path);
+    let request_output = self.request(&base_name, entry, &body_info)?;
 
     let warnings = request_output.warnings.clone();
     let parameters = request_output.parameter_fields.clone();
 
-    let (request_types, request_type) = self.request_types(request_output, response_def.is_some());
-    let (response_types, response_enum_token) = self.response_types(response_def, request_type.as_ref());
+    let (request_types, request_type) = self.request_types(request_output, response_variants.is_some());
+    self.mark_response_types(response_variants.as_deref().unwrap_or_default());
 
-    let types = Self::collect_types(&body_info, request_types, response_types);
+    let types = Self::collect_types(&body_info, request_types);
 
     let operation_info = self.operation_info(
       entry,
       &base_name,
       request_type,
-      response_enum_token,
+      response_variants,
       &body_info,
       warnings,
       parameters,
@@ -181,34 +177,10 @@ impl OperationConverter {
     Ok(ConversionResult { types, operation_info })
   }
 
-  /// Builds the response enum and parse method for an operation.
-  fn response_definition(&self, base_name: &str, entry: &OperationEntry) -> ResponseDefinition {
-    let response_name = generate_unique_response_name(base_name, |n| self.schema_converter.contains(n));
-    let response_def = self
-      .response_converter
-      .build_enum(&response_name, &entry.operation, &entry.path);
-
-    let parse_method = response_def.as_ref().map(|def| {
-      self
-        .response_converter
-        .build_parse_method(&EnumToken::new(def.name.to_string()), &def.variants)
-    });
-
-    (response_def, parse_method)
-  }
-
   /// Builds the request struct with parameters, body, and methods.
-  fn request(
-    &self,
-    base_name: &str,
-    entry: &OperationEntry,
-    body_info: &BodyInfo,
-    parse_method: Option<StructMethod>,
-  ) -> anyhow::Result<RequestOutput> {
+  fn request(&self, base_name: &str, entry: &OperationEntry, body_info: &BodyInfo) -> anyhow::Result<RequestOutput> {
     let request_name = generate_unique_request_name(base_name, |n| self.schema_converter.contains(n));
-    self
-      .request_converter
-      .build(&request_name, entry, body_info, parse_method)
+    self.request_converter.build(&request_name, entry, body_info)
   }
 
   /// Assembles request types and marks them as request-context types.
@@ -233,31 +205,20 @@ impl OperationConverter {
     (types, Some(name))
   }
 
-  /// Assembles response types and marks them as response-context types.
-  fn response_types(&self, response_def: Option<ResponseEnumDef>, request_type: Option<&StructToken>) -> ResponseTypes {
-    let Some(mut def) = response_def else {
-      return (vec![], None);
-    };
-
-    def.request_type = request_type.cloned();
-
-    self.context.mark_response(def.name.clone());
-    for schema_type in def.variants.iter().filter_map(|v| v.schema_type.as_ref()) {
+  /// Marks every response body type as a response-context type.
+  fn mark_response_types(&self, variants: &[ResponseVariant]) {
+    for schema_type in variants.iter().filter_map(|v| v.schema_type.as_ref()) {
       self.context.mark_response_type_ref(schema_type);
     }
-
-    let token = EnumToken::new(def.name.to_string());
-    (vec![RustType::ResponseEnum(def)], Some(token))
   }
 
-  /// Combines body, request, and response types into a single collection.
-  fn collect_types(body_info: &BodyInfo, request_types: Vec<RustType>, response_types: Vec<RustType>) -> Vec<RustType> {
+  /// Combines body and request types into a single collection.
+  fn collect_types(body_info: &BodyInfo, request_types: Vec<RustType>) -> Vec<RustType> {
     body_info
       .generated_types
       .iter()
       .cloned()
       .chain(request_types)
-      .chain(response_types)
       .collect::<Vec<_>>()
   }
 
@@ -268,7 +229,7 @@ impl OperationConverter {
     entry: &OperationEntry,
     base_name: &str,
     request_type: Option<StructToken>,
-    response_enum: Option<EnumToken>,
+    response_variants: Option<Vec<ResponseVariant>>,
     body_info: &BodyInfo,
     warnings: Vec<String>,
     parameters: Vec<FieldDef>,
@@ -291,7 +252,7 @@ impl OperationConverter {
         .kind(entry.kind)
         .maybe_request_type(request_type)
         .maybe_response_type(response_metadata.metadata.type_name)
-        .maybe_response_enum(response_enum)
+        .maybe_response_variants(response_variants)
         .response_media_types(response_metadata.metadata.media_types)
         .warnings(warnings)
         .parameters(parameters)

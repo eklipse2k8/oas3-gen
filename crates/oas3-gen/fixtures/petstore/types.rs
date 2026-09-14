@@ -199,7 +199,7 @@ impl ListPetsRequest {
 }
 impl ListPetsRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ListPetsResponse> {
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Pets, Error>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let content_type_str = req
@@ -209,24 +209,16 @@ impl ListPetsRequest {
         .unwrap_or("application/json");
       if content_type_str.contains("json") {
         let data = oas3_gen_support::Diagnostics::<Pets>::json_with_diagnostics(req).await?;
-        return Ok(ListPetsResponse::Ok(data));
+        return Ok(ApiResponse::Ok(data));
       }
       if content_type_str.contains("xml") {
         let data = oas3_gen_support::Diagnostics::<Pets>::xml_with_diagnostics(req).await?;
-        return Ok(ListPetsResponse::Ok(data));
+        return Ok(ApiResponse::Ok(data));
       }
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ListPetsResponse::Unknown(data))
+    Ok(ApiResponse::Unknown(status, data))
   }
-}
-/// Response types for listPets
-#[derive(Debug, Clone)]
-pub enum ListPetsResponse {
-  ///200: A paged array of pets
-  Ok(Pets),
-  ///default: unexpected error
-  Unknown(Error),
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
 pub struct CreatePetsRequestPath {
@@ -254,23 +246,15 @@ impl CreatePetsRequest {
 }
 impl CreatePetsRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<CreatePetsResponse> {
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<(), Error>> {
     let status = req.status();
     if status == http::StatusCode::CREATED {
       let _ = req.bytes().await?;
-      return Ok(CreatePetsResponse::Created);
+      return Ok(ApiResponse::Created);
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(CreatePetsResponse::Unknown(data))
+    Ok(ApiResponse::Unknown(status, data))
   }
-}
-/// Response types for createPets
-#[derive(Debug, Clone)]
-pub enum CreatePetsResponse {
-  ///201: Null response
-  Created,
-  ///default: unexpected error
-  Unknown(Error),
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
@@ -323,23 +307,15 @@ impl ListCatsRequest {
 }
 impl ListCatsRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ListCatsResponse> {
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Cats, Error>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let data = oas3_gen_support::Diagnostics::<Cats>::json_with_diagnostics(req).await?;
-      return Ok(ListCatsResponse::Ok(data));
+      return Ok(ApiResponse::Ok(data));
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ListCatsResponse::Unknown(data))
+    Ok(ApiResponse::Unknown(status, data))
   }
-}
-/// Response types for listCats
-#[derive(Debug, Clone)]
-pub enum ListCatsResponse {
-  ///200: A paged array of cats
-  Ok(Cats),
-  ///default: unexpected error
-  Unknown(Error),
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
 pub struct ShowPetByIdRequestPath {
@@ -391,23 +367,15 @@ impl ShowPetByIdRequest {
 }
 impl ShowPetByIdRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ShowPetByIdResponse> {
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Pet, Error>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ShowPetByIdResponse::Ok(data));
+      return Ok(ApiResponse::Ok(data));
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ShowPetByIdResponse::Unknown(data))
+    Ok(ApiResponse::Unknown(status, data))
   }
-}
-/// Response types for showPetById
-#[derive(Debug, Clone)]
-pub enum ShowPetByIdResponse {
-  ///200: Expected response to a valid request
-  Ok(Pet),
-  ///default: unexpected error
-  Unknown(Error),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default, bon::Builder)]
 pub struct UploadRequestBody {
@@ -446,14 +414,14 @@ impl UploadPetImageRequest {
 }
 impl UploadPetImageRequest {
   /// Parse the HTTP response into the response enum.
-  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ShowPetByIdResponse> {
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Pet, Error>> {
     let status = req.status();
     if status == http::StatusCode::OK {
       let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ShowPetByIdResponse::Ok(data));
+      return Ok(ApiResponse::Ok(data));
     }
     let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ShowPetByIdResponse::Unknown(data))
+    Ok(ApiResponse::Unknown(status, data))
   }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
@@ -499,4 +467,17 @@ impl core::fmt::Display for ListPetsRequestHeaderXonly {
       Self::Bird => write!(f, "bird"),
     }
   }
+}
+/// Response enum shared by every operation.
+///
+/// `Value` is the operation's success body type and `Failure` its error body type.
+/// A status code is a unit variant when no operation gives it a body.
+#[derive(Debug, Clone)]
+pub enum ApiResponse<Value, Failure> {
+  ///200
+  Ok(Value),
+  ///201
+  Created,
+  ///default
+  Unknown(http::StatusCode, Failure),
 }

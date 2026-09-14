@@ -12,8 +12,7 @@ use crate::generator::{
   codegen::{
     Visibility,
     constants::{HeaderConstantsFragment, RegexConstantsResult},
-    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment},
-    server::AxumResponseEnumFragment,
+    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment, ResponseUnionFragment},
     structs::StructFragment,
     type_aliases::TypeAliasFragment,
   },
@@ -53,10 +52,8 @@ impl ToTokens for TypeFragment<'_> {
       RustType::Enum(def) => EnumFragment::new(def, self.visibility, self.target).into_token_stream(),
       RustType::TypeAlias(def) => TypeAliasFragment::new(def, self.visibility).into_token_stream(),
       RustType::DiscriminatedEnum(def) => DiscriminatedEnumFragment::new(def, self.visibility).into_token_stream(),
-      RustType::ResponseEnum(def) => match self.target {
-        GenerationTarget::Server => AxumResponseEnumFragment::new(self.visibility, def).into_token_stream(),
-        GenerationTarget::Client => ResponseEnumFragment::new(self.visibility, def).into_token_stream(),
-      },
+      RustType::ResponseEnum(def) => ResponseEnumFragment::new(self.visibility, def).into_token_stream(),
+      RustType::ResponseUnion(def) => ResponseUnionFragment::new(self.visibility, def).into_token_stream(),
     };
     tokens.extend(ts);
   }

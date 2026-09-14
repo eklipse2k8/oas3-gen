@@ -14,7 +14,7 @@ One-way data flow. Each stage consumes the previous stage's output and never wri
 | 3 | Collect operations and webhooks | `operation_registry.rs` |
 | 4 | Convert schemas -> `Vec<RustType>` | `converter/` (`SchemaConverter`) |
 | 5 | Convert operations -> `Vec<OperationInfo>` + types + usage | `converter/operations.rs` |
-| 6 | Propagate usage, fix serde modes, dedupe response enums | `postprocess/` |
+| 6 | Assemble the shared `ApiResponse<Value, Failure>` response enum, propagate usage, fix serde modes | `postprocess/` |
 | 7 | Emit Rust source | `codegen/` (`SchemaCodeGenerator`) |
 
 `orchestrator.rs` sequences all seven. `SharedSchemaCache` (`converter/cache.rs`) dedupes within

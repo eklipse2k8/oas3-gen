@@ -50,7 +50,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
   DependencySpec {
     ident: "bon",
     package: "bon",
-    version: "3.9",
+    version: "3.10",
     features: &["implied-bounds"],
     ordered_features: &[],
     default_features: true,
@@ -122,7 +122,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
   DependencySpec {
     ident: "serde_with",
     package: "serde_with",
-    version: "3.21",
+    version: "3.23",
     features: &["base64", "chrono"],
     ordered_features: &[],
     default_features: true,
@@ -130,7 +130,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
   DependencySpec {
     ident: "uuid",
     package: "uuid",
-    version: "1.24",
+    version: "1.26",
     features: &["serde"],
     ordered_features: &[],
     default_features: true,

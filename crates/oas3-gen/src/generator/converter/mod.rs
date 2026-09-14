@@ -321,10 +321,6 @@ impl ConverterContext {
   /// Records that the named type appears in an HTTP response context.
   ///
   /// Types used only in responses may derive `Deserialize` without `Serialize`.
-  pub(crate) fn mark_response(&self, type_name: impl Into<EnumToken>) {
-    self.type_usage.borrow_mut().mark_response(type_name);
-  }
-
   /// Records that multiple types appear in HTTP request contexts.
   ///
   /// More efficient than calling [`mark_request`](Self::mark_request) in a loop.

@@ -5,8 +5,8 @@ use reqwest::Url;
 use crate::generator::{
   ast::{
     ClientRootNode, ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, MultipartFieldInfo,
-    OperationBody, OperationInfo, OperationKind, ParameterLocation, ParsedPath, PathSegment, ResponseMediaType,
-    StructToken, TypeRef,
+    OperationBody, OperationInfo, OperationKind, OperationResponse, ParameterLocation, ParsedPath, PathSegment,
+    ResponseMediaType, StructToken, TypeRef,
   },
   codegen::{
     Visibility,
@@ -19,7 +19,7 @@ struct TestOperation {
   summary: Option<String>,
   description: Option<String>,
   response_media_types: Option<Vec<ResponseMediaType>>,
-  response_enum: Option<String>,
+  response: Option<OperationResponse>,
 }
 
 impl TestOperation {
@@ -37,7 +37,7 @@ impl TestOperation {
       .kind(OperationKind::Http)
       .request_type(StructToken::new("TestRequest"))
       .response_type("TestResponse".to_string())
-      .maybe_response_enum(self.response_enum.as_deref().map(EnumToken::new))
+      .maybe_response(self.response.clone())
       .response_media_types(
         self
           .response_media_types
@@ -219,25 +219,49 @@ fn test_response_handling_content_categories() {
 }
 
 #[test]
-fn test_response_handling_with_response_enum() {
-  let operation = TestOperation {
-    response_enum: Some("TestResponseEnum".to_string()),
-    ..Default::default()
-  }
-  .build();
-  let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
-    .generate()
-    .unwrap()
-    .to_string();
+fn test_response_handling_with_response_response_enum() {
+  let cases = [
+    (
+      OperationResponse::builder()
+        .name(EnumToken::new("ApiResponse"))
+        .value(TypeRef::new("Pet"))
+        .failure(TypeRef::new("Error"))
+        .build(),
+      "-> anyhow :: Result < ApiResponse < Pet , Error > >",
+    ),
+    (
+      OperationResponse::builder()
+        .name(EnumToken::new("ApiResponse"))
+        .value(TypeRef::new("Pet").with_option())
+        .build(),
+      "-> anyhow :: Result < ApiResponse < Option < Pet > > >",
+    ),
+    (
+      OperationResponse::builder().name(EnumToken::new("ApiResponse")).build(),
+      "-> anyhow :: Result < ApiResponse >",
+    ),
+  ];
 
-  assert!(
-    method.contains("-> anyhow :: Result < TestResponseEnum >"),
-    "success type should contain TestResponseEnum"
-  );
-  assert!(
-    method.contains("parse_response"),
-    "parse_body should use parse_response"
-  );
+  for (response, expected) in cases {
+    let operation = TestOperation {
+      response: Some(response.clone()),
+      ..Default::default()
+    }
+    .build();
+    let method = ClientMethodFragment::new(operation, Visibility::Public)
+      .generate()
+      .unwrap()
+      .to_string();
+
+    assert!(
+      method.contains(expected),
+      "return type mismatch for {response:?}: {method}"
+    );
+    assert!(
+      method.contains("parse_response"),
+      "parse_body should use parse_response for {response:?}"
+    );
+  }
 }
 
 #[test]

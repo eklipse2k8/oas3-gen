@@ -63,8 +63,9 @@ Functions: `new`/`with_<prop>`/`from_<source>`; getters without `get_`; `to_<typ
 vs `into_<type>` consuming; `is_`/`has_` predicates.
 
 Keep OpenAPI (source) and Rust AST (target) vocabulary distinct in the same scope. Generated
-operation types are `...Request`, `...RequestBody`, `...Response`; generated fields are
-`snake_case` with keyword escaping (`r#type`).
+operation types are `...Request` and `...RequestBody`; every operation answers with the one
+generic `ApiResponse<Value, Failure>` response enum. Generated fields are `snake_case` with keyword escaping
+(`r#type`).
 
 ## Patterns
 

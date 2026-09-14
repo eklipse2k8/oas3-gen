@@ -23,6 +23,7 @@ pub use client::ClientRootNode;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
+use itertools::Itertools;
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
 use oas3::{
@@ -132,23 +133,52 @@ impl DiscriminatedEnumDef {
 /// Response enum variant definition
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct ResponseVariant {
-  pub variant_name: EnumVariantToken,
   #[builder(default)]
   pub status_code: StatusCodeToken,
-  pub description: Option<String>,
   #[builder(default)]
   pub media_types: Vec<ResponseMediaType>,
   pub schema_type: Option<TypeRef>,
+  #[builder(default)]
+  pub mapping: VariantMapping,
 }
 
 impl ResponseVariant {
   #[must_use]
-  pub fn doc_line(&self) -> String {
-    match &self.description {
-      Some(desc) => format!("{}: {desc}", self.status_code),
-      None => self.status_code.to_string(),
+  pub fn variant_name(&self) -> EnumVariantToken {
+    self.status_code.to_variant_token()
+  }
+
+  #[must_use]
+  pub fn payload(&self) -> ResponsePayload {
+    ResponsePayload::for_status(self.status_code)
+  }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ResponsePayload {
+  #[default]
+  None,
+  Value,
+  Failure,
+  Raw,
+}
+
+impl ResponsePayload {
+  #[must_use]
+  pub fn for_status(status_code: StatusCodeToken) -> Self {
+    if status_code.is_success() {
+      Self::Value
+    } else {
+      Self::Failure
     }
   }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct VariantMapping {
+  #[builder(default)]
+  pub payload: ResponsePayload,
+  pub union_variant: Option<EnumVariantToken>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -166,6 +196,57 @@ pub enum ResponseStatusCategory {
   },
 }
 
+impl ResponseStatusCategory {
+  #[must_use]
+  pub fn from_variants(variants: &[&ResponseVariant]) -> Self {
+    if let [variant] = variants {
+      let unique_categories = variant.media_types.iter().map(|m| m.category).unique().count();
+
+      if unique_categories <= 1 {
+        return Self::Single(
+          ResponseVariantCategory::builder()
+            .category(ResponseMediaType::primary_category(&variant.media_types))
+            .variant((*variant).clone())
+            .build(),
+        );
+      }
+    }
+
+    Self::from_content_types(variants)
+  }
+
+  #[must_use]
+  pub(crate) fn from_content_types(variants: &[&ResponseVariant]) -> Self {
+    let all_categories = variants
+      .iter()
+      .flat_map(|variant| {
+        let default_category = variant
+          .media_types
+          .is_empty()
+          .then(|| ResponseMediaType::primary_category(&[]));
+
+        let explicit_categories = variant.media_types.iter().map(|m| m.category);
+
+        default_category
+          .into_iter()
+          .chain(explicit_categories)
+          .map(move |category| (category, *variant))
+      })
+      .unique_by(|(category, variant)| (*category, variant.schema_type.as_ref().map(TypeRef::to_rust_type)))
+      .map(|(category, variant)| ResponseVariantCategory {
+        category,
+        variant: variant.clone(),
+      })
+      .collect_vec();
+
+    let (streams, variants): (Vec<_>, Vec<_>) = all_categories
+      .into_iter()
+      .partition(|c| c.category == ContentCategory::EventStream);
+
+    Self::ContentDispatch { streams, variants }
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusHandler {
   pub status_code: StatusCodeToken,
@@ -173,9 +254,22 @@ pub struct StatusHandler {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
-pub struct ImplTryFromNode {
-  pub into: TypeRef,
-  pub methods: Vec<MethodKind>,
+pub struct ResponseEnumVariant {
+  pub name: EnumVariantToken,
+  #[builder(default)]
+  pub status_code: StatusCodeToken,
+  #[builder(default)]
+  pub payload: ResponsePayload,
+}
+
+impl ResponseEnumVariant {
+  #[must_use]
+  pub fn doc_line(&self) -> String {
+    match self.payload {
+      ResponsePayload::Raw => "Status code the operation does not declare; carries the raw body.".to_string(),
+      _ => self.status_code.to_string(),
+    }
+  }
 }
 
 /// Response enum definition for operation responses
@@ -185,10 +279,51 @@ pub struct ResponseEnumDef {
   #[builder(default)]
   pub docs: Documentation,
   #[builder(default)]
-  pub variants: Vec<ResponseVariant>,
-  pub request_type: Option<StructToken>,
+  pub variants: Vec<ResponseEnumVariant>,
+}
+
+impl ResponseEnumDef {
+  #[must_use]
+  pub fn has_param(&self, payload: ResponsePayload) -> bool {
+    self.variants.iter().any(|v| v.payload == payload)
+  }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct OperationResponse {
+  pub name: EnumToken,
+  pub value: Option<TypeRef>,
+  pub failure: Option<TypeRef>,
+}
+
+impl OperationResponse {
+  #[must_use]
+  pub fn param(&self, payload: ResponsePayload) -> Option<&TypeRef> {
+    match payload {
+      ResponsePayload::Value => self.value.as_ref(),
+      ResponsePayload::Failure => self.failure.as_ref(),
+      ResponsePayload::None | ResponsePayload::Raw => None,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct ResponseUnionDef {
+  pub name: EnumToken,
   #[builder(default)]
-  pub try_from: Vec<ImplTryFromNode>,
+  pub docs: Documentation,
+  #[builder(default)]
+  pub variants: Vec<ResponseUnionVariant>,
+  #[builder(default)]
+  pub serde_mode: SerdeMode,
+  #[builder(default)]
+  pub streaming: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct ResponseUnionVariant {
+  pub name: EnumVariantToken,
+  pub rust_type: TypeRef,
 }
 
 /// Top-level Rust type representation
@@ -199,6 +334,7 @@ pub enum RustType {
   TypeAlias(TypeAliasDef),
   DiscriminatedEnum(DiscriminatedEnumDef),
   ResponseEnum(ResponseEnumDef),
+  ResponseUnion(ResponseUnionDef),
 }
 
 impl RustType {
@@ -209,13 +345,14 @@ impl RustType {
       RustType::TypeAlias(def) => def.name.to_atom(),
       RustType::DiscriminatedEnum(def) => def.name.to_atom(),
       RustType::ResponseEnum(def) => def.name.to_atom(),
+      RustType::ResponseUnion(def) => def.name.to_atom(),
     }
   }
 
   pub fn type_priority(&self) -> u8 {
     match self {
       RustType::Struct(_) => 0,
-      RustType::ResponseEnum(_) => 1,
+      RustType::ResponseEnum(_) | RustType::ResponseUnion(_) => 1,
       RustType::DiscriminatedEnum(_) => 2,
       RustType::Enum(_) => 3,
       RustType::TypeAlias(_) => 4,
@@ -229,6 +366,7 @@ impl RustType {
       RustType::Enum(def) => def.is_serializable(),
       RustType::DiscriminatedEnum(def) => def.is_serializable(),
       RustType::ResponseEnum(def) => def.is_serializable(),
+      RustType::ResponseUnion(def) => def.is_serializable(),
       RustType::TypeAlias(_) => SerdeImpl::None,
     }
   }
@@ -240,6 +378,7 @@ impl RustType {
       RustType::Enum(def) => def.is_deserializable(),
       RustType::DiscriminatedEnum(def) => def.is_deserializable(),
       RustType::ResponseEnum(def) => def.is_deserializable(),
+      RustType::ResponseUnion(def) => def.is_deserializable(),
       RustType::TypeAlias(_) => SerdeImpl::None,
     }
   }
@@ -263,7 +402,8 @@ pub struct OperationInfo {
   pub kind: OperationKind,
   pub request_type: Option<StructToken>,
   pub response_type: Option<String>,
-  pub response_enum: Option<EnumToken>,
+  pub response_variants: Option<Vec<ResponseVariant>>,
+  pub response: Option<OperationResponse>,
   #[builder(default)]
   pub response_media_types: Vec<ResponseMediaType>,
   #[builder(default)]
@@ -356,29 +496,6 @@ impl ContentCategory {
       ("application" | "text", _, _) => Self::Text,
       _ => Self::Json,
     }
-  }
-
-  #[must_use]
-  pub const fn variant_suffix(self) -> &'static str {
-    match self {
-      Self::Json => "",
-      Self::Binary => "Binary",
-      Self::Text => "Text",
-      Self::Xml => "Xml",
-      Self::EventStream => "EventStream",
-      Self::FormUrlEncoded => "Form",
-      Self::Multipart => "Multipart",
-    }
-  }
-}
-
-impl EnumVariantToken {
-  pub fn with_content_suffix(self, category: ContentCategory) -> Self {
-    Self::new(format!("{}{}", self, category.variant_suffix()))
-  }
-
-  pub fn with_schema_suffix(self, schema_name: &str) -> Self {
-    Self::new(format!("{self}{schema_name}"))
   }
 }
 
@@ -504,15 +621,9 @@ impl StructDef {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MethodKind {
-  /// Method to parse a reqwest response into the struct
+  /// Method to parse a reqwest response into the operation's response enum instantiation
   ParseResponse {
-    response_enum: EnumToken,
-    status_handlers: Vec<StatusHandler>,
-    default_handler: Option<ResponseVariantCategory>,
-  },
-  /// Method to convert the struct into an axum response
-  IntoAxumResponse {
-    response_enum: EnumToken,
+    response: OperationResponse,
     status_handlers: Vec<StatusHandler>,
     default_handler: Option<ResponseVariantCategory>,
   },

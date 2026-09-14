@@ -1,4 +1,9 @@
-use axum::response::IntoResponse;
+use std::future::{Future, ready};
+
+use axum::{
+  extract::{Path, Query, State},
+  response::IntoResponse,
+};
 use http::HeaderMap;
 use validator::Validate;
 
@@ -181,56 +186,139 @@ fn test_query_deserialization() {
   assert_eq!(query_none.limit, None, "missing fields should be None");
 }
 
-#[test]
-fn test_list_pets_response_into_response() {
-  let ok_response = ListPetsResponse::Ok(vec![Pet {
-    id: 1,
-    name: "Fluffy".to_string(),
-    tag: None,
-    ..Default::default()
-  }]);
-  let response = ok_response.into_response();
-  assert_eq!(
-    response.status(),
-    http::StatusCode::OK,
-    "ok response should have 200 status"
-  );
-
-  let error_response = ListPetsResponse::Unknown(Error {
-    code: 500,
-    message: "Internal error".to_string(),
-  });
-  let response = error_response.into_response();
-  assert_eq!(
-    response.status(),
-    http::StatusCode::OK,
-    "unknown response uses default status"
-  );
+#[derive(Debug, Clone, Copy)]
+enum Outcome {
+  Declared,
+  Default,
+  Failure,
 }
 
-#[test]
-fn test_show_pet_by_id_response_into_response() {
-  let ok_response = ShowPetByIdResponse::Ok(Pet {
-    id: 42,
-    name: "Rex".to_string(),
-    tag: Some("dog".to_string()),
-    ..Default::default()
-  });
-  let response = ok_response.into_response();
-  assert_eq!(
-    response.status(),
-    http::StatusCode::OK,
-    "ok response should have 200 status"
-  );
+#[derive(Clone)]
+struct StubService {
+  outcome: Outcome,
 }
 
-#[test]
-fn test_create_pets_response_into_response() {
-  let created_response = CreatePetsResponse::Created;
-  let response = created_response.into_response();
+impl StubService {
+  fn upstream_error() -> Error {
+    Error {
+      code: 502,
+      message: "upstream unavailable".to_string(),
+    }
+  }
+}
+
+impl ApiServer for StubService {
+  fn list_pets(
+    &self,
+    _request: ListPetsRequest,
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<Pets, Error>>> + Send {
+    ready(match self.outcome {
+      Outcome::Declared => Ok(ApiResponse::Ok(vec![Pet {
+        id: 1,
+        name: "Fluffy".to_string(),
+        tag: None,
+        ..Default::default()
+      }])),
+      Outcome::Default => Ok(ApiResponse::Unknown(
+        http::StatusCode::BAD_GATEWAY,
+        Self::upstream_error(),
+      )),
+      Outcome::Failure => Err(anyhow::anyhow!("service failure")),
+    })
+  }
+
+  fn create_pets(
+    &self,
+    _request: CreatePetsRequest,
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<(), Error>>> + Send {
+    ready(Ok(ApiResponse::Created))
+  }
+
+  fn list_cats(
+    &self,
+    _request: ListCatsRequest,
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<Cats, Error>>> + Send {
+    ready(Ok(ApiResponse::Ok(vec![])))
+  }
+
+  fn show_pet_by_id(
+    &self,
+    _request: ShowPetByIdRequest,
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<Pet, Error>>> + Send {
+    ready(Ok(ApiResponse::Ok(Pet {
+      id: 42,
+      name: "Rex".to_string(),
+      tag: Some("dog".to_string()),
+      ..Default::default()
+    })))
+  }
+
+  fn upload_pet_image(
+    &self,
+    _request: UploadPetImageRequest,
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<Pet, Error>>> + Send {
+    ready(Ok(ApiResponse::Unknown(
+      http::StatusCode::SERVICE_UNAVAILABLE,
+      Self::upstream_error(),
+    )))
+  }
+}
+
+#[tokio::test]
+async fn test_list_pets_handler_maps_response_enum_to_status() {
+  let cases = [
+    (Outcome::Declared, http::StatusCode::OK),
+    (Outcome::Default, http::StatusCode::BAD_GATEWAY),
+    (Outcome::Failure, http::StatusCode::INTERNAL_SERVER_ERROR),
+  ];
+
+  for (outcome, expected) in cases {
+    let response = list_pets(
+      State(StubService { outcome }),
+      Path(ListPetsRequestPath {
+        api_version: "v1".to_string(),
+      }),
+      Query(ListPetsRequestQuery { limit: None }),
+      HeaderMap::new(),
+    )
+    .await
+    .into_response();
+    assert_eq!(response.status(), expected, "status mismatch for {outcome:?}");
+  }
+}
+
+#[tokio::test]
+async fn test_handlers_map_unit_and_body_variants_to_status() {
+  let service = StubService {
+    outcome: Outcome::Declared,
+  };
+
+  let created = create_pets(
+    State(service.clone()),
+    Path(CreatePetsRequestPath {
+      api_version: "v1".to_string(),
+    }),
+  )
+  .await
+  .into_response();
   assert_eq!(
-    response.status(),
+    created.status(),
     http::StatusCode::CREATED,
-    "created response should have 201 status"
+    "unit variant should answer with its status alone"
+  );
+
+  let shown = show_pet_by_id(
+    State(service),
+    Path(ShowPetByIdRequestPath {
+      pet_id: "42".to_string(),
+    }),
+    HeaderMap::new(),
+  )
+  .await
+  .into_response();
+  assert_eq!(
+    shown.status(),
+    http::StatusCode::OK,
+    "body variant should answer with its status and a JSON body"
   );
 }

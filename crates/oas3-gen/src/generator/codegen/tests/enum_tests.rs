@@ -3,12 +3,13 @@ use quote::ToTokens;
 use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumDefault, EnumDefaultValue, EnumMethod,
-    EnumMethodKind, EnumToken, EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseMediaType, ResponseVariant,
-    RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken, StructToken, TypeRef, VariantContent, VariantDef,
+    EnumMethodKind, EnumToken, EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseEnumVariant, ResponsePayload,
+    ResponseUnionDef, ResponseUnionVariant, RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken, TypeRef,
+    VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
-    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment},
+    enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment, ResponseUnionFragment},
   },
   converter::GenerationTarget,
   naming::constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
@@ -984,66 +985,139 @@ fn test_discriminated_enum_deserialize_only() {
 }
 
 #[test]
-fn test_response_enum_generation() {
-  let def = ResponseEnumDef {
-    name: EnumToken::new("GetUserResponse"),
-    docs: Documentation::from_lines(["Response for GET /users/{id}"]),
-    variants: vec![
-      ResponseVariant::builder()
+fn test_response_response_enum_generation() {
+  let def = ResponseEnumDef::builder()
+    .name(EnumToken::new("ApiResponse"))
+    .docs(Documentation::from_lines(["Shared response enum"]))
+    .variants(vec![
+      ResponseEnumVariant::builder()
+        .name(EnumVariantToken::new("Ok"))
         .status_code(StatusCodeToken::Ok200)
-        .variant_name(EnumVariantToken::new("Ok"))
-        .description("User found".to_string())
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom("User".into()))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom("User".into())))
+        .payload(ResponsePayload::Value)
         .build(),
-      ResponseVariant::builder()
+      ResponseEnumVariant::builder()
+        .name(EnumVariantToken::new("NotFound"))
         .status_code(StatusCodeToken::NotFound404)
-        .variant_name(EnumVariantToken::new("NotFound"))
-        .description("User not found".to_string())
-        .media_types(vec![ResponseMediaType::new("application/json")])
         .build(),
-      ResponseVariant::builder()
-        .status_code(StatusCodeToken::InternalServerError500)
-        .variant_name(EnumVariantToken::new("InternalServerError"))
-        .media_types(vec![ResponseMediaType::with_schema(
-          "application/json",
-          Some(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into()))),
-        )])
-        .schema_type(TypeRef::new(RustPrimitive::Custom("ErrorResponse".into())))
+      ResponseEnumVariant::builder()
+        .name(EnumVariantToken::new("ClientError"))
+        .status_code(StatusCodeToken::ClientError4XX)
+        .payload(ResponsePayload::Failure)
         .build(),
-    ],
-    request_type: Some(StructToken::new("GetUserRequest")),
-    try_from: vec![],
-  };
+      ResponseEnumVariant::builder()
+        .name(EnumVariantToken::new("Other"))
+        .status_code(StatusCodeToken::Default)
+        .payload(ResponsePayload::Raw)
+        .build(),
+    ])
+    .build();
 
   let code = ResponseEnumFragment::new(Visibility::Public, &def)
     .into_token_stream()
     .to_string();
 
   let assertions = [
-    ("pub enum GetUserResponse", "should have pub enum declaration"),
+    (
+      "pub enum ApiResponse < Value , Failure >",
+      "should declare both type parameters",
+    ),
     ("# [derive (Debug , Clone)]", "should derive Debug and Clone"),
-    ("Ok (User)", "should have Ok variant with User type"),
-    ("NotFound", "should have NotFound unit variant"),
+    ("Ok (Value)", "success variant should carry Value"),
+    ("NotFound ,", "bodiless status should be a unit variant"),
     (
-      "InternalServerError (ErrorResponse)",
-      "should have error variant with type",
+      "ClientError (http :: StatusCode , Failure)",
+      "range variant should carry the status and Failure",
     ),
     (
-      "# [doc = \"200: User found\"]",
-      "should have doc with status and description",
+      "Other (http :: StatusCode , Vec < u8 >)",
+      "raw variant should carry the status and bytes",
     ),
-    ("# [doc = \"404: User not found\"]", "should have doc for 404"),
-    (
-      "# [doc = \"500\"]",
-      "should have doc with just status when no description",
-    ),
+    ("# [doc = \"200\"]", "should document the status code"),
+    ("# [doc = \"4XX\"]", "should document the range"),
   ];
   for (expected, msg) in assertions {
-    assert!(code.contains(expected), "{msg}");
+    assert!(code.contains(expected), "{msg}: {code}");
+  }
+
+  let success_only = ResponseEnumDef::builder()
+    .name(EnumToken::new("ApiResponse"))
+    .variants(vec![
+      ResponseEnumVariant::builder()
+        .name(EnumVariantToken::new("Ok"))
+        .status_code(StatusCodeToken::Ok200)
+        .payload(ResponsePayload::Value)
+        .build(),
+    ])
+    .build();
+  let code = ResponseEnumFragment::new(Visibility::Public, &success_only)
+    .into_token_stream()
+    .to_string();
+  assert!(
+    code.contains("pub enum ApiResponse < Value >"),
+    "unused error parameter should be omitted: {code}"
+  );
+}
+
+#[test]
+fn test_payload_union_generation() {
+  let variants = vec![
+    ResponseUnionVariant::builder()
+      .name(EnumVariantToken::new("BasicError"))
+      .rust_type(TypeRef::new("BasicError"))
+      .build(),
+    ResponseUnionVariant::builder()
+      .name(EnumVariantToken::new("ValidationError"))
+      .rust_type(TypeRef::new("ValidationError"))
+      .build(),
+  ];
+  let cases = [
+    (
+      SerdeMode::None,
+      false,
+      vec!["# [derive (Debug , Clone)]", "pub enum BasicErrorOrValidationError"],
+      vec!["serde"],
+    ),
+    (
+      SerdeMode::SerializeOnly,
+      false,
+      vec!["Serialize", "# [serde (untagged)]"],
+      vec!["Deserialize"],
+    ),
+    (
+      SerdeMode::SerializeOnly,
+      true,
+      vec!["# [derive (Debug)]"],
+      vec!["Clone", "serde"],
+    ),
+  ];
+
+  for (serde_mode, streaming, present, absent) in cases {
+    let def = ResponseUnionDef::builder()
+      .name(EnumToken::new("BasicErrorOrValidationError"))
+      .variants(variants.clone())
+      .serde_mode(serde_mode)
+      .streaming(streaming)
+      .build();
+    let code = ResponseUnionFragment::new(Visibility::Public, &def)
+      .into_token_stream()
+      .to_string();
+
+    assert!(
+      code.contains("BasicError (BasicError) , ValidationError (ValidationError)"),
+      "members should be tuple variants for {serde_mode:?}/{streaming}: {code}"
+    );
+    for expected in present {
+      assert!(
+        code.contains(expected),
+        "expected `{expected}` for {serde_mode:?}/{streaming}: {code}"
+      );
+    }
+    for unexpected in absent {
+      assert!(
+        !code.contains(unexpected),
+        "did not expect `{unexpected}` for {serde_mode:?}/{streaming}: {code}"
+      );
+    }
   }
 }
 

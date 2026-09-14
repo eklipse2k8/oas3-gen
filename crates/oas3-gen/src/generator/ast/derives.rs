@@ -5,7 +5,7 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 use strum::Display;
 
 use super::{
-  DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponseMediaType, SerdeMode, StructDef, StructKind,
+  DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponseUnionDef, SerdeMode, StructDef, StructKind,
   VariantContent,
 };
 
@@ -174,18 +174,7 @@ impl DerivesProvider for DiscriminatedEnumDef {
 
 impl DerivesProvider for ResponseEnumDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    let mut derives = BTreeSet::from([DeriveTrait::Debug]);
-
-    let has_event_stream = self
-      .variants
-      .iter()
-      .any(|v| ResponseMediaType::has_event_stream(&v.media_types));
-
-    if !has_event_stream {
-      derives.insert(DeriveTrait::Clone);
-    }
-
-    derives
+    BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
   }
 
   fn is_serializable(&self) -> SerdeImpl {
@@ -194,5 +183,37 @@ impl DerivesProvider for ResponseEnumDef {
 
   fn is_deserializable(&self) -> SerdeImpl {
     SerdeImpl::None
+  }
+}
+
+impl DerivesProvider for ResponseUnionDef {
+  fn derives(&self) -> BTreeSet<DeriveTrait> {
+    let mut derives = BTreeSet::from([DeriveTrait::Debug]);
+
+    if !self.streaming {
+      derives.insert(DeriveTrait::Clone);
+    }
+    if self.is_serializable() == SerdeImpl::Derive {
+      derives.insert(DeriveTrait::Serialize);
+    }
+    if self.is_deserializable() == SerdeImpl::Derive {
+      derives.insert(DeriveTrait::Deserialize);
+    }
+
+    derives
+  }
+
+  fn is_serializable(&self) -> SerdeImpl {
+    match self.serde_mode {
+      SerdeMode::SerializeOnly | SerdeMode::Both if !self.streaming => SerdeImpl::Derive,
+      _ => SerdeImpl::None,
+    }
+  }
+
+  fn is_deserializable(&self) -> SerdeImpl {
+    match self.serde_mode {
+      SerdeMode::DeserializeOnly | SerdeMode::Both if !self.streaming => SerdeImpl::Derive,
+      _ => SerdeImpl::None,
+    }
   }
 }

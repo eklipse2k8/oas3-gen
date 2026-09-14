@@ -51,7 +51,10 @@ impl EventStreamApiClient {
   /// Returns a stream of server-sent events
   ///
   /// * Path: `GET /events`
-  pub async fn events(&self, request: EventsRequest) -> anyhow::Result<EventsResponse> {
+  pub async fn events(
+    &self,
+    request: EventsRequest,
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<StreamEvent>>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -66,7 +69,10 @@ impl EventStreamApiClient {
   /// Returns a stream of typed server-sent events with query parameters
   ///
   /// * Path: `GET /events/typed`
-  pub async fn typed_events(&self, request: TypedEventsRequest) -> anyhow::Result<TypedEventsResponse> {
+  pub async fn typed_events(
+    &self,
+    request: TypedEventsRequest,
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<TypedEvent>>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url

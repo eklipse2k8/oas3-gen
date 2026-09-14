@@ -1,11 +1,18 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
+use itertools::Itertools;
 use oas3::{
   Spec,
   spec::{Operation, Response},
 };
 
-use crate::{generator::naming::identifiers::to_rust_type_name, utils::SchemaRefName};
+use crate::{
+  generator::naming::{
+    constants::{RESPONSE_UNION_FALLBACK_SUFFIX, RESPONSE_UNION_SEPARATOR},
+    identifiers::{ensure_unique, to_rust_type_name},
+  },
+  utils::SchemaRefName,
+};
 
 const SUCCESS_RESPONSE_PREFIX: char = '2';
 
@@ -81,4 +88,20 @@ pub fn extract_schema_name_from_response(response: &Response) -> Option<String> 
     .schema
     .as_ref()
     .and_then(SchemaRefName::schema_ref_name)
+}
+
+/// Names the union over several response body types, e.g. `BasicErrorOrValidationError`.
+///
+/// `members` are rendered Rust types in canonical order. A name already in use gets a
+/// `Body` suffix, then a numeric one.
+pub(crate) fn union_name<'a>(members: impl IntoIterator<Item = &'a str>, taken: &BTreeSet<String>) -> String {
+  let base = members
+    .into_iter()
+    .map(to_rust_type_name)
+    .join(RESPONSE_UNION_SEPARATOR);
+  if taken.contains(&base) {
+    ensure_unique(&format!("{base}{RESPONSE_UNION_FALLBACK_SUFFIX}"), taken)
+  } else {
+    base
+  }
 }

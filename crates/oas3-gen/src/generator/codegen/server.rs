@@ -3,11 +3,11 @@ use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::{Visibility, enums::ResponseEnumFragment};
+use super::Visibility;
 use crate::generator::{
   ast::{
-    ContentCategory, HandlerBodyInfo, ResponseEnumDef, ResponseVariant, ServerRequestTraitDef, ServerTraitMethod,
-    TraitToken,
+    ContentCategory, HandlerBodyInfo, OperationResponse, ResponseEnumDef, ResponsePayload, RustPrimitive,
+    ServerRequestTraitDef, ServerTraitMethod, TraitToken, TypeRef,
   },
   codegen::http::HttpStatusCode,
 };
@@ -46,7 +46,7 @@ impl ToTokens for ServerGenerator {
     let handlers = def
       .methods
       .iter()
-      .map(|m| HandlerFunctionFragment::new(m.clone(), def.name.clone(), self.visibility))
+      .map(|m| HandlerFunctionFragment::new(m.clone(), def.name.clone(), def.response_enum.as_ref(), self.visibility))
       .collect::<Vec<_>>();
 
     let router = RouterFragment::new(def.methods.clone(), def.name.clone(), self.visibility);
@@ -105,7 +105,7 @@ impl ToTokens for ServerTraitMethodFragment {
     let name = &self.0.name;
     let docs = &self.0.docs;
 
-    let (request_param, return_type) = match (&self.0.request_type, &self.0.response_type) {
+    let (request_param, return_type) = match (&self.0.request_type, &self.0.response) {
       (Some(req), Some(resp)) => (quote! { request: #req }, quote! { #resp }),
       (Some(req), None) => (quote! { request: #req }, quote! { () }),
       (None, Some(resp)) => (quote! {}, quote! { #resp }),
@@ -119,111 +119,31 @@ impl ToTokens for ServerTraitMethodFragment {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct AxumIntoResponse<'a>(&'a ResponseEnumDef);
-
-impl<'a> AxumIntoResponse<'a> {
-  pub(crate) fn new(def: &'a ResponseEnumDef) -> Self {
-    Self(def)
-  }
-}
-
-impl ToTokens for AxumIntoResponse<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = &self.0.name;
-    let variants = self
-      .0
-      .variants
-      .iter()
-      .map(AxumIntoResponseVariant::new)
-      .collect::<Vec<_>>();
-
-    let ts = quote! {
-      impl IntoResponse for #name {
-        fn into_response(self) -> axum::response::Response {
-          match self {
-            #(#variants),*
-          }
-        }
-      }
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct AxumIntoResponseVariant<'a>(&'a ResponseVariant);
-
-impl<'a> AxumIntoResponseVariant<'a> {
-  pub(crate) fn new(variant: &'a ResponseVariant) -> Self {
-    Self(variant)
-  }
-}
-
-impl ToTokens for AxumIntoResponseVariant<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let variant = &self.0.variant_name;
-    let status_code = HttpStatusCode::new(self.0.status_code);
-
-    let ts = if self.0.schema_type.is_some() {
-      quote! {
-        Self::#variant(data) => (#status_code, axum::Json(data)).into_response()
-      }
-    } else {
-      quote! {
-        Self::#variant => #status_code.into_response()
-      }
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct AxumResponseEnumFragment<'a> {
-  vis: Visibility,
-  def: &'a ResponseEnumDef,
-}
-
-impl<'a> AxumResponseEnumFragment<'a> {
-  pub(crate) fn new(vis: Visibility, def: &'a ResponseEnumDef) -> Self {
-    Self { vis, def }
-  }
-}
-
-impl ToTokens for AxumResponseEnumFragment<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let response = ResponseEnumFragment::new(self.vis, self.def);
-    let into_response = AxumIntoResponse::new(self.def);
-
-    let ts = quote! {
-      #response
-      #into_response
-    };
-
-    tokens.extend(ts);
-  }
-}
-
 #[derive(Clone, Debug)]
-struct HandlerFunctionFragment {
+struct HandlerFunctionFragment<'a> {
   method: ServerTraitMethod,
   trait_name: TraitToken,
+  response_enum: Option<&'a ResponseEnumDef>,
   vis: Visibility,
 }
 
-impl HandlerFunctionFragment {
-  fn new(method: ServerTraitMethod, trait_name: TraitToken, vis: Visibility) -> Self {
+impl<'a> HandlerFunctionFragment<'a> {
+  fn new(
+    method: ServerTraitMethod,
+    trait_name: TraitToken,
+    response_enum: Option<&'a ResponseEnumDef>,
+    vis: Visibility,
+  ) -> Self {
     Self {
       method,
       trait_name,
+      response_enum,
       vis,
     }
   }
 }
 
-impl ToTokens for HandlerFunctionFragment {
+impl ToTokens for HandlerFunctionFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let vis = self.vis.to_tokens();
     let fn_name = &self.method.name;
@@ -234,9 +154,15 @@ impl ToTokens for HandlerFunctionFragment {
 
     let return_type = self
       .method
-      .response_type
+      .response
       .as_ref()
       .map_or_else(|| quote! { impl IntoResponse }, |resp| quote! { #resp });
+
+    let response_arms = if let (Some(response), Some(response_enum)) = (&self.method.response, self.response_enum) {
+      ResponseArmsFragment::new(response_enum, response).into_token_stream()
+    } else {
+      quote! { Ok(response) => response.into_response(), }
+    };
 
     let service_call = if self.method.request_type.is_some() {
       quote! { service.#fn_name(request).await }
@@ -246,7 +172,7 @@ impl ToTokens for HandlerFunctionFragment {
 
     let error_handling = quote! {
       match result {
-        Ok(response) => response.into_response(),
+        #response_arms
         Err(e) => (
           axum::http::StatusCode::INTERNAL_SERVER_ERROR,
           format!("Internal error: {e}")
@@ -266,6 +192,87 @@ impl ToTokens for HandlerFunctionFragment {
         #error_handling
       }
     });
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ResponseArmsFragment<'a> {
+  response_enum: &'a ResponseEnumDef,
+  response: &'a OperationResponse,
+}
+
+impl<'a> ResponseArmsFragment<'a> {
+  fn new(response_enum: &'a ResponseEnumDef, response: &'a OperationResponse) -> Self {
+    Self {
+      response_enum,
+      response,
+    }
+  }
+
+  fn body_arms(
+    variant_path: &TokenStream,
+    status_pattern: Option<&TokenStream>,
+    status_expr: &TokenStream,
+    param: Option<&TypeRef>,
+  ) -> TokenStream {
+    let with_status = |body: TokenStream| {
+      let fields = status_pattern.into_iter().cloned().chain(std::iter::once(body));
+      quote! { #variant_path(#(#fields),*) }
+    };
+
+    match param {
+      Some(param) if param.nullable => {
+        let some = with_status(quote! { Some(body) });
+        let none = with_status(quote! { None });
+        quote! {
+          Ok(#some) => (#status_expr, axum::Json(body)).into_response(),
+          Ok(#none) => #status_expr.into_response(),
+        }
+      }
+      Some(param) if !matches!(param.base_type, RustPrimitive::Unit) => {
+        let pattern = with_status(quote! { body });
+        quote! { Ok(#pattern) => (#status_expr, axum::Json(body)).into_response(), }
+      }
+      _ => {
+        let pattern = with_status(quote! { _ });
+        quote! { Ok(#pattern) => #status_expr.into_response(), }
+      }
+    }
+  }
+}
+
+impl ToTokens for ResponseArmsFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let response_enum_name = &self.response_enum.name;
+
+    for variant in &self.response_enum.variants {
+      let variant_name = &variant.name;
+      let variant_path = quote! { #response_enum_name::#variant_name };
+      let status_code = HttpStatusCode::new(variant.status_code);
+      let (status_pattern, status_expr) = if variant.status_code.carries_status() {
+        (Some(quote! { status }), quote! { status })
+      } else {
+        (None, quote! { #status_code })
+      };
+
+      let arms = match variant.payload {
+        ResponsePayload::None => {
+          let fields = status_pattern.as_ref().map(|status| quote! { (#status) });
+          quote! { Ok(#variant_path #fields) => #status_expr.into_response(), }
+        }
+        ResponsePayload::Raw => {
+          quote! { Ok(#variant_path(status, body)) => (status, body).into_response(), }
+        }
+        ResponsePayload::Value | ResponsePayload::Failure => Self::body_arms(
+          &variant_path,
+          status_pattern.as_ref(),
+          &status_expr,
+          self.response.param(variant.payload),
+        ),
+      };
+
+      tokens.extend(arms);
+    }
   }
 }
 

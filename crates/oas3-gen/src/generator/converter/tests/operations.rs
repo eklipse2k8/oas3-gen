@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StructDef, StructToken},
+    ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StatusCodeToken, StructDef, StructToken},
     converter::{SchemaConverter, SerdeUsageRecorder, operations::OperationConverter},
     operation_registry::OperationEntry,
   },
@@ -97,22 +97,35 @@ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
   let entry = make_entry("get_kibble_image", Method::GET, "/kibble/image", operation);
   let result = converter.convert(&entry)?;
 
-  let response_enum = result
-    .types
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
+
+  let ok_variants = variants.iter().filter(|v| v.variant_name() == "Ok").collect::<Vec<_>>();
+  assert_eq!(
+    ok_variants.len(),
+    2,
+    "200 should split into one variant per body schema, got {ok_variants:?}"
+  );
+
+  let json_variant = ok_variants
     .iter()
-    .find_map(|t| match t {
-      RustType::ResponseEnum(e) if e.name == "GetKibbleImageResponse" => Some(e),
-      _ => None,
-    })
-    .expect("Response enum not found");
+    .find(|v| v.media_types.iter().all(|m| m.category == ContentCategory::Json));
+  let binary_variant = ok_variants.iter().find(|v| {
+    v.schema_type
+      .as_ref()
+      .is_some_and(|t| t.base_type == RustPrimitive::Bytes)
+  });
 
-  let ok_variant = response_enum.variants.iter().find(|v| v.variant_name == "Ok");
-  let binary_variant = response_enum.variants.iter().find(|v| v.variant_name == "OkBinary");
-
-  assert!(ok_variant.is_some(), "Should have Ok variant for JSON content type");
+  assert!(
+    json_variant.is_some(),
+    "Should have an Ok variant for JSON content type"
+  );
   assert!(
     binary_variant.is_some(),
-    "Should have OkBinary variant for binary content types"
+    "Should have a bytes-typed Ok variant for binary content types"
   );
 
   Ok(())
@@ -399,19 +412,15 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
     let entry = make_entry("download_file", Method::GET, "/files/download", operation);
     let result = converter.convert(&entry)?;
 
-    let response_enum = result
-      .types
-      .iter()
-      .find_map(|t| match t {
-        RustType::ResponseEnum(e) if e.name == "DownloadFileResponse" => Some(e),
-        _ => None,
-      })
-      .unwrap_or_else(|| panic!("Response enum not found for {content_type}"));
+    let variants = result
+      .operation_info
+      .response_variants
+      .as_deref()
+      .expect("response variants not found");
 
-    let ok_variant = response_enum
-      .variants
+    let ok_variant = variants
       .iter()
-      .find(|v| v.variant_name == "Ok")
+      .find(|v| v.variant_name() == "Ok")
       .unwrap_or_else(|| panic!("Ok variant not found for {content_type}"));
 
     assert_eq!(
@@ -436,14 +445,13 @@ fn test_binary_response_uses_bytes_type() -> anyhow::Result<()> {
     );
 
     assert!(
-      result.operation_info.response_enum.is_some(),
-      "response_enum should be set for {content_type}"
+      result.operation_info.response_variants.is_some(),
+      "response_variants should be set for {content_type}"
     );
 
-    let error_variant = response_enum
-      .variants
+    let error_variant = variants
       .iter()
-      .find(|v| v.variant_name == "ClientError")
+      .find(|v| v.variant_name() == "ClientError")
       .unwrap_or_else(|| panic!("ClientError variant not found for {content_type}"));
 
     assert_eq!(
@@ -496,26 +504,26 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
   let entry = make_entry("get_events", Method::GET, "/events", operation);
   let result = converter.convert(&entry)?;
 
-  let response_enum = result
-    .types
-    .iter()
-    .find_map(|t| match t {
-      RustType::ResponseEnum(e) if e.name == "GetEventsResponse" => Some(e),
-      _ => None,
-    })
-    .expect("Response enum not found");
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
 
-  let ok_variant = response_enum
-    .variants
+  let ok_variant = variants
     .iter()
-    .find(|v| v.variant_name == "Ok")
-    .expect("Ok variant not found (JSON is the default, no suffix)");
+    .find(|v| v.media_types.iter().all(|m| m.category == ContentCategory::Json))
+    .expect("JSON Ok variant not found");
 
-  let stream_variant = response_enum
-    .variants
+  let stream_variant = variants
     .iter()
-    .find(|v| v.variant_name == "OkEventStream")
-    .expect("OkEventStream variant not found");
+    .find(|v| v.media_types.iter().all(|m| m.category == ContentCategory::EventStream))
+    .expect("event stream Ok variant not found");
+
+  assert!(
+    variants.iter().all(|v| v.variant_name() == "Ok"),
+    "both variants share the response enum's Ok name, got {variants:?}"
+  );
 
   assert_eq!(
     ok_variant
@@ -552,7 +560,7 @@ fn test_event_stream_response_splits_variants() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
+fn test_response_variants_have_no_synthesized_default() -> anyhow::Result<()> {
   let (converter, _usage) = setup_converter(BTreeMap::new());
 
   let operation_json = json!({
@@ -575,27 +583,52 @@ fn test_response_enum_adds_default_variant() -> anyhow::Result<()> {
   let entry = make_entry("get_item", Method::GET, "/items", operation);
   let result = converter.convert(&entry)?;
 
-  let response_enum = result
-    .types
-    .iter()
-    .find_map(|t| match t {
-      RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
-      _ => None,
-    })
-    .expect("Response enum not found");
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
 
-  let default_variant = response_enum.variants.iter().find(|v| v.variant_name == "Unknown");
-
-  assert!(default_variant.is_some(), "Default variant should be added");
   assert!(
-    default_variant.unwrap().schema_type.as_ref().is_none(),
-    "Default variant should have no schema type"
+    !variants.iter().any(|v| v.status_code.is_default()),
+    "undeclared statuses fall through to the response enum's Other variant; got {variants:?}"
+  );
+  assert_eq!(variants.len(), 1, "only the declared 200 response should remain");
+  Ok(())
+}
+
+#[test]
+fn test_bodiless_declared_default_is_dropped() -> anyhow::Result<()> {
+  let (converter, _usage) = setup_converter(BTreeMap::new());
+
+  let operation_json = json!({
+    "operationId": "ping",
+    "responses": {
+      "204": { "description": "No content" },
+      "default": { "description": "Anything else" }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
+  let entry = make_entry("ping", Method::GET, "/ping", operation);
+  let result = converter.convert(&entry)?;
+
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
+
+  assert_eq!(
+    variants.iter().map(|v| v.status_code).collect::<Vec<_>>(),
+    vec![StatusCodeToken::NoContent204],
+    "a default response without a body falls through to the shared Other variant"
   );
   Ok(())
 }
 
 #[test]
-fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
+fn test_response_variants_keep_declared_default() -> anyhow::Result<()> {
   let error_schema = serde_json::from_value::<ObjectSchema>(json!({
     "type": "object"
   }))?;
@@ -630,27 +663,20 @@ fn test_response_enum_preserves_existing_default() -> anyhow::Result<()> {
   let entry = make_entry("get_item", Method::GET, "/items", operation);
   let result = converter.convert(&entry)?;
 
-  let response_enum = result
-    .types
-    .iter()
-    .find_map(|t| match t {
-      RustType::ResponseEnum(e) if e.name == "GetItemResponse" => Some(e),
-      _ => None,
-    })
-    .expect("Response enum not found");
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
 
-  let auto_added_unknown = response_enum
-    .variants
-    .iter()
-    .filter(|v| v.variant_name == "Unknown")
-    .count();
+  let unknown_count = variants.iter().filter(|v| v.variant_name() == "Unknown").count();
 
   assert_eq!(
-    auto_added_unknown, 1,
-    "Should only have one Unknown variant (from the default response, not auto-added)"
+    unknown_count, 1,
+    "the declared default response yields one Unknown variant"
   );
 
-  let default_variant = response_enum.variants.iter().find(|v| v.status_code.is_default());
+  let default_variant = variants.iter().find(|v| v.status_code.is_default());
 
   assert!(default_variant.is_some(), "Default variant should exist");
   assert!(
@@ -685,19 +711,15 @@ fn test_response_with_primitive_type() -> anyhow::Result<()> {
   let entry = make_entry("get_count", Method::GET, "/count", operation);
   let result = converter.convert(&entry)?;
 
-  let response_enum = result
-    .types
-    .iter()
-    .find_map(|t| match t {
-      RustType::ResponseEnum(e) if e.name == "GetCountResponse" => Some(e),
-      _ => None,
-    })
-    .expect("Response enum not found");
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
 
-  let ok_variant = response_enum
-    .variants
+  let ok_variant = variants
     .iter()
-    .find(|v| v.variant_name == "Ok")
+    .find(|v| v.variant_name() == "Ok")
     .expect("Ok variant not found");
 
   assert!(ok_variant.schema_type.as_ref().is_some(), "Should have schema type");
@@ -727,19 +749,15 @@ fn test_response_with_no_content() -> anyhow::Result<()> {
   let entry = make_entry("delete_item", Method::DELETE, "/items/{id}", operation);
   let result = converter.convert(&entry)?;
 
-  let response_enum = result
-    .types
-    .iter()
-    .find_map(|t| match t {
-      RustType::ResponseEnum(e) if e.name == "DeleteItemResponse" => Some(e),
-      _ => None,
-    })
-    .expect("Response enum not found");
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
 
-  let no_content_variant = response_enum
-    .variants
+  let no_content_variant = variants
     .iter()
-    .find(|v| v.variant_name == "NoContent")
+    .find(|v| v.variant_name() == "NoContent")
     .expect("NoContent variant not found");
 
   assert!(

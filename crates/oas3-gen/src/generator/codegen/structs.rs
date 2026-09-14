@@ -14,9 +14,9 @@ use super::{
 use crate::generator::{
   ast::{
     BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, Documentation, FieldDef, MethodKind,
-    MethodNameToken, RegexKey, ResponseStatusCategory, ResponseVariantCategory, RustPrimitive, StatusCodeToken,
-    StatusHandler, StructDef, StructKind, StructMethod, TypeRef, ValidationAttribute,
-    tokens::{ConstToken, EnumToken, EnumVariantToken},
+    MethodNameToken, OperationResponse, RegexKey, ResponseStatusCategory, ResponseVariantCategory, RustPrimitive,
+    StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod, TypeRef, ValidationAttribute,
+    tokens::{ConstToken, EnumVariantToken},
   },
   codegen::{
     attributes::generate_derives_from_slice,
@@ -24,6 +24,7 @@ use crate::generator::{
     http::HttpStatusCode,
   },
   converter::GenerationTarget,
+  naming::constants::OTHER_RESPONSE_VARIANT,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -276,11 +277,11 @@ impl ToTokens for StructMethodFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let ts = match &self.method.kind {
       MethodKind::ParseResponse {
-        response_enum,
+        response,
         status_handlers,
         default_handler,
       } => ParseResponseMethodFragment::new(
-        response_enum,
+        response,
         status_handlers,
         default_handler.as_ref(),
         self.visibility,
@@ -288,7 +289,6 @@ impl ToTokens for StructMethodFragment<'_> {
         &self.method.docs,
       )
       .into_token_stream(),
-      MethodKind::IntoAxumResponse { .. } => quote! {},
       MethodKind::Builder { fields, nested_structs } => {
         BuilderMethodFragment::new(fields, nested_structs, self.visibility, &self.method.docs).into_token_stream()
       }
@@ -300,7 +300,7 @@ impl ToTokens for StructMethodFragment<'_> {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ParseResponseMethodFragment<'a> {
-  response_enum: &'a EnumToken,
+  response: &'a OperationResponse,
   status_handlers: &'a [StatusHandler],
   default_handler: Option<&'a ResponseVariantCategory>,
   visibility: Visibility,
@@ -310,7 +310,7 @@ pub(crate) struct ParseResponseMethodFragment<'a> {
 
 impl<'a> ParseResponseMethodFragment<'a> {
   pub(crate) fn new(
-    response_enum: &'a EnumToken,
+    response: &'a OperationResponse,
     status_handlers: &'a [StatusHandler],
     default_handler: Option<&'a ResponseVariantCategory>,
     visibility: Visibility,
@@ -318,7 +318,7 @@ impl<'a> ParseResponseMethodFragment<'a> {
     docs: &'a Documentation,
   ) -> Self {
     Self {
-      response_enum,
+      response,
       status_handlers,
       default_handler,
       visibility,
@@ -330,28 +330,23 @@ impl<'a> ParseResponseMethodFragment<'a> {
 
 impl ToTokens for ParseResponseMethodFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let status_checks: Vec<StatusCheckFragment<'_>> = self
+    let status_checks = self
       .status_handlers
       .iter()
-      .map(|h| StatusCheckFragment::new(h, self.response_enum))
-      .collect();
+      .map(|h| StatusCheckFragment::new(h, self.response))
+      .collect::<Vec<_>>();
 
-    let fallback = FallbackFragment::new(self.response_enum, self.default_handler);
-    let status_decl = if status_checks.is_empty() {
-      quote! {}
-    } else {
-      quote! { let status = req.status(); }
-    };
+    let fallback = FallbackFragment::new(self.response, self.default_handler);
 
     let vis = &self.visibility;
     let method_name = self.method_name;
     let docs = self.docs;
-    let response_enum = self.response_enum;
+    let response = self.response;
 
     tokens.extend(quote! {
       #docs
-      #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response_enum> {
-        #status_decl
+      #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response> {
+        let status = req.status();
         #(#status_checks)*
         #fallback
       }
@@ -362,19 +357,19 @@ impl ToTokens for ParseResponseMethodFragment<'_> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct StatusCheckFragment<'a> {
   handler: &'a StatusHandler,
-  response_enum: &'a EnumToken,
+  response: &'a OperationResponse,
 }
 
 impl<'a> StatusCheckFragment<'a> {
-  pub(crate) fn new(handler: &'a StatusHandler, response_enum: &'a EnumToken) -> Self {
-    Self { handler, response_enum }
+  pub(crate) fn new(handler: &'a StatusHandler, response: &'a OperationResponse) -> Self {
+    Self { handler, response }
   }
 }
 
 impl ToTokens for StatusCheckFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let cond = StatusConditionFragment::new(self.handler.status_code);
-    let body = ResponseDispatchFragment::new(&self.handler.dispatch, self.response_enum);
+    let body = ResponseDispatchFragment::new(&self.handler.dispatch, self.response);
 
     tokens.extend(quote! {
       if #cond {
@@ -418,24 +413,21 @@ impl ToTokens for StatusConditionFragment {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ResponseDispatchFragment<'a> {
   dispatch: &'a ResponseStatusCategory,
-  response_enum: &'a EnumToken,
+  response: &'a OperationResponse,
 }
 
 impl<'a> ResponseDispatchFragment<'a> {
-  pub(crate) fn new(dispatch: &'a ResponseStatusCategory, response_enum: &'a EnumToken) -> Self {
-    Self {
-      dispatch,
-      response_enum,
-    }
+  pub(crate) fn new(dispatch: &'a ResponseStatusCategory, response: &'a OperationResponse) -> Self {
+    Self { dispatch, response }
   }
 }
 
 impl ToTokens for ResponseDispatchFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let ts = match self.dispatch {
-      ResponseStatusCategory::Single(case) => ResponseCaseFragment::new(case, self.response_enum).into_token_stream(),
+      ResponseStatusCategory::Single(case) => ResponseCaseFragment::new(case, self.response).into_token_stream(),
       ResponseStatusCategory::ContentDispatch { streams, variants } => {
-        ContentDispatchFragment::new(streams, variants, self.response_enum).into_token_stream()
+        ContentDispatchFragment::new(streams, variants, self.response).into_token_stream()
       }
     };
 
@@ -447,19 +439,19 @@ impl ToTokens for ResponseDispatchFragment<'_> {
 pub(crate) struct ContentDispatchFragment<'a> {
   event_streams: &'a [ResponseVariantCategory],
   others: &'a [ResponseVariantCategory],
-  response_enum: &'a EnumToken,
+  response: &'a OperationResponse,
 }
 
 impl<'a> ContentDispatchFragment<'a> {
   pub(crate) fn new(
     event_streams: &'a [ResponseVariantCategory],
     others: &'a [ResponseVariantCategory],
-    response_enum: &'a EnumToken,
+    response: &'a OperationResponse,
   ) -> Self {
     Self {
       event_streams,
       others,
-      response_enum,
+      response,
     }
   }
 }
@@ -477,7 +469,7 @@ impl ToTokens for ContentDispatchFragment<'_> {
       .event_streams
       .iter()
       .map(|case| {
-        let block = ResponseCaseFragment::new(case, self.response_enum);
+        let block = ResponseCaseFragment::new(case, self.response);
         quote! {
           if content_type_str.contains("event-stream") {
             #block
@@ -491,7 +483,7 @@ impl ToTokens for ContentDispatchFragment<'_> {
       .iter()
       .map(|case| {
         let check = ContentCheckFragment::new(case.category);
-        let block = ResponseCaseFragment::new(case, self.response_enum);
+        let block = ResponseCaseFragment::new(case, self.response);
         quote! {
           if #check {
             #block
@@ -540,32 +532,58 @@ impl ToTokens for ContentCheckFragment {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ResponseCaseFragment<'a> {
   case: &'a ResponseVariantCategory,
-  response_enum: &'a EnumToken,
+  response: &'a OperationResponse,
 }
 
 impl<'a> ResponseCaseFragment<'a> {
-  pub(crate) fn new(case: &'a ResponseVariantCategory, response_enum: &'a EnumToken) -> Self {
-    Self { case, response_enum }
+  pub(crate) fn new(case: &'a ResponseVariantCategory, response: &'a OperationResponse) -> Self {
+    Self { case, response }
   }
 }
 
 impl ToTokens for ResponseCaseFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let variant_name = &self.case.variant.variant_name;
-    let response_enum = self.response_enum;
+    let variant = &self.case.variant;
+    let variant_name = variant.variant_name();
+    let response_enum = &self.response.name;
+    let mapping = &variant.mapping;
+    let carries_status = variant.status_code.carries_status();
+    let status_arg = carries_status.then(|| quote! { status, });
+    let param = self.response.param(mapping.payload);
+    let optional = param.is_some_and(|p| p.nullable);
 
-    let ts = match self.case.variant.schema_type.as_ref() {
-      Some(ty) => {
-        let data = ResponseExtractionFragment::new(ty, self.case.category);
-        quote! {
-          let data = #data;
-          return Ok(#response_enum::#variant_name(data));
-        }
-      }
-      None => {
+    let ts = match (variant.schema_type.as_ref(), param) {
+      (_, None) => {
+        let fields = carries_status.then(|| quote! { (status) });
         quote! {
           let _ = req.bytes().await?;
-          return Ok(#response_enum::#variant_name);
+          return Ok(#response_enum::#variant_name #fields);
+        }
+      }
+      (None, Some(_)) => {
+        let empty = if optional {
+          quote! { None }
+        } else {
+          quote! { () }
+        };
+        quote! {
+          let _ = req.bytes().await?;
+          return Ok(#response_enum::#variant_name(#status_arg #empty));
+        }
+      }
+      (Some(schema_type), Some(param)) => {
+        let data = ResponseExtractionFragment::new(schema_type, self.case.category);
+        let mut value = quote! { data };
+        if let Some(union_variant) = &mapping.union_variant {
+          let union = &param.base_type;
+          value = quote! { #union::#union_variant(#value) };
+        }
+        if optional {
+          value = quote! { Some(#value) };
+        }
+        quote! {
+          let data = #data;
+          return Ok(#response_enum::#variant_name(#status_arg #value));
         }
       }
     };
@@ -591,20 +609,17 @@ impl ToTokens for ResponseExtractionFragment<'_> {
     let schema_type = self.schema_type;
 
     let ts = match self.category {
+      ContentCategory::Text | ContentCategory::Binary if matches!(self.schema_type.base_type, RustPrimitive::Bytes) => {
+        quote! { req.bytes().await?.to_vec() }
+      }
+      ContentCategory::Text | ContentCategory::Binary if self.schema_type.is_string_like() => {
+        quote! { req.text().await? }
+      }
       ContentCategory::Text => {
-        if self.schema_type.is_string_like() {
-          quote! { req.text().await? }
-        } else if matches!(self.schema_type.base_type, RustPrimitive::Custom(_)) {
+        if matches!(self.schema_type.base_type, RustPrimitive::Custom(_)) {
           quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
         } else {
           quote! { req.text().await?.parse::<#schema_type>()? }
-        }
-      }
-      ContentCategory::Binary => {
-        if matches!(self.schema_type.base_type, RustPrimitive::Bytes) {
-          quote! { req.bytes().await?.to_vec() }
-        } else {
-          quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
         }
       }
       ContentCategory::EventStream => {
@@ -622,14 +637,14 @@ impl ToTokens for ResponseExtractionFragment<'_> {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FallbackFragment<'a> {
-  response_enum: &'a EnumToken,
+  response: &'a OperationResponse,
   default_handler: Option<&'a ResponseVariantCategory>,
 }
 
 impl<'a> FallbackFragment<'a> {
-  pub(crate) fn new(response_enum: &'a EnumToken, default_handler: Option<&'a ResponseVariantCategory>) -> Self {
+  pub(crate) fn new(response: &'a OperationResponse, default_handler: Option<&'a ResponseVariantCategory>) -> Self {
     Self {
-      response_enum,
+      response,
       default_handler,
     }
   }
@@ -638,13 +653,12 @@ impl<'a> FallbackFragment<'a> {
 impl ToTokens for FallbackFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let ts = if let Some(case) = self.default_handler {
-      ResponseCaseFragment::new(case, self.response_enum).into_token_stream()
+      ResponseCaseFragment::new(case, self.response).into_token_stream()
     } else {
-      let response_enum = self.response_enum;
-      let unknown_variant = EnumVariantToken::from("Unknown");
+      let response_enum = &self.response.name;
+      let unexpected = EnumVariantToken::from_raw(OTHER_RESPONSE_VARIANT);
       quote! {
-        let _ = req.bytes().await?;
-        Ok(#response_enum::#unknown_variant)
+        Ok(#response_enum::#unexpected(status, req.bytes().await?.to_vec()))
       }
     };
 

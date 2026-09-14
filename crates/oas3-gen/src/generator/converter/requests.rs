@@ -11,7 +11,7 @@ use crate::{
   generator::{
     ast::{
       ContentCategory, Documentation, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody, RustPrimitive,
-      RustType, StructDef, StructKind, StructMethod, StructToken, TypeRef,
+      RustType, StructDef, StructKind, StructToken, TypeRef,
     },
     converter::ConverterContext,
     naming::{
@@ -63,7 +63,6 @@ impl RequestConverter {
     name: &str,
     entry: &OperationEntry,
     body_info: &BodyInfo,
-    extra_method: Option<StructMethod>,
   ) -> anyhow::Result<RequestOutput> {
     let params = self.param_converter.convert_all(name, &entry.path, &entry.operation)?;
 
@@ -85,7 +84,7 @@ impl RequestConverter {
       None
     };
 
-    let methods = extra_method.into_iter().chain(builder_method).collect::<Vec<_>>();
+    let methods = builder_method.into_iter().collect::<Vec<_>>();
 
     let main_struct = StructDef::builder()
       .name(StructToken::new(name))
