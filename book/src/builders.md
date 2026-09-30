@@ -1,11 +1,20 @@
 # Builder Pattern with `bon`
 
-Generated Rust types from OpenAPI schemas tend to have many fields. Some are
-required, some are optional, and some have defaults that only matter during
-deserialization. When constructing these types by hand in application code,
-struct literal syntax can become verbose and error-prone fast.
+When you construct a generated type with a struct literal, you supply a value
+for every field. This includes writing `None` for optional fields you don't
+need. A *builder* lets you set fields through methods and then construct the
+value with a call to `build()`.
 
-Consider a `Pet` with four fields:
+In this chapter, we'll enable builders and use them to construct schema values
+and requests. We'll also look at the difference between checking that a
+required field is set and validating the value of that field.
+
+The examples use a small pet API. The `Pet` below has four fields; your generated
+types will reflect the fields in your own specification. Code excerpts omit
+imports and unrelated attributes. Put construction examples inside a function;
+examples that use `?` need a compatible return type, such as `anyhow::Result<()>`.
+
+Let's begin with a struct literal:
 
 ```rust
 let pet = Pet {
@@ -16,91 +25,58 @@ let pet = Pet {
 };
 ```
 
-That's manageable. Now consider a request struct with path parameters, query
-parameters, and headers that all need to be slotted into nested sub-structs:
+We want to supply an ID and a name, leaving the optional fields unset. With
+builders enabled, we can write that as:
 
 ```rust
-let request = ListPetsRequest {
-    path: ListPetsRequestPath {
-        api_version: "v2".to_string(),
-    },
-    query: ListPetsRequestQuery {
-        limit: Some(25),
-    },
-    header: ListPetsRequestHeader {
-        x_sort_order: None,
-        x_only: None,
-    },
-};
+let pet = Pet::builder()
+    .id(42)
+    .name("Whiskers".to_string())
+    .build();
 ```
 
-That is six lines of ceremony to express two meaningful values. The nested
-struct names are long, the optional fields are noise, and the compiler will
-not catch a missing field until the developer adds it. As schemas grow, this
-pattern scales poorly.
-
-The `--enable-builders` flag solves this by integrating the
-[`bon`](https://docs.rs/bon/latest/bon/) crate into the generated code. `bon`
-is a compile-time builder generator that uses the typestate pattern to ensure
-all required fields are set before construction, with zero runtime cost. It
-turns the example above into:
-
-```rust
-let request = ListPetsRequest::builder()
-    .api_version("v2".to_string())
-    .limit(25)
-    .build()?;
-```
-
-Three lines. No nested structs. No `None` assignments. Required fields are
-enforced at compile time, and optional fields can simply be omitted.
-
----
+The builder supplies `None` for `tag` and `allergies`. It also requires us to
+set `id` and `name` before we can call `build()`. Let's look at how to enable
+that API and what the generator adds.
 
 ## Enabling Builders
 
-Pass the `--enable-builders` flag during code generation:
+Pass `--enable-builders` during code generation:
 
 ```bash
 oas3-gen generate client-mod -i api.json -o src/api/ --enable-builders
 ```
 
-This works with all generation modes: `types`, `client`, `client-mod`, and
-`server-mod`.
+You can use this flag with any generation mode: `types`, `client`, `client-mod`,
+or `server-mod`. The generated code uses the
+[`bon`](https://docs.rs/bon/3.10.0/bon/) crate to create the builder methods.
 
 ## Adding `bon` to Your Project
 
-The generated code references `bon` macros and derives, so the crate must be
-present in the consuming project's `Cargo.toml`:
+If you're including generated source files in an existing crate, add `bon` to
+that crate's `Cargo.toml`:
 
 ```toml
 [dependencies]
-bon = "3.8"
+bon = { version = "3.10", features = ["implied-bounds"] }
 ```
 
-Without this dependency, the generated code will fail to compile with unresolved
-import errors. The `bon` crate is lightweight and has no runtime dependencies
-beyond `proc-macro2` and `syn`, which most Rust projects already pull in
-transitively.
-
-> **Tip:** If the project already uses `bon` for its own types, there is nothing
-> extra to add. The generated code uses the same `bon::Builder` derive and
-> `#[builder]` attribute that any hand-written `bon` usage would.
-
----
+The compiler needs this dependency to resolve the generated `bon` attributes.
+If your crate already declares a compatible version, use that dependency.
+When you generate a crate with `--workspace`, the generator adds the dependency
+for you. See [Workspace Crate Output](./code-generation.md#workspace-crate-output).
 
 ## What Changes in the Generated Code
 
-Enabling builders affects two categories of generated types: **schema structs**
-and **request structs**. Each gets a different integration point with `bon`.
+The generator adds builders in two places. Schema structs receive a
+`bon::Builder` derive. Request structs receive a constructor with a `#[builder]`
+attribute. These produce similar method chains, but their `build()` methods
+have different return types.
 
 ### Schema Structs
 
-Schema structs (types generated from `components/schemas`) receive a
-`bon::Builder` derive. This adds a `::builder()` associated function that
-returns a type-safe builder.
-
-**Without `--enable-builders`:**
+Schema structs represent objects from your OpenAPI schemas. Without builders,
+our `Pet` definition looks like this:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -112,7 +88,7 @@ pub struct Pet {
 }
 ```
 
-**With `--enable-builders`:**
+With `--enable-builders`, the generator adds `bon::Builder` to the derives:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Deserialize, bon::Builder)]
@@ -124,19 +100,10 @@ pub struct Pet {
 }
 ```
 
-The struct definition itself is identical except for the extra derive. The
-difference shows up at the call site:
+The derive adds the `Pet::builder()` associated function. We can use it to set
+an optional tag as well as the required fields:
 
 ```rust
-// Struct literal (always available)
-let pet = Pet {
-    id: 42,
-    name: "Whiskers".to_string(),
-    tag: Some("indoor".to_string()),
-    allergies: None,
-};
-
-// Builder (available with --enable-builders)
 let pet = Pet::builder()
     .id(42)
     .name("Whiskers".to_string())
@@ -144,107 +111,70 @@ let pet = Pet::builder()
     .build();
 ```
 
-Notice that `tag` accepts a plain `String` rather than `Option<String>`. The
-builder treats `Option` fields as optional setters: calling `.tag(...)` wraps
-the value in `Some` automatically, and omitting the call leaves it as `None`.
-The same applies to `allergies`, which can simply be left off when not needed.
+Notice that `tag()` accepts a `String`. The builder wraps it in `Some` for us.
+If we leave out that call, `tag` is `None`, as in our first example. The
+`allergies` field is also `None` because we haven't set it.
+
+Here, `build()` returns a `Pet` directly. The derive does not call
+`validator::Validate::validate()`. If a schema type has generated validation
+and you need to check its constraints, call `validate()` on the constructed
+value with the `validator::Validate` trait in scope.
 
 ### Request Structs
 
-Request structs benefit from builders in a more dramatic way. These types
-contain nested sub-structs for path parameters, query parameters, and headers.
-Without builders, constructing a request means manually assembling each nested
-struct.
-
-When `--enable-builders` is active, the generator produces a `#[builder]`
-constructor method that flattens all parameters into a single builder
-interface. The nested structs are assembled internally.
-
-**Without `--enable-builders`:**
+Request structs group parameters into nested structs for paths, query strings,
+and headers. For example, the petstore fixture's `ShowPetByIdRequest` contains
+both path parameters and headers:
 
 ```rust
-pub struct ListPetsRequest {
-    pub path: ListPetsRequestPath,
-    pub query: ListPetsRequestQuery,
-    pub header: ListPetsRequestHeader,
+pub struct ShowPetByIdRequest {
+    pub path: ShowPetByIdRequestPath,
+    pub header: ShowPetByIdRequestHeader,
 }
-
-// Construction requires knowledge of internal structure
-let request = ListPetsRequest {
-    path: ListPetsRequestPath {
-        api_version: "v2".to_string(),
-    },
-    query: ListPetsRequestQuery {
-        limit: Some(25),
-    },
-    header: ListPetsRequestHeader {
-        x_sort_order: Some(ListCatsRequestHeaderXSortOrder::Asc),
-        x_only: None,
-    },
-};
 ```
 
-**With `--enable-builders`:**
+With builders enabled, the generator adds a constructor that accepts the
+individual parameters and assembles those nested structs. This excerpt shows
+the constructor; the generated request also derives `validator::Validate` and
+marks the nested fields for validation:
 
 ```rust
-pub struct ListPetsRequest {
-    pub path: ListPetsRequestPath,
-    pub query: ListPetsRequestQuery,
-    pub header: ListPetsRequestHeader,
-}
-
 #[bon::bon]
-impl ListPetsRequest {
+impl ShowPetByIdRequest {
+    /// Create a new request with the given parameters.
     #[builder]
-    pub fn new(
-        api_version: String,
-        limit: Option<i32>,
-        x_sort_order: Option<ListCatsRequestHeaderXSortOrder>,
-        x_only: Option<Vec<ListPetsRequestHeaderXonly>>,
-    ) -> anyhow::Result<Self> {
+    pub fn new(pet_id: String, x_api_version: String) -> anyhow::Result<Self> {
         let request = Self {
-            path: ListPetsRequestPath { api_version },
-            query: ListPetsRequestQuery { limit },
-            header: ListPetsRequestHeader {
-                x_sort_order,
-                x_only,
-            },
+            path: ShowPetByIdRequestPath { pet_id },
+            header: ShowPetByIdRequestHeader { x_api_version },
         };
         request.validate()?;
         Ok(request)
     }
 }
-
-// Construction is flat and ergonomic
-let request = ListPetsRequest::builder()
-    .api_version("v2".to_string())
-    .limit(25)
-    .x_sort_order(ListCatsRequestHeaderXSortOrder::Asc)
-    .build()?;
 ```
 
-Several things are worth noting here:
+The `#[builder]` attribute creates setters for `pet_id` and `x_api_version`.
+Calling `build()` calls this constructor, including `request.validate()`.
+That's why a request builder returns a `Result` and the schema builder above
+returns its value directly.
 
-- **Flat parameter list.** Path, query, and header parameters are all
-  promoted to top-level builder setters. There is no need to know which
-  sub-struct a parameter belongs to.
-- **Optional fields omitted.** `x_only` is not set, so it defaults to `None`.
-  No explicit `None` assignment required.
-- **Validation included.** The builder's `build()` call runs the same
-  `validator::Validate` checks that would normally need to be invoked manually.
-  If a required field violates a constraint (for example, a string shorter than
-  its minimum length), the builder returns an error.
-
----
+The same approach applies to requests with query parameters or optional
+headers: their constructor parameters become builder setters. For an
+`Option<T>` parameter, you can supply a `T` or omit the setter to use `None`.
 
 ## A Side-by-Side Comparison
 
-To see the full impact, consider a `ShowPetByIdRequest` that takes a path
-parameter and a required header:
+Let's construct the request both ways. The following examples use the
+`ShowPetByIdRequest` from the previous section.
 
 ### Without Builders
 
+A struct literal requires us to assemble the path and header values ourselves:
+
 ```rust
+use validator::Validate;
+
 let request = ShowPetByIdRequest {
     path: ShowPetByIdRequestPath {
         pet_id: "pet-123".to_string(),
@@ -256,10 +186,14 @@ let request = ShowPetByIdRequest {
 request.validate()?;
 ```
 
-The developer must remember to call `.validate()` separately. Forgetting it
-means constraints like minimum string length go unchecked at runtime.
+The call to `validate()` checks the constraints after construction. In this
+example, both strings must be nonempty. Constructing the struct alone doesn't
+perform that check. The generated client also validates a request before
+sending it.
 
 ### With Builders
+
+The builder accepts the same two values:
 
 ```rust
 let request = ShowPetByIdRequest::builder()
@@ -268,18 +202,19 @@ let request = ShowPetByIdRequest::builder()
     .build()?;
 ```
 
-Validation is automatic. The required fields `pet_id` and `x_api_version` are
-enforced at compile time by the builder's typestate. Calling `.build()` without
-setting them is a compilation error.
+This call constructs and validates the request. There are two checks to keep
+in mind. If you omit `pet_id()` or `x_api_version()`, you can't call `build()`;
+that is a compilation error. If you supply an empty string, the code compiles,
+but `build()` returns a validation error at runtime.
 
----
+`bon` tracks which required setters you've called in the builder's type. This
+is called the *typestate pattern*. It checks that required values are present;
+the constructor's validation checks the supported constraints on those values.
 
-## When Builders Shine
+## Using Builders in Tests
 
-Builders are particularly valuable in a few common scenarios:
-
-**Testing.** Test code often constructs many variations of the same struct.
-Builders reduce the noise so the meaningful differences stand out:
+Builders can help when a test only needs to vary a few fields. These tests use
+the four-field `Pet` from the start of the chapter:
 
 ```rust
 #[test]
@@ -304,49 +239,40 @@ fn test_pet_without_tag() {
 }
 ```
 
-**Large schemas.** Some OpenAPI specifications define schemas with dozens of
-fields. Struct literals for these types become walls of `field: None` lines.
-Builders let the developer set only what matters and leave the rest at their
-defaults.
+The first test sets a tag, and the second leaves it unset. Neither test needs
+to assign `None` to `allergies`. For types with many optional fields, this lets
+you keep the setup focused on the values the test uses.
 
-**Prototyping and iteration.** When a schema is still evolving, adding a new
-optional field does not break existing builder call sites. Struct literals, on
-the other hand, require updating every construction site to include the new
-field.
-
----
+The same property helps when a schema changes. Adding an optional field
+usually lets you keep existing builder calls, while struct literals that list
+every field need an additional assignment.
 
 ## Combining with Other Flags
 
-The `--enable-builders` flag composes freely with other code generation options:
+You can enable builders alongside other generation options. For example, to
+keep generated items within your crate and accept enum values regardless of
+ASCII letter case, run:
 
 ```bash
 oas3-gen generate client-mod -i api.json -o src/api/ \
     --enable-builders \
     --visibility crate \
-    --enum-mode relaxed \
-    -c date_time=time::OffsetDateTime
+    --enum-mode relaxed
 ```
 
-Builders respect the chosen visibility level. With `--visibility crate`, the
-generated builder methods and derives remain accessible within the crate but
-are not part of the public API.
-
----
+The visibility setting applies to the generated structs and constructor
+methods. With `--visibility crate`, you can use them within your crate. See
+[Visibility](./code-generation.md#visibility) and
+[Enum Mode](./code-generation.md#enum-mode) for the other options.
 
 ## Trade-offs
 
-Every dependency is a trade-off, and `bon` is no exception. Here is what to
-consider:
+Enabling builders adds a procedural macro dependency to your project. `bon`
+expands the builder API during compilation, so include that work when assessing
+your project's build time. The amount of generated code depends on your schemas
+and operations.
 
-| Consideration | Details |
-|---|---|
-| **Compile time** | `bon` is a proc-macro crate that adds to compilation. For most projects this is negligible, but very large generated files with hundreds of structs may see a measurable increase. |
-| **IDE support** | Builder methods are generated by macros, so some IDEs may not auto-complete them until the project is built once. After that, `rust-analyzer` picks them up normally. |
-| **Struct literals still work** | Enabling builders does not remove the ability to construct types with struct literal syntax. Both approaches coexist, and developers can mix them freely. |
-
-For projects that want the lightest possible generated output with zero extra
-dependencies, leaving `--enable-builders` off is the right call. For projects
-that prioritize developer ergonomics and are already comfortable with proc-macro
-dependencies, builders pay for themselves quickly in reduced boilerplate and
-fewer construction errors.
+You can still use struct literals when builders are enabled. Choose a builder
+when setting fields by name or constructing nested requests helps your code,
+and use a literal when you want to show the whole value in one place. If you
+don't need builders, leave `--enable-builders` off to avoid the `bon` dependency.
