@@ -63,16 +63,31 @@ where
 }
 
 #[cfg(feature = "reqwest")]
+const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+#[cfg(feature = "reqwest")]
+pub(crate) fn deserialize_json<T, E>(json: &[u8], on_error: impl FnOnce(String, serde_json::Error) -> E) -> Result<T, E>
+where
+  T: DeserializeOwned,
+{
+  T::deserialize(&mut serde_json::Deserializer::from_slice(json)).map_err(
+    |error| match serde_path_to_error::deserialize::<_, T>(&mut serde_json::Deserializer::from_slice(json)) {
+      Err(tracked) => on_error(tracked.path().to_string(), tracked.into_inner()),
+      Ok(_) => on_error(".".to_string(), error),
+    },
+  )
+}
+
+#[cfg(feature = "reqwest")]
 impl<T> Diagnostics<T> for reqwest::Response
 where
   T: serde::de::DeserializeOwned,
 {
   async fn json_with_diagnostics(self) -> Result<T, DiagnosticsError> {
-    let raw_body = self.text().await?;
-    let mut de = serde_json::Deserializer::from_str(&raw_body);
-    serde_path_to_error::deserialize(&mut de).map_err(|err| DiagnosticsError::DeserializationError {
-      path: err.path().to_string(),
-      inner: err.into_inner(),
+    let body = self.bytes().await?;
+    let body = body.strip_prefix(UTF8_BOM).unwrap_or(&body);
+    deserialize_json(String::from_utf8_lossy(body).as_bytes(), |path, inner| {
+      DiagnosticsError::DeserializationError { path, inner }
     })
   }
 
