@@ -199,6 +199,11 @@ pub struct WithHeaders<Headers, Body> {
 
 
 - A header field is `Option<_>` unless every status in the class marks it `required`.
+  An optional header whose value fails to parse reads as `None`; for a list, one bad
+  element makes the whole value `None`. A required header that is missing or fails to
+  parse is an error rather than a default: `parse_response` returns it to the caller,
+  and a server handler answers `400` when a required request header is missing or
+  malformed.
 - Header structs are keyed by their fields, so operations declaring the same headers
   share one struct. It is named after the headers, such as `XNextHeaders` or
   `LinkAndLocationHeaders`; a name already in use gets a numeric suffix.

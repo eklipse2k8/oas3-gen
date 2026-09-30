@@ -414,10 +414,19 @@ impl ToTokens for RequestConstructionFragment {
       field_assignments.push(quote! { query });
     }
 
-    if self.method.header_params_type.is_some() {
-      field_assignments.push(quote! {
-        header: (&headers).try_into().unwrap_or_default()
-      });
+    let header = self.method.header_params_type.as_ref().map(|header_type| {
+      quote! {
+        let header = match #header_type::try_from(&headers) {
+          Ok(header) => header,
+          Err(e) => return (
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("Bad request: {e}")
+          ).into_response(),
+        };
+      }
+    });
+    if header.is_some() {
+      field_assignments.push(quote! { header });
     }
 
     if let Some(body_info) = &self.method.body_info {
@@ -434,6 +443,7 @@ impl ToTokens for RequestConstructionFragment {
     }
 
     tokens.extend(quote! {
+      #header
       let request = #request_type {
         #(#field_assignments),*
       };

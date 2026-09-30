@@ -62,11 +62,13 @@ pub async fn list_pets<S>(
 where
   S: ApiServer + Clone + Send + Sync + 'static,
 {
-  let request = ListPetsRequest {
-    path,
-    query,
-    header: (&headers).try_into().unwrap_or_default(),
+  let header = match ListPetsRequestHeader::try_from(&headers) {
+    Ok(header) => header,
+    Err(e) => {
+      return (axum::http::StatusCode::BAD_REQUEST, format!("Bad request: {e}")).into_response();
+    }
   };
+  let request = ListPetsRequest { path, query, header };
   let result: anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> = service.list_pets(request).await;
   match result {
     Ok(ApiResponse::Ok(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
@@ -132,10 +134,13 @@ pub async fn list_cats<S>(
 where
   S: ApiServer + Clone + Send + Sync + 'static,
 {
-  let request = ListCatsRequest {
-    query,
-    header: (&headers).try_into().unwrap_or_default(),
+  let header = match ListCatsRequestHeader::try_from(&headers) {
+    Ok(header) => header,
+    Err(e) => {
+      return (axum::http::StatusCode::BAD_REQUEST, format!("Bad request: {e}")).into_response();
+    }
   };
+  let request = ListCatsRequest { query, header };
   let result: anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Cats>, Error>> = service.list_cats(request).await;
   match result {
     Ok(ApiResponse::Ok(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
@@ -170,10 +175,13 @@ pub async fn show_pet_by_id<S>(
 where
   S: ApiServer + Clone + Send + Sync + 'static,
 {
-  let request = ShowPetByIdRequest {
-    path,
-    header: (&headers).try_into().unwrap_or_default(),
+  let header = match ShowPetByIdRequestHeader::try_from(&headers) {
+    Ok(header) => header,
+    Err(e) => {
+      return (axum::http::StatusCode::BAD_REQUEST, format!("Bad request: {e}")).into_response();
+    }
   };
+  let request = ShowPetByIdRequest { path, header };
   let result: anyhow::Result<ApiResponse<WithHeaders<XCacheHeaders, Pet>, Error>> =
     service.show_pet_by_id(request).await;
   match result {

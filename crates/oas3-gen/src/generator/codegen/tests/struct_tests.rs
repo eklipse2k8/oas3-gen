@@ -527,8 +527,9 @@ fn test_required_header_with_default_uses_unconditional_insert() {
     .into_token_stream()
     .to_string();
   assert!(
-    server_code.contains(". unwrap_or_default ()"),
-    "required field with default must unwrap extraction: {server_code}"
+    server_code.contains(". ok_or_else (|| anyhow :: anyhow ! (\"missing required header `X-Compatibility-Date`\")) ?")
+      && !server_code.contains("unwrap_or_default"),
+    "required field must be extracted as a value that fails when missing: {server_code}"
   );
 }
 

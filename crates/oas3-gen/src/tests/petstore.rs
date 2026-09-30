@@ -234,8 +234,16 @@ async fn test_parse_response_reads_declared_headers() {
     "bodiless status should carry its required header"
   );
 
+  let missing = CreatePetsRequest::parse_response(mock_response(201, &[], "")).await;
+  assert_eq!(
+    missing.map(|_| ()).map_err(|e| e.to_string()),
+    Err("missing required header `Location`".to_string()),
+    "a missing required response header should be an error"
+  );
+
   let cases = [
     (vec![("x-cache", "miss")], Some(ShowPetByIdResponseHeaderXCache::Miss)),
+    (vec![("x-cache", "stale")], None),
     (vec![], None),
   ];
   for (headers, expected) in cases {

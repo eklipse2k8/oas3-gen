@@ -186,6 +186,43 @@ fn test_query_deserialization() {
   assert_eq!(query_none.limit, None, "missing fields should be None");
 }
 
+fn header_map(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+  let mut headers = HeaderMap::new();
+  for (name, value) in pairs {
+    headers.insert(*name, http::HeaderValue::from_static(value));
+  }
+  headers
+}
+
+#[test]
+fn test_request_header_parsing() {
+  let date = ("x-compatibility-date", "2026-06-09");
+  let cases = [
+    (
+      vec![date, ("x-sort-order", "desc"), ("x-only", "bird, fish")],
+      Ok((
+        Some(ListPetsRequestHeaderXSortOrder::Desc),
+        Some(vec![ListPetsRequestHeaderXonly::Bird, ListPetsRequestHeaderXonly::Fish]),
+      )),
+    ),
+    (vec![date, ("x-sort-order", "sideways")], Ok((None, None))),
+    (vec![date, ("x-only", "bird,lizard")], Ok((None, None))),
+    (vec![date], Ok((None, None))),
+    (vec![], Err("missing required header `x-compatibility-date`")),
+    (
+      vec![("x-compatibility-date", "yesterday")],
+      Err("invalid value for required header `x-compatibility-date`"),
+    ),
+  ];
+
+  for (pairs, expected) in cases {
+    let parsed = ListPetsRequestHeader::try_from(&header_map(&pairs))
+      .map(|header| (header.x_sort_order, header.x_only))
+      .map_err(|e| e.to_string());
+    assert_eq!(parsed, expected.map_err(ToString::to_string), "mismatch for {pairs:?}");
+  }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Outcome {
   Declared,
@@ -297,7 +334,7 @@ async fn test_list_pets_handler_maps_response_enum_to_status() {
         api_version: "v1".to_string(),
       }),
       Query(ListPetsRequestQuery { limit: None }),
-      HeaderMap::new(),
+      header_map(&[("x-compatibility-date", "2026-06-09")]),
     )
     .await
     .into_response();
@@ -316,7 +353,7 @@ async fn test_list_pets_handler_writes_response_headers() {
         api_version: "v1".to_string(),
       }),
       Query(ListPetsRequestQuery { limit: None }),
-      HeaderMap::new(),
+      header_map(&[("x-compatibility-date", "2026-06-09")]),
     )
     .await
     .into_response();
@@ -354,11 +391,11 @@ async fn test_handlers_map_unit_and_body_variants_to_status() {
   );
 
   let shown = show_pet_by_id(
-    State(service),
+    State(service.clone()),
     Path(ShowPetByIdRequestPath {
       pet_id: "42".to_string(),
     }),
-    HeaderMap::new(),
+    header_map(&[("x-api-version", "v1")]),
   )
   .await
   .into_response();
@@ -371,5 +408,20 @@ async fn test_handlers_map_unit_and_body_variants_to_status() {
     shown.headers().get("x-cache").map(|v| v.to_str().unwrap()),
     Some("hit"),
     "enum header should be written with its wire value"
+  );
+
+  let unversioned = show_pet_by_id(
+    State(service),
+    Path(ShowPetByIdRequestPath {
+      pet_id: "42".to_string(),
+    }),
+    HeaderMap::new(),
+  )
+  .await
+  .into_response();
+  assert_eq!(
+    unversioned.status(),
+    http::StatusCode::BAD_REQUEST,
+    "a missing required request header should be rejected"
   );
 }

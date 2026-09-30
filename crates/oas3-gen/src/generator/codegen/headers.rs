@@ -142,7 +142,7 @@ impl ToTokens for HeaderFromMapFragment<'_> {
 
     tokens.extend(quote! {
       impl core::convert::TryFrom<&http::HeaderMap> for #struct_name {
-        type Error = http::header::InvalidHeaderValue;
+        type Error = anyhow::Error;
 
         fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
           Ok(Self {
@@ -152,7 +152,7 @@ impl ToTokens for HeaderFromMapFragment<'_> {
       }
 
       impl core::convert::TryFrom<http::HeaderMap> for #struct_name {
-        type Error = http::header::InvalidHeaderValue;
+        type Error = anyhow::Error;
 
         fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
           Self::try_from(&headers)
@@ -182,25 +182,39 @@ impl ToTokens for HeaderFieldExtractionFragment<'_> {
     };
 
     let header_const = ConstToken::from_raw(original_name);
-    let parse_expr = header_parse_expr(&self.field.rust_type, &quote! { value });
-    let default_suffix = (!self.field.rust_type.nullable).then(|| quote! { .unwrap_or_default() });
+    let parse = header_parse_adapter(&self.field.rust_type);
 
-    tokens.extend(quote! {
-      #field_name: headers
-        .get(#header_const)
-        .and_then(|v| v.to_str().ok())
-        .map(|value| #parse_expr)
-        #default_suffix
-    });
+    let extraction = if self.field.rust_type.nullable {
+      quote! {
+        headers
+          .get(#header_const)
+          .and_then(|v| v.to_str().ok())
+          #parse
+      }
+    } else {
+      let missing = format!("missing required header `{original_name}`");
+      let invalid = format!("invalid value for required header `{original_name}`");
+      quote! {
+        headers
+          .get(#header_const)
+          .ok_or_else(|| anyhow::anyhow!(#missing))?
+          .to_str()
+          .ok()
+          #parse
+          .ok_or_else(|| anyhow::anyhow!(#invalid))?
+      }
+    };
+
+    tokens.extend(quote! { #field_name: #extraction });
   }
 }
 
-fn header_parse_expr(ty: &TypeRef, accessor: &TokenStream) -> TokenStream {
+fn header_parse_adapter(ty: &TypeRef) -> TokenStream {
   if ty.is_string_like() {
-    quote! { #accessor.to_string() }
+    quote! { .map(|value| value.to_string()) }
   } else if ty.is_array {
-    quote! { #accessor.split(',').map(|s| s.trim()).filter_map(|s| s.parse().ok()).collect() }
+    quote! { .and_then(|value| value.split(',').map(|s| s.trim().parse().ok()).collect()) }
   } else {
-    quote! { #accessor.parse().unwrap_or_default() }
+    quote! { .and_then(|value| value.parse().ok()) }
   }
 }

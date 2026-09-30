@@ -553,7 +553,7 @@ impl core::convert::TryFrom<XNextHeaders> for http::HeaderMap {
   }
 }
 impl core::convert::TryFrom<&http::HeaderMap> for XNextHeaders {
-  type Error = http::header::InvalidHeaderValue;
+  type Error = anyhow::Error;
   fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
     Ok(Self {
       x_next: headers
@@ -564,7 +564,7 @@ impl core::convert::TryFrom<&http::HeaderMap> for XNextHeaders {
   }
 }
 impl core::convert::TryFrom<http::HeaderMap> for XNextHeaders {
-  type Error = http::header::InvalidHeaderValue;
+  type Error = anyhow::Error;
   fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
     Self::try_from(&headers)
   }
@@ -591,19 +591,21 @@ impl core::convert::TryFrom<LocationHeaders> for http::HeaderMap {
   }
 }
 impl core::convert::TryFrom<&http::HeaderMap> for LocationHeaders {
-  type Error = http::header::InvalidHeaderValue;
+  type Error = anyhow::Error;
   fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
     Ok(Self {
       location: headers
         .get(LOCATION)
-        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| anyhow::anyhow!("missing required header `Location`"))?
+        .to_str()
+        .ok()
         .map(std::string::ToString::to_string)
-        .unwrap_or_default(),
+        .ok_or_else(|| anyhow::anyhow!("invalid value for required header `Location`"))?,
     })
   }
 }
 impl core::convert::TryFrom<http::HeaderMap> for LocationHeaders {
-  type Error = http::header::InvalidHeaderValue;
+  type Error = anyhow::Error;
   fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
     Self::try_from(&headers)
   }
@@ -632,18 +634,18 @@ impl core::convert::TryFrom<XCacheHeaders> for http::HeaderMap {
   }
 }
 impl core::convert::TryFrom<&http::HeaderMap> for XCacheHeaders {
-  type Error = http::header::InvalidHeaderValue;
+  type Error = anyhow::Error;
   fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
     Ok(Self {
       x_cache: headers
         .get(X_CACHE)
         .and_then(|v| v.to_str().ok())
-        .map(|value| value.parse().unwrap_or_default()),
+        .and_then(|value| value.parse().ok()),
     })
   }
 }
 impl core::convert::TryFrom<http::HeaderMap> for XCacheHeaders {
-  type Error = http::header::InvalidHeaderValue;
+  type Error = anyhow::Error;
   fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
     Self::try_from(&headers)
   }
