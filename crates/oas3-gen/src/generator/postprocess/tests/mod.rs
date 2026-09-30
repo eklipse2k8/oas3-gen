@@ -1,3 +1,4 @@
+mod default_tests;
 mod response_tests;
 mod transform_tests;
 mod type_usage_tests;

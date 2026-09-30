@@ -1,3 +1,4 @@
+mod defaults;
 mod response;
 mod serde_usage;
 mod uses;
@@ -12,6 +13,7 @@ use crate::generator::{
   ast::{EnumToken, OperationInfo, RustType, constants::HttpHeaderRef},
   converter::GenerationTarget,
   postprocess::{
+    defaults::FieldDefaultProcessor,
     response::ResponseProcessor,
     serde_usage::SerdeUsage,
     uses::{ModuleImports, RustTypeDeduplication},
@@ -41,7 +43,8 @@ impl PostprocessOutput {
 
     SerdeUsage::new(&types, seed_usage, target).apply(&mut types);
 
-    let dedup_output = RustTypeDeduplication::new(types).process();
+    let mut dedup_output = RustTypeDeduplication::new(types).process();
+    FieldDefaultProcessor::process(&mut dedup_output);
     let uses_output = ModuleImports::new(&dedup_output).process();
 
     Self {

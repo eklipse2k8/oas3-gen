@@ -137,24 +137,13 @@ impl<'a> EnumDefaultImplFragment<'a> {
 impl ToTokens for EnumDefaultImplFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = self.name;
-    let variant_name = &self.variant.name;
-
-    let construction = if let Some(type_ref) = self.variant.content.single_type() {
-      let payload = if let Some(inner) = &self.default.inner_variant {
-        let enum_type = Ident::new(&type_ref.unboxed_base_type_name(), Span::call_site());
-        quote! { #enum_type::#inner }
-      } else {
-        coercion::json_to_rust_literal(&self.default.value, type_ref)
-      };
-
-      if type_ref.boxed {
-        quote! { Self::#variant_name(Box::new(#payload)) }
-      } else {
-        quote! { Self::#variant_name(#payload) }
-      }
-    } else {
-      quote! { Self::#variant_name }
-    };
+    let construction = EnumValueFragment::new(
+      quote! { Self },
+      &self.variant.name,
+      self.variant.content.single_type(),
+      &self.default.value,
+      self.default.inner_variant.as_ref(),
+    );
 
     let ts = quote! {
       impl Default for #name {
@@ -162,6 +151,64 @@ impl ToTokens for EnumDefaultImplFragment<'_> {
           #construction
         }
       }
+    };
+
+    tokens.extend(ts);
+  }
+}
+
+/// Expression constructing one enum value, such as `Owner::Variant(Inner::Value)`.
+///
+/// A unit variant ignores `value`. A tuple variant wraps `inner_variant` of the wrapped value
+/// enum when one is given, otherwise `value` coerced to the wrapped type.
+#[derive(Clone, Debug)]
+pub(crate) struct EnumValueFragment<'a> {
+  owner: TokenStream,
+  variant: &'a EnumVariantToken,
+  wrapped_type: Option<&'a TypeRef>,
+  value: &'a serde_json::Value,
+  inner_variant: Option<&'a EnumVariantToken>,
+}
+
+impl<'a> EnumValueFragment<'a> {
+  pub(crate) fn new(
+    owner: TokenStream,
+    variant: &'a EnumVariantToken,
+    wrapped_type: Option<&'a TypeRef>,
+    value: &'a serde_json::Value,
+    inner_variant: Option<&'a EnumVariantToken>,
+  ) -> Self {
+    Self {
+      owner,
+      variant,
+      wrapped_type,
+      value,
+      inner_variant,
+    }
+  }
+}
+
+impl ToTokens for EnumValueFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let owner = &self.owner;
+    let variant = self.variant;
+
+    let Some(type_ref) = self.wrapped_type else {
+      tokens.extend(quote! { #owner::#variant });
+      return;
+    };
+
+    let payload = if let Some(inner) = self.inner_variant {
+      let enum_type = &type_ref.base_type;
+      quote! { #enum_type::#inner }
+    } else {
+      coercion::json_to_rust_literal(self.value, type_ref)
+    };
+
+    let ts = if type_ref.boxed {
+      quote! { #owner::#variant(Box::new(#payload)) }
+    } else {
+      quote! { #owner::#variant(#payload) }
     };
 
     tokens.extend(ts);
@@ -639,7 +686,7 @@ impl ToTokens for EnumFragment<'_> {
     let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
 
     let default_idx = match &self.def.default_mode {
-      EnumDefault::Derive => Some(self.def.variants.iter().position(|v| v.default).unwrap_or(0)),
+      EnumDefault::Derive => Some(self.def.derived_default_index()),
       EnumDefault::Value(_) | EnumDefault::None => None,
     };
     let variants: Vec<EnumValueVariantFragment<'_>> = self

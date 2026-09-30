@@ -18,7 +18,7 @@ pub struct ContentRequest {
   /// Flexible metadata that can be string or object
   pub metadata: Option<Metadata>,
   /// The size of the generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.
-  #[default(Some(Default::default()))]
+  #[default(Some(ContentRequestImageSize::Preset(ImageSizePreset::Auto2k)))]
   pub image_size: Option<ContentRequestImageSize>,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -997,6 +997,25 @@ impl core::fmt::Display for ImageSizePreset {
     }
   }
 }
+/// Shares its inline model union with ModelSelection; this nullable copy has no default
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+pub struct ModelFilter {
+  pub model: Option<ModelFilterModel>,
+}
+/// Shares its inline model union with ModelFilter; this copy defaults to a non-first variant
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde(default)]
+pub struct ModelSelection {
+  #[default(Some(ModelFilterModel::Enum(ModelFilterModelEnum::Model10)))]
+  pub model: Option<ModelFilterModel>,
+}
+/// Shares its inline model union with ModelFilter; this copy is required and has no default
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+pub struct ModelRequirement {
+  pub model: ModelFilterModel,
+}
 /// Send content blocks
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct SendContentRequest {
@@ -1081,6 +1100,48 @@ impl ContentRequestImageSize {
   pub fn auto2k() -> Self {
     Self::Preset(ImageSizePreset::Auto2k)
   }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ModelFilterModelEnum {
+  #[serde(rename = "model-1.0-draft")]
+  #[default]
+  Model10Draft,
+  #[serde(rename = "model-1.0")]
+  Model10,
+  #[serde(rename = "model-1.1")]
+  Model11,
+}
+impl core::fmt::Display for ModelFilterModelEnum {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Model10Draft => write!(f, "model-1.0-draft"),
+      Self::Model10 => write!(f, "model-1.0"),
+      Self::Model11 => write!(f, "model-1.1"),
+    }
+  }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ModelFilterModelEnum2 {
+  #[serde(rename = "Legacy 0.1-mini")]
+  #[default]
+  Legacy01Mini,
+  #[serde(rename = "Legacy 0.1-plus")]
+  Legacy01Plus,
+}
+impl core::fmt::Display for ModelFilterModelEnum2 {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Legacy01Mini => write!(f, "Legacy 0.1-mini"),
+      Self::Legacy01Plus => write!(f, "Legacy 0.1-plus"),
+    }
+  }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum ModelFilterModel {
+  #[default]
+  Enum(ModelFilterModelEnum),
+  Enum2(ModelFilterModelEnum2),
 }
 /// Response enum shared by every operation.
 ///

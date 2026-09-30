@@ -14,7 +14,10 @@ use super::{
 };
 use crate::{
   generator::{
-    ast::{Documentation, EnumDefault, EnumDefaultValue, EnumVariantToken, RustPrimitive, RustType, VariantDef},
+    ast::{
+      Documentation, EnumDefault, EnumDefaultValue, EnumVariantToken, RustPrimitive, RustType, TypeRef, VariantContent,
+      VariantDef,
+    },
     converter::{ConverterContext, discriminator::DiscriminatorConverter},
     naming::{
       identifiers::ensure_unique,
@@ -249,48 +252,13 @@ impl UnionConverter {
   ) -> Option<EnumDefaultValue> {
     let normalized = NormalizedVariant::try_from(value).ok()?;
 
-    for variant in variants.iter_mut() {
-      let Some(type_ref) = variant.single_wrapped_type() else {
-        continue;
-      };
-      if type_ref.is_array {
-        continue;
-      }
-
+    variants.iter_mut().find_map(|variant| {
+      let type_ref = variant.single_wrapped_type().filter(|t| !t.is_array)?;
       let enum_variants = self.method_generator.resolve_enum_value_defs(type_ref, inline_types);
-      if !enum_variants.is_empty() {
-        if let Some(inner) = enum_variants
-          .iter()
-          .find(|v| variant_matches_value(v, &normalized.rename_value))
-        {
-          let inner_variant = Some(inner.name.clone());
-          variant.default = true;
-          return Some(EnumDefaultValue {
-            value: value.clone(),
-            inner_variant,
-          });
-        }
-        continue;
-      }
-
-      let accepts = match (&type_ref.base_type, value) {
-        (RustPrimitive::String, serde_json::Value::String(_)) | (RustPrimitive::Bool, serde_json::Value::Bool(_)) => {
-          true
-        }
-        (primitive, serde_json::Value::Number(_)) if primitive.is_float() => true,
-        (primitive, serde_json::Value::Number(n)) if primitive.is_integer() => n.is_i64() || n.is_u64(),
-        _ => false,
-      };
-      if accepts {
-        variant.default = true;
-        return Some(EnumDefaultValue {
-          value: value.clone(),
-          inner_variant: None,
-        });
-      }
-    }
-
-    None
+      let payload = wrapped_default_payload(type_ref, value, &normalized.rename_value, &enum_variants)?;
+      variant.default = true;
+      Some(payload)
+    })
   }
 
   /// Extracts variant specifications from raw union branch references.
@@ -336,4 +304,44 @@ impl UnionConverter {
 
     Ok((specs, has_null_variant))
   }
+}
+
+/// Builds the payload for a union variant wrapping the non-array `type_ref` from a schema
+/// `default`.
+///
+/// `enum_variants` are the variants of the enum `type_ref` names, or empty when it names
+/// anything else; only unit variants are considered. When there are any, the default is
+/// accepted only through the one whose wire value is `rename_value`. Otherwise it is
+/// accepted when its JSON kind fits the primitive. Returns `None` when the variant cannot
+/// hold the value.
+pub(crate) fn wrapped_default_payload(
+  type_ref: &TypeRef,
+  value: &serde_json::Value,
+  rename_value: &str,
+  enum_variants: &[VariantDef],
+) -> Option<EnumDefaultValue> {
+  let mut unit_variants = enum_variants
+    .iter()
+    .filter(|v| matches!(v.content, VariantContent::Unit))
+    .peekable();
+  if unit_variants.peek().is_some() {
+    return unit_variants
+      .find(|v| variant_matches_value(v, rename_value))
+      .map(|inner| EnumDefaultValue {
+        value: value.clone(),
+        inner_variant: Some(inner.name.clone()),
+      });
+  }
+
+  let accepts = match (&type_ref.base_type, value) {
+    (RustPrimitive::String, serde_json::Value::String(_)) | (RustPrimitive::Bool, serde_json::Value::Bool(_)) => true,
+    (primitive, serde_json::Value::Number(_)) if primitive.is_float() => true,
+    (primitive, serde_json::Value::Number(n)) if primitive.is_integer() => n.is_i64() || n.is_u64(),
+    _ => false,
+  };
+
+  accepts.then(|| EnumDefaultValue {
+    value: value.clone(),
+    inner_variant: None,
+  })
 }

@@ -44,7 +44,7 @@ pub use tokens::{
 pub use types::{Rounding, RustPrimitive, TypeRef};
 pub use validation_attrs::{RegexKey, ValidationAttribute};
 
-pub use crate::generator::ast::fields::{FieldCollection, FieldDef};
+pub use crate::generator::ast::fields::{DefaultVariant, FieldCollection, FieldDef};
 use crate::generator::{
   ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant,
 };
@@ -758,6 +758,12 @@ pub struct EnumDef {
 }
 
 impl EnumDef {
+  /// Index of the variant a derived `Default` constructs: the one flagged `default`, else the first
+  #[must_use]
+  pub fn derived_default_index(&self) -> usize {
+    self.variants.iter().position(|v| v.default).unwrap_or(0)
+  }
+
   #[must_use]
   pub fn fallback_variant(&self) -> Option<&VariantDef> {
     const FALLBACK_NAMES: &[&str] = &["Unknown", "Other"];

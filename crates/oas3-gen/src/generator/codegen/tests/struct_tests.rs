@@ -4,12 +4,17 @@ use quote::ToTokens as _;
 
 use crate::generator::{
   ast::{
-    ContentCategory, DeriveTrait, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind,
-    MethodNameToken, OperationResponse, ResponseHeadersRef, ResponseMediaType, ResponseParam, ResponsePayload,
-    ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, StatusCodeToken, StatusHandler, StructDef,
-    StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute, VariantMapping,
+    ContentCategory, DefaultVariant, DeriveTrait, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken,
+    MethodKind, MethodNameToken, OperationResponse, ResponseHeadersRef, ResponseMediaType, ResponseParam,
+    ResponsePayload, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, StatusCodeToken, StatusHandler,
+    StructDef, StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute, VariantMapping,
+    bon_attrs::BuilderAttribute,
   },
-  codegen::{Visibility, structs::StructFragment},
+  codegen::{
+    Visibility,
+    attributes::{generate_builder_attrs, generate_field_default_attr},
+    structs::StructFragment,
+  },
   converter::GenerationTarget,
 };
 
@@ -642,4 +647,54 @@ fn test_builder_skipped_field_named_build_not_renamed() {
     !code.contains("build_value"),
     "skipped field should not be renamed: {code}"
   );
+}
+
+#[test]
+fn test_field_default_attr_constructs_resolved_enum_variant() {
+  let resolved = |variant: &str, wrapped_type: Option<&str>, inner_variant: Option<&str>| DefaultVariant {
+    variant: EnumVariantToken::new(variant),
+    wrapped_type: wrapped_type.map(TypeRef::new),
+    inner_variant: inner_variant.map(EnumVariantToken::new),
+  };
+  let cases = [
+    (
+      TypeRef::new("Model").with_option(),
+      serde_json::json!("model-1.0"),
+      resolved("Enum", Some("ModelEnum"), Some("Stable")),
+      "Some (Model :: Enum (ModelEnum :: Stable))",
+    ),
+    (
+      TypeRef::new("Status"),
+      serde_json::json!("inactive"),
+      resolved("Inactive", None, None),
+      "Status :: Inactive",
+    ),
+    (
+      TypeRef::new("Mixed").with_boxed().with_option(),
+      serde_json::json!(5),
+      resolved("Integer", Some("i64"), None),
+      "Some (Box :: new (Mixed :: Integer (5i64)))",
+    ),
+  ];
+
+  for (rust_type, value, default_variant, expected) in cases {
+    let field = FieldDef::builder()
+      .name(FieldNameToken::new("field"))
+      .rust_type(rust_type)
+      .default_value(value)
+      .default_variant(default_variant)
+      .builder_attrs(vec![BuilderAttribute::Skip])
+      .build();
+    let type_name = field.rust_type.to_rust_type();
+    assert_eq!(
+      generate_field_default_attr(&field).to_string(),
+      format!("# [default ({expected})]"),
+      "default attr for {type_name}"
+    );
+    assert_eq!(
+      generate_builder_attrs(&field).to_string(),
+      format!("# [builder (skip = {expected})]"),
+      "builder attr for {type_name}"
+    );
+  }
 }

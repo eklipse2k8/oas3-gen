@@ -4,8 +4,8 @@ use itertools::Itertools;
 use oas3::spec::{ObjectSchema, Parameter, ParameterStyle};
 
 use crate::generator::ast::{
-  Documentation, FieldNameToken, OuterAttr, ParameterLocation, RustPrimitive, SerdeAsFieldAttr, SerdeAsSeparator,
-  SerdeAttribute, TypeRef, ValidationAttribute, bon_attrs::BuilderAttribute,
+  Documentation, EnumVariantToken, FieldNameToken, OuterAttr, ParameterLocation, RustPrimitive, SerdeAsFieldAttr,
+  SerdeAsSeparator, SerdeAttribute, TypeRef, ValidationAttribute, bon_attrs::BuilderAttribute,
 };
 
 /// Rust struct field definition
@@ -25,6 +25,8 @@ pub struct FieldDef {
   #[builder(default)]
   pub builder_attrs: Vec<BuilderAttribute>,
   pub default_value: Option<serde_json::Value>,
+  /// Variant of the field's enum type that `default_value` selects, resolved in postprocessing
+  pub default_variant: Option<DefaultVariant>,
   pub example_value: Option<serde_json::Value>,
   #[builder(into)]
   pub parameter_location: Option<ParameterLocation>,
@@ -33,6 +35,20 @@ pub struct FieldDef {
   pub multiple_of: Option<serde_json::Number>,
   #[builder(into)]
   pub original_name: Option<String>,
+}
+
+/// Enum variant a field's schema `default` constructs
+///
+/// Inline enums and unions are shared across every schema with the same value set, so the
+/// enum's own `Default` can belong to a different schema. Fields construct their default
+/// from this variant instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefaultVariant {
+  pub variant: EnumVariantToken,
+  /// Type the variant wraps; `None` for unit variants
+  pub wrapped_type: Option<TypeRef>,
+  /// Variant of the wrapped value enum that the default selects
+  pub inner_variant: Option<EnumVariantToken>,
 }
 
 impl FieldDef {
@@ -99,17 +115,11 @@ impl FieldDef {
       attrs.push(BuilderAttribute::Rename(format!("{}_value", self.name.as_str())));
     }
 
-    if let Some(default_value) = &self.default_value {
+    if self.default_value.is_some() {
       if self.doc_hidden {
-        attrs.push(BuilderAttribute::Skip {
-          value: default_value.clone(),
-          type_ref: self.rust_type.clone(),
-        });
+        attrs.push(BuilderAttribute::Skip);
       } else if !self.rust_type.nullable {
-        attrs.push(BuilderAttribute::Default {
-          value: default_value.clone(),
-          type_ref: self.rust_type.clone(),
-        });
+        attrs.push(BuilderAttribute::Default);
       }
     }
 

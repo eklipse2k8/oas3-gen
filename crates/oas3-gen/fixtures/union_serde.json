@@ -771,6 +771,65 @@
 					"auto_2K"
 				],
 				"type": "string"
+			},
+			"ModelFilter": {
+				"type": "object",
+				"description": "Shares its inline model union with ModelSelection; this nullable copy has no default",
+				"properties": {
+					"model": {
+						"anyOf": [
+							{
+								"type": "string",
+								"enum": ["model-1.0-draft", "model-1.0", "model-1.1"]
+							},
+							{
+								"type": "string",
+								"enum": ["Legacy 0.1-mini", "Legacy 0.1-plus"]
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				}
+			},
+			"ModelSelection": {
+				"type": "object",
+				"description": "Shares its inline model union with ModelFilter; this copy defaults to a non-first variant",
+				"properties": {
+					"model": {
+						"anyOf": [
+							{
+								"type": "string",
+								"enum": ["model-1.0-draft", "model-1.0", "model-1.1"]
+							},
+							{
+								"type": "string",
+								"enum": ["Legacy 0.1-mini", "Legacy 0.1-plus"]
+							}
+						],
+						"default": "model-1.0"
+					}
+				}
+			},
+			"ModelRequirement": {
+				"type": "object",
+				"description": "Shares its inline model union with ModelFilter; this copy is required and has no default",
+				"required": ["model"],
+				"properties": {
+					"model": {
+						"anyOf": [
+							{
+								"type": "string",
+								"enum": ["model-1.0-draft", "model-1.0", "model-1.1"]
+							},
+							{
+								"type": "string",
+								"enum": ["Legacy 0.1-mini", "Legacy 0.1-plus"]
+							}
+						]
+					}
+				}
 			}
 		}
 	}

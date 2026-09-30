@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::BTreeSet};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt as _, quote};
 
-use super::coercion;
+use super::{coercion, enums::EnumValueFragment};
 use crate::generator::ast::{
   DeriveTrait, Documentation, FieldDef, OuterAttr, RustPrimitive, SerdeAsFieldAttr, SerdeAttribute,
   ValidationAttribute, bon_attrs::BuilderAttribute,
@@ -120,29 +120,22 @@ pub(crate) fn generate_validation_attrs<'a>(attrs: impl IntoIterator<Item = &'a 
   }
 }
 
-/// Generates a single combined `#[builder(...)]` attribute for the given builder attributes.
+/// Generates a single combined `#[builder(...)]` attribute for the field's builder attributes.
 ///
-/// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
-/// `#[builder(attr1, attr2, ...)]` attribute to reduce output noise.
-///
-/// `Default` and `Skip` variants carry a `serde_json::Value` + `TypeRef` which are
-/// coerced to Rust expressions via [`coercion::json_to_rust_literal`].
-pub(crate) fn generate_builder_attrs<'a>(attrs: impl IntoIterator<Item = &'a BuilderAttribute>) -> TokenStream {
-  let attr_tokens = attrs
-    .into_iter()
-    .map(|attr| match attr {
-      BuilderAttribute::Default { value, type_ref } => {
-        let expr = coercion::json_to_rust_literal(value, type_ref);
-        quote! { default = #expr }
-      }
+/// If the field has none, returns nothing. Otherwise combines all attributes into a single
+/// `#[builder(attr1, attr2, ...)]` attribute to reduce output noise. `Default` and `Skip`
+/// render the same expression as the field's `#[default(...)]` attribute.
+pub(crate) fn generate_builder_attrs(field: &FieldDef) -> TokenStream {
+  let attr_tokens = field
+    .builder_attrs
+    .iter()
+    .filter_map(|attr| match attr {
+      BuilderAttribute::Default => field_default_expr(field).map(|expr| quote! { default = #expr }),
       BuilderAttribute::Rename(name) => {
         let ident = syn::Ident::new(name, proc_macro2::Span::call_site());
-        quote! { name = #ident }
+        Some(quote! { name = #ident })
       }
-      BuilderAttribute::Skip { value, type_ref } => {
-        let expr = coercion::json_to_rust_literal(value, type_ref);
-        quote! { skip = #expr }
-      }
+      BuilderAttribute::Skip => field_default_expr(field).map(|expr| quote! { skip = #expr }),
     })
     .collect::<Vec<_>>();
 
@@ -177,11 +170,35 @@ pub(crate) fn generate_doc_hidden_attr(hidden: bool) -> TokenStream {
 }
 
 pub(crate) fn generate_field_default_attr(field: &FieldDef) -> TokenStream {
-  field.default_value.as_ref().map_or_else(
-    || quote! {},
-    |default_value| {
-      let default_expr = coercion::json_to_rust_literal(default_value, &field.rust_type);
-      quote! { #[default(#default_expr)] }
-    },
+  field_default_expr(field).map_or_else(|| quote! {}, |expr| quote! { #[default(#expr)] })
+}
+
+/// Rust expression for the field's schema `default`: the resolved enum variant when
+/// postprocessing found one, otherwise the JSON value coerced to the field's type.
+fn field_default_expr(field: &FieldDef) -> Option<TokenStream> {
+  let value = field.default_value.as_ref()?;
+  let rust_type = &field.rust_type;
+  let Some(default) = &field.default_variant else {
+    return Some(coercion::json_to_rust_literal(value, rust_type));
+  };
+
+  let construction = EnumValueFragment::new(
+    rust_type.base_type.to_token_stream(),
+    &default.variant,
+    default.wrapped_type.as_ref(),
+    value,
+    default.inner_variant.as_ref(),
   )
+  .to_token_stream();
+  let construction = if rust_type.boxed {
+    quote! { Box::new(#construction) }
+  } else {
+    construction
+  };
+
+  Some(if rust_type.nullable {
+    quote! { Some(#construction) }
+  } else {
+    construction
+  })
 }

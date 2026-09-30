@@ -186,7 +186,7 @@ impl ToTokens for StructFieldFragment<'_> {
     let validation = self.validation_attrs();
     let deprecated = generate_deprecated_attr(self.field.deprecated);
     let default_val = generate_field_default_attr(self.field);
-    let builder_attr = generate_builder_attrs(&self.field.builder_attrs);
+    let builder_attr = generate_builder_attrs(self.field);
     let doc_hidden = generate_doc_hidden_attr(self.field.doc_hidden);
 
     tokens.extend(quote! {
