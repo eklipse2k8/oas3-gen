@@ -856,3 +856,77 @@ fn test_operation_with_oneof_request_body() -> anyhow::Result<()> {
 
   Ok(())
 }
+
+#[test]
+fn test_response_headers_become_variant_fields() -> anyhow::Result<()> {
+  let (converter, _usage) = setup_converter(BTreeMap::new());
+
+  let operation_json = json!({
+    "operationId": "listItems",
+    "responses": {
+      "200": {
+        "description": "Items",
+        "headers": {
+          "X-Rate-Limit": { "required": true, "schema": { "type": "integer", "format": "int32" } },
+          "Content-Type": { "schema": { "type": "string" } },
+          "x-mode": { "description": "Serving mode", "schema": { "type": "string", "enum": ["fast", "slow"] } },
+          "x-trace": { "content": { "text/plain": { "schema": { "type": "string" } } } }
+        },
+        "content": { "application/json": { "schema": { "type": "string" } } }
+      },
+      "404": { "description": "Missing" }
+    }
+  });
+
+  let operation = serde_json::from_value::<Operation>(operation_json)?;
+  let entry = make_entry("list_items", Method::GET, "/items", operation);
+  let result = converter.convert(&entry)?;
+
+  let variants = result
+    .operation_info
+    .response_variants
+    .as_deref()
+    .expect("response variants not found");
+  let headers_for = |status| {
+    variants
+      .iter()
+      .find(|v| v.status_code == status)
+      .map(|v| {
+        v.headers
+          .iter()
+          .map(|f| {
+            (
+              f.original_name.clone().unwrap_or_default(),
+              f.name.to_string(),
+              f.rust_type.to_rust_type(),
+            )
+          })
+          .collect::<Vec<_>>()
+      })
+      .expect("variant not found")
+  };
+
+  let expected = [
+    ("X-Rate-Limit", "x_rate_limit", "i32"),
+    ("x-mode", "x_mode", "Option<ListItemsResponseHeaderXMode>"),
+    ("x-trace", "x_trace", "Option<String>"),
+  ]
+  .map(|(original, name, ty)| (original.to_string(), name.to_string(), ty.to_string()));
+  assert_eq!(
+    headers_for(StatusCodeToken::Ok200),
+    expected,
+    "each header becomes a field and Content-Type is skipped"
+  );
+  assert!(
+    headers_for(StatusCodeToken::NotFound404).is_empty(),
+    "a response without headers yields no fields"
+  );
+  assert!(
+    result
+      .operation_info
+      .header_names()
+      .any(|header| header.header_name.to_string() == "x-rate-limit"),
+    "response headers get header name constants"
+  );
+  Ok(())
+}

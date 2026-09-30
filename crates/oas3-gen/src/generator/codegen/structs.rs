@@ -56,6 +56,7 @@ impl ToTokens for StructFragment<'_> {
     let definition = StructDefinitionFragment::new(self.def, self.regex_lookup, self.visibility);
     let impl_block = StructImplBlockFragment::new(self.def, self.visibility);
     let header_map = HeaderMapFragment::new(self.def);
+    let header_from_map = HeaderFromMapFragment::new(self.def, self.target);
 
     tokens.extend(quote! {
       #definition
@@ -64,15 +65,9 @@ impl ToTokens for StructFragment<'_> {
 
       #header_map
 
+      #header_from_map
+
     });
-
-    if self.target == GenerationTarget::Server {
-      let header_from_map = HeaderFromMapFragment::new(self.def);
-      tokens.extend(quote! {
-        #header_from_map
-
-      });
-    }
   }
 }
 
@@ -178,14 +173,15 @@ impl ToTokens for StructFieldFragment<'_> {
     let vis = &self.visibility;
     let type_tokens = &self.field.rust_type;
 
-    let (serde_as, serde_attrs) = if matches!(self.struct_def.kind, StructKind::HeaderParams | StructKind::PathParams) {
-      (quote! {}, quote! {})
-    } else {
-      (
-        generate_serde_as_attr(self.field.serde_as_attr.as_ref()),
-        generate_serde_attrs(&self.field.serde_attrs),
-      )
-    };
+    let (serde_as, serde_attrs) =
+      if self.struct_def.kind.is_header_struct() || self.struct_def.kind == StructKind::PathParams {
+        (quote! {}, quote! {})
+      } else {
+        (
+          generate_serde_as_attr(self.field.serde_as_attr.as_ref()),
+          generate_serde_attrs(&self.field.serde_attrs),
+        )
+      };
 
     let validation = self.validation_attrs();
     let deprecated = generate_deprecated_attr(self.field.deprecated);
@@ -550,7 +546,19 @@ impl ToTokens for ResponseCaseFragment<'_> {
     let carries_status = variant.status_code.carries_status();
     let status_arg = carries_status.then(|| quote! { status, });
     let param = self.response.param(mapping.payload);
-    let optional = param.is_some_and(|p| p.nullable);
+    let optional = param.is_some_and(|p| p.body.nullable);
+    let headers = param.and_then(|p| p.headers.as_ref());
+    let read_headers = headers.map(|headers| {
+      let name = &headers.name;
+      quote! { let headers = #name::try_from(req.headers())?; }
+    });
+    let with_headers = |body: TokenStream| match headers {
+      Some(headers) => {
+        let wrapper = &headers.wrapper;
+        quote! { #wrapper { headers, body: #body } }
+      }
+      None => body,
+    };
 
     let ts = match (variant.schema_type.as_ref(), param) {
       (_, None) => {
@@ -561,12 +569,13 @@ impl ToTokens for ResponseCaseFragment<'_> {
         }
       }
       (None, Some(_)) => {
-        let empty = if optional {
+        let empty = with_headers(if optional {
           quote! { None }
         } else {
           quote! { () }
-        };
+        });
         quote! {
+          #read_headers
           let _ = req.bytes().await?;
           return Ok(#response_enum::#variant_name(#status_arg #empty));
         }
@@ -575,13 +584,15 @@ impl ToTokens for ResponseCaseFragment<'_> {
         let data = ResponseExtractionFragment::new(schema_type, self.case.category);
         let mut value = quote! { data };
         if let Some(union_variant) = &mapping.union_variant {
-          let union = &param.base_type;
+          let union = &param.body.base_type;
           value = quote! { #union::#union_variant(#value) };
         }
         if optional {
           value = quote! { Some(#value) };
         }
+        let value = with_headers(value);
         quote! {
+          #read_headers
           let data = #data;
           return Ok(#response_enum::#variant_name(#status_arg #value));
         }

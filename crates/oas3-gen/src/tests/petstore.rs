@@ -193,3 +193,59 @@ fn test_component_header_constant_exists() {
     "component-level header constant should exist"
   );
 }
+
+fn mock_response(status: u16, headers: &[(&str, &str)], body: &str) -> reqwest::Response {
+  let mut builder = http::Response::builder()
+    .status(status)
+    .header("content-type", "application/json");
+  for (name, value) in headers {
+    builder = builder.header(*name, *value);
+  }
+  reqwest::Response::from(builder.body(body.to_string()).unwrap())
+}
+
+#[tokio::test]
+async fn test_parse_response_reads_declared_headers() {
+  let listed = ListPetsRequest::parse_response(mock_response(
+    200,
+    &[("x-next", "/v1/pets?page=2")],
+    r#"[{"id": 1, "name": "Fluffy"}]"#,
+  ))
+  .await
+  .unwrap();
+  let ApiResponse::Ok(listed) = listed else {
+    panic!("expected Ok, got {listed:?}");
+  };
+  assert_eq!(listed.body.len(), 1, "body should still be parsed");
+  assert_eq!(
+    listed.headers.x_next.as_deref(),
+    Some("/v1/pets?page=2"),
+    "optional string header should be read"
+  );
+
+  let created = CreatePetsRequest::parse_response(mock_response(201, &[("location", "/v1/pets/7")], ""))
+    .await
+    .unwrap();
+  let ApiResponse::Created(created) = created else {
+    panic!("expected Created, got {created:?}");
+  };
+  assert_eq!(
+    created.headers.location, "/v1/pets/7",
+    "bodiless status should carry its required header"
+  );
+
+  let cases = [
+    (vec![("x-cache", "miss")], Some(ShowPetByIdResponseHeaderXCache::Miss)),
+    (vec![], None),
+  ];
+  for (headers, expected) in cases {
+    let shown = ShowPetByIdRequest::parse_response(mock_response(200, &headers, r#"{"id": 42, "name": "Rex"}"#))
+      .await
+      .unwrap();
+    let ApiResponse::Ok(shown) = shown else {
+      panic!("expected Ok, got {shown:?}");
+    };
+    assert_eq!(shown.body.id, 42, "body should still be parsed");
+    assert_eq!(shown.headers.x_cache, expected, "enum header mismatch for {headers:?}");
+  }
+}

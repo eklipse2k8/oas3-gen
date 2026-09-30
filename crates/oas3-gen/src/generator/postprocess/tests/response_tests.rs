@@ -2,9 +2,9 @@ use http::Method;
 
 use crate::generator::{
   ast::{
-    EnumVariantToken, MethodKind, OperationInfo, OperationKind, ParsedPath, ResponseEnumDef, ResponseMediaType,
-    ResponsePayload, ResponseUnionDef, ResponseVariant, RustType, SerdeMode, StatusCodeToken, StructDef, StructKind,
-    StructToken, TypeRef,
+    EnumDef, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, OperationInfo, OperationKind,
+    ParsedPath, ResponseEnumDef, ResponseMediaType, ResponseParam, ResponsePayload, ResponseUnionDef, ResponseVariant,
+    RustType, SerdeMode, StatusCodeToken, StructDef, StructKind, StructToken, TypeRef,
   },
   converter::GenerationTarget,
   postprocess::response::ResponseProcessor,
@@ -17,6 +17,19 @@ fn variant(status: StatusCodeToken, body: Option<&str>) -> ResponseVariant {
     .media_types(vec![ResponseMediaType::with_schema("application/json", schema.clone())])
     .maybe_schema_type(schema)
     .build()
+}
+
+fn header(name: &str, rust_type: &str, required: bool) -> FieldDef {
+  let rust_type = TypeRef::new(rust_type);
+  FieldDef::builder()
+    .name(FieldNameToken::from_raw(name))
+    .rust_type(if required { rust_type } else { rust_type.with_option() })
+    .original_name(name)
+    .build()
+}
+
+fn with_headers(variant: ResponseVariant, headers: Vec<FieldDef>) -> ResponseVariant {
+  ResponseVariant { headers, ..variant }
 }
 
 fn operation(id: &str, variants: Option<Vec<ResponseVariant>>) -> OperationInfo {
@@ -70,8 +83,24 @@ fn unions(types: &[RustType]) -> Vec<&ResponseUnionDef> {
     .collect()
 }
 
-fn param(response: Option<&TypeRef>) -> Option<String> {
-  response.map(TypeRef::to_rust_type)
+fn param(response: Option<&ResponseParam>) -> Option<String> {
+  response.map(|param| param.body.to_rust_type())
+}
+
+fn headers_of(response: Option<&ResponseParam>) -> Option<String> {
+  response
+    .and_then(|param| param.headers.as_ref())
+    .map(|headers| headers.name.to_string())
+}
+
+fn header_structs(types: &[RustType]) -> Vec<&StructDef> {
+  types
+    .iter()
+    .filter_map(|t| match t {
+      RustType::Struct(def) if def.kind == StructKind::ResponseHeaders => Some(def),
+      _ => None,
+    })
+    .collect()
 }
 
 #[test]
@@ -343,4 +372,221 @@ fn test_no_declared_responses_means_no_response_enum() {
     "no response enum without responses"
   );
   assert!(operations[0].response.is_none());
+}
+
+#[test]
+fn test_headers_merge_across_a_status_class() {
+  let types = vec![request_struct("list_pets")];
+  let operations = vec![operation(
+    "list_pets",
+    Some(vec![
+      with_headers(
+        variant(StatusCodeToken::Ok200, Some("Pets")),
+        vec![header("Link", "String", true), header("X-Total", "i64", true)],
+      ),
+      with_headers(
+        variant(StatusCodeToken::Created201, None),
+        vec![header("Link", "String", true)],
+      ),
+      variant(StatusCodeToken::NotFound404, Some("Error")),
+    ]),
+  )];
+
+  let (types, operations) = assemble(types, operations, GenerationTarget::Client);
+  let response = operations[0].response.as_ref().expect("response not resolved");
+
+  assert_eq!(param(response.value.as_ref()).as_deref(), Some("Option<Pets>"));
+  assert_eq!(
+    headers_of(response.value.as_ref()).as_deref(),
+    Some("LinkAndXTotalHeaders"),
+    "success statuses share one headers struct"
+  );
+  assert_eq!(
+    headers_of(response.failure.as_ref()),
+    None,
+    "failure statuses declare no headers"
+  );
+
+  let structs = header_structs(&types);
+  let [headers] = structs.as_slice() else {
+    panic!("expected one headers struct, got {structs:?}");
+  };
+  let fields = headers
+    .fields
+    .iter()
+    .map(|f| (f.name.to_string(), f.rust_type.to_rust_type()))
+    .collect::<Vec<_>>();
+  let expected = [("link", "String"), ("x_total", "Option<i64>")].map(|(name, ty)| (name.to_string(), ty.to_string()));
+  assert_eq!(
+    fields, expected,
+    "a header is required only when every status in the class requires it"
+  );
+
+  let created = response_enum(&types)
+    .variants
+    .iter()
+    .find(|v| v.status_code == StatusCodeToken::Created201)
+    .expect("Created variant not generated");
+  assert_eq!(
+    created.payload,
+    ResponsePayload::Value,
+    "a bodiless status whose class declares headers carries a payload"
+  );
+}
+
+#[test]
+fn test_header_structs_are_shared_by_header_set() {
+  let link = |rust_type| vec![header("Link", rust_type, false)];
+  let types = ["list_pets", "list_cats", "count_pets", "get_pet"]
+    .into_iter()
+    .map(request_struct)
+    .collect::<Vec<_>>();
+  let operations = vec![
+    operation(
+      "list_pets",
+      Some(vec![with_headers(
+        variant(StatusCodeToken::Ok200, Some("Pets")),
+        link("String"),
+      )]),
+    ),
+    operation(
+      "list_cats",
+      Some(vec![with_headers(
+        variant(StatusCodeToken::Ok200, Some("Cats")),
+        link("String"),
+      )]),
+    ),
+    operation(
+      "count_pets",
+      Some(vec![with_headers(
+        variant(StatusCodeToken::Ok200, Some("i64")),
+        link("i64"),
+      )]),
+    ),
+    operation(
+      "get_pet",
+      Some(vec![
+        variant(StatusCodeToken::Ok200, Some("Pet")),
+        with_headers(variant(StatusCodeToken::NotFound404, Some("Error")), link("String")),
+      ]),
+    ),
+  ];
+
+  let (types, operations) = assemble(types, operations, GenerationTarget::Client);
+
+  let expected = [
+    ("list_pets", Some("LinkHeaders"), None),
+    ("list_cats", Some("LinkHeaders"), None),
+    ("count_pets", Some("LinkHeaders2"), None),
+    ("get_pet", None, Some("LinkHeaders")),
+  ];
+  for (op, (id, value, failure)) in operations.iter().zip(expected) {
+    let response = op.response.as_ref().expect("response not resolved");
+    assert_eq!(
+      (
+        headers_of(response.value.as_ref()).as_deref(),
+        headers_of(response.failure.as_ref()).as_deref()
+      ),
+      (value, failure),
+      "headers mismatch for {id}"
+    );
+  }
+  assert_eq!(header_structs(&types).len(), 2, "one struct per distinct header set");
+}
+
+#[test]
+fn test_enums_parsed_from_response_headers_are_flagged() {
+  let enum_type = |name: &str| {
+    RustType::Enum(EnumDef {
+      name: EnumToken::new(name),
+      ..Default::default()
+    })
+  };
+  let types = vec![
+    request_struct("get_pet"),
+    enum_type("CacheStatus"),
+    enum_type("PetKind"),
+  ];
+  let operations = vec![operation(
+    "get_pet",
+    Some(vec![with_headers(
+      variant(StatusCodeToken::Ok200, Some("Pet")),
+      vec![header("x-cache", "CacheStatus", false)],
+    )]),
+  )];
+
+  let (types, _) = assemble(types, operations, GenerationTarget::Client);
+
+  let flagged = types
+    .iter()
+    .filter_map(|t| match t {
+      RustType::Enum(def) => Some((def.name.to_string(), def.in_response_header)),
+      _ => None,
+    })
+    .collect::<Vec<_>>();
+  assert_eq!(
+    flagged,
+    [("CacheStatus".to_string(), true), ("PetKind".to_string(), false)],
+    "only enums read from response headers are flagged"
+  );
+}
+
+#[test]
+fn test_with_headers_wrapper_only_when_headers_are_declared() {
+  let schema_named_wrapper = RustType::Struct(StructDef {
+    name: StructToken::new("WithHeaders"),
+    ..Default::default()
+  });
+  let headed = || {
+    vec![with_headers(
+      variant(StatusCodeToken::Ok200, Some("Pet")),
+      vec![header("x-next", "String", false)],
+    )]
+  };
+  let cases = [
+    (
+      "no headers",
+      vec![],
+      vec![variant(StatusCodeToken::Ok200, Some("Pet"))],
+      None,
+    ),
+    ("headers", vec![], headed(), Some("WithHeaders")),
+    (
+      "schema already named WithHeaders",
+      vec![schema_named_wrapper],
+      headed(),
+      Some("WithHeaders2"),
+    ),
+  ];
+
+  for (label, schemas, variants, expected) in cases {
+    let types = std::iter::once(request_struct("get_pet"))
+      .chain(schemas)
+      .collect::<Vec<_>>();
+    let (types, operations) = assemble(
+      types,
+      vec![operation("get_pet", Some(variants))],
+      GenerationTarget::Client,
+    );
+    let response = operations[0].response.as_ref().expect("response not resolved");
+    assert_eq!(
+      response_enum(&types)
+        .with_headers
+        .as_ref()
+        .map(ToString::to_string)
+        .as_deref(),
+      expected,
+      "{label}: wrapper emitted with the response enum"
+    );
+    assert_eq!(
+      response
+        .value
+        .as_ref()
+        .and_then(|param| param.headers.as_ref())
+        .map(|headers| headers.wrapper.to_string())
+        .as_deref(),
+      expected,
+      "{label}: wrapper used by the operation"
+    );
+  }
 }

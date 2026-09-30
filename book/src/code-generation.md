@@ -78,7 +78,10 @@ pub struct PetStoreClient {
 impl PetStoreClient {
     pub fn new() -> Self { /* ... */ }
 
-    pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ApiResponse<Pets, Error>> {
+    pub async fn list_pets(
+        &self,
+        request: ListPetsRequest,
+    ) -> anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> {
         /* ... */
     }
 }
@@ -127,7 +130,9 @@ pub trait ApiServer: Send + Sync {
     fn list_pets(
         &self,
         request: ListPetsRequest,
-    ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Pets, Error>>> + Send;
+    ) -> impl std::future::Future<
+        Output = anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>>,
+    > + Send;
 }
 
 pub fn router<S>(service: S) -> Router
@@ -152,7 +157,7 @@ in the spec, plus `Other` for status codes an operation does not declare.
 |---|---|
 | `Ok(Value)`, `Created(Value)`, ... | A 2xx status that carries a body in at least one operation |
 | `NotFound(Failure)`, `Conflict(Failure)`, ... | Any other declared status that carries a body |
-| `NoContent`, `NotModified`, ... | A status that has no body in any operation |
+| `NoContent`, `NotModified`, ... | A status that has no body, and no [headers](#response-headers) in its class, in any operation |
 | `ClientError(http::StatusCode, Failure)` | A range such as `4XX`; the concrete status travels with the body |
 | `Unknown(http::StatusCode, Failure)` | The spec's `default` response, when it declares a body |
 | `Other(http::StatusCode, Vec<u8>)` | A status the operation does not declare and no bodied `default` covers |
@@ -172,6 +177,40 @@ set of bodies share one definition. A type parameter is left off the enum entire
 when no status in the spec uses it. If a schema is already named `ApiResponse`,
 the response enum is named `ApiResponseType` instead.
 
+### Response Headers
+
+When any status in a class declares headers, that class's parameter becomes
+`WithHeaders<Headers, Body>`. `Headers` is a generated struct with one field per header
+declared across the class's statuses; `Body` is the parameter from the table above.
+A class without headers keeps its plain parameter.
+
+`WithHeaders` is generated into `types.rs` next to the response enum, and only when at
+least one response declares headers. If a schema already uses the name, the wrapper
+gets a numeric suffix.
+
+```rust
+/// A response body together with the headers its response declares.
+#[derive(Debug, Clone)]
+pub struct WithHeaders<Headers, Body> {
+    pub headers: Headers,
+    pub body: Body,
+}
+```
+
+
+- A header field is `Option<_>` unless every status in the class marks it `required`.
+- Header structs are keyed by their fields, so operations declaring the same headers
+  share one struct. It is named after the headers, such as `XNextHeaders` or
+  `LinkAndLocationHeaders`; a name already in use gets a numeric suffix.
+- A bodiless status whose class declares headers carries a payload: `Created(Value)`
+  instead of `Created`, with a `Body` of `()` or `Option<_>`.
+- `Content-Type` is ignored, as the OpenAPI specification requires. A header without
+  a `schema` is read as a `String`.
+- Enums that a header parses into implement `FromStr` on both targets.
+
+Header name constants are emitted for response headers the same way as for request
+headers.
+
 **Example** (petstore):
 
 ```rust
@@ -186,8 +225,18 @@ pub enum ApiResponse<Value, Failure> {
     Unknown(http::StatusCode, Failure),
 }
 
+/// Response headers that share one status class in an operation.
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct XNextHeaders {
+    /// A link to the next page of responses
+    pub x_next: Option<String>,
+}
+
 impl PetStoreClient {
-    pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<ApiResponse<Pets, Error>> {
+    pub async fn list_pets(
+        &self,
+        request: ListPetsRequest,
+    ) -> anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> {
         /* ... */
     }
 
@@ -197,7 +246,9 @@ impl PetStoreClient {
 }
 
 match client.list_pets(request).await? {
-    ApiResponse::Ok(pets) => println!("{} pets", pets.len()),
+    ApiResponse::Ok(WithHeaders { headers, body: pets }) => {
+        println!("{} pets, next page at {:?}", pets.len(), headers.x_next);
+    }
     ApiResponse::Unknown(status, error) => eprintln!("{status}: {}", error.message),
     other => anyhow::bail!("list_pets never answers {other:?}"),
 }
@@ -208,9 +259,10 @@ enum is shared; a wildcard arm handles them.
 
 Each request struct keeps a `parse_response` associated function that maps a
 `reqwest::Response` onto the response enum, so the generated client method and any
-hand-written transport share one decoder. Server handlers match the response enum back
-to a status code and a JSON body; a `()` or `None` payload answers with the status
-alone.
+hand-written transport share one decoder; it reads declared headers before the body.
+Server handlers match the response enum back to a status code and a JSON body; a `()`
+or `None` payload answers with the status alone. Declared headers are written onto the
+response, and a value that is not a valid header value answers `500`.
 
 ---
 
@@ -1127,7 +1179,7 @@ cargo run -- generate client -i spec.json -o client.rs --only listPets
 ```
 
 By default, you only get header constants for headers that appear as parameters
-in your selected operations. Set `--all-headers` to also emit constants for
+or [response headers](#response-headers) in your selected operations. Set `--all-headers` to also emit constants for
 every header parameter defined in `components/parameters`, even ones that no
 operation references.
 

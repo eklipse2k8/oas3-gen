@@ -211,14 +211,19 @@ impl ApiServer for StubService {
   fn list_pets(
     &self,
     _request: ListPetsRequest,
-  ) -> impl Future<Output = anyhow::Result<ApiResponse<Pets, Error>>> + Send {
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>>> + Send {
     ready(match self.outcome {
-      Outcome::Declared => Ok(ApiResponse::Ok(vec![Pet {
-        id: 1,
-        name: "Fluffy".to_string(),
-        tag: None,
-        ..Default::default()
-      }])),
+      Outcome::Declared => Ok(ApiResponse::Ok(WithHeaders {
+        headers: XNextHeaders {
+          x_next: Some("/v1/pets?page=2".to_string()),
+        },
+        body: vec![Pet {
+          id: 1,
+          name: "Fluffy".to_string(),
+          tag: None,
+          ..Default::default()
+        }],
+      })),
       Outcome::Default => Ok(ApiResponse::Unknown(
         http::StatusCode::BAD_GATEWAY,
         Self::upstream_error(),
@@ -230,26 +235,39 @@ impl ApiServer for StubService {
   fn create_pets(
     &self,
     _request: CreatePetsRequest,
-  ) -> impl Future<Output = anyhow::Result<ApiResponse<(), Error>>> + Send {
-    ready(Ok(ApiResponse::Created))
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, ()>, Error>>> + Send {
+    ready(Ok(ApiResponse::Created(WithHeaders {
+      headers: LocationHeaders {
+        location: "/v1/pets/7".to_string(),
+      },
+      body: (),
+    })))
   }
 
   fn list_cats(
     &self,
     _request: ListCatsRequest,
-  ) -> impl Future<Output = anyhow::Result<ApiResponse<Cats, Error>>> + Send {
-    ready(Ok(ApiResponse::Ok(vec![])))
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Cats>, Error>>> + Send {
+    ready(Ok(ApiResponse::Ok(WithHeaders {
+      headers: XNextHeaders::default(),
+      body: vec![],
+    })))
   }
 
   fn show_pet_by_id(
     &self,
     _request: ShowPetByIdRequest,
-  ) -> impl Future<Output = anyhow::Result<ApiResponse<Pet, Error>>> + Send {
-    ready(Ok(ApiResponse::Ok(Pet {
-      id: 42,
-      name: "Rex".to_string(),
-      tag: Some("dog".to_string()),
-      ..Default::default()
+  ) -> impl Future<Output = anyhow::Result<ApiResponse<WithHeaders<XCacheHeaders, Pet>, Error>>> + Send {
+    ready(Ok(ApiResponse::Ok(WithHeaders {
+      headers: XCacheHeaders {
+        x_cache: Some(ShowPetByIdResponseHeaderXCache::Hit),
+      },
+      body: Pet {
+        id: 42,
+        name: "Rex".to_string(),
+        tag: Some("dog".to_string()),
+        ..Default::default()
+      },
     })))
   }
 
@@ -288,6 +306,29 @@ async fn test_list_pets_handler_maps_response_enum_to_status() {
 }
 
 #[tokio::test]
+async fn test_list_pets_handler_writes_response_headers() {
+  let cases = [(Outcome::Declared, Some("/v1/pets?page=2")), (Outcome::Default, None)];
+
+  for (outcome, expected) in cases {
+    let response = list_pets(
+      State(StubService { outcome }),
+      Path(ListPetsRequestPath {
+        api_version: "v1".to_string(),
+      }),
+      Query(ListPetsRequestQuery { limit: None }),
+      HeaderMap::new(),
+    )
+    .await
+    .into_response();
+    assert_eq!(
+      response.headers().get("x-next").map(|v| v.to_str().unwrap()),
+      expected,
+      "x-next header mismatch for {outcome:?}"
+    );
+  }
+}
+
+#[tokio::test]
 async fn test_handlers_map_unit_and_body_variants_to_status() {
   let service = StubService {
     outcome: Outcome::Declared,
@@ -304,7 +345,12 @@ async fn test_handlers_map_unit_and_body_variants_to_status() {
   assert_eq!(
     created.status(),
     http::StatusCode::CREATED,
-    "unit variant should answer with its status alone"
+    "bodiless variant should answer with its status"
+  );
+  assert_eq!(
+    created.headers().get("location").map(|v| v.to_str().unwrap()),
+    Some("/v1/pets/7"),
+    "bodiless variant should carry its declared headers"
   );
 
   let shown = show_pet_by_id(
@@ -320,5 +366,10 @@ async fn test_handlers_map_unit_and_body_variants_to_status() {
     shown.status(),
     http::StatusCode::OK,
     "body variant should answer with its status and a JSON body"
+  );
+  assert_eq!(
+    shown.headers().get("x-cache").map(|v| v.to_str().unwrap()),
+    Some("hit"),
+    "enum header should be written with its wire value"
   );
 }

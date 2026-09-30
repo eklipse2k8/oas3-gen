@@ -6,8 +6,8 @@ use quote::{ToTokens, quote};
 use super::Visibility;
 use crate::generator::{
   ast::{
-    ContentCategory, HandlerBodyInfo, OperationResponse, ResponseEnumDef, ResponsePayload, RustPrimitive,
-    ServerRequestTraitDef, ServerTraitMethod, TraitToken, TypeRef,
+    ContentCategory, HandlerBodyInfo, OperationResponse, ResponseEnumDef, ResponseParam, ResponsePayload,
+    RustPrimitive, ServerRequestTraitDef, ServerTraitMethod, TraitToken,
   },
   codegen::http::HttpStatusCode,
 };
@@ -170,13 +170,11 @@ impl ToTokens for HandlerFunctionFragment<'_> {
       quote! { service.#fn_name().await }
     };
 
+    let internal_error = internal_error();
     let error_handling = quote! {
       match result {
         #response_arms
-        Err(e) => (
-          axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-          format!("Internal error: {e}")
-        ).into_response(),
+        Err(e) => #internal_error,
       }
     };
 
@@ -192,6 +190,16 @@ impl ToTokens for HandlerFunctionFragment<'_> {
         #error_handling
       }
     });
+  }
+}
+
+/// Answers `500` with the error bound as `e` in the enclosing match arm.
+fn internal_error() -> TokenStream {
+  quote! {
+    (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}")
+    ).into_response()
   }
 }
 
@@ -213,30 +221,46 @@ impl<'a> ResponseArmsFragment<'a> {
     variant_path: &TokenStream,
     status_pattern: Option<&TokenStream>,
     status_expr: &TokenStream,
-    param: Option<&TypeRef>,
+    param: Option<&ResponseParam>,
   ) -> TokenStream {
-    let with_status = |body: TokenStream| {
-      let fields = status_pattern.into_iter().cloned().chain(std::iter::once(body));
-      quote! { #variant_path(#(#fields),*) }
+    let wrapper = param.and_then(|p| p.headers.as_ref()).map(|headers| &headers.wrapper);
+    let arm = |pattern: TokenStream, headed_pattern: TokenStream, body: Option<TokenStream>| {
+      let (payload, response) = match (wrapper, body) {
+        (Some(wrapper), body) => {
+          let body = body.map(|body| quote! { , #body });
+          let internal_error = internal_error();
+          (
+            quote! { #wrapper { headers, #headed_pattern } },
+            quote! {
+              match http::HeaderMap::try_from(headers) {
+                Ok(headers) => (#status_expr, headers #body).into_response(),
+                Err(e) => #internal_error,
+              }
+            },
+          )
+        }
+        (None, Some(body)) => (pattern, quote! { (#status_expr, #body).into_response() }),
+        (None, None) => (pattern, quote! { #status_expr.into_response() }),
+      };
+      let fields = status_pattern.into_iter().cloned().chain(std::iter::once(payload));
+
+      quote! { Ok(#variant_path(#(#fields),*)) => #response, }
     };
 
     match param {
-      Some(param) if param.nullable => {
-        let some = with_status(quote! { Some(body) });
-        let none = with_status(quote! { None });
-        quote! {
-          Ok(#some) => (#status_expr, axum::Json(body)).into_response(),
-          Ok(#none) => #status_expr.into_response(),
-        }
+      Some(param) if param.body.nullable => {
+        let some = arm(
+          quote! { Some(body) },
+          quote! { body: Some(body) },
+          Some(quote! { axum::Json(body) }),
+        );
+        let none = arm(quote! { None }, quote! { body: None }, None);
+        quote! { #some #none }
       }
-      Some(param) if !matches!(param.base_type, RustPrimitive::Unit) => {
-        let pattern = with_status(quote! { body });
-        quote! { Ok(#pattern) => (#status_expr, axum::Json(body)).into_response(), }
+      Some(param) if !matches!(param.body.base_type, RustPrimitive::Unit) => {
+        arm(quote! { body }, quote! { body }, Some(quote! { axum::Json(body) }))
       }
-      _ => {
-        let pattern = with_status(quote! { _ });
-        quote! { Ok(#pattern) => #status_expr.into_response(), }
-      }
+      _ => arm(quote! { _ }, quote! { .. }, None),
     }
   }
 }

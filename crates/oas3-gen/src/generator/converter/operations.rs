@@ -153,7 +153,9 @@ impl OperationConverter {
 
     self.context.mark_request_iter(&body_info.type_usage);
 
-    let response_variants = self.response_converter.build_variants(&entry.operation, &entry.path);
+    let response_variants = self
+      .response_converter
+      .build_variants(&entry.operation, &entry.path, &base_name)?;
     let request_output = self.request(&base_name, entry, &body_info)?;
 
     let warnings = request_output.warnings.clone();

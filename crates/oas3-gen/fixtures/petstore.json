@@ -116,7 +116,16 @@
 				"tags": ["pets"],
 				"responses": {
 					"201": {
-						"description": "Null response"
+						"description": "Null response",
+						"headers": {
+							"Location": {
+								"description": "URL of the created pet",
+								"required": true,
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
 					},
 					"default": {
 						"description": "unexpected error",
@@ -220,6 +229,15 @@
 				"responses": {
 					"200": {
 						"description": "Expected response to a valid request",
+						"headers": {
+							"x-cache": {
+								"description": "Whether the pet was served from cache",
+								"schema": {
+									"type": "string",
+									"enum": ["hit", "miss"]
+								}
+							}
+						},
 						"content": {
 							"application/json": {
 								"schema": {

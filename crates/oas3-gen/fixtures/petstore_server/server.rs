@@ -23,28 +23,28 @@ pub trait ApiServer: Send + Sync {
   fn list_pets(
     &self,
     request: ListPetsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Pets, Error>>> + Send;
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>>> + Send;
   /// Create a pet
   ///
   /// * Path: `POST /{api_version}/pets`
   fn create_pets(
     &self,
     request: CreatePetsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<(), Error>>> + Send;
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, ()>, Error>>> + Send;
   /// List all cats
   ///
   /// * Path: `GET /cats`
   fn list_cats(
     &self,
     request: ListCatsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Cats, Error>>> + Send;
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Cats>, Error>>> + Send;
   /// Info for a specific pet
   ///
   /// * Path: `GET /pets/{petId}`
   fn show_pet_by_id(
     &self,
     request: ShowPetByIdRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Pet, Error>>> + Send;
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<WithHeaders<XCacheHeaders, Pet>, Error>>> + Send;
   /// Upload pet image and update name
   ///
   /// * Path: `POST /pets/{petId}/upload`
@@ -67,10 +67,24 @@ where
     query,
     header: (&headers).try_into().unwrap_or_default(),
   };
-  let result: anyhow::Result<ApiResponse<Pets, Error>> = service.list_pets(request).await;
+  let result: anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> = service.list_pets(request).await;
   match result {
-    Ok(ApiResponse::Ok(body)) => (http::StatusCode::OK, axum::Json(body)).into_response(),
-    Ok(ApiResponse::Created) => http::StatusCode::CREATED.into_response(),
+    Ok(ApiResponse::Ok(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::OK, headers, axum::Json(body)).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
+    Ok(ApiResponse::Created(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::CREATED, headers, axum::Json(body)).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
     Ok(ApiResponse::Unknown(status, body)) => (status, axum::Json(body)).into_response(),
     Err(e) => (
       axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -84,10 +98,24 @@ where
   S: ApiServer + Clone + Send + Sync + 'static,
 {
   let request = CreatePetsRequest { path };
-  let result: anyhow::Result<ApiResponse<(), Error>> = service.create_pets(request).await;
+  let result: anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, ()>, Error>> = service.create_pets(request).await;
   match result {
-    Ok(ApiResponse::Ok(())) => http::StatusCode::OK.into_response(),
-    Ok(ApiResponse::Created) => http::StatusCode::CREATED.into_response(),
+    Ok(ApiResponse::Ok(WithHeaders { headers, .. })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::OK, headers).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
+    Ok(ApiResponse::Created(WithHeaders { headers, .. })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::CREATED, headers).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
     Ok(ApiResponse::Unknown(status, body)) => (status, axum::Json(body)).into_response(),
     Err(e) => (
       axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -108,10 +136,24 @@ where
     query,
     header: (&headers).try_into().unwrap_or_default(),
   };
-  let result: anyhow::Result<ApiResponse<Cats, Error>> = service.list_cats(request).await;
+  let result: anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Cats>, Error>> = service.list_cats(request).await;
   match result {
-    Ok(ApiResponse::Ok(body)) => (http::StatusCode::OK, axum::Json(body)).into_response(),
-    Ok(ApiResponse::Created) => http::StatusCode::CREATED.into_response(),
+    Ok(ApiResponse::Ok(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::OK, headers, axum::Json(body)).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
+    Ok(ApiResponse::Created(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::CREATED, headers, axum::Json(body)).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
     Ok(ApiResponse::Unknown(status, body)) => (status, axum::Json(body)).into_response(),
     Err(e) => (
       axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -132,10 +174,25 @@ where
     path,
     header: (&headers).try_into().unwrap_or_default(),
   };
-  let result: anyhow::Result<ApiResponse<Pet, Error>> = service.show_pet_by_id(request).await;
+  let result: anyhow::Result<ApiResponse<WithHeaders<XCacheHeaders, Pet>, Error>> =
+    service.show_pet_by_id(request).await;
   match result {
-    Ok(ApiResponse::Ok(body)) => (http::StatusCode::OK, axum::Json(body)).into_response(),
-    Ok(ApiResponse::Created) => http::StatusCode::CREATED.into_response(),
+    Ok(ApiResponse::Ok(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::OK, headers, axum::Json(body)).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
+    Ok(ApiResponse::Created(WithHeaders { headers, body })) => match http::HeaderMap::try_from(headers) {
+      Ok(headers) => (http::StatusCode::CREATED, headers, axum::Json(body)).into_response(),
+      Err(e) => (
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Internal error: {e}"),
+      )
+        .into_response(),
+    },
     Ok(ApiResponse::Unknown(status, body)) => (status, axum::Json(body)).into_response(),
     Err(e) => (
       axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -156,7 +213,7 @@ where
   let result: anyhow::Result<ApiResponse<Pet, Error>> = service.upload_pet_image(request).await;
   match result {
     Ok(ApiResponse::Ok(body)) => (http::StatusCode::OK, axum::Json(body)).into_response(),
-    Ok(ApiResponse::Created) => http::StatusCode::CREATED.into_response(),
+    Ok(ApiResponse::Created(body)) => (http::StatusCode::CREATED, axum::Json(body)).into_response(),
     Ok(ApiResponse::Unknown(status, body)) => (status, axum::Json(body)).into_response(),
     Err(e) => (
       axum::http::StatusCode::INTERNAL_SERVER_ERROR,

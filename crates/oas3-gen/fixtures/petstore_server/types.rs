@@ -12,7 +12,10 @@ use validator::Validate;
 pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");
 pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
 pub const X_COMPATIBILITY_DATE: http::HeaderName = http::HeaderName::from_static("x-compatibility-date");
+pub const X_NEXT: http::HeaderName = http::HeaderName::from_static("x-next");
+pub const LOCATION: http::HeaderName = http::HeaderName::from_static("location");
 pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
+pub const X_CACHE: http::HeaderName = http::HeaderName::from_static("x-cache");
 pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
@@ -475,6 +478,32 @@ impl core::str::FromStr for ListPetsRequestHeaderXonly {
     }
   }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ShowPetByIdResponseHeaderXCache {
+  #[serde(rename = "hit")]
+  #[default]
+  Hit,
+  #[serde(rename = "miss")]
+  Miss,
+}
+impl core::fmt::Display for ShowPetByIdResponseHeaderXCache {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Hit => write!(f, "hit"),
+      Self::Miss => write!(f, "miss"),
+    }
+  }
+}
+impl core::str::FromStr for ShowPetByIdResponseHeaderXCache {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "hit" => Ok(Self::Hit),
+      "miss" => Ok(Self::Miss),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "hit, miss")),
+    }
+  }
+}
 /// Response enum shared by every operation.
 ///
 /// `Value` is the operation's success body type and `Failure` its error body type.
@@ -484,7 +513,132 @@ pub enum ApiResponse<Value, Failure> {
   ///200
   Ok(Value),
   ///201
-  Created,
+  Created(Value),
   ///default
   Unknown(http::StatusCode, Failure),
+}
+/// A response body together with the headers its response declares.
+#[derive(Debug, Clone)]
+pub struct WithHeaders<Headers, Body> {
+  pub headers: Headers,
+  pub body: Body,
+}
+/// Response headers that share one status class in an operation.
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct XNextHeaders {
+  /// A link to the next page of responses
+  pub x_next: Option<String>,
+}
+impl core::convert::TryFrom<&XNextHeaders> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &XNextHeaders) -> core::result::Result<Self, Self::Error> {
+    let mut map = http::HeaderMap::with_capacity(1usize);
+    if let Some(value) = &headers.x_next {
+      let header_value = http::HeaderValue::try_from(value)?;
+      map.insert(X_NEXT, header_value);
+    }
+    Ok(map)
+  }
+}
+impl core::convert::TryFrom<XNextHeaders> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: XNextHeaders) -> core::result::Result<Self, Self::Error> {
+    http::HeaderMap::try_from(&headers)
+  }
+}
+impl core::convert::TryFrom<&http::HeaderMap> for XNextHeaders {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Ok(Self {
+      x_next: headers
+        .get(X_NEXT)
+        .and_then(|v| v.to_str().ok())
+        .map(std::string::ToString::to_string),
+    })
+  }
+}
+impl core::convert::TryFrom<http::HeaderMap> for XNextHeaders {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Self::try_from(&headers)
+  }
+}
+/// Response headers that share one status class in an operation.
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct LocationHeaders {
+  /// URL of the created pet
+  pub location: String,
+}
+impl core::convert::TryFrom<&LocationHeaders> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &LocationHeaders) -> core::result::Result<Self, Self::Error> {
+    let mut map = http::HeaderMap::with_capacity(1usize);
+    let header_value = http::HeaderValue::try_from(&headers.location)?;
+    map.insert(LOCATION, header_value);
+    Ok(map)
+  }
+}
+impl core::convert::TryFrom<LocationHeaders> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: LocationHeaders) -> core::result::Result<Self, Self::Error> {
+    http::HeaderMap::try_from(&headers)
+  }
+}
+impl core::convert::TryFrom<&http::HeaderMap> for LocationHeaders {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Ok(Self {
+      location: headers
+        .get(LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .map(std::string::ToString::to_string)
+        .unwrap_or_default(),
+    })
+  }
+}
+impl core::convert::TryFrom<http::HeaderMap> for LocationHeaders {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Self::try_from(&headers)
+  }
+}
+/// Response headers that share one status class in an operation.
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct XCacheHeaders {
+  /// Whether the pet was served from cache
+  pub x_cache: Option<ShowPetByIdResponseHeaderXCache>,
+}
+impl core::convert::TryFrom<&XCacheHeaders> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &XCacheHeaders) -> core::result::Result<Self, Self::Error> {
+    let mut map = http::HeaderMap::with_capacity(1usize);
+    if let Some(value) = &headers.x_cache {
+      let header_value = http::HeaderValue::try_from(value.to_string())?;
+      map.insert(X_CACHE, header_value);
+    }
+    Ok(map)
+  }
+}
+impl core::convert::TryFrom<XCacheHeaders> for http::HeaderMap {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: XCacheHeaders) -> core::result::Result<Self, Self::Error> {
+    http::HeaderMap::try_from(&headers)
+  }
+}
+impl core::convert::TryFrom<&http::HeaderMap> for XCacheHeaders {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Ok(Self {
+      x_cache: headers
+        .get(X_CACHE)
+        .and_then(|v| v.to_str().ok())
+        .map(|value| value.parse().unwrap_or_default()),
+    })
+  }
+}
+impl core::convert::TryFrom<http::HeaderMap> for XCacheHeaders {
+  type Error = http::header::InvalidHeaderValue;
+  fn try_from(headers: http::HeaderMap) -> core::result::Result<Self, Self::Error> {
+    Self::try_from(&headers)
+  }
 }

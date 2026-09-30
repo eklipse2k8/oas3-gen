@@ -10,7 +10,7 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
-use super::{OperationResponse, ResponsePayload};
+use super::{OperationResponse, ResponseHeadersRef, ResponseParam, ResponsePayload};
 use crate::generator::ast::{DefaultAtom, FileHeaderNode, StructToken};
 
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
@@ -506,6 +506,16 @@ impl ToTokens for OperationResponse {
         .map(ToTokens::to_token_stream),
     );
     quote! { #response_enum #generics }.to_tokens(tokens);
+  }
+}
+
+impl ToTokens for ResponseParam {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let body = &self.body;
+    match &self.headers {
+      Some(ResponseHeadersRef { wrapper, name }) => quote! { #wrapper<#name, #body> }.to_tokens(tokens),
+      None => body.to_tokens(tokens),
+    }
   }
 }
 

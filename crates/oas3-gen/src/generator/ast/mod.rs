@@ -139,6 +139,8 @@ pub struct ResponseVariant {
   pub media_types: Vec<ResponseMediaType>,
   pub schema_type: Option<TypeRef>,
   #[builder(default)]
+  pub headers: Vec<FieldDef>,
+  #[builder(default)]
   pub mapping: VariantMapping,
 }
 
@@ -280,6 +282,7 @@ pub struct ResponseEnumDef {
   pub docs: Documentation,
   #[builder(default)]
   pub variants: Vec<ResponseEnumVariant>,
+  pub with_headers: Option<StructToken>,
 }
 
 impl ResponseEnumDef {
@@ -290,15 +293,35 @@ impl ResponseEnumDef {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct ResponseHeadersRef {
+  pub wrapper: StructToken,
+  pub name: StructToken,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+pub struct ResponseParam {
+  pub body: TypeRef,
+  pub headers: Option<ResponseHeadersRef>,
+}
+
+impl From<TypeRef> for ResponseParam {
+  fn from(body: TypeRef) -> Self {
+    Self { body, headers: None }
+  }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct OperationResponse {
   pub name: EnumToken,
-  pub value: Option<TypeRef>,
-  pub failure: Option<TypeRef>,
+  #[builder(into)]
+  pub value: Option<ResponseParam>,
+  #[builder(into)]
+  pub failure: Option<ResponseParam>,
 }
 
 impl OperationResponse {
   #[must_use]
-  pub fn param(&self, payload: ResponsePayload) -> Option<&TypeRef> {
+  pub fn param(&self, payload: ResponsePayload) -> Option<&ResponseParam> {
     match payload {
       ResponsePayload::Value => self.value.as_ref(),
       ResponsePayload::Failure => self.failure.as_ref(),
@@ -417,11 +440,15 @@ pub struct OperationInfo {
 
 impl OperationInfo {
   pub fn header_names(&self) -> impl Iterator<Item = HttpHeaderRef> {
-    self
+    let request_headers = self
       .parameters
       .iter()
-      .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)))
-      .filter_map(|p| p.original_name.as_deref())
+      .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)));
+    let response_headers = self.response_variants.iter().flatten().flat_map(|v| &v.headers);
+
+    request_headers
+      .chain(response_headers)
+      .filter_map(|field| field.original_name.as_deref())
       .map(HttpHeaderRef::from)
   }
 
@@ -574,6 +601,15 @@ pub enum StructKind {
   QueryParams,
   /// Nested struct for header parameters (no serde, just storage)
   HeaderParams,
+  /// Struct for the headers a response declares (no serde, just storage)
+  ResponseHeaders,
+}
+
+impl StructKind {
+  #[must_use]
+  pub fn is_header_struct(self) -> bool {
+    matches!(self, Self::HeaderParams | Self::ResponseHeaders)
+  }
 }
 
 /// Rust struct definition
@@ -714,6 +750,8 @@ pub struct EnumDef {
   pub serde_mode: SerdeMode,
   #[builder(default)]
   pub generate_display: bool,
+  #[builder(default)]
+  pub in_response_header: bool,
   pub scalar_repr: Option<RustPrimitive>,
   #[builder(default)]
   pub default_mode: EnumDefault,

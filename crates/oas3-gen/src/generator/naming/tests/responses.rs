@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::{
   Spec,
@@ -7,8 +7,8 @@ use oas3::{
 use serde_json::json;
 
 use crate::generator::naming::responses::{
-  extract_all_response_types, extract_response_type_name, extract_schema_name_from_response, is_error_code,
-  is_success_code,
+  extract_all_response_types, extract_response_type_name, extract_schema_name_from_response, headers_name,
+  is_error_code, is_success_code,
 };
 
 fn create_test_spec() -> Spec {
@@ -286,5 +286,22 @@ fn test_extract_all_response_types() {
         case.desc
       );
     }
+  }
+}
+
+#[test]
+fn test_headers_name() {
+  let taken = BTreeSet::from(["LinkHeaders".to_string()]);
+  let cases = [
+    (vec!["x-next"], "XNextHeaders"),
+    (vec!["Link", "X-Total-Count"], "LinkAndXTotalCountHeaders"),
+    (vec!["Link"], "LinkHeaders2"),
+  ];
+  for (headers, expected) in cases {
+    assert_eq!(
+      headers_name(headers.iter().copied(), &taken),
+      expected,
+      "name mismatch for {headers:?}"
+    );
   }
 }

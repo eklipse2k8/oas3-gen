@@ -8,7 +8,9 @@ use oas3::{
 
 use crate::{
   generator::naming::{
-    constants::{RESPONSE_UNION_FALLBACK_SUFFIX, RESPONSE_UNION_SEPARATOR},
+    constants::{
+      RESPONSE_HEADERS_SEPARATOR, RESPONSE_HEADERS_SUFFIX, RESPONSE_UNION_FALLBACK_SUFFIX, RESPONSE_UNION_SEPARATOR,
+    },
     identifiers::{ensure_unique, to_rust_type_name},
   },
   utils::SchemaRefName,
@@ -104,4 +106,16 @@ pub(crate) fn union_name<'a>(members: impl IntoIterator<Item = &'a str>, taken: 
   } else {
     base
   }
+}
+
+/// Names the struct over a set of response headers, e.g. `LinkAndLocationHeaders`.
+///
+/// `headers` are the original header names in declaration order. A name already in
+/// use gets a numeric suffix.
+pub(crate) fn headers_name<'a>(headers: impl IntoIterator<Item = &'a str>, taken: &BTreeSet<String>) -> String {
+  let base = headers
+    .into_iter()
+    .map(to_rust_type_name)
+    .join(RESPONSE_HEADERS_SEPARATOR);
+  ensure_unique(&format!("{base}{RESPONSE_HEADERS_SUFFIX}"), taken)
 }

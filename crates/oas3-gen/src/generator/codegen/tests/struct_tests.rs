@@ -5,9 +5,9 @@ use quote::ToTokens as _;
 use crate::generator::{
   ast::{
     ContentCategory, DeriveTrait, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind,
-    MethodNameToken, OperationResponse, ResponseMediaType, ResponsePayload, ResponseStatusCategory, ResponseVariant,
-    ResponseVariantCategory, StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod, StructToken, TypeRef,
-    ValidationAttribute, VariantMapping,
+    MethodNameToken, OperationResponse, ResponseHeadersRef, ResponseMediaType, ResponseParam, ResponsePayload,
+    ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, StatusCodeToken, StatusHandler, StructDef,
+    StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute, VariantMapping,
   },
   codegen::{Visibility, structs::StructFragment},
   converter::GenerationTarget,
@@ -264,6 +264,23 @@ fn test_parse_response_slot_shapes() {
       .failure(TypeRef::new("ErrorBody"))
       .build()
   };
+  let headed = |ty: TypeRef| {
+    OperationResponse::builder()
+      .name(EnumToken::new("ResponseEnum"))
+      .value(
+        ResponseParam::builder()
+          .body(ty)
+          .headers(
+            ResponseHeadersRef::builder()
+              .wrapper(StructToken::new("WithHeaders"))
+              .name(StructToken::new("LinkHeaders"))
+              .build(),
+          )
+          .build(),
+      )
+      .failure(TypeRef::new("ErrorBody"))
+      .build()
+  };
   let union_member = VariantMapping::builder()
     .payload(ResponsePayload::Value)
     .union_variant(EnumVariantToken::new("Body"))
@@ -304,7 +321,7 @@ fn test_parse_response_slot_shapes() {
     (
       "status carried alongside body",
       StatusCodeToken::ClientError4XX,
-      body,
+      body.clone(),
       payload_mapping(ResponsePayload::Failure),
       value(TypeRef::new("Body")),
       "return Ok (ResponseEnum :: ClientError (status , data)) ;",
@@ -324,6 +341,22 @@ fn test_parse_response_slot_shapes() {
       payload_mapping(ResponsePayload::Value),
       value(TypeRef::new("Body").with_option()),
       "return Ok (ResponseEnum :: Ok (None)) ;",
+    ),
+    (
+      "body with headers",
+      StatusCodeToken::Ok200,
+      body,
+      payload_mapping(ResponsePayload::Value),
+      headed(TypeRef::new("Body")),
+      "return Ok (ResponseEnum :: Ok (WithHeaders { headers , body : data })) ;",
+    ),
+    (
+      "no body with headers where the parameter is optional",
+      StatusCodeToken::Ok200,
+      None,
+      payload_mapping(ResponsePayload::Value),
+      headed(TypeRef::new("Body").with_option()),
+      "let headers = LinkHeaders :: try_from (req . headers ()) ? ; let _ = req . bytes () . await ? ; return Ok (ResponseEnum :: Ok (WithHeaders { headers , body : None })) ;",
     ),
     (
       "unit variant carrying the status",

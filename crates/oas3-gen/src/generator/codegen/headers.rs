@@ -1,7 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use crate::generator::ast::{FieldDef, StructDef, StructKind, TypeRef, tokens::ConstToken};
+use crate::generator::{
+  ast::{FieldDef, StructDef, StructKind, TypeRef, tokens::ConstToken},
+  converter::GenerationTarget,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HeaderMapFragment<'a> {
@@ -14,7 +17,7 @@ impl<'a> HeaderMapFragment<'a> {
   }
 
   fn should_generate(self) -> bool {
-    matches!(self.def.kind, StructKind::HeaderParams) && !self.def.fields.is_empty()
+    self.def.kind.is_header_struct() && !self.def.fields.is_empty()
   }
 }
 
@@ -105,15 +108,21 @@ fn header_value_expr(ty: &TypeRef, accessor: TokenStream) -> TokenStream {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HeaderFromMapFragment<'a> {
   def: &'a StructDef,
+  target: GenerationTarget,
 }
 
 impl<'a> HeaderFromMapFragment<'a> {
-  pub(crate) fn new(def: &'a StructDef) -> Self {
-    Self { def }
+  pub(crate) fn new(def: &'a StructDef, target: GenerationTarget) -> Self {
+    Self { def, target }
   }
 
   fn should_generate(self) -> bool {
-    matches!(self.def.kind, StructKind::HeaderParams) && !self.def.fields.is_empty()
+    let parsed = match self.def.kind {
+      StructKind::HeaderParams => self.target == GenerationTarget::Server,
+      StructKind::ResponseHeaders => true,
+      _ => false,
+    };
+    parsed && !self.def.fields.is_empty()
   }
 }
 

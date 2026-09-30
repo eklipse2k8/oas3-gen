@@ -10,8 +10,8 @@ use crate::generator::{
   ast::{
     DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumDefault, EnumDefaultValue,
     EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseEnumVariant,
-    ResponsePayload, ResponseUnionDef, RustPrimitive, SerdeAttribute, SerdeMode, TypeRef, VariantContent, VariantDef,
-    types::generic_args,
+    ResponsePayload, ResponseUnionDef, RustPrimitive, SerdeAttribute, SerdeMode, StructToken, TypeRef, VariantContent,
+    VariantDef, types::generic_args,
   },
   codegen::{
     attributes::DeriveAttribute,
@@ -682,7 +682,9 @@ impl ToTokens for EnumFragment<'_> {
       quote! {}
     };
 
-    let from_str_impl = if self.def.generate_display && self.def.is_simple() && self.target == GenerationTarget::Server
+    let from_str_impl = if self.def.generate_display
+      && self.def.is_simple()
+      && (self.target == GenerationTarget::Server || self.def.in_response_header)
     {
       FromStrImplFragment::new(name, &self.def.variants).to_token_stream()
     } else {
@@ -1054,6 +1056,11 @@ impl ToTokens for ResponseEnumFragment<'_> {
     );
     let derives = DeriveAttribute::new(self.def.derives());
     let vis = &self.vis;
+    let with_headers = self
+      .def
+      .with_headers
+      .as_ref()
+      .map(|name| WithHeadersFragment::new(self.vis, name, &derives));
 
     let ts = quote! {
       #docs
@@ -1061,9 +1068,42 @@ impl ToTokens for ResponseEnumFragment<'_> {
       #vis enum #name #generics {
         #variants
       }
+      #with_headers
     };
 
     tokens.extend(ts);
+  }
+}
+
+/// Emits the struct pairing a response body with its headers, e.g.
+/// `pub struct WithHeaders<Headers, Body> { .. }`.
+#[derive(Clone, Copy, Debug)]
+struct WithHeadersFragment<'a> {
+  vis: Visibility,
+  name: &'a StructToken,
+  derives: &'a DeriveAttribute<DeriveTrait>,
+}
+
+impl<'a> WithHeadersFragment<'a> {
+  fn new(vis: Visibility, name: &'a StructToken, derives: &'a DeriveAttribute<DeriveTrait>) -> Self {
+    Self { vis, name, derives }
+  }
+}
+
+impl ToTokens for WithHeadersFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = self.name;
+    let derives = self.derives;
+    let vis = &self.vis;
+
+    tokens.extend(quote! {
+      /// A response body together with the headers its response declares.
+      #derives
+      #vis struct #name<Headers, Body> {
+        #vis headers: Headers,
+        #vis body: Body,
+      }
+    });
   }
 }
 
