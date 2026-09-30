@@ -115,7 +115,7 @@ fn test_dependencies_are_limited_to_referenced_crates() {
   let expected = [
     "serde = { version = \"1.0\", features = [\"derive\"] }",
     "validator = { version = \"0.21\", features = [\"derive\"] }",
-    "http = \"1.4\"",
+    "http = \"1.5\"",
   ];
   let unexpected = ["reqwest = ", "axum = ", "indexmap = ", "uuid = ", "chrono = ", "bon = "];
 

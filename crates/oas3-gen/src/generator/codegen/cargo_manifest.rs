@@ -66,7 +66,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
   DependencySpec {
     ident: "http",
     package: "http",
-    version: "1.4",
+    version: "1.5",
     features: &[],
     ordered_features: &[],
     default_features: true,
@@ -122,7 +122,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
   DependencySpec {
     ident: "serde_with",
     package: "serde_with",
-    version: "3.23",
+    version: "3.24",
     features: &["base64", "chrono"],
     ordered_features: &[],
     default_features: true,
