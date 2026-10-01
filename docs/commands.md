@@ -49,5 +49,9 @@ Prerequisites for specific flags: `--doc-format` needs `mdformat` on PATH.
 
 ## Book
 
-Feature changes must land in `book/src/`: `code-generation.md` (flags and examples),
-`builders.md` (builder patterns), `introduction.md` (overview), `SUMMARY.md` (new pages only).
+Feature changes must land in `book/src/`: `client-generation.md` (client calls,
+responses, and authentication), `server-generation.md` (service traits, routing,
+and credentials), `code-generation.md` (shared types and generation options),
+`builders.md` (builder patterns), and `introduction.md` (overview). Update
+`SUMMARY.md` when adding or reorganizing chapters. Follow
+[book-style-guide.md](book-style-guide.md) for the book's voice and examples.

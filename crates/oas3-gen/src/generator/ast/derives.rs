@@ -61,7 +61,7 @@ impl DerivesProvider for StructDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
     let mut derives = BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone, DeriveTrait::Default]);
 
-    if self.kind != StructKind::OperationRequest {
+    if !matches!(self.kind, StructKind::OperationRequest | StructKind::Credentials) {
       derives.insert(DeriveTrait::PartialEq);
     }
 

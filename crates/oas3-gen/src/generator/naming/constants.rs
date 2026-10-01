@@ -1,4 +1,8 @@
 pub const BODY_FIELD_NAME: &str = "body";
+pub const CLIENT_MEMBER_NAMES: &[&str] = &["client", "base_url"];
+pub const CREDENTIALS_FIELD: &str = "credentials";
+pub const CREDENTIALS_SEPARATOR: &str = "And";
+pub const CREDENTIALS_SUFFIX: &str = "Credentials";
 pub const DISCRIMINATED_BASE_SUFFIX: &str = "Base";
 pub const HEADER_PARAMS_FIELD: &str = "header";
 pub const HEADER_PARAMS_SUFFIX: &str = "Header";

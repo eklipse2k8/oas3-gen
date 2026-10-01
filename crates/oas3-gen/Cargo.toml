@@ -50,12 +50,16 @@ strum.workspace = true
 syn.workspace = true
 tokio.workspace = true
 toml.workspace = true
+yaml_serde.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
 axum-core.workspace = true
+axum-extra.workspace = true
 oas3-gen-support.workspace = true
 reqwest = { workspace = true, features = ["json", "multipart", "http2", "native-tls", "query", "stream"] }
+reqwest_cookie_store.workspace = true
+secrecy.workspace = true
 serde_with.workspace = true
 tempfile.workspace = true
 toml = { workspace = true, features = ["parse"] }

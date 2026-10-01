@@ -1,9 +1,16 @@
-# Code Generation
+# Shared Generation Options
 
-In this chapter, we'll choose what code to generate and then look at the
-options that change it. We'll start with the output modes, examine how requests
-and responses fit together, and work through examples of individual flags.
+<a id="code-generation"></a>
+
+Client and server generation use the same schemas and many of the same options.
+This chapter explains those shared rules: choosing output modes, representing
+responses, interpreting security requirements, and changing the generated types.
 Use the [Flag Summary](#flag-summary) when you need a reminder of an option.
+
+For a walkthrough of calling an API, start with
+[Client Generation](./client-generation.md). To implement an API with Axum,
+start with [Server Generation](./server-generation.md). Both chapters link back
+here when an option applies to both targets.
 
 The commands use `cargo run --` from a checkout of this repository. If you
 installed the tool with Cargo, replace `cargo run --` with `oas3-gen`. Input
@@ -13,14 +20,13 @@ petstore example in `crates/oas3-gen/fixtures/petstore.json`.
 
 The Rust examples are excerpts that focus on the option being discussed. They
 omit imports, unrelated attributes, and some definitions. An ellipsis marks
-omitted code, so those excerpts aren't complete programs. Client examples use
-the name `PetStoreClient`; [API Name Override](#api-name-override) explains how
-to choose that name.
+omitted code, so those excerpts aren't complete programs.
 
 ## Table of Contents
 
 - [Generation Modes](#generation-modes)
 - [Responses](#responses)
+- [API Key Security](#api-key-security)
 - [Workspace Crate Output](#workspace-crate-output)
 - [Visibility](#visibility)
 - [Enum Mode](#enum-mode)
@@ -72,88 +78,20 @@ pub enum Status {
 
 ### `client`
 
-The `client` mode puts the types and an HTTP client in one file. The client
-uses `reqwest` to send requests. This excerpt from `client.rs` shows a client
-method alongside a schema type:
-
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pet { /* ... */ }
-
-#[derive(Debug, Clone)]
-pub struct PetStoreClient {
-    pub client: Client,
-    pub base_url: Url,
-}
-
-impl PetStoreClient {
-    pub fn new() -> Self { /* ... */ }
-
-    pub async fn list_pets(
-        &self,
-        request: ListPetsRequest,
-    ) -> anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> {
-        /* ... */
-    }
-}
-```
+The `client` mode writes types and a `reqwest` client to one file. See
+[Choosing the Output Layout](./client-generation.md#choosing-the-output-layout)
+for an example.
 
 ### `client-mod`
 
-The `client-mod` mode separates the types and client into files within a
-module directory. For an output path of `output/`, you'll get:
-
-```text
-output/
-├── mod.rs
-├── types.rs
-└── client.rs
-```
-
-The `mod.rs` file declares the modules and re-exports their items:
-
-```rust
-mod types;
-mod client;
-
-pub use types::*;
-pub use client::*;
-```
+The `client-mod` mode writes `types.rs`, `client.rs`, and `mod.rs` to a directory.
+See [Client Generation](./client-generation.md) for how to generate and use it.
 
 ### `server-mod`
 
-The `server-mod` mode creates a module directory containing types and an
-Axum server trait. For an output path of `output/`, you'll get:
-
-```text
-output/
-├── mod.rs
-├── types.rs
-└── server.rs
-```
-
-You'll implement the trait in `server.rs` to handle API operations. The
-same file provides a router that connects HTTP routes to your implementation:
-
-```rust
-pub trait ApiServer: Send + Sync {
-    fn list_pets(
-        &self,
-        request: ListPetsRequest,
-    ) -> impl std::future::Future<
-        Output = anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>>,
-    > + Send;
-}
-
-pub fn router<S>(service: S) -> Router
-where
-    S: ApiServer + Clone + Send + Sync + 'static,
-{
-    Router::new()
-        .route("/pets", get(list_pets::<S>))
-        .with_state(service)
-}
-```
+The `server-mod` mode writes `types.rs`, `server.rs`, and `mod.rs` to a directory.
+See [Server Generation](./server-generation.md) for how to implement the trait
+and use the generated Axum router.
 
 ## Responses
 
@@ -175,6 +113,9 @@ body. The following table shows the possible variant shapes:
 | `Unknown(http::StatusCode, Failure)` | The spec's `default` response, when it declares a body |
 | `Other(http::StatusCode, Vec<u8>)` | A status the operation does not declare when it has no `default` response |
 
+The variants that carry a status use [`http::StatusCode`][rustdoc-http-status]. `Other` holds its raw
+body in a [`Vec<u8>`][rustdoc-vec].
+
 Each operation supplies its own types for `Value` and `Failure`. We'll call
 these the two *response classes*: `Value` covers 2xx statuses, and `Failure`
 covers the remaining statuses. Before accounting for headers, the body types
@@ -182,9 +123,9 @@ determine each parameter as follows:
 
 | Bodies declared in the class | Parameter |
 |---|---|
-| None | `()` |
+| None | [`()`][rustdoc-unit] |
 | One type | That type |
-| One type plus a status that carries a payload but no body | `Option<Type>` |
+| One type plus a status that carries a payload but no body | [`Option<Type>`][rustdoc-option] |
 | Several types | An untagged payload union such as `BasicErrorOrValidationError` |
 | Several types plus a status that carries a payload but no body | `Option<Union>` |
 
@@ -226,81 +167,123 @@ Operations with the same header fields share a header struct. The generator
 names that struct after its headers, as in `XNextHeaders` or
 `LinkAndLocationHeaders`, and adds a numeric suffix if the name is already in
 use. A status without a body can still carry headers: its variant then holds
-a `WithHeaders` value whose body is `()` or an `Option`.
+a `WithHeaders` value whose body is [`()`][rustdoc-unit] or an [`Option`][rustdoc-option].
 
 The generator ignores `Content-Type` entries in response header definitions.
-A header without a schema uses `String`. Enums used in headers implement
-`FromStr` for both client and server output, and response headers receive name
+A header without a schema uses [`String`][rustdoc-string]. Enums used in headers implement
+[`FromStr`][rustdoc-from-str] for both client and server output, and response headers receive name
 constants in the same way as request headers.
 
-Let's look at the petstore response types and two client methods. The first
-method returns pets with a pagination header; the second returns a location
-header with no body:
+For example, the petstore response enum and pagination headers include these
+definitions:
 
 ```rust
 /// Response shared by every operation.
 #[derive(Debug, Clone)]
 pub enum ApiResponse<Value, Failure> {
-    ///200
+    /// 200
     Ok(Value),
-    ///201
+    /// 201
     Created(Value),
-    ///default
+    /// default
     Unknown(http::StatusCode, Failure),
 }
 
 /// Response headers that share one status class in an operation.
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct XNextHeaders {
-    /// A link to the next page of responses
+    /// A link to the next page of responses.
     pub x_next: Option<String>,
 }
-
-impl PetStoreClient {
-    pub async fn list_pets(
-        &self,
-        request: ListPetsRequest,
-    ) -> anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> {
-        /* ... */
-    }
-
-    pub async fn create_pets(
-        &self,
-        request: CreatePetsRequest,
-    ) -> anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, ()>, Error>> {
-        /* ... */
-    }
-}
-
 ```
 
-We can match the result of `list_pets` to read both its body and its headers.
-This snippet belongs in an async function that can propagate `anyhow::Error`:
+An operation returning pets with pagination headers uses
+`ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>`. The client decodes that
+value from an HTTP response, and the server constructs it to send a response.
+See [Reading Responses](./client-generation.md#reading-responses) and
+[Returning Responses](./server-generation.md#returning-responses) for examples.
 
-```rust
-match client.list_pets(request).await? {
-    ApiResponse::Ok(WithHeaders { headers, body: pets }) => {
-        println!("{} pets, next page at {:?}", pets.len(), headers.x_next);
+## API Key Security
+
+OpenAPI describes authentication in two places. A *security scheme* under
+`components.securitySchemes` describes a credential and how it travels in a
+request. A *security requirement* in `security` names the schemes an operation
+accepts. The generator supports `apiKey` schemes in headers, query parameters,
+and cookies.
+
+Let's start with a header key. This excerpt from an OpenAPI document declares
+a scheme named `ApiKeyAuth` and uses it as the default requirement:
+
+```json
+{
+  "security": [{ "ApiKeyAuth": [] }],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
     }
-    ApiResponse::Unknown(status, error) => eprintln!("{status}: {}", error.message),
-    other => anyhow::bail!("list_pets never answers {other:?}"),
+  }
 }
 ```
 
-The `Ok` arm gives us both `pets` and `headers.x_next`. Because the enum is
-shared, the `match` also has to cover variants that `list_pets` never returns.
-The wildcard arm handles those variants.
+The scheme name, `ApiKeyAuth`, identifies the credential in generated Rust
+names. The `name` value, `X-Api-Key`, identifies the HTTP header. Operations
+inherit the top-level `security` unless they declare their own requirements.
 
-In client output, request structs provide a `parse_response` associated
-function that turns a `reqwest::Response` into the response enum. It reads
-declared headers before decoding the body. You can call this function if you
-send requests with your own transport and want to reuse the generated decoder.
+### Requirements
 
-On the server, handlers convert the response enum into an HTTP status and a
-JSON body. A `()` or `None` body produces a response without a body. The
-handler also writes declared headers; if a value can't be represented as an
-HTTP header value, it returns status `500`. Missing or malformed required
-request headers produce status `400`.
+The entries in the `security` array are alternatives: a request needs to
+satisfy one entry. Within an entry, all the named schemes are required. These
+examples show how the grouping changes the requirement:
+
+| Operation's `security` | Requirement |
+|---|---|
+| `[{"ApiKeyAuth": []}]` | Supply the header key. |
+| `[{"QueryKey": []}, {"SessionCookie": []}]` | Supply a query key or a session cookie. |
+| `[{"ApiKeyAuth": [], "SessionCookie": []}]` | Supply both the header key and the session cookie. |
+| `[]` or `[{}]` | Allow anonymous access, replacing any top-level requirement. |
+
+For the second and third examples, assume `QueryKey` and `SessionCookie` are
+also declared as `apiKey` schemes. The complete example is in
+`crates/oas3-gen/fixtures/api_key_security.json`.
+
+The server represents a key as required when every alternative needs it.
+Otherwise, the field is optional, and the extractor checks that the supplied
+keys complete at least one alternative. These checks establish that credentials
+are present. Your service still needs to decide whether their values authorize
+the request.
+
+Schemes such as HTTP bearer tokens and OAuth 2.0 don't produce generated
+credentials. The generator reports a warning for each referenced scheme it
+can't handle. If an operation has an alternative containing one of these
+schemes, all its API key fields become optional, including keys in that same
+alternative. The generated extractor can't enforce the full requirement, so
+your application must handle authorization for that operation.
+
+### Keeping Keys Out of Logs
+
+The server stores API keys as
+[`secrecy::SecretString`][rustdoc-secret-string].
+The client uses the same type for header and query keys. Its debug representation
+shows `[REDACTED]` in place of the value, and it clears its own stored value when
+dropped. It doesn't implement [`Display`][rustdoc-display], [`Serialize`][rustdoc-serde-serialize], or [`PartialEq`][rustdoc-partial-eq].
+
+Client cookie keys live in a cookie store instead. The generated client's
+[`Debug`][rustdoc-debug] implementation leaves that store out. To read a `SecretString`, call
+`expose_secret()` with [`secrecy::ExposeSecret`][rustdoc-expose-secret] in scope; the
+[server example](./server-generation.md#reading-and-checking-keys) shows how.
+Once exposed, the returned string is ordinary text, so keep it out of log output.
+
+### Client
+
+The client provides methods to set header, query, and cookie keys. See
+[Sending API Keys](./client-generation.md#sending-api-keys) for examples and
+[Cookie Keys](./client-generation.md#cookie-keys) for the cookie store's behavior.
+
+### Server
+
+Server request structs carry credentials extracted from the incoming request.
+See [Receiving API Keys](./server-generation.md#receiving-api-keys) for the
+generated types, rejection behavior, and checks to perform in your service.
 
 ## Workspace Crate Output
 
@@ -364,13 +347,13 @@ description = "Rust client generated from the Swagger Petstore OpenAPI document"
 anyhow = "1.0"
 bon = { version = "3.10", features = ["implied-bounds"] }
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock", "serde"] }
-http = "1.4"
+http = "1.5"
 indexmap = { version = "2.14", features = ["serde"] }
 oas3-gen-support = "0.29.0"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "http2", "native-tls", "query", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-serde_with = { version = "3.23", features = ["base64", "chrono"] }
+serde_with = { version = "3.24", features = ["base64", "chrono"] }
 validator = { version = "0.21", features = ["derive"] }
 ```
 
@@ -402,20 +385,23 @@ table describes the dependencies you may see:
 
 | Crate | Declared when the generated code |
 |-------|----------------------------------|
-| `anyhow` | returns `anyhow::Result` from client or server methods |
+| `anyhow` | returns [`anyhow::Result`][rustdoc-anyhow-result] from client or server methods |
 | `axum` | defines a `server-mod` router and extractors |
+| `axum-extra` | reads cookie API keys on the server, with the `cookie` feature |
 | `bon` | derives builders (`--enable-builders`) |
 | `chrono` | maps `date`, `date-time`, or `time` formats |
-| `http` | emits header constants or `HeaderMap` conversions |
-| `indexmap` | emits `IndexMap`/`IndexSet` collection types |
+| `http` | emits header constants or [`HeaderMap`][rustdoc-http-header-map] conversions |
+| `indexmap` | emits [`IndexMap`][rustdoc-indexmap-map]/[`IndexSet`][rustdoc-indexmap-set] collection types |
 | `oas3-gen-support` | uses runtime derives, diagnostics, or event streams |
 | `regex` | emits `pattern` validation constants |
 | `reqwest` | performs `client-mod` HTTP calls |
-| `serde` | derives `Serialize`/`Deserialize` |
-| `serde_json` | handles freeform `serde_json::Value` payloads |
+| `reqwest_cookie_store` | sends cookie API keys from the client |
+| `secrecy` | stores API keys |
+| `serde` | derives [`Serialize`][rustdoc-serde-serialize]/[`Deserialize`][rustdoc-serde-deserialize] |
+| `serde_json` | handles freeform [`serde_json::Value`][rustdoc-serde-json-value] payloads |
 | `serde_with` | applies `serde_as` conversions |
 | `uuid` | maps the `uuid` format |
-| `validator` | derives `Validate` |
+| `validator` | derives [`Validate`][rustdoc-validate] |
 
 `serde_json` gains the `preserve_order` feature under the default collection
 policy so that freeform JSON objects keep their key order. With
@@ -441,7 +427,7 @@ petstore-api = { path = "../petstore-api" }
 
 Keep the default [`--visibility public`](#visibility) for a crate other code
 depends on. `crate` and `file` visibility restrict the re-exports in `lib.rs`, so
-the crate compiles but exposes nothing to its consumers.
+other crates can't access those re-exported items.
 
 ## Visibility
 
@@ -595,7 +581,7 @@ those variants separately.
 ### Example: `--enum-mode relaxed`
 
 Use `relaxed` when you want to accept values regardless of ASCII letter
-case. The generator merges the variants and writes a `Deserialize`
+case. The generator merges the variants and writes a [`Deserialize`][rustdoc-serde-deserialize]
 implementation that converts input to ASCII lowercase before matching:
 
 ```rust
@@ -650,7 +636,7 @@ the specification reorders enum values. This can make changes to the generated
 source easier to review.
 
 Ordering can also affect the default value. For value enums that derive
-`Default`, the generator marks the variant matching the schema's `default`.
+[`Default`][rustdoc-default], the generator marks the variant matching the schema's `default`.
 If no variant matches, it uses the first declared variant. Switching to
 `sorted` can therefore change the fallback default.
 
@@ -661,7 +647,7 @@ When a variant can represent the schema's default, the generator writes an
 `Self::String("cheesecake".to_string())` for a string.
 
 A nullable union includes a `null` branch. If it has no usable default, it gets
-no `Default` implementation. Properties with that union type use `Option<T>`,
+no `Default` implementation. Properties with that union type use [`Option<T>`][rustdoc-option],
 including properties listed as required.
 
 ### Input Schema
@@ -717,7 +703,7 @@ pub enum Status {
 
 An enum can represent numbers as well as strings. When a schema combines an
 `enum` array with `type: integer` or `type: number`, the generated type reads
-and writes JSON numbers. The generator supplies `Serialize` and `Deserialize`
+and writes JSON numbers. The generator supplies [`Serialize`][rustdoc-serde-serialize] and [`Deserialize`][rustdoc-serde-deserialize]
 implementations so that a value such as `8000` stays a number during
 serialization.
 
@@ -731,7 +717,9 @@ Consider a schema that lists the sample rates an audio API accepts:
 ```
 
 The generator emits one variant per value, a serializer that turns each variant
-into its number, and a deserializer that maps numbers back to variants:
+into its number, and a deserializer that maps numbers back to variants. These
+implementations use the [`serde::Serializer`][rustdoc-serde-serializer] and [`serde::Deserializer`][rustdoc-serde-deserializer] traits,
+with [`serde::de::Error`][rustdoc-serde-de-error] for decoding errors:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
@@ -776,13 +764,13 @@ to `SampleRate::Value8000`. A number outside the listed values produces an
 error that names the accepted values.
 
 The schema's type and format determine which Rust number type the generated
-implementation uses. Signed integers use `i64`, unsigned integers use `u64`,
-and floating-point values use `f64`. In each case, the serialized value is a
+implementation uses. Signed integers use [`i64`][rustdoc-i64], unsigned integers use [`u64`][rustdoc-u64],
+and floating-point values use [`f64`][rustdoc-f64]. In each case, the serialized value is a
 JSON number.
 
 ### Floating-Point Values
 
-For a `number` enum, the generated deserializer reads an `f64` and compares
+For a `number` enum, the generated deserializer reads an [`f64`][rustdoc-f64] and compares
 its bit pattern with each allowed value. Here's an excerpt for a playback
 rate that accepts `0.5`:
 
@@ -803,13 +791,13 @@ impl<'de> serde::Deserialize<'de> for PlaybackRate {
 ```
 
 The Rust variants don't store floating-point values: each variant identifies
-one allowed number. These enums can therefore derive `Eq` and `Hash`, and you
+one allowed number. These enums can therefore derive [`Eq`][rustdoc-eq] and [`Hash`][rustdoc-hash], and you
 can use them as map keys or set members.
 
 ## Helper Methods
 
 By default, the generator adds constructor helpers for supported enum
-variants. For a variant that wraps a struct with a `Default` implementation,
+variants. For a variant that wraps a struct with a [`Default`][rustdoc-default] implementation,
 a helper can accept the required values and fill in the remaining fields.
 Pass `--no-helpers` if you'd prefer to construct the variants yourself.
 
@@ -951,7 +939,7 @@ its name doesn't start with `@odata.`.
 
 Use `--customize` to choose a `serde_with` adapter for a generated field. An
 adapter controls how Serde reads or writes a value. The generated field keeps
-its Rust type, and the adapter appears in its `#[serde_as]` attribute.
+its Rust type, and the adapter appears in its [`#[serde_as]`][rustdoc-serde-as] attribute.
 
 ```text
 -c, --customize <TYPE=PATH>
@@ -961,16 +949,17 @@ The following keys select commonly customized formats:
 
 | Key | OpenAPI Format | Rust Field Type |
 |-----|----------------|-----------------|
-| `date_time` | `date-time` | `chrono::DateTime<chrono::Utc>` |
-| `date` | `date` | `chrono::NaiveDate` |
-| `time` | `time` | `chrono::NaiveTime` |
-| `duration` | `duration` | `std::time::Duration` |
-| `uuid` | `uuid` | `uuid::Uuid` |
+| `date_time` | `date-time` | [`chrono::DateTime<chrono::Utc>`][rustdoc-chrono-datetime] |
+| `date` | `date` | [`chrono::NaiveDate`][rustdoc-chrono-date] |
+| `time` | `time` | [`chrono::NaiveTime`][rustdoc-chrono-time] |
+| `duration` | `duration` | [`std::time::Duration`][rustdoc-duration] |
+| `uuid` | `uuid` | [`uuid::Uuid`][rustdoc-uuid] |
 
-For these examples, suppose your crate defines adapters named `DateTimeAdapter`
-and `DateAdapter`. Each adapter must implement the `serde_with` traits needed
-by the generated field's serialization or deserialization. To use both,
-repeat the flag:
+The date-time type uses [`chrono::Utc`][rustdoc-chrono-utc] as its time zone. For these examples,
+suppose your crate defines adapters named `DateTimeAdapter` and `DateAdapter`.
+Each adapter must implement [`serde_with::SerializeAs`][rustdoc-serialize-as] or
+[`serde_with::DeserializeAs`][rustdoc-deserialize-as] as needed by the generated field. To use both
+adapters, repeat the flag:
 
 ```bash
 cargo run -- generate types -i spec.json -o types.rs \
@@ -1005,14 +994,14 @@ pub struct Event {
 }
 ```
 
-Notice that `created_at` is still a `chrono::DateTime<chrono::Utc>`. The
+Notice that `created_at` is still a [`chrono::DateTime<chrono::Utc>`][rustdoc-chrono-datetime]. The
 `DateTimeAdapter` controls its conversion during serialization and
 deserialization. The `scheduled_date` field is unchanged because we haven't
 supplied a `date` override in this example.
 
 ### Handling Optional and Array Fields
 
-The generator wraps the adapter in `Option` and `Vec` to match optional and
+The generator wraps the adapter in [`Option`][rustdoc-option] and [`Vec`][rustdoc-vec] to match optional and
 array fields. For example, the same date-time override produces these
 attributes on a schedule:
 
@@ -1050,36 +1039,20 @@ one of these flags at a time.
 
 ### `--only`
 
-Pass the operation IDs you want to keep, separated by commas. For example,
-this command selects the petstore operations for listing and creating pets:
+Pass the normalized `snake_case` operation IDs, separated by commas. Filtering
+uses these IDs before any `--fn-name` overrides. For example, the petstore's
+`listPets` and `createPets` operations use `list_pets` and `create_pets` in the
+filter:
 
 ```bash
 cargo run -- generate client-mod -i petstore.json -o output/ \
-  --only listPets,createPets
+  --only list_pets,create_pets
 ```
 
-The generated client has methods for those two operations:
-
-```rust
-impl PetStoreClient {
-    pub async fn list_pets(
-        &self,
-        request: ListPetsRequest,
-    ) -> anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> {
-        /* ... */
-    }
-
-    pub async fn create_pets(
-        &self,
-        request: CreatePetsRequest,
-    ) -> anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, ()>, Error>> {
-        /* ... */
-    }
-}
-```
-
-The client omits the other operations. Types needed by the selected methods
-are still included, as we'll see in [Schema Dependency Resolution](#schema-dependency-resolution).
+The generated client keeps `list_pets()` and `create_pets()` and omits the
+other operations. With `server-mod`, the same selection keeps those two trait
+methods and their routes. Types needed by the selected methods are still
+included, as we'll see in [Schema Dependency Resolution](#schema-dependency-resolution).
 
 ### `--exclude`
 
@@ -1088,11 +1061,12 @@ operation. For example, to leave out the image upload operation, run:
 
 ```bash
 cargo run -- generate client-mod -i petstore.json -o output/ \
-  --exclude uploadPetImage
+  --exclude upload_pet_image
 ```
 
 The client keeps the petstore's other operations, including `list_pets()`
-and `create_pets()`, and omits `upload_pet_image()`.
+and `create_pets()`, and omits `upload_pet_image()`. In `server-mod` mode, the
+flag omits that operation's trait method and route.
 
 ### Schema Dependency Resolution
 
@@ -1130,27 +1104,14 @@ cargo run -- generate client-mod -i petstore.json -o output/ \
   --fn-name showPetById=get_pet
 ```
 
-The renamed methods and request types appear together in the client:
+The override changes both names together:
 
-```rust
-impl PetStoreClient {
-    pub async fn fetch_all_pets(
-        &self,
-        request: FetchAllPetsRequest,
-    ) -> anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>> {
-        /* ... */
-    }
+| Operation ID | Method Name | Request Type |
+|---|---|---|
+| `listPets` | `fetch_all_pets` | `FetchAllPetsRequest` |
+| `showPetById` | `get_pet` | `GetPetRequest` |
 
-    pub async fn get_pet(
-        &self,
-        request: GetPetRequest,
-    ) -> anyhow::Result<ApiResponse<WithHeaders<XCacheHeaders, Pet>, Error>> {
-        /* ... */
-    }
-}
-```
-
-Use these names when constructing requests and calling the generated client.
+Use the new names when calling the client or implementing the server trait.
 
 ## API Name Override
 
@@ -1171,35 +1132,16 @@ To choose `PetStoreClient` for the client, run:
 cargo run -- generate client-mod -i petstore.json -o output/ --api-name PetStoreClient
 ```
 
-The client uses the supplied name for both the struct and its implementation:
+The client struct and its implementation now use `PetStoreClient`. In server
+mode, choose a trait name with the same flag:
 
-```rust
-#[derive(Debug, Clone)]
-pub struct PetStoreClient {
-    pub client: Client,
-    pub base_url: Url,
-}
-
-impl PetStoreClient {
-    pub fn new() -> Self { /* ... */ }
-}
+```bash
+cargo run -- generate server-mod -i petstore.json -o output/ --api-name PetStoreApi
 ```
 
-In server mode, passing `--api-name PetStoreApi` names the trait and updates
-the router's trait bound:
-
-```rust
-pub trait PetStoreApi: Send + Sync {
-    /* ... */
-}
-
-pub fn router<S>(service: S) -> Router
-where
-    S: PetStoreApi + Clone + Send + Sync + 'static,
-{
-    /* ... */
-}
-```
+The server trait is named `PetStoreApi`, and the generated router uses that
+name in its trait bound. Changing the API name doesn't rename the operations;
+use [`--fn-name`](#function-name-overrides) for those.
 
 ## Schema Filtering
 
@@ -1244,7 +1186,7 @@ outputs:
 
 ```bash
 cargo run -- generate types -i spec.json -o types.rs --all-schemas
-cargo run -- generate client -i spec.json -o client.rs --only listPets
+cargo run -- generate client -i spec.json -o client.rs --only list_pets
 ```
 
 The first file contains all schemas. The second contains the filtered client
@@ -1253,8 +1195,8 @@ from the first file.
 
 ## Header Emission
 
-Header name constants let you refer to headers without repeating their string
-names. By default, the generator creates constants for request parameters and
+Header name constants use [`http::HeaderName`][rustdoc-http-header-name], so you can refer to headers
+without repeating their string names. By default, the generator creates constants for request parameters and
 [response headers](#response-headers) used by the selected operations. Use
 `--all-headers` to include header parameters from `components/parameters` even
 when no operation references them.
@@ -1299,7 +1241,7 @@ pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key
 ## Builder Generation
 
 Use `--enable-builders` when you want to construct generated values through
-setter methods. The generator adds `bon::Builder` derives to schema structs
+setter methods. The generator adds [`bon::Builder`][rustdoc-bon-builder] derives to schema structs
 and `#[builder]` constructors to request structs.
 
 ```text
@@ -1360,8 +1302,8 @@ You can change enum ordering separately with
 
 The generator also uses collection types that preserve insertion order at
 runtime. Maps described by `additionalProperties` use
-`indexmap::IndexMap<String, T>`, and arrays with `uniqueItems: true` use
-`indexmap::IndexSet<T>`. If you include these types in an existing crate, add
+[`indexmap::IndexMap<String, T>`][rustdoc-indexmap-map], and arrays with `uniqueItems: true` use
+[`indexmap::IndexSet<T>`][rustdoc-indexmap-set]. If you include these types in an existing crate, add
 `indexmap` with its `serde` feature to your `Cargo.toml`. A generated workspace
 manifest includes that dependency when needed.
 
@@ -1372,8 +1314,8 @@ Use this flag to choose standard library collections instead:
 ```
 
 Set `--no-ordered-collections` to opt out of the `indexmap` runtime types. Map
-schemas then resolve to `std::collections::HashMap<String, T>`, and
-`uniqueItems` arrays resolve to `Vec<T>`, the same type as a normal array, so
+schemas then resolve to [`std::collections::HashMap<String, T>`][rustdoc-hashmap], and
+`uniqueItems` arrays resolve to [`Vec<T>`][rustdoc-vec], the same type as a normal array, so
 uniqueness is no longer expressed at the type level. Use this flag when your
 code cannot depend on `indexmap`, or when you do not need JSON key and element
 order to survive a deserialize-then-serialize round trip.
@@ -1431,7 +1373,7 @@ pub struct Widget {
 
 ## Flag Summary
 
-This table collects the generation options covered in this chapter. Defaults
+This table collects the options used across the generation chapters. Defaults
 apply when you omit the corresponding option. Run `oas3-gen generate --help`
 to see the command-line help, including input, output, and terminal options.
 
@@ -1450,7 +1392,7 @@ to see the command-line help, including input, output, and terminal options.
 | `--api-name` | *(none)* | Name for the generated client struct or server trait |
 | `--all-headers` | `false` | Emit header constants for all component-level headers |
 | `--enable-builders` | `false` | Enable `bon` builder derives and methods |
-| `--no-ordered-collections` | `false` | Emit `HashMap`/`Vec` instead of `indexmap` collection types |
+| `--no-ordered-collections` | `false` | Emit [`HashMap`][rustdoc-hashmap]/[`Vec`][rustdoc-vec] instead of `indexmap` collection types |
 | `--doc-format` | `false` | Format documentation comments with `mdformat` |
 | `--only` | *(none)* | Include only specified operations |
 | `--exclude` | *(none)* | Exclude specified operations |
@@ -1458,3 +1400,44 @@ to see the command-line help, including input, output, and terminal options.
 
 To work through constructing the generated values, continue to the
 [Builder Pattern](./builders.md) chapter.
+
+[rustdoc-anyhow-result]: https://docs.rs/anyhow/1.0.104/anyhow/type.Result.html
+[rustdoc-bon-builder]: https://docs.rs/bon/3.10.1/bon/derive.Builder.html
+[rustdoc-chrono-date]: https://docs.rs/chrono/0.4.45/chrono/struct.NaiveDate.html
+[rustdoc-chrono-datetime]: https://docs.rs/chrono/0.4.45/chrono/struct.DateTime.html
+[rustdoc-chrono-time]: https://docs.rs/chrono/0.4.45/chrono/struct.NaiveTime.html
+[rustdoc-chrono-utc]: https://docs.rs/chrono/0.4.45/chrono/struct.Utc.html
+[rustdoc-debug]: https://doc.rust-lang.org/std/fmt/trait.Debug.html
+[rustdoc-default]: https://doc.rust-lang.org/std/default/trait.Default.html
+[rustdoc-deserialize-as]: https://docs.rs/serde_with/3.24.0/serde_with/trait.DeserializeAs.html
+[rustdoc-display]: https://doc.rust-lang.org/std/fmt/trait.Display.html
+[rustdoc-duration]: https://doc.rust-lang.org/std/time/struct.Duration.html
+[rustdoc-eq]: https://doc.rust-lang.org/std/cmp/trait.Eq.html
+[rustdoc-expose-secret]: https://docs.rs/secrecy/0.10.3/secrecy/trait.ExposeSecret.html
+[rustdoc-f64]: https://doc.rust-lang.org/std/primitive.f64.html
+[rustdoc-from-str]: https://doc.rust-lang.org/std/str/trait.FromStr.html
+[rustdoc-hash]: https://doc.rust-lang.org/std/hash/trait.Hash.html
+[rustdoc-hashmap]: https://doc.rust-lang.org/std/collections/struct.HashMap.html
+[rustdoc-http-header-map]: https://docs.rs/http/1.5.0/http/header/struct.HeaderMap.html
+[rustdoc-http-header-name]: https://docs.rs/http/1.5.0/http/header/struct.HeaderName.html
+[rustdoc-http-status]: https://docs.rs/http/1.5.0/http/status/struct.StatusCode.html
+[rustdoc-i64]: https://doc.rust-lang.org/std/primitive.i64.html
+[rustdoc-indexmap-map]: https://docs.rs/indexmap/2.14.2/indexmap/map/struct.IndexMap.html
+[rustdoc-indexmap-set]: https://docs.rs/indexmap/2.14.2/indexmap/set/struct.IndexSet.html
+[rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html
+[rustdoc-partial-eq]: https://doc.rust-lang.org/std/cmp/trait.PartialEq.html
+[rustdoc-secret-string]: https://docs.rs/secrecy/0.10.3/secrecy/type.SecretString.html
+[rustdoc-serde-as]: https://docs.rs/serde_with/3.24.0/serde_with/attr.serde_as.html
+[rustdoc-serde-de-error]: https://docs.rs/serde/1.0.229/serde/de/trait.Error.html
+[rustdoc-serde-deserialize]: https://docs.rs/serde/1.0.229/serde/trait.Deserialize.html
+[rustdoc-serde-deserializer]: https://docs.rs/serde/1.0.229/serde/trait.Deserializer.html
+[rustdoc-serde-json-value]: https://docs.rs/serde_json/1.0.151/serde_json/enum.Value.html
+[rustdoc-serde-serialize]: https://docs.rs/serde/1.0.229/serde/trait.Serialize.html
+[rustdoc-serde-serializer]: https://docs.rs/serde/1.0.229/serde/trait.Serializer.html
+[rustdoc-serialize-as]: https://docs.rs/serde_with/3.24.0/serde_with/trait.SerializeAs.html
+[rustdoc-string]: https://doc.rust-lang.org/std/string/struct.String.html
+[rustdoc-u64]: https://doc.rust-lang.org/std/primitive.u64.html
+[rustdoc-unit]: https://doc.rust-lang.org/std/primitive.unit.html
+[rustdoc-uuid]: https://docs.rs/uuid/1.26.1/uuid/struct.Uuid.html
+[rustdoc-validate]: https://docs.rs/validator/0.21.0/validator/trait.Validate.html
+[rustdoc-vec]: https://doc.rust-lang.org/std/vec/struct.Vec.html

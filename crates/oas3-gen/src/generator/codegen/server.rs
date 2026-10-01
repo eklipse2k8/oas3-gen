@@ -1,13 +1,15 @@
 use http::Method;
 use indexmap::IndexMap;
+use itertools::Itertools as _;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use super::Visibility;
 use crate::generator::{
   ast::{
-    ContentCategory, HandlerBodyInfo, OperationResponse, ResponseEnumDef, ResponseParam, ResponsePayload,
-    RustPrimitive, ServerRequestTraitDef, ServerTraitMethod, TraitToken,
+    ApiKeyLocation, ApiKeyScheme, ContentCategory, HandlerBodyInfo, HandlerCredentials, OperationResponse,
+    ResponseEnumDef, ResponseParam, ResponsePayload, RustPrimitive, ServerRequestTraitDef, ServerTraitMethod,
+    TraitToken, tokens::ConstToken,
   },
   codegen::http::HttpStatusCode,
 };
@@ -42,6 +44,12 @@ impl ToTokens for ServerGenerator {
     };
 
     let trait_fragment = ServerTraitFragment::new(def.clone(), self.visibility);
+    let credentials = def
+      .methods
+      .iter()
+      .filter_map(|m| m.credentials.as_ref())
+      .unique_by(|credentials| &credentials.type_name)
+      .map(CredentialsExtractorFragment::new);
 
     let handlers = def
       .methods
@@ -63,6 +71,8 @@ impl ToTokens for ServerGenerator {
       #types_import
 
       #trait_fragment
+
+      #(#credentials)*
 
       #(#handlers)*
 
@@ -94,6 +104,117 @@ impl ToTokens for ServerTraitFragment {
         #(#methods)*
       }
     });
+  }
+}
+
+/// Extracts one credentials struct from the request parts, answering `401` when the
+/// API keys satisfy none of the operation's security requirements.
+///
+/// Handlers take it before the body, so axum refuses the request without reading it.
+#[derive(Clone, Copy, Debug)]
+struct CredentialsExtractorFragment<'a> {
+  credentials: &'a HandlerCredentials,
+}
+
+impl<'a> CredentialsExtractorFragment<'a> {
+  fn new(credentials: &'a HandlerCredentials) -> Self {
+    Self { credentials }
+  }
+}
+
+impl ToTokens for CredentialsExtractorFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let type_name = &self.credentials.type_name;
+    let security = &self.credentials.security;
+
+    let query = security.reads(ApiKeyLocation::Query).then(|| {
+      quote! {
+        let Query(query) = Query::<Vec<(String, String)>>::try_from_uri(&parts.uri).unwrap_or_default();
+      }
+    });
+    let cookies = security.reads(ApiKeyLocation::Cookie).then(|| {
+      quote! { let cookies = axum_extra::extract::CookieJar::from_headers(&parts.headers); }
+    });
+
+    let fields = security.schemes.iter().map(|scheme| {
+      let field = &scheme.field;
+      let value = api_key_value(scheme);
+      if security.requires(field) {
+        let missing = format!("missing API key in {}", scheme.whereabouts());
+        quote! { #field: #value.ok_or((axum::http::StatusCode::UNAUTHORIZED, #missing))? }
+      } else {
+        quote! { #field: #value }
+      }
+    });
+
+    let satisfied = security
+      .unchecked_alternatives()
+      .into_iter()
+      .map(|fields| {
+        let present = fields.iter().map(|field| quote! { credentials.#field.is_some() });
+        if fields.len() > 1 {
+          quote! { (#(#present)&&*) }
+        } else {
+          quote! { #(#present)* }
+        }
+      })
+      .collect::<Vec<_>>();
+
+    let body = if satisfied.is_empty() {
+      quote! { Ok(Self { #(#fields),* }) }
+    } else {
+      let missing = format!("missing {}", security.describe_alternatives());
+      quote! {
+        let credentials = Self { #(#fields),* };
+        if !(#(#satisfied)||*) {
+          return Err((axum::http::StatusCode::UNAUTHORIZED, #missing));
+        }
+        Ok(credentials)
+      }
+    };
+
+    tokens.extend(quote! {
+      impl #type_name {
+        fn from_parts(
+          parts: &axum::http::request::Parts,
+        ) -> Result<Self, (axum::http::StatusCode, &'static str)> {
+          #query
+          #cookies
+          #body
+        }
+      }
+
+      impl<S: Send + Sync> axum::extract::FromRequestParts<S> for #type_name {
+        type Rejection = (axum::http::StatusCode, &'static str);
+
+        fn from_request_parts(
+          parts: &mut axum::http::request::Parts,
+          _state: &S,
+        ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+          std::future::ready(Self::from_parts(parts))
+        }
+      }
+    });
+  }
+}
+
+/// Reads one API key, as an optional `secrecy::SecretString`, from the request part
+/// it travels in.
+fn api_key_value(scheme: &ApiKeyScheme) -> TokenStream {
+  let name = &scheme.parameter_name;
+  match scheme.location {
+    ApiKeyLocation::Header => {
+      let header = ConstToken::from_raw(name);
+      quote! {
+        parts.headers.get(#header).and_then(|value| value.to_str().ok()).map(secrecy::SecretString::from)
+      }
+    }
+    ApiKeyLocation::Query => quote! {
+      query.iter().find(|(name, _)| name == #name).map(|(_, value)| secrecy::SecretString::from(value.as_str()))
+    },
+    ApiKeyLocation::Cookie => quote! {
+      cookies.get(#name).map(|cookie| secrecy::SecretString::from(cookie.value_trimmed()))
+    },
   }
 }
 
@@ -315,6 +436,12 @@ impl ToTokens for ExtractorsFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let mut parts = vec![quote! { State(service): State<S> }];
 
+    if let Some(credentials) = &self.method.credentials {
+      let field = &credentials.field;
+      let credentials_type = &credentials.type_name;
+      parts.push(quote! { #field: #credentials_type });
+    }
+
     if let Some(path_type) = &self.method.path_params_type {
       parts.push(quote! { Path(path): Path<#path_type> });
     }
@@ -427,6 +554,11 @@ impl ToTokens for RequestConstructionFragment {
     });
     if header.is_some() {
       field_assignments.push(quote! { header });
+    }
+
+    if let Some(credentials) = &self.method.credentials {
+      let field = &credentials.field;
+      field_assignments.push(quote! { #field });
     }
 
     if let Some(body_info) = &self.method.body_info {

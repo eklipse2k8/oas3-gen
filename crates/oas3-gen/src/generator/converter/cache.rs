@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use indexmap::IndexMap;
 use oas3::spec::ObjectSchema;
@@ -6,7 +6,7 @@ use oas3::spec::ObjectSchema;
 use super::hashing::CanonicalSchema;
 use crate::{
   generator::{
-    ast::{EnumToken, RustType, StructDef, StructToken, TypeRef},
+    ast::{EnumToken, OperationSecurity, RustType, StructDef, StructToken, TypeRef},
     naming::{
       identifiers::{ensure_unique, to_rust_type_name},
       name_index::SchemaPrecomputed,
@@ -172,6 +172,13 @@ impl UnionRegistry {
   }
 }
 
+/// Credentials struct names keyed by the security they enforce, so operations that
+/// accept the same API keys share one definition.
+#[derive(Default, Debug, Clone)]
+struct CredentialsRegistry {
+  by_security: HashMap<OperationSecurity, StructToken>,
+}
+
 #[derive(Default, Debug, Clone)]
 pub(crate) struct TypeCollector {
   pub(crate) types: Vec<RustType>,
@@ -262,6 +269,7 @@ pub(crate) struct SharedSchemaCache {
   type_refs: TypeRefRegistry,
   schema_names: SchemaNameRegistry,
   union_fingerprints: UnionFingerprints,
+  credentials: CredentialsRegistry,
 }
 
 impl SharedSchemaCache {
@@ -277,6 +285,7 @@ impl SharedSchemaCache {
       type_refs: TypeRefRegistry::default(),
       schema_names: SchemaNameRegistry::default(),
       union_fingerprints: UnionFingerprints::new(),
+      credentials: CredentialsRegistry::default(),
     }
   }
 
@@ -466,6 +475,16 @@ impl SharedSchemaCache {
   /// Takes all accumulated type definitions, leaving the cache empty for reuse.
   pub(crate) fn take_types(&mut self) -> Vec<RustType> {
     self.types.take_types()
+  }
+
+  /// Returns the credentials struct registered for `security`, or `None` if none has been.
+  pub(crate) fn credentials_type(&self, security: &OperationSecurity) -> Option<&StructToken> {
+    self.credentials.by_security.get(security)
+  }
+
+  /// Records the credentials struct name for `security`.
+  pub(crate) fn register_credentials(&mut self, security: OperationSecurity, name: StructToken) {
+    self.credentials.by_security.insert(security, name);
   }
 
   /// Stores a struct definition indexed by type name for later retrieval when

@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod api_key_security;
 pub mod common;
 #[cfg(feature = "eventsource")]
 #[cfg(test)]

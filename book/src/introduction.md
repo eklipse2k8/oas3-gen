@@ -2,8 +2,8 @@
 
 Welcome to the `oas3-gen` book. `oas3-gen` reads an OpenAPI 3.1 specification
 and generates Rust code for the API it describes. You can generate types to use
-in your own code, an HTTP client built on `reqwest`, or a server trait and router
-built on Axum.
+in your own code, an HTTP client built on [`reqwest::Client`][rustdoc-reqwest-client], or a server trait
+with an [`axum::Router`][rustdoc-axum-router].
 
 This book assumes you're familiar with Rust structs, enums, and Cargo. We'll
 look at the generated code and work through the options that change it. You
@@ -13,15 +13,21 @@ don't need to know how the generator itself is implemented.
 
 An OpenAPI document describes an API's operations and the data they accept and
 return. `oas3-gen` uses those descriptions to create Rust structs, enums, and
-type aliases. It also generates Serde implementations for serialization and
-deserialization where the types need them, along with validation for supported
-schema constraints.
+type aliases. It also generates [`serde::Serialize`][rustdoc-serde-serialize] and [`serde::Deserialize`][rustdoc-serde-deserialize] implementations
+where the types need them, along with validation for supported schema
+constraints.
 
 You can start with type generation and add a client or server as your project
-needs it. The [Code Generation](./code-generation.md) chapter explains those
-choices, then covers response handling, type customization, and filtering. The
-[Builder Pattern](./builders.md) chapter shows how to construct generated values
-with the optional `bon` integration.
+needs it. [Client Generation](./client-generation.md) walks through calling an
+API, reading responses, and sending API keys. [Server Generation](./server-generation.md)
+shows how to implement a service, connect its router, and check incoming
+credentials.
+
+[Shared Generation Options](./code-generation.md) explains type generation,
+response shapes, security requirements, and flags that apply to both targets.
+The [Builder Pattern](./builders.md) chapter shows how to construct generated
+values with the optional `bon` integration. You can follow the client or server
+chapter first and refer to the shared options as you need them.
 
 ## Features
 
@@ -31,7 +37,8 @@ The generator supports several parts of working with an OpenAPI description:
   described with `oneOf`, `anyOf`, and discriminators.
 - Call API operations through an asynchronous `reqwest` client.
 - Implement a generated server trait and connect it to an Axum router.
-- Check supported field constraints with the `validator` crate.
+- Send and receive API keys declared by `apiKey` security schemes.
+- Check supported field constraints with [`validator::Validate`][rustdoc-validate].
 - Construct schema values and requests with builders by passing
   `--enable-builders`.
 
@@ -98,6 +105,8 @@ oas3-gen generate server-mod -i api.json -o src/server/
 
 The server output contains `types.rs`, `server.rs`, and `mod.rs`. You'll
 implement the generated trait to provide the behavior of each API operation.
+Continue with [Client Generation](./client-generation.md) to call an API or
+[Server Generation](./server-generation.md) to implement one.
 
 These commands generate source files to include in a Rust project. To generate
 an accompanying `Cargo.toml`, add `--workspace` to either module mode. See
@@ -113,3 +122,9 @@ JSON; the same generation options apply to YAML input.
 ## License
 
 `oas3-gen` is available under the MIT license.
+
+[rustdoc-axum-router]: https://docs.rs/axum/0.8.9/axum/struct.Router.html
+[rustdoc-reqwest-client]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html
+[rustdoc-serde-deserialize]: https://docs.rs/serde/1.0.229/serde/trait.Deserialize.html
+[rustdoc-serde-serialize]: https://docs.rs/serde/1.0.229/serde/trait.Serialize.html
+[rustdoc-validate]: https://docs.rs/validator/0.21.0/validator/trait.Validate.html

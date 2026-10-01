@@ -117,6 +117,8 @@ pub enum GenerationWarning {
   OperationSpecific { operation_id: String, message: String },
   #[strum(to_string = "Schema '{schema_name}': {message}")]
   DiscriminatorMappingFailed { schema_name: String, message: String },
+  #[strum(to_string = "Security scheme '{scheme_name}' gets no credentials: {reason}")]
+  UnsupportedSecurityScheme { scheme_name: String, reason: String },
 }
 
 impl GenerationWarning {

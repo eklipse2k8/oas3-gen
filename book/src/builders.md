@@ -12,7 +12,7 @@ required field is set and validating the value of that field.
 The examples use a small pet API. The `Pet` below has four fields; your generated
 types will reflect the fields in your own specification. Code excerpts omit
 imports and unrelated attributes. Put construction examples inside a function;
-examples that use `?` need a compatible return type, such as `anyhow::Result<()>`.
+examples that use `?` need a compatible return type, such as [`anyhow::Result<()>`][rustdoc-anyhow-result].
 
 Let's begin with a struct literal:
 
@@ -49,7 +49,7 @@ oas3-gen generate client-mod -i api.json -o src/api/ --enable-builders
 
 You can use this flag with any generation mode: `types`, `client`, `client-mod`,
 or `server-mod`. The generated code uses the
-[`bon`](https://docs.rs/bon/3.10.0/bon/) crate to create the builder methods.
+[`bon`](https://docs.rs/bon/3.10.1/bon/) crate to create the builder methods.
 
 ## Adding `bon` to Your Project
 
@@ -69,7 +69,7 @@ for you. See [Workspace Crate Output](./code-generation.md#workspace-crate-outpu
 ## What Changes in the Generated Code
 
 The generator adds builders in two places. Schema structs receive a
-`bon::Builder` derive. Request structs receive a constructor with a `#[builder]`
+[`bon::Builder`][rustdoc-bon-builder] derive. Request structs receive a constructor with a `#[builder]`
 attribute. These produce similar method chains, but their `build()` methods
 have different return types.
 
@@ -88,7 +88,7 @@ pub struct Pet {
 }
 ```
 
-With `--enable-builders`, the generator adds `bon::Builder` to the derives:
+With `--enable-builders`, the generator adds [`bon::Builder`][rustdoc-bon-builder] to the derives:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Deserialize, bon::Builder)]
@@ -111,14 +111,15 @@ let pet = Pet::builder()
     .build();
 ```
 
-Notice that `tag()` accepts a `String`. The builder wraps it in `Some` for us.
+Notice that `tag()` accepts a [`String`][rustdoc-string]. The builder wraps it in `Some` for us.
 If we leave out that call, `tag` is `None`, as in our first example. The
-`allergies` field is also `None` because we haven't set it.
+`allergies` field holds a [`Box<Health>`][rustdoc-box] when set; here, it is `None` because we
+haven't set it.
 
 Here, `build()` returns a `Pet` directly. The derive does not call
-`validator::Validate::validate()`. If a schema type has generated validation
+[`validator::Validate::validate()`][rustdoc-validate-method]. If a schema type has generated validation
 and you need to check its constraints, call `validate()` on the constructed
-value with the `validator::Validate` trait in scope.
+value with the [`validator::Validate`][rustdoc-validate] trait in scope.
 
 ### Request Structs
 
@@ -135,7 +136,7 @@ pub struct ShowPetByIdRequest {
 
 With builders enabled, the generator adds a constructor that accepts the
 individual parameters and assembles those nested structs. This excerpt shows
-the constructor; the generated request also derives `validator::Validate` and
+the constructor; the generated request also derives [`validator::Validate`][rustdoc-validate] and
 marks the nested fields for validation:
 
 ```rust
@@ -154,14 +155,22 @@ impl ShowPetByIdRequest {
 }
 ```
 
-The `#[builder]` attribute creates setters for `pet_id` and `x_api_version`.
+The [`#[bon::bon]`][rustdoc-bon-attr] macro processes the constructor's `#[builder]` attribute,
+creating setters for `pet_id` and `x_api_version`.
 Calling `build()` calls this constructor, including `request.validate()`.
-That's why a request builder returns a `Result` and the schema builder above
+That's why a request builder returns a [`Result`][rustdoc-result] and the schema builder above
 returns its value directly.
 
 The same approach applies to requests with query parameters or optional
 headers: their constructor parameters become builder setters. For an
-`Option<T>` parameter, you can supply a `T` or omit the setter to use `None`.
+[`Option<T>`][rustdoc-option] parameter, you can supply a `T` or omit the setter to use `None`.
+
+Server requests can also contain credentials for API key authentication.
+Their builders accept a complete credentials struct through the `credentials()`
+setter. Building the request doesn't check whether a key is authorized; your
+service performs that check. See
+[Constructing Requests in Tests](./server-generation.md#constructing-requests-in-tests)
+for an example and how it differs from HTTP extraction.
 
 ## A Side-by-Side Comparison
 
@@ -276,3 +285,13 @@ You can still use struct literals when builders are enabled. Choose a builder
 when setting fields by name or constructing nested requests helps your code,
 and use a literal when you want to show the whole value in one place. If you
 don't need builders, leave `--enable-builders` off to avoid the `bon` dependency.
+
+[rustdoc-anyhow-result]: https://docs.rs/anyhow/1.0.104/anyhow/type.Result.html
+[rustdoc-bon-attr]: https://docs.rs/bon/3.10.1/bon/attr.bon.html
+[rustdoc-bon-builder]: https://docs.rs/bon/3.10.1/bon/derive.Builder.html
+[rustdoc-box]: https://doc.rust-lang.org/std/boxed/struct.Box.html
+[rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html
+[rustdoc-result]: https://doc.rust-lang.org/std/result/enum.Result.html
+[rustdoc-string]: https://doc.rust-lang.org/std/string/struct.String.html
+[rustdoc-validate]: https://docs.rs/validator/0.21.0/validator/trait.Validate.html
+[rustdoc-validate-method]: https://docs.rs/validator/0.21.0/validator/trait.Validate.html#tymethod.validate

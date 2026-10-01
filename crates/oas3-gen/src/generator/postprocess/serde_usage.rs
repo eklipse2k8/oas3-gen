@@ -228,7 +228,10 @@ impl SerdeUsage {
         let key: EnumToken = def.name.as_str().into();
         self.get_usage(&key).to_serde_mode(self.target)
       }
-      StructKind::OperationRequest | StructKind::HeaderParams | StructKind::ResponseHeaders => SerdeMode::None,
+      StructKind::OperationRequest
+      | StructKind::HeaderParams
+      | StructKind::ResponseHeaders
+      | StructKind::Credentials => SerdeMode::None,
       StructKind::PathParams => match self.target {
         GenerationTarget::Server => SerdeMode::DeserializeOnly,
         GenerationTarget::Client => SerdeMode::None,

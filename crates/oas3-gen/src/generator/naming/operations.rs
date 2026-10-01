@@ -1,6 +1,10 @@
+use std::collections::HashSet;
+
+use itertools::Itertools as _;
+
 use crate::generator::naming::{
-  constants::{REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX},
-  identifiers::{split_snake_case, to_rust_field_name, to_rust_type_name},
+  constants::{CREDENTIALS_FIELD, CREDENTIALS_SEPARATOR, CREDENTIALS_SUFFIX, REQUEST_PARAMS_SUFFIX, REQUEST_SUFFIX},
+  identifiers::{ensure_unique_snake_case_id, split_snake_case, to_rust_field_name, to_rust_type_name},
   inference::{all_non_empty_and_unique, common_prefix_len, common_suffix_len, extract_middle_segments},
 };
 
@@ -16,6 +20,34 @@ where
   }
 
   request_name
+}
+
+/// Names the struct that holds the API keys an operation accepts, e.g.
+/// `QueryKeyAndSessionCookieCredentials`, before it is made unique.
+///
+/// `schemes` are security scheme names in declaration order.
+pub(crate) fn credentials_name<'a>(schemes: impl IntoIterator<Item = &'a str>) -> String {
+  let base = schemes.into_iter().map(to_rust_type_name).join(CREDENTIALS_SEPARATOR);
+  format!("{base}{CREDENTIALS_SUFFIX}")
+}
+
+/// Names the request field that holds an operation's credentials, avoiding the
+/// parameter names that `--enable-builders` flattens into the same constructor.
+pub(crate) fn credentials_field_name(parameters: &[&str]) -> String {
+  ensure_unique_snake_case_id(CREDENTIALS_FIELD, |id| parameters.contains(&id))
+}
+
+/// Assigns each security scheme a distinct field name, avoiding `reserved` names,
+/// e.g. `ApiKey` and `api_key` become `api_key` and `api_key_2`.
+pub(crate) fn credential_field_names<'a>(schemes: impl IntoIterator<Item = &'a str>, reserved: &[&str]) -> Vec<String> {
+  let mut taken = reserved.iter().map(ToString::to_string).collect::<HashSet<_>>();
+  let mut fields = vec![];
+  for scheme in schemes {
+    let field = ensure_unique_snake_case_id(&to_rust_field_name(scheme), |id| taken.contains(id));
+    taken.insert(field.clone());
+    fields.push(field);
+  }
+  fields
 }
 
 /// Simplifies operation IDs by stripping common prefix and suffix segments.

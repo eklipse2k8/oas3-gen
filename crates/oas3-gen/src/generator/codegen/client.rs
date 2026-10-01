@@ -1,13 +1,15 @@
 use anyhow::Context as _;
 use http::Method;
+use itertools::Itertools;
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::LitStr;
 
 use super::Visibility;
 use crate::generator::ast::{
-  ClientRootNode, ContentCategory, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody, OperationInfo,
-  OperationKind, OperationResponse, ParameterLocation, ParsedPath, StructToken,
+  ApiKeyLocation, ApiKeyScheme, ClientRootNode, ContentCategory, Documentation, FieldDef, FieldNameToken,
+  MultipartFieldInfo, OperationBody, OperationInfo, OperationKind, OperationResponse, OperationSecurity,
+  ParameterLocation, ParsedPath, StructToken, tokens::ConstToken,
 };
 
 #[derive(Clone, Debug)]
@@ -421,6 +423,46 @@ impl ToTokens for UrlConstructionFragment {
   }
 }
 
+/// Attaches the header and query API keys configured on the client to an operation
+/// that accepts them, as statements on `req_builder`. Cookie keys live in the client's
+/// cookie store, which `reqwest` reads on every request.
+///
+/// A key that isn't configured is left off, and the server decides.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CredentialsFragment<'a> {
+  security: &'a OperationSecurity,
+}
+
+impl<'a> CredentialsFragment<'a> {
+  pub(crate) fn new(security: &'a OperationSecurity) -> Self {
+    Self { security }
+  }
+}
+
+impl ToTokens for CredentialsFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    for scheme in &self.security.schemes {
+      let field = &scheme.field;
+      let name = &scheme.parameter_name;
+      let attach = match scheme.location {
+        ApiKeyLocation::Header => {
+          let header = ConstToken::from_raw(name);
+          quote! { req_builder.header(#header, secrecy::ExposeSecret::expose_secret(api_key)) }
+        }
+        ApiKeyLocation::Query => quote! {
+          req_builder.query(&[(#name, secrecy::ExposeSecret::expose_secret(api_key))])
+        },
+        ApiKeyLocation::Cookie => continue,
+      };
+      tokens.extend(quote! {
+        if let Some(api_key) = &self.#field {
+          req_builder = #attach;
+        }
+      });
+    }
+  }
+}
+
 #[derive(Clone)]
 enum ResponseKind {
   Enum {
@@ -547,16 +589,33 @@ impl ClientMethodFragment {
     let query_chain = QueryParamsFragment::new(&self.op.parameters);
     let header_chain = HeaderParamsFragment::new(&self.op.parameters);
     let body_fragment = RequestBodyFragment::new(self.op.body.as_ref());
+    let credentials = self
+      .op
+      .security
+      .as_ref()
+      .filter(|security| {
+        security
+          .schemes
+          .iter()
+          .any(|scheme| scheme.location != ApiKeyLocation::Cookie)
+      })
+      .map(CredentialsFragment::new);
     let response_fragment = ResponseParsingFragment::new(&self.op);
 
     let vis = self.visibility.to_tokens();
     let return_type = response_fragment.success_type();
     let parse_block = response_fragment.parse_body();
 
-    let request_chain = if body_fragment.needs_conditional() {
+    let request_chain = if body_fragment.needs_conditional() || credentials.is_some() {
+      let (body_chain, body_statements) = if body_fragment.needs_conditional() {
+        (None, Some(&body_fragment))
+      } else {
+        (Some(&body_fragment), None)
+      };
       quote! {
-        let mut req_builder = #http_init #query_chain #header_chain;
-        #body_fragment
+        let mut req_builder = #http_init #query_chain #header_chain #body_chain;
+        #credentials
+        #body_statements
         let response = req_builder.send().await?;
       }
     } else {
@@ -580,28 +639,86 @@ impl ClientMethodFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ClientStructFragment {
+pub(crate) struct ClientStructFragment<'a> {
   name: StructToken,
+  api_keys: &'a [&'a ApiKeyScheme],
   visibility: Visibility,
 }
 
-impl ClientStructFragment {
-  pub(crate) fn new(name: StructToken, visibility: Visibility) -> Self {
-    Self { name, visibility }
+impl<'a> ClientStructFragment<'a> {
+  pub(crate) fn new(name: StructToken, api_keys: &'a [&'a ApiKeyScheme], visibility: Visibility) -> Self {
+    Self {
+      name,
+      api_keys,
+      visibility,
+    }
   }
 }
 
-impl ToTokens for ClientStructFragment {
+impl ToTokens for ClientStructFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = &self.name;
     let vis = self.visibility.to_tokens();
+    let api_keys = self
+      .api_keys
+      .iter()
+      .filter(|scheme| scheme.location != ApiKeyLocation::Cookie)
+      .collect::<Vec<_>>();
+    let api_key_fields = api_keys.iter().map(|scheme| {
+      let field = &scheme.field;
+      let docs = Documentation::from_lines([format!(
+        "`{}` API key, sent in {}.",
+        scheme.scheme_name,
+        scheme.whereabouts()
+      )]);
+      quote! {
+        #docs
+        #vis #field: Option<secrecy::SecretString>,
+      }
+    });
+
+    let has_cookies = api_keys.len() < self.api_keys.len();
+    let derives = if has_cookies {
+      quote! { #[derive(Clone)] }
+    } else {
+      quote! { #[derive(Debug, Clone)] }
+    };
+    let cookies_field = has_cookies.then(|| {
+      quote! {
+        /// Cookie API keys, which `client` sends with every request to the host of `base_url`.
+        #vis cookies: std::sync::Arc<reqwest_cookie_store::CookieStoreMutex>,
+      }
+    });
+    let debug_impl = has_cookies.then(|| {
+      let label = name.to_string();
+      let fields = api_keys.iter().map(|scheme| {
+        let field = &scheme.field;
+        let field_label = field.as_str().trim_start_matches("r#");
+        quote! { .field(#field_label, &self.#field) }
+      });
+      quote! {
+        impl core::fmt::Debug for #name {
+          fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.debug_struct(#label)
+              .field("client", &self.client)
+              .field("base_url", &self.base_url)
+              #(#fields)*
+              .finish_non_exhaustive()
+          }
+        }
+      }
+    });
 
     let ts = quote! {
-      #[derive(Debug, Clone)]
+      #derives
       #vis struct #name {
         #vis client: Client,
         #vis base_url: Url,
+        #cookies_field
+        #(#api_key_fields)*
       }
+
+      #debug_impl
     };
 
     tokens.extend(ts);
@@ -636,44 +753,123 @@ impl ToTokens for ClientDefaultImplFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ClientConstructorsFragment {
+pub(crate) struct ClientConstructorsFragment<'a> {
+  api_keys: &'a [&'a ApiKeyScheme],
   visibility: Visibility,
 }
 
-impl ClientConstructorsFragment {
-  pub(crate) fn new(visibility: Visibility) -> Self {
-    Self { visibility }
+impl<'a> ClientConstructorsFragment<'a> {
+  pub(crate) fn new(api_keys: &'a [&'a ApiKeyScheme], visibility: Visibility) -> Self {
+    Self { api_keys, visibility }
   }
 }
 
-impl ToTokens for ClientConstructorsFragment {
+impl ToTokens for ClientConstructorsFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let vis = self.visibility.to_tokens();
+    let unset = self
+      .api_keys
+      .iter()
+      .filter(|scheme| scheme.location != ApiKeyLocation::Cookie)
+      .map(|scheme| {
+        let field = &scheme.field;
+        quote! { #field: None, }
+      });
+    let unset = quote! { #(#unset)* };
+    let setters = self.api_keys.iter().map(|scheme| {
+      let field = &scheme.field;
+      let setter = format_ident!("with_{}", field.as_str().trim_start_matches("r#"));
+      if scheme.location == ApiKeyLocation::Cookie {
+        let name = &scheme.parameter_name;
+        let docs = Documentation::from_lines([
+          format!(
+            "Set the `{}` API key, sent in {} with every request to the host of `base_url`.",
+            scheme.scheme_name,
+            scheme.whereabouts()
+          ),
+          String::new(),
+          "The key goes into `cookies`, which clones of this client share.".to_string(),
+        ]);
+        return quote! {
+          #docs
+          #[must_use]
+          #vis fn #setter(self, api_key: impl Into<String>) -> Self {
+            let cookie = reqwest_cookie_store::RawCookie::new(#name, api_key.into());
+            let _ = self
+              .cookies
+              .lock()
+              .unwrap_or_else(std::sync::PoisonError::into_inner)
+              .insert_raw(&cookie, &self.base_url);
+            self
+          }
+        };
+      }
+      let docs = Documentation::from_lines([format!(
+        "Set the `{}` API key, sent in {} to operations that accept it.",
+        scheme.scheme_name,
+        scheme.whereabouts()
+      )]);
+      quote! {
+        #docs
+        #[must_use]
+        #vis fn #setter(mut self, api_key: impl Into<String>) -> Self {
+          self.#field = Some(secrecy::SecretString::from(api_key.into()));
+          self
+        }
+      }
+    });
+
+    let has_cookies = self
+      .api_keys
+      .iter()
+      .any(|scheme| scheme.location == ApiKeyLocation::Cookie);
+    let new_cookies = has_cookies.then(|| {
+      quote! { let cookies = std::sync::Arc::new(reqwest_cookie_store::CookieStoreMutex::default()); }
+    });
+    let cookie_provider = has_cookies.then(|| quote! { .cookie_provider(std::sync::Arc::clone(&cookies)) });
+    let cookies_field = has_cookies.then(|| quote! { cookies, });
+    let empty_cookies = has_cookies.then(|| quote! { cookies: std::sync::Arc::default(), });
+    let with_client_docs = has_cookies.then(|| {
+      quote! {
+        ///
+        /// Cookie API keys go into a new `cookies` store, which `client` doesn't read. To
+        /// send them, rebuild `client` with `cookie_provider(Arc::clone(&cookies))`.
+      }
+    });
 
     let ts = quote! {
       /// Create a client using the OpenAPI `servers[0]` URL.
       #[must_use]
       #[track_caller]
       #vis fn new() -> Self {
+        #new_cookies
         Self {
-          client: Client::builder().build().expect("client"),
+          client: Client::builder() #cookie_provider .build().expect("client"),
           base_url: Url::parse(BASE_URL).expect("valid base url"),
+          #cookies_field
+          #unset
         }
       }
 
       /// Create a client with a custom base URL.
       #vis fn with_base_url(base_url: impl AsRef<str>) -> anyhow::Result<Self> {
+        #new_cookies
         Ok(Self {
-          client: Client::builder().build().context("building reqwest client")?,
+          client: Client::builder() #cookie_provider .build().context("building reqwest client")?,
           base_url: Url::parse(base_url.as_ref()).context("parsing base url")?,
+          #cookies_field
+          #unset
         })
       }
 
       /// Create a client from an existing `reqwest::Client`.
+      #with_client_docs
       #vis fn with_client(base_url: impl AsRef<str>, client: Client) -> anyhow::Result<Self> {
         let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
-        Ok(Self { client, base_url: url })
+        Ok(Self { client, base_url: url, #empty_cookies #unset })
       }
+
+      #(#setters)*
     };
 
     tokens.extend(ts);
@@ -722,9 +918,18 @@ impl ToTokens for ClientFragment {
       quote! {}
     };
 
-    let client_struct = ClientStructFragment::new(client_ident.clone(), self.visibility);
+    let api_keys = self
+      .operations
+      .iter()
+      .filter(|op| op.kind == OperationKind::Http)
+      .filter_map(|op| op.security.as_ref())
+      .flat_map(|security| &security.schemes)
+      .unique_by(|scheme| &scheme.field)
+      .collect::<Vec<_>>();
+
+    let client_struct = ClientStructFragment::new(client_ident.clone(), &api_keys, self.visibility);
     let default_impl = ClientDefaultImplFragment::new(client_ident.clone());
-    let constructors = ClientConstructorsFragment::new(self.visibility);
+    let constructors = ClientConstructorsFragment::new(&api_keys, self.visibility);
 
     quote! {
       use anyhow::Context;

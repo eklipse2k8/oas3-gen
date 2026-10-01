@@ -79,6 +79,14 @@ pub(super) fn make_orchestrator_with_api_name(spec: Spec, api_name: &str, target
   Orchestrator::new(spec, Visibility::default(), config, None, None)
 }
 
+pub(super) fn make_server_orchestrator(spec: Spec) -> Orchestrator {
+  let config = CodegenConfig::builder()
+    .target(GenerationTarget::Server)
+    .enable_builders(true)
+    .build();
+  Orchestrator::new(spec, Visibility::default(), config, None, None)
+}
+
 pub(super) fn generate_types(orchestrator: &Orchestrator, source_path: &str) -> GeneratedTypes {
   let output = orchestrator
     .generate(&TypesMode, source_path)

@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use super::support::{
   assert_contains, assert_contains_all, assert_not_contains, assert_occurs_at_least, generate_client, generate_server,
   generate_types, make_orchestrator, make_orchestrator_with_api_name, make_orchestrator_with_customizations,
-  make_orchestrator_with_fn_name_overrides, make_orchestrator_with_ops, parse_spec, string_set,
+  make_orchestrator_with_fn_name_overrides, make_orchestrator_with_ops, make_server_orchestrator, parse_spec,
+  string_set,
 };
-use crate::generator::{GenerationTarget, ast::ApiMetadata};
+use crate::generator::{GenerationTarget, ServerModMode, ast::ApiMetadata};
 
 type PresenceCheck<'a> = (&'a str, usize, &'a str);
 type AbsenceCheck<'a> = (&'a str, &'a str);
@@ -272,6 +273,214 @@ fn test_api_name_overrides_server_trait_name() {
     "ApiServer",
     "default trait name should not appear when overridden",
   );
+}
+
+#[test]
+fn unsupported_security_schemes_warn_once_each() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Mixed Auth", "version": "1.0.0" },
+    "security": [{ "BearerAuth": [] }],
+    "paths": {
+      "/a": { "get": { "operationId": "a", "responses": { "204": { "description": "ok" } } } },
+      "/b": { "get": { "operationId": "b", "responses": { "204": { "description": "ok" } } } },
+      "/c": {
+        "get": {
+          "operationId": "c",
+          "security": [{ "Missing": [] }, { "ApiKeyAuth": [] }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      }
+    },
+    "components": {
+      "securitySchemes": {
+        "BearerAuth": { "type": "http", "scheme": "bearer" },
+        "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
+      }
+    }
+  }"#;
+
+  let output = make_server_orchestrator(parse_spec(spec_json))
+    .generate(&ServerModMode::default(), "test.json")
+    .expect("server generation should succeed");
+  let warnings = output
+    .stats
+    .warnings
+    .iter()
+    .map(ToString::to_string)
+    .collect::<Vec<_>>();
+  assert_eq!(
+    warnings,
+    [
+      "Security scheme 'BearerAuth' gets no credentials: only `apiKey` schemes are generated, and it has type `http`",
+      "Security scheme 'Missing' gets no credentials: it is not declared in `components.securitySchemes`",
+    ],
+    "each unsupported scheme should warn once"
+  );
+}
+
+#[test]
+fn credentials_struct_names_avoid_schema_names() {
+  let spec_json = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "Collisions", "version": "1.0.0" },
+    "security": [{ "ApiKeyAuth": [] }],
+    "paths": {
+      "/creds": {
+        "get": {
+          "operationId": "getCreds",
+          "responses": {
+            "200": {
+              "description": "ok",
+              "content": {
+                "application/json": { "schema": { "$ref": "#/components/schemas/ApiKeyAuthCredentials" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "securitySchemes": { "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" } },
+      "schemas": {
+        "ApiKeyAuthCredentials": { "type": "object", "properties": { "label": { "type": "string" } } }
+      }
+    }
+  }"##;
+
+  let types = generate_types(&make_server_orchestrator(parse_spec(spec_json)), "test.json").code;
+  assert_contains_all(
+    &types,
+    &[
+      ("pub struct ApiKeyAuthCredentials {", "the schema keeps its name"),
+      (
+        "pub struct ApiKeyAuthCredentials2 {",
+        "the credentials struct takes a suffix",
+      ),
+      (
+        "pub credentials: ApiKeyAuthCredentials2,",
+        "the request holds the credentials struct",
+      ),
+    ],
+  );
+}
+
+#[test]
+fn api_key_edge_cases_keep_credentials_usable() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Edge Cases", "version": "1.0.0" },
+    "paths": {
+      "/mixed": {
+        "get": {
+          "operationId": "mixed",
+          "security": [{ "ApiKeyAuth": [], "BearerAuth": [] }],
+          "parameters": [{ "name": "credentials", "in": "query", "schema": { "type": "string" } }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      },
+      "/cookies": {
+        "get": {
+          "operationId": "cookies",
+          "security": [{ "CookieA": [], "CookieB": [] }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      },
+      "/forward": {
+        "get": {
+          "operationId": "forward",
+          "security": [{ "Client": [] }, { "CookieA": [] }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      },
+      "/reverse": {
+        "get": {
+          "operationId": "reverse",
+          "security": [{ "CookieA": [] }, { "Client": [] }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      }
+    },
+    "components": {
+      "securitySchemes": {
+        "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" },
+        "BearerAuth": { "type": "http", "scheme": "bearer" },
+        "Client": { "type": "apiKey", "in": "header", "name": "X-Client" },
+        "CookieA": { "type": "apiKey", "in": "cookie", "name": "a" },
+        "CookieB": { "type": "apiKey", "in": "cookie", "name": "b" }
+      }
+    }
+  }"#;
+
+  let client = generate_client(&make_orchestrator(parse_spec(spec_json), false), "test.json");
+  assert_contains_all(
+    &client,
+    &[
+      (
+        "pub api_key_auth: Option<secrecy::SecretString>,",
+        "an API key paired with an unsupported scheme stays on the client",
+      ),
+      (
+        "pub client_2: Option<secrecy::SecretString>,",
+        "a scheme named after a client member takes a suffix",
+      ),
+      (
+        "pub cookies: std::sync::Arc<reqwest_cookie_store::CookieStoreMutex>,",
+        "cookie keys live in a reqwest cookie store",
+      ),
+      (
+        ".cookie_provider(std::sync::Arc::clone(&cookies))",
+        "the reqwest client reads the cookie store",
+      ),
+      ("RawCookie::new(\"a\", api_key.into())", "the first cookie key"),
+      ("RawCookie::new(\"b\", api_key.into())", "the second cookie key"),
+      (".finish_non_exhaustive()", "Debug skips the cookie store"),
+    ],
+  );
+  assert_not_contains(
+    &client,
+    "reqwest::header::COOKIE",
+    "requests leave the Cookie header to reqwest",
+  );
+
+  let server = make_server_orchestrator(parse_spec(spec_json));
+  let server_types = generate_types(&server, "test.json").code;
+  assert_contains_all(
+    &server_types,
+    &[
+      (
+        "pub api_key_auth: Option<secrecy::SecretString>,",
+        "an API key paired with an unsupported scheme is optional",
+      ),
+      (
+        "pub credentials_2: ApiKeyAuthCredentials,",
+        "the credentials field avoids a parameter named credentials",
+      ),
+      (
+        "pub struct ClientAndCookieACredentials {",
+        "reordered alternatives share one struct",
+      ),
+      (
+        "pub client: Option<secrecy::SecretString>,",
+        "server fields don't avoid client members",
+      ),
+    ],
+  );
+  for absent in [
+    "ClientAndCookieACredentials2",
+    "CookieAAndClientCredentials",
+    "client_2",
+  ] {
+    assert_not_contains(&server_types, absent, "canonical server credentials");
+  }
+
+  let server_code = generate_server(&server, "test.json");
+  assert_contains(
+    &server_code,
+    "credentials_2: ApiKeyAuthCredentials,",
+    "the handler extracts the renamed credentials field",
+  );
+  assert_not_contains(&server_code, "fn reject", "handlers use axum's rejections");
 }
 
 #[test]

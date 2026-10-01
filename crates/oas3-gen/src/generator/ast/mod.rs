@@ -7,6 +7,7 @@ pub mod fields;
 pub mod lints;
 mod outer_attrs;
 mod parsed_path;
+mod security;
 pub(super) mod serde_attrs;
 pub(crate) mod server;
 mod status_codes;
@@ -34,9 +35,10 @@ pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
+pub use security::{ApiKeyLocation, ApiKeyScheme, OperationSecurity};
 pub use serde_attrs::SerdeAttribute;
 use serde_json::Value;
-pub use server::{HandlerBodyInfo, ServerRequestTraitDef, ServerTraitMethod};
+pub use server::{HandlerBodyInfo, HandlerCredentials, ServerRequestTraitDef, ServerTraitMethod};
 pub use status_codes::StatusCodeToken;
 pub use tokens::{
   DefaultAtom, EnumToken, EnumVariantToken, FieldNameToken, MethodNameToken, StructToken, TraitToken, TypeAliasToken,
@@ -434,6 +436,8 @@ pub struct OperationInfo {
   #[builder(default)]
   pub parameters: Vec<FieldDef>,
   pub body: Option<OperationBody>,
+  pub security: Option<OperationSecurity>,
+  pub credentials_type: Option<StructToken>,
   #[builder(default)]
   pub documentation: Documentation,
 }
@@ -445,10 +449,17 @@ impl OperationInfo {
       .iter()
       .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)));
     let response_headers = self.response_variants.iter().flatten().flat_map(|v| &v.headers);
+    let api_key_headers = self
+      .security
+      .iter()
+      .flat_map(|security| &security.schemes)
+      .filter(|scheme| scheme.location == ApiKeyLocation::Header)
+      .map(|scheme| scheme.parameter_name.as_str());
 
     request_headers
       .chain(response_headers)
       .filter_map(|field| field.original_name.as_deref())
+      .chain(api_key_headers)
       .map(HttpHeaderRef::from)
   }
 
@@ -603,6 +614,8 @@ pub enum StructKind {
   HeaderParams,
   /// Struct for the headers a response declares (no serde, just storage)
   ResponseHeaders,
+  /// Struct for the API keys a server operation accepts (no serde, just storage)
+  Credentials,
 }
 
 impl StructKind {

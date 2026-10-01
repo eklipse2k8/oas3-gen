@@ -4,9 +4,10 @@ use indexmap::IndexSet;
 use oas3::spec::ParameterIn;
 
 use super::{
-  ConverterContext, SchemaConverter, SerdeUsageRecorder,
+  ConverterContext, GenerationTarget, SchemaConverter, SerdeUsageRecorder,
   requests::{BodyInfo, RequestConverter, RequestOutput},
   responses::ResponseConverter,
+  security::{SecurityConverter, credentials_structs},
 };
 use crate::{
   generator::{
@@ -67,9 +68,13 @@ impl OperationsProcessor {
   /// the entire generation. Returns accumulated type usage data for
   /// serde derive optimization in postprocessing.
   pub(crate) fn process_all<'a>(&self, entries: impl Iterator<Item = &'a OperationEntry>) -> OperationsOutput {
+    let entries = entries.collect::<Vec<_>>();
     let mut types = vec![];
     let mut operations = vec![];
-    let mut warnings = vec![];
+    let mut warnings = self
+      .converter
+      .security
+      .unsupported_warnings(entries.iter().map(|entry| entry.operation.as_ref()));
     let mut unique_headers = IndexSet::new();
 
     for entry in entries {
@@ -86,6 +91,8 @@ impl OperationsProcessor {
         Err(error) => warnings.push(GenerationWarning::conversion_failure(entry, &error)),
       }
     }
+
+    types.extend(credentials_structs(&operations));
 
     if self.context.config().include_all_headers() {
       self.extend_component_headers(&mut unique_headers);
@@ -126,6 +133,7 @@ pub(crate) struct OperationConverter {
   schema_converter: SchemaConverter,
   response_converter: ResponseConverter,
   request_converter: RequestConverter,
+  security: SecurityConverter,
 }
 
 impl OperationConverter {
@@ -133,12 +141,14 @@ impl OperationConverter {
   pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
     let response_converter = ResponseConverter::new(context.clone());
     let request_converter = RequestConverter::new(&context);
+    let security = SecurityConverter::new(&context);
 
     Self {
       context,
       schema_converter,
       response_converter,
       request_converter,
+      security,
     }
   }
 
@@ -156,7 +166,12 @@ impl OperationConverter {
     let response_variants = self
       .response_converter
       .build_variants(&entry.operation, &entry.path, &base_name)?;
-    let request_output = self.request(&base_name, entry, &body_info)?;
+    let security = self.security.convert(&entry.operation);
+    let credentials_type = security
+      .as_ref()
+      .filter(|_| self.context.config().target == GenerationTarget::Server)
+      .map(|security| self.security.credentials_type(security));
+    let request_output = self.request(&base_name, entry, &body_info, credentials_type.as_ref())?;
 
     let warnings = request_output.warnings.clone();
     let parameters = request_output.parameter_fields.clone();
@@ -166,7 +181,7 @@ impl OperationConverter {
 
     let types = Self::collect_types(&body_info, request_types);
 
-    let operation_info = self.operation_info(
+    let mut operation_info = self.operation_info(
       entry,
       &base_name,
       request_type,
@@ -175,14 +190,24 @@ impl OperationConverter {
       warnings,
       parameters,
     )?;
+    operation_info.security = security;
+    operation_info.credentials_type = credentials_type;
 
     Ok(ConversionResult { types, operation_info })
   }
 
-  /// Builds the request struct with parameters, body, and methods.
-  fn request(&self, base_name: &str, entry: &OperationEntry, body_info: &BodyInfo) -> anyhow::Result<RequestOutput> {
+  /// Builds the request struct with parameters, credentials, body, and methods.
+  fn request(
+    &self,
+    base_name: &str,
+    entry: &OperationEntry,
+    body_info: &BodyInfo,
+    credentials_type: Option<&StructToken>,
+  ) -> anyhow::Result<RequestOutput> {
     let request_name = generate_unique_request_name(base_name, |n| self.schema_converter.contains(n));
-    self.request_converter.build(&request_name, entry, body_info)
+    self
+      .request_converter
+      .build(&request_name, entry, body_info, credentials_type)
   }
 
   /// Assembles request types and marks them as request-context types.

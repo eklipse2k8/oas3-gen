@@ -17,6 +17,7 @@ use crate::{
     naming::{
       constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
       identifiers::to_rust_type_name,
+      operations::credentials_field_name,
     },
     operation_registry::OperationEntry,
   },
@@ -57,12 +58,14 @@ impl RequestConverter {
 
   /// Builds a request struct for an operation.
   ///
-  /// Converts parameters, resolves request body, and generates builder methods.
+  /// Converts parameters, adds the server's `credentials` field when the operation
+  /// accepts API keys, resolves the request body, and generates builder methods.
   pub(crate) fn build(
     &self,
     name: &str,
     entry: &OperationEntry,
     body_info: &BodyInfo,
+    credentials_type: Option<&StructToken>,
   ) -> anyhow::Result<RequestOutput> {
     let params = self.param_converter.convert_all(name, &entry.path, &entry.operation)?;
 
@@ -73,6 +76,14 @@ impl RequestConverter {
       inline_types,
       warnings,
     } = params;
+
+    if let Some(credentials_type) = credentials_type {
+      let parameters = all_fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
+      main_fields.push(FieldDef::nested_struct_field(
+        &credentials_field_name(&parameters),
+        credentials_type.as_str(),
+      ));
+    }
 
     if let Some(body_field) = body_info.create_field() {
       main_fields.push(body_field);

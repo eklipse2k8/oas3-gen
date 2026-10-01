@@ -11,6 +11,8 @@ output. Any change to generated code means regenerating, or the build breaks:
 F=crates/oas3-gen/fixtures
 cargo run -- generate client-mod -i $F/petstore.json           -o $F/petstore           --enable-builders --all-schemas --all-headers
 cargo run -- generate server-mod -i $F/petstore.json           -o $F/petstore_server    --enable-builders --all-schemas --all-headers
+cargo run -- generate client-mod -i $F/api_key_security.json   -o $F/api_key_security   --enable-builders --all-schemas
+cargo run -- generate server-mod -i $F/api_key_security.json   -o $F/api_key_security_server --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/union_serde.json        -o $F/union_serde        --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/intersection_union.json -o $F/intersection_union --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/event_stream.json       -o $F/event_stream       --enable-builders --all-schemas

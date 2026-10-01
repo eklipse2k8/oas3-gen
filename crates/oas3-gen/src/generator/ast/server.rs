@@ -1,10 +1,13 @@
 use http::Method;
 
 use super::{
-  ContentCategory, Documentation, FieldDef, FileHeaderNode, MethodNameToken, OperationInfo, OperationResponse,
-  ParameterLocation, ParsedPath, ResponseEnumDef, StructToken, TypeRef,
+  ContentCategory, Documentation, FieldDef, FieldNameToken, FileHeaderNode, MethodNameToken, OperationInfo,
+  OperationResponse, OperationSecurity, ParameterLocation, ParsedPath, ResponseEnumDef, StructToken, TypeRef,
 };
-use crate::generator::{ast::tokens::TraitToken, naming::identifiers::to_rust_type_name};
+use crate::generator::{
+  ast::tokens::TraitToken,
+  naming::{identifiers::to_rust_type_name, operations::credentials_field_name},
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct HandlerBodyInfo {
@@ -12,6 +15,15 @@ pub struct HandlerBodyInfo {
   pub content_category: ContentCategory,
   #[builder(default)]
   pub optional: bool,
+}
+
+/// The credentials struct a handler extracts, the request field it fills, and the
+/// security it enforces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandlerCredentials {
+  pub type_name: StructToken,
+  pub field: FieldNameToken,
+  pub security: OperationSecurity,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -27,6 +39,7 @@ pub struct ServerTraitMethod {
   pub query_params_type: Option<StructToken>,
   pub header_params_type: Option<StructToken>,
   pub body_info: Option<HandlerBodyInfo>,
+  pub credentials: Option<HandlerCredentials>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -64,6 +77,19 @@ impl ServerRequestTraitDef {
         let header_params_type =
           extract_nested_type(&info.parameters, ParameterLocation::Header, info.request_type.as_ref());
 
+        let credentials = info
+          .credentials_type
+          .clone()
+          .zip(info.security.clone())
+          .map(|(type_name, security)| {
+            let parameters = info.parameters.iter().map(|p| p.name.as_str()).collect::<Vec<_>>();
+            HandlerCredentials {
+              type_name,
+              field: FieldNameToken::new(credentials_field_name(&parameters)),
+              security,
+            }
+          });
+
         let body_info = info.body.as_ref().and_then(|body| {
           body.body_type.as_ref().map(|body_type| {
             HandlerBodyInfo::builder()
@@ -85,6 +111,7 @@ impl ServerRequestTraitDef {
           .maybe_query_params_type(query_params_type)
           .maybe_header_params_type(header_params_type)
           .maybe_body_info(body_info)
+          .maybe_credentials(credentials)
           .build()
       })
       .collect::<Vec<_>>();

@@ -48,6 +48,14 @@ const DEPENDENCIES: &[DependencySpec] = &[
     default_features: true,
   },
   DependencySpec {
+    ident: "axum_extra",
+    package: "axum-extra",
+    version: "0.12",
+    features: &["cookie"],
+    ordered_features: &[],
+    default_features: true,
+  },
+  DependencySpec {
     ident: "bon",
     package: "bon",
     version: "3.10",
@@ -102,6 +110,22 @@ const DEPENDENCIES: &[DependencySpec] = &[
     features: &["json", "multipart", "http2", "native-tls", "query", "stream"],
     ordered_features: &[],
     default_features: false,
+  },
+  DependencySpec {
+    ident: "reqwest_cookie_store",
+    package: "reqwest_cookie_store",
+    version: "0.10",
+    features: &[],
+    ordered_features: &[],
+    default_features: true,
+  },
+  DependencySpec {
+    ident: "secrecy",
+    package: "secrecy",
+    version: "0.10",
+    features: &[],
+    ordered_features: &[],
+    default_features: true,
   },
   DependencySpec {
     ident: "serde",

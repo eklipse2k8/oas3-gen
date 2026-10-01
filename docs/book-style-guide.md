@@ -88,6 +88,11 @@ part of the lesson, with enough context to understand and resolve them.
     Distinguish schema builders from request builders and compile-time guarantees
     from runtime checks. A prose edit must not imply a new feature.
 
+Link external types, traits, and macros to their Rust API documentation when
+introducing them in a section. Use docs.rs pages for the crate versions in
+`Cargo.lock`, and the standard library documentation for standard types. Put
+links in prose or tables alongside examples so code blocks stay copyable.
+
 For example, replace “Three lines. No nested structs. Required fields are
 enforced at compile time” with “The request builder assembles the nested structs
 for you. You must set each required parameter before calling `build()`. That

@@ -45,6 +45,7 @@ any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
 axum = { version = "0.8" }
 axum-core = { version = "0.5" }
+axum-extra = { version = "0.12", features = ["cookie"] }
 better_default = { version = "1.0" }
 blake3 = { version = "1.8", features = ["neon", "traits-preview"] }
 bon = { version = "3.10", features = ["implied-bounds"] }
@@ -74,6 +75,8 @@ quick-xml = { version = ">=0.38", default-features = false }
 quote = { version = "1.0" }
 regex = { version = "1.13" }
 reqwest = { version = "0.13", default-features = false }
+reqwest_cookie_store = { version = "0.10" }
+secrecy = { version = "0.10" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }
@@ -86,4 +89,5 @@ thiserror = { version = "2.0" }
 tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
 toml = { version = "1.1", default-features = false, features = ["display", "serde"] }
 uuid = { version = "1.26", features = ["serde"] }
+yaml_serde = { version = "0.10" }
 validator = { version = "0.21" }
