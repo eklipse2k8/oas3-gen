@@ -165,10 +165,10 @@ The same approach applies to requests with query parameters or optional
 headers: their constructor parameters become builder setters. For an
 [`Option<T>`][rustdoc-option] parameter, you can supply a `T` or omit the setter to use `None`.
 
-Server requests can also contain credentials for API key authentication.
-Their builders accept a complete credentials struct through the `credentials()`
-setter. Building the request doesn't check whether a key is authorized; your
-service performs that check. See
+Server requests can also contain credentials for API key or bearer token
+authentication. Their builders accept a complete credentials struct through the
+`credentials()` setter. Building the request doesn't check whether a credential
+is authorized; your service performs that check. See
 [Constructing Requests in Tests](./server-generation.md#constructing-requests-in-tests)
 for an example and how it differs from HTTP extraction.
 

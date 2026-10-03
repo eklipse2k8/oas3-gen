@@ -23,24 +23,88 @@ impl ApiKeyLocation {
   }
 }
 
+/// How a credential travels in a request.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ApiKeyScheme {
+pub enum CredentialKind {
+  /// An `apiKey` scheme's key, sent in the named header, query parameter, or cookie.
+  ApiKey {
+    location: ApiKeyLocation,
+    parameter_name: String,
+  },
+  /// An `http` scheme's bearer token, sent in the `Authorization` header.
+  Bearer,
+}
+
+impl CredentialKind {
+  /// What generated docs and messages call the credential.
+  #[must_use]
+  pub fn noun(&self) -> &'static str {
+    match self {
+      Self::ApiKey { .. } => "API key",
+      Self::Bearer => "bearer token",
+    }
+  }
+}
+
+/// A credential an operation can accept, declared by a supported security scheme.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CredentialScheme {
   pub scheme_name: String,
   pub field: FieldNameToken,
-  pub location: ApiKeyLocation,
-  pub parameter_name: String,
+  pub kind: CredentialKind,
   pub description: Option<String>,
 }
 
-impl ApiKeyScheme {
-  /// Where the key travels, e.g. ``the `X-Api-Key` header``.
+impl CredentialScheme {
+  /// Where the credential travels, e.g. ``the `X-Api-Key` header``.
   #[must_use]
   pub fn whereabouts(&self) -> String {
-    format!("the `{}` {}", self.parameter_name, self.location.describe())
+    match &self.kind {
+      CredentialKind::ApiKey {
+        location,
+        parameter_name,
+      } => format!("the `{parameter_name}` {}", location.describe()),
+      CredentialKind::Bearer => "the `Authorization` header".to_string(),
+    }
+  }
+
+  /// Where an API key travels, or `None` for a bearer token.
+  #[must_use]
+  pub fn api_key_location(&self) -> Option<ApiKeyLocation> {
+    match self.kind {
+      CredentialKind::ApiKey { location, .. } => Some(location),
+      CredentialKind::Bearer => None,
+    }
+  }
+
+  /// Whether the credential travels in the `Authorization` header, which a request
+  /// carries once.
+  #[must_use]
+  pub fn uses_authorization(&self) -> bool {
+    match &self.kind {
+      CredentialKind::ApiKey {
+        location: ApiKeyLocation::Header,
+        parameter_name,
+      } => parameter_name.eq_ignore_ascii_case("authorization"),
+      CredentialKind::ApiKey { .. } => false,
+      CredentialKind::Bearer => true,
+    }
+  }
+
+  /// Whether the credential is a cookie, which the client keeps in its cookie store
+  /// rather than in a field.
+  #[must_use]
+  pub fn is_cookie(&self) -> bool {
+    self.api_key_location() == Some(ApiKeyLocation::Cookie)
   }
 
   fn docs(&self) -> Documentation {
-    let origin = format!("`{}` API key, read from {}.", self.scheme_name, self.whereabouts());
+    let origin = format!(
+      "`{}` {}, read from {}.",
+      self.scheme_name,
+      self.kind.noun(),
+      self.whereabouts()
+    );
     let Some(description) = &self.description else {
       return Documentation::from_lines([origin]);
     };
@@ -51,21 +115,24 @@ impl ApiKeyScheme {
   }
 }
 
-/// The `apiKey` security an operation accepts.
+/// The `apiKey` and bearer security an operation accepts.
 ///
 /// `requirements` are alternatives: a request is authorized when it carries every
 /// scheme of at least one of them. An empty requirement allows anonymous access.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OperationSecurity {
-  pub schemes: Vec<ApiKeyScheme>,
+  pub schemes: Vec<CredentialScheme>,
   pub requirements: Vec<Vec<FieldNameToken>>,
 }
 
 impl OperationSecurity {
-  /// Whether any accepted key travels in `location`.
+  /// Whether any accepted API key travels in `location`.
   #[must_use]
   pub fn reads(&self, location: ApiKeyLocation) -> bool {
-    self.schemes.iter().any(|scheme| scheme.location == location)
+    self
+      .schemes
+      .iter()
+      .any(|scheme| scheme.api_key_location() == Some(location))
   }
 
   /// Whether every authorized request carries `field`.

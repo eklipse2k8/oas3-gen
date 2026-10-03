@@ -1,7 +1,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use itertools::Itertools;
-use oas3::spec::{Operation, Parameter, ParameterStyle};
+use oas3::spec::{Operation, Parameter, ParameterIn, ParameterStyle};
 
 use super::fields::FieldConverter;
 use crate::{
@@ -18,6 +18,10 @@ use crate::{
   },
   utils::schema_ext::SchemaExtIters,
 };
+
+/// Header parameters that OpenAPI says to ignore, since the media types and the
+/// security schemes describe these headers.
+const IGNORED_HEADER_PARAMETERS: [&str; 3] = ["Accept", "Content-Type", "Authorization"];
 
 /// Result of converting all parameters for an operation.
 ///
@@ -99,6 +103,7 @@ impl ParameterConverter {
   /// Collects parameters from both path-level and operation-level definitions.
   ///
   /// Operation parameters override path parameters with the same name and location.
+  /// Header parameters in [`IGNORED_HEADER_PARAMETERS`] are left out.
   fn collect_parameters(&self, path: &str, operation: &Operation) -> Vec<Parameter> {
     let spec = self.context.graph().spec();
     let mut params = vec![];
@@ -112,6 +117,12 @@ impl ParameterConverter {
       params.push(param);
     }
 
+    params.retain(|param| {
+      param.location != ParameterIn::Header
+        || !IGNORED_HEADER_PARAMETERS
+          .iter()
+          .any(|name| name.eq_ignore_ascii_case(&param.name))
+    });
     params
   }
 

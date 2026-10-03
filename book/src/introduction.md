@@ -19,7 +19,7 @@ constraints.
 
 You can start with type generation and add a client or server as your project
 needs it. [Client Generation](./client-generation.md) walks through calling an
-API, reading responses, and sending API keys. [Server Generation](./server-generation.md)
+API, reading responses, and sending API keys and bearer tokens. [Server Generation](./server-generation.md)
 shows how to implement a service, connect its router, and check incoming
 credentials.
 
@@ -37,7 +37,8 @@ The generator supports several parts of working with an OpenAPI description:
   described with `oneOf`, `anyOf`, and discriminators.
 - Call API operations through an asynchronous `reqwest` client.
 - Implement a generated server trait and connect it to an Axum router.
-- Send and receive API keys declared by `apiKey` security schemes.
+- Send and receive API keys and bearer tokens declared by `apiKey` and `http`
+  bearer security schemes.
 - Check supported field constraints with [`validator::Validate`][rustdoc-validate].
 - Construct schema values and requests with builders by passing
   `--enable-builders`.

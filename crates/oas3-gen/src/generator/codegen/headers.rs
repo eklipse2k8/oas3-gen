@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
 use crate::generator::{
-  ast::{FieldDef, StructDef, StructKind, TypeRef, tokens::ConstToken},
+  ast::{FieldDef, StructDef, StructKind, TypeRef, constants::HttpHeaderRef},
   converter::GenerationTarget,
 };
 
@@ -72,7 +72,7 @@ impl ToTokens for HeaderFieldInsertionFragment<'_> {
       return;
     };
 
-    let header_const = ConstToken::from_raw(original_name);
+    let header_const = HttpHeaderRef::from(original_name).path();
     let ty = &self.field.rust_type;
 
     let insertion = if self.field.rust_type.nullable {
@@ -181,7 +181,7 @@ impl ToTokens for HeaderFieldExtractionFragment<'_> {
       return;
     };
 
-    let header_const = ConstToken::from_raw(original_name);
+    let header_const = HttpHeaderRef::from(original_name).path();
     let parse = header_parse_adapter(&self.field.rust_type);
 
     let extraction = if self.field.rust_type.nullable {

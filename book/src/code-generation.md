@@ -26,7 +26,7 @@ omitted code, so those excerpts aren't complete programs.
 
 - [Generation Modes](#generation-modes)
 - [Responses](#responses)
-- [API Key Security](#api-key-security)
+- [Security Schemes](#security-schemes)
 - [Workspace Crate Output](#workspace-crate-output)
 - [Visibility](#visibility)
 - [Enum Mode](#enum-mode)
@@ -203,13 +203,13 @@ value from an HTTP response, and the server constructs it to send a response.
 See [Reading Responses](./client-generation.md#reading-responses) and
 [Returning Responses](./server-generation.md#returning-responses) for examples.
 
-## API Key Security
+## Security Schemes
 
 OpenAPI describes authentication in two places. A *security scheme* under
 `components.securitySchemes` describes a credential and how it travels in a
 request. A *security requirement* in `security` names the schemes an operation
 accepts. The generator supports `apiKey` schemes in headers, query parameters,
-and cookies.
+and cookies, and `http` schemes that use bearer tokens.
 
 Let's start with a header key. This excerpt from an OpenAPI document declares
 a scheme named `ApiKeyAuth` and uses it as the default requirement:
@@ -229,6 +229,26 @@ The scheme name, `ApiKeyAuth`, identifies the credential in generated Rust
 names. The `name` value, `X-Api-Key`, identifies the HTTP header. Operations
 inherit the top-level `security` unless they declare their own requirements.
 
+A bearer scheme is an `http` scheme whose `scheme` value is `bearer`. It has no
+`name`, because the token always travels in the `Authorization` header as
+`Bearer <token>`:
+
+```json
+{
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer" }
+    }
+  }
+}
+```
+
+The generator matches `bearer` in any case, as HTTP does. A `bearerFormat`
+value, such as `JWT`, only documents the token, so it doesn't change the
+generated code. A header parameter named `Authorization` doesn't produce
+credentials; OpenAPI says to ignore it, as [Header Emission](#header-emission)
+explains.
+
 ### Requirements
 
 The entries in the `security` array are alternatives: a request needs to
@@ -240,30 +260,31 @@ examples show how the grouping changes the requirement:
 | `[{"ApiKeyAuth": []}]` | Supply the header key. |
 | `[{"QueryKey": []}, {"SessionCookie": []}]` | Supply a query key or a session cookie. |
 | `[{"ApiKeyAuth": [], "SessionCookie": []}]` | Supply both the header key and the session cookie. |
+| `[{"BearerAuth": []}, {"ApiKeyAuth": []}]` | Supply a bearer token or the header key. |
 | `[]` or `[{}]` | Allow anonymous access, replacing any top-level requirement. |
 
-For the second and third examples, assume `QueryKey` and `SessionCookie` are
-also declared as `apiKey` schemes. The complete example is in
-`crates/oas3-gen/fixtures/api_key_security.json`.
+The middle examples assume `QueryKey` and `SessionCookie` are also declared as
+`apiKey` schemes, and that `BearerAuth` is the bearer scheme shown earlier. The
+complete example is in `crates/oas3-gen/fixtures/api_key_security.json`.
 
-The server represents a key as required when every alternative needs it.
-Otherwise, the field is optional, and the extractor checks that the supplied
-keys complete at least one alternative. These checks establish that credentials
-are present. Your service still needs to decide whether their values authorize
-the request.
+The server represents a credential as required when every alternative needs
+it. Otherwise, the field is optional, and the extractor checks that the
+supplied credentials complete at least one alternative. These checks establish
+that credentials are present. Your service still needs to decide whether their
+values authorize the request.
 
-Schemes such as HTTP bearer tokens and OAuth 2.0 don't produce generated
-credentials. The generator reports a warning for each referenced scheme it
-can't handle. If an operation has an alternative containing one of these
-schemes, all its API key fields become optional, including keys in that same
-alternative. The generated extractor can't enforce the full requirement, so
-your application must handle authorization for that operation.
+Other schemes, such as HTTP basic authentication and OAuth 2.0, don't produce
+generated credentials. The generator reports a warning for each referenced
+scheme it can't handle. If an operation has an alternative containing one of
+these schemes, all its credential fields become optional, including those in
+that same alternative. The generated extractor can't enforce the full
+requirement, so your application must handle authorization for that operation.
 
 ### Keeping Keys Out of Logs
 
-The server stores API keys as
+The server stores API keys and bearer tokens as
 [`secrecy::SecretString`][rustdoc-secret-string].
-The client uses the same type for header and query keys. Its debug representation
+The client uses the same type for header keys, query keys, and bearer tokens. Its debug representation
 shows `[REDACTED]` in place of the value, and it clears its own stored value when
 dropped. It doesn't implement [`Display`][rustdoc-display], [`Serialize`][rustdoc-serde-serialize], or [`PartialEq`][rustdoc-partial-eq].
 
@@ -275,14 +296,14 @@ Once exposed, the returned string is ordinary text, so keep it out of log output
 
 ### Client
 
-The client provides methods to set header, query, and cookie keys. See
-[Sending API Keys](./client-generation.md#sending-api-keys) for examples and
+The client provides methods to set header, query, and cookie keys and bearer
+tokens. See [Sending Credentials](./client-generation.md#sending-credentials) for examples and
 [Cookie Keys](./client-generation.md#cookie-keys) for the cookie store's behavior.
 
 ### Server
 
 Server request structs carry credentials extracted from the incoming request.
-See [Receiving API Keys](./server-generation.md#receiving-api-keys) for the
+See [Receiving Credentials](./server-generation.md#receiving-credentials) for the
 generated types, rejection behavior, and checks to perform in your service.
 
 ## Workspace Crate Output
@@ -396,7 +417,7 @@ table describes the dependencies you may see:
 | `regex` | emits `pattern` validation constants |
 | `reqwest` | performs `client-mod` HTTP calls |
 | `reqwest_cookie_store` | sends cookie API keys from the client |
-| `secrecy` | stores API keys |
+| `secrecy` | stores API keys and bearer tokens |
 | `serde` | derives [`Serialize`][rustdoc-serde-serialize]/[`Deserialize`][rustdoc-serde-deserialize] |
 | `serde_json` | handles freeform [`serde_json::Value`][rustdoc-serde-json-value] payloads |
 | `serde_with` | applies `serde_as` conversions |
@@ -1201,6 +1222,18 @@ without repeating their string names. By default, the generator creates constant
 `--all-headers` to include header parameters from `components/parameters` even
 when no operation references them.
 
+Headers that the `http` crate already names are the exception. The
+[`http::header`][rustdoc-http-header-constants] module declares constants for
+standard headers such as `Content-Type`, `Location`, and `Authorization`. The
+generator doesn't declare its own constant for any of them; generated code
+refers to `http`'s constant, such as `http::header::LOCATION`, instead.
+
+OpenAPI says to ignore header parameters named `Accept`, `Content-Type`, or
+`Authorization`, so the generator leaves them out of request types. The
+specification describes those headers elsewhere: media types cover `Accept` and
+`Content-Type`, and security schemes cover `Authorization`. To send credentials
+in `Authorization`, declare a [security scheme](#security-schemes).
+
 ```text
 --all-headers
 ```
@@ -1418,6 +1451,7 @@ To work through constructing the generated values, continue to the
 [rustdoc-from-str]: https://doc.rust-lang.org/std/str/trait.FromStr.html
 [rustdoc-hash]: https://doc.rust-lang.org/std/hash/trait.Hash.html
 [rustdoc-hashmap]: https://doc.rust-lang.org/std/collections/struct.HashMap.html
+[rustdoc-http-header-constants]: https://docs.rs/http/1.5.0/http/header/index.html#constants
 [rustdoc-http-header-map]: https://docs.rs/http/1.5.0/http/header/struct.HeaderMap.html
 [rustdoc-http-header-name]: https://docs.rs/http/1.5.0/http/header/struct.HeaderName.html
 [rustdoc-http-status]: https://docs.rs/http/1.5.0/http/status/struct.StatusCode.html

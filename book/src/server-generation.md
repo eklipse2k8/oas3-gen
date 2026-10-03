@@ -3,7 +3,7 @@
 Use server generation when you want to implement an API with Axum. The
 generator creates a trait for your service, request and response types, and a
 router that connects HTTP requests to your implementation. In this chapter,
-we'll implement an operation and then look at how API keys reach your service.
+we'll implement an operation and then look at how credentials reach your service.
 
 The commands run from a checkout of this repository. If you installed the
 tool, replace `cargo run --` with `oas3-gen` and supply the path to your OpenAPI
@@ -114,9 +114,9 @@ where
 
 This is an excerpt from `server.rs`; it omits the generated handler and imports.
 The handler extracts the path, query, and header values, assembles a
-`ListPetsRequest`, and calls your `list_pets()` method. For operations with API
-keys, it extracts credentials first, as described in
-[Receiving API Keys](#receiving-api-keys).
+`ListPetsRequest`, and calls your `list_pets()` method. For operations with
+security schemes, it extracts credentials first, as described in
+[Receiving Credentials](#receiving-credentials).
 
 ## Returning Responses
 
@@ -133,14 +133,14 @@ causes the handler to send status `500`. A response header value that can't be
 represented as an HTTP header also produces `500`. Missing or malformed
 required request headers produce `400` before your method runs.
 
-## Receiving API Keys
+## Receiving Credentials
 
-For an operation that accepts API keys, the generated request has a
-`credentials` field. Axum extracts its value before calling your service.
-The [shared security rules](./code-generation.md#api-key-security) explain how
+For an operation that accepts API keys or bearer tokens, the generated request
+has a `credentials` field. Axum extracts its value before calling your service.
+The [shared security rules](./code-generation.md#security-schemes) explain how
 the document declares schemes and combines requirements.
 
-The petstore has no API key schemes. To examine generated credentials, use
+The petstore has no security schemes. To examine generated credentials, use
 the Key Vault fixture instead:
 
 ```bash
@@ -191,6 +191,14 @@ Each credentials struct implements Axum's [`FromRequestParts`][rustdoc-axum-from
 reads header, query, or cookie values before the handler reads the other
 parameters or the body. Cookie keys are read with [`axum_extra::extract::CookieJar`][rustdoc-axum-cookie-jar].
 
+A bearer token comes from the `Authorization` header. The extractor accepts the
+`Bearer` prefix in any case and stores the token that follows it. An
+`Authorization` header with a different scheme, such as `Basic`, doesn't supply
+a bearer token. An `apiKey` scheme named `Authorization` reads the whole header
+value instead, so when an operation accepts both kinds, one header can fill
+both fields. For `listAuditEvents`, a request with `Authorization: Bearer t1`
+sets `bearer_auth` to `t1` and `token_auth` to `Bearer t1`.
+
 When a required key is missing, or the supplied keys don't complete any
 accepted alternative, Axum returns a plain-text `401` without reading the
 body or calling your service. For the required header key above, the response
@@ -200,14 +208,22 @@ message is:
 missing API key in the `X-Api-Key` header
 ```
 
+The fixture's `deleteSecret` operation accepts a bearer token or the header
+key, so its `ApiKeyAuthAndBearerAuthCredentials` struct has two optional
+fields. A request that supplies neither receives this message:
+
+```text
+missing credentials for `ApiKeyAuth` or `BearerAuth`
+```
+
 This response comes from the extractor, so it doesn't use the JSON error schema
 that your operation might declare for `401`. The
-[client chapter](./client-generation.md#sending-api-keys) explains how that
+[client chapter](./client-generation.md#sending-credentials) explains how that
 affects response decoding.
 
-If a requirement includes a scheme the generator doesn't support, such as a
-bearer token, it can't perform the complete presence check. All API key fields
-for that operation become optional. Your application must enforce those
+If a requirement includes a scheme the generator doesn't support, such as HTTP
+basic authentication, it can't perform the complete presence check. All
+credential fields for that operation become optional. Your application must enforce those
 requirements; see [Requirements](./code-generation.md#requirements).
 
 ### Reading and Checking Keys

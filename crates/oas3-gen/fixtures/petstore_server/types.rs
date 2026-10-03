@@ -13,7 +13,6 @@ pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort
 pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
 pub const X_COMPATIBILITY_DATE: http::HeaderName = http::HeaderName::from_static("x-compatibility-date");
 pub const X_NEXT: http::HeaderName = http::HeaderName::from_static("x-next");
-pub const LOCATION: http::HeaderName = http::HeaderName::from_static("location");
 pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
 pub const X_CACHE: http::HeaderName = http::HeaderName::from_static("x-cache");
 pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
@@ -578,7 +577,7 @@ impl core::convert::TryFrom<&LocationHeaders> for http::HeaderMap {
   fn try_from(headers: &LocationHeaders) -> core::result::Result<Self, Self::Error> {
     let mut map = http::HeaderMap::with_capacity(1usize);
     let header_value = http::HeaderValue::try_from(&headers.location)?;
-    map.insert(LOCATION, header_value);
+    map.insert(http::header::LOCATION, header_value);
     Ok(map)
   }
 }
@@ -593,7 +592,7 @@ impl core::convert::TryFrom<&http::HeaderMap> for LocationHeaders {
   fn try_from(headers: &http::HeaderMap) -> core::result::Result<Self, Self::Error> {
     Ok(Self {
       location: headers
-        .get(LOCATION)
+        .get(http::header::LOCATION)
         .ok_or_else(|| anyhow::anyhow!("missing required header `Location`"))?
         .to_str()
         .ok()

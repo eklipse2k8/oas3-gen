@@ -7,8 +7,8 @@ use oas3::spec::{Operation, SecurityRequirement, SecurityScheme};
 use super::{ConverterContext, GenerationTarget};
 use crate::generator::{
   ast::{
-    ApiKeyScheme, Documentation, FieldNameToken, OperationInfo, OperationSecurity, RustType, StructDef, StructKind,
-    StructToken,
+    CredentialKind, CredentialScheme, Documentation, FieldNameToken, OperationInfo, OperationSecurity, RustType,
+    StructDef, StructKind, StructToken,
   },
   metrics::GenerationWarning,
   naming::{
@@ -17,17 +17,20 @@ use crate::generator::{
   },
 };
 
-/// A declared security scheme: the API key it carries, or why it carries none.
-type DeclaredScheme = Result<ApiKeyScheme, String>;
+/// A declared security scheme: the credential it carries, or why it carries none.
+type DeclaredScheme = Result<CredentialScheme, String>;
 
 const UNDECLARED_SCHEME: &str = "it is not declared in `components.securitySchemes`";
 
-/// Resolves the `apiKey` security requirements that apply to each operation, and
-/// builds the server's credentials structs.
+const SUPPORTED_SCHEMES: &str = "only `apiKey` schemes and `http` schemes using `bearer` are generated";
+
+/// Resolves the `apiKey` and bearer security requirements that apply to each
+/// operation, and builds the server's credentials structs.
 ///
-/// Only `apiKey` schemes produce credentials. A requirement that names any other
-/// kind of scheme can't be checked by generated code, so it leaves every API key
-/// of the operation optional, including the ones it names itself.
+/// Only `apiKey` schemes and `http` schemes using `bearer` produce credentials. A
+/// requirement that names any other kind of scheme can't be checked by generated
+/// code, so it leaves every credential of the operation optional, including the
+/// ones it names itself.
 #[derive(Debug, Clone)]
 pub(crate) struct SecurityConverter {
   context: Rc<ConverterContext>,
@@ -56,7 +59,7 @@ impl SecurityConverter {
         let scheme = scheme
           .resolve(spec)
           .map_err(|error| format!("it does not resolve: {error}"))
-          .and_then(|scheme| api_key_scheme(name, field, scheme));
+          .and_then(|scheme| credential_scheme(name, field, scheme));
         (name.clone(), scheme)
       })
       .collect();
@@ -68,7 +71,7 @@ impl SecurityConverter {
     }
   }
 
-  /// Resolves the API keys `operation` accepts, or `None` when it accepts none.
+  /// Resolves the credentials `operation` accepts, or `None` when it accepts none.
   ///
   /// Operation-level `security` replaces the top-level requirements. Schemes keep
   /// their declaration order and requirements are sorted, so operations that list
@@ -150,8 +153,8 @@ impl SecurityConverter {
       .collect()
   }
 
-  /// The API key scheme declared as `name`, or why it carries no credentials.
-  fn scheme(&self, name: &str) -> Result<&ApiKeyScheme, &str> {
+  /// The credential scheme declared as `name`, or why it carries no credentials.
+  fn scheme(&self, name: &str) -> Result<&CredentialScheme, &str> {
     match self.declared.get(name) {
       Some(Ok(scheme)) => Ok(scheme),
       Some(Err(reason)) => Err(reason),
@@ -180,7 +183,7 @@ pub(crate) fn credentials_structs(operations: &[OperationInfo]) -> impl Iterator
         StructDef::builder()
           .name(name.clone())
           .docs(Documentation::from_lines([
-            "API keys an operation accepts, read from the request before the operation runs.",
+            "Credentials an operation accepts, read from the request before the operation runs.",
           ]))
           .fields(security.credential_fields())
           .kind(StructKind::Credentials)
@@ -189,27 +192,40 @@ pub(crate) fn credentials_structs(operations: &[OperationInfo]) -> impl Iterator
     })
 }
 
-fn api_key_scheme(name: &str, field: String, scheme: SecurityScheme) -> DeclaredScheme {
-  let kind = match scheme {
+fn credential_scheme(name: &str, field: String, scheme: SecurityScheme) -> DeclaredScheme {
+  let (kind, description) = match scheme {
     SecurityScheme::ApiKey {
       description,
       name: parameter_name,
       location,
     } => {
-      return Ok(ApiKeyScheme {
-        scheme_name: name.to_string(),
-        field: FieldNameToken::from_raw(field),
-        location: location
-          .parse()
-          .map_err(|_| format!("its API key location `{location}` is not header, query, or cookie"))?,
+      let location = location
+        .parse()
+        .map_err(|_| format!("its API key location `{location}` is not header, query, or cookie"))?;
+      let kind = CredentialKind::ApiKey {
+        location,
         parameter_name,
-        description,
-      });
+      };
+      (kind, description)
     }
-    SecurityScheme::Http { .. } => "http",
-    SecurityScheme::OAuth2 { .. } => "oauth2",
-    SecurityScheme::OpenIdConnect { .. } => "openIdConnect",
-    SecurityScheme::MutualTls { .. } => "mutualTLS",
+    SecurityScheme::Http {
+      description, scheme, ..
+    } if scheme.eq_ignore_ascii_case("bearer") => (CredentialKind::Bearer, description),
+    SecurityScheme::Http { scheme, .. } => {
+      return Err(format!(
+        "{SUPPORTED_SCHEMES}, and it has type `http` with scheme `{scheme}`"
+      ));
+    }
+    SecurityScheme::OAuth2 { .. } => return Err(format!("{SUPPORTED_SCHEMES}, and it has type `oauth2`")),
+    SecurityScheme::OpenIdConnect { .. } => {
+      return Err(format!("{SUPPORTED_SCHEMES}, and it has type `openIdConnect`"));
+    }
+    SecurityScheme::MutualTls { .. } => return Err(format!("{SUPPORTED_SCHEMES}, and it has type `mutualTLS`")),
   };
-  Err(format!("only `apiKey` schemes are generated, and it has type `{kind}`"))
+  Ok(CredentialScheme {
+    scheme_name: name.to_string(),
+    field: FieldNameToken::from_raw(field),
+    kind,
+    description,
+  })
 }

@@ -97,6 +97,7 @@ impl OperationsProcessor {
     if self.context.config().include_all_headers() {
       self.extend_component_headers(&mut unique_headers);
     }
+    unique_headers.retain(|header| !header.is_declared_by_http());
 
     OperationsOutput {
       types,

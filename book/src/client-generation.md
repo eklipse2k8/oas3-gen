@@ -3,7 +3,7 @@
 Use client generation when you want to call an API described by an OpenAPI
 document. The generator creates a `reqwest` client, request types, and response
 types. In this chapter, we'll generate a client, call an operation, and configure
-API keys for operations that need them.
+API keys and bearer tokens for operations that need them.
 
 The commands run from a checkout of this repository and use its example
 specifications. If you installed the tool, replace `cargo run --` with
@@ -150,13 +150,13 @@ Here, `http_response` is the response you've already received. The decoder
 reads declared headers before decoding the body and returns the operation's
 `ApiResponse` type.
 
-## Sending API Keys
+## Sending Credentials
 
-For operations with `apiKey` security schemes, the client provides methods to
-set credentials. See [API Key Security](./code-generation.md#api-key-security)
+For operations with `apiKey` or bearer security schemes, the client provides
+methods to set credentials. See [Security Schemes](./code-generation.md#security-schemes)
 for how schemes and requirements are declared.
 
-The petstore example doesn't declare API keys, so we'll use the Key Vault
+The petstore example doesn't declare security schemes, so we'll use the Key Vault
 fixture for the rest of this chapter. Generate it as a separate module:
 
 ```bash
@@ -166,8 +166,8 @@ cargo run -- generate client-mod \
 ```
 
 The document's title produces `KeyVaultClient`. Its schemes accept a header
-key named `ApiKeyAuth`, a query key named `QueryKey`, and a cookie key named
-`SessionCookie`. To configure the header key, read it from your application's
+key named `ApiKeyAuth`, a query key named `QueryKey`, a cookie key named
+`SessionCookie`, and a bearer token named `BearerAuth`. To configure the header key, read it from your application's
 environment and pass it to the generated setter:
 
 ```rust
@@ -176,14 +176,14 @@ let client = KeyVaultClient::with_base_url("https://vault.example.com/v1")?
     .with_api_key_auth(api_key);
 ```
 
-The client stores header and query keys as [`secrecy::SecretString`][rustdoc-secret-string] values
+The client stores header keys, query keys, and bearer tokens as [`secrecy::SecretString`][rustdoc-secret-string] values
 wrapped in [`Option`][rustdoc-option]. It gets one field and setter for each scheme used by the selected
 operations. Names come from the scheme: `ApiKeyAuth` becomes `api_key_auth`
 and `with_api_key_auth()`. If a name collides with another field, including
 `client` or `base_url`, the generator adds a numeric suffix.
 
-Each client method attaches the header and query keys you've configured that
-its operation accepts. It doesn't enforce security requirements before sending
+Each client method attaches the header keys, query keys, and bearer tokens
+you've configured that its operation accepts. It doesn't enforce security requirements before sending
 a request. If you leave a required key unset, the request goes out without it.
 
 A generated server rejects missing required credentials with a plain-text
@@ -191,6 +191,30 @@ A generated server rejects missing required credentials with a plain-text
 client can't decode that plain-text body and returns a decoding error. Set the
 required credentials before calling the operation; a service can separately
 return a declared JSON `401` when it receives a key that isn't valid.
+
+### Bearer Tokens
+
+A bearer scheme gets a field and setter, like a header key. The Key Vault's
+`BearerAuth` scheme produces `with_bearer_auth()`:
+
+```rust
+let token = std::env::var("VAULT_TOKEN")?;
+let client = KeyVaultClient::with_base_url("https://vault.example.com/v1")?
+    .with_bearer_auth(token);
+```
+
+Pass the token by itself, without the `Bearer` prefix. For an operation that
+accepts the scheme, such as `deleteSecret`, the client method calls
+[`reqwest::RequestBuilder::bearer_auth()`][rustdoc-reqwest-bearer-auth]. That
+method sends the token in an `Authorization: Bearer <token>` header and marks
+the header value as sensitive.
+
+A request carries one `Authorization` header. When an operation accepts more
+than one credential that travels in it, such as a bearer token and an `apiKey`
+scheme named `Authorization`, the client sends only one of them: of the
+credentials you've configured, the scheme declared last wins. The Key Vault's
+`listAuditEvents` accepts `BearerAuth` or `TokenAuth`, and `TokenAuth` is
+declared later, so a client with both set sends the `TokenAuth` key.
 
 ### Cookie Keys
 
@@ -233,9 +257,10 @@ configuration to the [`reqwest::ClientBuilder`][rustdoc-reqwest-client-builder] 
 
 ### Keeping Keys Out of Logs
 
-Header and query keys use [`SecretString`][rustdoc-secret-string], whose debug output hides the value.
-The generated client's debug output also omits the cookie store. Formatting
-the generated client with `{:?}` therefore doesn't print these stored API keys.
+Header keys, query keys, and bearer tokens use [`SecretString`][rustdoc-secret-string], whose debug
+output hides the value. The generated client's debug output also omits the
+cookie store. Formatting the generated client with `{:?}` therefore doesn't
+print these stored credentials.
 See [Keeping Keys Out of Logs](./code-generation.md#keeping-keys-out-of-logs)
 for the secret type's behavior when you explicitly read a key.
 
@@ -252,6 +277,7 @@ enums, type adapters, and collection choices.
 [rustdoc-arc]: https://doc.rust-lang.org/std/sync/struct.Arc.html
 [rustdoc-cookie-store]: https://docs.rs/reqwest_cookie_store/0.10.0/reqwest_cookie_store/struct.CookieStoreMutex.html
 [rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html
+[rustdoc-reqwest-bearer-auth]: https://docs.rs/reqwest/0.13.5/reqwest/struct.RequestBuilder.html#method.bearer_auth
 [rustdoc-reqwest-client]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html
 [rustdoc-reqwest-client-builder]: https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuilder.html
 [rustdoc-reqwest-response]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Response.html

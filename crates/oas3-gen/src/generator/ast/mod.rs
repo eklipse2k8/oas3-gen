@@ -35,7 +35,7 @@ pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
 #[cfg(test)]
 pub use parsed_path::{PathParseError, PathSegment};
-pub use security::{ApiKeyLocation, ApiKeyScheme, OperationSecurity};
+pub use security::{ApiKeyLocation, CredentialKind, CredentialScheme, OperationSecurity};
 pub use serde_attrs::SerdeAttribute;
 use serde_json::Value;
 pub use server::{HandlerBodyInfo, HandlerCredentials, ServerRequestTraitDef, ServerTraitMethod};
@@ -449,12 +449,18 @@ impl OperationInfo {
       .iter()
       .filter(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)));
     let response_headers = self.response_variants.iter().flatten().flat_map(|v| &v.headers);
-    let api_key_headers = self
-      .security
-      .iter()
-      .flat_map(|security| &security.schemes)
-      .filter(|scheme| scheme.location == ApiKeyLocation::Header)
-      .map(|scheme| scheme.parameter_name.as_str());
+    let api_key_headers =
+      self
+        .security
+        .iter()
+        .flat_map(|security| &security.schemes)
+        .filter_map(|scheme| match &scheme.kind {
+          CredentialKind::ApiKey {
+            location: ApiKeyLocation::Header,
+            parameter_name,
+          } => Some(parameter_name.as_str()),
+          _ => None,
+        });
 
     request_headers
       .chain(response_headers)

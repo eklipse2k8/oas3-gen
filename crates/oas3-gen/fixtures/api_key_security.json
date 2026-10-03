@@ -3,7 +3,7 @@
   "info": {
     "title": "Key Vault",
     "version": "1.0.0",
-    "description": "Exercises apiKey security schemes in headers, query strings, and cookies."
+    "description": "Exercises apiKey security schemes in headers, query strings, and cookies, and bearer tokens."
   },
   "servers": [
     {
@@ -142,6 +142,82 @@
             "$ref": "#/components/responses/Unauthorized"
           }
         }
+      },
+      "put": {
+        "operationId": "replaceSecret",
+        "summary": "Replace a secret with basic credentials or the header key",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSecret"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "operationId": "listAuditEvents",
+        "summary": "List audit events with a bearer token or a token key, ignoring the Authorization header parameter",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "TokenAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/health": {
@@ -178,6 +254,15 @@
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer"
+      },
+      "BasicAuth": {
+        "type": "http",
+        "scheme": "basic"
+      },
+      "TokenAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization"
       }
     },
     "responses": {

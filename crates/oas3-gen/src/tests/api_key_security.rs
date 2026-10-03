@@ -51,11 +51,54 @@ impl server::ApiServer for StubVault {
     })))
   }
 
+  fn replace_secret(
+    &self,
+    request: server::ReplaceSecretRequest,
+  ) -> impl Future<Output = anyhow::Result<server::ApiResponse<server::Secret, server::Error>>> + Send {
+    ready(Ok(server::ApiResponse::Ok(server::Secret {
+      id: format!(
+        "{:?}",
+        request
+          .credentials
+          .api_key_auth
+          .as_ref()
+          .map(secrecy::ExposeSecret::expose_secret)
+      ),
+      name: request.body.name,
+    })))
+  }
+
   fn delete_secret(
     &self,
-    _request: server::DeleteSecretRequest,
+    request: server::DeleteSecretRequest,
   ) -> impl Future<Output = anyhow::Result<server::ApiResponse<(), server::Error>>> + Send {
-    ready(Ok(server::ApiResponse::NoContent))
+    let credentials = request.credentials;
+    let recognized = credentials
+      .bearer_auth
+      .as_ref()
+      .is_some_and(|token| token.expose_secret() == "t1")
+      || credentials
+        .api_key_auth
+        .as_ref()
+        .is_some_and(|key| key.expose_secret() == "k1");
+    ready(Ok(if recognized {
+      server::ApiResponse::NoContent
+    } else {
+      server::ApiResponse::Unauthorized(server::Error {
+        code: "invalid_credentials".to_string(),
+        message: "The credentials are not recognized.".to_string(),
+      })
+    }))
+  }
+
+  fn list_audit_events(
+    &self,
+    request: server::ListAuditEventsRequest,
+  ) -> impl Future<Output = anyhow::Result<server::ApiResponse<Vec<String>, ()>>> + Send {
+    let credentials = request.credentials;
+    let received = [&credentials.bearer_auth, &credentials.token_auth]
+      .map(|credential| format!("{:?}", credential.as_ref().map(secrecy::ExposeSecret::expose_secret)));
+    ready(Ok(server::ApiResponse::Ok(received.to_vec())))
   }
 
   fn get_health(
@@ -183,23 +226,119 @@ async fn combined_requirement_needs_every_key() {
 }
 
 #[tokio::test]
+async fn bearer_token_or_header_key_is_required() {
+  let base_url = serve_vault().await;
+  let anonymous = || client::KeyVaultClient::with_base_url(&base_url).unwrap();
+  let request = || {
+    client::DeleteSecretRequest::builder()
+      .secret_id("s1".to_string())
+      .build()
+      .unwrap()
+  };
+  let cases = [
+    (anonymous().with_bearer_auth("t1"), true, "bearer token"),
+    (anonymous().with_api_key_auth("k1"), true, "header key"),
+    (anonymous().with_bearer_auth("t2"), false, "unrecognized bearer token"),
+  ];
+
+  for (keyed, recognized, label) in cases {
+    let deleted = keyed.delete_secret(request()).await.unwrap();
+    assert_eq!(
+      matches!(deleted, client::ApiResponse::NoContent),
+      recognized,
+      "{label}: {deleted:?}"
+    );
+  }
+
+  let http = reqwest::Client::new();
+  let url = format!("{base_url}/secrets/s1");
+  let missing = "missing credentials for `ApiKeyAuth` or `BearerAuth`";
+  let cases = [
+    (http.delete(&url), reqwest::StatusCode::UNAUTHORIZED, missing),
+    (
+      http.delete(&url).header("authorization", "Basic dDE="),
+      reqwest::StatusCode::UNAUTHORIZED,
+      missing,
+    ),
+    (
+      http.delete(&url).header("authorization", "bearer t1"),
+      reqwest::StatusCode::NO_CONTENT,
+      "",
+    ),
+    (
+      http.delete(&url).header("authorization", "Bearer   t1"),
+      reqwest::StatusCode::NO_CONTENT,
+      "",
+    ),
+  ];
+
+  for (request, status, text) in cases {
+    assert_eq!(status_and_text(request).await, (status, text.to_string()));
+  }
+}
+
+#[tokio::test]
+async fn one_authorization_header_carries_the_last_credential() {
+  let base_url = serve_vault().await;
+  let anonymous = || client::KeyVaultClient::with_base_url(&base_url).unwrap();
+  let cases = [
+    (
+      anonymous().with_bearer_auth("t1"),
+      [r#"Some("t1")"#, r#"Some("Bearer t1")"#],
+    ),
+    (anonymous().with_token_auth("a1"), ["None", r#"Some("a1")"#]),
+    (
+      anonymous().with_bearer_auth("t1").with_token_auth("a1"),
+      ["None", r#"Some("a1")"#],
+    ),
+  ];
+
+  for (keyed, expected) in cases {
+    match keyed
+      .list_audit_events(client::ListAuditEventsRequest {})
+      .await
+      .unwrap()
+    {
+      client::ApiResponse::Ok(received) => assert_eq!(received, expected, "credentials received"),
+      other => panic!("expected 200 for {expected:?}, got {other:?}"),
+    }
+  }
+
+  let refused = status_and_text(reqwest::Client::new().get(format!("{base_url}/audit"))).await;
+  assert_eq!(
+    refused,
+    (
+      reqwest::StatusCode::UNAUTHORIZED,
+      "missing credentials for `BearerAuth` or `TokenAuth`".to_string()
+    )
+  );
+}
+
+#[tokio::test]
 async fn unchecked_alternatives_and_public_operations_need_no_key() {
   let base_url = serve_vault().await;
   let anonymous = client::KeyVaultClient::with_base_url(&base_url).unwrap();
 
-  let deleted = anonymous
-    .delete_secret(
-      client::DeleteSecretRequest::builder()
+  let replaced = anonymous
+    .replace_secret(
+      client::ReplaceSecretRequest::builder()
         .secret_id("s1".to_string())
+        .body(client::NewSecret {
+          name: "db".to_string(),
+          value: "hunter2".to_string(),
+        })
         .build()
         .unwrap(),
     )
     .await
     .unwrap();
-  assert!(
-    matches!(deleted, client::ApiResponse::NoContent),
-    "a bearer alternative the server can't check should not require the API key: {deleted:?}"
-  );
+  match replaced {
+    client::ApiResponse::Ok(secret) => assert_eq!(
+      secret.id, "None",
+      "a basic alternative the server can't check should not require the API key"
+    ),
+    other => panic!("expected 200, got {other:?}"),
+  }
 
   let health = anonymous.get_health(client::GetHealthRequest {}).await.unwrap();
   assert!(
@@ -242,11 +381,12 @@ async fn credentials_are_checked_before_the_body() {
 }
 
 #[test]
-fn debug_output_hides_api_keys() {
+fn debug_output_hides_credentials() {
   let client = client::KeyVaultClient::with_base_url("http://localhost")
     .unwrap()
     .with_api_key_auth("sk_live_1")
-    .with_session_cookie("sk_live_4");
+    .with_session_cookie("sk_live_4")
+    .with_bearer_auth("sk_live_5");
   let credentials = server::ApiKeyAuthAndSessionCookieCredentials {
     api_key_auth: SecretString::from("sk_live_2"),
     session_cookie: SecretString::from("sk_live_3"),

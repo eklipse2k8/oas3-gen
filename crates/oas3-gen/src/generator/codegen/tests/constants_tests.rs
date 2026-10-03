@@ -151,3 +151,25 @@ fn test_header_constants_fragment_multiple() {
   assert!(code.contains("X_CORRELATION_ID"));
   assert!(code.contains("CONTENT_TYPE"));
 }
+
+#[test]
+fn test_header_path_falls_back_to_http_constants() {
+  let cases = [
+    ("Authorization", "http :: header :: AUTHORIZATION", true),
+    ("content-type", "http :: header :: CONTENT_TYPE", true),
+    ("WWW-Authenticate", "http :: header :: WWW_AUTHENTICATE", true),
+    ("Proxy-Authorization", "http :: header :: PROXY_AUTHORIZATION", true),
+    ("X-Api-Key", "X_API_KEY", false),
+    ("x-request-id", "X_REQUEST_ID", false),
+    ("bad header", "BAD_HEADER", false),
+  ];
+  for (name, path, declared_by_http) in cases {
+    let header = HttpHeaderRef::from(name);
+    assert_eq!(header.path().to_string(), path, "path for {name}");
+    assert_eq!(
+      header.is_declared_by_http(),
+      declared_by_http,
+      "declared by http for {name}"
+    );
+  }
+}

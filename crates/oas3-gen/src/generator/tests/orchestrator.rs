@@ -280,7 +280,7 @@ fn unsupported_security_schemes_warn_once_each() {
   let spec_json = r#"{
     "openapi": "3.1.0",
     "info": { "title": "Mixed Auth", "version": "1.0.0" },
-    "security": [{ "BearerAuth": [] }],
+    "security": [{ "BasicAuth": [] }],
     "paths": {
       "/a": { "get": { "operationId": "a", "responses": { "204": { "description": "ok" } } } },
       "/b": { "get": { "operationId": "b", "responses": { "204": { "description": "ok" } } } },
@@ -294,7 +294,7 @@ fn unsupported_security_schemes_warn_once_each() {
     },
     "components": {
       "securitySchemes": {
-        "BearerAuth": { "type": "http", "scheme": "bearer" },
+        "BasicAuth": { "type": "http", "scheme": "basic" },
         "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
       }
     }
@@ -312,7 +312,7 @@ fn unsupported_security_schemes_warn_once_each() {
   assert_eq!(
     warnings,
     [
-      "Security scheme 'BearerAuth' gets no credentials: only `apiKey` schemes are generated, and it has type `http`",
+      "Security scheme 'BasicAuth' gets no credentials: only `apiKey` schemes and `http` schemes using `bearer` are generated, and it has type `http` with scheme `basic`",
       "Security scheme 'Missing' gets no credentials: it is not declared in `components.securitySchemes`",
     ],
     "each unsupported scheme should warn once"
@@ -374,7 +374,7 @@ fn api_key_edge_cases_keep_credentials_usable() {
       "/mixed": {
         "get": {
           "operationId": "mixed",
-          "security": [{ "ApiKeyAuth": [], "BearerAuth": [] }],
+          "security": [{ "ApiKeyAuth": [], "BasicAuth": [] }],
           "parameters": [{ "name": "credentials", "in": "query", "schema": { "type": "string" } }],
           "responses": { "204": { "description": "ok" } }
         }
@@ -404,7 +404,7 @@ fn api_key_edge_cases_keep_credentials_usable() {
     "components": {
       "securitySchemes": {
         "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" },
-        "BearerAuth": { "type": "http", "scheme": "bearer" },
+        "BasicAuth": { "type": "http", "scheme": "basic" },
         "Client": { "type": "apiKey", "in": "header", "name": "X-Client" },
         "CookieA": { "type": "apiKey", "in": "cookie", "name": "a" },
         "CookieB": { "type": "apiKey", "in": "cookie", "name": "b" }
@@ -481,6 +481,153 @@ fn api_key_edge_cases_keep_credentials_usable() {
     "the handler extracts the renamed credentials field",
   );
   assert_not_contains(&server_code, "fn reject", "handlers use axum's rejections");
+}
+
+#[test]
+fn authorization_and_standard_headers_follow_http() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Tokens", "version": "1.0.0" },
+    "paths": {
+      "/bearer": {
+        "get": {
+          "operationId": "bearer",
+          "security": [{ "BearerAuth": [] }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      },
+      "/token": {
+        "get": {
+          "operationId": "token",
+          "security": [{ "TokenAuth": [] }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      },
+      "/either": {
+        "get": {
+          "operationId": "either",
+          "security": [{ "BearerAuth": [] }, { "TokenAuth": [] }],
+          "responses": { "204": { "description": "ok" } }
+        }
+      },
+      "/forwarded": {
+        "get": {
+          "operationId": "forwarded",
+          "parameters": [
+            { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } },
+            { "name": "accept", "in": "header", "schema": { "type": "string" } },
+            { "name": "Content-Type", "in": "header", "schema": { "type": "string" } },
+            { "name": "If-Match", "in": "header", "schema": { "type": "string" } },
+            { "name": "X-Trace", "in": "header", "schema": { "type": "string" } }
+          ],
+          "responses": {
+            "204": { "description": "ok", "headers": { "ETag": { "schema": { "type": "string" } } } }
+          }
+        }
+      }
+    },
+    "components": {
+      "securitySchemes": {
+        "BearerAuth": { "type": "http", "scheme": "Bearer", "bearerFormat": "JWT" },
+        "TokenAuth": { "type": "apiKey", "in": "header", "name": "Authorization" }
+      }
+    }
+  }"#;
+
+  let client = make_orchestrator(parse_spec(spec_json), false);
+  let client_types = generate_types(&client, "test.json").code;
+  assert_contains_all(
+    &client_types,
+    &[
+      (
+        "pub const X_TRACE: http::HeaderName",
+        "a header http doesn't name keeps its generated constant",
+      ),
+      (
+        "map.insert(http::header::IF_MATCH, header_value);",
+        "a standard request header uses the http constant",
+      ),
+      (
+        ".get(http::header::ETAG)",
+        "a standard response header uses the http constant",
+      ),
+    ],
+  );
+  for absent in [
+    "const AUTHORIZATION",
+    "const IF_MATCH",
+    "const ETAG",
+    "pub authorization:",
+    "pub accept:",
+    "pub content_type:",
+  ] {
+    assert_not_contains(
+      &client_types,
+      absent,
+      "standard headers get no constants, and ignored header parameters get no fields",
+    );
+  }
+
+  let client_code = generate_client(&client, "test.json");
+  assert_contains_all(
+    &client_code,
+    &[
+      (
+        "pub fn with_bearer_auth(mut self, token: impl Into<String>) -> Self {",
+        "the bearer token setter",
+      ),
+      (
+        ".bearer_auth(secrecy::ExposeSecret::expose_secret(token));",
+        "reqwest attaches the bearer token",
+      ),
+      (
+        "http::header::AUTHORIZATION,",
+        "an API key in the Authorization header uses the http constant",
+      ),
+      (
+        "} else if let Some(token) = &self.bearer_auth {",
+        "a request carries one Authorization credential, and the last declared wins",
+      ),
+    ],
+  );
+
+  let server = make_server_orchestrator(parse_spec(spec_json));
+  let server_types = generate_types(&server, "test.json").code;
+  assert_contains(
+    &server_types,
+    "`BearerAuth` bearer token, read from the `Authorization` header.",
+    "credential docs name the bearer token",
+  );
+  assert_not_contains(
+    &server_types,
+    "const AUTHORIZATION",
+    "types.rs leaves Authorization to http",
+  );
+
+  let server_code = generate_server(&server, "test.json");
+  assert_contains_all(
+    &server_code,
+    &[
+      (
+        ".filter(|(scheme, _)| scheme.eq_ignore_ascii_case(\"bearer\"))",
+        "the Bearer scheme matches in any case",
+      ),
+      (
+        "\"missing bearer token in the `Authorization` header\"",
+        "a missing bearer token is rejected",
+      ),
+      (
+        "\"missing API key in the `Authorization` header\"",
+        "a missing Authorization API key is rejected",
+      ),
+    ],
+  );
+  assert_occurs_at_least(
+    &server_code,
+    ".get(http::header::AUTHORIZATION)",
+    2,
+    "both extractors read the http constant",
+  );
 }
 
 #[test]

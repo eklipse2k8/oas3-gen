@@ -7,9 +7,9 @@ use quote::{ToTokens, quote};
 use super::Visibility;
 use crate::generator::{
   ast::{
-    ApiKeyLocation, ApiKeyScheme, ContentCategory, HandlerBodyInfo, HandlerCredentials, OperationResponse,
-    ResponseEnumDef, ResponseParam, ResponsePayload, RustPrimitive, ServerRequestTraitDef, ServerTraitMethod,
-    TraitToken, tokens::ConstToken,
+    ApiKeyLocation, ContentCategory, CredentialKind, CredentialScheme, HandlerBodyInfo, HandlerCredentials,
+    OperationResponse, ResponseEnumDef, ResponseParam, ResponsePayload, RustPrimitive, ServerRequestTraitDef,
+    ServerTraitMethod, TraitToken, constants::HttpHeaderRef,
   },
   codegen::http::HttpStatusCode,
 };
@@ -108,7 +108,7 @@ impl ToTokens for ServerTraitFragment {
 }
 
 /// Extracts one credentials struct from the request parts, answering `401` when the
-/// API keys satisfy none of the operation's security requirements.
+/// credentials satisfy none of the operation's security requirements.
 ///
 /// Handlers take it before the body, so axum refuses the request without reading it.
 #[derive(Clone, Copy, Debug)]
@@ -138,9 +138,9 @@ impl ToTokens for CredentialsExtractorFragment<'_> {
 
     let fields = security.schemes.iter().map(|scheme| {
       let field = &scheme.field;
-      let value = api_key_value(scheme);
+      let value = credential_value(scheme);
       if security.requires(field) {
-        let missing = format!("missing API key in {}", scheme.whereabouts());
+        let missing = format!("missing {} in {}", scheme.kind.noun(), scheme.whereabouts());
         quote! { #field: #value.ok_or((axum::http::StatusCode::UNAUTHORIZED, #missing))? }
       } else {
         quote! { #field: #value }
@@ -198,22 +198,45 @@ impl ToTokens for CredentialsExtractorFragment<'_> {
   }
 }
 
-/// Reads one API key, as an optional `secrecy::SecretString`, from the request part
-/// it travels in.
-fn api_key_value(scheme: &ApiKeyScheme) -> TokenStream {
-  let name = &scheme.parameter_name;
-  match scheme.location {
-    ApiKeyLocation::Header => {
-      let header = ConstToken::from_raw(name);
+/// Reads one credential, as an optional `secrecy::SecretString`, from the request
+/// part it travels in.
+///
+/// A bearer token is the `Authorization` header's value after a `Bearer` scheme,
+/// which matches in any case.
+fn credential_value(scheme: &CredentialScheme) -> TokenStream {
+  match &scheme.kind {
+    CredentialKind::ApiKey {
+      location: ApiKeyLocation::Header,
+      parameter_name,
+    } => {
+      let header = HttpHeaderRef::from(parameter_name).path();
       quote! {
         parts.headers.get(#header).and_then(|value| value.to_str().ok()).map(secrecy::SecretString::from)
       }
     }
-    ApiKeyLocation::Query => quote! {
-      query.iter().find(|(name, _)| name == #name).map(|(_, value)| secrecy::SecretString::from(value.as_str()))
+    CredentialKind::ApiKey {
+      location: ApiKeyLocation::Query,
+      parameter_name,
+    } => quote! {
+      query
+        .iter()
+        .find(|(name, _)| name == #parameter_name)
+        .map(|(_, value)| secrecy::SecretString::from(value.as_str()))
     },
-    ApiKeyLocation::Cookie => quote! {
-      cookies.get(#name).map(|cookie| secrecy::SecretString::from(cookie.value_trimmed()))
+    CredentialKind::ApiKey {
+      location: ApiKeyLocation::Cookie,
+      parameter_name,
+    } => quote! {
+      cookies.get(#parameter_name).map(|cookie| secrecy::SecretString::from(cookie.value_trimmed()))
+    },
+    CredentialKind::Bearer => quote! {
+      parts
+        .headers
+        .get(http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, token)| secrecy::SecretString::from(token.trim_start()))
     },
   }
 }
