@@ -129,3 +129,13 @@ pub(crate) fn parse_schemas(pairs: Vec<(&str, serde_json::Value)>) -> SchemaMap 
     .map(|(name, json)| (name.to_string(), parse_schema(json)))
     .collect()
 }
+
+/// Serves `router` on a free local port and returns its base URL.
+pub(crate) async fn serve(router: axum::Router) -> String {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind a free port");
+  let address = listener.local_addr().expect("listener address");
+  tokio::spawn(async move { axum::serve(listener, router).await });
+  format!("http://{address}")
+}

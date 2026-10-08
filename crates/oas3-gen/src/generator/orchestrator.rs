@@ -67,7 +67,7 @@ impl Orchestrator {
   }
 
   pub fn generate(&self, mode: &dyn GenerationMode, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
-    let artifacts = self.collect_generation_artifacts();
+    let mut artifacts = self.collect_generation_artifacts();
     let postprocessed = PostprocessOutput::new(
       artifacts.rust_types,
       artifacts.operations_info,
@@ -75,6 +75,7 @@ impl Orchestrator {
       artifacts.config.target,
       artifacts.unique_headers,
     );
+    artifacts.stats.record_warnings(postprocessed.warnings);
 
     let api_name = artifacts.config.api_name.as_deref();
     let (client, server_trait) = match artifacts.config.target {

@@ -138,7 +138,7 @@ fn extract_template_params_simple() {
 #[test]
 fn extract_template_params_none() {
   let params = ParsedPath::extract_template_params("/api/v1/status").collect::<Vec<_>>();
-  assert!(params.is_empty());
+  assert!(params.is_empty(), "expected no template params, got {params:?}");
 }
 
 #[test]
@@ -162,13 +162,17 @@ fn extract_template_params_skips_empty() {
 #[test]
 fn extract_template_params_handles_unclosed() {
   let params = ParsedPath::extract_template_params("/foo/{unclosed").collect::<Vec<_>>();
-  assert!(params.is_empty());
+  assert!(params.is_empty(), "expected no template params, got {params:?}");
 }
 
 #[test]
 fn parsed_path_empty() {
   let path = ParsedPath::parse("/", &[]).unwrap();
-  assert!(path.segments.is_empty());
+  assert!(
+    path.segments.is_empty(),
+    "expected no segments, got {:?}",
+    path.segments
+  );
   assert!(path.query_string.is_none());
 }
 

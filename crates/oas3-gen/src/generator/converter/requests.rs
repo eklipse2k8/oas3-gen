@@ -1,6 +1,11 @@
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc};
 
-use oas3::spec::Schema;
+use indexmap::IndexMap;
+use mediatype::MediaType;
+use oas3::{
+  Spec,
+  spec::{Encoding, MediaType as MediaTypeObject, ObjectSchema, Schema},
+};
 
 use super::{
   inline_resolver::InlineTypeResolver,
@@ -10,8 +15,8 @@ use super::{
 use crate::{
   generator::{
     ast::{
-      ContentCategory, Documentation, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody, RustPrimitive,
-      RustType, StructDef, StructKind, StructToken, TypeRef,
+      ContentCategory, Documentation, FieldDef, FieldNameToken, MultipartProperty, OperationBody, PartRfc6570,
+      PartStyle, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef, is_json_media_type,
     },
     converter::ConverterContext,
     naming::{
@@ -21,7 +26,7 @@ use crate::{
     },
     operation_registry::OperationEntry,
   },
-  utils::{SchemaExt, SchemaInspect, parse_schema_ref_path},
+  utils::{SchemaExt, SchemaInspect, SchemaRefName, SchemaResolveExt, parse_schema_ref_path},
 };
 
 /// Result of building a request struct for an operation.
@@ -131,7 +136,8 @@ pub(crate) struct BodyInfo {
   pub(crate) description: Option<String>,
   pub(crate) optional: bool,
   pub(crate) content_category: ContentCategory,
-  pub(crate) multipart_fields: Option<Vec<MultipartFieldInfo>>,
+  pub(crate) multipart_properties: IndexMap<String, MultipartProperty>,
+  pub(crate) warnings: Vec<String>,
 }
 
 impl BodyInfo {
@@ -178,7 +184,16 @@ impl BodyInfo {
 
     let body_type = TypeRef::new(&type_name);
     let content_category = ContentCategory::from_content_type(content_type);
-    let multipart_fields = Self::resolve_multipart_fields(content_category, &body_type, &generated_types);
+    let (multipart_properties, warnings) = if content_category == ContentCategory::Multipart {
+      let graph = context.graph();
+      let schema = match schema_ref.schema_ref_name() {
+        Some(name) => graph.resolved(&name).map_or_else(Cow::default, Cow::Borrowed),
+        None => Cow::Owned(graph.merge_inline(&schema_ref.resolve_object(spec)?)?),
+      };
+      MultipartAnalyzer { spec, media_type }.analyze(content_type, &schema)?
+    } else {
+      (IndexMap::new(), vec![])
+    };
 
     Ok(Self {
       generated_types,
@@ -188,47 +203,9 @@ impl BodyInfo {
       description: body.description.clone(),
       optional: !is_required,
       content_category,
-      multipart_fields,
+      multipart_properties,
+      warnings,
     })
-  }
-
-  /// Extracts field information for multipart form data bodies.
-  ///
-  /// Returns `None` for non-multipart content types. For multipart bodies,
-  /// inspects the body struct to determine which fields are binary, nullable,
-  /// or require JSON serialization.
-  fn resolve_multipart_fields(
-    category: ContentCategory,
-    body_type: &TypeRef,
-    generated_types: &[RustType],
-  ) -> Option<Vec<MultipartFieldInfo>> {
-    if category != ContentCategory::Multipart {
-      return None;
-    }
-
-    let body_type_name = body_type.unboxed_base_type_name();
-
-    let struct_def = generated_types.iter().find_map(|t| {
-      if let RustType::Struct(def) = t
-        && def.name.as_str() == body_type_name
-      {
-        return Some(def);
-      }
-      None
-    })?;
-
-    let fields = struct_def
-      .fields
-      .iter()
-      .map(|f| MultipartFieldInfo {
-        name: f.name.clone(),
-        nullable: f.rust_type.nullable,
-        is_bytes: matches!(f.rust_type.base_type, RustPrimitive::Bytes),
-        requires_json: f.rust_type.requires_json_serialization(),
-      })
-      .collect();
-
-    Some(fields)
   }
 
   /// Creates a field definition for the request body if present.
@@ -252,7 +229,7 @@ impl BodyInfo {
         .maybe_body_type(self.body_type.clone())
         .optional(self.optional)
         .content_category(self.content_category)
-        .maybe_multipart_fields(self.multipart_fields.clone())
+        .multipart_properties(self.multipart_properties.clone())
         .build(),
     )
   }
@@ -264,4 +241,236 @@ impl BodyInfo {
       ..Default::default()
     }
   }
+}
+
+/// What the spec declares about each multipart property, and warnings for what generated code
+/// can't send as written.
+type MultipartAnalysis = (IndexMap<String, MultipartProperty>, Vec<String>);
+
+/// Reads what a `multipart/form-data` media type declares about each body property.
+struct MultipartAnalyzer<'a> {
+  spec: &'a Spec,
+  media_type: &'a MediaTypeObject,
+}
+
+impl MultipartAnalyzer<'_> {
+  /// Collects each property's Encoding Object `contentType` and RFC 6570 fields and whether its
+  /// schema is raw binary, leaving out properties with nothing beyond the defaults, along with
+  /// warnings for what generated code can't honor.
+  fn analyze(&self, content_type: &str, schema: &ObjectSchema) -> anyhow::Result<MultipartAnalysis> {
+    let mut properties = IndexMap::new();
+    let mut warnings = vec![];
+    if MediaType::parse(content_type).is_ok_and(|media| media.subty.as_str() != "form-data") {
+      warnings.push(format!(
+        "`{content_type}` request bodies are sent as `multipart/form-data`"
+      ));
+    }
+    if schema.properties.is_empty() && schema.additional_properties.is_none() {
+      warnings.push(
+        "multipart request body is not an object with properties, so its parts come from its JSON form and \
+         binary values aren't sent as files"
+          .to_string(),
+      );
+    }
+
+    for (name, property_ref) in &schema.properties {
+      let resolved = self.resolve(property_ref)?;
+      let encoding = self.media_type.encoding.get(name);
+      if name.contains(['"', '\r', '\n']) {
+        warnings.push(format!(
+          "multipart part name `{name}` contains a quote or line break, which a part header can't carry"
+        ));
+      }
+      if resolved.items.as_ref().is_some_and(SchemaExt::is_array) {
+        warnings.push(format!(
+          "multipart property `{name}` holds nested arrays, whose inner arrays are sent as JSON text"
+        ));
+      }
+      if let Some(encoding) = encoding {
+        warnings.extend(self.encoding_warnings(name, encoding, &resolved));
+      }
+
+      let property = MultipartProperty {
+        content_type: encoding
+          .and_then(|encoding| encoding.content_type.as_deref())
+          .and_then(first_concrete_media_type)
+          .map(|content_type| {
+            if resolved.is_binary() {
+              content_type
+            } else {
+              with_utf8_charset(content_type)
+            }
+          }),
+        rfc6570: encoding.and_then(part_rfc6570),
+        raw_binary: resolved.is_raw_binary(),
+      };
+      if property != MultipartProperty::default() {
+        properties.insert(name.clone(), property);
+      }
+    }
+
+    for name in self.media_type.encoding.keys() {
+      if !schema.properties.contains_key(name) {
+        warnings.push(format!(
+          "multipart encoding names `{name}`, which is not a property of the request body"
+        ));
+      }
+    }
+    Ok((properties, warnings))
+  }
+
+  fn encoding_warnings(&self, name: &str, encoding: &Encoding, property: &ResolvedProperty) -> Vec<String> {
+    let mut warnings = vec![];
+    if let Some(declared) = encoding.content_type.as_deref() {
+      match first_concrete_media_type(declared) {
+        None => warnings.push(format!(
+          "multipart property `{name}` declares contentType `{declared}`, which names no media type a part can \
+           carry, so its parts use the default"
+        )),
+        Some(chosen) if property.is_binary() && chosen != declared.trim() => warnings.push(format!(
+          "multipart property `{name}` allows `{declared}`, and every file part is labelled `{chosen}`"
+        )),
+        Some(chosen) if property.is_structured() && !is_json_media_type(&chosen) => warnings.push(format!(
+          "multipart property `{name}` declares contentType `{chosen}`, but structured values are sent as \
+           `application/json`"
+        )),
+        Some(chosen) if !property.is_binary() && has_non_utf8_charset(&chosen) => warnings.push(format!(
+          "multipart property `{name}` declares contentType `{chosen}`, but text is sent as UTF-8"
+        )),
+        Some(_) => {}
+      }
+    }
+    if let Some(style) = &encoding.style
+      && style.parse::<PartStyle>().is_err()
+    {
+      warnings.push(format!(
+        "multipart property `{name}` declares style `{style}`, which multipart/form-data doesn't support, so \
+         `form` is used"
+      ));
+    }
+    for (header, header_ref) in &encoding.headers {
+      if !header.eq_ignore_ascii_case("content-type")
+        && header_ref
+          .resolve(self.spec)
+          .is_ok_and(|header| header.required.unwrap_or(false))
+      {
+        warnings.push(format!(
+          "multipart part `{name}` requires header `{header}`, which generated code does not send"
+        ));
+      }
+    }
+    warnings
+  }
+
+  fn resolve(&self, property_ref: &Schema) -> anyhow::Result<ResolvedProperty> {
+    let schema = property_ref.resolve_object(self.spec)?;
+    let schema = match schema.single_non_null_variant(self.spec) {
+      Some(variant) if schema.has_null_variant(self.spec) => variant.resolve_object(self.spec)?,
+      _ => schema,
+    };
+    let items = schema
+      .items
+      .as_deref()
+      .map(|items| items.resolve_object(self.spec))
+      .transpose()?;
+    Ok(ResolvedProperty { schema, items })
+  }
+}
+
+/// A body property's schema, unwrapped from a nullable union, and its `items` schema.
+struct ResolvedProperty {
+  schema: ObjectSchema,
+  items: Option<ObjectSchema>,
+}
+
+impl ResolvedProperty {
+  /// Whether OpenAPI 3.1 reads the property, or each of its items, as raw binary.
+  fn is_raw_binary(&self) -> bool {
+    is_raw_binary(&self.schema) || (self.schema.is_array() && self.items.as_ref().is_none_or(is_raw_binary))
+  }
+
+  /// Whether the generator sends the property, or each of its items, as file parts.
+  fn is_binary(&self) -> bool {
+    is_binary(&self.schema) || self.items.as_ref().is_some_and(is_binary)
+  }
+
+  /// Whether the property, or each of its items, is an object, which multipart sends as JSON.
+  fn is_structured(&self) -> bool {
+    is_structured(&self.schema) || self.items.as_ref().is_some_and(is_structured)
+  }
+}
+
+/// Returns `true` when a schema declares no `type` and constrains nothing about its JSON shape,
+/// which OpenAPI 3.1 reads as raw binary (`application/octet-stream`) in `multipart` content.
+fn is_raw_binary(schema: &ObjectSchema) -> bool {
+  schema.is_empty_object()
+    && schema.const_value.is_none()
+    && schema.additional_properties.is_none()
+    && schema.items.is_none()
+    && schema.prefix_items.is_empty()
+}
+
+/// Returns `true` for schemas the generator sends as file parts.
+fn is_binary(schema: &ObjectSchema) -> bool {
+  is_raw_binary(schema) || matches!(schema.format.as_deref(), Some("binary"))
+}
+
+/// Returns `true` for object schemas.
+fn is_structured(schema: &ObjectSchema) -> bool {
+  schema.is_object() || !schema.properties.is_empty() || schema.additional_properties.is_some()
+}
+
+/// The first media type an Encoding Object's `contentType` lists that a part can carry: a
+/// wildcard such as `image/*` names a range, not a type a sender can label with.
+fn first_concrete_media_type(content_type: &str) -> Option<String> {
+  content_type
+    .split(',')
+    .map(str::trim)
+    .find(|candidate| {
+      MediaType::parse(candidate).is_ok_and(|media| media.ty.as_str() != "*" && media.subty.as_str() != "*")
+    })
+    .map(str::to_owned)
+}
+
+/// Returns `true` when a media type names a `charset` other than UTF-8.
+fn has_non_utf8_charset(content_type: &str) -> bool {
+  MediaType::parse(content_type).is_ok_and(|media| {
+    media.params.iter().any(|(name, value)| {
+      name.as_str().eq_ignore_ascii_case("charset") && !value.as_str().eq_ignore_ascii_case("utf-8")
+    })
+  })
+}
+
+/// Replaces a `charset` other than UTF-8, since generated code sends Rust strings as UTF-8.
+fn with_utf8_charset(content_type: String) -> String {
+  if !has_non_utf8_charset(&content_type) {
+    return content_type;
+  }
+  let Ok(mut media) = MediaType::parse(&content_type) else {
+    return content_type;
+  };
+  media.params = media
+    .params
+    .iter()
+    .filter(|(name, _)| !name.as_str().eq_ignore_ascii_case("charset"))
+    .copied()
+    .collect::<Vec<_>>()
+    .into();
+  format!("{media}; charset=utf-8")
+}
+
+/// Returns the RFC 6570 serialization an Encoding Object selects. Any explicit `style`,
+/// `explode`, or `allowReserved` selects it; `style` defaults to `form`, and `explode` defaults
+/// to `true` only for `form`.
+fn part_rfc6570(encoding: &Encoding) -> Option<PartRfc6570> {
+  if encoding.style.is_none() && encoding.explode.is_none() && encoding.allow_reserved.is_none() {
+    return None;
+  }
+  let style = encoding
+    .style
+    .as_deref()
+    .and_then(|style| style.parse().ok())
+    .unwrap_or(PartStyle::Form);
+  let explode = encoding.explode.unwrap_or(style == PartStyle::Form);
+  Some(PartRfc6570 { style, explode })
 }

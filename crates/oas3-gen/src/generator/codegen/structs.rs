@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
+use quote::{ToTokens, format_ident, quote};
 
 use super::{
   Visibility,
@@ -24,7 +24,7 @@ use crate::generator::{
     http::HttpStatusCode,
   },
   converter::GenerationTarget,
-  naming::constants::OTHER_RESPONSE_VARIANT,
+  naming::{constants::OTHER_RESPONSE_VARIANT, identifiers::builder_setter_name},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -709,7 +709,11 @@ impl ToTokens for BuilderMethodFragment<'_> {
       .map(|f| {
         let name = &f.name;
         let ty = &f.rust_type;
-        quote! { #name: #ty }
+        let setter = builder_setter_name(name.as_str()).map(|setter| {
+          let setter = format_ident!("{setter}");
+          quote! { #[builder(name = #setter)] }
+        });
+        quote! { #setter #name: #ty }
       })
       .collect();
 

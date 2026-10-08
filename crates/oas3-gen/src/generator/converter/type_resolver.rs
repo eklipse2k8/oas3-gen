@@ -522,11 +522,7 @@ impl TypeResolver {
     }
 
     let value = self.additional_properties_type(additional)?;
-    Ok(Some(TypeRef::new(format!(
-      "{}<String, {}>",
-      self.context.config().map_type_path(),
-      value.to_rust_type()
-    ))))
+    Ok(Some(TypeRef::map(self.context.config().map_type_path(), &value)))
   }
 
   /// Resolves whether an array schema's `uniqueItems` flag should propagate to

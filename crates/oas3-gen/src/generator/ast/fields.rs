@@ -52,6 +52,20 @@ pub struct DefaultVariant {
 }
 
 impl FieldDef {
+  /// Returns the name this field serializes under: its `#[serde(rename)]` value when present,
+  /// otherwise the Rust field name.
+  #[must_use]
+  pub fn serde_name(&self) -> &str {
+    self
+      .serde_attrs
+      .iter()
+      .find_map(|attr| match attr {
+        SerdeAttribute::Rename(name) => Some(name.as_str()),
+        _ => None,
+      })
+      .unwrap_or_else(|| self.name.as_str())
+  }
+
   #[must_use]
   pub fn is_required(&self) -> bool {
     self.default_value.is_none() && !self.rust_type.nullable
@@ -70,7 +84,6 @@ impl FieldDef {
     if let Some(value) = discriminator_value {
       self.default_value = Some(serde_json::Value::String(value.to_string()));
       self.serde_attrs.insert(SerdeAttribute::SkipDeserializing);
-      self.serde_attrs.insert(SerdeAttribute::Default);
     } else if is_base {
       self.serde_attrs.clear();
       self.serde_attrs.insert(SerdeAttribute::Skip);
@@ -110,9 +123,10 @@ impl FieldDef {
   pub fn with_builder_attrs(self) -> Self {
     let mut attrs = vec![];
 
-    let needs_rename = BON_RESERVED_FIELD_NAMES.contains(&self.name.as_str());
-    if needs_rename && !self.doc_hidden {
-      attrs.push(BuilderAttribute::Rename(format!("{}_value", self.name.as_str())));
+    if !self.doc_hidden
+      && let Some(setter) = builder_setter_name(self.name.as_str())
+    {
+      attrs.push(BuilderAttribute::Rename(setter));
     }
 
     if self.default_value.is_some() {
@@ -151,7 +165,7 @@ use crate::generator::{
     IsSet, IsUnset, SetDefaultValue, SetDeprecated, SetDocs, SetExampleValue, SetMultipleOf, SetName, SetOriginalName,
     SetParameterLocation, SetRustType, SetSerdeAttrs, State,
   },
-  naming::constants::BON_RESERVED_FIELD_NAMES,
+  naming::identifiers::builder_setter_name,
 };
 
 impl<S: State> FieldDefBuilder<S>
@@ -229,10 +243,7 @@ where
       .docs(Documentation::from_lines([
         "Additional properties not defined in the schema.",
       ]))
-      .rust_type(TypeRef::new(format!(
-        "{map_type_path}<String, {}>",
-        value_type.to_rust_type()
-      )))
+      .rust_type(TypeRef::map(map_type_path, value_type))
       .serde_attrs(BTreeSet::from([SerdeAttribute::Flatten]))
   }
 }

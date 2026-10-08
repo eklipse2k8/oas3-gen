@@ -21,7 +21,7 @@ pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key
 #[serde(default)]
 pub struct Allergies {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("allergies"))]
   #[builder(skip = Some("allergies"))]
   pub r#type: Option<&'static str>,
@@ -31,7 +31,7 @@ pub struct Allergies {
 #[serde(default)]
 pub struct Diet {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("diet"))]
   #[builder(skip = Some("diet"))]
   pub r#type: Option<&'static str>,

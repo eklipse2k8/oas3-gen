@@ -1117,4 +1117,38 @@ mod tests {
       assert_eq!(deserialized, variant, "MediaType deserialization failed for {expected}");
     }
   }
+
+  #[test]
+  fn test_decoded_variants_keep_their_discriminator() {
+    let cases = [
+      (
+        json!({"type": "text", "text": "hi"}),
+        ContentBlock::Text(text_block("hi")),
+      ),
+      (
+        json!({"type": "code", "code": "fn main() {}"}),
+        ContentBlock::Code(code_block("fn main() {}")),
+      ),
+    ];
+    for (json, expected) in cases {
+      let decoded: ContentBlock = serde_json::from_value(json.clone()).unwrap();
+      assert_eq!(decoded, expected, "decoding {json} should fill the discriminator");
+
+      let reencoded = serde_json::to_value(&decoded).unwrap();
+      assert_eq!(
+        reencoded["type"], json["type"],
+        "re-encoding {json} should keep the discriminator"
+      );
+
+      let decoded_again: ContentBlock = serde_json::from_value(reencoded).unwrap();
+      assert_eq!(decoded_again, decoded, "re-encoded {json} should decode again");
+    }
+
+    let wrong_tag: TextBlock = serde_json::from_value(json!({"type": "code", "text": "hi"})).unwrap();
+    assert_eq!(
+      wrong_tag.r#type,
+      Some("text"),
+      "a variant's discriminator is fixed by its type"
+    );
+  }
 }

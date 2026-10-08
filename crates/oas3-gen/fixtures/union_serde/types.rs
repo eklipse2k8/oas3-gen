@@ -116,7 +116,7 @@ impl ContentBlock {
 #[serde(default)]
 pub struct TextBlock {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("text"))]
   #[builder(skip = Some("text"))]
   pub r#type: Option<&'static str>,
@@ -130,7 +130,7 @@ pub struct TextBlock {
 #[serde(default)]
 pub struct ImageBlock {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("image"))]
   #[builder(skip = Some("image"))]
   pub r#type: Option<&'static str>,
@@ -145,7 +145,7 @@ pub struct ImageBlock {
 #[serde(default)]
 pub struct CodeBlock {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("code"))]
   #[builder(skip = Some("code"))]
   pub r#type: Option<&'static str>,
@@ -160,7 +160,7 @@ pub struct CodeBlock {
 #[serde(default)]
 pub struct ToolUseBlock {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("tool_use"))]
   #[builder(skip = Some("tool_use"))]
   pub r#type: Option<&'static str>,
@@ -177,7 +177,7 @@ pub struct ToolUseBlock {
 #[serde(default)]
 pub struct ToolResultBlock {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("tool_result"))]
   #[builder(skip = Some("tool_result"))]
   pub r#type: Option<&'static str>,
@@ -315,7 +315,7 @@ impl ImageSource {
 #[serde(default)]
 pub struct Base64ImageSource {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("base64"))]
   #[builder(skip = Some("base64"))]
   pub r#type: Option<&'static str>,
@@ -330,7 +330,7 @@ pub struct Base64ImageSource {
 #[serde(default)]
 pub struct UrlImageSource {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("url"))]
   #[builder(skip = Some("url"))]
   pub r#type: Option<&'static str>,
@@ -416,7 +416,7 @@ impl<'de> serde::Deserialize<'de> for Annotation {
 #[serde(default)]
 pub struct CitationAnnotation {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("citation"))]
   #[builder(skip = Some("citation"))]
   pub r#type: Option<&'static str>,
@@ -433,7 +433,7 @@ pub struct CitationAnnotation {
 #[serde(default)]
 pub struct LinkAnnotation {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("link"))]
   #[builder(skip = Some("link"))]
   pub r#type: Option<&'static str>,
@@ -521,7 +521,7 @@ impl Event {
 #[serde(default)]
 pub struct MessageStartEvent {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("message_start"))]
   #[builder(skip = Some("message_start"))]
   pub r#type: Option<&'static str>,
@@ -531,7 +531,7 @@ pub struct MessageStartEvent {
 #[serde(default)]
 pub struct ContentBlockStartEvent {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("content_block_start"))]
   #[builder(skip = Some("content_block_start"))]
   pub r#type: Option<&'static str>,
@@ -543,7 +543,7 @@ pub struct ContentBlockStartEvent {
 #[serde(default)]
 pub struct ContentBlockDeltaEvent {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("content_block_delta"))]
   #[builder(skip = Some("content_block_delta"))]
   pub r#type: Option<&'static str>,
@@ -555,7 +555,7 @@ pub struct ContentBlockDeltaEvent {
 #[serde(default)]
 pub struct ContentBlockStopEvent {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("content_block_stop"))]
   #[builder(skip = Some("content_block_stop"))]
   pub r#type: Option<&'static str>,
@@ -565,7 +565,7 @@ pub struct ContentBlockStopEvent {
 #[serde(default)]
 pub struct MessageStopEvent {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("message_stop"))]
   #[builder(skip = Some("message_stop"))]
   pub r#type: Option<&'static str>,
@@ -574,7 +574,7 @@ pub struct MessageStopEvent {
 #[serde(default)]
 pub struct PingEvent {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("ping"))]
   #[builder(skip = Some("ping"))]
   pub r#type: Option<&'static str>,
@@ -632,7 +632,7 @@ impl Delta {
 #[serde(default)]
 pub struct TextDelta {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("text_delta"))]
   #[builder(skip = Some("text_delta"))]
   pub r#type: Option<&'static str>,
@@ -642,7 +642,7 @@ pub struct TextDelta {
 #[serde(default)]
 pub struct InputJsonDelta {
   #[doc(hidden)]
-  #[serde(default, rename = "type", skip_deserializing)]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("input_json_delta"))]
   #[builder(skip = Some("input_json_delta"))]
   pub r#type: Option<&'static str>,

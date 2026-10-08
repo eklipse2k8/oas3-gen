@@ -172,6 +172,21 @@ is authorized; your service performs that check. See
 [Constructing Requests in Tests](./server-generation.md#constructing-requests-in-tests)
 for an example and how it differs from HTTP extraction.
 
+### Setter Names
+
+A setter usually has its field's or parameter's name. Two kinds of names can't
+work that way, so their setters get a different name:
+
+| Field or parameter | Setter | Reason |
+|---|---|---|
+| `build` or `builder` | `build_value()`, `builder_value()` | `bon` uses these names itself |
+| A name that starts with a digit, such as `_2fa` | `value_2fa()` | `bon` drops a leading underscore, and `2fa` isn't a valid name |
+
+For example, a schema with a `2fa` property generates the field `_2fa`, and you
+set it with `.value_2fa(...)`. The field itself keeps its name; only the setter
+changes. See [Generated Names](./code-generation.md#generated-names) for how
+property names become fields.
+
 ## A Side-by-Side Comparison
 
 Let's construct the request both ways. The following examples use the

@@ -150,6 +150,53 @@ Here, `http_response` is the response you've already received. The decoder
 reads declared headers before decoding the body and returns the operation's
 `ApiResponse` type.
 
+## Sending Multipart Bodies
+
+When an operation's request body uses `multipart/form-data`, the client method
+sends the body struct as a form with one or more parts per property.
+[Multipart Form Bodies](./code-generation.md#multipart-form-bodies) describes
+which part each property becomes. This section shows the code that builds them.
+
+The `submitForm` operation in `crates/oas3-gen/fixtures/multipart.json` takes an
+`UploadForm` body with `name`, `file`, `attachments`, and `quality` fields,
+among others. Its `submit_form()` method moves each field into a
+[`reqwest::multipart::Form`][rustdoc-reqwest-form]:
+
+```rust
+let body = request.body;
+let mut form = reqwest::multipart::Form::new().percent_encode_noop();
+form = form.text("name", body.name);
+if let Some(value) = body.file {
+    form = form.part(
+        "file",
+        reqwest::multipart::Part::bytes(value)
+            .file_name("file")
+            .mime_str("application/octet-stream")?,
+    );
+}
+for value in body.attachments {
+    form = form.part(
+        "attachments",
+        reqwest::multipart::Part::bytes(value)
+            .file_name("attachments")
+            .mime_str("application/octet-stream")?,
+    );
+}
+if let Some(value) = body.quality {
+    form = form.text("quality", value.to_string());
+}
+req_builder = req_builder.multipart(form);
+```
+
+This is an excerpt from the generated `client.rs`, trimmed to those four
+fields. A binary field becomes a file part with a filename, which is how
+servers such as FastAPI tell an uploaded file from a text field. The filename
+is the property name because the specification doesn't name the file. An array
+sends one part per item under the same name, and a `None` field sends no part
+at all. The bytes move into the part rather than being copied. Part names are
+sent as raw UTF-8, as browsers send them, so a property such as `résumé` keeps
+its name.
+
 ## Sending Credentials
 
 For operations with `apiKey` or bearer security schemes, the client provides
@@ -280,6 +327,7 @@ enums, type adapters, and collection choices.
 [rustdoc-reqwest-bearer-auth]: https://docs.rs/reqwest/0.13.5/reqwest/struct.RequestBuilder.html#method.bearer_auth
 [rustdoc-reqwest-client]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html
 [rustdoc-reqwest-client-builder]: https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuilder.html
+[rustdoc-reqwest-form]: https://docs.rs/reqwest/0.13.5/reqwest/multipart/struct.Form.html
 [rustdoc-reqwest-response]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Response.html
 [rustdoc-reqwest-url]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Url.html
 [rustdoc-result]: https://doc.rust-lang.org/std/result/enum.Result.html

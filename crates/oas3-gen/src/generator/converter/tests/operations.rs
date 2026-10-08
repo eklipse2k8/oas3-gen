@@ -6,7 +6,10 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{ContentCategory, OperationKind, RustPrimitive, RustType, StatusCodeToken, StructDef, StructToken},
+    ast::{
+      ContentCategory, MultipartProperty, OperationKind, PartRfc6570, PartStyle, RustPrimitive, RustType,
+      StatusCodeToken, StructDef, StructToken,
+    },
     converter::{SchemaConverter, SerdeUsageRecorder, operations::OperationConverter},
     operation_registry::OperationEntry,
   },
@@ -927,6 +930,146 @@ fn test_response_headers_become_variant_fields() -> anyhow::Result<()> {
       .header_names()
       .any(|header| header.header_name.to_string() == "x-rate-limit"),
     "response headers get header name constants"
+  );
+  Ok(())
+}
+
+#[test]
+fn test_multipart_body_records_property_encodings() -> anyhow::Result<()> {
+  let form_schema = serde_json::from_value::<ObjectSchema>(json!({
+    "type": "object",
+    "properties": {
+      "name": { "type": "string" },
+      "file": { "anyOf": [{ "type": "string", "format": "binary" }, { "type": "null" }] },
+      "avatar": { "description": "no type: raw binary" },
+      "previews": { "type": "array", "items": {} },
+      "untyped_items": { "type": "array" },
+      "metadata": { "type": "object" },
+      "listed": { "type": "string", "format": "binary" },
+      "wildcard": { "type": "string", "format": "binary" },
+      "invalid": { "type": "string" },
+      "ids": { "type": "array", "items": { "type": "integer" } },
+      "filter": { "type": "object", "properties": { "size": { "type": "integer" } } },
+      "reserved": { "type": "string" }
+    }
+  }))?;
+  let (converter, _usage) = setup_converter(BTreeMap::from([("UploadForm".to_string(), form_schema)]));
+
+  let operation = serde_json::from_value::<Operation>(json!({
+    "operationId": "submitForm",
+    "requestBody": {
+      "required": true,
+      "content": {
+        "multipart/form-data": {
+          "schema": { "$ref": "#/components/schemas/UploadForm" },
+          "encoding": {
+            "listed": {
+              "contentType": "image/png, image/jpeg",
+              "headers": {
+                "X-Signature": { "required": true, "schema": { "type": "string" } },
+                "X-Trace": { "schema": { "type": "string" } },
+                "Content-Type": { "required": true, "schema": { "type": "string" } }
+              }
+            },
+            "missing": { "contentType": "text/plain" },
+            "wildcard": { "contentType": "image/*, application/*" },
+            "invalid": { "contentType": "not a media type" },
+            "ids": { "style": "pipeDelimited" },
+            "filter": { "style": "deepObject", "explode": true },
+            "reserved": { "allowReserved": true }
+          }
+        }
+      }
+    },
+    "responses": { "204": { "description": "accepted" } }
+  }))?;
+  let result = converter.convert(&make_entry("submit_form", Method::POST, "/forms", operation))?;
+  let body = result.operation_info.body.expect("operation should have a body");
+
+  assert_eq!(body.content_category, ContentCategory::Multipart);
+  assert!(
+    body.multipart_fields.is_none(),
+    "fields resolve in postprocess, not during conversion"
+  );
+
+  let raw_binary = MultipartProperty {
+    raw_binary: true,
+    ..Default::default()
+  };
+  let styled = |style, explode| MultipartProperty {
+    rfc6570: Some(PartRfc6570 { style, explode }),
+    ..Default::default()
+  };
+  let expected = [
+    ("avatar", raw_binary.clone()),
+    ("previews", raw_binary.clone()),
+    ("untyped_items", raw_binary),
+    (
+      "listed",
+      MultipartProperty {
+        content_type: Some("image/png".to_string()),
+        ..Default::default()
+      },
+    ),
+    ("ids", styled(PartStyle::PipeDelimited, false)),
+    ("filter", styled(PartStyle::DeepObject, true)),
+    ("reserved", styled(PartStyle::Form, true)),
+  ];
+  let actual = body
+    .multipart_properties
+    .iter()
+    .map(|(name, property)| (name.as_str(), property.clone()))
+    .collect::<Vec<_>>();
+  assert_eq!(
+    actual, expected,
+    "only properties that differ from the defaults are recorded"
+  );
+
+  assert_eq!(
+    result.operation_info.warnings,
+    [
+      "multipart property `listed` allows `image/png, image/jpeg`, and every file part is labelled `image/png`",
+      "multipart part `listed` requires header `X-Signature`, which generated code does not send",
+      "multipart property `wildcard` declares contentType `image/*, application/*`, which names no media type a \
+       part can carry, so its parts use the default",
+      "multipart property `invalid` declares contentType `not a media type`, which names no media type a part can \
+       carry, so its parts use the default",
+      "multipart encoding names `missing`, which is not a property of the request body",
+    ],
+    "optional part headers and `Content-Type` produce no warning"
+  );
+  Ok(())
+}
+
+#[test]
+fn test_inline_multipart_body_reads_array_of_empty_items_as_files() -> anyhow::Result<()> {
+  let (converter, _usage) = setup_converter(BTreeMap::new());
+  let operation = serde_json::from_value::<Operation>(json!({
+    "operationId": "uploadFiles",
+    "requestBody": {
+      "content": {
+        "multipart/form-data": {
+          "schema": {
+            "type": "object",
+            "properties": { "file": { "type": "array", "items": {} }, "note": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "responses": { "204": { "description": "accepted" } }
+  }))?;
+  let result = converter.convert(&make_entry("upload_files", Method::POST, "/files", operation))?;
+  let body = result.operation_info.body.expect("operation should have a body");
+
+  assert!(body.optional, "request body without `required` is optional");
+  assert_eq!(
+    body.multipart_properties.keys().collect::<Vec<_>>(),
+    ["file"],
+    "only the file array differs from the defaults"
+  );
+  assert!(
+    body.multipart_properties["file"].raw_binary,
+    "`items: {{}}` is raw binary"
   );
   Ok(())
 }

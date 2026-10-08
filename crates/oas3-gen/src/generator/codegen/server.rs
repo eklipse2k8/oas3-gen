@@ -4,7 +4,7 @@ use itertools::Itertools as _;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::Visibility;
+use super::{Visibility, multipart::MultipartDecodeFragment};
 use crate::generator::{
   ast::{
     ApiKeyLocation, ContentCategory, CredentialKind, CredentialScheme, HandlerBodyInfo, HandlerCredentials,
@@ -314,6 +314,13 @@ impl ToTokens for HandlerFunctionFragment<'_> {
       quote! { service.#fn_name().await }
     };
 
+    let multipart_decode = self
+      .method
+      .body_info
+      .as_ref()
+      .filter(|body_info| body_info.content_category == ContentCategory::Multipart)
+      .map(MultipartDecodeFragment::new);
+
     let internal_error = internal_error();
     let error_handling = quote! {
       match result {
@@ -329,11 +336,22 @@ impl ToTokens for HandlerFunctionFragment<'_> {
       where
         S: #trait_name + Clone + Send + Sync + 'static,
       {
+        #multipart_decode
         #request_construction
         let result: anyhow::Result<#return_type> = #service_call;
         #error_handling
       }
     });
+  }
+}
+
+/// Answers `400` with the error bound as `e` in the enclosing match arm.
+pub(super) fn bad_request() -> TokenStream {
+  quote! {
+    (
+      axum::http::StatusCode::BAD_REQUEST,
+      format!("Bad request: {e}")
+    ).into_response()
   }
 }
 
@@ -503,7 +521,14 @@ impl ToTokens for BodyExtractorFragment {
     let body_type = &self.body_info.body_type;
 
     let ts = match self.body_info.content_category {
-      ContentCategory::Json | ContentCategory::Multipart => {
+      ContentCategory::Multipart => {
+        if self.body_info.optional {
+          quote! { multipart: Option<axum::extract::Multipart> }
+        } else {
+          quote! { multipart: axum::extract::Multipart }
+        }
+      }
+      ContentCategory::Json => {
         if self.body_info.optional {
           quote! { body: Option<axum::Json<#body_type>> }
         } else {
@@ -565,13 +590,11 @@ impl ToTokens for RequestConstructionFragment {
     }
 
     let header = self.method.header_params_type.as_ref().map(|header_type| {
+      let bad_request = bad_request();
       quote! {
         let header = match #header_type::try_from(&headers) {
           Ok(header) => header,
-          Err(e) => return (
-            axum::http::StatusCode::BAD_REQUEST,
-            format!("Bad request: {e}")
-          ).into_response(),
+          Err(e) => return #bad_request,
         };
       }
     });
@@ -587,7 +610,7 @@ impl ToTokens for RequestConstructionFragment {
     if let Some(body_info) = &self.method.body_info {
       let needs_unwrap = matches!(
         body_info.content_category,
-        ContentCategory::Json | ContentCategory::FormUrlEncoded | ContentCategory::Multipart
+        ContentCategory::Json | ContentCategory::FormUrlEncoded
       );
       let body_expr = if needs_unwrap && body_info.optional {
         quote! { body: body.map(|b| b.0) }

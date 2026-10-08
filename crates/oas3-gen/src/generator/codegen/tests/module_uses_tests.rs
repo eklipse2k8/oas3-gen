@@ -2,7 +2,14 @@ use std::collections::BTreeSet;
 
 use quote::ToTokens as _;
 
-use crate::generator::codegen::types::{ModuleUsesFragment, UseFragment};
+use crate::generator::{
+  ast::ApiMetadata,
+  codegen::{
+    Visibility,
+    mod_file::ModFileFragment,
+    types::{ModuleUsesFragment, UseFragment},
+  },
+};
 
 fn set_from<const N: usize>(items: [&str; N]) -> BTreeSet<String> {
   items.into_iter().map(String::from).collect::<BTreeSet<_>>()
@@ -312,4 +319,27 @@ fn empty_items_after_filtering_produces_empty_braces() {
     code.contains("use serde :: { } ;"),
     "all-invalid items produce empty braces (edge case), got: {code}"
   );
+}
+
+#[test]
+fn test_mod_file_reexports_follow_visibility() {
+  let cases = [
+    (Visibility::Public, "pub use types :: * ; pub use client :: * ;"),
+    (
+      Visibility::Crate,
+      "pub (crate) use types :: * ; pub (crate) use client :: * ;",
+    ),
+    (Visibility::File, "mod types ; mod client ;"),
+  ];
+  for (visibility, expected) in cases {
+    let fragment = ModFileFragment::for_client(ApiMetadata::default(), visibility, String::new(), String::new());
+    let code = fragment.into_token_stream().to_string();
+    assert!(code.contains(expected), "{visibility:?}: expected {expected} in {code}");
+    if visibility == Visibility::File {
+      assert!(
+        !code.contains("use"),
+        "file visibility keeps generated items inside the module: {code}"
+      );
+    }
+  }
 }

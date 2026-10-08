@@ -1,8 +1,9 @@
 use http::Method;
 
 use super::{
-  ContentCategory, Documentation, FieldDef, FieldNameToken, FileHeaderNode, MethodNameToken, OperationInfo,
-  OperationResponse, OperationSecurity, ParameterLocation, ParsedPath, ResponseEnumDef, StructToken, TypeRef,
+  ContentCategory, Documentation, FieldDef, FieldNameToken, FileHeaderNode, MethodNameToken, MultipartFieldInfo,
+  OperationInfo, OperationResponse, OperationSecurity, ParameterLocation, ParsedPath, ResponseEnumDef, StructToken,
+  TypeRef,
 };
 use crate::generator::{
   ast::tokens::TraitToken,
@@ -15,6 +16,8 @@ pub struct HandlerBodyInfo {
   pub content_category: ContentCategory,
   #[builder(default)]
   pub optional: bool,
+  /// Parts a `multipart/form-data` body's struct fields arrive in; `None` when the body has no struct
+  pub multipart_fields: Option<Vec<MultipartFieldInfo>>,
 }
 
 /// The credentials struct a handler extracts, the request field it fills, and the
@@ -96,6 +99,7 @@ impl ServerRequestTraitDef {
               .body_type(body_type.clone())
               .content_category(body.content_category)
               .optional(body.optional)
+              .maybe_multipart_fields(body.multipart_fields.clone())
               .build()
           })
         });

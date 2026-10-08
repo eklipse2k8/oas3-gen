@@ -42,8 +42,8 @@ const DEPENDENCIES: &[DependencySpec] = &[
   DependencySpec {
     ident: "axum",
     package: "axum",
-    version: "0.8",
-    features: &[],
+    version: "0.8.5",
+    features: &["multipart"],
     ordered_features: &[],
     default_features: true,
   },

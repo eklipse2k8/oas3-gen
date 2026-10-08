@@ -5,12 +5,12 @@ use reqwest::Url;
 use crate::generator::{
   ast::{
     ClientRootNode, ContentCategory, Documentation, EnumToken, FieldDef, FieldNameToken, MultipartFieldInfo,
-    OperationBody, OperationInfo, OperationKind, OperationResponse, ParameterLocation, ParsedPath, PathSegment,
-    ResponseMediaType, StructToken, TypeRef,
+    MultipartPartKind, OperationBody, OperationInfo, OperationKind, OperationResponse, ParameterLocation, ParsedPath,
+    PartValue, PathSegment, ResponseMediaType, RustPrimitive, StructToken, TypeRef,
   },
   codegen::{
     Visibility,
-    client::{ClientFragment, ClientMethodFragment, MultipartFormFragment},
+    client::{ClientFragment, ClientMethodFragment},
   },
 };
 
@@ -288,67 +288,6 @@ fn test_event_stream_response_handling() {
 }
 
 #[test]
-fn test_multipart_generation() {
-  let strict_body = OperationBody::builder()
-    .field_name(FieldNameToken::new("body"))
-    .content_category(ContentCategory::Multipart)
-    .multipart_fields(vec![
-      MultipartFieldInfo::builder()
-        .name(FieldNameToken::new("file"))
-        .is_bytes(true)
-        .build(),
-      MultipartFieldInfo::builder()
-        .name(FieldNameToken::new("description"))
-        .build(),
-    ])
-    .build();
-
-  let strict_code = MultipartFormFragment::new(strict_body.clone())
-    .into_token_stream()
-    .to_string();
-
-  assert!(
-    strict_code.contains("Part :: bytes"),
-    "strict: should use Part::bytes for binary"
-  );
-  assert!(
-    strict_code.contains("Part :: text"),
-    "strict: should use Part::text for text"
-  );
-  assert!(
-    strict_code.contains("form . part (\"file\""),
-    "strict: should have file part"
-  );
-  assert!(
-    strict_code.contains("form . part (\"description\""),
-    "strict: should have description part"
-  );
-  assert!(
-    !strict_code.contains("serde_json :: to_value"),
-    "strict: should NOT use fallback"
-  );
-
-  let fallback_body = OperationBody::builder()
-    .field_name(FieldNameToken::new("body"))
-    .content_category(ContentCategory::Multipart)
-    .build();
-
-  let fallback_code = MultipartFormFragment::new(fallback_body.clone())
-    .into_token_stream()
-    .to_string();
-
-  assert!(
-    fallback_code.contains("serde_json :: to_value"),
-    "fallback: should use serde_json"
-  );
-  assert!(fallback_code.contains("form . text"), "fallback: should use form.text");
-  assert!(
-    !fallback_code.contains("Part :: bytes"),
-    "fallback: should NOT use Part::bytes"
-  );
-}
-
-#[test]
 fn test_client_filters_webhook_operations() {
   let http_operation = {
     let method = Method::GET;
@@ -572,9 +511,21 @@ fn test_multipart_method_generation_with_path_params() {
         .multipart_fields(vec![
           MultipartFieldInfo::builder()
             .name(FieldNameToken::new("image"))
-            .is_bytes(true)
+            .part_name("image")
+            .rust_type(TypeRef::new(RustPrimitive::Bytes))
+            .kind(MultipartPartKind::File {
+              content_type: "application/octet-stream".to_string(),
+            })
             .build(),
-          MultipartFieldInfo::builder().name(FieldNameToken::new("name")).build(),
+          MultipartFieldInfo::builder()
+            .name(FieldNameToken::new("name"))
+            .part_name("name")
+            .rust_type(TypeRef::new(RustPrimitive::String))
+            .kind(MultipartPartKind::Value {
+              value: PartValue::String,
+              content_type: None,
+            })
+            .build(),
         ])
         .build(),
     )
@@ -605,8 +556,12 @@ fn test_multipart_method_generation_with_path_params() {
     "should use Part::bytes for image field"
   );
   assert!(
-    generated.contains("Part :: text"),
-    "should use Part::text for name field"
+    generated.contains("file_name (\"image\")"),
+    "image part should carry a filename"
+  );
+  assert!(
+    generated.contains("form . text (\"name\" , body . name)"),
+    "name field should be a text part"
   );
   assert!(
     generated.contains("req_builder . multipart (form)"),
@@ -615,88 +570,6 @@ fn test_multipart_method_generation_with_path_params() {
   assert!(
     generated.contains("-> anyhow :: Result < Pet >"),
     "should return Pet type"
-  );
-}
-
-#[test]
-fn test_multipart_with_nullable_fields() {
-  let body = OperationBody::builder()
-    .field_name(FieldNameToken::new("body"))
-    .content_category(ContentCategory::Multipart)
-    .multipart_fields(vec![
-      MultipartFieldInfo::builder()
-        .name(FieldNameToken::new("file"))
-        .is_bytes(true)
-        .build(),
-      MultipartFieldInfo::builder()
-        .name(FieldNameToken::new("description"))
-        .nullable(true)
-        .build(),
-    ])
-    .build();
-
-  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
-
-  assert!(
-    code.contains("if let Some (val)"),
-    "nullable field should use if let Some pattern"
-  );
-  assert!(
-    code.contains("form . part (\"file\""),
-    "non-nullable file field should be added unconditionally"
-  );
-  assert!(
-    code.contains("form . part (\"description\""),
-    "nullable description field should be added conditionally"
-  );
-}
-
-#[test]
-fn test_multipart_with_json_serialization() {
-  let body = OperationBody::builder()
-    .field_name(FieldNameToken::new("body"))
-    .content_category(ContentCategory::Multipart)
-    .multipart_fields(vec![
-      MultipartFieldInfo::builder()
-        .name(FieldNameToken::new("metadata"))
-        .requires_json(true)
-        .build(),
-      MultipartFieldInfo::builder()
-        .name(FieldNameToken::new("simple_text"))
-        .build(),
-    ])
-    .build();
-
-  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
-
-  assert!(
-    code.contains("serde_json :: to_string"),
-    "JSON-required field should use serde_json::to_string"
-  );
-  assert!(code.contains("form . part (\"metadata\""), "should have metadata part");
-  assert!(
-    code.contains("form . part (\"simple_text\""),
-    "should have simple_text part"
-  );
-}
-
-#[test]
-fn test_multipart_fallback_uses_type_inference() {
-  let body = OperationBody::builder()
-    .field_name(FieldNameToken::new("body"))
-    .body_type(TypeRef::new("UploadRequest"))
-    .content_category(ContentCategory::Multipart)
-    .build();
-
-  let code = MultipartFormFragment::new(body.clone()).into_token_stream().to_string();
-
-  assert!(
-    code.contains("serde_json :: to_value (body)"),
-    "fallback should use type inference without explicit annotation: {code}"
-  );
-  assert!(
-    !code.contains("to_value :: <"),
-    "fallback should not include explicit type annotation: {code}"
   );
 }
 

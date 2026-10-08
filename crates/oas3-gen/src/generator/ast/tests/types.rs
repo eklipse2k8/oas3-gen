@@ -120,6 +120,26 @@ fn test_type_ref_wrappers() {
   }
 }
 
+#[test]
+fn test_type_ref_map_carries_its_value_type() {
+  let cases = [
+    TypeRef::new(RustPrimitive::I64),
+    TypeRef::new(RustPrimitive::String).with_vec(),
+    TypeRef::new("Node").with_boxed().with_option(),
+  ];
+  for value in cases {
+    let map = TypeRef::map("indexmap::IndexMap", &value);
+    let expected = format!("indexmap::IndexMap<String, {}>", value.to_rust_type());
+    assert_eq!(map.to_rust_type(), expected, "map type for {value:?}");
+    assert_eq!(map.map_value.as_deref(), Some(&value), "value type for {value:?}");
+    assert_eq!(
+      map.with_option().element_type().map_value.as_deref(),
+      Some(&value),
+      "wrappers keep the value type for {value:?}"
+    );
+  }
+}
+
 #[allow(clippy::approx_constant)]
 #[test]
 fn test_format_example_primitive_types() {
@@ -363,7 +383,7 @@ fn discriminator_behavior() {
       expect_doc_hidden: true,
       expect_skip_deserializing: true,
       expect_skip: false,
-      expect_default: true,
+      expect_default: false,
       expected_default_value: Some(serde_json::Value::String("nugget".to_string())),
     },
     Case {

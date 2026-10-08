@@ -45,6 +45,8 @@ pub struct TypeRef {
   pub nullable: bool,
   pub is_array: bool,
   pub unique_items: bool,
+  /// Value type when `base_type` is a `String`-keyed map built by [`TypeRef::map`]
+  pub map_value: Option<Box<TypeRef>>,
 }
 
 impl TypeRef {
@@ -55,6 +57,27 @@ impl TypeRef {
       nullable: false,
       is_array: false,
       unique_items: false,
+      map_value: None,
+    }
+  }
+
+  /// A `String`-keyed map of `map_type_path`, such as `indexmap::IndexMap`, holding `value`.
+  #[must_use]
+  pub fn map(map_type_path: &str, value: &TypeRef) -> Self {
+    Self {
+      map_value: Some(Box::new(value.clone())),
+      ..Self::new(format!("{map_type_path}<String, {}>", value.to_rust_type()))
+    }
+  }
+
+  /// The type of one value: this type without its `Option` and collection wrappers.
+  #[must_use]
+  pub fn element_type(&self) -> Self {
+    Self {
+      nullable: false,
+      is_array: false,
+      unique_items: false,
+      ..self.clone()
     }
   }
 
@@ -89,10 +112,6 @@ impl TypeRef {
 
   pub fn unboxed_base_type_name(&self) -> String {
     self.base_type.to_string()
-  }
-
-  pub fn requires_json_serialization(&self) -> bool {
-    self.is_array || matches!(self.base_type, RustPrimitive::Custom(_) | RustPrimitive::Value)
   }
 
   /// Get the full Rust type string
@@ -157,13 +176,7 @@ impl TypeRef {
       };
     }
 
-    let element_type = TypeRef {
-      base_type: self.base_type.clone(),
-      boxed: self.boxed,
-      nullable: false,
-      is_array: false,
-      unique_items: false,
-    };
+    let element_type = self.element_type();
 
     let formatted_items = items
       .iter()

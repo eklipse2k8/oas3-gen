@@ -70,15 +70,23 @@ impl ModFileFragment {
 
 impl ToTokens for ModFileFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let vis = &self.visibility;
     let secondary_mod = Ident::new(self.kind.label(), Span::call_site());
+    let reexports = match self.visibility {
+      Visibility::File => None,
+      visibility => {
+        let vis = visibility.to_tokens();
+        Some(quote! {
+          #vis use types::*;
+          #vis use #secondary_mod::*;
+        })
+      }
+    };
 
     tokens.extend(quote! {
       mod types;
       mod #secondary_mod;
 
-      #vis use types::*;
-      #vis use #secondary_mod::*;
+      #reexports
     });
   }
 }

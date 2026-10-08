@@ -7,6 +7,8 @@ mod event_stream;
 #[cfg(test)]
 mod intersection_union;
 #[cfg(test)]
+mod multipart;
+#[cfg(test)]
 mod petstore;
 #[cfg(test)]
 mod petstore_server;

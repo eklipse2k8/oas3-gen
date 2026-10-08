@@ -131,7 +131,41 @@ Use a declared response variant when the result is part of your API's contract,
 such as an authorization failure. Returning `Err` from the service method
 causes the handler to send status `500`. A response header value that can't be
 represented as an HTTP header also produces `500`. Missing or malformed
-required request headers produce `400` before your method runs.
+required request headers produce `400` before your method runs, as do
+`multipart/form-data` bodies with a missing required part or a part that
+doesn't decode. See [Receiving Multipart Bodies](#receiving-multipart-bodies).
+
+## Receiving Multipart Bodies
+
+When an operation's request body uses `multipart/form-data`, the generated
+handler reads the parts back into the body struct before calling your service.
+[Multipart Form Bodies](./code-generation.md#multipart-form-bodies) describes
+which part each property becomes.
+
+The generated server extracts the body with Axum's
+[`Multipart`][rustdoc-axum-multipart] extractor, which needs Axum 0.8.5 or
+later with the `multipart` feature. With `--workspace`, the generated manifest
+declares both. With module output, add the feature to your own `axum`
+dependency. Each handler contains a function that reads the parts. Text parts
+are converted by the rules in
+[Choosing the Part for Each Property](./code-generation.md#choosing-the-part-for-each-property)
+and collected into a JSON object. The function then deserializes the struct
+from that object in one step, so renamed fields, defaults, and `#[serde_as]`
+adapters behave as they do for JSON bodies. File parts skip that step: their
+bytes are assigned to the struct afterward.
+
+If a required part is missing or a part's text doesn't match its type, the
+handler responds with status `400` before calling your service. For example, a
+`count` part containing `three` produces
+``Bad request: invalid multipart part `count`: expected ident at line 1 column 2``.
+A missing required array is an empty array, because multipart sends no part for
+an empty array. For the same reason, an empty array and a `None` field both
+arrive as `None` when the field is optional, and `null` items in an array are
+dropped.
+
+Axum limits request bodies to 2 MB by default. A larger upload fails while the
+parts are read, and the handler answers `400`. To accept larger files, add
+[`DefaultBodyLimit`][rustdoc-axum-default-body-limit] as a layer on the router.
 
 ## Receiving Credentials
 
@@ -302,7 +336,9 @@ options, and [Builder Pattern](./builders.md) explains request construction.
 
 [rustdoc-anyhow-result]: https://docs.rs/anyhow/1.0.104/anyhow/type.Result.html
 [rustdoc-axum-cookie-jar]: https://docs.rs/axum-extra/0.12.6/axum_extra/extract/cookie/struct.CookieJar.html
+[rustdoc-axum-default-body-limit]: https://docs.rs/axum/0.8.9/axum/extract/struct.DefaultBodyLimit.html
 [rustdoc-axum-from-request-parts]: https://docs.rs/axum/0.8.9/axum/extract/trait.FromRequestParts.html
+[rustdoc-axum-multipart]: https://docs.rs/axum/0.8.9/axum/extract/struct.Multipart.html
 [rustdoc-axum-router]: https://docs.rs/axum/0.8.9/axum/struct.Router.html
 [rustdoc-clone]: https://doc.rust-lang.org/std/clone/trait.Clone.html
 [rustdoc-expose-secret]: https://docs.rs/secrecy/0.10.3/secrecy/trait.ExposeSecret.html

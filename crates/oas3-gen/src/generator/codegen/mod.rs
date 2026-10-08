@@ -31,6 +31,7 @@ pub(crate) mod headers;
 pub mod http;
 pub mod methods;
 pub mod mod_file;
+pub(crate) mod multipart;
 pub mod server;
 pub mod structs;
 pub mod type_aliases;
@@ -54,7 +55,7 @@ impl ToTokens for Visibility {
     let ts = match self {
       Visibility::Public => quote! { pub },
       Visibility::Crate => quote! { pub(crate) },
-      Visibility::File => quote! {},
+      Visibility::File => quote! { pub(super) },
     };
     tokens.extend(ts);
   }
@@ -65,7 +66,7 @@ impl Visibility {
     match self {
       Visibility::Public => quote! { pub },
       Visibility::Crate => quote! { pub(crate) },
-      Visibility::File => quote! {},
+      Visibility::File => quote! { pub(super) },
     }
   }
 }

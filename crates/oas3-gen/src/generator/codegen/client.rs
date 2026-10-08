@@ -5,11 +5,11 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, LitStr};
 
-use super::Visibility;
+use super::{Visibility, multipart::MultipartFormFragment};
 use crate::generator::ast::{
   ApiKeyLocation, ClientRootNode, ContentCategory, CredentialKind, CredentialScheme, Documentation, FieldDef,
-  FieldNameToken, MultipartFieldInfo, OperationBody, OperationInfo, OperationKind, OperationResponse,
-  OperationSecurity, ParameterLocation, ParsedPath, StructToken, constants::HttpHeaderRef,
+  FieldNameToken, OperationBody, OperationInfo, OperationKind, OperationResponse, OperationSecurity, ParameterLocation,
+  ParsedPath, StructToken, constants::HttpHeaderRef,
 };
 
 #[derive(Clone, Debug)]
@@ -37,44 +37,6 @@ impl ToTokens for HttpInitFragment {
         quote! { self.client.request(#m, url) }
       }
     };
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct MultipartFieldFragment {
-  field: MultipartFieldInfo,
-}
-
-impl MultipartFieldFragment {
-  pub(crate) fn new(field: MultipartFieldInfo) -> Self {
-    Self { field }
-  }
-
-  fn to_part(&self, value_expr: &TokenStream) -> TokenStream {
-    if self.field.is_bytes {
-      quote! { reqwest::multipart::Part::bytes(std::borrow::Cow::from(#value_expr.clone())) }
-    } else if self.field.requires_json {
-      quote! { reqwest::multipart::Part::text(serde_json::to_string(&#value_expr)?) }
-    } else {
-      quote! { reqwest::multipart::Part::text(#value_expr.to_string()) }
-    }
-  }
-}
-
-impl ToTokens for MultipartFieldFragment {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let ident = &self.field.name;
-    let name = self.field.name.as_str();
-
-    let ts = if self.field.nullable {
-      let part = self.to_part(&quote! { val });
-      quote! { if let Some(val) = &body.#ident { form = form.part(#name, #part); } }
-    } else {
-      let part = self.to_part(&quote! { body.#ident });
-      quote! { form = form.part(#name, #part); }
-    };
-
     tokens.extend(ts);
   }
 }
@@ -157,105 +119,6 @@ impl ToTokens for XmlBodyFragment {
       quote! {
         .header("Content-Type", "application/xml")
         .body(request.#field.to_string())
-      }
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct MultipartFallbackFragment;
-
-impl MultipartFallbackFragment {
-  pub(crate) fn new() -> Self {
-    Self
-  }
-}
-
-impl ToTokens for MultipartFallbackFragment {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let ts = quote! {
-      let json_value = serde_json::to_value(body)?;
-      let mut form = reqwest::multipart::Form::new();
-      if let serde_json::Value::Object(map) = json_value {
-        for (key, value) in map {
-          let text_value = match value {
-            serde_json::Value::String(s) => s,
-            serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::Bool(b) => b.to_string(),
-            serde_json::Value::Null => continue,
-            other => serde_json::to_string(&other)?,
-          };
-          form = form.text(key, text_value);
-        }
-      }
-      req_builder = req_builder.multipart(form);
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct MultipartStrictFragment {
-  fields: Vec<MultipartFieldFragment>,
-}
-
-impl MultipartStrictFragment {
-  pub(crate) fn new(fields: Vec<MultipartFieldInfo>) -> Self {
-    let fragments = fields.into_iter().map(MultipartFieldFragment::new).collect();
-    Self { fields: fragments }
-  }
-}
-
-impl ToTokens for MultipartStrictFragment {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let parts = &self.fields;
-
-    let ts = quote! {
-      let mut form = reqwest::multipart::Form::new();
-      #(#parts)*
-      req_builder = req_builder.multipart(form);
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct MultipartFormFragment {
-  body: OperationBody,
-}
-
-impl MultipartFormFragment {
-  pub(crate) fn new(body: OperationBody) -> Self {
-    Self { body }
-  }
-
-  fn inner_logic(&self) -> TokenStream {
-    self.body.multipart_fields.as_ref().map_or_else(
-      || MultipartFallbackFragment::new().into_token_stream(),
-      |f| MultipartStrictFragment::new(f.clone()).into_token_stream(),
-    )
-  }
-}
-
-impl ToTokens for MultipartFormFragment {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let logic = self.inner_logic();
-    let field = &self.body.field_name;
-
-    let ts = if self.body.optional {
-      quote! {
-        if let Some(body) = request.#field.as_ref() {
-          #logic
-        }
-      }
-    } else {
-      quote! {
-        let body = &request.#field;
-        #logic
       }
     };
 

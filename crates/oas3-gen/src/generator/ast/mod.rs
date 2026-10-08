@@ -5,6 +5,7 @@ mod derives;
 pub(crate) mod documentation;
 pub mod fields;
 pub mod lints;
+mod multipart;
 mod outer_attrs;
 mod parsed_path;
 mod security;
@@ -24,9 +25,14 @@ pub use client::ClientRootNode;
 pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
+use indexmap::IndexMap;
 use itertools::Itertools;
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
+pub use multipart::{
+  MultipartFieldInfo, MultipartPartKind, MultipartProperty, PartMembers, PartRfc6570, PartStyle, PartType, PartValue,
+  is_json_media_type,
+};
 use oas3::{
   Spec,
   spec::{ObjectSchema, ParameterIn},
@@ -583,17 +589,6 @@ impl ResponseMediaType {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
-pub struct MultipartFieldInfo {
-  pub name: FieldNameToken,
-  #[builder(default)]
-  pub nullable: bool,
-  #[builder(default)]
-  pub is_bytes: bool,
-  #[builder(default)]
-  pub requires_json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct OperationBody {
   pub field_name: FieldNameToken,
   pub body_type: Option<TypeRef>,
@@ -601,6 +596,10 @@ pub struct OperationBody {
   pub optional: bool,
   #[builder(default)]
   pub content_category: ContentCategory,
+  /// What the spec declares about each `multipart/form-data` property, keyed by property name
+  #[builder(default)]
+  pub multipart_properties: IndexMap<String, MultipartProperty>,
+  /// Parts the body struct's fields become; `None` until resolved, or when the body has no struct
   pub multipart_fields: Option<Vec<MultipartFieldInfo>>,
 }
 

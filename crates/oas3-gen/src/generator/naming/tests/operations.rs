@@ -49,7 +49,7 @@ fn test_single_operation_not_simplified() {
 #[test]
 fn test_empty_slice_returns_empty() {
   let ids: [&str; 0] = [];
-  assert!(trim_common_affixes(&ids).is_empty());
+  assert_eq!(trim_common_affixes(&ids), ids);
 }
 
 #[test]

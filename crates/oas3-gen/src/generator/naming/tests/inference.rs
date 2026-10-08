@@ -454,7 +454,7 @@ fn make_variant(name: &str) -> VariantDef {
 fn test_strip_common_affixes_no_op_cases() {
   let empty: Vec<VariantDef> = vec![];
   let empty = strip_common_affixes(empty);
-  assert!(empty.is_empty());
+  assert!(empty.is_empty(), "expected no variants, got {empty:?}");
 
   let single = vec![make_variant("UserResponse")];
   let single = strip_common_affixes(single);

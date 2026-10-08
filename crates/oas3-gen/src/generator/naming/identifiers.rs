@@ -9,6 +9,8 @@ use any_ascii::any_ascii;
 use inflections::Inflect;
 use regex::Regex;
 
+use super::constants::BON_RESERVED_FIELD_NAMES;
+
 pub(crate) static FORBIDDEN_IDENTIFIERS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
   [
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
@@ -23,9 +25,16 @@ pub(crate) static FORBIDDEN_IDENTIFIERS: LazyLock<HashSet<&str>> = LazyLock::new
   .collect()
 });
 
-static PRELUDE_TYPE_NAMES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+/// Keywords that name a path root and so can't be raw identifiers; field names with them get a
+/// trailing underscore instead of an `r#` prefix.
+const PATH_KEYWORDS: [&str; 3] = ["crate", "self", "super"];
+
+/// Type names a generated type can't take: prelude items it would shadow, the `Self` keyword,
+/// and `S`, the service type parameter of generated server handlers. Such names get a `Type`
+/// suffix.
+static RESERVED_TYPE_NAMES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
   [
-    "Clone", "Copy", "Display", "Option", "Result", "Send", "Sync", "Type", "Vec",
+    "Clone", "Copy", "Display", "Option", "Result", "S", "Self", "Send", "Sync", "Type", "Vec",
   ]
   .into_iter()
   .collect()
@@ -145,8 +154,9 @@ where
 /// 1. If the string starts with `-`, it's stripped and "negative_" is prepended to the result.
 /// 2. Sanitizes the base string.
 /// 3. Converts to `snake_case`.
-/// 4. If the result is `self`, it becomes `self_`.
-/// 5. If the result is a keyword, it gets a raw identifier prefix (`r#`).
+/// 4. If the result is `crate`, `self`, or `super`, which can't be raw identifiers, it gets a
+///    trailing underscore.
+/// 5. If the result is another keyword, it gets a raw identifier prefix (`r#`).
 /// 6. If the result starts with a digit, it's prefixed with `_`.
 /// 7. If the result is empty, it becomes `_`.
 pub(crate) fn to_rust_field_name(name: &str) -> String {
@@ -154,7 +164,11 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
     && !raw.is_empty()
     && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
   {
-    return format!("r#{raw}");
+    return if PATH_KEYWORDS.contains(&raw) {
+      format!("{raw}_")
+    } else {
+      format!("r#{raw}")
+    };
   }
 
   let has_leading_minus = name.starts_with('-');
@@ -170,8 +184,8 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
     ident = format!("negative_{ident}");
   }
 
-  if ident == "self" {
-    return "self_".to_string();
+  if PATH_KEYWORDS.contains(&ident.as_str()) {
+    return format!("{ident}_");
   }
 
   if FORBIDDEN_IDENTIFIERS.contains(ident.as_str()) {
@@ -202,7 +216,7 @@ pub(crate) fn to_rust_const_name(input: &str) -> String {
 /// 2. If the string starts with `-`, it's stripped and "Negative" is prepended to the result.
 /// 3. If the input already has mixed case (both upper and lowercase, no separators), preserve capitalization.
 /// 4. Otherwise, sanitizes the base string and converts to `PascalCase` using capitalize_words.
-/// 5. If the result is a reserved name (e.g., `Clone`, `Vec`), it gets a `Type` suffix.
+/// 5. If the result is a reserved name (e.g., `Clone`, `Self`, `S`), it gets a `Type` suffix.
 /// 6. If the result starts with a digit, it's prefixed with `T`.
 /// 7. If the result is empty, it becomes `Unnamed`.
 pub(crate) fn to_rust_type_name(name: &str) -> String {
@@ -247,11 +261,7 @@ pub(crate) fn to_rust_type_name(name: &str) -> String {
     ident = format!("Negative{ident}");
   }
 
-  if ident == "Self" {
-    return "r#Self".to_string();
-  }
-
-  if PRELUDE_TYPE_NAMES.contains(ident.as_str()) {
+  if RESERVED_TYPE_NAMES.contains(ident.as_str()) {
     return format!("{ident}Type");
   }
 
@@ -352,4 +362,17 @@ where
       self.pending_lower.as_mut().unwrap().next()
     }
   }
+}
+
+/// The setter name a `bon` builder needs for a field or parameter named `field`, when it can't
+/// use that name: `bon` reserves `build` and `builder`, and strips leading underscores, which
+/// turns a field such as `_2fa` into the invalid identifier `2fa`.
+pub(crate) fn builder_setter_name(field: &str) -> Option<String> {
+  if BON_RESERVED_FIELD_NAMES.contains(&field) {
+    return Some(format!("{field}_value"));
+  }
+  let unprefixed = field.trim_start_matches('_');
+  unprefixed
+    .starts_with(|c: char| c.is_ascii_digit())
+    .then(|| format!("value_{unprefixed}"))
 }

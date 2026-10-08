@@ -140,7 +140,10 @@ fn test_dependencies_cover_client_and_server_crates() {
       "let response: reqwest::Response = todo!();",
       "reqwest = { version = \"0.13\"",
     ),
-    ("pub fn router() -> axum::Router { todo!() }", "axum = \"0.8\""),
+    (
+      "pub fn router() -> axum::Router { todo!() }",
+      "axum = { version = \"0.8.5\", features = [\"multipart\"] }",
+    ),
     (
       "pub type Ids = indexmap::IndexSet<String>;",
       "indexmap = { version = \"2.14\"",

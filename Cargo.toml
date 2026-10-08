@@ -43,7 +43,7 @@ oas3-gen-support = { path = "crates/oas3-gen-support", version = "0.29.0" }
 # External Dependencies
 any_ascii = { version = "0.3" }
 anyhow = { version = "1.0" }
-axum = { version = "0.8" }
+axum = { version = "0.8.5" }
 axum-core = { version = "0.5" }
 axum-extra = { version = "0.12", features = ["cookie"] }
 better_default = { version = "1.0" }

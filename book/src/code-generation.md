@@ -26,8 +26,10 @@ omitted code, so those excerpts aren't complete programs.
 
 - [Generation Modes](#generation-modes)
 - [Responses](#responses)
+- [Multipart Form Bodies](#multipart-form-bodies)
 - [Security Schemes](#security-schemes)
 - [Workspace Crate Output](#workspace-crate-output)
+- [Generated Names](#generated-names)
 - [Visibility](#visibility)
 - [Enum Mode](#enum-mode)
 - [Enum Layout](#enum-layout)
@@ -202,6 +204,130 @@ An operation returning pets with pagination headers uses
 value from an HTTP response, and the server constructs it to send a response.
 See [Reading Responses](./client-generation.md#reading-responses) and
 [Returning Responses](./server-generation.md#returning-responses) for examples.
+
+## Multipart Form Bodies
+
+When an operation's request body uses `multipart/form-data`, the body schema
+still becomes an ordinary struct in `types.rs`. The difference is on the wire:
+the generated client sends each property as its own part, named after the
+property, and the generated server reads those parts back into the struct.
+This section explains which part each property becomes, so you can predict
+what a server receives.
+
+Let's start with a body that uploads a file next to a few text fields. This is
+the `UploadForm` schema from `crates/oas3-gen/fixtures/multipart.json`, trimmed
+to four of its properties:
+
+```json
+"UploadForm": {
+  "type": "object",
+  "required": ["name", "attachments"],
+  "properties": {
+    "name": { "type": "string" },
+    "file": { "anyOf": [{ "type": "string", "format": "binary" }, { "type": "null" }] },
+    "attachments": { "type": "array", "items": { "type": "string", "format": "binary" } },
+    "quality": { "$ref": "#/components/schemas/Quality" }
+  }
+}
+```
+
+The generator produces a struct with `name: String`, `file: Option<Vec<u8>>`,
+`attachments: Vec<Vec<u8>>`, and `quality: Option<Quality>`. The rest of this
+section describes the parts those fields become. See
+[Sending Multipart Bodies](./client-generation.md#sending-multipart-bodies) and
+[Receiving Multipart Bodies](./server-generation.md#receiving-multipart-bodies)
+for the code that writes and reads them.
+
+### Choosing the Part for Each Property
+
+The following table shows how the generator encodes each kind of property when
+the media type has no `encoding` entry for it:
+
+| Property schema | Part sent |
+|---|---|
+| `type: string` with `format: binary` | A file part labelled `application/octet-stream`, carrying the raw bytes |
+| No `type` at all, such as `{}` | A file part, because OpenAPI 3.1 reads an untyped multipart property as raw binary |
+| `type: string`, or a string `enum` | A text part holding the string |
+| `type: string` with `format: byte` | A text part holding the base64 text |
+| `type: integer`, `number`, `boolean`, or an integer `enum` | A text part holding the value, such as `3` or `true` |
+| `format: date`, `date-time`, `time`, or `uuid` | A text part holding the serialized value, such as `2026-10-07T16:42:52Z` |
+| `type: object`, a `$ref` to one, or a discriminated `oneOf` | An `application/json` part |
+| An untagged `anyOf` or `oneOf`, or a schema such as `additionalProperties: true` | A text part when the value is a string, and an `application/json` part otherwise |
+| `type: array` | One part per item, each encoded by the rules above |
+| `additionalProperties` | One part per entry, named by its key |
+
+An untyped property is generated as [`Vec<u8>`][rustdoc-vec] in a multipart body,
+and `items: {}` produces `Vec<Vec<u8>>`. That's how you upload any number of
+files under one name, as in the specification's own example. The generator
+makes this change only when the schema is used just as a multipart body. If
+the same schema is also a JSON response or another schema's property, the field
+stays [`serde_json::Value`][rustdoc-serde-json-value], so its JSON form doesn't
+change, and the generator warns.
+
+A value whose type depends on the data, such as an untagged union, goes as
+JSON unless it's a string. That way a server can tell the string `"5"` from the
+number `5`.
+
+### Encoding Objects
+
+A media type's `encoding` map adjusts individual properties. Its
+`contentType` field labels a property's parts:
+
+- When the field lists several media types, such as `image/png, image/jpeg`,
+  the generator uses the first one, because a part can carry only one. It warns
+  when it labels every file with the first type of a list.
+- A wildcard such as `image/*` describes a range rather than a type a client
+  can send, so the generator skips it, falls back to the default, and warns.
+- A JSON media type serializes the value as JSON. A string property with
+  `contentType: application/json` is therefore sent as `"hello"`, quotes
+  included.
+- Objects are always serialized as JSON. When `contentType` names a non-JSON
+  type for an object, such as `application/xml`, the part keeps
+  `application/json`, and the generator warns.
+- Rust strings are UTF-8, so a `charset` other than UTF-8 on a text part
+  becomes `charset=utf-8`, with a warning.
+
+The `style`, `explode`, and `allowReserved` fields switch a property to the
+serialization used for query parameters. When any of them is present,
+`contentType` is ignored for text values, and values aren't percent-encoded.
+File properties keep their file parts. The following table applies to struct
+and map properties:
+
+| Property | Encoding | Parts sent |
+|---|---|---|
+| Array | `explode: true` (the default for `form`) | One part per item |
+| Array | `explode: false` | One part, with items joined by `,`, a space, or `\|` for `form`, `spaceDelimited`, or `pipeDelimited` |
+| Object | `style: deepObject` | One part per member, named `property[member]` |
+| Object | `style: form`, `explode: true` | One part per member, named by the member |
+| Object | `style: form`, `explode: false` | One part of alternating names and values, such as `min,1,max,5` |
+
+This serialization has no way to escape its delimiters. An item that contains
+the delimiter, such as `a,b` in a comma-joined array, arrives as two items. A
+`style` value that `multipart/form-data` doesn't support, such as `matrix`,
+falls back to `form` with a warning.
+
+An Encoding Object can also declare `headers` for a part. The generated client
+doesn't send part headers, and the generated server doesn't expose them. Part
+headers are optional unless a header sets `required: true`, so the generator
+warns about each required one.
+
+### Generation Warnings
+
+The generator also warns about specifications it can't follow exactly:
+
+- An `encoding` entry names a property the body schema doesn't have.
+- The body schema isn't an object with properties, such as a top-level
+  `oneOf`. Its parts come from its JSON form, so binary values aren't sent as
+  files.
+- The media type is another `multipart` subtype, such as `multipart/mixed`.
+  The client sends `multipart/form-data`.
+- A property name contains a double quote or a line break, which a part header
+  can't carry.
+- An array holds nested arrays, whose inner arrays are sent as JSON text.
+
+The parser the generator uses doesn't keep a schema's `contentEncoding`, so a
+`type: string` property with `contentEncoding: base64` is sent as a plain text
+part rather than labelled `application/octet-stream`.
 
 ## Security Schemes
 
@@ -407,7 +533,7 @@ table describes the dependencies you may see:
 | Crate | Declared when the generated code |
 |-------|----------------------------------|
 | `anyhow` | returns [`anyhow::Result`][rustdoc-anyhow-result] from client or server methods |
-| `axum` | defines a `server-mod` router and extractors |
+| `axum` | defines a `server-mod` router and extractors, with the `multipart` feature |
 | `axum-extra` | reads cookie API keys on the server, with the `cookie` feature |
 | `bon` | derives builders (`--enable-builders`) |
 | `chrono` | maps `date`, `date-time`, or `time` formats |
@@ -450,6 +576,27 @@ Keep the default [`--visibility public`](#visibility) for a crate other code
 depends on. `crate` and `file` visibility restrict the re-exports in `lib.rs`, so
 other crates can't access those re-exported items.
 
+## Generated Names
+
+Schema and property names become Rust identifiers. When a name isn't a valid
+identifier, or would collide with something Rust or the generated code already
+uses, the generator changes it as shown in the following table:
+
+| Name in the specification | Generated name | Reason |
+|---|---|---|
+| A property named after a keyword, such as `type` or `match` | `r#type` | Keywords need the raw identifier prefix |
+| A property named `crate`, `self`, or `super` | `crate_`, `self_`, `super_` | These keywords can't be raw identifiers |
+| A property that starts with a digit, such as `2fa` | `_2fa` | Identifiers can't start with a digit |
+| A schema named after a prelude item, such as `Option` or `Vec` | `OptionType` | The name would shadow the prelude |
+| A schema named `Self` | `SelfType` | `Self` can't be a raw identifier |
+| A schema named `S` | `SType` | Generated server handlers use `S` for your service type |
+| A schema that starts with a digit, such as `123Response` | `T123Response` | Identifiers can't start with a digit |
+
+A renamed property keeps its original name on the wire through
+`#[serde(rename)]`, so the JSON stays the same. Enum variants follow the same
+rules as schema names. For example, the enum value `self` becomes the variant
+`SelfType`.
+
 ## Visibility
 
 Use `--visibility` to choose where generated items can be accessed. The
@@ -464,7 +611,7 @@ the generated API is an internal part of your application.
 |-------|----------|----------|
 | `public` (default) | `pub` | Library distribution |
 | `crate` | `pub(crate)` | Internal crate types |
-| `file` | *(none)* | Private implementation |
+| `file` | `pub(super)` | Items used only inside the generated module |
 
 ### Example: `--visibility public`
 
@@ -508,23 +655,28 @@ impl Status {
 
 ### Example: `--visibility file`
 
-With file visibility, the generator omits a visibility modifier:
+With file visibility, those items use `pub(super)`:
 
 ```rust
-struct Pet {
-    id: i64,
-    name: String,
+pub(super) struct Pet {
+    pub(super) id: i64,
+    pub(super) name: String,
 }
 
-enum Status {
+pub(super) enum Status {
     Available,
     Pending,
 }
 
 impl Status {
-    fn available() -> Self { Self::Available }
+    pub(super) fn available() -> Self { Self::Available }
 }
 ```
+
+In module output, `pub(super)` lets the generated files use each other's items:
+`client.rs` or `server.rs` can reach the types in `types.rs`. The module's
+`mod.rs` or `lib.rs` doesn't re-export anything, so the items stay inside the
+generated module.
 
 ## Enum Mode
 

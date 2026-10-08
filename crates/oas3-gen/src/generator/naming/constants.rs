@@ -29,5 +29,6 @@ pub const RESPONSE_PREFIX: &str = "Response";
 pub const RESPONSE_SUFFIX: &str = "Response";
 
 pub const DEFAULT_MEDIA_TYPE: &str = "application/json";
+pub const OCTET_STREAM_MEDIA_TYPE: &str = "application/octet-stream";
 
 pub const BON_RESERVED_FIELD_NAMES: &[&str] = &["build", "builder"];

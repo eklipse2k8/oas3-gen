@@ -1,0 +1,435 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Multipart Forms",
+    "version": "1.0.0",
+    "description": "Exercises multipart/form-data request bodies: file parts, Encoding Objects, and RFC 6570 styles"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "paths": {
+    "/forms/{formId}": {
+      "post": {
+        "operationId": "submitForm",
+        "summary": "Submit a form that mixes files, scalars, and structured values",
+        "parameters": [
+          {
+            "name": "formId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadForm"
+              },
+              "encoding": {
+                "thumbnail": {
+                  "contentType": "image/*"
+                },
+                "addresses": {
+                  "contentType": "application/vnd.example+json"
+                },
+                "note": {
+                  "contentType": "text/markdown"
+                },
+                "ids": {
+                  "style": "pipeDelimited",
+                  "explode": false
+                },
+                "colors": {
+                  "explode": true
+                },
+                "filter": {
+                  "style": "deepObject"
+                },
+                "range": {
+                  "style": "form",
+                  "explode": false
+                },
+                "extras": {
+                  "style": "form",
+                  "explode": true
+                },
+                "options": {
+                  "style": "deepObject"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The form as the server received it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadForm"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files": {
+      "post": {
+        "operationId": "uploadFiles",
+        "summary": "Upload any number of files under one part name",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "array",
+                    "items": {}
+                  },
+                  "cover": {
+                    "description": "Raw binary: the schema declares no type"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              },
+              "encoding": {
+                "cover": {
+                  "contentType": "image/png"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What the server received",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilesReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metadata": {
+      "post": {
+        "operationId": "submitMetadata",
+        "summary": "Submit free-form text fields",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Metadata"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The fields as the server received them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/counters": {
+      "post": {
+        "operationId": "submitCounters",
+        "summary": "Submit named lists of counts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Counters"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The counts as the server received them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Counters"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UploadForm": {
+        "type": "object",
+        "required": [
+          "name",
+          "attachments",
+          "thumbnail",
+          "encoded",
+          "count"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "résumé": {
+            "type": "string",
+            "description": "A non-ASCII part name"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A lexicon file"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            }
+          },
+          "thumbnail": {
+            "type": "string",
+            "format": "binary"
+          },
+          "encoded": {
+            "type": "string",
+            "format": "byte"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/Quality"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filter": {
+            "$ref": "#/components/schemas/Filter"
+          },
+          "range": {
+            "$ref": "#/components/schemas/Range"
+          },
+          "extras": {
+            "$ref": "#/components/schemas/Extras"
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        }
+      },
+      "Quality": {
+        "type": "string",
+        "enum": [
+          "high",
+          "low"
+        ]
+      },
+      "Level": {
+        "type": "integer",
+        "enum": [
+          1,
+          2,
+          3
+        ]
+      },
+      "Address": {
+        "type": "object",
+        "required": [
+          "city"
+        ],
+        "properties": {
+          "city": {
+            "type": "string"
+          },
+          "zip": {
+            "type": "string"
+          }
+        }
+      },
+      "Filter": {
+        "type": "object",
+        "properties": {
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "color": {
+            "type": "string"
+          }
+        }
+      },
+      "Range": {
+        "type": "object",
+        "properties": {
+          "min": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "max": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Extras": {
+        "type": "object",
+        "properties": {
+          "mood": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Metadata": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "FilesReceipt": {
+        "type": "object",
+        "required": [
+          "sizes"
+        ],
+        "properties": {
+          "sizes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "coverSize": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Counters": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      }
+    }
+  }
+}

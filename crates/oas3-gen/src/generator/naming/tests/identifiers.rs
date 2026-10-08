@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 
 use crate::generator::{
   ast::{RegexKey, StructToken, tokens::ConstToken},
-  naming::identifiers::{ensure_unique, split_pascal_case, strip_parent_prefix, to_rust_field_name, to_rust_type_name},
+  naming::identifiers::{
+    builder_setter_name, ensure_unique, split_pascal_case, strip_parent_prefix, to_rust_field_name, to_rust_type_name,
+  },
 };
 
 #[test]
@@ -14,6 +16,10 @@ fn test_field_names() {
     ("static", "r#static"),
     ("type", "r#type"),
     ("self", "self_"),
+    ("crate", "crate_"),
+    ("super", "super_"),
+    ("r#crate", "crate_"),
+    ("r#type", "r#type"),
     ("123name", "_123name"),
     ("", "_"),
     ("  ", "_"),
@@ -25,6 +31,22 @@ fn test_field_names() {
   ];
   for (input, expected) in cases {
     assert_eq!(to_rust_field_name(input), expected, "failed for input {input:?}");
+  }
+}
+
+#[test]
+fn test_builder_setter_names() {
+  let cases = [
+    ("build", Some("build_value")),
+    ("builder", Some("builder_value")),
+    ("_2fa", Some("value_2fa")),
+    ("__3d", Some("value_3d")),
+    ("_private", None),
+    ("name", None),
+    ("r#type", None),
+  ];
+  for (field, expected) in cases {
+    assert_eq!(builder_setter_name(field).as_deref(), expected, "setter for {field:?}");
   }
 }
 
@@ -74,8 +96,11 @@ fn test_type_names() {
     ("Send", "SendType"),
     ("Sync", "SyncType"),
     ("Type", "TypeType"),
-    // Self is a keyword, so it gets raw identifier prefix
-    ("Self", "r#Self"),
+    // `Self` can't be a raw identifier, and `S` is the server handlers' service type parameter
+    ("Self", "SelfType"),
+    ("self", "SelfType"),
+    ("S", "SType"),
+    ("s", "SType"),
     // Raw identifier prefixes should be stripped and PascalCased
     ("r#move", "Move"),
     ("r#static", "Static"),

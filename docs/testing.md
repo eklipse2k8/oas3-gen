@@ -15,6 +15,8 @@ cargo run -- generate client-mod -i $F/api_key_security.json   -o $F/api_key_sec
 cargo run -- generate server-mod -i $F/api_key_security.json   -o $F/api_key_security_server --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/union_serde.json        -o $F/union_serde        --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/intersection_union.json -o $F/intersection_union --enable-builders --all-schemas
+cargo run -- generate client-mod -i $F/multipart.json          -o $F/multipart          --enable-builders --all-schemas
+cargo run -- generate server-mod -i $F/multipart.json          -o $F/multipart_server   --enable-builders --all-schemas
 cargo run -- generate client-mod -i $F/event_stream.json       -o $F/event_stream       --enable-builders --all-schemas
 
 cargo clippy --fix --allow-dirty --all --all-targets -- -W clippy::pedantic

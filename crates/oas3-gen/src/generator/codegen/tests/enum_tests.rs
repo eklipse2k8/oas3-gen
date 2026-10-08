@@ -622,17 +622,16 @@ fn test_enum_visibility() {
     ),
     (
       Visibility::File,
-      "pub enum",
-      false,
-      "no pub visibility for file-private",
+      "pub (super) enum Private",
+      true,
+      "pub(super) visibility for file-level",
     ),
     (
       Visibility::File,
       "pub (crate)",
       false,
-      "no pub(crate) visibility for file-private",
+      "no pub(crate) visibility for file-level",
     ),
-    (Visibility::File, "enum Private", true, "private visibility"),
   ];
 
   for (visibility, pattern, should_contain, msg) in cases {

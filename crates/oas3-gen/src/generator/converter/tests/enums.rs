@@ -386,8 +386,16 @@ fn test_anyof_without_discriminator_has_no_rename_attrs() -> anyhow::Result<()> 
 
   assert_eq!(enum_def.name.to_string(), "TestUnion");
   assert_eq!(enum_def.variants.len(), 2);
-  assert!(enum_def.variants[0].serde_attrs.is_empty());
-  assert!(enum_def.variants[1].serde_attrs.is_empty());
+  assert!(
+    enum_def.variants[0].serde_attrs.is_empty(),
+    "expected no serde attrs, got {:?}",
+    enum_def.variants[0].serde_attrs
+  );
+  assert!(
+    enum_def.variants[1].serde_attrs.is_empty(),
+    "expected no serde attrs, got {:?}",
+    enum_def.variants[1].serde_attrs
+  );
   assert!(enum_def.serde_attrs.contains(&SerdeAttribute::Untagged));
   Ok(())
 }
@@ -858,7 +866,7 @@ fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
 
   let result = converter.convert_schema("ResponseFormat", graph.get("ResponseFormat").unwrap())?;
 
-  assert!(!result.is_empty());
+  assert!(!result.is_empty(), "expected at least one generated type");
   let RustType::Enum(enum_def) = &result[result.len() - 1] else {
     panic!("Expected enum as last type, got: {result:?}");
   };
@@ -1081,7 +1089,11 @@ fn test_enum_helper_methods_disabled_flag() -> anyhow::Result<()> {
     panic!("Expected enum")
   };
 
-  assert!(enum_def.methods.is_empty());
+  assert!(
+    enum_def.methods.is_empty(),
+    "expected no helper methods, got {:?}",
+    enum_def.methods
+  );
   Ok(())
 }
 
@@ -1178,7 +1190,7 @@ fn test_enum_helper_skips_without_default_trait() {
   });
 
   if let RustType::Enum(e) = enum_def {
-    assert!(e.methods.is_empty());
+    assert!(e.methods.is_empty(), "expected no helper methods, got {:?}", e.methods);
   }
 }
 

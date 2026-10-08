@@ -177,7 +177,7 @@ fn validation_exclusive_numeric_range() {
 fn validation_no_range_when_bounds_empty() {
   let schema = number_schema();
   let attrs = FieldConverter::extract_all_validation("test", false, &schema, &TypeRef::new(RustPrimitive::I32));
-  assert!(attrs.is_empty());
+  assert!(attrs.is_empty(), "expected no validation attrs, got {attrs:?}");
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn validation_length_skipped_for_non_string_types() {
   schema.format = Some("date".to_string());
 
   let attrs = FieldConverter::extract_all_validation("test", false, &schema, &TypeRef::new(RustPrimitive::Date));
-  assert!(attrs.is_empty());
+  assert!(attrs.is_empty(), "expected no validation attrs, got {attrs:?}");
 }
 
 #[test]

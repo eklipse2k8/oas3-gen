@@ -2,7 +2,10 @@ use std::future::{Future, ready};
 
 use secrecy::{ExposeSecret as _, SecretString};
 
-use crate::fixtures::{api_key_security as client, api_key_security_server as server};
+use crate::{
+  fixtures::{api_key_security as client, api_key_security_server as server},
+  tests::common::serve,
+};
 
 #[derive(Clone)]
 struct StubVault;
@@ -110,12 +113,7 @@ impl server::ApiServer for StubVault {
 }
 
 async fn serve_vault() -> String {
-  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind a free port");
-  let address = listener.local_addr().expect("listener address");
-  tokio::spawn(async move { axum::serve(listener, server::router(StubVault)).await });
-  format!("http://{address}")
+  serve(server::router(StubVault)).await
 }
 
 async fn status_and_text(request: reqwest::RequestBuilder) -> (reqwest::StatusCode, String) {

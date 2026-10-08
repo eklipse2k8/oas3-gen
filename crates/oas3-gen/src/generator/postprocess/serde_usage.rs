@@ -93,7 +93,7 @@ impl SerdeUsage {
     (graph, indices)
   }
 
-  fn dependencies<'a>(
+  pub(super) fn dependencies<'a>(
     rust_type: &'a RustType,
     declared: &'a BTreeSet<EnumToken>,
   ) -> impl Iterator<Item = EnumToken> + 'a {

@@ -142,12 +142,14 @@ impl SwaggerPetstoreClient {
       .push(&request.path.pet_id.clone())
       .push("upload");
     let mut req_builder = self.client.post(url);
-    let body = &request.body;
-    let mut form = reqwest::multipart::Form::new();
-    form = form.part("name", reqwest::multipart::Part::text(body.name.clone()));
+    let body = request.body;
+    let mut form = reqwest::multipart::Form::new().percent_encode_noop();
+    form = form.text("name", body.name);
     form = form.part(
       "image",
-      reqwest::multipart::Part::bytes(std::borrow::Cow::from(body.image.clone())),
+      reqwest::multipart::Part::bytes(body.image)
+        .file_name("image")
+        .mime_str("application/octet-stream")?,
     );
     req_builder = req_builder.multipart(form);
     let response = req_builder.send().await?;

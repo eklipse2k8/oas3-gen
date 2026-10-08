@@ -212,11 +212,39 @@ where
 pub async fn upload_pet_image<S>(
   State(service): State<S>,
   Path(path): Path<UploadPetImageRequestPath>,
-  axum::Json(body): axum::Json<UploadRequestBody>,
+  multipart: axum::extract::Multipart,
 ) -> impl IntoResponse
 where
   S: ApiServer + Clone + Send + Sync + 'static,
 {
+  async fn multipart_body(mut multipart: axum::extract::Multipart) -> anyhow::Result<UploadRequestBody> {
+    let mut fields = serde_json::Map::new();
+    let mut image_parts = None;
+    while let Some(part) = multipart.next_field().await? {
+      let Some(name) = part.name().map(str::to_owned) else {
+        continue;
+      };
+      match name.as_str() {
+        "name" => {
+          fields.insert("name".to_owned(), serde_json::Value::String(part.text().await?));
+        }
+        "image" => {
+          image_parts = Some(Vec::from(part.bytes().await?));
+        }
+        _ => {}
+      }
+    }
+    fields.insert("image".to_owned(), serde_json::Value::Array(vec![]));
+    let mut body: UploadRequestBody = serde_json::from_value(serde_json::Value::Object(fields))?;
+    body.image = image_parts.ok_or_else(|| anyhow::anyhow!("missing multipart part `{}`", "image"))?;
+    Ok(body)
+  }
+  let body = match multipart_body(multipart).await {
+    Ok(body) => body,
+    Err(e) => {
+      return (axum::http::StatusCode::BAD_REQUEST, format!("Bad request: {e}")).into_response();
+    }
+  };
   let request = UploadPetImageRequest { path, body };
   let result: anyhow::Result<ApiResponse<Pet, Error>> = service.upload_pet_image(request).await;
   match result {

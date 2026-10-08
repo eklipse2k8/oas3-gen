@@ -172,9 +172,10 @@ impl OperationConverter {
       .as_ref()
       .filter(|_| self.context.config().target == GenerationTarget::Server)
       .map(|security| self.security.credentials_type(security));
-    let request_output = self.request(&base_name, entry, &body_info, credentials_type.as_ref())?;
+    let mut request_output = self.request(&base_name, entry, &body_info, credentials_type.as_ref())?;
 
-    let warnings = request_output.warnings.clone();
+    let mut warnings = std::mem::take(&mut request_output.warnings);
+    warnings.extend(body_info.warnings.iter().cloned());
     let parameters = request_output.parameter_fields.clone();
 
     let (request_types, request_type) = self.request_types(request_output, response_variants.is_some());

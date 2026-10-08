@@ -86,7 +86,7 @@ fn test_type_alias_visibility_levels() {
   let cases = [
     (Visibility::Public, "pub type TestAlias"),
     (Visibility::Crate, "pub(crate) type TestAlias"),
-    (Visibility::File, "type TestAlias"),
+    (Visibility::File, "pub(super) type TestAlias"),
   ];
 
   for (visibility, expected_prefix) in cases {

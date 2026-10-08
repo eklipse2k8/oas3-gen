@@ -53,7 +53,7 @@ toml.workspace = true
 yaml_serde.workspace = true
 
 [dev-dependencies]
-axum.workspace = true
+axum = { workspace = true, features = ["multipart"] }
 axum-core.workspace = true
 axum-extra.workspace = true
 oas3-gen-support.workspace = true

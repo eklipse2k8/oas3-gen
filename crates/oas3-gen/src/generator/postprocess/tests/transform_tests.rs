@@ -113,7 +113,10 @@ fn test_schema_request_only() {
   assert!(def.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
 
   // Check Validation (Should remain)
-  assert!(!def.fields[0].validation_attrs.is_empty());
+  assert!(
+    !def.fields[0].validation_attrs.is_empty(),
+    "validation attrs should remain on request fields"
+  );
 }
 
 #[test]
@@ -129,7 +132,11 @@ fn test_schema_response_only() {
   assert!(!def.outer_attrs.contains(&OuterAttr::SkipSerializingNone));
 
   // Check Validation (Should be stripped)
-  assert!(def.fields[0].validation_attrs.is_empty());
+  assert!(
+    def.fields[0].validation_attrs.is_empty(),
+    "validation attrs should be stripped from response fields, got {:?}",
+    def.fields[0].validation_attrs
+  );
 }
 
 #[test]
@@ -186,7 +193,11 @@ fn test_skip_serializing_none_logic() {
   // Case 1: Not nullable -> No attribute
   let def = create_struct("Strict", StructKind::Schema, false);
   let def = process_struct_helper(def, TypeUsage::RequestOnly);
-  assert!(def.outer_attrs.is_empty());
+  assert!(
+    def.outer_attrs.is_empty(),
+    "non-nullable struct should have no outer attrs, got {:?}",
+    def.outer_attrs
+  );
 
   // Case 2: Nullable + Request -> Attribute
   let def2 = create_struct("Loose", StructKind::Schema, true);
