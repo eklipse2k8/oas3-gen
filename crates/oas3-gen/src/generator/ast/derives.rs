@@ -154,6 +154,12 @@ impl EnumDef {
       .iter()
       .all(|v| matches!(v.content, VariantContent::Unit))
   }
+
+  /// Whether the enum round-trips as text through `Display` and `FromStr`.
+  #[must_use]
+  pub fn is_text_form(&self) -> bool {
+    self.generate_display && self.is_simple()
+  }
 }
 
 impl DerivesProvider for DiscriminatedEnumDef {

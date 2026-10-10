@@ -47,7 +47,7 @@ fn test_basic_enum_generation() {
     ],
   );
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -78,7 +78,7 @@ fn test_simple_enum_display_impl() {
     ],
   );
 
-  let code = EnumFragment::new(&simple_def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&simple_def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -116,7 +116,7 @@ fn test_enum_default_variant_placement() {
       .collect::<Vec<_>>();
     let def = make_simple_enum("Color", variants);
 
-    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+    let code = EnumFragment::new(&def, Visibility::Public)
       .into_token_stream()
       .to_string();
 
@@ -163,7 +163,7 @@ fn test_enum_default_value_impl() {
       inner_variant: None,
     });
 
-    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+    let code = EnumFragment::new(&def, Visibility::Public)
       .into_token_stream()
       .to_string();
 
@@ -209,7 +209,7 @@ fn test_enum_default_value_impl_with_wrapped_enum() {
     inner_variant: Some(EnumVariantToken::new("Auto2k")),
   });
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -225,7 +225,7 @@ fn test_enum_default_mode_none_emits_no_default() {
   let mut def = make_simple_enum("Value", vec![make_unit_variant("Red"), make_unit_variant("Blue")]);
   def.default_mode = EnumDefault::None;
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -261,7 +261,7 @@ fn test_simple_enum_display_impl_with_serde_rename() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&renamed_def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&renamed_def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -300,7 +300,7 @@ fn test_tuple_enum_no_display_impl() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&tuple_def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&tuple_def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -323,7 +323,7 @@ fn test_enum_with_docs() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -376,7 +376,7 @@ fn test_enum_tuple_variants() {
 
   for (case_name, variants, expected_content) in cases {
     let def = make_simple_enum("Value", variants);
-    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+    let code = EnumFragment::new(&def, Visibility::Public)
       .into_token_stream()
       .to_string();
 
@@ -405,7 +405,7 @@ fn test_enum_variant_attributes() {
     ..Default::default()
   };
 
-  let deprecated_code = EnumFragment::new(&deprecated_def, Visibility::Public, GenerationTarget::Client)
+  let deprecated_code = EnumFragment::new(&deprecated_def, Visibility::Public)
     .into_token_stream()
     .to_string();
   assert!(
@@ -423,7 +423,7 @@ fn test_enum_variant_attributes() {
     ..Default::default()
   };
 
-  let outer_attrs_code = EnumFragment::new(&outer_attrs_def, Visibility::Public, GenerationTarget::Client)
+  let outer_attrs_code = EnumFragment::new(&outer_attrs_def, Visibility::Public)
     .into_token_stream()
     .to_string();
   assert!(
@@ -478,7 +478,7 @@ fn test_enum_serde_attributes() {
   ];
 
   for (case_name, def, expected_attrs) in cases {
-    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+    let code = EnumFragment::new(&def, Visibility::Public)
       .into_token_stream()
       .to_string()
       .clone();
@@ -515,7 +515,7 @@ fn test_case_insensitive_enum() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&base_def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&base_def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -556,7 +556,7 @@ fn test_case_insensitive_enum() {
     ..Default::default()
   };
 
-  let fallback_code = EnumFragment::new(&fallback_def, Visibility::Public, GenerationTarget::Client)
+  let fallback_code = EnumFragment::new(&fallback_def, Visibility::Public)
     .into_token_stream()
     .to_string();
   assert!(
@@ -586,7 +586,7 @@ fn test_case_insensitive_enum_deserialize_only() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
 
@@ -646,9 +646,7 @@ fn test_enum_visibility() {
       Visibility::Public => "Public",
     };
     let def = make_simple_enum(name, vec![make_unit_variant("A"), make_unit_variant("B")]);
-    let code = EnumFragment::new(&def, visibility, GenerationTarget::Client)
-      .into_token_stream()
-      .to_string();
+    let code = EnumFragment::new(&def, visibility).into_token_stream().to_string();
 
     if should_contain {
       assert!(code.contains(pattern), "should have {msg}");
@@ -684,7 +682,7 @@ fn test_enum_constructor_methods() {
     ..Default::default()
   };
 
-  let simple_code = EnumFragment::new(&simple_def, Visibility::Public, GenerationTarget::Client)
+  let simple_code = EnumFragment::new(&simple_def, Visibility::Public)
     .into_token_stream()
     .to_string();
   assert!(simple_code.contains("impl RequestBody"), "should have impl block");
@@ -723,7 +721,7 @@ fn test_enum_constructor_methods() {
     ..Default::default()
   };
 
-  let param_code = EnumFragment::new(&param_def, Visibility::Public, GenerationTarget::Client)
+  let param_code = EnumFragment::new(&param_def, Visibility::Public)
     .into_token_stream()
     .to_string();
   assert!(
@@ -762,7 +760,7 @@ fn test_enum_constructor_methods_without_docs() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
   assert!(code.contains("pub fn json () -> Self"), "should have json constructor");
@@ -816,7 +814,7 @@ fn test_known_value_constructor_methods() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
   assert!(
@@ -1171,25 +1169,16 @@ fn test_non_exhaustive_enum_generation() {
   let shared_unexpected = ["\"other\""];
   let cases = [
     (
-      GenerationTarget::Client,
       false,
       vec![
         "Eq , Hash , Serialize , Deserialize",
         "match value . as_str () { \"italian\" => Self :: Italian , \"thai\" | \"Thai-Food\" => Self :: Thai ,",
-      ],
-      vec!["FromStr"],
-    ),
-    (
-      GenerationTarget::Server,
-      false,
-      vec![
         "impl core :: str :: FromStr for CuisineType",
         "Ok (Self :: from (s . to_string ()))",
       ],
       vec!["unknown variant"],
     ),
     (
-      GenerationTarget::Server,
       true,
       vec![
         "Ok (Self :: from (s . to_string ()))",
@@ -1200,36 +1189,36 @@ fn test_non_exhaustive_enum_generation() {
       vec!["unknown variant", "unknown_variant"],
     ),
     (
-      GenerationTarget::Client,
       true,
       vec![
         "impl < 'de > serde :: Deserialize < 'de > for CuisineType",
         "String :: deserialize (deserializer) . map (Self :: from)",
         "\"thai\" | \"thai-food\" => Self :: Thai ,",
+        "impl core :: str :: FromStr for CuisineType",
       ],
-      vec!["unknown_variant", "FromStr"],
+      vec!["unknown_variant"],
     ),
   ];
 
-  for (target, case_insensitive, expected, unexpected) in cases {
+  for (case_insensitive, expected, unexpected) in cases {
     let def = EnumDef {
       case_insensitive,
       ..def.clone()
     };
-    let code = EnumFragment::new(&def, Visibility::Public, target)
+    let code = EnumFragment::new(&def, Visibility::Public)
       .into_token_stream()
       .to_string();
 
     for pattern in shared_expected.iter().chain(&expected) {
       assert!(
         code.contains(pattern),
-        "{target:?}/case_insensitive={case_insensitive}: expected `{pattern}`\n{code}"
+        "case_insensitive={case_insensitive}: expected `{pattern}`\n{code}"
       );
     }
     for pattern in shared_unexpected.iter().chain(&unexpected) {
       assert!(
         !code.contains(pattern),
-        "{target:?}/case_insensitive={case_insensitive}: did not expect `{pattern}`\n{code}"
+        "case_insensitive={case_insensitive}: did not expect `{pattern}`\n{code}"
       );
     }
   }
@@ -1288,7 +1277,7 @@ fn test_bool_and_mixed_value_enum_serde() {
       scalar_repr: Some(primitive.clone()),
       ..make_simple_enum("Choice", values.into_iter().map(value_variant).collect())
     };
-    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+    let code = EnumFragment::new(&def, Visibility::Public)
       .into_token_stream()
       .to_string();
 
@@ -1322,7 +1311,7 @@ fn test_non_simple_enum_without_generate_display_has_no_display() {
     ..Default::default()
   };
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+  let code = EnumFragment::new(&def, Visibility::Public)
     .into_token_stream()
     .to_string();
 

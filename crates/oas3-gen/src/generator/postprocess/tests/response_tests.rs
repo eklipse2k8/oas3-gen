@@ -2,9 +2,9 @@ use http::Method;
 
 use crate::generator::{
   ast::{
-    EnumDef, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, OperationInfo, OperationKind,
-    ParsedPath, ResponseEnumDef, ResponseMediaType, ResponseParam, ResponsePayload, ResponseUnionDef, ResponseVariant,
-    RustType, SerdeMode, StatusCodeToken, StructDef, StructKind, StructToken, TypeRef,
+    EnumVariantToken, FieldDef, FieldNameToken, MethodKind, OperationInfo, OperationKind, ParsedPath, ResponseEnumDef,
+    ResponseMediaType, ResponseParam, ResponsePayload, ResponseUnionDef, ResponseVariant, RustType, SerdeMode,
+    StatusCodeToken, StructDef, StructKind, StructToken, TypeRef,
   },
   converter::GenerationTarget,
   postprocess::response::ResponseProcessor,
@@ -492,43 +492,6 @@ fn test_header_structs_are_shared_by_header_set() {
     );
   }
   assert_eq!(header_structs(&types).len(), 2, "one struct per distinct header set");
-}
-
-#[test]
-fn test_enums_parsed_from_response_headers_are_flagged() {
-  let enum_type = |name: &str| {
-    RustType::Enum(EnumDef {
-      name: EnumToken::new(name),
-      ..Default::default()
-    })
-  };
-  let types = vec![
-    request_struct("get_pet"),
-    enum_type("CacheStatus"),
-    enum_type("PetKind"),
-  ];
-  let operations = vec![operation(
-    "get_pet",
-    Some(vec![with_headers(
-      variant(StatusCodeToken::Ok200, Some("Pet")),
-      vec![header("x-cache", "CacheStatus", false)],
-    )]),
-  )];
-
-  let (types, _) = assemble(types, operations, GenerationTarget::Client);
-
-  let flagged = types
-    .iter()
-    .filter_map(|t| match t {
-      RustType::Enum(def) => Some((def.name.to_string(), def.in_response_header)),
-      _ => None,
-    })
-    .collect::<Vec<_>>();
-  assert_eq!(
-    flagged,
-    [("CacheStatus".to_string(), true), ("PetKind".to_string(), false)],
-    "only enums read from response headers are flagged"
-  );
 }
 
 #[test]

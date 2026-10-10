@@ -885,8 +885,6 @@ pub struct EnumDef {
   pub serde_mode: SerdeMode,
   #[builder(default)]
   pub generate_display: bool,
-  #[builder(default)]
-  pub in_response_header: bool,
   pub scalar_repr: Option<RustPrimitive>,
   #[builder(default)]
   pub default_mode: EnumDefault,

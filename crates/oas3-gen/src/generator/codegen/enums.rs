@@ -20,7 +20,6 @@ use crate::generator::{
     attributes::DeriveAttribute,
     methods::{FieldFunctionParameterFragment, HelperMethodFragment, HelperMethodParts, StructConstructorFragment},
   },
-  converter::GenerationTarget,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -865,16 +864,11 @@ impl ToTokens for MixedEnumSerdeImplFragment<'_> {
 pub(crate) struct EnumFragment<'a> {
   def: &'a EnumDef,
   vis: Visibility,
-  target: GenerationTarget,
 }
 
 impl<'a> EnumFragment<'a> {
-  pub(crate) fn new(def: &'a EnumDef, visibility: Visibility, target: GenerationTarget) -> Self {
-    Self {
-      def,
-      vis: visibility,
-      target,
-    }
+  pub(crate) fn new(def: &'a EnumDef, visibility: Visibility) -> Self {
+    Self { def, vis: visibility }
   }
 }
 
@@ -938,10 +932,7 @@ impl ToTokens for EnumFragment<'_> {
       quote! {}
     };
 
-    let from_str_impl = if self.def.generate_display
-      && self.def.is_simple()
-      && (self.target == GenerationTarget::Server || self.def.in_response_header)
-    {
+    let from_str_impl = if self.def.is_text_form() {
       FromStrImplFragment::new(self.def).to_token_stream()
     } else {
       quote! {}

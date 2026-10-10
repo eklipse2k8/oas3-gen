@@ -89,7 +89,6 @@ impl ResponseProcessor {
       op.response = Some(response);
     }
 
-    self.mark_header_enums();
     self.types.push(RustType::ResponseEnum(response_enum));
     self
       .types
@@ -348,29 +347,6 @@ impl ResponseProcessor {
     });
 
     def.name.clone()
-  }
-
-  /// Flags the enums that response headers parse into, so they implement `FromStr`
-  /// on every target.
-  fn mark_header_enums(&mut self) {
-    if self.headers.is_empty() {
-      return;
-    }
-
-    let parsed = self
-      .headers
-      .values()
-      .flat_map(|def| &def.fields)
-      .map(|field| field.rust_type.unboxed_base_type_name())
-      .collect::<BTreeSet<_>>();
-
-    for rust_type in &mut self.types {
-      if let RustType::Enum(def) = rust_type
-        && parsed.contains(def.name.as_str())
-      {
-        def.in_response_header = true;
-      }
-    }
   }
 
   /// Returns the union over the given bodies, creating it on first use.

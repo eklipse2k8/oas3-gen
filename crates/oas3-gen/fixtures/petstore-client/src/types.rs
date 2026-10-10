@@ -63,6 +63,23 @@ impl core::fmt::Display for Species {
     }
   }
 }
+impl core::str::FromStr for Species {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "dog" => Ok(Self::Dog),
+      "cat" => Ok(Self::Cat),
+      "bird" => Ok(Self::Bird),
+      "fish" => Ok(Self::Fish),
+      "reptile" => Ok(Self::Reptile),
+      "small_mammal" => Ok(Self::SmallMammal),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "dog, cat, bird, fish, reptile, small_mammal"
+      )),
+    }
+  }
+}
 /// Where the pet is in the adoption process
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum PetStatus {
@@ -80,6 +97,20 @@ impl core::fmt::Display for PetStatus {
       Self::Available => write!(f, "available"),
       Self::Pending => write!(f, "pending"),
       Self::Adopted => write!(f, "adopted"),
+    }
+  }
+}
+impl core::str::FromStr for PetStatus {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "available" => Ok(Self::Available),
+      "pending" => Ok(Self::Pending),
+      "adopted" => Ok(Self::Adopted),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "available, pending, adopted"
+      )),
     }
   }
 }
@@ -365,6 +396,22 @@ impl core::fmt::Display for AdoptionStatus {
       Self::Approved => write!(f, "approved"),
       Self::Rejected => write!(f, "rejected"),
       Self::Completed => write!(f, "completed"),
+    }
+  }
+}
+impl core::str::FromStr for AdoptionStatus {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "submitted" => Ok(Self::Submitted),
+      "under_review" => Ok(Self::UnderReview),
+      "approved" => Ok(Self::Approved),
+      "rejected" => Ok(Self::Rejected),
+      "completed" => Ok(Self::Completed),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "submitted, under_review, approved, rejected, completed"
+      )),
     }
   }
 }
@@ -656,6 +703,16 @@ impl core::fmt::Display for CoatQuality {
     }
   }
 }
+impl core::str::FromStr for CoatQuality {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "high" => Ok(Self::High),
+      "low" => Ok(Self::Low),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "high, low")),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
 pub enum EnergyLevel {
   #[default]
@@ -669,6 +726,17 @@ impl core::fmt::Display for EnergyLevel {
       Self::Value1 => write!(f, "1"),
       Self::Value2 => write!(f, "2"),
       Self::Value3 => write!(f, "3"),
+    }
+  }
+}
+impl core::str::FromStr for EnergyLevel {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "1" => Ok(Self::Value1),
+      "2" => Ok(Self::Value2),
+      "3" => Ok(Self::Value3),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "1, 2, 3")),
     }
   }
 }
@@ -1130,6 +1198,21 @@ impl core::fmt::Display for MediaType {
     }
   }
 }
+impl core::str::FromStr for MediaType {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "image/jpeg" => Ok(Self::ImageJpeg),
+      "image/png" => Ok(Self::ImagePng),
+      "image/gif" => Ok(Self::ImageGif),
+      "image/webp" => Ok(Self::ImageWebp),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "image/jpeg, image/png, image/gif, image/webp"
+      )),
+    }
+  }
+}
 /// Text annotation with different types
 #[derive(Debug, Clone, PartialEq)]
 pub enum Annotation {
@@ -1516,6 +1599,19 @@ impl core::fmt::Display for Role {
     }
   }
 }
+impl core::str::FromStr for Role {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "user" => Ok(Self::User),
+      "assistant" => Ok(Self::Assistant),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "user, assistant"
+      )),
+    }
+  }
+}
 /// Audio sample rate in Hz (integer-backed enum)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
 pub enum SampleRate {
@@ -1534,6 +1630,22 @@ impl core::fmt::Display for SampleRate {
       Self::Value24000 => write!(f, "24000"),
       Self::Value44100 => write!(f, "44100"),
       Self::Value48000 => write!(f, "48000"),
+    }
+  }
+}
+impl core::str::FromStr for SampleRate {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "8000" => Ok(Self::Value8000),
+      "16000" => Ok(Self::Value16000),
+      "24000" => Ok(Self::Value24000),
+      "44100" => Ok(Self::Value44100),
+      "48000" => Ok(Self::Value48000),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "8000, 16000, 24000, 44100, 48000"
+      )),
     }
   }
 }
@@ -1590,6 +1702,21 @@ impl core::fmt::Display for PlaybackRate {
     }
   }
 }
+impl core::str::FromStr for PlaybackRate {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "0.5" => Ok(Self::Value0_5),
+      "1" => Ok(Self::Value1),
+      "1.5" => Ok(Self::Value1_5),
+      "2" => Ok(Self::Value2),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "0.5, 1, 1.5, 2"
+      )),
+    }
+  }
+}
 impl serde::Serialize for PlaybackRate {
   fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
   where
@@ -1641,6 +1768,21 @@ impl core::fmt::Display for StopReason {
       Self::MaxTokens => write!(f, "max_tokens"),
       Self::StopSequence => write!(f, "stop_sequence"),
       Self::ToolUse => write!(f, "tool_use"),
+    }
+  }
+}
+impl core::str::FromStr for StopReason {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "end_turn" => Ok(Self::EndTurn),
+      "max_tokens" => Ok(Self::MaxTokens),
+      "stop_sequence" => Ok(Self::StopSequence),
+      "tool_use" => Ok(Self::ToolUse),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "end_turn, max_tokens, stop_sequence, tool_use"
+      )),
     }
   }
 }
@@ -1723,6 +1865,25 @@ impl core::fmt::Display for ErrorType {
       Self::RateLimitError => write!(f, "rate_limit_error"),
       Self::ApiError => write!(f, "api_error"),
       Self::OverloadedError => write!(f, "overloaded_error"),
+    }
+  }
+}
+impl core::str::FromStr for ErrorType {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "invalid_request_error" => Ok(Self::InvalidRequestError),
+      "authentication_error" => Ok(Self::AuthenticationError),
+      "permission_error" => Ok(Self::PermissionError),
+      "not_found_error" => Ok(Self::NotFoundError),
+      "rate_limit_error" => Ok(Self::RateLimitError),
+      "api_error" => Ok(Self::ApiError),
+      "overloaded_error" => Ok(Self::OverloadedError),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s,
+        "invalid_request_error, authentication_error, permission_error, not_found_error, rate_limit_error, api_error, overloaded_error"
+      )),
     }
   }
 }
@@ -1886,6 +2047,25 @@ impl core::fmt::Display for ImageSizePreset {
     }
   }
 }
+impl core::str::FromStr for ImageSizePreset {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "square_hd" => Ok(Self::SquareHd),
+      "square" => Ok(Self::Square),
+      "portrait_4_3" => Ok(Self::Portrait43),
+      "portrait_16_9" => Ok(Self::Portrait169),
+      "landscape_4_3" => Ok(Self::Landscape43),
+      "landscape_16_9" => Ok(Self::Landscape169),
+      "auto_1K" => Ok(Self::Auto1k),
+      "auto_2K" => Ok(Self::Auto2k),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "square_hd, square, portrait_4_3, portrait_16_9, landscape_4_3, landscape_16_9, auto_1K, auto_2K"
+      )),
+    }
+  }
+}
 /// Shares its inline model union with ModelSelection; this nullable copy has no default
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -1918,6 +2098,19 @@ impl core::fmt::Display for ChatModel {
     match self {
       Self::Chat10 => write!(f, "chat-1.0"),
       Self::Chat11 => write!(f, "chat-1.1"),
+    }
+  }
+}
+impl core::str::FromStr for ChatModel {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "chat-1.0" => Ok(Self::Chat10),
+      "chat-1.1" => Ok(Self::Chat11),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "chat-1.0, chat-1.1"
+      )),
     }
   }
 }
@@ -1957,6 +2150,16 @@ impl core::fmt::Display for ResponseKind {
     }
   }
 }
+impl core::str::FromStr for ResponseKind {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "text" => Ok(Self::Text),
+      "json" => Ok(Self::Json),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "text, json")),
+    }
+  }
+}
 /// A constant tried before an object and any other string
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum UsageChoice {
@@ -1980,6 +2183,16 @@ impl core::fmt::Display for Toggle {
     match self {
       Self::True => write!(f, "true"),
       Self::False => write!(f, "false"),
+    }
+  }
+}
+impl core::str::FromStr for Toggle {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "true" => Ok(Self::True),
+      "false" => Ok(Self::False),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "true, false")),
     }
   }
 }
@@ -2020,6 +2233,21 @@ impl core::fmt::Display for ResponseQuality {
       Self::Value1 => write!(f, "1"),
       Self::Value0_5 => write!(f, "0.5"),
       Self::True => write!(f, "true"),
+    }
+  }
+}
+impl core::str::FromStr for ResponseQuality {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "auto" => Ok(Self::Auto),
+      "1" => Ok(Self::Value1),
+      "0.5" => Ok(Self::Value0_5),
+      "true" => Ok(Self::True),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "auto, 1, 0.5, true"
+      )),
     }
   }
 }
@@ -2068,6 +2296,17 @@ impl core::fmt::Display for Priority {
       Self::Value1 => write!(f, "1"),
       Self::Value2 => write!(f, "2"),
       Self::Value3 => write!(f, "3"),
+    }
+  }
+}
+impl core::str::FromStr for Priority {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "1" => Ok(Self::Value1),
+      "2" => Ok(Self::Value2),
+      "3" => Ok(Self::Value3),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "1, 2, 3")),
     }
   }
 }
@@ -2120,6 +2359,12 @@ impl core::fmt::Display for ChatModelId {
       Self::Chat11 => write!(f, "chat-1.1"),
       Self::Other(v) => write!(f, "{v}"),
     }
+  }
+}
+impl core::str::FromStr for ChatModelId {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    Ok(Self::from(s.to_string()))
   }
 }
 impl From<String> for ChatModelId {
@@ -4170,6 +4415,20 @@ impl core::fmt::Display for AdoptionFeedEventType {
     }
   }
 }
+impl core::str::FromStr for AdoptionFeedEventType {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "created" => Ok(Self::Created),
+      "updated" => Ok(Self::Updated),
+      "deleted" => Ok(Self::Deleted),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "created, updated, deleted"
+      )),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
 pub enum VitalsReadingActivity {
   #[serde(rename = "resting")]
@@ -4192,6 +4451,21 @@ impl core::fmt::Display for VitalsReadingActivity {
     }
   }
 }
+impl core::str::FromStr for VitalsReadingActivity {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "resting" => Ok(Self::Resting),
+      "walking" => Ok(Self::Walking),
+      "running" => Ok(Self::Running),
+      "sleeping" => Ok(Self::Sleeping),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "resting, walking, running, sleeping"
+      )),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
 pub enum CollarTelemetryMode {
   #[serde(rename = "eco")]
@@ -4208,6 +4482,20 @@ impl core::fmt::Display for CollarTelemetryMode {
       Self::Eco => write!(f, "eco"),
       Self::Standard => write!(f, "standard"),
       Self::Tracking => write!(f, "tracking"),
+    }
+  }
+}
+impl core::str::FromStr for CollarTelemetryMode {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "eco" => Ok(Self::Eco),
+      "standard" => Ok(Self::Standard),
+      "tracking" => Ok(Self::Tracking),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "eco, standard, tracking"
+      )),
     }
   }
 }
@@ -4231,6 +4519,20 @@ impl core::fmt::Display for OrderStatus {
     }
   }
 }
+impl core::str::FromStr for OrderStatus {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "placed" => Ok(Self::Placed),
+      "approved" => Ok(Self::Approved),
+      "delivered" => Ok(Self::Delivered),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "placed, approved, delivered"
+      )),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Frequency {
   #[serde(rename = "weekly")]
@@ -4244,6 +4546,19 @@ impl core::fmt::Display for Frequency {
     match self {
       Self::Weekly => write!(f, "weekly"),
       Self::Monthly => write!(f, "monthly"),
+    }
+  }
+}
+impl core::str::FromStr for Frequency {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "weekly" => Ok(Self::Weekly),
+      "monthly" => Ok(Self::Monthly),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "weekly, monthly"
+      )),
     }
   }
 }
@@ -4331,6 +4646,23 @@ impl core::fmt::Display for AssistantEventFrameEvent {
     }
   }
 }
+impl core::str::FromStr for AssistantEventFrameEvent {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "message_start" => Ok(Self::MessageStart),
+      "content_block_start" => Ok(Self::ContentBlockStart),
+      "content_block_delta" => Ok(Self::ContentBlockDelta),
+      "content_block_stop" => Ok(Self::ContentBlockStop),
+      "message_stop" => Ok(Self::MessageStop),
+      "ping" => Ok(Self::Ping),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "message_start, content_block_start, content_block_delta, content_block_stop, message_stop, ping"
+      )),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub enum UsageCounterUsageCounterKind {
   A(UsageCounterA),
@@ -4411,6 +4743,20 @@ impl core::fmt::Display for ModelFilterModelEnum {
     }
   }
 }
+impl core::str::FromStr for ModelFilterModelEnum {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "model-1.0-draft" => Ok(Self::Model10Draft),
+      "model-1.0" => Ok(Self::Model10),
+      "model-1.1" => Ok(Self::Model11),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "model-1.0-draft, model-1.0, model-1.1"
+      )),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum ModelFilterModelEnum2 {
   #[serde(rename = "Legacy 0.1-mini")]
@@ -4424,6 +4770,19 @@ impl core::fmt::Display for ModelFilterModelEnum2 {
     match self {
       Self::Legacy01Mini => write!(f, "Legacy 0.1-mini"),
       Self::Legacy01Plus => write!(f, "Legacy 0.1-plus"),
+    }
+  }
+}
+impl core::str::FromStr for ModelFilterModelEnum2 {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "Legacy 0.1-mini" => Ok(Self::Legacy01Mini),
+      "Legacy 0.1-plus" => Ok(Self::Legacy01Plus),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "Legacy 0.1-mini, Legacy 0.1-plus"
+      )),
     }
   }
 }
@@ -4461,6 +4820,12 @@ impl core::fmt::Display for ChatPreferenceTier {
     }
   }
 }
+impl core::str::FromStr for ChatPreferenceTier {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    Ok(Self::from(s.to_string()))
+  }
+}
 impl From<String> for ChatPreferenceTier {
   fn from(value: String) -> Self {
     match value.as_str() {
@@ -4486,6 +4851,16 @@ impl core::fmt::Display for ListPetsRequestHeaderXSortOrder {
     match self {
       Self::Asc => write!(f, "asc"),
       Self::Desc => write!(f, "desc"),
+    }
+  }
+}
+impl core::str::FromStr for ListPetsRequestHeaderXSortOrder {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "asc" => Ok(Self::Asc),
+      "desc" => Ok(Self::Desc),
+      _ => Err(format!("unknown variant '{}', expected one of: {}", s, "asc, desc")),
     }
   }
 }
@@ -4531,6 +4906,20 @@ impl core::fmt::Display for GetPetCardRequestCookieCardTheme {
       Self::Light => write!(f, "light"),
       Self::Dark => write!(f, "dark"),
       Self::HighContrast => write!(f, "high-contrast"),
+    }
+  }
+}
+impl core::str::FromStr for GetPetCardRequestCookieCardTheme {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "light" => Ok(Self::Light),
+      "dark" => Ok(Self::Dark),
+      "high-contrast" => Ok(Self::HighContrast),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "light, dark, high-contrast"
+      )),
     }
   }
 }

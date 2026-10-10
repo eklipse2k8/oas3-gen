@@ -50,7 +50,7 @@ impl ToTokens for TypeFragment<'_> {
       RustType::Struct(def) => {
         StructFragment::new(def, self.regex_lookup, self.visibility, self.target).into_token_stream()
       }
-      RustType::Enum(def) => EnumFragment::new(def, self.visibility, self.target).into_token_stream(),
+      RustType::Enum(def) => EnumFragment::new(def, self.visibility).into_token_stream(),
       RustType::TypeAlias(def) => TypeAliasFragment::new(def, self.visibility).into_token_stream(),
       RustType::DiscriminatedEnum(def) if def.sse_frame && self.target == GenerationTarget::Client => {
         FrameUnionFragment::new(def, self.visibility).into_token_stream()

@@ -13,7 +13,7 @@ use crate::{
     },
     codegen::{Visibility, enums::EnumFragment},
     converter::{
-      GenerationTarget, SchemaConverter,
+      SchemaConverter,
       union_types::CollisionStrategy,
       unions::{EnumConverter, UnionConverter},
     },
@@ -969,7 +969,7 @@ fn test_preserve_strategy_keeps_original_spellings() {
     let RustType::Enum(enum_def) = converter.convert_value_enum("Status", &schema) else {
       panic!("expected enum for {values:?}");
     };
-    let code = EnumFragment::new(&enum_def, Visibility::Public, GenerationTarget::Client)
+    let code = EnumFragment::new(&enum_def, Visibility::Public)
       .into_token_stream()
       .to_string();
 
