@@ -946,9 +946,16 @@ field calls `multiple_of::<N>`, which accepts a value that divides evenly by
 `N`. With `multipleOf: 5`, `batteryPercent` accepts `85` and rejects `87`. A
 number field calls `multiple_of_ratio::<NUMERATOR, DENOMINATOR>`, with the
 multiple written as a fraction: `multipleOf: 0.25` becomes
-`multiple_of_ratio::<1, 4>`. That check tolerates floating-point rounding, so
-`0.3` counts as a multiple of `0.1`. Either check reports a failure as a
-validation error with the code `multiple_of`.
+`multiple_of_ratio::<1, 4>`. That check applies only to `f32` and `f64` fields.
+It accepts a value when the nearest multiple of the fraction, rounded to the
+field's type, is the value itself. It also accepts a value whose quotient by the
+fraction is within `1e-9` of a whole number, which absorbs rounding that
+accumulates in arithmetic. So `0.3` counts as a multiple of `0.1` in either
+type, as do `0.1 + 0.2` and a sum of one hundred `0.1` values, while `0.35`
+doesn't. Where the field's type is coarser than the multiple, every value rounds
+to a multiple, so an `f32` field with `multipleOf: 0.1` accepts `1_100_000.125`.
+Either check reports a failure as a validation error with the code
+`multiple_of`.
 
 Every `multipleOf` adds a line such as `Validation: Must be a multiple of 5` to
 the field's documentation. These multiples get only that line:

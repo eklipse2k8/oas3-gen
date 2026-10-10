@@ -14,7 +14,7 @@ use serde_with::{
 };
 #[cfg(feature = "eventsource")]
 pub use sse::{EventStream, FromSseFrame, RawSseFrame, SseFrame};
-pub use validation::{multiple_of, multiple_of_ratio};
+pub use validation::{MultipleOfFloat, multiple_of, multiple_of_ratio};
 
 /// Pipe separator for `OpenAPI` pipeDelimited style
 pub struct PipeSeparator;
