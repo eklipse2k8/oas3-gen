@@ -445,6 +445,14 @@
             "style": "form",
             "explode": false,
             "schema": { "type": "array", "items": { "type": "string", "format": "uuid" }, "maxItems": 5 }
+          },
+          {
+            "name": "pinnedPets",
+            "in": "cookie",
+            "description": "Pets the visitor pinned, in no particular order",
+            "style": "form",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string", "format": "uuid" }, "uniqueItems": true }
           }
         ],
         "responses": {

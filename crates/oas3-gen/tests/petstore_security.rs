@@ -30,8 +30,8 @@ use reqwest::{
 use rstest::rstest;
 use secrecy::{ExposeSecret, SecretString};
 use support::{
-  API_KEY, AUDIT_TOKEN, COMPATIBILITY_DATE, Petstore, QUERY_KEY, Received, SESSION, STAFF_TOKEN, petstore, run_case,
-  start_shared,
+  API_KEY, AUDIT_TOKEN, COMPATIBILITY_DATE, Petstore, PetstoreService, QUERY_KEY, Received, SESSION, STAFF_TOKEN,
+  petstore, run_case, start_shared,
 };
 use uuid::Uuid;
 
@@ -644,14 +644,18 @@ async fn get_api_key_answers_when_the_header_key_and_session_arrive_together(#[f
   assert_eq!(request.credentials.session_cookie.expose_secret(), SESSION);
 }
 
+/// The server trims quotes around the session cookie, and percent-decodes it as it does cookie
+/// parameters, before the key check.
 #[rstest]
+#[case::quoted(format!("session=\"{SESSION}\""))]
+#[case::percent_encoded(format!("session={}", SESSION.replace('-', "%2D")))]
 #[tokio::test]
-async fn get_api_key_trims_quotes_around_the_session_cookie(#[future(awt)] petstore: Petstore) {
+async fn get_api_key_reads_the_session_cookie_value(#[future(awt)] petstore: Petstore, #[case] cookie: String) {
   seed_api_key(&petstore);
   let response = reqwest::Client::new()
     .get(petstore.url(&format!("/staff/keys/{SEEDED_KEY_ID}")))
     .header(X_API_KEY, API_KEY)
-    .header(COOKIE, format!("session=\"{SESSION}\""))
+    .header(COOKIE, cookie)
     .send()
     .await
     .expect("the store answers");
@@ -662,10 +666,13 @@ async fn get_api_key_trims_quotes_around_the_session_cookie(#[future(awt)] petst
   assert_eq!(request.credentials.session_cookie.expose_secret(), SESSION);
 }
 
+/// The client sends an API key cookie verbatim, so a value arrives unchanged when it is a
+/// cookie-octet string the server decodes to itself. Space and semicolon can't ride a `Cookie`
+/// header, and a valid percent-escape is decoded by the server, so neither is a case here.
 #[rstest]
 #[case::plain(SESSION)]
-#[case::percent_escape_look_alike("s%41ss%2Fion")]
 #[case::plus_and_equals("a+b=c")]
+#[case::percent_sign("p%q")]
 #[tokio::test]
 async fn session_cookie_values_arrive_verbatim(#[future(awt)] petstore: Petstore, #[case] session: &'static str) {
   let response = Credentials::NONE
@@ -678,6 +685,39 @@ async fn session_cookie_values_arrive_verbatim(#[future(awt)] petstore: Petstore
     panic!("the service did not receive createApiKey");
   };
   assert_eq!(exposed(request.credentials.session_cookie.as_ref()), Some(session));
+}
+
+/// An API key cookie reaches the wire as the caller wrote it. Third-party servers don't
+/// percent-decode cookies, so an encoded value would not match what they issued.
+#[rstest]
+#[case::base64_with_slash_and_equals("dGVzdC9rZXk/Pw==")]
+#[case::email_and_colon("user@example.com:secret")]
+#[tokio::test]
+async fn session_cookie_api_key_is_sent_verbatim_on_the_wire(#[case] session: &'static str) {
+  let wire_cookie = Arc::new(Mutex::new(None));
+  let recorder = Arc::clone(&wire_cookie);
+  let router = server::router(PetstoreService::default()).layer(axum::middleware::from_fn(
+    move |request: axum::extract::Request, next: axum::middleware::Next| {
+      *recorder.lock().expect("the wire lock is never poisoned") = request
+        .headers()
+        .get(COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+      next.run(request)
+    },
+  ));
+  let base_url = support::serve(router).await;
+  let response = PetstoreClient::with_base_url(&base_url)
+    .expect("the base URL parses")
+    .with_session_cookie(session)
+    .create_api_key(create_api_key_request())
+    .await;
+  assert!(response.is_ok(), "{response:?}");
+  assert_eq!(
+    wire_cookie.lock().expect("the wire lock is never poisoned").as_deref(),
+    Some(format!("session={session}").as_str()),
+    "{session:?}"
+  );
 }
 
 #[rstest]
@@ -1084,12 +1124,9 @@ fn property_config() -> ProptestConfig {
 }
 
 prop_compose! {
-  /// A cookie value of RFC 6265 cookie-octets that often contains percent-escape look-alikes.
+  /// A cookie value of RFC 6265 cookie-octets without `%`, so the server decodes it to itself.
   fn session_cookie_value()(
-    chunks in prop::collection::vec(
-      prop_oneof!["[!#$%&'()*+\\-./0-9:<=>?@A-Z\\[\\]^_`a-z{|}~]{1,8}", "%[0-9A-Fa-f]{2}"],
-      1..8,
-    )
+    chunks in prop::collection::vec("[!#$&'()*+\\-./0-9:<=>?@A-Z\\[\\]^_`a-z{|}~]{1,8}", 1..8)
   ) -> String {
     chunks.concat()
   }

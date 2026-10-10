@@ -3065,6 +3065,8 @@ pub struct GetPetCardRequestCookie {
   /// Pets the visitor viewed recently, most recent first
   #[validate(length(max = 5u64))]
   pub recently_viewed: Option<Vec<uuid::Uuid>>,
+  /// Pets the visitor pinned, in no particular order
+  pub pinned_pets: Option<indexmap::IndexSet<uuid::Uuid>>,
 }
 impl core::convert::TryFrom<&http::HeaderMap> for GetPetCardRequestCookie {
   type Error = anyhow::Error;
@@ -3088,9 +3090,25 @@ impl core::convert::TryFrom<&http::HeaderMap> for GetPetCardRequestCookie {
         .transpose()
         .map_err(|_| anyhow::anyhow!("invalid value for cookie `cardTheme`"))?,
       recently_viewed: cookie("recentlyViewed")
-        .map(|value| value.split(',').map(str::parse).collect::<Result<_, _>>())
+        .map(|value| {
+          if value.is_empty() {
+            Ok(Default::default())
+          } else {
+            value.split(',').map(str::parse).collect::<Result<_, _>>()
+          }
+        })
         .transpose()
         .map_err(|_| anyhow::anyhow!("invalid value for cookie `recentlyViewed`"))?,
+      pinned_pets: cookie("pinnedPets")
+        .map(|value| {
+          if value.is_empty() {
+            Ok(Default::default())
+          } else {
+            value.split(',').map(str::parse).collect::<Result<_, _>>()
+          }
+        })
+        .transpose()
+        .map_err(|_| anyhow::anyhow!("invalid value for cookie `pinnedPets`"))?,
     })
   }
 }
@@ -3110,6 +3128,7 @@ impl GetPetCardRequest {
     pet_id: uuid::Uuid,
     card_theme: Option<GetPetCardRequestCookieCardTheme>,
     recently_viewed: Option<Vec<uuid::Uuid>>,
+    pinned_pets: Option<indexmap::IndexSet<uuid::Uuid>>,
     credentials: ApiKeyAuthCredentials2,
   ) -> anyhow::Result<Self> {
     let request = Self {
@@ -3117,6 +3136,7 @@ impl GetPetCardRequest {
       cookie: GetPetCardRequestCookie {
         card_theme,
         recently_viewed,
+        pinned_pets,
       },
       credentials,
     };

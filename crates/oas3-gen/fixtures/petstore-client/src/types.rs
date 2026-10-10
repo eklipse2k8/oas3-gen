@@ -3110,13 +3110,18 @@ pub struct GetPetCardRequestCookie {
   /// Pets the visitor viewed recently, most recent first
   #[validate(length(max = 5u64))]
   pub recently_viewed: Option<Vec<uuid::Uuid>>,
+  /// Pets the visitor pinned, in no particular order
+  pub pinned_pets: Option<indexmap::IndexSet<uuid::Uuid>>,
 }
 impl GetPetCardRequestCookie {
-  /// The `name=value` pairs these cookies send, percent-encoded for a `Cookie` header.
+  /// The `Cookie` header these cookies send, percent-encoded, followed by each of `stored`
+  /// whose name none of these cookies sends. `None` when there is nothing to send.
   #[must_use]
-  pub fn cookie_pairs(&self) -> Vec<String> {
+  pub fn cookie_header<'a>(&self, stored: impl IntoIterator<Item = (&'a str, &'a str)>) -> Option<String> {
+    let mut names = vec![];
     let mut pairs = vec![];
     if let Some(value) = &self.card_theme {
+      names.push("cardTheme");
       pairs.push(
         reqwest_cookie_store::RawCookie::new("cardTheme", value.to_string())
           .encoded()
@@ -3124,6 +3129,7 @@ impl GetPetCardRequestCookie {
       );
     }
     if let Some(value) = &self.recently_viewed {
+      names.push("recentlyViewed");
       pairs.push(
         reqwest_cookie_store::RawCookie::new(
           "recentlyViewed",
@@ -3133,7 +3139,24 @@ impl GetPetCardRequestCookie {
         .to_string(),
       );
     }
-    pairs
+    if let Some(value) = &self.pinned_pets {
+      names.push("pinnedPets");
+      pairs.push(
+        reqwest_cookie_store::RawCookie::new(
+          "pinnedPets",
+          value.iter().map(ToString::to_string).collect::<Vec<_>>().join(","),
+        )
+        .encoded()
+        .to_string(),
+      );
+    }
+    pairs.extend(
+      stored
+        .into_iter()
+        .filter(|(name, _)| !names.contains(name))
+        .map(|(name, value)| format!("{name}={value}")),
+    );
+    (!pairs.is_empty()).then(|| pairs.join("; "))
   }
 }
 /// Render the pet's kennel card as plain text
@@ -3151,12 +3174,14 @@ impl GetPetCardRequest {
     pet_id: uuid::Uuid,
     card_theme: Option<GetPetCardRequestCookieCardTheme>,
     recently_viewed: Option<Vec<uuid::Uuid>>,
+    pinned_pets: Option<indexmap::IndexSet<uuid::Uuid>>,
   ) -> anyhow::Result<Self> {
     let request = Self {
       path: GetPetCardRequestPath { pet_id },
       cookie: GetPetCardRequestCookie {
         card_theme,
         recently_viewed,
+        pinned_pets,
       },
     };
     request.validate()?;
@@ -3706,17 +3731,26 @@ pub struct ListAssistantEventsRequestCookie {
   pub conversation: String,
 }
 impl ListAssistantEventsRequestCookie {
-  /// The `name=value` pairs these cookies send, percent-encoded for a `Cookie` header.
+  /// The `Cookie` header these cookies send, percent-encoded, followed by each of `stored`
+  /// whose name none of these cookies sends. `None` when there is nothing to send.
   #[must_use]
-  pub fn cookie_pairs(&self) -> Vec<String> {
+  pub fn cookie_header<'a>(&self, stored: impl IntoIterator<Item = (&'a str, &'a str)>) -> Option<String> {
+    let mut names = vec![];
     let mut pairs = vec![];
     let value = &self.conversation;
+    names.push("conversation");
     pairs.push(
       reqwest_cookie_store::RawCookie::new("conversation", value)
         .encoded()
         .to_string(),
     );
-    pairs
+    pairs.extend(
+      stored
+        .into_iter()
+        .filter(|(name, _)| !names.contains(name))
+        .map(|(name, value)| format!("{name}={value}")),
+    );
+    (!pairs.is_empty()).then(|| pairs.join("; "))
   }
 }
 /// Replay the assistant's streaming events as one JSON document

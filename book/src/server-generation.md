@@ -424,7 +424,9 @@ parts are read, and the handler answers `400`. To accept larger files, add
 
 An operation's cookie parameters arrive in the request's `cookie` field. The
 handler parses them from the `Cookie` header and percent-decodes each value
-before calling your service. The petstore's `getPetCard` operation declares
+before calling your service. A value that isn't valid percent-encoded UTF-8
+counts as missing. An array cookie with no items, sent as `name=`,
+arrives as an empty list. The petstore's `getPetCard` operation declares
 two optional cookies, so your `get_pet_card()` method reads
 `request.cookie.card_theme` and `request.cookie.recently_viewed`.
 
@@ -511,7 +513,9 @@ parameters or the body.
 
 Cookie keys are parsed from the `Cookie` header with axum-extra's cookie
 support. With module output, enable the `cookie` feature of your `axum-extra`
-dependency. A cookie key reaches your service as sent, without percent-decoding.
+dependency. A cookie key is percent-decoded like a cookie parameter, so a value
+sent as `abc%2Bdef` reaches your service as `abc+def`. A value that isn't valid
+percent-encoded UTF-8, such as `abc%ff`, counts as missing.
 
 A bearer token comes from the `Authorization` header. The extractor accepts the
 `Bearer` prefix in any case and stores the token that follows it. An

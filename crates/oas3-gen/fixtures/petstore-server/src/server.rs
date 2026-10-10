@@ -598,7 +598,7 @@ impl QueryKeyAndSessionCookieCredentials {
       .get_all(http::header::COOKIE)
       .iter()
       .filter_map(|value| value.to_str().ok())
-      .flat_map(axum_extra::extract::cookie::Cookie::split_parse)
+      .flat_map(axum_extra::extract::cookie::Cookie::split_parse_encoded)
       .filter_map(Result::ok)
       .collect::<Vec<_>>();
     let cookie = |name: &str| {
@@ -639,7 +639,7 @@ impl ApiKeyAuthAndSessionCookieCredentials {
       .get_all(http::header::COOKIE)
       .iter()
       .filter_map(|value| value.to_str().ok())
-      .flat_map(axum_extra::extract::cookie::Cookie::split_parse)
+      .flat_map(axum_extra::extract::cookie::Cookie::split_parse_encoded)
       .filter_map(Result::ok)
       .collect::<Vec<_>>();
     let cookie = |name: &str| {

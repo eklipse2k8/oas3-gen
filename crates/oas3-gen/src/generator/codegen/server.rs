@@ -4,11 +4,7 @@ use itertools::Itertools as _;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::{
-  Visibility,
-  cookies::{CookieValues, request_cookie_lookup},
-  multipart::MultipartDecodeFragment,
-};
+use super::{Visibility, cookies::request_cookie_lookup, multipart::MultipartDecodeFragment};
 use crate::generator::{
   ast::{
     ApiKeyLocation, BodyMediaType, ContentCategory, CredentialKind, CredentialScheme, HandlerBodyInfo,
@@ -140,7 +136,7 @@ impl ToTokens for CredentialsExtractorFragment<'_> {
     });
     let cookies = security
       .reads(ApiKeyLocation::Cookie)
-      .then(|| request_cookie_lookup(&quote! { parts.headers }, CookieValues::AsSent));
+      .then(|| request_cookie_lookup(&quote! { parts.headers }));
 
     let fields = security.schemes.iter().map(|scheme| {
       let field = &scheme.field;

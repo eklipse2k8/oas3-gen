@@ -9,10 +9,10 @@ use crate::generator::{
 /// Converts a cookie parameter struct to and from the `Cookie` header.
 ///
 /// Cookie parameters use OpenAPI's `form` style: an array's items are joined with `,`.
-/// The client renders the struct into `name=value` pairs, percent-encoded by the
-/// `cookie` crate's `Cookie::encoded`; the server parses the request's `Cookie` header
-/// back into it with `Cookie::split_parse_encoded`, rejecting a missing required cookie
-/// or a value that doesn't parse.
+/// The client renders the struct into a `Cookie` header of `name=value` pairs, each
+/// percent-encoded by the `cookie` crate's `Cookie::encoded`. The server parses the
+/// request's `Cookie` header back into it with `Cookie::split_parse_encoded`, rejecting a
+/// missing required cookie or a value that doesn't parse.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CookieParamsFragment<'a> {
   def: &'a StructDef,
@@ -31,6 +31,7 @@ impl<'a> CookieParamsFragment<'a> {
       let ident = &field.name;
       let rendered = render_value(field);
       let push = quote! {
+        names.push(#name);
         pairs.push(reqwest_cookie_store::RawCookie::new(#name, #rendered).encoded().to_string());
       };
       Some(if field.rust_type.nullable {
@@ -49,12 +50,20 @@ impl<'a> CookieParamsFragment<'a> {
 
     quote! {
       impl #struct_name {
-        /// The `name=value` pairs these cookies send, percent-encoded for a `Cookie` header.
+        /// The `Cookie` header these cookies send, percent-encoded, followed by each of `stored`
+        /// whose name none of these cookies sends. `None` when there is nothing to send.
         #[must_use]
-        pub fn cookie_pairs(&self) -> Vec<String> {
+        pub fn cookie_header<'a>(&self, stored: impl IntoIterator<Item = (&'a str, &'a str)>) -> Option<String> {
+          let mut names = vec![];
           let mut pairs = vec![];
           #(#pushes)*
-          pairs
+          pairs.extend(
+            stored
+              .into_iter()
+              .filter(|(name, _)| !names.contains(name))
+              .map(|(name, value)| format!("{name}={value}")),
+          );
+          (!pairs.is_empty()).then(|| pairs.join("; "))
         }
       }
     }
@@ -69,7 +78,13 @@ impl<'a> CookieParamsFragment<'a> {
       let missing_message = format!("missing required cookie `{name}`");
       let invalid = quote! { anyhow::anyhow!(#invalid_message) };
       let parsed = if field.rust_type.is_array {
-        quote! { value.split(',').map(|item| item.parse()).collect::<Result<_, _>>() }
+        quote! {
+          if value.is_empty() {
+            Ok(Default::default())
+          } else {
+            value.split(',').map(|item| item.parse()).collect::<Result<_, _>>()
+          }
+        }
       } else {
         quote! { value.parse() }
       };
@@ -89,7 +104,7 @@ impl<'a> CookieParamsFragment<'a> {
       })
     });
 
-    let cookie_lookup = request_cookie_lookup(&quote! { headers }, CookieValues::Decoded);
+    let cookie_lookup = request_cookie_lookup(&quote! { headers });
 
     quote! {
       impl core::convert::TryFrom<&http::HeaderMap> for #struct_name {
@@ -118,28 +133,16 @@ impl ToTokens for CookieParamsFragment<'_> {
   }
 }
 
-/// The form in which a request cookie lookup returns values.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum CookieValues {
-  /// As the request sent them, for cookie API keys, which a client's cookie store sends unencoded
-  AsSent,
-  /// Percent-decoded, for cookie parameters, which a generated client percent-encodes
-  Decoded,
-}
-
-/// Binds `cookie`, which finds the value of the request cookie with a given name, from
-/// the `Cookie` headers in the `http::HeaderMap` `headers` evaluates to.
-pub(crate) fn request_cookie_lookup(headers: &TokenStream, values: CookieValues) -> TokenStream {
-  let split = match values {
-    CookieValues::AsSent => quote! { axum_extra::extract::cookie::Cookie::split_parse },
-    CookieValues::Decoded => quote! { axum_extra::extract::cookie::Cookie::split_parse_encoded },
-  };
+/// Binds `cookie`, which finds the percent-decoded value of the request cookie with a given
+/// name, from the `Cookie` headers in the `http::HeaderMap` `headers` evaluates to. A cookie
+/// that isn't valid percent-encoded UTF-8 is dropped, so it counts as missing.
+pub(crate) fn request_cookie_lookup(headers: &TokenStream) -> TokenStream {
   quote! {
     let cookies = #headers
       .get_all(http::header::COOKIE)
       .iter()
       .filter_map(|value| value.to_str().ok())
-      .flat_map(#split)
+      .flat_map(axum_extra::extract::cookie::Cookie::split_parse_encoded)
       .filter_map(Result::ok)
       .collect::<Vec<_>>();
     let cookie = |name: &str| {
@@ -165,7 +168,8 @@ fn render_value(field: &FieldDef) -> TokenStream {
 /// Builds the `Cookie` header an operation's cookie parameters send, as `cookie_header`.
 ///
 /// A request that carries its own `Cookie` header keeps `reqwest` from adding the
-/// client's cookie store, so the stored cookies for the URL are merged in first.
+/// client's cookie store, so the stored cookies for the URL are merged in after the
+/// parameters, leaving out any whose name a parameter sends.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CookieHeaderFragment {
   has_cookie_store: bool,
@@ -192,22 +196,18 @@ impl CookieHeaderFragment {
 
 impl ToTokens for CookieHeaderFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let pairs = if self.has_cookie_store {
+    let header = if self.has_cookie_store {
       quote! {
-        reqwest::cookie::CookieStore::cookies(&*self.cookies, &url)
-          .and_then(|stored| stored.to_str().ok().map(str::to_owned))
-          .into_iter()
-          .chain(request.cookie.cookie_pairs())
-          .collect::<Vec<_>>()
+        let cookie_header = {
+          let store = self.cookies.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+          request.cookie.cookie_header(store.get_request_values(&url))
+        };
       }
     } else {
-      quote! { request.cookie.cookie_pairs() }
+      quote! {
+        let cookie_header = request.cookie.cookie_header(std::iter::empty::<(&str, &str)>());
+      }
     };
-    tokens.extend(quote! {
-      let cookie_header = {
-        let pairs = #pairs;
-        (!pairs.is_empty()).then(|| pairs.join("; "))
-      };
-    });
+    tokens.extend(header);
   }
 }

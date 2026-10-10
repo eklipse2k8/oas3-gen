@@ -461,12 +461,8 @@ impl PetstoreClient {
       .push(&request.path.pet_id.to_string())
       .push("card");
     let cookie_header = {
-      let pairs = reqwest::cookie::CookieStore::cookies(&*self.cookies, &url)
-        .and_then(|stored| stored.to_str().ok().map(str::to_owned))
-        .into_iter()
-        .chain(request.cookie.cookie_pairs())
-        .collect::<Vec<_>>();
-      (!pairs.is_empty()).then(|| pairs.join("; "))
+      let store = self.cookies.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+      request.cookie.cookie_header(store.get_request_values(&url))
     };
     let mut req_builder = self.client.get(url);
     req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
@@ -784,12 +780,8 @@ impl PetstoreClient {
       .push("assistant")
       .push("events");
     let cookie_header = {
-      let pairs = reqwest::cookie::CookieStore::cookies(&*self.cookies, &url)
-        .and_then(|stored| stored.to_str().ok().map(str::to_owned))
-        .into_iter()
-        .chain(request.cookie.cookie_pairs())
-        .collect::<Vec<_>>();
-      (!pairs.is_empty()).then(|| pairs.join("; "))
+      let store = self.cookies.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+      request.cookie.cookie_header(store.get_request_values(&url))
     };
     let mut req_builder = self.client.get(url);
     req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);

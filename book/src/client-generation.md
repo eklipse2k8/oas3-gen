@@ -202,8 +202,11 @@ cardTheme=dark; recentlyViewed=0192f0c1-7a6e-7c4e-9d2a-5b1e8f3c2a11%2C0192f0c1-7
 The array's items are joined with commas, and the [`cookie`][rustdoc-cookie]
 crate percent-encodes each value, commas included. An optional cookie you
 don't set is left out. When the client's cookie store holds cookies for the
-URL, such as a [cookie key](#cookie-keys), they come first in the same header,
-as in `session=...; cardTheme=dark`.
+URL, such as a [cookie key](#cookie-keys), they follow the operation's cookie
+parameters in the same header, as in `cardTheme=dark; session=...`. A stored
+cookie is left out when you send a parameter of the same name, so the header
+never carries two values for one name. A stored cookie of a parameter you don't
+set still goes out.
 
 ## Reading Responses
 
@@ -677,8 +680,11 @@ let session_key = std::env::var("SESSION_KEY")?;
 let client = PetstoreClient::new().with_session_cookie(session_key);
 ```
 
-The setter inserts a cookie named `session` for the base URL, storing your key
-as it is, without percent-encoding.
+The setter inserts a cookie named `session` for the base URL and sends your key
+as it is, without percent-encoding, so a key with `/`, `=`, `:`, or `@` reaches
+the server unchanged. A generated server percent-decodes cookie values, so a
+key containing an escape such as `%41` arrives there as `A`. A key with a space
+or a semicolon can't be sent in a `Cookie` header.
 Reqwest then sends the cookie on requests that match its scope, including
 requests to operations that don't declare that scheme. The store also retains
 cookies received from the server. Clones of the generated client share the

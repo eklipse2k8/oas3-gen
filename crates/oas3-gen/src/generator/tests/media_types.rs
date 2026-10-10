@@ -495,8 +495,8 @@ fn server_rejects_malformed_bodies_with_bad_request() {
         "an optional form body is absent when the request has no media type",
       ),
       (
-        "axum_extra::extract::cookie::Cookie::split_parse",
-        "cookie keys are read without percent-decoding",
+        "axum_extra::extract::cookie::Cookie::split_parse_encoded",
+        "cookie API keys are percent-decoded like cookie parameters",
       ),
       (
         "\"application/problem+json\"",
@@ -625,12 +625,8 @@ fn cookie_parameters_render_into_and_parse_from_the_cookie_header() {
     &client,
     &[
       (
-        "reqwest::cookie::CookieStore::cookies(&*self.cookies, &url)",
-        "stored cookies merge into a request's own `Cookie` header",
-      ),
-      (
-        ".chain(request.cookie.cookie_pairs())",
-        "cookie parameters follow the stored cookies",
+        "request.cookie.cookie_header(store.get_request_values(&url))",
+        "stored cookies for the URL merge into a request's own `Cookie` header",
       ),
       (
         "req_builder.header(reqwest::header::COOKIE, cookie)",
@@ -638,14 +634,17 @@ fn cookie_parameters_render_into_and_parse_from_the_cookie_header() {
       ),
     ],
   );
-  assert_contains(
-    &client_types,
-    "pub fn cookie_pairs(&self) -> Vec<String>",
-    "the client renders its cookies",
-  );
   assert_contains_all(
     &client_types,
     &[
+      (
+        "pub fn cookie_header<'a>(",
+        "the parameter struct renders the one `Cookie` header it sends",
+      ),
+      (
+        "!names.contains(name)",
+        "a stored cookie whose name a parameter sends is left out",
+      ),
       (
         "reqwest_cookie_store::RawCookie::new(",
         "each pair is a cookie from the `cookie` crate",
@@ -671,6 +670,11 @@ fn cookie_parameters_render_into_and_parse_from_the_cookie_header() {
       (
         "axum_extra::extract::cookie::Cookie::split_parse_encoded",
         "cookie values are percent-decoded",
+      ),
+      ("if value.is_empty()", "an empty array cookie parses to an empty list"),
+      (
+        "Ok(Default::default())",
+        "the empty list is the field's own default, so a set-typed array parses too",
       ),
     ],
   );

@@ -91,13 +91,11 @@ impl Wiretapped {
   }
 }
 
-/// A fresh store per test, served behind a layer that records each raw request.
-#[fixture]
-async fn wiretapped() -> Wiretapped {
-  let service = PetstoreService::default();
+/// Serves `router`, backed by `service`, behind a layer that records each raw request.
+async fn serve_wiretapped(service: PetstoreService, router: axum::Router) -> Wiretapped {
   let requests = Arc::new(Mutex::new(vec![]));
   let recorder = Arc::clone(&requests);
-  let router = server::router(service.clone()).layer(axum::middleware::from_fn(
+  let router = router.layer(axum::middleware::from_fn(
     move |request: axum::extract::Request, next: axum::middleware::Next| {
       let wire_request = WireRequest {
         method: request.method().clone(),
@@ -123,6 +121,13 @@ async fn wiretapped() -> Wiretapped {
     },
     requests,
   }
+}
+
+/// A fresh store per test, served behind a layer that records each raw request.
+#[fixture]
+async fn wiretapped() -> Wiretapped {
+  let service = PetstoreService::default();
+  serve_wiretapped(service.clone(), server::router(service)).await
 }
 
 fn date(year: i32, month: u32, day: u32) -> NaiveDate {
@@ -903,6 +908,7 @@ fn card_request(
   Some(vec![Uuid::from_u128(3)]),
   Some("cardTheme=light; recentlyViewed=00000000-0000-0000-0000-000000000003")
 )]
+#[case::empty_recently_viewed(None, Some(vec![]), Some("recentlyViewed="))]
 #[tokio::test]
 async fn card_cookie_parameters_travel_in_the_cookie_header(
   #[future(awt)] wiretapped: Wiretapped,
@@ -954,7 +960,103 @@ async fn card_cookies_keep_the_stored_session_cookie(#[future(awt)] wiretapped: 
 
   assert_eq!(
     wiretapped.last().header(http::header::COOKIE),
-    Some(format!("session={SESSION}; cardTheme=dark").as_str())
+    Some(format!("cardTheme=dark; session={SESSION}").as_str())
+  );
+}
+
+/// A wiretapped store whose client holds `cardTheme=dark`, set by a `Set-Cookie` from the server.
+async fn with_stored_card_theme() -> Wiretapped {
+  let service = PetstoreService::default();
+  let router = server::router(service.clone()).route(
+    "/stored-theme",
+    axum::routing::get(|| async { ([(http::header::SET_COOKIE, "cardTheme=dark; Path=/")], "stored") }),
+  );
+  let wiretapped = serve_wiretapped(service, router).await;
+  reqwest::Client::builder()
+    .cookie_provider(Arc::clone(&wiretapped.petstore.client.cookies))
+    .build()
+    .expect("a client with the generated store")
+    .get(wiretapped.petstore.url("/stored-theme"))
+    .send()
+    .await
+    .expect("the stored cookie is set");
+  wiretapped
+}
+
+/// A stored cookie goes out unless a parameter of its name does. The header then carries the
+/// parameter alone, since a stored cookie of the same name would give a last-wins server the
+/// wrong value.
+#[rstest]
+#[case::parameter_shadows_the_stored_cookie(Some(client::GetPetCardRequestCookieCardTheme::Light), "light")]
+#[case::stored_cookie_without_the_parameter(None, "dark")]
+#[tokio::test]
+async fn a_stored_card_theme_yields_to_the_parameter(
+  #[case] theme: Option<client::GetPetCardRequestCookieCardTheme>,
+  #[case] sent: &str,
+) {
+  let wiretapped = with_stored_card_theme().await;
+  let pet = create(&wiretapped.petstore, new_pet("Biscuit", client::Species::Dog)).await;
+
+  let response = wiretapped
+    .petstore
+    .client
+    .get_pet_card(card_request(pet.id, theme, None))
+    .await
+    .expect("getPetCard round trip");
+
+  assert!(matches!(response, client::ApiResponse::Ok(_)), "{response:?}");
+  assert_eq!(
+    wiretapped.last().header(http::header::COOKIE),
+    Some(format!("cardTheme={sent}").as_str())
+  );
+  let Some(Received::GetPetCard(received)) = wiretapped.petstore.service.last_received() else {
+    panic!("the server did not record getPetCard");
+  };
+  assert_eq!(
+    received.cookie.card_theme.map(|theme| theme.to_string()).as_deref(),
+    Some(sent)
+  );
+}
+
+/// An array cookie declared `uniqueItems` is an ordered set in the generated types. An empty set
+/// and a set of items both travel in the header and come back as the same set.
+#[rstest]
+#[case::empty(vec![], Some("pinnedPets="))]
+#[case::items(
+  vec![Uuid::from_u128(4), Uuid::from_u128(5)],
+  Some("pinnedPets=00000000-0000-0000-0000-000000000004%2C00000000-0000-0000-0000-000000000005")
+)]
+#[tokio::test]
+async fn unique_array_cookies_round_trip_as_sets(
+  #[future(awt)] wiretapped: Wiretapped,
+  #[case] pinned: Vec<Uuid>,
+  #[case] cookie_header: Option<&str>,
+) {
+  let petstore = &wiretapped.petstore;
+  let pet = create(petstore, new_pet("Biscuit", client::Species::Dog)).await;
+  let request = client::GetPetCardRequest::builder()
+    .pet_id(pet.id)
+    .pinned_pets(pinned.iter().copied().collect())
+    .build()
+    .expect("a valid getPetCard request");
+
+  let response = petstore
+    .client
+    .get_pet_card(request)
+    .await
+    .expect("getPetCard round trip");
+
+  assert!(matches!(response, client::ApiResponse::Ok(_)), "{response:?}");
+  assert_eq!(wiretapped.last().header(http::header::COOKIE), cookie_header);
+  let Some(Received::GetPetCard(received)) = petstore.service.last_received() else {
+    panic!("the server did not record getPetCard");
+  };
+  assert_eq!(
+    received
+      .cookie
+      .pinned_pets
+      .map(|set| set.into_iter().collect::<Vec<_>>()),
+    Some(pinned)
   );
 }
 
