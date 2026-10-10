@@ -205,27 +205,14 @@ impl DerivesProvider for ResponseUnionDef {
     if self.streaming.is_none() {
       derives.insert(DeriveTrait::Clone);
     }
-    if self.is_serializable() == SerdeImpl::Derive {
-      derives.insert(DeriveTrait::Serialize);
-    }
-    if self.is_deserializable() == SerdeImpl::Derive {
-      derives.insert(DeriveTrait::Deserialize);
-    }
-
     derives
   }
 
   fn is_serializable(&self) -> SerdeImpl {
-    match self.serde_mode {
-      SerdeMode::SerializeOnly | SerdeMode::Both if self.streaming.is_none() => SerdeImpl::Derive,
-      _ => SerdeImpl::None,
-    }
+    SerdeImpl::None
   }
 
   fn is_deserializable(&self) -> SerdeImpl {
-    match self.serde_mode {
-      SerdeMode::DeserializeOnly | SerdeMode::Both if self.streaming.is_none() => SerdeImpl::Derive,
-      _ => SerdeImpl::None,
-    }
+    SerdeImpl::None
   }
 }

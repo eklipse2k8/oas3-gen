@@ -426,6 +426,11 @@ the body's Rust type:
 | A binary type, such as `image/png` or `application/octet-stream` | [`Vec<u8>`][rustdoc-vec] |
 | `text/event-stream` | A stream of events, described below |
 
+A text body is read as the text it is, when its type is a string or bytes, and
+otherwise parsed with `FromStr`, the inverse of the `Display` a server writes it
+with. A text body whose type has no text form, such as an object, is decoded
+from JSON, which is how a server sends it.
+
 For example, `getPetCard` returns its kennel card as `text/plain`, so it
 returns `ApiResponse<String, Problem>`. `getPetPhoto` returns `image/png` and
 produces `ApiResponse<Vec<u8>, Problem>`. Both declare their `404` body as

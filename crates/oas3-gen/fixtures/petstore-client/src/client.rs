@@ -16,22 +16,24 @@ use validator::Validate;
 
 use super::types::{
   AdoptPetRequest, Adoption, AdoptionFeedEvent, AllowHeaders, ApiKey, ApiResponse, AssistantEventList,
-  AssistantSettings, AssistantTokenFrame, Carrier200Response, Cats, ChatPreference, ContentResponse,
+  AssistantSettings, AssistantTokenFrame, Carrier200Response, CatOrPet, Cats, ChatPreference, ContentResponse,
   ContentResponseOrAssistantEventFrameStream, CreateApiKeyRequest, CreatePetRequest, DeleteOrderRequest,
   DeletePetRequest, DescribePetsRequest, ETagAndXCacheHeaders, ETagHeaders, EchoResponseQualityRequest, Error,
   ErrorOrProblem, ErrorResponse, GetAdoptionRequest, GetApiKeyRequest, GetChatPreferenceRequest, GetHealthRequest,
-  GetInventoryRequest, GetMediaBothRequest, GetOrderByIdRequest, GetPetCardRequest, GetPetLineageRequest,
-  GetPetPhotoRequest, IntakeForm, Inventory, Key200Response, Lineage, ListApiKeysRequest, ListAssistantEventsRequest,
+  GetInventoryRequest, GetMediaAcceptedRequest, GetMediaBothRequest, GetMediaKindRequest, GetMediaLatinRequest,
+  GetMediaNicknameRequest, GetMediaNullableNameRequest, GetMediaPetTextRequest, GetMediaTextRequest,
+  GetMediaWildcardRequest, GetOrderByIdRequest, GetPetCardRequest, GetPetLineageRequest, GetPetPhotoRequest,
+  IntakeForm, Inventory, Key200Response, Lineage, ListApiKeysRequest, ListAssistantEventsRequest,
   ListAuditEventsRequest, ListCarriersRequest, ListCatsRequest, ListPetsRequest, ListVaccinationsRequest,
-  LocationHeaders, MediaLabels, MediaReceipt, Order, Pet, PetExistsRequest, PetOrPetStream, Pets, PlaceOrderRequest,
-  Problem, RecordVaccinationRequest, ReplaceApiKeyRequest, ReplacePetPhotoRequest, ResponseQuality,
-  RevokeApiKeyRequest, SearchPetsRequest, SearchResults, SendAssistantMessageRequest, SetPetNotesRequest,
-  ShowPetByIdRequest, StreamAdoptionFeedRequest, StreamAssistantMessageRequest, StreamAssistantTokensRequest,
-  StreamPetVitalsRequest, SubmitCollarTelemetryRequest, SubmitIntakeFormRequest, SubmitMediaLabelsRequest,
-  SubmitTalliesRequest, SubscribeNewsletterRequest, Subscription, Tallies, TelemetryReceipt, TraceHealthRequest,
-  UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest, UpdateChatPreferenceRequest, UpdatePetRequest,
-  UploadMediaRequest, UploadPetImageRequest, Vaccination200Response, VaccineRecord, VitalsReading, WithHeaders,
-  X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
+  LocationHeaders, MediaLabels, MediaReceipt, Nickname, NullableName, Order, Pet, PetExistsRequest, PetOrPetStream,
+  PetOrVecu8, Pets, PlaceOrderRequest, PostMediaUnionRequest, Problem, PutMediaRawRequest, RecordVaccinationRequest,
+  ReplaceApiKeyRequest, ReplacePetPhotoRequest, ResponseQuality, RevokeApiKeyRequest, SearchPetsRequest, SearchResults,
+  SendAssistantMessageRequest, SetPetNotesRequest, ShowPetByIdRequest, Species, StreamAdoptionFeedRequest,
+  StreamAssistantMessageRequest, StreamAssistantTokensRequest, StreamPetVitalsRequest, SubmitCollarTelemetryRequest,
+  SubmitIntakeFormRequest, SubmitMediaLabelsRequest, SubmitTalliesRequest, SubscribeNewsletterRequest, Subscription,
+  Tallies, TelemetryReceipt, TraceHealthRequest, UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest,
+  UpdateChatPreferenceRequest, UpdatePetRequest, UploadMediaRequest, UploadPetImageRequest, Vaccination200Response,
+  VaccineRecord, VitalsReading, WithHeaders, X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
 };
 pub const BASE_URL: &str = "https://api.petstore.example/v3";
 #[derive(Clone)]
@@ -1318,6 +1320,202 @@ impl PetstoreClient {
     };
     let response = req_builder.send().await?;
     SubmitTalliesRequest::parse_response(response).await
+  }
+  /// Download a text/plain body that is raw bytes
+  ///
+  /// * Path: `GET /media/text`
+  pub async fn get_media_text(&self, request: GetMediaTextRequest) -> anyhow::Result<ApiResponse<Vec<u8>, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("text");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaTextRequest::parse_response(response).await
+  }
+  /// Download an image whose media type is a wildcard
+  ///
+  /// * Path: `GET /media/wildcard`
+  pub async fn get_media_wildcard(&self, request: GetMediaWildcardRequest) -> anyhow::Result<ApiResponse<Vec<u8>, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("wildcard");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaWildcardRequest::parse_response(response).await
+  }
+  /// Describe a pet as text, or as raw bytes
+  ///
+  /// * Path: `GET /media/pet-text`
+  pub async fn get_media_pet_text(
+    &self,
+    request: GetMediaPetTextRequest,
+  ) -> anyhow::Result<ApiResponse<PetOrVecu8, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("pet-text");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaPetTextRequest::parse_response(response).await
+  }
+  /// Describe a species as text
+  ///
+  /// * Path: `GET /media/kind`
+  pub async fn get_media_kind(&self, request: GetMediaKindRequest) -> anyhow::Result<ApiResponse<Species, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("kind");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaKindRequest::parse_response(response).await
+  }
+  /// Describe a nickname as text
+  ///
+  /// * Path: `GET /media/nickname`
+  pub async fn get_media_nickname(
+    &self,
+    request: GetMediaNicknameRequest,
+  ) -> anyhow::Result<ApiResponse<Nickname, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("nickname");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaNicknameRequest::parse_response(response).await
+  }
+  /// Describe an optional name as text
+  ///
+  /// * Path: `GET /media/nullable-name`
+  pub async fn get_media_nullable_name(
+    &self,
+    request: GetMediaNullableNameRequest,
+  ) -> anyhow::Result<ApiResponse<NullableName, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("nullable-name");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaNullableNameRequest::parse_response(response).await
+  }
+  /// Describe a place as text in a legacy charset
+  ///
+  /// * Path: `GET /media/latin`
+  pub async fn get_media_latin(&self, request: GetMediaLatinRequest) -> anyhow::Result<ApiResponse<String, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("latin");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaLatinRequest::parse_response(response).await
+  }
+  /// Upload raw bytes whose label names a legacy charset
+  ///
+  /// * Path: `PUT /media/raw`
+  pub async fn put_media_raw(&self, request: PutMediaRawRequest) -> anyhow::Result<ApiResponse<(), ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("raw");
+    let mut req_builder = self
+      .client
+      .put(url)
+      .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+      .body(request.body.clone());
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    PutMediaRawRequest::parse_response(response).await
+  }
+  /// Create a pet or a cat, or accept the request without a body
+  ///
+  /// * Path: `POST /media/union`
+  pub async fn post_media_union(
+    &self,
+    request: PostMediaUnionRequest,
+  ) -> anyhow::Result<ApiResponse<Option<CatOrPet>, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("union");
+    let mut req_builder = self.client.post(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    PostMediaUnionRequest::parse_response(response).await
+  }
+  /// Check a pet's intake, which is accepted with its record
+  ///
+  /// * Path: `GET /media/accepted`
+  pub async fn get_media_accepted(&self, request: GetMediaAcceptedRequest) -> anyhow::Result<ApiResponse<Pet, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("accepted");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaAcceptedRequest::parse_response(response).await
   }
   /// Describe a pet as JSON, or stream it as server-sent events
   ///

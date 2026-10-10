@@ -587,7 +587,7 @@ impl ToTokens for ResponseCaseFragment<'_> {
       }
       (Some(schema_type), Some(param)) => {
         let stream = ResponseMediaType::event_stream(&variant.media_types).and_then(|media| media.stream.as_ref());
-        let data = ResponseExtractionFragment::new(schema_type, self.case.category, stream);
+        let data = ResponseExtractionFragment::new(schema_type, self.case.category, mapping.parses_text, stream);
         let mut value = quote! { data };
         if let Some(union_variant) = &mapping.union_variant {
           let union = &param.body.base_type;
@@ -613,6 +613,7 @@ impl ToTokens for ResponseCaseFragment<'_> {
 pub(crate) struct ResponseExtractionFragment<'a> {
   schema_type: &'a TypeRef,
   category: ContentCategory,
+  parses_text: bool,
   stream: Option<&'a EventStreamFormat>,
 }
 
@@ -623,11 +624,13 @@ impl<'a> ResponseExtractionFragment<'a> {
   pub(crate) fn new(
     schema_type: &'a TypeRef,
     category: ContentCategory,
+    parses_text: bool,
     stream: Option<&'a EventStreamFormat>,
   ) -> Self {
     Self {
       schema_type,
       category,
+      parses_text,
       stream,
     }
   }
@@ -644,9 +647,9 @@ impl ToTokens for ResponseExtractionFragment<'_> {
       ContentCategory::Text | ContentCategory::Binary if self.schema_type.is_string_like() => {
         quote! { req.text().await? }
       }
-      ContentCategory::Text => {
+      ContentCategory::Text if self.parses_text => {
         if matches!(self.schema_type.base_type, RustPrimitive::Custom(_)) {
-          quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
+          quote! { req.text().await?.parse::<#schema_type>().map_err(anyhow::Error::msg)? }
         } else {
           quote! { req.text().await?.parse::<#schema_type>()? }
         }

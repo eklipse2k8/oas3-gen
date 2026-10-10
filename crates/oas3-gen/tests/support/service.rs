@@ -68,6 +68,16 @@ pub enum Received {
   UploadMedia(server::UploadMediaRequest),
   SubmitMediaLabels(server::SubmitMediaLabelsRequest),
   SubmitTallies(server::SubmitTalliesRequest),
+  GetMediaText(server::GetMediaTextRequest),
+  GetMediaWildcard(server::GetMediaWildcardRequest),
+  GetMediaPetText(server::GetMediaPetTextRequest),
+  GetMediaKind(server::GetMediaKindRequest),
+  GetMediaNickname(server::GetMediaNicknameRequest),
+  GetMediaNullableName(server::GetMediaNullableNameRequest),
+  GetMediaLatin(server::GetMediaLatinRequest),
+  PutMediaRaw(server::PutMediaRawRequest),
+  PostMediaUnion(server::PostMediaUnionRequest),
+  GetMediaAccepted(server::GetMediaAcceptedRequest),
   GetMediaBoth(server::GetMediaBothRequest),
   ListApiKeys(server::ListApiKeysRequest),
   CreateApiKey(server::CreateApiKeyRequest),
@@ -1137,6 +1147,59 @@ impl server::ApiServer for PetstoreService {
   async fn submit_tallies(&self, request: server::SubmitTalliesRequest) -> Response<server::Tallies> {
     self.record(Received::SubmitTallies(request.clone()));
     Ok(server::ApiResponse::Ok(request.body))
+  }
+
+  async fn get_media_text(&self, request: server::GetMediaTextRequest) -> Response<Vec<u8>> {
+    self.record(Received::GetMediaText(request));
+    Ok(server::ApiResponse::Ok(b"hi".to_vec()))
+  }
+
+  async fn get_media_wildcard(&self, request: server::GetMediaWildcardRequest) -> Response<Vec<u8>> {
+    self.record(Received::GetMediaWildcard(request));
+    Ok(server::ApiResponse::Ok(vec![0x89, b'P', b'N', b'G']))
+  }
+
+  async fn get_media_pet_text(&self, request: server::GetMediaPetTextRequest) -> Response<server::PetOrVecu8> {
+    self.record(Received::GetMediaPetText(request));
+    Ok(server::ApiResponse::Ok(server::PetOrVecu8::Pet(media_pet())))
+  }
+
+  async fn get_media_kind(&self, request: server::GetMediaKindRequest) -> Response<server::Species> {
+    self.record(Received::GetMediaKind(request));
+    Ok(server::ApiResponse::Ok(server::Species::Cat))
+  }
+
+  async fn get_media_nickname(&self, request: server::GetMediaNicknameRequest) -> Response<server::Nickname> {
+    self.record(Received::GetMediaNickname(request));
+    Ok(server::ApiResponse::Ok("Biscuit".to_string()))
+  }
+
+  async fn get_media_nullable_name(
+    &self,
+    request: server::GetMediaNullableNameRequest,
+  ) -> Response<server::NullableName> {
+    self.record(Received::GetMediaNullableName(request));
+    Ok(server::ApiResponse::Ok(Some("Biscuit".to_string())))
+  }
+
+  async fn get_media_latin(&self, request: server::GetMediaLatinRequest) -> Response<String> {
+    self.record(Received::GetMediaLatin(request));
+    Ok(server::ApiResponse::Ok("caf\u{e9}".to_string()))
+  }
+
+  async fn put_media_raw(&self, request: server::PutMediaRawRequest) -> Response<()> {
+    self.record(Received::PutMediaRaw(request));
+    Ok(server::ApiResponse::NoContent(()))
+  }
+
+  async fn post_media_union(&self, request: server::PostMediaUnionRequest) -> Response<Option<server::CatOrPet>> {
+    self.record(Received::PostMediaUnion(request));
+    Ok(server::ApiResponse::Ok(Some(server::CatOrPet::Pet(media_pet()))))
+  }
+
+  async fn get_media_accepted(&self, request: server::GetMediaAcceptedRequest) -> Response<server::Pet> {
+    self.record(Received::GetMediaAccepted(request));
+    Ok(server::ApiResponse::Accepted(media_pet()))
   }
 
   async fn get_media_both(&self, request: server::GetMediaBothRequest) -> Response<server::PetOrPetStream> {

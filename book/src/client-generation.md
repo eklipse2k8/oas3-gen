@@ -511,7 +511,12 @@ media type the operation declares and sets `Content-Type` to match:
 | `application/x-www-form-urlencoded` | As form fields |
 | `text/*`, such as `text/plain` | As text, with the declared `Content-Type` |
 | A binary type, such as `image/png` | As raw bytes, with the declared `Content-Type` |
+| A wildcard, such as `*/*` or `image/*` | In the body's own kind: JSON as `application/json`, text as `text/plain`, bytes as `application/octet-stream` |
 | `multipart/form-data` | As parts; see [Sending Multipart Bodies](#sending-multipart-bodies) |
+
+A `charset` parameter other than UTF-8 on a text or JSON body is replaced with
+`charset=utf-8`, because the client sends that text as UTF-8. A binary body
+carries no charset, so its `charset` parameter is dropped.
 
 For example, the petstore's `updatePet` operation takes a JSON merge patch.
 Its `update_pet()` method sets the declared media type and then serializes the

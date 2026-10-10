@@ -13,8 +13,8 @@ use crate::generator::{
   ast::{
     DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumDefault, EnumDefaultValue,
     EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseEnumVariant,
-    ResponsePayload, ResponseUnionDef, RustPrimitive, SerdeAttribute, SerdeMode, StructToken, TypeRef, ValueKind,
-    VariantContent, VariantDef, types::generic_args,
+    ResponsePayload, ResponseUnionDef, RustPrimitive, SerdeMode, StructToken, TypeRef, ValueKind, VariantContent,
+    VariantDef, types::generic_args,
   },
   codegen::{
     attributes::DeriveAttribute,
@@ -1379,12 +1379,6 @@ impl ToTokens for ResponseUnionFragment<'_> {
     let derives = DeriveAttribute::new(self.def.derives());
     let vis = &self.vis;
 
-    let derive_traits = self.def.derives();
-    let has_serde_derive = derive_traits
-      .iter()
-      .any(|d| matches!(d, DeriveTrait::Serialize | DeriveTrait::Deserialize));
-    let untagged = has_serde_derive.then(|| generate_serde_attrs(&[SerdeAttribute::Untagged]));
-
     let variants = self.def.variants.iter().map(|variant| {
       let variant_name = &variant.name;
       let rust_type = &variant.rust_type;
@@ -1394,7 +1388,6 @@ impl ToTokens for ResponseUnionFragment<'_> {
     let ts = quote! {
       #docs
       #derives
-      #untagged
       #vis enum #name {
         #(#variants),*
       }

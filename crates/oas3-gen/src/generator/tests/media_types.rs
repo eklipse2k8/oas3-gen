@@ -306,6 +306,170 @@ fn client_labels_bodies_with_their_declared_media_type() {
   );
 }
 
+const MEDIA_LABEL_SPEC: &str = r#"{
+  "openapi": "3.1.0",
+  "info": { "title": "Labels", "version": "1.0.0" },
+  "paths": {
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "requestBody": {
+          "required": true,
+          "content": { "*/*": { "schema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } } }
+        },
+        "responses": { "204": { "description": "created" } }
+      }
+    },
+    "/blobs": {
+      "put": {
+        "operationId": "putBlob",
+        "requestBody": { "required": true, "content": { "image/*": { "schema": { "type": "string", "format": "binary" } } } },
+        "responses": { "204": { "description": "stored" } }
+      }
+    },
+    "/notes": {
+      "put": {
+        "operationId": "putNote",
+        "requestBody": { "required": true, "content": { "text/plain; charset=iso-8859-1": { "schema": { "type": "string" } } } },
+        "responses": { "204": { "description": "stored" } }
+      }
+    },
+    "/raw": {
+      "put": {
+        "operationId": "putRaw",
+        "requestBody": {
+          "required": true,
+          "content": { "application/octet-stream; charset=iso-8859-1": { "schema": { "type": "string", "format": "binary" } } }
+        },
+        "responses": { "204": { "description": "stored" } }
+      }
+    },
+    "/latin": {
+      "get": {
+        "operationId": "getLatin",
+        "responses": {
+          "200": { "description": "ok", "content": { "text/plain; charset=iso-8859-1": { "schema": { "type": "string" } } } }
+        }
+      }
+    },
+    "/image": {
+      "get": {
+        "operationId": "getImage",
+        "responses": { "200": { "description": "ok", "content": { "image/*": { "schema": { "type": "string", "format": "binary" } } } } }
+      }
+    },
+    "/blob": {
+      "get": {
+        "operationId": "getBlob",
+        "responses": { "200": { "description": "ok", "content": { "*/*": { "schema": { "type": "string", "format": "binary" } } } } }
+      }
+    },
+    "/note": {
+      "get": {
+        "operationId": "getNote",
+        "responses": { "200": { "description": "ok", "content": { "text/*": { "schema": { "type": "string" } } } } }
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn bodies_are_labelled_with_concrete_utf8_media_types() {
+  let client = generate_client(
+    &make_orchestrator_with_api_name(parse_spec(MEDIA_LABEL_SPEC), "LabelClient", GenerationTarget::Client),
+    "test.json",
+  );
+  let server = generate_server(&make_server_orchestrator(parse_spec(MEDIA_LABEL_SPEC)), "test.json");
+
+  assert_contains_all(
+    &client,
+    &[
+      (".json(&request.body)", "a wildcard JSON request body is sent as JSON"),
+      (
+        "\"application/octet-stream\"",
+        "a wildcard or charset-labelled binary request body is labelled octet-stream",
+      ),
+      (
+        "\"text/plain; charset=utf-8\"",
+        "a non-UTF-8 text request body is relabelled to match the UTF-8 bytes sent",
+      ),
+    ],
+  );
+  assert_contains_all(
+    &server,
+    &[
+      (
+        "\"application/octet-stream\"",
+        "a binary response under a wildcard is sent as octet-stream",
+      ),
+      (
+        "\"text/plain\"",
+        "a text response under a wildcard is sent as text/plain",
+      ),
+      (
+        "\"text/plain; charset=utf-8\"",
+        "a non-UTF-8 text response is relabelled to match the UTF-8 bytes sent",
+      ),
+    ],
+  );
+  for code in [&client, &server] {
+    for label in [
+      "\"*/*\"",
+      "\"image/*\"",
+      "\"text/*\"",
+      "iso-8859-1",
+      "octet-stream; charset",
+    ] {
+      assert_not_contains(
+        code,
+        label,
+        "a label is concrete, UTF-8 for text, and without a charset for bytes",
+      );
+    }
+  }
+}
+
+const BODILESS_UNION_SPEC: &str = r##"{
+  "openapi": "3.1.0",
+  "info": { "title": "Union", "version": "1.0.0" },
+  "paths": {
+    "/union": {
+      "post": {
+        "operationId": "postUnion",
+        "responses": {
+          "200": { "description": "a pet", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } },
+          "201": { "description": "a dog", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dog" } } } },
+          "202": { "description": "accepted without a body" }
+        }
+      }
+    },
+    "/intake": {
+      "get": {
+        "operationId": "getIntake",
+        "responses": {
+          "202": { "description": "accepted with a record", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pet": { "type": "object", "properties": { "name": { "type": "string" } } },
+      "Dog": { "type": "object", "properties": { "bark": { "type": "string" } } }
+    }
+  }
+}"##;
+
+#[test]
+fn bodiless_status_in_a_union_class_is_matched_once() {
+  let server = generate_server(&make_server_orchestrator(parse_spec(BODILESS_UNION_SPEC)), "test.json");
+  assert_contains(
+    &server,
+    "Ok(ApiResponse::Accepted(None)) =>",
+    "a bodiless status shared with a body elsewhere is one alternative, not a repeated pattern",
+  );
+}
+
 #[test]
 fn server_rejects_malformed_bodies_with_bad_request() {
   let server = generate_server(&make_server_orchestrator(parse_spec(REQUEST_SPEC)), "test.json");
@@ -580,4 +744,111 @@ fn callbacks_become_server_receivers_without_the_api_security() {
     "a callback doesn't inherit the API's top-level security",
   );
   assert_not_contains(&client, "search_pets_on_match", "the client never receives callbacks");
+}
+
+const TEXT_BODY_SPEC: &str = r##"{
+  "openapi": "3.1.0",
+  "info": { "title": "TextBody", "version": "1.0.0" },
+  "paths": {
+    "/pets/{id}": {
+      "get": {
+        "operationId": "getPet",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/Pet" } },
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          }
+        }
+      }
+    },
+    "/count": {
+      "get": {
+        "operationId": "getCount",
+        "responses": { "200": { "description": "ok", "content": { "text/plain": { "schema": { "type": "integer" } } } } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pet": { "type": "object", "required": ["id"], "properties": { "id": { "type": "integer" } } }
+    }
+  }
+}"##;
+
+#[test]
+fn server_sends_text_only_for_bodies_that_display() {
+  let server = generate_server(&make_server_orchestrator(parse_spec(TEXT_BODY_SPEC)), "test.json");
+
+  assert_contains(
+    &server,
+    "(http::StatusCode::OK, axum::Json(body)).into_response()",
+    "an object body with a text media type is sent as JSON",
+  );
+  assert_eq!(
+    server.matches("body.to_string()").count(),
+    1,
+    "only the integer body is written with Display, and the object body must not be"
+  );
+}
+
+const RESPONSE_STREAM_SPEC: &str = r##"{
+  "openapi": "3.1.0",
+  "info": { "title": "EventUnion", "version": "1.0.0" },
+  "paths": {
+    "/events": {
+      "get": {
+        "operationId": "getEvents",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Ev" } } },
+              "text/event-stream": { "schema": { "$ref": "#/components/schemas/Ev" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Ev": { "type": "object", "required": ["n"], "properties": { "n": { "type": "integer" } } }
+    }
+  }
+}"##;
+
+#[test]
+fn server_sends_each_response_union_member_under_its_own_media_type() {
+  let server = generate_server(&make_server_orchestrator(parse_spec(RESPONSE_STREAM_SPEC)), "test.json");
+
+  assert_contains_all(
+    &server,
+    &[
+      (
+        "Event200ResponseOrEvStream::Event200Response(body)",
+        "the JSON member is matched inline",
+      ),
+      (
+        "(http::StatusCode::OK, axum::Json(body)).into_response()",
+        "the JSON member is sent as JSON",
+      ),
+      (
+        "Event200ResponseOrEvStream::EvStream(",
+        "the event stream member is matched inline",
+      ),
+      (
+        "axum::response::sse::Sse::new(",
+        "the event stream member is sent as server-sent events",
+      ),
+    ],
+  );
+  assert_not_contains(
+    &server,
+    "ApiResponse::Ok(body)",
+    "the union is matched member by member, never serialized as a whole",
+  );
 }

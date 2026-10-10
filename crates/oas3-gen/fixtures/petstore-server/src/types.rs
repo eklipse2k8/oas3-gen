@@ -114,6 +114,10 @@ impl core::str::FromStr for PetStatus {
     }
   }
 }
+/// A short name a pet answers to
+pub type Nickname = String;
+/// A name that may be absent
+pub type NullableName = Option<String>;
 /// A pet in the store's care.
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
@@ -190,10 +194,13 @@ pub struct PetPatch {
 /// A pet with cat-specific fields.
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct Cat {
   /// Server-assigned identifier
   pub id: uuid::Uuid,
+  #[validate(length(min = 1u64, max = 64u64))]
   pub name: String,
   /// Kinds of pets the store cares for
   pub species: Species,
@@ -204,10 +211,13 @@ pub struct Cat {
   #[serde(rename = "birthDate")]
   pub birth_date: Option<chrono::NaiveDate>,
   #[serde(rename = "weightKg")]
+  #[validate(range(max = 500.0, exclusive_min = 0.0))]
   pub weight_kg: Option<f64>,
   /// ISO 11784 microchip number
+  #[validate(regex(path = "REGEX_PET_MICROCHIP"))]
   pub microchip: Option<String>,
   #[serde_as(as = "Option<serde_with::SetPreventDuplicates<_>>")]
+  #[validate(length(max = 10u64))]
   pub tags: Option<indexmap::IndexSet<String>>,
   #[serde(rename = "photoUrls")]
   pub photo_urls: Option<Vec<String>>,
@@ -220,6 +230,7 @@ pub struct Cat {
   /// Superseded by `tags`
   #[deprecated]
   pub tag: Option<String>,
+  #[validate(range(min = 1i32, max = 9i32))]
   pub lives: i32,
   #[serde(rename = "favoriteToy")]
   pub favorite_toy: Option<String>,
@@ -3832,6 +3843,157 @@ impl SubmitTalliesRequest {
     Ok(request)
   }
 }
+/// Download a text/plain body that is raw bytes
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaTextRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaTextRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Download an image whose media type is a wildcard
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaWildcardRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaWildcardRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Describe a pet as text, or as raw bytes
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaPetTextRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaPetTextRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Describe a species as text
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaKindRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaKindRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Describe a nickname as text
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaNicknameRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaNicknameRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Describe an optional name as text
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaNullableNameRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaNullableNameRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Describe a place as text in a legacy charset
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaLatinRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaLatinRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Upload raw bytes whose label names a legacy charset
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PutMediaRawRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+  pub body: PhotoRequestBody,
+}
+#[bon::bon]
+impl PutMediaRawRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2, body: PhotoRequestBody) -> anyhow::Result<Self> {
+    let request = Self { credentials, body };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Create a pet or a cat, or accept the request without a body
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostMediaUnionRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl PostMediaUnionRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Check a pet's intake, which is accepted with its record
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaAcceptedRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaAcceptedRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
 /// Describe a pet as JSON, or stream it as server-sent events
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetMediaBothRequest {
@@ -4654,8 +4816,7 @@ pub struct WithHeaders<Headers, Body> {
   pub body: Body,
 }
 /// Response bodies that share one status class in an operation.
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum ErrorOrProblem {
   Error(Error),
   Problem(Problem),
@@ -4664,6 +4825,18 @@ pub enum ErrorOrProblem {
 pub enum ContentResponseOrAssistantEventFrameStream {
   ContentResponse(ContentResponse),
   AssistantEventFrameStream(futures::stream::BoxStream<'static, AssistantEventFrame>),
+}
+/// Response bodies that share one status class in an operation.
+#[derive(Debug, Clone)]
+pub enum PetOrVecu8 {
+  Pet(Pet),
+  Vecu8(Vec<u8>),
+}
+/// Response bodies that share one status class in an operation.
+#[derive(Debug, Clone)]
+pub enum CatOrPet {
+  Cat(Cat),
+  Pet(Pet),
 }
 /// Response bodies that share one status class in an operation.
 pub enum PetOrPetStream {

@@ -166,9 +166,15 @@ you return Rust values and the handler chooses the encoding:
 |---|---|
 | `application/json` | JSON, serialized with [`axum::Json`][rustdoc-axum-json] |
 | A `+json` type, such as `application/problem+json` | JSON, labelled with the declared `Content-Type` |
-| `text/*`, such as `text/plain` | Text, labelled with the declared `Content-Type` |
-| A binary type, such as `image/png` or `application/octet-stream` | The raw bytes, labelled with the declared `Content-Type` |
+| `text/*`, such as `text/plain` | Text, labelled with the declared `Content-Type`, when the body is a string, byte vector, number, boolean, value enum, or named string schema. Any other body is sent as JSON, labelled with the declared text type when the status declares no JSON type |
+| A binary type, such as `image/png` or `application/octet-stream` | The raw bytes, labelled with the declared `Content-Type` and no `charset`, when the body is `Vec<u8>` or a string. Any other body is sent as JSON |
 | `text/event-stream` | A stream of events; see [Streaming Server-Sent Events](#streaming-server-sent-events) |
+
+A wildcard such as `image/*` or `text/*` names a range of types, so the handler
+labels the body with a concrete one instead: `application/octet-stream` for
+binary and `text/plain` for text. A `*/*` declares a JSON body, which is sent
+as `application/json`. The handler sends Rust strings as UTF-8, so a `charset`
+other than UTF-8 is replaced with `utf-8`. A binary label carries no `charset`.
 
 The examples from here on use operations from the whole petstore, so generate
 it without `--only` to follow along. For example, its `updatePet` operation
@@ -193,8 +199,10 @@ You can also return a status that the operation doesn't declare, such as
 `ApiResponse::Conflict` from `update_pet()`. The handler then uses the first media type the operation
 declares for the same payload: `application/json` for a `Pet` and
 `application/problem+json` for a `Problem`. A payload that combines several
-body types into a union, such as `ErrorOrProblem` for `showPetById`, is always
-serialized as JSON.
+body types into a union, such as `ErrorOrProblem` for `showPetById`, sends each
+member under the media type it was declared with: `Error` as `application/json`
+and `Problem` as `application/problem+json`. A status that offers both JSON and
+`text/event-stream` works the same way, sending its stream member as events.
 
 Use a declared response variant when the result is part of your API's contract,
 such as an authorization failure. Returning `Err` from the service method

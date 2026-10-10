@@ -2,18 +2,19 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use indexmap::IndexMap;
 use itertools::Itertools;
+use string_cache::DefaultAtom;
 
 use crate::generator::{
   ast::{
-    BodyMediaType, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken,
-    OperationInfo, OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef, ResponseMediaType,
-    ResponseParam, ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant, ResponseVariant,
-    ResponseVariantCategory, RustPrimitive, RustType, SerdeMode, StatusCodeToken, StatusHandler, StructDef, StructKind,
-    StructMethod, StructToken, TypeRef, VariantMapping,
+    BodyMediaType, ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind,
+    MethodNameToken, OperationInfo, OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef,
+    ResponseMediaType, ResponseParam, ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant,
+    ResponseVariant, ResponseVariantCategory, RustPrimitive, RustType, StatusCodeToken, StatusHandler, StructDef,
+    StructKind, StructMethod, StructToken, TypeRef, VariantMapping,
   },
-  converter::GenerationTarget,
+  converter::{GenerationTarget, requests::sent_media_type},
   naming::{
-    constants::{OTHER_RESPONSE_VARIANT, RESPONSE_FALLBACK_NAME, RESPONSE_NAME, WITH_HEADERS_NAME},
+    constants::{DEFAULT_MEDIA_TYPE, OTHER_RESPONSE_VARIANT, RESPONSE_FALLBACK_NAME, RESPONSE_NAME, WITH_HEADERS_NAME},
     identifiers::ensure_unique,
     responses::{headers_name, union_member_name, union_name},
   },
@@ -38,6 +39,20 @@ pub(crate) struct ResponseProcessor {
   unions: IndexMap<String, ResponseUnionDef>,
   headers: IndexMap<String, StructDef>,
   taken: BTreeSet<String>,
+  type_index: HashMap<DefaultAtom, usize>,
+}
+
+/// The generated types, looked up by name.
+#[derive(Clone, Copy)]
+struct TypeLookup<'a> {
+  types: &'a [RustType],
+  by_name: &'a HashMap<DefaultAtom, usize>,
+}
+
+impl<'a> TypeLookup<'a> {
+  fn get(self, name: &DefaultAtom) -> Option<&'a RustType> {
+    self.by_name.get(name).map(|&index| &self.types[index])
+  }
 }
 
 impl ResponseProcessor {
@@ -50,6 +65,7 @@ impl ResponseProcessor {
       unions: IndexMap::new(),
       headers: IndexMap::new(),
       taken: BTreeSet::new(),
+      type_index: HashMap::new(),
     }
   }
 
@@ -59,6 +75,12 @@ impl ResponseProcessor {
     };
     self.table = table;
     self.taken = self.types.iter().map(|t| t.type_name().to_string()).collect();
+    self.type_index = self
+      .types
+      .iter()
+      .enumerate()
+      .map(|(index, rust_type)| (rust_type.type_name(), index))
+      .collect();
 
     let response_enum = self.build_response_enum();
     let request_structs = self
@@ -248,21 +270,28 @@ impl ResponseProcessor {
       .iter()
       .map(|(_, key)| union.as_ref().and(key.as_deref()).map(member_variant))
       .collect::<Vec<_>>();
+    let lookup = TypeLookup {
+      types: &self.types,
+      by_name: &self.type_index,
+    };
     let media_types = keyed
       .iter()
       .zip(&members)
       .filter_map(|((index, _), member)| {
         let variant = &variants[*index];
         let body = variant.schema_type.clone()?;
-        let media = variant.media_types.first()?;
+        let (category, content_type) = sent_body(variant, &body, lookup);
+        let stream = (category == ContentCategory::EventStream)
+          .then(|| ResponseMediaType::event_stream(&variant.media_types)?.stream.clone())
+          .flatten();
         Some(
           BodyMediaType::builder()
             .status(variant.status_code)
             .maybe_member(member.clone())
-            .category(media.category)
-            .content_type(media.content_type.clone())
+            .category(category)
+            .content_type(content_type)
             .body(body)
-            .maybe_stream(media.stream.clone())
+            .maybe_stream(stream)
             .build(),
         )
       })
@@ -276,9 +305,14 @@ impl ResponseProcessor {
     };
 
     for ((index, _), member) in keyed.into_iter().zip(members) {
+      let parses_text = variants[index]
+        .schema_type
+        .as_ref()
+        .is_some_and(|body| can_write_as(ContentCategory::Text, body, lookup));
       variants[index].mapping = VariantMapping::builder()
         .payload(class)
         .maybe_union_variant(member)
+        .parses_text(parses_text)
         .build();
     }
 
@@ -363,10 +397,6 @@ impl ResponseProcessor {
       let streaming = members
         .iter()
         .any(|(_, _, v)| ResponseMediaType::has_event_stream(&v.media_types));
-      let serde_mode = match self.target {
-        GenerationTarget::Client => SerdeMode::None,
-        GenerationTarget::Server => SerdeMode::SerializeOnly,
-      };
 
       ResponseUnionDef::builder()
         .name(EnumToken::from_raw(name))
@@ -384,7 +414,6 @@ impl ResponseProcessor {
             })
             .collect(),
         )
-        .serde_mode(serde_mode)
         .maybe_streaming(streaming.then_some(self.target))
         .build()
     })
@@ -421,6 +450,65 @@ fn status_table(operations: &[OperationInfo]) -> Option<StatusTable> {
   }
 
   any_responses.then_some(table)
+}
+
+/// The category a server encodes one body as and the media type it labels it with: the first
+/// declared media type that can carry the body, or else JSON under the first declared text
+/// label, or `application/json` without one.
+fn sent_body(variant: &ResponseVariant, body: &TypeRef, types: TypeLookup<'_>) -> (ContentCategory, String) {
+  if let Some(media) = variant
+    .media_types
+    .iter()
+    .find(|media| can_write_as(media.category, body, types))
+  {
+    return (media.category, sent_media_type(&media.content_type, media.category));
+  }
+  let label = variant
+    .media_types
+    .iter()
+    .find(|media| media.category == ContentCategory::Text)
+    .map_or_else(
+      || DEFAULT_MEDIA_TYPE.to_string(),
+      |media| sent_media_type(&media.content_type, ContentCategory::Text),
+    );
+  (ContentCategory::Json, label)
+}
+
+/// Whether a body of this type can be written under the category's media type. Text needs a
+/// string, a direct byte vector, or a `Display` type; binary needs bytes or a string. An alias
+/// is judged by the type it names.
+fn can_write_as(category: ContentCategory, body: &TypeRef, types: TypeLookup<'_>) -> bool {
+  if !matches!(category, ContentCategory::Text | ContentCategory::Binary) {
+    return true;
+  }
+  let Some(target) = resolve_alias(body, types) else {
+    return false;
+  };
+  if target.is_array || target.map_value.is_some() {
+    return false;
+  }
+  match &target.base_type {
+    RustPrimitive::Custom(name) => {
+      category == ContentCategory::Text && matches!(types.get(name), Some(RustType::Enum(def)) if def.is_text_form())
+    }
+    RustPrimitive::Bytes => category == ContentCategory::Binary || matches!(body.base_type, RustPrimitive::Bytes),
+    RustPrimitive::String => true,
+    RustPrimitive::Unit | RustPrimitive::Duration => false,
+    _ => category == ContentCategory::Text,
+  }
+}
+
+/// Follows an alias chain to the type it names, or `None` through a nullable alias, since
+/// `Option<T>` has no `Display` or raw byte form.
+fn resolve_alias<'a>(body: &'a TypeRef, types: TypeLookup<'a>) -> Option<&'a TypeRef> {
+  let RustPrimitive::Custom(name) = &body.base_type else {
+    return Some(body);
+  };
+  match types.get(name) {
+    Some(RustType::TypeAlias(alias)) if alias.target.nullable => None,
+    Some(RustType::TypeAlias(alias)) => resolve_alias(&alias.target, types),
+    _ => Some(body),
+  }
 }
 
 fn parse_method(response: &OperationResponse, variants: &[ResponseVariant]) -> StructMethod {

@@ -17,7 +17,7 @@ use petstore_client::{self as client, ApiResponse, PetstoreClient, WithHeaders};
 use rstest::rstest;
 use support::{API_KEY, API_VERSION, COMPATIBILITY_DATE, Petstore, QUERY_KEY, SESSION, STAFF_TOKEN, now, petstore};
 
-const OPERATIONS: [&str; 53] = [
+const OPERATIONS: [&str; 63] = [
   "AdoptPet",
   "AdoptPetStatusChanged",
   "CreateApiKey",
@@ -31,7 +31,15 @@ const OPERATIONS: [&str; 53] = [
   "GetChatPreference",
   "GetHealth",
   "GetInventory",
+  "GetMediaAccepted",
   "GetMediaBoth",
+  "GetMediaKind",
+  "GetMediaLatin",
+  "GetMediaNickname",
+  "GetMediaNullableName",
+  "GetMediaPetText",
+  "GetMediaText",
+  "GetMediaWildcard",
   "GetOrderById",
   "GetPetCard",
   "GetPetLineage",
@@ -47,6 +55,8 @@ const OPERATIONS: [&str; 53] = [
   "PetAdopted",
   "PetExists",
   "PlaceOrder",
+  "PostMediaUnion",
+  "PutMediaRaw",
   "RecordVaccination",
   "ReplaceApiKey",
   "ReplacePetPhoto",
@@ -556,6 +566,55 @@ async fn every_operation_answers_with_its_declared_success(#[future(awt)] petsto
   };
   assert_eq!(echoed, tallies);
 
+  let ApiResponse::Ok(text) = pets.get_media_text(client::GetMediaTextRequest {}).await? else {
+    panic!("getMediaText answers 200");
+  };
+  assert_eq!(text, b"hi".to_vec());
+  let ApiResponse::Ok(wildcard) = pets.get_media_wildcard(client::GetMediaWildcardRequest {}).await? else {
+    panic!("getMediaWildcard answers 200");
+  };
+  assert_eq!(wildcard, [0x89, b'P', b'N', b'G']);
+  let ApiResponse::Ok(client::PetOrVecu8::Pet(described)) =
+    pets.get_media_pet_text(client::GetMediaPetTextRequest {}).await?
+  else {
+    panic!("getMediaPetText answers 200 with a pet");
+  };
+  assert_eq!(described.name, "Biscuit");
+  let ApiResponse::Ok(species) = pets.get_media_kind(client::GetMediaKindRequest {}).await? else {
+    panic!("getMediaKind answers 200");
+  };
+  assert_eq!(species, client::Species::Cat);
+  let ApiResponse::Ok(nickname) = pets.get_media_nickname(client::GetMediaNicknameRequest {}).await? else {
+    panic!("getMediaNickname answers 200");
+  };
+  assert_eq!(nickname, "Biscuit");
+  let ApiResponse::Ok(nullable) = pets
+    .get_media_nullable_name(client::GetMediaNullableNameRequest {})
+    .await?
+  else {
+    panic!("getMediaNullableName answers 200");
+  };
+  assert_eq!(nullable.as_deref(), Some("Biscuit"));
+  let ApiResponse::Ok(latin) = pets.get_media_latin(client::GetMediaLatinRequest {}).await? else {
+    panic!("getMediaLatin answers 200");
+  };
+  assert_eq!(latin, "caf\u{e9}");
+  let ApiResponse::NoContent(()) = pets
+    .put_media_raw(client::PutMediaRawRequest::builder().body(vec![0xE9, 0x41]).build()?)
+    .await?
+  else {
+    panic!("putMediaRaw answers 204");
+  };
+  let ApiResponse::Ok(Some(client::CatOrPet::Pet(union_pet))) =
+    pets.post_media_union(client::PostMediaUnionRequest {}).await?
+  else {
+    panic!("postMediaUnion answers 200 with a pet");
+  };
+  assert_eq!(union_pet.name, "Biscuit");
+  let ApiResponse::Accepted(accepted) = pets.get_media_accepted(client::GetMediaAcceptedRequest {}).await? else {
+    panic!("getMediaAccepted answers 202");
+  };
+  assert_eq!(accepted.name, "Biscuit");
   let ApiResponse::Ok(client::PetOrPetStream::Pet(streamed)) =
     pets.get_media_both(client::GetMediaBothRequest {}).await?
   else {

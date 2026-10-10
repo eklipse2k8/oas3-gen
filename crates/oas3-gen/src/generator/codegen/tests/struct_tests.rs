@@ -137,22 +137,29 @@ fn test_text_response_parsing() {
   let cases = [
     (
       TypeRef::new("String"),
+      false,
       "req . text () . await ?",
       "text/plain String response",
     ),
     (
       TypeRef::new("i32"),
+      true,
       "req . text () . await ? . parse :: < i32 > () ?",
       "text/plain i32 response with parsing",
     ),
   ];
-  for (st, expected_code, desc) in cases {
+  for (st, parses_text, expected_code, desc) in cases {
     let def = make_response_parser_struct(
       ResponseVariant::builder()
         .status_code(StatusCodeToken::Ok200)
         .media_types(vec![ResponseMediaType::with_schema("text/plain", Some(st.clone()))])
         .maybe_schema_type(Some(st))
-        .mapping(payload_mapping(ResponsePayload::Value))
+        .mapping(
+          VariantMapping::builder()
+            .payload(ResponsePayload::Value)
+            .parses_text(parses_text)
+            .build(),
+        )
         .build(),
     );
     let tokens =

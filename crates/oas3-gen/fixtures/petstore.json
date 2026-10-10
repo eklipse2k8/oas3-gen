@@ -1105,6 +1105,165 @@
         }
       }
     },
+    "/media/text": {
+      "get": {
+        "operationId": "getMediaText",
+        "tags": ["media"],
+        "summary": "Download a text/plain body that is raw bytes",
+        "responses": {
+          "200": {
+            "description": "The bytes, labelled as text",
+            "content": {
+              "text/plain": { "schema": { "type": "string", "format": "binary" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/wildcard": {
+      "get": {
+        "operationId": "getMediaWildcard",
+        "tags": ["media"],
+        "summary": "Download an image whose media type is a wildcard",
+        "responses": {
+          "200": {
+            "description": "Image bytes under a wildcard media type",
+            "content": {
+              "image/*": { "schema": { "type": "string", "format": "binary" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/pet-text": {
+      "get": {
+        "operationId": "getMediaPetText",
+        "tags": ["media"],
+        "summary": "Describe a pet as text, or as raw bytes",
+        "responses": {
+          "200": {
+            "description": "A pet as text, or the raw bytes",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/Pet" } },
+              "application/octet-stream": { "schema": { "type": "string", "format": "binary" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/kind": {
+      "get": {
+        "operationId": "getMediaKind",
+        "tags": ["media"],
+        "summary": "Describe a species as text",
+        "responses": {
+          "200": {
+            "description": "The species as text",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/Species" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/nickname": {
+      "get": {
+        "operationId": "getMediaNickname",
+        "tags": ["media"],
+        "summary": "Describe a nickname as text",
+        "responses": {
+          "200": {
+            "description": "The nickname as text",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/Nickname" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/nullable-name": {
+      "get": {
+        "operationId": "getMediaNullableName",
+        "tags": ["media"],
+        "summary": "Describe an optional name as text",
+        "responses": {
+          "200": {
+            "description": "The name as text",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/NullableName" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/latin": {
+      "get": {
+        "operationId": "getMediaLatin",
+        "tags": ["media"],
+        "summary": "Describe a place as text in a legacy charset",
+        "responses": {
+          "200": {
+            "description": "The text, labelled as ISO-8859-1",
+            "content": {
+              "text/plain; charset=iso-8859-1": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/raw": {
+      "put": {
+        "operationId": "putMediaRaw",
+        "tags": ["media"],
+        "summary": "Upload raw bytes whose label names a legacy charset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream; charset=iso-8859-1": { "schema": { "type": "string", "format": "binary" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "The bytes were stored" }
+        }
+      }
+    },
+    "/media/union": {
+      "post": {
+        "operationId": "postMediaUnion",
+        "tags": ["media"],
+        "summary": "Create a pet or a cat, or accept the request without a body",
+        "responses": {
+          "200": {
+            "description": "A pet",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          },
+          "201": {
+            "description": "A cat",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Cat" } }
+            }
+          },
+          "202": { "description": "Accepted without a body" }
+        }
+      }
+    },
+    "/media/accepted": {
+      "get": {
+        "operationId": "getMediaAccepted",
+        "tags": ["media"],
+        "summary": "Check a pet's intake, which is accepted with its record",
+        "responses": {
+          "202": {
+            "description": "The intake record",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          }
+        }
+      }
+    },
     "/media/both": {
       "get": {
         "operationId": "getMediaBoth",
@@ -1545,6 +1704,15 @@
         "type": "string",
         "description": "Where the pet is in the adoption process",
         "enum": ["available", "pending", "adopted"]
+      },
+      "Nickname": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "A short name a pet answers to"
+      },
+      "NullableName": {
+        "type": ["string", "null"],
+        "description": "A name that may be absent"
       },
       "Pet": {
         "type": "object",

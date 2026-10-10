@@ -114,6 +114,10 @@ impl core::str::FromStr for PetStatus {
     }
   }
 }
+/// A short name a pet answers to
+pub type Nickname = String;
+/// A name that may be absent
+pub type NullableName = Option<String>;
 /// A pet in the store's care.
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
@@ -191,10 +195,14 @@ pub struct PetPatch {
 }
 /// A pet with cat-specific fields.
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct Cat {
   /// Server-assigned identifier
   pub id: uuid::Uuid,
+  #[validate(length(min = 1u64, max = 64u64))]
   pub name: String,
   /// Kinds of pets the store cares for
   pub species: Species,
@@ -205,10 +213,13 @@ pub struct Cat {
   #[serde(rename = "birthDate")]
   pub birth_date: Option<chrono::NaiveDate>,
   #[serde(rename = "weightKg")]
+  #[validate(range(max = 500.0, exclusive_min = 0.0))]
   pub weight_kg: Option<f64>,
   /// ISO 11784 microchip number
+  #[validate(regex(path = "REGEX_PET_MICROCHIP"))]
   pub microchip: Option<String>,
   #[serde_as(as = "Option<serde_with::SetPreventDuplicates<_>>")]
+  #[validate(length(max = 10u64))]
   pub tags: Option<indexmap::IndexSet<String>>,
   #[serde(rename = "photoUrls")]
   pub photo_urls: Option<Vec<String>>,
@@ -221,6 +232,7 @@ pub struct Cat {
   /// Superseded by `tags`
   #[deprecated]
   pub tag: Option<String>,
+  #[validate(range(min = 1i32, max = 9i32))]
   pub lives: i32,
   #[serde(rename = "favoriteToy")]
   pub favorite_toy: Option<String>,
@@ -4157,6 +4169,181 @@ impl SubmitTalliesRequest {
     Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
   }
 }
+/// Download a text/plain body that is raw bytes
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaTextRequest {}
+impl GetMediaTextRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Vec<u8>, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = req.bytes().await?.to_vec();
+      return Ok(ApiResponse::Ok(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Download an image whose media type is a wildcard
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaWildcardRequest {}
+impl GetMediaWildcardRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Vec<u8>, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = req.bytes().await?.to_vec();
+      return Ok(ApiResponse::Ok(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Describe a pet as text, or as raw bytes
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaPetTextRequest {}
+impl GetMediaPetTextRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<PetOrVecu8, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let content_type_str = req
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+      if content_type_str.starts_with("text/") && !content_type_str.contains("xml") {
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(PetOrVecu8::Pet(data)));
+      }
+      if content_type_str.starts_with("application/octet-stream")
+        || content_type_str.starts_with("image/")
+        || content_type_str.starts_with("audio/")
+        || content_type_str.starts_with("video/")
+      {
+        let data = req.bytes().await?.to_vec();
+        return Ok(ApiResponse::Ok(PetOrVecu8::Vecu8(data)));
+      }
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Describe a species as text
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaKindRequest {}
+impl GetMediaKindRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Species, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = req.text().await?.parse::<Species>().map_err(anyhow::Error::msg)?;
+      return Ok(ApiResponse::Ok(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Describe a nickname as text
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaNicknameRequest {}
+impl GetMediaNicknameRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Nickname, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = req.text().await?.parse::<Nickname>().map_err(anyhow::Error::msg)?;
+      return Ok(ApiResponse::Ok(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Describe an optional name as text
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaNullableNameRequest {}
+impl GetMediaNullableNameRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<NullableName, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = oas3_gen_support::Diagnostics::<NullableName>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Ok(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Describe a place as text in a legacy charset
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaLatinRequest {}
+impl GetMediaLatinRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<String, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = req.text().await?;
+      return Ok(ApiResponse::Ok(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Upload raw bytes whose label names a legacy charset
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PutMediaRawRequest {
+  pub body: PhotoRequestBody,
+}
+#[bon::bon]
+impl PutMediaRawRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(body: PhotoRequestBody) -> anyhow::Result<Self> {
+    let request = Self { body };
+    request.validate()?;
+    Ok(request)
+  }
+}
+impl PutMediaRawRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<(), ()>> {
+    let status = req.status();
+    if status == http::StatusCode::NO_CONTENT {
+      let _ = req.bytes().await?;
+      return Ok(ApiResponse::NoContent(()));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Create a pet or a cat, or accept the request without a body
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostMediaUnionRequest {}
+impl PostMediaUnionRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Option<CatOrPet>, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Ok(Some(CatOrPet::Pet(data))));
+    }
+    if status == http::StatusCode::CREATED {
+      let data = oas3_gen_support::Diagnostics::<Cat>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Created(Some(CatOrPet::Cat(data))));
+    }
+    if status == http::StatusCode::ACCEPTED {
+      let _ = req.bytes().await?;
+      return Ok(ApiResponse::Accepted(None));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Check a pet's intake, which is accepted with its record
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaAcceptedRequest {}
+impl GetMediaAcceptedRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Pet, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::ACCEPTED {
+      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Accepted(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
 /// Describe a pet as JSON, or stream it as server-sent events
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetMediaBothRequest {}
@@ -5068,6 +5255,18 @@ pub enum ErrorOrProblem {
 pub enum ContentResponseOrAssistantEventFrameStream {
   ContentResponse(ContentResponse),
   AssistantEventFrameStream(oas3_gen_support::EventStream<AssistantEventFrame>),
+}
+/// Response bodies that share one status class in an operation.
+#[derive(Debug, Clone)]
+pub enum PetOrVecu8 {
+  Pet(Pet),
+  Vecu8(Vec<u8>),
+}
+/// Response bodies that share one status class in an operation.
+#[derive(Debug, Clone)]
+pub enum CatOrPet {
+  Cat(Cat),
+  Pet(Pet),
 }
 /// Response bodies that share one status class in an operation.
 #[derive(Debug)]

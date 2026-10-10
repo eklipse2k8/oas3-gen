@@ -22,7 +22,7 @@ use crate::{
     },
     converter::ConverterContext,
     naming::{
-      constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
+      constants::{BODY_FIELD_NAME, DEFAULT_MEDIA_TYPE, OCTET_STREAM_MEDIA_TYPE, REQUEST_BODY_SUFFIX},
       identifiers::to_rust_type_name,
       operations::credentials_field_name,
     },
@@ -215,7 +215,7 @@ impl BodyInfo {
       description: body.description.clone(),
       optional: !is_required,
       content_category,
-      content_type: content_type.clone(),
+      content_type: sent_media_type(content_type, content_category),
       validation_attrs,
       multipart_properties,
       warnings,
@@ -433,8 +433,8 @@ fn is_structured(schema: &ObjectSchema) -> bool {
   schema.is_object() || !schema.properties.is_empty() || schema.additional_properties.is_some()
 }
 
-/// The first media type an Encoding Object's `contentType` lists that a part can carry: a
-/// wildcard such as `image/*` names a range, not a type a sender can label with.
+/// The first concrete media type in a comma-separated list, such as an Encoding Object's
+/// `contentType`. A wildcard such as `image/*` names a range, not a type a sender can label with.
 fn first_concrete_media_type(content_type: &str) -> Option<String> {
   content_type
     .split(',')
@@ -470,6 +470,50 @@ fn with_utf8_charset(content_type: String) -> String {
     .collect::<Vec<_>>()
     .into();
   format!("{media}; charset=utf-8")
+}
+
+/// The media type a body of `category` is labelled with: its first concrete declared media type,
+/// or the category's default for a wildcard. Binary drops its `charset`, and anything else names
+/// UTF-8 in place of another charset.
+pub(crate) fn sent_media_type(declared: &str, category: ContentCategory) -> String {
+  first_concrete_media_type(declared).map_or_else(
+    || category_media_type(category).to_owned(),
+    |media| match category {
+      ContentCategory::Binary => without_charset(media),
+      _ => with_utf8_charset(media),
+    },
+  )
+}
+
+/// Drops the `charset` parameter, which names no encoding for bytes.
+fn without_charset(content_type: String) -> String {
+  let Ok(mut media) = MediaType::parse(&content_type) else {
+    return content_type;
+  };
+  let params = media
+    .params
+    .iter()
+    .filter(|(name, _)| !name.as_str().eq_ignore_ascii_case("charset"))
+    .copied()
+    .collect::<Vec<_>>();
+  if params.len() == media.params.len() {
+    return content_type;
+  }
+  media.params = params.into();
+  media.to_string()
+}
+
+/// The media type a body of `category` is sent as when the spec declares only a wildcard.
+fn category_media_type(category: ContentCategory) -> &'static str {
+  match category {
+    ContentCategory::Json => DEFAULT_MEDIA_TYPE,
+    ContentCategory::FormUrlEncoded => "application/x-www-form-urlencoded",
+    ContentCategory::Multipart => "multipart/form-data",
+    ContentCategory::Text => "text/plain",
+    ContentCategory::Binary => OCTET_STREAM_MEDIA_TYPE,
+    ContentCategory::Xml => "application/xml",
+    ContentCategory::EventStream => "text/event-stream",
+  }
 }
 
 /// Returns the RFC 6570 serialization an Encoding Object selects. Any explicit `style`,

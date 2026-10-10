@@ -443,7 +443,7 @@ impl<'a> ResponseArmsFragment<'a> {
   /// serialized as JSON without one.
   ///
   /// JSON keeps a declared label other than `application/json`. Text bodies other than
-  /// strings are written through `Display`. An event stream goes through axum's
+  /// strings and bytes are written through `Display`. An event stream goes through axum's
   /// `Sse`, sending each item as the JSON data of one event, or as one whole event for a
   /// frame type, and ends with its sentinel when it declares one.
   fn body_response(entry: Option<&BodyMediaType>) -> TokenStream {
@@ -462,7 +462,9 @@ impl<'a> ResponseArmsFragment<'a> {
 
     match entry.category {
       ContentCategory::Json if content_type != DEFAULT_MEDIA_TYPE => declared(quote! { axum::Json(body) }),
-      ContentCategory::Text if matches!(entry.body.base_type, RustPrimitive::String) => declared(quote! { body }),
+      ContentCategory::Text if matches!(entry.body.base_type, RustPrimitive::String | RustPrimitive::Bytes) => {
+        declared(quote! { body })
+      }
       ContentCategory::Text => declared(quote! { body.to_string() }),
       ContentCategory::Binary => declared(quote! { body }),
       ContentCategory::EventStream => {

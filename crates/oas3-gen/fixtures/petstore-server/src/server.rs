@@ -21,33 +21,36 @@ use super::types::{
   AdoptPetRequest, AdoptPetStatusChangedRequest, Adoption, AdoptionEvent, AdoptionFeedEvent, AdoptionRequest,
   AllowHeaders, ApiKey, ApiKeyAuthAndBearerAuthCredentials, ApiKeyAuthAndSessionCookieCredentials,
   ApiKeyAuthCredentials, ApiKeyAuthCredentials2, ApiResponse, AssistantEventList, AssistantSettings,
-  AssistantTokenFrame, BearerAuthAndTokenAuthCredentials, Carrier200Response, Cats, ChatPreference, CollarTelemetry,
-  ContentRequest, ContentResponse, ContentResponseOrAssistantEventFrameStream, CreateApiKeyRequest, CreatePetRequest,
-  DeleteOrderRequest, DeleteOrderRequestPath, DeletePetRequest, DeletePetRequestPath, DescribePetsRequest,
-  ETagAndXCacheHeaders, ETagHeaders, EchoResponseQualityRequest, EchoResponseQualityRequestPath,
+  AssistantTokenFrame, BearerAuthAndTokenAuthCredentials, Carrier200Response, CatOrPet, Cats, ChatPreference,
+  CollarTelemetry, ContentRequest, ContentResponse, ContentResponseOrAssistantEventFrameStream, CreateApiKeyRequest,
+  CreatePetRequest, DeleteOrderRequest, DeleteOrderRequestPath, DeletePetRequest, DeletePetRequestPath,
+  DescribePetsRequest, ETagAndXCacheHeaders, ETagHeaders, EchoResponseQualityRequest, EchoResponseQualityRequestPath,
   EchoResponseQualityRequestQuery, Error, ErrorOrProblem, ErrorResponse, GetAdoptionRequest, GetAdoptionRequestPath,
   GetApiKeyRequest, GetApiKeyRequestPath, GetChatPreferenceRequest, GetHealthRequest, GetInventoryRequest,
-  GetMediaBothRequest, GetOrderByIdRequest, GetOrderByIdRequestPath, GetPetCardRequest, GetPetCardRequestCookie,
-  GetPetCardRequestPath, GetPetLineageRequest, GetPetLineageRequestPath, GetPetLineageRequestQuery, GetPetPhotoRequest,
+  GetMediaAcceptedRequest, GetMediaBothRequest, GetMediaKindRequest, GetMediaLatinRequest, GetMediaNicknameRequest,
+  GetMediaNullableNameRequest, GetMediaPetTextRequest, GetMediaTextRequest, GetMediaWildcardRequest,
+  GetOrderByIdRequest, GetOrderByIdRequestPath, GetPetCardRequest, GetPetCardRequestCookie, GetPetCardRequestPath,
+  GetPetLineageRequest, GetPetLineageRequestPath, GetPetLineageRequestQuery, GetPetPhotoRequest,
   GetPetPhotoRequestPath, ImageRequestBody, IntakeForm, IntakeFormLabels, Inventory, InventoryAlert,
   InventoryLowRequest, Key200Response, Lineage, ListApiKeysRequest, ListApiKeysRequestQuery,
   ListAssistantEventsRequest, ListAssistantEventsRequestCookie, ListAuditEventsRequest, ListCarriersRequest,
   ListCatsRequest, ListCatsRequestHeader, ListCatsRequestQuery, ListPetsRequest, ListPetsRequestHeader,
   ListPetsRequestQuery, ListVaccinationsRequest, ListVaccinationsRequestPath, LocationHeaders, MediaLabels,
-  MediaReceipt, MediumRequestBody, NewApiKey, NewPet, NewsletterOptOut, NewsletterSignup, Order, Pet,
-  PetAdoptedRequest, PetExistsRequest, PetExistsRequestPath, PetOrPetStream, PetPatch, Pets, PlaceOrderRequest,
-  Problem, QueryKeyAndSessionCookieCredentials, RecordVaccinationRequest, RecordVaccinationRequestPath,
-  ReplaceApiKeyRequest, ReplaceApiKeyRequestPath, ReplacePetPhotoRequest, ReplacePetPhotoRequestPath, ResponseQuality,
-  RevokeApiKeyRequest, RevokeApiKeyRequestPath, SearchPetsRequest, SearchPetsRequestQuery, SearchResults,
-  SendAssistantMessageRequest, SetPetNotesRequest, SetPetNotesRequestPath, ShowPetByIdRequest,
-  ShowPetByIdRequestHeader, ShowPetByIdRequestPath, StreamAdoptionFeedRequest, StreamAdoptionFeedRequestQuery,
-  StreamAssistantMessageRequest, StreamAssistantMessageRequestQuery, StreamAssistantTokensRequest,
-  StreamPetVitalsRequest, StreamPetVitalsRequestPath, StreamPetVitalsRequestQuery, SubmitCollarTelemetryRequest,
-  SubmitCollarTelemetryRequestPath, SubmitIntakeFormRequest, SubmitIntakeFormRequestPath, SubmitMediaLabelsRequest,
-  SubmitTalliesRequest, SubscribeNewsletterRequest, Subscription, Tallies, TelemetryReceipt, TraceHealthRequest,
-  UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest, UpdateChatPreferenceRequest, UpdatePetRequest,
-  UpdatePetRequestPath, UploadMediaRequest, UploadPetImageRequest, UploadPetImageRequestPath, Vaccination200Response,
-  VaccineRecord, VitalsReading, WithHeaders, X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
+  MediaReceipt, MediumRequestBody, NewApiKey, NewPet, NewsletterOptOut, NewsletterSignup, Nickname, NullableName,
+  Order, Pet, PetAdoptedRequest, PetExistsRequest, PetExistsRequestPath, PetOrPetStream, PetOrVecu8, PetPatch, Pets,
+  PlaceOrderRequest, PostMediaUnionRequest, Problem, PutMediaRawRequest, QueryKeyAndSessionCookieCredentials,
+  RecordVaccinationRequest, RecordVaccinationRequestPath, ReplaceApiKeyRequest, ReplaceApiKeyRequestPath,
+  ReplacePetPhotoRequest, ReplacePetPhotoRequestPath, ResponseQuality, RevokeApiKeyRequest, RevokeApiKeyRequestPath,
+  SearchPetsRequest, SearchPetsRequestQuery, SearchResults, SendAssistantMessageRequest, SetPetNotesRequest,
+  SetPetNotesRequestPath, ShowPetByIdRequest, ShowPetByIdRequestHeader, ShowPetByIdRequestPath, Species,
+  StreamAdoptionFeedRequest, StreamAdoptionFeedRequestQuery, StreamAssistantMessageRequest,
+  StreamAssistantMessageRequestQuery, StreamAssistantTokensRequest, StreamPetVitalsRequest, StreamPetVitalsRequestPath,
+  StreamPetVitalsRequestQuery, SubmitCollarTelemetryRequest, SubmitCollarTelemetryRequestPath, SubmitIntakeFormRequest,
+  SubmitIntakeFormRequestPath, SubmitMediaLabelsRequest, SubmitTalliesRequest, SubscribeNewsletterRequest,
+  Subscription, Tallies, TelemetryReceipt, TraceHealthRequest, UnsubscribeNewsletterRequest,
+  UpdateAssistantSettingsRequest, UpdateChatPreferenceRequest, UpdatePetRequest, UpdatePetRequestPath,
+  UploadMediaRequest, UploadPetImageRequest, UploadPetImageRequestPath, Vaccination200Response, VaccineRecord,
+  VitalsReading, WithHeaders, X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
 };
 pub trait ApiServer: Send + Sync {
   /// List pets
@@ -353,6 +356,76 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: SubmitTalliesRequest,
   ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Tallies, ()>>> + Send;
+  /// Download a text/plain body that is raw bytes
+  ///
+  /// * Path: `GET /media/text`
+  fn get_media_text(
+    &self,
+    request: GetMediaTextRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Vec<u8>, ()>>> + Send;
+  /// Download an image whose media type is a wildcard
+  ///
+  /// * Path: `GET /media/wildcard`
+  fn get_media_wildcard(
+    &self,
+    request: GetMediaWildcardRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Vec<u8>, ()>>> + Send;
+  /// Describe a pet as text, or as raw bytes
+  ///
+  /// * Path: `GET /media/pet-text`
+  fn get_media_pet_text(
+    &self,
+    request: GetMediaPetTextRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<PetOrVecu8, ()>>> + Send;
+  /// Describe a species as text
+  ///
+  /// * Path: `GET /media/kind`
+  fn get_media_kind(
+    &self,
+    request: GetMediaKindRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Species, ()>>> + Send;
+  /// Describe a nickname as text
+  ///
+  /// * Path: `GET /media/nickname`
+  fn get_media_nickname(
+    &self,
+    request: GetMediaNicknameRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Nickname, ()>>> + Send;
+  /// Describe an optional name as text
+  ///
+  /// * Path: `GET /media/nullable-name`
+  fn get_media_nullable_name(
+    &self,
+    request: GetMediaNullableNameRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<NullableName, ()>>> + Send;
+  /// Describe a place as text in a legacy charset
+  ///
+  /// * Path: `GET /media/latin`
+  fn get_media_latin(
+    &self,
+    request: GetMediaLatinRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<String, ()>>> + Send;
+  /// Upload raw bytes whose label names a legacy charset
+  ///
+  /// * Path: `PUT /media/raw`
+  fn put_media_raw(
+    &self,
+    request: PutMediaRawRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<(), ()>>> + Send;
+  /// Create a pet or a cat, or accept the request without a body
+  ///
+  /// * Path: `POST /media/union`
+  fn post_media_union(
+    &self,
+    request: PostMediaUnionRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Option<CatOrPet>, ()>>> + Send;
+  /// Check a pet's intake, which is accepted with its record
+  ///
+  /// * Path: `GET /media/accepted`
+  fn get_media_accepted(
+    &self,
+    request: GetMediaAcceptedRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Pet, ()>>> + Send;
   /// Describe a pet as JSON, or stream it as server-sent events
   ///
   /// * Path: `GET /media/both`
@@ -3668,6 +3741,620 @@ where
       .into_response(),
   }
 }
+pub async fn get_media_text<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaTextRequest { credentials };
+  let result: anyhow::Result<ApiResponse<Vec<u8>, ()>> = service.get_media_text(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(body)) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(body)) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(body)) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn get_media_wildcard<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaWildcardRequest { credentials };
+  let result: anyhow::Result<ApiResponse<Vec<u8>, ()>> = service.get_media_wildcard(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(body)) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(body)) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(body)) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn get_media_pet_text<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaPetTextRequest { credentials };
+  let result: anyhow::Result<ApiResponse<PetOrVecu8, ()>> = service.get_media_pet_text(request).await;
+  match result {
+    Ok(ApiResponse::Ok(PetOrVecu8::Pet(body))) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Ok(PetOrVecu8::Vecu8(body))) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(PetOrVecu8::Pet(body))) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(PetOrVecu8::Vecu8(body))) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(PetOrVecu8::Pet(body))) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(PetOrVecu8::Vecu8(body))) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(PetOrVecu8::Pet(body))) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(PetOrVecu8::Vecu8(body))) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/octet-stream"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn get_media_kind<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaKindRequest { credentials };
+  let result: anyhow::Result<ApiResponse<Species, ()>> = service.get_media_kind(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.to_string(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(body)) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.to_string(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(body)) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.to_string(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(body)) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.to_string(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn get_media_nickname<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaNicknameRequest { credentials };
+  let result: anyhow::Result<ApiResponse<Nickname, ()>> = service.get_media_nickname(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.clone(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(body)) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.clone(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(body)) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.clone(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(body)) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        body.clone(),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn get_media_nullable_name<S>(
+  State(service): State<S>,
+  credentials: ApiKeyAuthCredentials2,
+) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaNullableNameRequest { credentials };
+  let result: anyhow::Result<ApiResponse<NullableName, ()>> = service.get_media_nullable_name(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(body)) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(body)) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(body)) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn get_media_latin<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaLatinRequest { credentials };
+  let result: anyhow::Result<ApiResponse<String, ()>> = service.get_media_latin(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (
+      http::StatusCode::OK,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(body)) => (
+      http::StatusCode::CREATED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(body)) => (
+      http::StatusCode::ACCEPTED,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(body)) => (
+      http::StatusCode::NO_CONTENT,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )],
+        body,
+      ),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn put_media_raw<S>(
+  State(service): State<S>,
+  credentials: ApiKeyAuthCredentials2,
+  body: axum::body::Bytes,
+) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = PutMediaRawRequest {
+    credentials,
+    body: Vec::from(body),
+  };
+  let result: anyhow::Result<ApiResponse<(), ()>> = service.put_media_raw(request).await;
+  match result {
+    Ok(ApiResponse::Ok(())) => http::StatusCode::OK.into_response(),
+    Ok(ApiResponse::Created(())) => http::StatusCode::CREATED.into_response(),
+    Ok(ApiResponse::Accepted(())) => http::StatusCode::ACCEPTED.into_response(),
+    Ok(ApiResponse::NoContent(())) => http::StatusCode::NO_CONTENT.into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn post_media_union<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = PostMediaUnionRequest { credentials };
+  let result: anyhow::Result<ApiResponse<Option<CatOrPet>, ()>> = service.post_media_union(request).await;
+  match result {
+    Ok(ApiResponse::Ok(Some(CatOrPet::Pet(body)))) => (http::StatusCode::OK, axum::Json(body)).into_response(),
+    Ok(ApiResponse::Ok(Some(CatOrPet::Cat(body)))) => (http::StatusCode::OK, axum::Json(body)).into_response(),
+    Ok(ApiResponse::Ok(None)) => http::StatusCode::OK.into_response(),
+    Ok(ApiResponse::Created(Some(CatOrPet::Pet(body)))) => {
+      (http::StatusCode::CREATED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Created(Some(CatOrPet::Cat(body)))) => {
+      (http::StatusCode::CREATED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Created(None)) => http::StatusCode::CREATED.into_response(),
+    Ok(ApiResponse::Accepted(Some(CatOrPet::Pet(body)))) => {
+      (http::StatusCode::ACCEPTED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Accepted(Some(CatOrPet::Cat(body)))) => {
+      (http::StatusCode::ACCEPTED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Accepted(None)) => http::StatusCode::ACCEPTED.into_response(),
+    Ok(ApiResponse::NoContent(Some(CatOrPet::Pet(body)))) => {
+      (http::StatusCode::NO_CONTENT, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::NoContent(Some(CatOrPet::Cat(body)))) => {
+      (http::StatusCode::NO_CONTENT, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::NoContent(None)) => http::StatusCode::NO_CONTENT.into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn get_media_accepted<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaAcceptedRequest { credentials };
+  let result: anyhow::Result<ApiResponse<Pet, ()>> = service.get_media_accepted(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (http::StatusCode::OK, axum::Json(body)).into_response(),
+    Ok(ApiResponse::Created(body)) => (http::StatusCode::CREATED, axum::Json(body)).into_response(),
+    Ok(ApiResponse::Accepted(body)) => (http::StatusCode::ACCEPTED, axum::Json(body)).into_response(),
+    Ok(ApiResponse::NoContent(body)) => (http::StatusCode::NO_CONTENT, axum::Json(body)).into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
 pub async fn get_media_both<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
 where
   S: ApiServer + Clone + Send + Sync + 'static,
@@ -4216,6 +4903,16 @@ where
     .route("/media", axum::routing::post(upload_media::<S>))
     .route("/media/labels", axum::routing::post(submit_media_labels::<S>))
     .route("/media/tallies", axum::routing::post(submit_tallies::<S>))
+    .route("/media/text", axum::routing::get(get_media_text::<S>))
+    .route("/media/wildcard", axum::routing::get(get_media_wildcard::<S>))
+    .route("/media/pet-text", axum::routing::get(get_media_pet_text::<S>))
+    .route("/media/kind", axum::routing::get(get_media_kind::<S>))
+    .route("/media/nickname", axum::routing::get(get_media_nickname::<S>))
+    .route("/media/nullable-name", axum::routing::get(get_media_nullable_name::<S>))
+    .route("/media/latin", axum::routing::get(get_media_latin::<S>))
+    .route("/media/raw", axum::routing::put(put_media_raw::<S>))
+    .route("/media/union", axum::routing::post(post_media_union::<S>))
+    .route("/media/accepted", axum::routing::get(get_media_accepted::<S>))
     .route("/media/both", axum::routing::get(get_media_both::<S>))
     .route(
       "/staff/keys",

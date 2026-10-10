@@ -3,8 +3,8 @@ use http::Method;
 use crate::generator::{
   ast::{
     EnumVariantToken, FieldDef, FieldNameToken, MethodKind, OperationInfo, OperationKind, ParsedPath, ResponseEnumDef,
-    ResponseMediaType, ResponseParam, ResponsePayload, ResponseUnionDef, ResponseVariant, RustType, SerdeMode,
-    StatusCodeToken, StructDef, StructKind, StructToken, TypeRef,
+    ResponseMediaType, ResponseParam, ResponsePayload, ResponseUnionDef, ResponseVariant, RustType, StatusCodeToken,
+    StructDef, StructKind, StructToken, TypeRef,
   },
   converter::GenerationTarget,
   postprocess::response::ResponseProcessor,
@@ -277,7 +277,6 @@ fn test_several_body_types_share_one_payload_union() {
   assert_eq!(unions.len(), 1, "identical member sets share one union");
   let union = unions[0];
   assert_eq!(union.name, "BasicErrorOrValidationError");
-  assert_eq!(union.serde_mode, SerdeMode::SerializeOnly);
   assert_eq!(
     union
       .variants

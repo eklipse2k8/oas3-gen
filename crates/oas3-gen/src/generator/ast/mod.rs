@@ -200,6 +200,9 @@ pub struct VariantMapping {
   #[builder(default)]
   pub payload: ResponsePayload,
   pub union_variant: Option<EnumVariantToken>,
+  /// Whether a text body parses with `FromStr` rather than decoding as JSON.
+  #[builder(default)]
+  pub parses_text: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -390,8 +393,6 @@ pub struct ResponseUnionDef {
   pub docs: Documentation,
   #[builder(default)]
   pub variants: Vec<ResponseUnionVariant>,
-  #[builder(default)]
-  pub serde_mode: SerdeMode,
   /// The target whose event stream a member holds, if any: a client's `EventStream` is
   /// `Debug`, a server's `BoxStream` isn't, and neither is `Clone`.
   pub streaming: Option<GenerationTarget>,
