@@ -4,38 +4,57 @@
 
 ## Fixtures
 
-`main.rs` declares `fixtures/` as a `#[cfg(test)]` module, so `cargo test` compiles generated
-output. Any change to generated code means regenerating, or the build breaks:
+One document, `crates/oas3-gen/fixtures/petstore.json`, is the fixture: an OpenAPI 3.1.2 pet
+store that exercises every feature the generator supports. It generates two crates with
+`--workspace`, `fixtures/petstore-client` and `fixtures/petstore-server`. Both are workspace
+members, so `cargo build` compiles generated output against its own generated `Cargo.toml`. Any
+change to generated code means regenerating, or the build breaks:
 
 ```bash
 F=crates/oas3-gen/fixtures
-cargo run -- generate client-mod -i $F/petstore.json           -o $F/petstore           --enable-builders --all-schemas --all-headers
-cargo run -- generate server-mod -i $F/petstore.json           -o $F/petstore_server    --enable-builders --all-schemas --all-headers
-cargo run -- generate client-mod -i $F/api_key_security.json   -o $F/api_key_security   --enable-builders --all-schemas
-cargo run -- generate server-mod -i $F/api_key_security.json   -o $F/api_key_security_server --enable-builders --all-schemas
-cargo run -- generate client-mod -i $F/union_serde.json        -o $F/union_serde        --enable-builders --all-schemas
-cargo run -- generate client-mod -i $F/intersection_union.json -o $F/intersection_union --enable-builders --all-schemas
-cargo run -- generate client-mod -i $F/multipart.json          -o $F/multipart          --enable-builders --all-schemas
-cargo run -- generate server-mod -i $F/multipart.json          -o $F/multipart_server   --enable-builders --all-schemas
-cargo run -- generate client-mod -i $F/event_stream.json       -o $F/event_stream       --enable-builders --all-schemas
+cargo run -- generate client-mod -i $F/petstore.json -o $F/petstore-client --workspace --enable-builders --all-schemas --all-headers
+cargo run -- generate server-mod -i $F/petstore.json -o $F/petstore-server --workspace --enable-builders --all-schemas --all-headers
 
 cargo clippy --fix --allow-dirty --all --all-targets -- -W clippy::pedantic
 cargo +nightly fmt --all
 ```
 
-Flags differ per fixture — copy the line, don't improvise. `event_stream` is *not* in the
-`#[cfg(test)]` module, so nothing compile-checks it; review its diff by eye.
-
 Committed fixtures are post-clippy and post-rustfmt, so the last two commands are part of
 regenerating, not an afterthought — skip them and the diff fills with lint and formatting noise.
-`--all-targets` is what makes clippy reach `fixtures/` at all, since the module is `#[cfg(test)]`.
 
 The fixture diff is how generated-output changes get reviewed. Read it before claiming a change
 is correct.
 
+A feature the generator gains belongs in `petstore.json`, so the generated client and server
+exercise it. A spec that only feeds one converter test, especially one counting operations or
+types, belongs inline in that test as a raw string instead.
+
+### Fixture tests
+
+`crates/oas3-gen/tests/petstore_*.rs` prove the generated client and server work together. Each
+target serves `petstore_server::router` on a free local port, backed by `PetstoreService` in
+`tests/support/`, an in-memory implementation of the generated `ApiServer` trait. Tests call it
+through `petstore_client::PetstoreClient`. The service records each request it receives, so a
+test can assert both what crossed the wire and what came back.
+
+- `#[rstest]` with `#[case]` tables for variants, and the async `support::petstore` fixture
+  (`#[future(awt)] petstore: Petstore`) for a fresh store per test.
+- `proptest!` for properties over inputs. Cases are synchronous, so a property starts one store
+  with `support::start_shared()` and blocks each case on `support::runtime()`.
+- Raw `reqwest` requests only where the generated client can't express the input: missing
+  credentials, invalid bodies, wire-level `Content-Type` checks.
+
+A test that fails because generated code breaks the spec is a generator bug. Fix the generator
+and regenerate; don't weaken the assertion.
+
+A new operation in `petstore.json` adds a method to the generated `ApiServer`, so the build fails
+until `PetstoreService` implements it. Give it a `Received` variant and an entry in
+`petstore_smoke.rs`, whose coverage check fails while any operation goes unexercised.
+
 ## Requirements
 
-- Unit tests in `#[cfg(test)]` modules alongside the code; integration tests in `src/tests/`.
+- Unit tests in `#[cfg(test)]` modules alongside the code; generator integration tests in
+  `src/generator/tests/`; generated-code tests in `tests/`.
 - Cover happy path, boundaries (empty, special characters), and error cases.
 - Test behavior generally. Never hard-code a value or special-case an assertion to make a test
   pass — if a test or requirement looks wrong, say so.

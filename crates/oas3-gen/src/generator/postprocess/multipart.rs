@@ -72,10 +72,11 @@ impl<'a> MultipartProcessor<'a> {
 
     let property = properties.get(field.serde_name());
     let content_type = property.and_then(|property| property.content_type.clone());
-    let serialize_as = match &field.serde_as_attr {
-      Some(SerdeAsFieldAttr::CustomOverride { custom_type, .. }) => Some(custom_type.clone()),
-      _ => None,
-    };
+    let serialize_as = field
+      .serde_as_attr
+      .as_ref()
+      .and_then(SerdeAsFieldAttr::custom_type)
+      .map(str::to_owned);
 
     let kind = if field.serde_attrs.contains(&SerdeAttribute::Flatten) {
       let entry_type = field

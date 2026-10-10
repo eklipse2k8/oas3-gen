@@ -4,14 +4,19 @@ use itertools::Itertools as _;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::{Visibility, multipart::MultipartDecodeFragment};
+use super::{
+  Visibility,
+  cookies::{CookieValues, request_cookie_lookup},
+  multipart::MultipartDecodeFragment,
+};
 use crate::generator::{
   ast::{
     ApiKeyLocation, ContentCategory, CredentialKind, CredentialScheme, HandlerBodyInfo, HandlerCredentials,
     OperationResponse, ResponseEnumDef, ResponseParam, ResponsePayload, RustPrimitive, ServerRequestTraitDef,
-    ServerTraitMethod, TraitToken, constants::HttpHeaderRef,
+    ServerTraitMethod, StatusCodeToken, StructToken, TraitToken, constants::HttpHeaderRef,
   },
   codegen::http::HttpStatusCode,
+  naming::constants::DEFAULT_MEDIA_TYPE,
 };
 
 pub struct ServerGenerator {
@@ -62,10 +67,9 @@ impl ToTokens for ServerGenerator {
     tokens.extend(quote! {
       use axum::{
         Router,
-        extract::{Path, Query, State},
+        extract::{Path, State},
         http::HeaderMap,
         response::IntoResponse,
-        routing::{delete, get, head, options, patch, post, put, trace},
       };
 
       #types_import
@@ -129,12 +133,13 @@ impl ToTokens for CredentialsExtractorFragment<'_> {
 
     let query = security.reads(ApiKeyLocation::Query).then(|| {
       quote! {
-        let Query(query) = Query::<Vec<(String, String)>>::try_from_uri(&parts.uri).unwrap_or_default();
+        let axum::extract::Query(query) =
+          axum::extract::Query::<Vec<(String, String)>>::try_from_uri(&parts.uri).unwrap_or_default();
       }
     });
-    let cookies = security.reads(ApiKeyLocation::Cookie).then(|| {
-      quote! { let cookies = axum_extra::extract::CookieJar::from_headers(&parts.headers); }
-    });
+    let cookies = security
+      .reads(ApiKeyLocation::Cookie)
+      .then(|| request_cookie_lookup(&quote! { parts.headers }, CookieValues::AsSent));
 
     let fields = security.schemes.iter().map(|scheme| {
       let field = &scheme.field;
@@ -226,9 +231,7 @@ fn credential_value(scheme: &CredentialScheme) -> TokenStream {
     CredentialKind::ApiKey {
       location: ApiKeyLocation::Cookie,
       parameter_name,
-    } => quote! {
-      cookies.get(#parameter_name).map(|cookie| secrecy::SecretString::from(cookie.value_trimmed()))
-    },
+    } => quote! { cookie(#parameter_name).map(secrecy::SecretString::from) },
     CredentialKind::Bearer => quote! {
       parts
         .headers
@@ -384,7 +387,8 @@ impl<'a> ResponseArmsFragment<'a> {
     status_pattern: Option<&TokenStream>,
     status_expr: &TokenStream,
     param: Option<&ResponseParam>,
-  ) -> TokenStream {
+    status: StatusCodeToken,
+  ) -> Vec<MatchArm> {
     let wrapper = param.and_then(|p| p.headers.as_ref()).map(|headers| &headers.wrapper);
     let arm = |pattern: TokenStream, headed_pattern: TokenStream, body: Option<TokenStream>| {
       let (payload, response) = match (wrapper, body) {
@@ -406,7 +410,7 @@ impl<'a> ResponseArmsFragment<'a> {
       };
       let fields = status_pattern.into_iter().cloned().chain(std::iter::once(payload));
 
-      quote! { Ok(#variant_path(#(#fields),*)) => #response, }
+      (quote! { #variant_path(#(#fields),*) }, response)
     };
 
     match param {
@@ -414,22 +418,68 @@ impl<'a> ResponseArmsFragment<'a> {
         let some = arm(
           quote! { Some(body) },
           quote! { body: Some(body) },
-          Some(quote! { axum::Json(body) }),
+          Some(Self::body_response(param, status)),
         );
         let none = arm(quote! { None }, quote! { body: None }, None);
-        quote! { #some #none }
+        vec![some, none]
       }
-      Some(param) if !matches!(param.body.base_type, RustPrimitive::Unit) => {
-        arm(quote! { body }, quote! { body }, Some(quote! { axum::Json(body) }))
+      Some(param) if !matches!(param.body.base_type, RustPrimitive::Unit) => vec![arm(
+        quote! { body },
+        quote! { body },
+        Some(Self::body_response(param, status)),
+      )],
+      _ => vec![arm(quote! { _ }, quote! { .. }, None)],
+    }
+  }
+
+  /// The response for a body bound as `body`, encoded as the media type `status`
+  /// declares for it.
+  ///
+  /// JSON bodies are serialized, keeping a declared `+json` media type such as
+  /// `application/problem+json`. Text and binary bodies are sent as they are under
+  /// their declared media type, and an event stream sends each item as the JSON data
+  /// of one server-sent event.
+  fn body_response(param: &ResponseParam, status: StatusCodeToken) -> TokenStream {
+    let Some(media_type) = param.media_type(status) else {
+      return quote! { axum::Json(body) };
+    };
+    let content_type = media_type.content_type.as_str();
+    let declared = |body: TokenStream| {
+      quote! {
+        (
+          [(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static(#content_type))],
+          #body
+        )
       }
-      _ => arm(quote! { _ }, quote! { .. }, None),
+    };
+
+    match media_type.category {
+      ContentCategory::Json if content_type != DEFAULT_MEDIA_TYPE => declared(quote! { axum::Json(body) }),
+      ContentCategory::Text if matches!(param.body.base_type, RustPrimitive::String) => declared(quote! { body }),
+      ContentCategory::Text => declared(quote! { body.to_string() }),
+      ContentCategory::Binary => declared(quote! { body }),
+      ContentCategory::EventStream => quote! {
+        axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item)))
+      },
+      ContentCategory::Json | ContentCategory::Xml | ContentCategory::Multipart | ContentCategory::FormUrlEncoded => {
+        quote! { axum::Json(body) }
+      }
     }
   }
 }
 
+/// One arm of the `match` over a service result: the response variant pattern
+/// inside `Ok(..)`, and the response it sends.
+type MatchArm = (TokenStream, TokenStream);
+
+/// Arms that send the same response, joined into one or-pattern. Arms only join
+/// within a payload class, so every alternative binds `body` at the same type.
+type MergedArms = IndexMap<(ResponsePayload, String), (Vec<TokenStream>, TokenStream)>;
+
 impl ToTokens for ResponseArmsFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let response_enum_name = &self.response_enum.name;
+    let mut merged = MergedArms::new();
 
     for variant in &self.response_enum.variants {
       let variant_name = &variant.name;
@@ -444,20 +494,35 @@ impl ToTokens for ResponseArmsFragment<'_> {
       let arms = match variant.payload {
         ResponsePayload::None => {
           let fields = status_pattern.as_ref().map(|status| quote! { (#status) });
-          quote! { Ok(#variant_path #fields) => #status_expr.into_response(), }
+          vec![(
+            quote! { #variant_path #fields },
+            quote! { #status_expr.into_response() },
+          )]
         }
-        ResponsePayload::Raw => {
-          quote! { Ok(#variant_path(status, body)) => (status, body).into_response(), }
-        }
+        ResponsePayload::Raw => vec![(
+          quote! { #variant_path(status, body) },
+          quote! { (status, body).into_response() },
+        )],
         ResponsePayload::Value | ResponsePayload::Failure => Self::body_arms(
           &variant_path,
           status_pattern.as_ref(),
           &status_expr,
           self.response.param(variant.payload),
+          variant.status_code,
         ),
       };
 
-      tokens.extend(arms);
+      for (pattern, response) in arms {
+        merged
+          .entry((variant.payload, response.to_string()))
+          .or_insert_with(|| (vec![], response))
+          .0
+          .push(pattern);
+      }
+    }
+
+    for (patterns, response) in merged.into_values() {
+      tokens.extend(quote! { Ok(#(#patterns)|*) => #response, });
     }
   }
 }
@@ -488,10 +553,20 @@ impl ToTokens for ExtractorsFragment {
     }
 
     if let Some(query_type) = &self.method.query_params_type {
-      parts.push(quote! { Query(query): Query<#query_type> });
+      parts.push(quote! { axum_extra::extract::Query(query): axum_extra::extract::Query<#query_type> });
     }
 
-    if self.method.header_params_type.is_some() {
+    let optional_body_without_option = self.method.body_info.as_ref().is_some_and(|body_info| {
+      body_info.optional
+        && matches!(
+          body_info.content_category,
+          ContentCategory::Multipart | ContentCategory::FormUrlEncoded
+        )
+    });
+    if self.method.header_params_type.is_some()
+      || self.method.cookie_params_type.is_some()
+      || optional_body_without_option
+    {
       parts.push(quote! { headers: HeaderMap });
     }
 
@@ -530,32 +605,16 @@ impl ToTokens for BodyExtractorFragment {
       }
       ContentCategory::Json => {
         if self.body_info.optional {
-          quote! { body: Option<axum::Json<#body_type>> }
+          quote! { body: Result<Option<axum::Json<#body_type>>, axum::extract::rejection::JsonRejection> }
         } else {
-          quote! { axum::Json(body): axum::Json<#body_type> }
+          quote! { body: Result<axum::Json<#body_type>, axum::extract::rejection::JsonRejection> }
         }
       }
       ContentCategory::FormUrlEncoded => {
-        if self.body_info.optional {
-          quote! { body: Option<axum::extract::Form<#body_type>> }
-        } else {
-          quote! { axum::extract::Form(body): axum::extract::Form<#body_type> }
-        }
+        quote! { body: Result<axum::extract::Form<#body_type>, axum::extract::rejection::FormRejection> }
       }
-      ContentCategory::Text | ContentCategory::EventStream | ContentCategory::Xml => {
-        if self.body_info.optional {
-          quote! { body: Option<String> }
-        } else {
-          quote! { body: String }
-        }
-      }
-      ContentCategory::Binary => {
-        if self.body_info.optional {
-          quote! { body: Option<axum::body::Bytes> }
-        } else {
-          quote! { body: axum::body::Bytes }
-        }
-      }
+      ContentCategory::Text | ContentCategory::EventStream | ContentCategory::Xml => quote! { body: String },
+      ContentCategory::Binary => quote! { body: axum::body::Bytes },
     };
 
     tokens.extend(ts);
@@ -589,17 +648,22 @@ impl ToTokens for RequestConstructionFragment {
       field_assignments.push(quote! { query });
     }
 
-    let header = self.method.header_params_type.as_ref().map(|header_type| {
-      let bad_request = bad_request();
-      quote! {
-        let header = match #header_type::try_from(&headers) {
-          Ok(header) => header,
-          Err(e) => return #bad_request,
-        };
-      }
-    });
+    let header = self
+      .method
+      .header_params_type
+      .as_ref()
+      .map(|header_type| parse_from_headers(&quote! { header }, header_type));
     if header.is_some() {
       field_assignments.push(quote! { header });
+    }
+
+    let cookie = self
+      .method
+      .cookie_params_type
+      .as_ref()
+      .map(|cookie_type| parse_from_headers(&quote! { cookie }, cookie_type));
+    if cookie.is_some() {
+      field_assignments.push(quote! { cookie });
     }
 
     if let Some(credentials) = &self.method.credentials {
@@ -607,25 +671,58 @@ impl ToTokens for RequestConstructionFragment {
       field_assignments.push(quote! { #field });
     }
 
+    let body = self.method.body_info.as_ref().and_then(|body_info| {
+      let bad_request = bad_request();
+      let accepted = match (body_info.content_category, body_info.optional) {
+        (ContentCategory::Json, false) => quote! { Ok(axum::Json(body)) => body, },
+        (ContentCategory::Json, true) => quote! { Ok(body) => body.map(|axum::Json(body)| body), },
+        (ContentCategory::FormUrlEncoded, false) => quote! { Ok(axum::extract::Form(body)) => body, },
+        (ContentCategory::FormUrlEncoded, true) => quote! {
+          Ok(axum::extract::Form(body)) => Some(body),
+          Err(_) if !headers.contains_key(axum::http::header::CONTENT_TYPE) => None,
+        },
+        _ => return None,
+      };
+      Some(quote! {
+        let body = match body {
+          #accepted
+          Err(e) => return #bad_request,
+        };
+      })
+    });
+
     if let Some(body_info) = &self.method.body_info {
-      let needs_unwrap = matches!(
-        body_info.content_category,
-        ContentCategory::Json | ContentCategory::FormUrlEncoded
-      );
-      let body_expr = if needs_unwrap && body_info.optional {
-        quote! { body: body.map(|b| b.0) }
-      } else {
-        quote! { body }
+      let body_expr = match (body_info.content_category, body_info.optional) {
+        (ContentCategory::Text | ContentCategory::EventStream | ContentCategory::Xml, true) => {
+          quote! { body: (!body.is_empty()).then_some(body) }
+        }
+        (ContentCategory::Binary, true) => quote! { body: (!body.is_empty()).then(|| Vec::from(body)) },
+        (ContentCategory::Binary, false) => quote! { body: Vec::from(body) },
+        _ => quote! { body },
       };
       field_assignments.push(body_expr);
     }
 
     tokens.extend(quote! {
       #header
+      #cookie
+      #body
       let request = #request_type {
         #(#field_assignments),*
       };
     });
+  }
+}
+
+/// Binds `binding` to the parameter struct `params_type` parsed from the request
+/// `headers`, answering `400` when they don't parse.
+fn parse_from_headers(binding: &TokenStream, params_type: &StructToken) -> TokenStream {
+  let bad_request = bad_request();
+  quote! {
+    let #binding = match #params_type::try_from(&headers) {
+      Ok(#binding) => #binding,
+      Err(e) => return #bad_request,
+    };
   }
 }
 
@@ -667,7 +764,7 @@ impl ToTokens for RouterFragment {
 
       let chained = method_handlers.reduce(|acc, handler| quote! { #acc.#handler });
 
-      quote! { .route(#path, #chained) }
+      quote! { .route(#path, axum::routing::#chained) }
     });
 
     tokens.extend(quote! {

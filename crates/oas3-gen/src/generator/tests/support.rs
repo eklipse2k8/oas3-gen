@@ -125,6 +125,31 @@ pub(super) fn generate_server(orchestrator: &Orchestrator, source_path: &str) ->
     .clone()
 }
 
+/// Generates server mode once, returning the server file and the types file.
+pub(super) fn generate_server_files(orchestrator: &Orchestrator, source_path: &str) -> (String, String) {
+  let output = orchestrator
+    .generate(&ServerModMode::default(), source_path)
+    .expect("server generation should succeed");
+  let file = |file_type: &GeneratedFileType| {
+    output
+      .code
+      .code(file_type)
+      .unwrap_or_else(|| panic!("{file_type:?} output should exist"))
+      .clone()
+  };
+  (file(&GeneratedFileType::Server), file(&GeneratedFileType::Types))
+}
+
+/// The text between the end of the previous field and the field declared as `pub {name}:`,
+/// which holds that field's attributes.
+pub(super) fn field_attributes<'a>(code: &'a str, name: &str) -> &'a str {
+  let end = code
+    .find(&format!("pub {name}:"))
+    .unwrap_or_else(|| panic!("missing field {name}"));
+  let start = code[..end].rfind(",\n").map_or(0, |start| start + 2);
+  &code[start..end]
+}
+
 pub(super) fn assert_contains(code: &str, expected: &str, context: &str) {
   assert!(code.contains(expected), "missing {context}: expected '{expected}'");
 }

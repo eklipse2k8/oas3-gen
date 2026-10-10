@@ -31,17 +31,21 @@ impl SpecFormat {
     }
   }
 
-  /// Parses a document, keeping the operations that clear the top-level `security`
-  /// with an empty array public, and the `default` a property sets next to its `$ref`.
+  /// Parses a document, keeping the operations of path items that reference
+  /// `components.pathItems`, the operations that clear the top-level `security` with
+  /// an empty array public, and the `default` a property sets next to its `$ref`.
   pub fn parse(self, content: &[u8]) -> anyhow::Result<oas3::Spec> {
     let mut document = self.deserialize::<Value>(content)?;
-    let mut spec = if RefSiblingDefaults::lift(&mut document) {
+    let inlined = PathItemRefs::inline(&mut document);
+    let lifted = RefSiblingDefaults::lift(&mut document);
+    let overrides = SecurityOverrides::deserialize(&document)?;
+    let mut spec = if inlined || lifted {
       serde_json::from_value::<OpenApiV3Spec>(document)?
     } else {
       self.deserialize::<OpenApiV3Spec>(content)?
     };
     if !spec.security.is_empty() {
-      self.deserialize::<SecurityOverrides>(content)?.apply(&mut spec);
+      overrides.apply(&mut spec);
     }
     Ok(spec)
   }
@@ -73,6 +77,68 @@ impl SpecLoader {
 
   pub fn parse(&self) -> anyhow::Result<oas3::Spec> {
     self.format.parse(self.file.as_slice())
+  }
+}
+
+/// Entries of `paths` and `webhooks` in the raw document that reference a
+/// `components.pathItems` entry.
+///
+/// `oas3` keeps the `$ref` of a referenced Path Item but none of the operations it
+/// points to, so those operations would never be generated. [`PathItemRefs::inline`]
+/// replaces each reference with the component it names, following chains of
+/// references. Fields set next to the `$ref` win over the component's.
+struct PathItemRefs;
+
+impl PathItemRefs {
+  const PREFIX: &'static str = "#/components/pathItems/";
+
+  /// Inlines every referenced Path Item, returning `true` when any changed.
+  fn inline(document: &mut Value) -> bool {
+    let Some(components) = document
+      .pointer("/components/pathItems")
+      .and_then(Value::as_object)
+      .cloned()
+    else {
+      return false;
+    };
+
+    let mut inlined = false;
+    for section in ["paths", "webhooks"] {
+      let Some(items) = document.get_mut(section).and_then(Value::as_object_mut) else {
+        continue;
+      };
+      for item in items.values_mut() {
+        if let Some(resolved) = Self::resolve(item, &components) {
+          *item = resolved;
+          inlined = true;
+        }
+      }
+    }
+    inlined
+  }
+
+  /// Merges the components `item` references into it, or returns `None` when it
+  /// references none, names a missing component, or loops back on itself.
+  fn resolve(item: &Value, components: &serde_json::Map<String, Value>) -> Option<Value> {
+    item.get("$ref")?;
+    let mut fields = item.as_object()?.clone();
+    let mut visited = HashSet::new();
+    while let Some(name) = fields
+      .get("$ref")
+      .and_then(Value::as_str)
+      .and_then(|reference| reference.strip_prefix(Self::PREFIX))
+      .map(|name| name.replace("~1", "/").replace("~0", "~"))
+    {
+      let target = components.get(&name)?.as_object()?;
+      if !visited.insert(name) {
+        return None;
+      }
+      fields.remove("$ref");
+      for (key, value) in target {
+        fields.entry(key.clone()).or_insert_with(|| value.clone());
+      }
+    }
+    (!visited.is_empty()).then_some(Value::Object(fields))
   }
 }
 
@@ -376,6 +442,105 @@ paths:
           .collect::<Vec<_>>();
         assert_eq!(&security, expected, "{format:?} security of {path}");
       }
+    }
+  }
+
+  #[test]
+  fn referenced_path_items_keep_their_operations() {
+    let json = r##"{
+      "openapi": "3.1.0",
+      "info": { "title": "t", "version": "1" },
+      "security": [{ "Key": [] }],
+      "paths": {
+        "/direct": { "$ref": "#/components/pathItems/Direct", "summary": "local" },
+        "/chained": { "$ref": "#/components/pathItems/Alias" },
+        "/missing": { "$ref": "#/components/pathItems/Missing" },
+        "/looping": { "$ref": "#/components/pathItems/Loop" }
+      },
+      "webhooks": {
+        "ping": { "$ref": "#/components/pathItems/Public" }
+      },
+      "components": {
+        "pathItems": {
+          "Direct": { "summary": "shared", "get": { "operationId": "readDirect", "responses": {} } },
+          "Alias": { "$ref": "#/components/pathItems/Direct", "post": { "operationId": "writeAlias", "responses": {} } },
+          "Public": { "post": { "operationId": "ping", "security": [], "responses": {} } },
+          "Loop": { "$ref": "#/components/pathItems/Loop" }
+        }
+      }
+    }"##;
+    let yaml = "
+openapi: 3.1.0
+info: { title: t, version: '1' }
+security: [{ Key: [] }]
+paths:
+  /direct: { $ref: '#/components/pathItems/Direct', summary: local }
+  /chained: { $ref: '#/components/pathItems/Alias' }
+  /missing: { $ref: '#/components/pathItems/Missing' }
+  /looping: { $ref: '#/components/pathItems/Loop' }
+webhooks:
+  ping: { $ref: '#/components/pathItems/Public' }
+components:
+  pathItems:
+    Direct: { summary: shared, get: { operationId: readDirect, responses: {} } }
+    Alias: { $ref: '#/components/pathItems/Direct', post: { operationId: writeAlias, responses: {} } }
+    Public: { post: { operationId: ping, security: [], responses: {} } }
+    Loop: { $ref: '#/components/pathItems/Loop' }
+";
+
+    for (format, content) in [(SpecFormat::Json, json), (SpecFormat::Yaml, yaml)] {
+      let spec = format.parse(content.as_bytes()).expect("spec parses");
+      let paths = spec.paths.as_ref().expect("paths");
+      let operation_id = |path: &str, pick: fn(&oas3::spec::PathItem) -> Option<&oas3::spec::Operation>| {
+        paths
+          .get(path)
+          .and_then(pick)
+          .and_then(|operation| operation.operation_id.clone())
+      };
+
+      let direct = paths.get("/direct").expect("/direct");
+      assert_eq!(direct.reference, None, "{format:?}: /direct reference is inlined");
+      assert_eq!(
+        direct.summary.as_deref(),
+        Some("local"),
+        "{format:?}: a sibling field wins"
+      );
+      assert_eq!(
+        operation_id("/direct", |item| item.get.as_ref()).as_deref(),
+        Some("readDirect"),
+        "{format:?}: /direct get"
+      );
+      assert_eq!(
+        operation_id("/chained", |item| item.get.as_ref()).as_deref(),
+        Some("readDirect"),
+        "{format:?}: /chained follows the alias"
+      );
+      assert_eq!(
+        operation_id("/chained", |item| item.post.as_ref()).as_deref(),
+        Some("writeAlias"),
+        "{format:?}: /chained keeps the alias's own operation"
+      );
+      for unresolved in ["/missing", "/looping"] {
+        let item = paths.get(unresolved).expect(unresolved);
+        assert!(item.reference.is_some(), "{format:?}: {unresolved} stays a reference");
+        assert!(item.get.is_none(), "{format:?}: {unresolved} gains no operations");
+      }
+
+      let ping = spec
+        .webhooks
+        .get("ping")
+        .and_then(|item| item.post.as_ref())
+        .expect("webhook operation");
+      assert_eq!(ping.operation_id.as_deref(), Some("ping"), "{format:?}: webhook");
+      assert_eq!(
+        ping
+          .security
+          .iter()
+          .map(|requirement| requirement.0.len())
+          .collect::<Vec<_>>(),
+        vec![0],
+        "{format:?}: an empty security array in a referenced item stays public"
+      );
     }
   }
 }

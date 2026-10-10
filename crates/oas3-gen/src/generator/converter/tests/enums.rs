@@ -1,5 +1,6 @@
 use std::{collections::BTreeSet, sync::Arc};
 
+use quote::ToTokens as _;
 use serde_json::json;
 
 use super::support::assert_single_non_exhaustive_enum;
@@ -10,8 +11,9 @@ use crate::{
       EnumVariantToken, MethodNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValueKind, VariantContent,
       VariantDef,
     },
+    codegen::{Visibility, enums::EnumFragment},
     converter::{
-      SchemaConverter,
+      GenerationTarget, SchemaConverter,
       union_types::CollisionStrategy,
       unions::{EnumConverter, UnionConverter},
     },
@@ -377,7 +379,7 @@ fn test_mixed_const_union_default_selects_const_variant() {
 }
 
 #[test]
-fn test_union_tries_plain_string_variants_last() {
+fn test_union_tries_arrays_first_and_plain_string_variants_last() {
   let cases = [
     (
       json!({"oneOf": [{"type": "string"}, {"$ref": "#/components/schemas/Chat"}]}),
@@ -400,7 +402,19 @@ fn test_union_tries_plain_string_variants_last() {
     (
       json!({"oneOf": [{"$ref": "#/components/schemas/Chat"}, {"type": "array", "items": {"type": "string"}}]}),
       default_config(),
-      vec!["Chat", "Array"],
+      vec!["Array", "Chat"],
+      Some("Chat"),
+    ),
+    (
+      json!({"oneOf": [{"$ref": "#/components/schemas/Chat"}, {"type": "array", "items": {"type": "string"}}], "default": "chat-1.1"}),
+      default_config(),
+      vec!["Array", "Chat"],
+      Some("Chat"),
+    ),
+    (
+      json!({"oneOf": [{"type": "array", "items": {"type": "string"}}, {"$ref": "#/components/schemas/Chat"}]}),
+      default_config(),
+      vec!["Array", "Chat"],
       None,
     ),
   ];
@@ -909,24 +923,80 @@ fn test_collision_strategy_enum() {
 }
 
 #[test]
-fn test_preserve_strategy_with_multiple_collisions() {
-  let graph = create_test_graph(parse_schemas(vec![]));
-  let context = create_test_context(graph, config_with_preserve_case());
-  let converter = EnumConverter::new(context);
+fn test_preserve_strategy_keeps_original_spellings() {
+  type NameAndWireValue<'a> = (&'a str, &'a str);
+  let cases: [(&[&str], &[NameAndWireValue]); 8] = [
+    (
+      &["pending", "PENDING"],
+      &[("Pending", "pending"), ("Pending1", "PENDING")],
+    ),
+    (
+      &["pending", "Pending"],
+      &[("Pending", "pending"), ("Pending1", "Pending")],
+    ),
+    (
+      &["active", "Active", "ACTIVE"],
+      &[("Active", "active"), ("Active1", "Active"), ("Active2", "ACTIVE")],
+    ),
+    (
+      &["active", "ACTIVE", "Active"],
+      &[("Active", "active"), ("Active1", "ACTIVE"), ("Active2", "Active")],
+    ),
+    (
+      &["Active", "active", "in_progress", "ACTIVE", "InProgress"],
+      &[
+        ("Active", "Active"),
+        ("Active1", "active"),
+        ("InProgress", "in_progress"),
+        ("Active3", "ACTIVE"),
+        ("InProgress4", "InProgress"),
+      ],
+    ),
+    (&["a", "A", "A1"], &[("A", "a"), ("A1", "A"), ("A12", "A1")]),
+    (&["A2", "a", "A"], &[("A2", "A2"), ("A", "a"), ("A22", "A")]),
+    (
+      &["A3", "A32", "a", "A"],
+      &[("A3", "A3"), ("A32", "A32"), ("A", "a"), ("A33", "A")],
+    ),
+  ];
+  let converter = EnumConverter::new(create_test_context(
+    create_test_graph(parse_schemas(vec![])),
+    config_with_preserve_case(),
+  ));
 
-  let schema = parse_schema(json!({
-    "enum": ["active", "Active", "ACTIVE"]
-  }));
+  for (values, expected) in cases {
+    let schema = parse_schema(json!({ "type": "string", "enum": values }));
+    let RustType::Enum(enum_def) = converter.convert_value_enum("Status", &schema) else {
+      panic!("expected enum for {values:?}");
+    };
+    let code = EnumFragment::new(&enum_def, Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
 
-  let result = converter.convert_value_enum("Status", &schema);
+    let actual = enum_def
+      .variants
+      .iter()
+      .map(|v| (v.name.to_string(), v.serde_name().to_string()))
+      .collect::<Vec<_>>();
+    let wanted = expected
+      .iter()
+      .map(|(name, wire)| ((*name).to_string(), (*wire).to_string()))
+      .collect::<Vec<_>>();
+    assert_eq!(actual, wanted, "variant names and wire values for {values:?}");
 
-  if let RustType::Enum(enum_def) = result {
-    assert_eq!(enum_def.variants.len(), 3);
-    assert_eq!(enum_def.variants[0].name, EnumVariantToken::new("Active"));
-    assert_eq!(enum_def.variants[1].name, EnumVariantToken::new("Active1"));
-    assert_eq!(enum_def.variants[2].name, EnumVariantToken::new("Active2"));
-  } else {
-    panic!("Expected enum result");
+    for (variant, (name, wire)) in enum_def.variants.iter().zip(expected) {
+      assert!(
+        name == wire
+          || variant
+            .serde_attrs
+            .contains(&SerdeAttribute::Rename((*wire).to_string())),
+        "{name} should carry #[serde(rename = {wire:?})] for {values:?}"
+      );
+      assert!(
+        code.contains(&format!("Self :: {name} => write ! (f , {wire:?})")),
+        "{name} should display as {wire:?} for {values:?}: {code}"
+      );
+    }
   }
 }
 

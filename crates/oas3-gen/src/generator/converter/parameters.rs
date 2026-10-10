@@ -12,8 +12,8 @@ use crate::{
     },
     converter::ConverterContext,
     naming::constants::{
-      HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD,
-      QUERY_PARAMS_SUFFIX,
+      COOKIE_PARAMS_FIELD, COOKIE_PARAMS_SUFFIX, HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD,
+      PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD, QUERY_PARAMS_SUFFIX,
     },
   },
   utils::schema_ext::SchemaExtIters,
@@ -243,6 +243,7 @@ struct Collector {
   path: ParamGroup,
   query: ParamGroup,
   header: ParamGroup,
+  cookie: ParamGroup,
   all: Vec<FieldDef>,
 }
 
@@ -268,6 +269,12 @@ impl Collector {
         HEADER_PARAMS_FIELD,
         StructKind::HeaderParams,
       ),
+      cookie: ParamGroup::new(
+        request_name,
+        COOKIE_PARAMS_SUFFIX,
+        COOKIE_PARAMS_FIELD,
+        StructKind::CookieParams,
+      ),
       all: vec![],
     }
   }
@@ -276,8 +283,9 @@ impl Collector {
   fn parent_name(&self, location: ParameterLocation) -> &str {
     match location {
       ParameterLocation::Path => &self.path.struct_name,
-      ParameterLocation::Query | ParameterLocation::Cookie => &self.query.struct_name,
+      ParameterLocation::Query => &self.query.struct_name,
       ParameterLocation::Header => &self.header.struct_name,
+      ParameterLocation::Cookie => &self.cookie.struct_name,
     }
   }
 
@@ -288,13 +296,13 @@ impl Collector {
       ParameterLocation::Path => self.path.fields.push(field),
       ParameterLocation::Query => self.query.fields.push(field),
       ParameterLocation::Header => self.header.fields.push(field),
-      ParameterLocation::Cookie => {}
+      ParameterLocation::Cookie => self.cookie.fields.push(field),
     }
   }
 
   /// Consumes the collector and produces main fields and nested structs.
   fn finish(self) -> (Vec<FieldDef>, Vec<StructDef>, Vec<FieldDef>) {
-    let (main_fields, nested_structs) = [self.path, self.query, self.header]
+    let (main_fields, nested_structs) = [self.path, self.query, self.header, self.cookie]
       .into_iter()
       .filter_map(ParamGroup::into_structs)
       .unzip();

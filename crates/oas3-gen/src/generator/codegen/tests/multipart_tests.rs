@@ -332,7 +332,7 @@ fn test_server_decode_emission() {
       )],
       vec![
         "letmutfields=serde_json::Map::new();",
-        "serde_json::from_str(&part.text().await?).map_err(|e|anyhow::anyhow!(\"invalidmultipartpart`{}`:{e}\",\"count\"))?",
+        "serde_json::from_str(&String::from_utf8(Vec::from(part.bytes().await?))?).map_err(|e|anyhow::anyhow!(\"invalidmultipartpart`{}`:{e}\",\"count\"))?",
         "letbody:UploadForm=",
       ],
     ),
@@ -362,9 +362,9 @@ fn test_server_decode_emission() {
       ],
       vec![
         "#[allow(clippy::similar_names)]",
-        "\"tags\"=>{tags_parts.push(serde_json::Value::String(part.text().await?));}",
+        "\"tags\"=>{tags_parts.push(serde_json::Value::String(String::from_utf8(Vec::from(part.bytes().await?))?));}",
         "fields.insert(\"tags\".to_owned(),serde_json::Value::Array(tags_parts));",
-        "lettext=part.text().await?;if!text.is_empty(){foritemintext.split(','){ids_parts.push(",
+        "lettext=String::from_utf8(Vec::from(part.bytes().await?))?;if!text.is_empty(){foritemintext.split(','){ids_parts.push(",
       ],
     ),
     (
@@ -380,12 +380,12 @@ fn test_server_decode_emission() {
         ),
       ],
       vec![
-        "ifname==\"range\"{lettext=part.text().await?;letmuttokens=text.split(',');",
+        "ifname==\"range\"{lettext=String::from_utf8(Vec::from(part.bytes().await?))?;letmuttokens=text.split(',');",
         "letmember=matchkey{\"score\"=>serde_json::from_str(member).map_err(|e|anyhow::anyhow!(\"invalidmultipartpart`{}`:{e}\",\"range\"))?,_=>serde_json::Value::String(member.to_owned()),};",
         "}elseifletSome(key)=name.strip_prefix(\"filter[\").and_then(|key|key.strip_suffix(']')){letmember=matchkey{",
         "filter_parts.insert(key.to_owned(),member);",
         "}elseifmatches!(name.as_str(),\"mood\"|\"score\"){letmember=matchname.as_str(){",
-        "extras_parts.insert(name,member);}else{letvalue=serde_json::from_str(&part.text().await?).map_err(|e|anyhow::anyhow!(\"invalidmultipartpart`{name}`:{e}\"))?;options_parts.insert(name,value);}",
+        "extras_parts.insert(name,member);}else{letvalue=serde_json::from_str(&String::from_utf8(Vec::from(part.bytes().await?))?).map_err(|e|anyhow::anyhow!(\"invalidmultipartpart`{name}`:{e}\"))?;options_parts.insert(name,value);}",
       ],
     ),
     (

@@ -1,8 +1,9 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::{borrow::Cow, collections::BTreeSet, rc::Rc};
 
 use anyhow::Context;
+use indexmap::IndexMap;
 use itertools::Itertools;
-use oas3::spec::{ObjectSchema, Schema};
+use oas3::spec::{Discriminator, ObjectSchema, Schema};
 
 use super::{
   ConversionOutput,
@@ -22,8 +23,9 @@ use crate::{
       identifiers::ensure_unique,
       inference::{NormalizedVariant, strip_common_affixes},
     },
+    schema_registry::SchemaRegistry,
   },
-  utils::{SchemaExt, SchemaRefName, SchemaResolveExt, schema_ext::SchemaExtIters},
+  utils::{SchemaExt, SchemaInspect, SchemaRefName, SchemaResolveExt, schema_ext::SchemaExtIters},
 };
 
 #[derive(Clone, Debug)]
@@ -213,6 +215,7 @@ impl UnionConverter {
     variants = plain_strings_last(variants);
 
     let default_mode = self.resolve_default_mode(schema, &mut variants, &inline_types, has_null_variant);
+    variants = arrays_first(variants, &default_mode);
 
     let methods = if self.context.config().no_helpers() {
       vec![]
@@ -222,7 +225,12 @@ impl UnionConverter {
 
     let main_enum = self
       .discriminator_converter
-      .try_upgrade_to_discriminated(name, schema, &variants, methods.clone())
+      .try_upgrade_to_discriminated(
+        name,
+        &self.with_inferred_discriminator(schema),
+        &variants,
+        methods.clone(),
+      )
       .unwrap_or_else(|| {
         RustType::untagged_enum()
           .name(name)
@@ -234,6 +242,71 @@ impl UnionConverter {
       });
 
     Ok(ConversionOutput::with_inline_types(main_enum, inline_types))
+  }
+
+  /// Gives a union that declares no `discriminator` the one its branches imply.
+  ///
+  /// When every non-null branch is a `$ref` to an object schema that requires the
+  /// same property and fixes it to a distinct string `const`, that property
+  /// identifies the branch. Left untagged, the first branch whose fields fit would
+  /// win instead, because a constant property is never checked on input.
+  fn with_inferred_discriminator<'s>(&self, schema: &'s ObjectSchema) -> Cow<'s, ObjectSchema> {
+    if schema.discriminator.is_some() {
+      return Cow::Borrowed(schema);
+    }
+
+    let spec = self.context.graph().spec();
+    let mut branches = vec![];
+    for branch in schema.union_variants() {
+      let Some(ref_path) = branch.ref_path() else {
+        if branch
+          .as_inline()
+          .is_some_and(crate::utils::schema_ext::SchemaExt::is_null)
+        {
+          continue;
+        }
+        return Cow::Borrowed(schema);
+      };
+      let Ok(resolved) = branch.resolve_object(spec) else {
+        return Cow::Borrowed(schema);
+      };
+      if resolved.is_null() {
+        continue;
+      }
+      branches.push((ref_path.to_string(), resolved));
+    }
+    if branches.len() < 2 {
+      return Cow::Borrowed(schema);
+    }
+
+    let mut tags_by_property = IndexMap::<&str, Vec<String>>::new();
+    for (_, branch) in &branches {
+      for property in &branch.required {
+        if let Some(tag) = SchemaRegistry::extract_const_discriminator_value(branch, property) {
+          tags_by_property.entry(property).or_default().push(tag);
+        }
+      }
+    }
+
+    let Some((property, tags)) = tags_by_property
+      .into_iter()
+      .find(|(_, tags)| tags.len() == branches.len() && tags.iter().all_unique())
+    else {
+      return Cow::Borrowed(schema);
+    };
+
+    let mapping = tags
+      .into_iter()
+      .zip(&branches)
+      .map(|(tag, (ref_path, _))| (tag, ref_path.clone()))
+      .collect();
+    Cow::Owned(ObjectSchema {
+      discriminator: Some(Discriminator {
+        property_name: property.to_string(),
+        mapping: Some(mapping),
+      }),
+      ..schema.clone()
+    })
   }
 
   fn resolve_default_mode(
@@ -341,6 +414,31 @@ fn plain_strings_last(variants: Vec<VariantDef>) -> Vec<VariantDef> {
         .single_wrapped_type()
         .is_some_and(|t| t.base_type == RustPrimitive::String && !t.is_array)
     })
+    .collect()
+}
+
+/// Moves variants wrapping an array ahead of the others, keeping their relative order and
+/// the variant `Default` derives.
+///
+/// A struct with `#[serde(default)]` deserializes from an empty JSON array, so trying it
+/// first would shadow `Array(Vec<T>)`. An array variant only accepts a JSON array, which no
+/// object variant validly matches.
+fn arrays_first(mut variants: Vec<VariantDef>, default_mode: &EnumDefault) -> Vec<VariantDef> {
+  let wraps_array = |variant: &VariantDef| variant.single_wrapped_type().is_some_and(|t| t.is_array);
+  if variants.iter().is_sorted_by_key(|variant| !wraps_array(variant)) {
+    return variants;
+  }
+
+  if matches!(default_mode, EnumDefault::Derive)
+    && !variants.iter().any(|variant| variant.default)
+    && let Some(first) = variants.first_mut()
+  {
+    first.default = true;
+  }
+
+  variants
+    .into_iter()
+    .sorted_by_key(|variant| !wraps_array(variant))
     .collect()
 }
 

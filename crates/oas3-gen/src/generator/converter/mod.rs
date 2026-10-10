@@ -418,6 +418,10 @@ impl SchemaConverter {
         return self.convert_nullable_enum(name, schema);
       }
 
+      if let Some(array) = self.type_resolver.nullable_inline_array(schema)? {
+        return self.convert_schema(name, &array);
+      }
+
       if let Some(flattened) = self.type_resolver.try_flatten_nested_union(schema)? {
         return self
           .union_converter

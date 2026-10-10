@@ -5,11 +5,16 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, LitStr};
 
-use super::{Visibility, multipart::MultipartFormFragment};
-use crate::generator::ast::{
-  ApiKeyLocation, ClientRootNode, ContentCategory, CredentialKind, CredentialScheme, Documentation, FieldDef,
-  FieldNameToken, OperationBody, OperationInfo, OperationKind, OperationResponse, OperationSecurity, ParameterLocation,
-  ParsedPath, StructToken, constants::HttpHeaderRef,
+use super::{
+  Visibility, attributes::generate_deprecated_attr, cookies::CookieHeaderFragment, multipart::MultipartFormFragment,
+};
+use crate::generator::{
+  ast::{
+    ApiKeyLocation, ClientRootNode, ContentCategory, CredentialKind, CredentialScheme, Documentation, FieldDef,
+    FieldNameToken, OperationBody, OperationInfo, OperationKind, OperationResponse, OperationSecurity,
+    ParameterLocation, ParsedPath, StructToken, constants::HttpHeaderRef,
+  },
+  naming::constants::DEFAULT_MEDIA_TYPE,
 };
 
 #[derive(Clone, Debug)]
@@ -33,14 +38,20 @@ impl ToTokens for HttpInitFragment {
       Method::PATCH => quote! { self.client.patch(url) },
       Method::HEAD => quote! { self.client.head(url) },
       _ => {
-        let m = format_ident!("reqwest::Method::{}", self.method.as_str());
-        quote! { self.client.request(#m, url) }
+        let method = format_ident!("{}", self.method.as_str());
+        quote! { self.client.request(reqwest::Method::#method, url) }
       }
     };
     tokens.extend(ts);
   }
 }
 
+/// Appends an operation's query parameters to `url`.
+///
+/// `serde_html_form` writes the query struct into `url.query_pairs_mut()`, after any query
+/// the path declares, and repeats an exploded array's name once per item, the way the
+/// generated server's `axum_extra::extract::Query` reads it back. A query whose parameters
+/// are all `None` leaves no empty `?` behind.
 #[derive(Clone, Debug)]
 pub(crate) struct QueryParamsFragment {
   has_query: bool,
@@ -58,7 +69,13 @@ impl QueryParamsFragment {
 impl ToTokens for QueryParamsFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     if self.has_query {
-      tokens.extend(quote! { .query(&request.query) });
+      tokens.extend(quote! {
+        serde::Serialize::serialize(&request.query, serde_html_form::Serializer::new(&mut url.query_pairs_mut()))
+          .context("encoding query parameters")?;
+        if url.query() == Some("") {
+          url.set_query(None);
+        }
+      });
     }
   }
 }
@@ -139,47 +156,32 @@ pub(crate) struct SimpleBodyFragment {
   field: FieldNameToken,
   optional: bool,
   kind: BodyChainKind,
+  content_type: Option<String>,
 }
 
 impl SimpleBodyFragment {
-  fn json(field: FieldNameToken, optional: bool) -> Self {
+  fn new(field: FieldNameToken, optional: bool, kind: BodyChainKind, content_type: Option<String>) -> Self {
     Self {
       field,
       optional,
-      kind: BodyChainKind::Json,
+      kind,
+      content_type,
     }
   }
 
-  fn form(field: FieldNameToken, optional: bool) -> Self {
-    Self {
-      field,
-      optional,
-      kind: BodyChainKind::Form,
-    }
-  }
-
-  fn text(field: FieldNameToken, optional: bool) -> Self {
-    Self {
-      field,
-      optional,
-      kind: BodyChainKind::Text,
-    }
-  }
-
-  fn binary(field: FieldNameToken, optional: bool) -> Self {
-    Self {
-      field,
-      optional,
-      kind: BodyChainKind::Binary,
-    }
-  }
-
+  /// The builder calls that send `expr` as the body, labelled with its declared media type.
+  ///
+  /// `json` and `form` only label a body that has no `Content-Type` yet, so a declared
+  /// `+json` media type such as `application/merge-patch+json` is set first.
   fn make_chain(&self, expr: &TokenStream) -> TokenStream {
+    let content_type = self.content_type.as_deref().map(|content_type| {
+      quote! { .header(reqwest::header::CONTENT_TYPE, #content_type) }
+    });
     match self.kind {
-      BodyChainKind::Json => quote! { .json(#expr) },
+      BodyChainKind::Json => quote! { #content_type .json(#expr) },
       BodyChainKind::Form => quote! { .form(#expr) },
-      BodyChainKind::Text => quote! { .body((#expr).to_string()) },
-      BodyChainKind::Binary => quote! { .body((#expr).clone()) },
+      BodyChainKind::Text => quote! { #content_type .body((#expr).to_string()) },
+      BodyChainKind::Binary => quote! { #content_type .body((#expr).clone()) },
     }
   }
 
@@ -224,11 +226,29 @@ impl RequestBodyFragment {
     let field = body.field_name.clone();
     let optional = body.optional;
 
+    let declared = || Some(body.content_type.clone());
     match body.content_category {
-      ContentCategory::Json => Self::Simple(SimpleBodyFragment::json(field, optional)),
-      ContentCategory::FormUrlEncoded => Self::Simple(SimpleBodyFragment::form(field, optional)),
-      ContentCategory::Text | ContentCategory::EventStream => Self::Simple(SimpleBodyFragment::text(field, optional)),
-      ContentCategory::Binary => Self::Simple(SimpleBodyFragment::binary(field, optional)),
+      ContentCategory::Json => Self::Simple(SimpleBodyFragment::new(
+        field,
+        optional,
+        BodyChainKind::Json,
+        declared().filter(|content_type| content_type != DEFAULT_MEDIA_TYPE),
+      )),
+      ContentCategory::FormUrlEncoded => {
+        Self::Simple(SimpleBodyFragment::new(field, optional, BodyChainKind::Form, None))
+      }
+      ContentCategory::Text | ContentCategory::EventStream => Self::Simple(SimpleBodyFragment::new(
+        field,
+        optional,
+        BodyChainKind::Text,
+        declared(),
+      )),
+      ContentCategory::Binary => Self::Simple(SimpleBodyFragment::new(
+        field,
+        optional,
+        BodyChainKind::Binary,
+        declared(),
+      )),
       ContentCategory::Xml => Self::Xml(XmlBodyFragment::new(field, optional)),
       ContentCategory::Multipart => Self::Multipart(MultipartFormFragment::new(body.clone())),
     }
@@ -466,11 +486,18 @@ impl ResponseParsingFragment {
 pub(crate) struct ClientMethodFragment {
   op: OperationInfo,
   visibility: Visibility,
+  has_cookie_store: bool,
 }
 
 impl ClientMethodFragment {
-  pub(crate) fn new(op: OperationInfo, visibility: Visibility) -> Self {
-    Self { op, visibility }
+  /// Generates `op`'s method; `has_cookie_store` says the client struct keeps a
+  /// cookie store, which cookie parameters merge with.
+  pub(crate) fn new(op: OperationInfo, visibility: Visibility, has_cookie_store: bool) -> Self {
+    Self {
+      op,
+      visibility,
+      has_cookie_store,
+    }
   }
 
   pub(crate) fn generate(&self) -> anyhow::Result<TokenStream> {
@@ -480,10 +507,11 @@ impl ClientMethodFragment {
 
     let method_name = format_ident!("{}", self.op.stable_id);
     let doc_attrs = &self.op.documentation;
+    let deprecated = generate_deprecated_attr(self.op.deprecated);
 
     let http_init = HttpInitFragment::new(self.op.method.clone());
     let url_construction = UrlConstructionFragment::new(self.op.path.clone());
-    let query_chain = QueryParamsFragment::new(&self.op.parameters);
+    let query_params = QueryParamsFragment::new(&self.op.parameters);
     let header_chain = HeaderParamsFragment::new(&self.op.parameters);
     let body_fragment = RequestBodyFragment::new(self.op.body.as_ref());
     let credentials = self
@@ -493,26 +521,29 @@ impl ClientMethodFragment {
       .filter(|security| security.schemes.iter().any(|scheme| !scheme.is_cookie()))
       .map(CredentialsFragment::new);
     let response_fragment = ResponseParsingFragment::new(&self.op);
+    let cookie_header = CookieHeaderFragment::new(&self.op.parameters, self.has_cookie_store);
+    let attach_cookies = cookie_header.is_some().then(CookieHeaderFragment::attach);
 
     let vis = self.visibility.to_tokens();
     let return_type = response_fragment.success_type();
     let parse_block = response_fragment.parse_body();
 
-    let request_chain = if body_fragment.needs_conditional() || credentials.is_some() {
+    let request_chain = if body_fragment.needs_conditional() || credentials.is_some() || cookie_header.is_some() {
       let (body_chain, body_statements) = if body_fragment.needs_conditional() {
         (None, Some(&body_fragment))
       } else {
         (Some(&body_fragment), None)
       };
       quote! {
-        let mut req_builder = #http_init #query_chain #header_chain #body_chain;
+        let mut req_builder = #http_init #header_chain #body_chain;
         #credentials
+        #attach_cookies
         #body_statements
         let response = req_builder.send().await?;
       }
     } else {
       quote! {
-        let response = #http_init #query_chain #header_chain #body_fragment
+        let response = #http_init #header_chain #body_fragment
           .send()
           .await?;
       }
@@ -520,9 +551,12 @@ impl ClientMethodFragment {
 
     Ok(quote! {
       #doc_attrs
+      #deprecated
       #vis async fn #method_name(&self, request: #request_ident) -> anyhow::Result<#return_type> {
         request.validate().context("parameter validation")?;
         #url_construction
+        #query_params
+        #cookie_header
         #request_chain
         #parse_block
       }
@@ -797,12 +831,6 @@ impl ToTokens for ClientFragment {
     let vis = self.visibility.to_tokens();
     let base_url = LitStr::new(&self.def.base_url, Span::call_site());
 
-    let methods = self
-      .operations
-      .iter()
-      .filter(|op| op.kind == OperationKind::Http)
-      .filter_map(|op| ClientMethodFragment::new(op.clone(), self.visibility).generate().ok());
-
     let types_import = if self.use_types_import {
       quote! { use super::types::*; }
     } else {
@@ -817,6 +845,17 @@ impl ToTokens for ClientFragment {
       .flat_map(|security| &security.schemes)
       .unique_by(|scheme| &scheme.field)
       .collect::<Vec<_>>();
+    let has_cookie_store = schemes.iter().any(|scheme| scheme.is_cookie());
+
+    let methods = self
+      .operations
+      .iter()
+      .filter(|op| op.kind == OperationKind::Http)
+      .filter_map(|op| {
+        ClientMethodFragment::new(op.clone(), self.visibility, has_cookie_store)
+          .generate()
+          .ok()
+      });
 
     let client_struct = ClientStructFragment::new(client_ident.clone(), &schemes, self.visibility);
     let default_impl = ClientDefaultImplFragment::new(client_ident.clone());

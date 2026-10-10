@@ -54,11 +54,27 @@ pub enum SerdeAsFieldAttr {
     optional: bool,
     is_array: bool,
   },
+  /// A `uniqueItems` array, which rejects a repeated item instead of collapsing it
+  UniqueItems { optional: bool },
+  /// A required field that reads `null` as its type's default, through `inner` when the
+  /// field has its own adapter
+  DefaultOnNull { inner: Option<Box<SerdeAsFieldAttr>> },
 }
 
-impl ToTokens for SerdeAsFieldAttr {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let type_str = match self {
+impl SerdeAsFieldAttr {
+  /// The `--customize` type the field serializes through, looking past `DefaultOnNull`.
+  #[must_use]
+  pub fn custom_type(&self) -> Option<&str> {
+    match self {
+      Self::CustomOverride { custom_type, .. } => Some(custom_type),
+      Self::DefaultOnNull { inner: Some(inner) } => inner.custom_type(),
+      Self::SeparatedList { .. } | Self::UniqueItems { .. } | Self::DefaultOnNull { inner: None } => None,
+    }
+  }
+
+  /// The `serde_with` adapter type written in `#[serde_as(as = "...")]`.
+  fn adapter(&self) -> String {
+    match self {
       Self::SeparatedList { separator, optional } => {
         if *optional {
           format!("Option<{}>", separator.as_ref())
@@ -80,7 +96,17 @@ impl ToTokens for SerdeAsFieldAttr {
         }
         result
       }
-    };
+      Self::UniqueItems { optional: true } => "Option<serde_with::SetPreventDuplicates<_>>".to_string(),
+      Self::UniqueItems { optional: false } => "serde_with::SetPreventDuplicates<_>".to_string(),
+      Self::DefaultOnNull { inner: None } => "serde_with::DefaultOnNull".to_string(),
+      Self::DefaultOnNull { inner: Some(inner) } => format!("serde_with::DefaultOnNull<{}>", inner.adapter()),
+    }
+  }
+}
+
+impl ToTokens for SerdeAsFieldAttr {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let type_str = self.adapter();
     let attr = quote! { #[serde_as(as = #type_str)] };
     tokens.extend(attr);
   }

@@ -219,7 +219,11 @@ impl FieldConverter {
       BTreeSet::from([SerdeAttribute::Rename(prop_name.to_string())])
     };
 
-    let serde_as_attr = self.customization_for_type(&final_type, prop_schema);
+    let serde_as_attr = self.customization_for_type(&final_type, prop_schema).or_else(|| {
+      (final_type.unique_items && final_type.is_array).then_some(SerdeAsFieldAttr::UniqueItems {
+        optional: final_type.nullable,
+      })
+    });
 
     let mut field = FieldDef::builder()
       .schema(prop_schema)
@@ -245,17 +249,15 @@ impl FieldConverter {
   /// and never read it, so a server sending something else can't fail deserialization.
   ///
   /// A property is constant when it has a `const` or a single-value `enum`; the struct's
-  /// `#[serde(default)]` then fills the skipped field with that value. Structs that
-  /// collect additional properties still read the field, since a skipped key would land
-  /// in the flattened map and serialize twice.
+  /// `#[serde(default)]` then fills the skipped field with that value. A skipped key
+  /// counts as unknown, so only structs that ignore unknown keys skip it. Declaring
+  /// `additionalProperties` either collects them into a flattened map, where the key
+  /// would serialize twice, or rejects them with `deny_unknown_fields`.
   fn ignores_received_constant(&self, parent_schema: &ObjectSchema, prop_schema: &ObjectSchema) -> bool {
     let is_constant = prop_schema.const_value.is_some() || prop_schema.enum_values.len() == 1;
-    let collects_additional = parent_schema
-      .additional_properties
-      .as_ref()
-      .is_some_and(|additional| !matches!(additional, Schema::Boolean(b) if !b.0));
-
-    is_constant && !collects_additional && self.context.config().target == GenerationTarget::Client
+    is_constant
+      && parent_schema.additional_properties.is_none()
+      && self.context.config().target == GenerationTarget::Client
   }
 
   fn customization_for_type(&self, type_ref: &TypeRef, prop_schema: &ObjectSchema) -> Option<SerdeAsFieldAttr> {
@@ -321,9 +323,8 @@ impl FieldConverter {
     }
 
     if schema.is_numeric() {
-      if let Some(range_attr) = ValidationAttribute::range(schema, type_ref) {
-        attrs.push(range_attr);
-      }
+      attrs.extend(ValidationAttribute::range(schema, type_ref));
+      attrs.extend(ValidationAttribute::multiple_of(schema, type_ref));
       return attrs;
     }
 

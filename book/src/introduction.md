@@ -14,17 +14,21 @@ don't need to know how the generator itself is implemented.
 An OpenAPI document describes an API's operations and the data they accept and
 return. `oas3-gen` uses those descriptions to create Rust structs, enums, and
 type aliases. It also generates [`serde::Serialize`][rustdoc-serde-serialize] and [`serde::Deserialize`][rustdoc-serde-deserialize] implementations
-where the types need them, along with validation for supported schema
+where the types need them, along with
+[validation](./code-generation.md#field-validation) for supported schema
 constraints.
 
 You can start with type generation and add a client or server as your project
 needs it. [Client Generation](./client-generation.md) walks through calling an
 API, reading responses, and sending API keys and bearer tokens. [Server Generation](./server-generation.md)
-shows how to implement a service, connect its router, and check incoming
-credentials.
+shows how to implement a service, connect its router, stream events, and check
+incoming credentials.
 
 [Shared Generation Options](./code-generation.md) explains type generation,
-response shapes, security requirements, and flags that apply to both targets.
+operations and their parameters, response shapes, validation, security
+requirements, and flags that apply to both targets. It ends with the
+[known limitations](./code-generation.md#known-limitations) of the generated
+code.
 The [Builder Pattern](./builders.md) chapter shows how to construct generated
 values with the optional `bon` integration. You can follow the client or server
 chapter first and refer to the shared options as you need them.
@@ -37,9 +41,14 @@ The generator supports several parts of working with an OpenAPI description:
   described with `oneOf`, `anyOf`, and discriminators.
 - Call API operations through an asynchronous `reqwest` client.
 - Implement a generated server trait and connect it to an Axum router.
+- Send and receive JSON, form, multipart, plain-text, and binary bodies, using
+  the media type each operation declares.
+- Stream Server-Sent Events for `text/event-stream` responses: the client
+  reads them as a stream, and the server sends the events your service yields.
 - Send and receive API keys and bearer tokens declared by `apiKey` and `http`
   bearer security schemes.
-- Check supported field constraints with [`validator::Validate`][rustdoc-validate].
+- Check supported field constraints, including `multipleOf`, with
+  [`validator::Validate`][rustdoc-validate].
 - Construct schema values and requests with builders by passing
   `--enable-builders`.
 
@@ -74,7 +83,10 @@ with `oas3-gen` below.
 ## Quick Start
 
 Let's start by generating types. The following commands assume you have an
-OpenAPI document named `api.json` in your current directory:
+OpenAPI document named `api.json` in your current directory. If you don't have
+one yet, the repository's `crates/oas3-gen/fixtures/petstore.json` describes a
+hypothetical pet store that uses every feature the generator supports, and
+most examples in this book come from it:
 
 ```bash
 oas3-gen generate types -i api.json -o types.rs

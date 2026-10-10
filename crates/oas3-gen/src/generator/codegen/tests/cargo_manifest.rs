@@ -201,6 +201,39 @@ fn test_collection_policy_controls_serde_json_features() {
 }
 
 #[test]
+fn test_validator_supports_indexmap_only_when_referenced() {
+  let with_set = "#[derive(validator::Validate)] pub struct Pet { #[validate(length(max = 10))] pub tags: \
+                  indexmap::IndexSet<String> }";
+  let with_vec = "#[derive(validator::Validate)] pub struct Pet { #[validate(length(max = 10))] pub tags: \
+                  Vec<String> }";
+  let cases = [
+    (
+      with_set,
+      "validator = { version = \"0.21\", features = [\"derive\", \"indexmap\"] }",
+    ),
+    (with_vec, "validator = { version = \"0.21\", features = [\"derive\"] }"),
+  ];
+
+  for (source, expected) in cases {
+    let manifest = render_manifest(&[source], CollectionTypePolicy::Ordered);
+    assert!(
+      manifest.contains(expected),
+      "expected '{expected}' for source '{source}':\n{manifest}"
+    );
+  }
+}
+
+#[test]
+fn test_reqwest_supports_form_bodies() {
+  let source = "pub async fn send(client: reqwest::Client) { let _ = client.post(\"/\").form(&[(\"a\", \"b\")]); }";
+  let manifest = render_manifest(&[source], CollectionTypePolicy::Ordered);
+  assert!(
+    manifest.contains("features = [\"form\", \"json\""),
+    "reqwest should enable `form` for urlencoded bodies:\n{manifest}"
+  );
+}
+
+#[test]
 fn test_manifest_package_section() {
   let manifest = render_manifest(&["pub struct Pet;"], CollectionTypePolicy::Ordered);
   let expected = [

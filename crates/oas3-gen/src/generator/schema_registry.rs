@@ -729,7 +729,7 @@ impl SchemaRegistry {
   ///
   /// Returns `None` if the property doesn't exist, has no `const_value`,
   /// or the `const_value` is not a string.
-  fn extract_const_discriminator_value(schema: &ObjectSchema, property_name: &str) -> Option<String> {
+  pub(crate) fn extract_const_discriminator_value(schema: &ObjectSchema, property_name: &str) -> Option<String> {
     let prop_schema = schema.properties.get(property_name)?.as_inline()?;
     prop_schema.const_value.as_ref()?.as_str().map(String::from)
   }

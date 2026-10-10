@@ -6,7 +6,8 @@ use itertools::Itertools;
 use oas3::spec::{MediaType, ObjectSchema, Operation, Response, Schema};
 
 use super::{
-  ConverterContext, SerdeUsageRecorder, TypeResolver, fields::FieldConverter, inline_resolver::InlineTypeResolver,
+  ConverterContext, GenerationTarget, SerdeUsageRecorder, TypeResolver, fields::FieldConverter,
+  inline_resolver::InlineTypeResolver,
 };
 use crate::{
   generator::{
@@ -96,7 +97,12 @@ impl ResponseConverter {
         );
         let headers = self.header_fields(&response, &header_parent)?;
 
-        anyhow::Ok(Self::split_variants_by_schema(status_code, &media_types, headers))
+        anyhow::Ok(Self::split_variants_by_schema(
+          status_code,
+          &media_types,
+          headers,
+          self.event_stream_type(),
+        ))
       })
       .flatten_ok()
       .filter_ok(|variant| !(variant.status_code.is_default() && variant.schema_type.is_none()))
@@ -262,6 +268,15 @@ impl ResponseConverter {
     Ok(Some(TypeRef::new(output.result)))
   }
 
+  /// The generic type a `text/event-stream` body's items are wrapped in: the client
+  /// reads a stream from the response, the server returns one for the handler to send.
+  fn event_stream_type(&self) -> &'static str {
+    match self.context.config().target {
+      GenerationTarget::Client => "oas3_gen_support::EventStream",
+      GenerationTarget::Server => "oas3_gen_support::ServerEvents",
+    }
+  }
+
   /// Ensures at least one media type exists, defaulting to `application/json`.
   fn with_default_media_type(media_types: Vec<ResponseMediaType>) -> Vec<ResponseMediaType> {
     if media_types.is_empty() {
@@ -275,8 +290,9 @@ impl ResponseConverter {
     status_code: StatusCodeToken,
     media_types: &[ResponseMediaType],
     headers: Vec<FieldDef>,
+    event_stream_type: &str,
   ) -> Vec<ResponseVariant> {
-    let grouped = Self::group_media_types_by_schema(media_types);
+    let grouped = Self::group_media_types_by_schema(media_types, event_stream_type);
 
     if grouped.is_empty() {
       return vec![
@@ -304,13 +320,16 @@ impl ResponseConverter {
   }
 
   /// Groups media types by their schema type for variant splitting.
-  fn group_media_types_by_schema(media_types: &[ResponseMediaType]) -> Vec<(String, Vec<ResponseMediaType>)> {
+  fn group_media_types_by_schema(
+    media_types: &[ResponseMediaType],
+    event_stream_type: &str,
+  ) -> Vec<(String, Vec<ResponseMediaType>)> {
     media_types
       .iter()
       .filter_map(|media_type| {
         let schema = media_type.schema_type.as_ref()?;
         let key = match media_type.category {
-          ContentCategory::EventStream => format!("oas3_gen_support::EventStream<{}>", schema.to_rust_type()),
+          ContentCategory::EventStream => format!("{event_stream_type}<{}>", schema.to_rust_type()),
           _ => schema.to_rust_type(),
         };
         Some((key, media_type.clone()))

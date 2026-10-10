@@ -54,7 +54,12 @@ pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 pub use crate::generator::ast::fields::{DefaultVariant, FieldCollection, FieldDef};
 use crate::generator::{
-  ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant,
+  ast::constants::HttpHeaderRef,
+  metrics::GenerationWarning,
+  naming::{
+    constants::{COOKIE_PARAMS_SUFFIX, HEADER_PARAMS_SUFFIX, PATH_PARAMS_SUFFIX, QUERY_PARAMS_SUFFIX},
+    inference::NormalizedVariant,
+  },
 };
 
 /// API metadata from the spec's `info` object.
@@ -164,7 +169,7 @@ impl ResponseVariant {
   }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ResponsePayload {
   #[default]
   None,
@@ -310,11 +315,36 @@ pub struct ResponseHeadersRef {
 pub struct ResponseParam {
   pub body: TypeRef,
   pub headers: Option<ResponseHeadersRef>,
+  /// The media type a server sends the body as under each status code that declares
+  /// one. A response union keeps only its JSON entries, and a union without any is sent
+  /// as JSON
+  #[builder(default)]
+  pub media_types: Vec<StatusMediaType>,
+}
+
+/// The first media type one status code declares for its body.
+pub type StatusMediaType = (StatusCodeToken, ResponseMediaType);
+
+impl ResponseParam {
+  /// The media type the body is sent as under `status`: the one `status` declares,
+  /// or, for a status the operation doesn't declare, the first one it does.
+  #[must_use]
+  pub fn media_type(&self, status: StatusCodeToken) -> Option<&ResponseMediaType> {
+    self
+      .media_types
+      .iter()
+      .find_map(|(declared, media_type)| (*declared == status).then_some(media_type))
+      .or_else(|| self.media_types.first().map(|(_, media_type)| media_type))
+  }
 }
 
 impl From<TypeRef> for ResponseParam {
   fn from(body: TypeRef) -> Self {
-    Self { body, headers: None }
+    Self {
+      body,
+      headers: None,
+      media_types: vec![],
+    }
   }
 }
 
@@ -420,6 +450,8 @@ impl RustType {
 pub enum OperationKind {
   Http,
   Webhook,
+  /// A request an operation's `callbacks` declare the API sends back to the caller
+  Callback,
 }
 
 #[derive(Debug, Clone, bon::Builder)]
@@ -446,6 +478,9 @@ pub struct OperationInfo {
   pub credentials_type: Option<StructToken>,
   #[builder(default)]
   pub documentation: Documentation,
+  /// The document marks the operation `deprecated`, so its client method is too
+  #[builder(default)]
+  pub deprecated: bool,
 }
 
 impl OperationInfo {
@@ -494,12 +529,12 @@ pub enum ParameterLocation {
 
 impl ParameterLocation {
   #[must_use]
-  pub const fn suffix(self) -> Option<&'static str> {
+  pub const fn suffix(self) -> &'static str {
     match self {
-      Self::Path => Some("Path"),
-      Self::Query => Some("Query"),
-      Self::Header => Some("Header"),
-      Self::Cookie => None,
+      Self::Path => PATH_PARAMS_SUFFIX,
+      Self::Query => QUERY_PARAMS_SUFFIX,
+      Self::Header => HEADER_PARAMS_SUFFIX,
+      Self::Cookie => COOKIE_PARAMS_SUFFIX,
     }
   }
 }
@@ -557,22 +592,22 @@ impl ContentCategory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseMediaType {
   pub category: ContentCategory,
+  /// The media type as the document declares it, such as `image/png`
+  pub content_type: String,
   pub schema_type: Option<TypeRef>,
 }
 
 impl ResponseMediaType {
   #[must_use]
   pub fn new(content_type: &str) -> Self {
-    Self {
-      category: ContentCategory::from_content_type(content_type),
-      schema_type: None,
-    }
+    Self::with_schema(content_type, None)
   }
 
   #[must_use]
   pub fn with_schema(content_type: &str, schema_type: Option<TypeRef>) -> Self {
     Self {
       category: ContentCategory::from_content_type(content_type),
+      content_type: content_type.to_string(),
       schema_type,
     }
   }
@@ -596,6 +631,9 @@ pub struct OperationBody {
   pub optional: bool,
   #[builder(default)]
   pub content_category: ContentCategory,
+  /// The media type as the document declares it, such as `application/merge-patch+json`
+  #[builder(default)]
+  pub content_type: String,
   /// What the spec declares about each `multipart/form-data` property, keyed by property name
   #[builder(default)]
   pub multipart_properties: IndexMap<String, MultipartProperty>,
@@ -617,6 +655,9 @@ pub enum StructKind {
   QueryParams,
   /// Nested struct for header parameters (no serde, just storage)
   HeaderParams,
+  /// Nested struct for cookie parameters (no serde: the client renders a `Cookie`
+  /// header from it and the server parses one into it)
+  CookieParams,
   /// Struct for the headers a response declares (no serde, just storage)
   ResponseHeaders,
   /// Struct for the API keys a server operation accepts (no serde, just storage)
@@ -677,7 +718,7 @@ impl StructDef {
 pub enum MethodKind {
   /// Method to parse a reqwest response into the operation's response enum instantiation
   ParseResponse {
-    response: OperationResponse,
+    response: Box<OperationResponse>,
     status_handlers: Vec<StatusHandler>,
     default_handler: Option<ResponseVariantCategory>,
   },

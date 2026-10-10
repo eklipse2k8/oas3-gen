@@ -5,8 +5,8 @@ use petgraph::{Graph, graph::NodeIndex};
 
 use crate::generator::{
   ast::{
-    DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumToken, OuterAttr, RustPrimitive, RustType, SerdeImpl,
-    SerdeMode, StructDef, StructKind, TypeRef,
+    DerivesProvider, DiscriminatedEnumDef, EnumDef, EnumToken, FieldDef, OuterAttr, RustPrimitive, RustType,
+    SerdeAsFieldAttr, SerdeAttribute, SerdeImpl, SerdeMode, StructDef, StructKind, TypeRef,
   },
   converter::GenerationTarget,
 };
@@ -219,7 +219,41 @@ impl SerdeUsage {
       def.fields.iter_mut().for_each(|f| f.validation_attrs.clear());
     }
 
+    if self.target == GenerationTarget::Client {
+      Self::update_default_on_null(def);
+    }
     Self::update_skip_serializing_none(def);
+  }
+
+  /// Lets a client struct that fills missing fields from its `Default` also read `null`
+  /// in a required field as that field's default, so a server sending `null` doesn't
+  /// fail deserialization.
+  ///
+  /// Fields with their own `default` keep rejecting `null`: `DefaultOnNull` would
+  /// substitute the type's default instead of theirs.
+  fn update_default_on_null(def: &mut StructDef) {
+    let fills_missing = def.serde_attrs.contains(&SerdeAttribute::Default);
+    if !fills_missing || def.is_deserializable() != SerdeImpl::Derive {
+      return;
+    }
+
+    let mut required = def
+      .fields
+      .iter_mut()
+      .filter(|field| reads_required_value(field))
+      .peekable();
+    if required.peek().is_none() {
+      return;
+    }
+    for field in required {
+      field.serde_as_attr = Some(SerdeAsFieldAttr::DefaultOnNull {
+        inner: field.serde_as_attr.take().map(Box::new),
+      });
+    }
+
+    if !def.outer_attrs.contains(&OuterAttr::SerdeAs) {
+      def.outer_attrs.insert(0, OuterAttr::SerdeAs);
+    }
   }
 
   fn struct_serde_mode(&self, def: &StructDef) -> SerdeMode {
@@ -230,6 +264,7 @@ impl SerdeUsage {
       }
       StructKind::OperationRequest
       | StructKind::HeaderParams
+      | StructKind::CookieParams
       | StructKind::ResponseHeaders
       | StructKind::Credentials => SerdeMode::None,
       StructKind::PathParams => match self.target {
@@ -262,4 +297,16 @@ impl SerdeUsage {
   fn update_discriminated_enum(&self, def: &mut DiscriminatedEnumDef) {
     def.serde_mode = self.get_usage(&def.name).to_serde_mode(self.target);
   }
+}
+
+/// Whether deserialization reads `field` as a required value that has no default of its own.
+fn reads_required_value(field: &FieldDef) -> bool {
+  !field.rust_type.nullable
+    && field.default_value.is_none()
+    && !field.serde_attrs.iter().any(|attr| {
+      matches!(
+        attr,
+        SerdeAttribute::Flatten | SerdeAttribute::Skip | SerdeAttribute::SkipDeserializing
+      )
+    })
 }

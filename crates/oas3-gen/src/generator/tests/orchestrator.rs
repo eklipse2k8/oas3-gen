@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use super::support::{
-  assert_contains, assert_contains_all, assert_not_contains, assert_occurs_at_least, generate_client, generate_server,
-  generate_types, make_orchestrator, make_orchestrator_with_api_name, make_orchestrator_with_customizations,
-  make_orchestrator_with_fn_name_overrides, make_orchestrator_with_ops, make_server_orchestrator, parse_spec,
-  string_set,
+  assert_contains, assert_contains_all, assert_not_contains, assert_occurs_at_least, field_attributes, generate_client,
+  generate_server, generate_types, make_orchestrator, make_orchestrator_with_api_name,
+  make_orchestrator_with_customizations, make_orchestrator_with_fn_name_overrides, make_orchestrator_with_ops,
+  make_server_orchestrator, parse_spec, string_set,
 };
 use crate::generator::{GenerationTarget, ServerModMode, ast::ApiMetadata};
 
@@ -12,9 +12,71 @@ type PresenceCheck<'a> = (&'a str, usize, &'a str);
 type AbsenceCheck<'a> = (&'a str, &'a str);
 type EnumDedupCase<'a> = (&'a str, Vec<PresenceCheck<'a>>, Vec<AbsenceCheck<'a>>);
 
+const OPERATION_FILTERING_SPEC: &str = r##"{
+  "openapi": "3.1.0",
+  "info": { "title": "Operation Filtering Test API", "version": "1.0.0" },
+  "paths": {
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserList" } } }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createUser",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } }
+          }
+        }
+      }
+    },
+    "/admin": {
+      "post": {
+        "operationId": "adminAction",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminResponse" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "name": { "type": "string" } }
+      },
+      "UserList": {
+        "type": "object",
+        "properties": { "users": { "type": "array", "items": { "$ref": "#/components/schemas/User" } } }
+      },
+      "AdminResponse": { "type": "object", "properties": { "status": { "type": "string" } } },
+      "UnreferencedSchema": { "type": "object", "properties": { "data": { "type": "string" } } }
+    }
+  }
+}"##;
+
 #[test]
 fn test_metadata_and_header_generation() {
-  let spec = parse_spec(include_str!("../../../fixtures/basic_api.json"));
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": {
+      "title": "Basic Test API",
+      "version": "1.0.0",
+      "description": "A test API.\nWith multiple lines.\nFor testing documentation."
+    },
+    "paths": {}
+  }"#;
+
+  let spec = parse_spec(spec_json);
   let metadata = ApiMetadata::from(&spec);
 
   assert_eq!(metadata.title, "Basic Test API", "title mismatch");
@@ -46,13 +108,13 @@ fn test_metadata_and_header_generation() {
 
 #[test]
 fn test_operation_filtering() {
-  let spec_json = include_str!("../../../fixtures/operation_filtering.json");
   let excluded = string_set(&["admin_action"]);
 
-  let full_orchestrator = make_orchestrator(parse_spec(spec_json), false);
+  let full_orchestrator = make_orchestrator(parse_spec(OPERATION_FILTERING_SPEC), false);
   let full = generate_types(&full_orchestrator, "test.json");
 
-  let filtered_orchestrator = make_orchestrator_with_ops(parse_spec(spec_json), false, None, Some(&excluded));
+  let filtered_orchestrator =
+    make_orchestrator_with_ops(parse_spec(OPERATION_FILTERING_SPEC), false, None, Some(&excluded));
   let filtered = generate_types(&filtered_orchestrator, "test.json");
 
   assert_eq!(full.operations_converted, 3, "full spec should have 3 ops");
@@ -85,13 +147,14 @@ fn test_operation_filtering() {
 
 #[test]
 fn test_all_schemas_overrides_operation_filtering() {
-  let spec_json = include_str!("../../../fixtures/operation_filtering.json");
   let only = string_set(&["list_users"]);
 
-  let without_all_schemas_orchestrator = make_orchestrator_with_ops(parse_spec(spec_json), false, Some(&only), None);
+  let without_all_schemas_orchestrator =
+    make_orchestrator_with_ops(parse_spec(OPERATION_FILTERING_SPEC), false, Some(&only), None);
   let without_all_schemas = generate_types(&without_all_schemas_orchestrator, "test.json");
 
-  let with_all_schemas_orchestrator = make_orchestrator_with_ops(parse_spec(spec_json), true, Some(&only), None);
+  let with_all_schemas_orchestrator =
+    make_orchestrator_with_ops(parse_spec(OPERATION_FILTERING_SPEC), true, Some(&only), None);
   let with_all_schemas = generate_types(&with_all_schemas_orchestrator, "test.json");
 
   assert_eq!(without_all_schemas.operations_converted, 1, "without all_schemas: 1 op");
@@ -632,7 +695,37 @@ fn authorization_and_standard_headers_follow_http() {
 
 #[test]
 fn test_content_types_generation() {
-  let orchestrator = make_orchestrator(parse_spec(include_str!("../../../fixtures/content_types.json")), false);
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Content Types Test API", "version": "1.0.0" },
+    "paths": {
+      "/mixed-content": {
+        "get": {
+          "operationId": "getMixedContent",
+          "responses": {
+            "200": {
+              "description": "JSON response",
+              "content": {
+                "application/json": {
+                  "schema": { "type": "object", "properties": { "message": { "type": "string" } } }
+                }
+              }
+            },
+            "201": {
+              "description": "Text response",
+              "content": { "text/plain": { "schema": { "type": "string" } } }
+            },
+            "202": {
+              "description": "Image response",
+              "content": { "image/png": { "schema": { "type": "string", "format": "binary" } } }
+            }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let orchestrator = make_orchestrator(parse_spec(spec_json), false);
   let output = generate_types(&orchestrator, "test.json");
   assert_contains_all(
     &output.code,
@@ -652,9 +745,73 @@ fn test_content_types_generation() {
 
 #[test]
 fn test_enum_deduplication() {
+  let enum_deduplication_spec = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Enum Deduplication Test", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "StructA": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "x-enum-descriptions": ["Object is active.", "Object is inactive."],
+              "enum": ["active", "inactive"]
+            }
+          }
+        },
+        "StructB": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "x-enum-descriptions": ["Object is active.", "Object is inactive."],
+              "enum": ["active", "inactive"]
+            }
+          }
+        },
+        "StructC": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "x-enum-descriptions": ["Object is inactive.", "Object is active."],
+              "enum": ["inactive", "active"]
+            }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let non_exhaustive_enum_spec = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "Non-Exhaustive Enum Test", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Status": { "type": "string", "enum": ["active", "inactive", "pending"] },
+        "ComplexStatus": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "description": "Known statuses plus any other string",
+              "anyOf": [{ "type": "string" }, { "type": "string", "enum": ["active", "inactive", "pending"] }]
+            },
+            "referenced": {
+              "description": "A referenced closed enum plus any other string",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/Status" }]
+            }
+          }
+        }
+      }
+    }
+  }"##;
+
   let cases: [EnumDedupCase<'_>; 2] = [
     (
-      include_str!("../../../fixtures/enum_deduplication.json"),
+      enum_deduplication_spec,
       vec![
         ("pub enum Status", 1, "Status enum should be defined exactly once"),
         ("pub status: Option<Status>", 1, "StructA should use Status"),
@@ -670,7 +827,7 @@ fn test_enum_deduplication() {
       )],
     ),
     (
-      include_str!("../../../fixtures/non_exhaustive_enum.json"),
+      non_exhaustive_enum_spec,
       vec![
         ("pub enum Status", 1, "Closed Status enum should be defined"),
         ("pub enum ComplexStatusStatus", 1, "Inline open enum should be defined"),
@@ -926,4 +1083,297 @@ fn test_no_customization_no_serde_as() {
     !output.code.contains("#[serde_with::serde_as]") || !output.code.contains("Frappe"),
     "Frappe struct should not have serde_as outer attribute without customizations"
   );
+}
+
+#[test]
+fn deprecated_operations_deprecate_their_client_method() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Shelter", "version": "1.0.0" },
+    "paths": {
+      "/cats": { "get": { "operationId": "listCats", "deprecated": true, "responses": { "204": { "description": "ok" } } } },
+      "/dogs": { "get": { "operationId": "findDogs", "responses": { "204": { "description": "ok" } } } }
+    }
+  }"#;
+
+  let client = generate_client(
+    &make_orchestrator_with_api_name(parse_spec(spec_json), "ShelterClient", GenerationTarget::Client),
+    "test.json",
+  );
+  let server = generate_server(&make_server_orchestrator(parse_spec(spec_json)), "test.json");
+
+  let cases = [("pub async fn list_cats", true), ("pub async fn find_dogs", false)];
+  for (method, deprecated) in cases {
+    let position = client.find(method).unwrap_or_else(|| panic!("missing {method}"));
+    let preceding = &client[..position];
+    let attribute = preceding.rfind("#[deprecated]");
+    let previous_method = preceding.rfind("pub async fn");
+    let marked = attribute.is_some_and(|attribute| previous_method.is_none_or(|previous| attribute > previous));
+    assert_eq!(marked, deprecated, "deprecation of `{method}`");
+  }
+  assert_not_contains(&server, "#[deprecated]", "servers keep serving deprecated operations");
+}
+
+#[test]
+fn defaulted_fields_deserialize_through_the_struct_default() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Telemetry", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Reading": {
+          "type": "object",
+          "required": ["collarId", "samples"],
+          "properties": {
+            "collarId": { "type": "string" },
+            "samples": { "type": "array", "items": { "type": "integer" } },
+            "mode": { "type": "string", "enum": ["eco", "standard"], "default": "standard" },
+            "quantity": { "type": "integer", "default": 1 }
+          }
+        },
+        "Settings": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["eco", "standard"], "default": "eco" }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let types = generate_types(&make_orchestrator(parse_spec(spec_json), true), "test.json").code;
+
+  for name in ["Reading", "Settings"] {
+    let declaration = format!("pub struct {name}");
+    let attrs = &types[..types.find(&declaration).unwrap_or_else(|| panic!("{name} struct"))];
+    let attrs = &attrs[attrs.rfind("#[derive").unwrap_or_else(|| panic!("{name} derives"))..];
+    assert_contains(
+      attrs,
+      "#[serde(default)]",
+      &format!("{name} fills missing fields from its Default implementation"),
+    );
+  }
+
+  let reading = &types[types.find("pub struct Reading").expect("Reading struct")..];
+  assert_contains_all(
+    reading,
+    &[
+      (
+        "#[default(Some(Mode::Standard))]",
+        "the enum default sets the Default implementation",
+      ),
+      (
+        "#[default(Some(1i64))]",
+        "the integer default sets the Default implementation",
+      ),
+    ],
+  );
+  assert_not_contains(&types, "#[serde(default =", "no field names its own default function");
+  assert_not_contains(&types, "fn default_", "no default functions are generated");
+}
+
+#[test]
+fn required_fields_of_defaulted_client_structs_read_null_as_their_default() {
+  let spec_json = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "Telemetry", "version": "1.0.0" },
+    "paths": {
+      "/batches": {
+        "post": {
+          "operationId": "submitBatch",
+          "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Batch" } } } },
+          "responses": { "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Batch" } } } } }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "Batch": {
+          "type": "object",
+          "properties": {
+            "reading": { "$ref": "#/components/schemas/Reading" },
+            "counter": { "$ref": "#/components/schemas/Counter" },
+            "plain": { "$ref": "#/components/schemas/Plain" }
+          }
+        },
+        "Reading": {
+          "type": "object",
+          "required": ["collarId", "samples", "payload", "tags", "kind"],
+          "properties": {
+            "collarId": { "type": "string" },
+            "samples": { "type": "array", "items": { "type": "integer" } },
+            "payload": { "type": "string", "format": "byte" },
+            "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+            "kind": { "type": "string", "const": "reading" },
+            "mode": { "type": "string", "enum": ["eco", "standard"], "default": "standard" },
+            "note": { "type": "string" }
+          },
+          "additionalProperties": { "type": "string" }
+        },
+        "Counter": {
+          "type": "object",
+          "required": ["count"],
+          "properties": {
+            "count": { "type": "integer" },
+            "step": { "type": "integer", "default": 1 }
+          }
+        },
+        "Plain": {
+          "type": "object",
+          "required": ["label"],
+          "properties": { "label": { "type": "string" } }
+        }
+      }
+    }
+  }"##;
+
+  let client = generate_types(&make_orchestrator(parse_spec(spec_json), false), "test.json").code;
+  let server = generate_types(&make_server_orchestrator(parse_spec(spec_json)), "test.json").code;
+
+  let default_on_null = "#[serde_as(as = \"serde_with::DefaultOnNull";
+  let cases = [
+    (
+      "collar_id",
+      Some("#[serde_as(as = \"serde_with::DefaultOnNull\")]"),
+      "a required string",
+    ),
+    (
+      "samples",
+      Some("#[serde_as(as = \"serde_with::DefaultOnNull\")]"),
+      "a required array",
+    ),
+    (
+      "payload",
+      Some("#[serde_as(as = \"serde_with::DefaultOnNull<serde_with::base64::Base64>\")]"),
+      "a required field keeps its own adapter inside",
+    ),
+    (
+      "tags",
+      Some("#[serde_as(as = \"serde_with::DefaultOnNull<serde_with::SetPreventDuplicates<_>>\")]"),
+      "a required unique array keeps rejecting duplicates",
+    ),
+    (
+      "count",
+      Some("#[serde_as(as = \"serde_with::DefaultOnNull\")]"),
+      "a required integer",
+    ),
+    ("kind", None, "a constant has its own default"),
+    ("mode", None, "an optional field already reads null as None"),
+    ("note", None, "an optional field already reads null as None"),
+    ("step", None, "an optional field already reads null as None"),
+    (
+      "additional_properties",
+      None,
+      "flattened additional properties aren't a property",
+    ),
+    (
+      "label",
+      None,
+      "a struct without #[serde(default)] still rejects missing and null fields",
+    ),
+  ];
+  for (name, expected, reason) in cases {
+    let attributes = field_attributes(&client, name);
+    match expected {
+      Some(expected) => assert_contains(attributes, expected, &format!("`{name}`: {reason}")),
+      None => assert_not_contains(attributes, default_on_null, &format!("`{name}`: {reason}")),
+    }
+  }
+
+  let counter = &client[..client.find("pub struct Counter").expect("Counter struct")];
+  let counter = &counter[counter.rfind("pub struct").expect("struct before Counter")..];
+  assert_contains(
+    counter,
+    "#[serde_with::serde_as]",
+    "a struct whose only adapter is DefaultOnNull opts into serde_as",
+  );
+  assert_not_contains(&server, "DefaultOnNull", "server types reject null in required fields");
+}
+
+#[test]
+fn unions_of_const_tagged_objects_route_by_the_tag() {
+  let spec_json = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "Counters", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "CounterA": { "type": "object", "required": ["kind", "count"], "properties": { "kind": { "type": "string", "const": "a" }, "count": { "type": "integer" } } },
+        "CounterB": { "type": "object", "required": ["kind", "count"], "properties": { "kind": { "type": "string", "const": "b" }, "count": { "type": "integer" } } },
+        "CounterC": { "type": "object", "required": ["count"], "properties": { "kind": { "type": "string", "const": "c" }, "count": { "type": "integer" } } },
+        "Tagged": { "anyOf": [{ "$ref": "#/components/schemas/CounterA" }, { "$ref": "#/components/schemas/CounterB" }, { "type": "null" }] },
+        "Optional": { "oneOf": [{ "$ref": "#/components/schemas/CounterA" }, { "$ref": "#/components/schemas/CounterC" }] },
+        "Repeated": { "oneOf": [{ "$ref": "#/components/schemas/CounterA" }, { "$ref": "#/components/schemas/CounterA" }] }
+      }
+    }
+  }"##;
+
+  let types = generate_types(&make_orchestrator(parse_spec(spec_json), true), "test.json").code;
+  let cases = [
+    ("Tagged", true, "every branch requires `kind` with a distinct constant"),
+    ("Optional", false, "CounterC doesn't require `kind`"),
+    ("Repeated", false, "both branches share one constant"),
+  ];
+  for (name, routed, reason) in cases {
+    let start = types
+      .find(&format!("pub enum {name} "))
+      .unwrap_or_else(|| panic!("missing {name}"));
+    let definition = &types[types[..start].rfind("#[derive").expect("derives")..];
+    let definition = &definition[..definition.find("\n}").expect("enum end")];
+    assert_eq!(
+      !definition.contains("#[serde(untagged)]"),
+      routed,
+      "{name} routing ({reason}):\n{definition}"
+    );
+  }
+  assert_contains(
+    &types,
+    "pub const DISCRIMINATOR_FIELD: &'static str = \"kind\";",
+    "the inferred tag is the shared constant property",
+  );
+}
+
+#[test]
+fn multiple_of_is_validated_for_integers_and_decimals() {
+  let spec_json = r#"{
+    "openapi": "3.1.0",
+    "info": { "title": "Collar", "version": "1.0.0" },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Reading": {
+          "type": "object",
+          "properties": {
+            "battery": { "type": "integer", "format": "int32", "multipleOf": 5 },
+            "dose": { "type": "number", "multipleOf": 0.25 },
+            "precision": { "type": "number", "format": "float", "multipleOf": 1.5 },
+            "halves": { "type": "integer", "multipleOf": 0.5 },
+            "tiny": { "type": "number", "multipleOf": 1e-12 }
+          }
+        }
+      }
+    }
+  }"#;
+
+  let types = generate_types(&make_orchestrator(parse_spec(spec_json), true), "test.json").code;
+
+  let cases = [
+    ("battery", Some("oas3_gen_support::multiple_of::<5>")),
+    ("dose", Some("oas3_gen_support::multiple_of_ratio::<1, 4>")),
+    ("precision", Some("oas3_gen_support::multiple_of_ratio::<3, 2>")),
+    ("halves", None),
+    ("tiny", None),
+  ];
+  for (name, function) in cases {
+    let attributes = field_attributes(&types, name);
+    match function {
+      Some(function) => assert_contains(attributes, function, &format!("`{name}` checks its multiple")),
+      None => assert_not_contains(
+        attributes,
+        "custom(function",
+        &format!("`{name}` only documents its multiple"),
+      ),
+    }
+  }
 }

@@ -64,7 +64,7 @@ fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
     name: MethodNameToken::new("parse_response"),
     docs: Documentation::from_lines(["Parse response"]),
     kind: MethodKind::ParseResponse {
-      response: sample_response(),
+      response: Box::new(sample_response()),
       status_handlers: vec![StatusHandler {
         status_code,
         dispatch: ResponseStatusCategory::Single(ResponseVariantCategory { category, variant }),
@@ -388,7 +388,7 @@ fn test_parse_response_slot_shapes() {
       name: MethodNameToken::new("parse_response"),
       docs: Documentation::from_lines(["Parse response"]),
       kind: MethodKind::ParseResponse {
-        response,
+        response: Box::new(response),
         status_handlers: vec![StatusHandler {
           status_code,
           dispatch: ResponseStatusCategory::Single(ResponseVariantCategory {
@@ -422,7 +422,7 @@ fn test_parse_response_default_handler_carries_status() {
     name: MethodNameToken::new("parse_response"),
     docs: Documentation::from_lines(["Parse response"]),
     kind: MethodKind::ParseResponse {
-      response: sample_response(),
+      response: Box::new(sample_response()),
       status_handlers: vec![],
       default_handler: Some(ResponseVariantCategory {
         category: ContentCategory::Json,

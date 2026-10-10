@@ -5,11 +5,11 @@ use itertools::Itertools;
 
 use crate::generator::{
   ast::{
-    Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken, OperationInfo,
-    OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef, ResponseMediaType, ResponseParam,
-    ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant, ResponseVariant,
-    ResponseVariantCategory, RustPrimitive, RustType, SerdeMode, StatusCodeToken, StatusHandler, StructDef, StructKind,
-    StructMethod, StructToken, TypeRef, VariantMapping,
+    ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken,
+    OperationInfo, OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef, ResponseMediaType,
+    ResponseParam, ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant, ResponseVariant,
+    ResponseVariantCategory, RustPrimitive, RustType, SerdeMode, StatusCodeToken, StatusHandler, StatusMediaType,
+    StructDef, StructKind, StructMethod, StructToken, TypeRef, VariantMapping,
   },
   converter::GenerationTarget,
   naming::{
@@ -198,9 +198,11 @@ impl ResponseProcessor {
           .build()
       });
 
+    let (body, media_types) = self.resolve_payload(class, variants);
     ResponseParam::builder()
-      .body(self.resolve_payload(class, variants))
+      .body(body)
       .maybe_headers(headers)
+      .media_types(media_types)
       .build()
   }
 
@@ -209,8 +211,14 @@ impl ResponseProcessor {
   ///
   /// A single body type is used as is, several become a response union, and a
   /// bodiless status alongside a body makes the parameter `Option<_>`. With no
-  /// body anywhere in the class the parameter is `()`.
-  fn resolve_payload(&mut self, class: ResponsePayload, variants: &mut [ResponseVariant]) -> TypeRef {
+  /// body anywhere in the class the parameter is `()`. Also returns the first media
+  /// type each status code with a body declares; a union keeps only its JSON ones,
+  /// since a union is always sent as JSON.
+  fn resolve_payload(
+    &mut self,
+    class: ResponsePayload,
+    variants: &mut [ResponseVariant],
+  ) -> (TypeRef, Vec<StatusMediaType>) {
     let keyed = variants
       .iter()
       .enumerate()
@@ -238,6 +246,18 @@ impl ResponseProcessor {
       }
     };
 
+    let media_types = keyed
+      .iter()
+      .filter_map(|(index, key)| {
+        key.as_ref()?;
+        let variant = &variants[*index];
+        Some((variant.status_code, variant.media_types.first()?))
+      })
+      .unique_by(|(status, _)| *status)
+      .filter(|(_, media_type)| union.is_none() || media_type.category == ContentCategory::Json)
+      .map(|(status, media_type)| (status, media_type.clone()))
+      .collect::<Vec<_>>();
+
     let param = if any_bodiless && !bodies.is_empty() {
       param.with_option()
     } else {
@@ -251,7 +271,7 @@ impl ResponseProcessor {
         .build();
     }
 
-    param
+    (param, media_types)
   }
 
   /// Merges the headers declared across one payload class of an operation into
@@ -419,7 +439,7 @@ fn parse_method(response: &OperationResponse, variants: &[ResponseVariant]) -> S
       "Parse the HTTP response into the response enum.",
     ]))
     .kind(MethodKind::ParseResponse {
-      response: response.clone(),
+      response: Box::new(response.clone()),
       status_handlers,
       default_handler,
     })

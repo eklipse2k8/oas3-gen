@@ -8,7 +8,42 @@ use crate::generator::{
 
 #[test]
 fn test_implicit_dependency_via_union_fingerprint() {
-  let spec_json = include_str!("../../../../fixtures/implicit_union.json");
+  let spec_json = r##"{
+    "openapi": "3.1.0",
+    "info": { "title": "Implicit Dependency Test", "version": "1.0.0" },
+    "paths": {
+      "/test": {
+        "post": {
+          "operationId": "test_operation",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    { "$ref": "#/components/schemas/ComponentA" },
+                    { "$ref": "#/components/schemas/ComponentB" }
+                  ]
+                }
+              }
+            }
+          },
+          "responses": { "200": { "description": "OK" } }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "ImplicitlyRequiredUnion": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/ComponentA" },
+            { "$ref": "#/components/schemas/ComponentB" }
+          ]
+        },
+        "ComponentA": { "type": "object", "properties": { "a": { "type": "string" } } },
+        "ComponentB": { "type": "object", "properties": { "b": { "type": "integer" } } }
+      }
+    }
+  }"##;
   let spec: oas3::Spec = oas3::from_json(spec_json).unwrap();
 
   let mut only_ops = HashSet::new();

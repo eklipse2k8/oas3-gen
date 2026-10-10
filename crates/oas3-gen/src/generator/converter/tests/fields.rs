@@ -703,7 +703,7 @@ fn test_nullable_union_field_is_optional() -> anyhow::Result<()> {
 fn test_constant_fields_skip_deserializing_in_client_output() -> anyhow::Result<()> {
   let cases = [
     (GenerationTarget::Client, None, true),
-    (GenerationTarget::Client, Some(json!(false)), true),
+    (GenerationTarget::Client, Some(json!(false)), false),
     (GenerationTarget::Client, Some(json!(true)), false),
     (GenerationTarget::Server, None, false),
   ];

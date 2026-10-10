@@ -18,7 +18,7 @@
 
 `oas3-gen` is a command-line interface (CLI) for generating idiomatic Rust type definitions from an OpenAPI v3.1.x specification. The tool produces clean, production-ready code designed for seamless integration into any Rust project. Its primary function is to provide a robust and reliable method for type generation, ensuring the resulting code is correct, efficient, and well-documented.
 
-Generated output preserves the declaration order written in the OpenAPI document for schemas, fields, enum variants, union variants, operations, and header constants. Map-like generated types use `indexmap::IndexMap`, and arrays marked with `uniqueItems: true` use `indexmap::IndexSet` so runtime insertion order is preserved too. Pass `--no-ordered-collections` to opt out of the `indexmap` runtime types and emit `std::collections::HashMap<String, T>` plus `Vec<T>` instead.
+Generated output preserves the declaration order written in the OpenAPI document for schemas, fields, enum variants, union variants, operations, and header constants. Map-like generated types use `indexmap::IndexMap`, and arrays marked with `uniqueItems: true` use `indexmap::IndexSet` so runtime insertion order is preserved too. An `IndexSet` drops duplicate items rather than rejecting them. Pass `--no-ordered-collections` to opt out of the `indexmap` runtime types and emit `std::collections::HashMap<String, T>` plus `Vec<T>` instead.
 
 ## Quick Start
 
@@ -62,43 +62,75 @@ oas3-gen generate server-mod -i path/to/openapi.json -o path/to/output/
 
 #### Example
 
-Consider the following Pet OpenAPI schema definition in `fixtures/petstore.json`:
+Consider the following `Pet` OpenAPI schema definition in `crates/oas3-gen/fixtures/petstore.json`:
 
 ```json
 {
   "Pet": {
     "type": "object",
-    "required": ["id", "name"],
+    "description": "A pet in the store's care.",
+    "required": ["id", "name", "species"],
     "properties": {
-     "id": {
-      "type": "integer",
-      "format": "int64"
-     },
-     "name": {
-      "type": "string"
-     },
-     "tag": {
-      "type": "string"
-     }
+      "id": { "type": "string", "format": "uuid", "readOnly": true, "description": "Server-assigned identifier" },
+      "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "species": { "$ref": "#/components/schemas/Species" },
+      "status": { "$ref": "#/components/schemas/PetStatus" },
+      "nickname": { "type": ["string", "null"], "description": "An optional nickname" },
+      "birthDate": { "type": "string", "format": "date" },
+      "weightKg": { "type": "number", "format": "double", "exclusiveMinimum": 0, "maximum": 500 },
+      "microchip": { "type": "string", "pattern": "^[0-9]{15}$", "description": "ISO 11784 microchip number" },
+      "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "maxItems": 10 },
+      "photoUrls": { "type": "array", "items": { "type": "string", "format": "uri" } },
+      "allergies": { "$ref": "#/components/schemas/Health" },
+      "vaccinations": { "$ref": "#/components/schemas/PetVaccinations" },
+      "createdAt": { "type": "string", "format": "date-time", "readOnly": true },
+      "tag": { "type": "string", "deprecated": true, "description": "Superseded by `tags`" }
     }
   }
 }
 ```
 
-Executing `oas3-gen` produces the corresponding Rust types.
+Executing `oas3-gen generate -i crates/oas3-gen/fixtures/petstore.json -o types.rs` produces the corresponding Rust type, along with the types it refers to, such as `Species`, `PetStatus`, and `Health`.
 
 ```rust
-// src/types.rs
+// types.rs
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
+/// A pet in the store's care.
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Pet {
-  pub id: i64,
-  pub name: String,
-  pub tag: Option<String>,
+    /// Server-assigned identifier
+    pub id: uuid::Uuid,
+    pub name: String,
+    /// Kinds of pets the store cares for
+    pub species: Species,
+    /// Where the pet is in the adoption process
+    pub status: Option<PetStatus>,
+    /// An optional nickname
+    pub nickname: Option<String>,
+    #[serde(rename = "birthDate")]
+    pub birth_date: Option<chrono::NaiveDate>,
+    #[serde(rename = "weightKg")]
+    pub weight_kg: Option<f64>,
+    /// ISO 11784 microchip number
+    pub microchip: Option<String>,
+    pub tags: Option<indexmap::IndexSet<String>>,
+    #[serde(rename = "photoUrls")]
+    pub photo_urls: Option<Vec<String>>,
+    /// A health note, tagged by `type` without an explicit mapping.
+    pub allergies: Option<Box<Health>>,
+    /// Vaccination records keyed by vaccine family
+    pub vaccinations: Option<indexmap::IndexMap<String, Vec<VaccineRecord>>>,
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Superseded by `tags`
+    #[deprecated]
+    pub tag: Option<String>,
 }
 ```
+
+`Pet` only appears in responses, so it derives `Deserialize` and carries no validation. `NewPet`, the schema a caller sends to create a pet, derives `Serialize` and `validator::Validate` instead, with its `minLength`, `maxLength`, `pattern`, and other constraints as validation attributes.
 
 ### Server Generation
 
@@ -119,21 +151,45 @@ This generates three files:
 // server.rs
 
 pub trait ApiServer: Send + Sync {
-    fn list_pets(&self, request: ListPetsRequest)
-        -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send;
+    fn list_pets(
+        &self,
+        request: ListPetsRequest,
+    ) -> impl std::future::Future<
+        Output = anyhow::Result<
+            ApiResponse<
+                WithHeaders<XNextAndXTotalCountAndXRequestIdHeaders, Pets>,
+                Error,
+            >,
+        >,
+    > + Send;
 
-    fn create_pet(&self, request: CreatePetRequest)
-        -> impl std::future::Future<Output = anyhow::Result<CreatePetResponse>> + Send;
+    fn create_pet(
+        &self,
+        request: CreatePetRequest,
+    ) -> impl std::future::Future<
+        Output = anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, Pet>, Error>>,
+    > + Send;
 
-    fn get_pet_by_id(&self, request: GetPetByIdRequest)
-        -> impl std::future::Future<Output = anyhow::Result<GetPetByIdResponse>> + Send;
+    fn show_pet_by_id(
+        &self,
+        request: ShowPetByIdRequest,
+    ) -> impl std::future::Future<
+        Output = anyhow::Result<
+            ApiResponse<WithHeaders<ETagAndXCacheHeaders, Pet>, ErrorOrProblem>,
+        >,
+    > + Send;
+
+    // ... one method per operation and webhook
 }
 ```
 
 #### Implementing the Server
 
 ```rust
-use generated::{ApiServer, ListPetsRequest, ListPetsResponse, /* ... */};
+use generated::{
+    ApiResponse, ApiServer, Error, ListPetsRequest, Pets, WithHeaders,
+    XNextAndXTotalCountAndXRequestIdHeaders, /* ... */
+};
 
 #[derive(Clone)]
 struct MyServer {
@@ -141,13 +197,17 @@ struct MyServer {
 }
 
 impl ApiServer for MyServer {
-    fn list_pets(&self, request: ListPetsRequest)
-        -> impl std::future::Future<Output = anyhow::Result<ListPetsResponse>> + Send
-    {
-        async move {
-            let pets = self.db.query_pets(request.query.limit).await?;
-            Ok(ListPetsResponse::Ok(pets))
-        }
+    async fn list_pets(
+        &self,
+        request: ListPetsRequest,
+    ) -> anyhow::Result<
+        ApiResponse<WithHeaders<XNextAndXTotalCountAndXRequestIdHeaders, Pets>, Error>,
+    > {
+        let pets = self.db.query_pets(request.query.limit).await?;
+        Ok(ApiResponse::Ok(WithHeaders {
+            headers: XNextAndXTotalCountAndXRequestIdHeaders::default(),
+            body: pets,
+        }))
     }
     // ... implement other methods
 }
@@ -162,10 +222,12 @@ async fn main() {
 ```
 
 The generated router automatically:
-- Extracts path, query, and header parameters
-- Deserializes request bodies (JSON, form, multipart)
+- Extracts path, query, and header parameters, including arrays sent as repeated query parameters
+- Extracts API keys and bearer tokens declared by the operation's security requirements, answering a request that lacks required credentials with `401`
+- Deserializes request bodies (JSON, form, multipart, text, and binary), answering malformed ones with `400` before your method runs
 - Routes requests to the correct handler based on path and HTTP method
-- Converts response enums to proper HTTP responses with status codes
+- Converts `ApiResponse` values into HTTP responses with the status, headers, and media type each response declares
+- Streams Server-Sent Events for `text/event-stream` responses from the `ServerEvents` your method returns
 
 ## Key Features
 
@@ -176,7 +238,6 @@ The generated router automatically:
 | Doc Comments | Schema descriptions become rustdoc |
 | Enum Helpers | Ergonomic is_/as_ methods |
 | Enum Modes | Merge, preserve, or relaxed |
-| Event stream | Simple event stream capture if media-type is specified |
 | JSON/YAML Support | Auto-detects format from file extension |
 | OData Support | Optional @odata.* field handling |
 | OpenAPI 3.1 | Most common spec parsing support |
@@ -185,9 +246,10 @@ The generated router automatically:
 | Order Preserving | Mirrors OpenAPI declaration order in generated code |
 | Schema Composition | Handles allOf/oneOf/anyOf correctly |
 | Server Generation | Axum server trait scaffolding |
+| Server-Sent Events | `text/event-stream` responses stream on the client and the server |
 | Serde Integration | Automatic derive for serialization |
 | Smart Naming | Auto-detects camelCase/snake_case conventions |
-| Validation | Constraint attributes from spec |
+| Validation | Constraint attributes from spec, including `multipleOf` |
 | Builder Pattern | Optional `bon` integration for ergonomic struct construction |
 | Webhooks | Generates structs from Webhook components |
 
@@ -197,6 +259,7 @@ The generated router automatically:
 * OAS 3.2 Event-stream support
 * External schema references
 * HTTP schema references and fetching
+* Cookie parameters (`in: cookie`); the generator skips each one with a warning
 
 ### Command-Line Options
 

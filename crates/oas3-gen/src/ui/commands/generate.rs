@@ -390,6 +390,9 @@ impl<'a> GenerateLogger<'a> {
     if stats.webhooks_converted > 0 {
       self.stat("", format!("{} webhooks", stats.webhooks_converted));
     }
+    if stats.callbacks_converted > 0 {
+      self.stat("", format!("{} callbacks", stats.callbacks_converted));
+    }
   }
 
   fn print_client_stats(&self, stats: &GenerationStats) {

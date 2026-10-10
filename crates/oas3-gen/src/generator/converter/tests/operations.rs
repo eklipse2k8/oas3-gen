@@ -8,7 +8,7 @@ use crate::{
   generator::{
     ast::{
       ContentCategory, MultipartProperty, OperationKind, PartRfc6570, PartStyle, RustPrimitive, RustType,
-      StatusCodeToken, StructDef, StructToken,
+      StatusCodeToken, StructDef, StructKind, StructToken,
     },
     converter::{SchemaConverter, SerdeUsageRecorder, operations::OperationConverter},
     operation_registry::OperationEntry,
@@ -1070,6 +1070,40 @@ fn test_inline_multipart_body_reads_array_of_empty_items_as_files() -> anyhow::R
   assert!(
     body.multipart_properties["file"].raw_binary,
     "`items: {{}}` is raw binary"
+  );
+  Ok(())
+}
+
+#[test]
+fn cookie_parameters_become_a_cookie_group() -> anyhow::Result<()> {
+  let (converter, _usage) = setup_converter(BTreeMap::new());
+  let operation = serde_json::from_value::<Operation>(json!({
+    "parameters": [
+      { "name": "theme", "in": "cookie", "schema": { "type": "string" } },
+      { "name": "visits", "in": "cookie", "required": true, "schema": { "type": "integer" } },
+      { "name": "page", "in": "query", "schema": { "type": "integer" } }
+    ]
+  }))?;
+
+  let result = converter.convert(&make_entry("list_pets", Method::GET, "/pets", operation))?;
+
+  let field_names = |name: &str| {
+    extract_request_struct(&result.types, name)
+      .fields
+      .iter()
+      .map(|field| field.name.to_string())
+      .collect::<Vec<_>>()
+  };
+  assert_eq!(field_names("ListPetsRequest"), ["query", "cookie"]);
+  assert_eq!(field_names("ListPetsRequestCookie"), ["theme", "visits"]);
+  let cookie = extract_request_struct(&result.types, "ListPetsRequestCookie");
+  assert_eq!(cookie.kind, StructKind::CookieParams);
+  assert!(cookie.fields[0].rust_type.nullable, "an optional cookie is an `Option`");
+  assert!(!cookie.fields[1].rust_type.nullable, "a required cookie is not");
+  assert!(
+    result.operation_info.warnings.is_empty(),
+    "{:?}",
+    result.operation_info.warnings
   );
   Ok(())
 }

@@ -7,8 +7,8 @@ use oas3::spec::{Operation, SecurityRequirement, SecurityScheme};
 use super::{ConverterContext, GenerationTarget};
 use crate::generator::{
   ast::{
-    CredentialKind, CredentialScheme, Documentation, FieldNameToken, OperationInfo, OperationSecurity, RustType,
-    StructDef, StructKind, StructToken,
+    CredentialKind, CredentialScheme, Documentation, FieldNameToken, OperationInfo, OperationKind, OperationSecurity,
+    RustType, StructDef, StructKind, StructToken,
   },
   metrics::GenerationWarning,
   naming::{
@@ -73,15 +73,17 @@ impl SecurityConverter {
 
   /// Resolves the credentials `operation` accepts, or `None` when it accepts none.
   ///
-  /// Operation-level `security` replaces the top-level requirements. Schemes keep
-  /// their declaration order and requirements are sorted, so operations that list
-  /// the same alternatives in a different order share one credentials struct.
-  pub(crate) fn convert(&self, operation: &Operation) -> Option<OperationSecurity> {
+  /// Operation-level `security` replaces the top-level requirements, which only an
+  /// operation the API serves inherits: a callback is a request the API sends, so it
+  /// carries only its own requirements. Schemes keep their declaration order and
+  /// requirements are sorted, so operations that list the same alternatives in a
+  /// different order share one credentials struct.
+  pub(crate) fn convert(&self, operation: &Operation, kind: OperationKind) -> Option<OperationSecurity> {
     let mut schemes = vec![];
     let mut requirements = vec![];
     let mut unchecked = false;
 
-    for requirement in self.requirements(operation) {
+    for requirement in self.requirements(operation, kind) {
       let resolved = requirement.0.keys().map(|name| self.scheme(name)).collect::<Vec<_>>();
       if resolved.iter().all(Result::is_ok) {
         requirements.push(resolved.iter().flatten().map(|scheme| scheme.field.clone()).collect());
@@ -128,13 +130,13 @@ impl SecurityConverter {
   /// credentials for.
   pub(crate) fn unsupported_warnings<'a>(
     &self,
-    operations: impl IntoIterator<Item = &'a Operation>,
+    operations: impl IntoIterator<Item = (&'a Operation, OperationKind)>,
   ) -> Vec<GenerationWarning> {
     let mut reasons = IndexMap::<&str, &str>::new();
 
-    for operation in operations {
+    for (operation, kind) in operations {
       for name in self
-        .requirements(operation)
+        .requirements(operation, kind)
         .iter()
         .flat_map(|requirement| requirement.0.keys())
       {
@@ -162,8 +164,8 @@ impl SecurityConverter {
     }
   }
 
-  fn requirements<'a>(&'a self, operation: &'a Operation) -> &'a [SecurityRequirement] {
-    if operation.security.is_empty() {
+  fn requirements<'a>(&'a self, operation: &'a Operation, kind: OperationKind) -> &'a [SecurityRequirement] {
+    if operation.security.is_empty() && kind != OperationKind::Callback {
       &self.global
     } else {
       &operation.security

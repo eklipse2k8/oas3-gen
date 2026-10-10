@@ -197,7 +197,7 @@ fn test_response_handling_content_categories() {
       ..Default::default()
     }
     .build();
-    let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+    let method = ClientMethodFragment::new(operation.clone(), Visibility::Public, false)
       .generate()
       .unwrap()
       .to_string();
@@ -248,7 +248,7 @@ fn test_response_handling_with_response_response_enum() {
       ..Default::default()
     }
     .build();
-    let method = ClientMethodFragment::new(operation, Visibility::Public)
+    let method = ClientMethodFragment::new(operation, Visibility::Public, false)
       .generate()
       .unwrap()
       .to_string();
@@ -271,7 +271,7 @@ fn test_event_stream_response_handling() {
     ..Default::default()
   }
   .build();
-  let method = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+  let method = ClientMethodFragment::new(operation.clone(), Visibility::Public, false)
     .generate()
     .unwrap()
     .to_string();
@@ -532,7 +532,7 @@ fn test_multipart_method_generation_with_path_params() {
     .documentation(documentation)
     .build();
 
-  let generated = ClientMethodFragment::new(operation.clone(), Visibility::Public)
+  let generated = ClientMethodFragment::new(operation.clone(), Visibility::Public, false)
     .generate()
     .unwrap()
     .to_string();

@@ -508,6 +508,17 @@ impl ToTokens for MultipartDecodeFragment<'_> {
       )
     };
     let bad_request = bad_request();
+    let reject_other_bodies = self.body.optional.then(|| {
+      quote! {
+        if multipart.is_none() && headers.contains_key(axum::http::header::CONTENT_TYPE) {
+          return (
+            axum::http::StatusCode::BAD_REQUEST,
+            "Bad request: the body must be `multipart/form-data`",
+          )
+            .into_response();
+        }
+      }
+    });
 
     tokens.extend(quote! {
       #allow_similar_names
@@ -521,6 +532,7 @@ impl ToTokens for MultipartDecodeFragment<'_> {
         #(#assignments)*
         Ok(#result)
       }
+      #reject_other_bodies
       let body = match multipart_body(multipart).await {
         Ok(body) => body,
         Err(e) => return #bad_request,
@@ -609,13 +621,14 @@ fn server_arm(field: &MultipartFieldInfo) -> Option<(&str, TokenStream)> {
     MultipartPartKind::File { .. } => quote! { #local = Some(Vec::from(part.bytes().await?)); },
     MultipartPartKind::Styled { value, rfc6570, .. } if is_array && !rfc6570.explode => {
       let delimiter = rfc6570.style.delimiter();
+      let read_text = read_part_text();
       let decoded = decode(
         &field_part_type(field, *value),
         &PartText::borrowed(quote! { item }),
         Some(name),
       );
       quote! {
-        let text = part.text().await?;
+        let text = #read_text;
         if !text.is_empty() {
           for item in text.split(#delimiter) {
             #local.push(#decoded);
@@ -632,9 +645,10 @@ fn server_arm(field: &MultipartFieldInfo) -> Option<(&str, TokenStream)> {
         return None;
       }
       let delimiter = rfc6570.style.delimiter();
+      let read_text = read_part_text();
       let member = decode_member(members, &quote! { key }, &PartText::borrowed(quote! { member }), name);
       quote! {
-        let text = part.text().await?;
+        let text = #read_text;
         let mut tokens = text.split(#delimiter);
         while let (Some(key), Some(member)) = (tokens.next(), tokens.next()) {
           let member = #member;
@@ -780,6 +794,14 @@ fn server_assignment(field: &MultipartFieldInfo) -> Option<TokenStream> {
   Some(allow_deprecated(field, quote! { body.#ident = #value; }))
 }
 
+/// Reads the current `part` as UTF-8 text, exactly as sent.
+///
+/// The generated client labels every text part UTF-8. `Field::text` would also drop a
+/// leading byte order mark, changing a value that starts with U+FEFF.
+fn read_part_text() -> TokenStream {
+  quote! { String::from_utf8(Vec::from(part.bytes().await?))? }
+}
+
 /// Part text in the forms decoding needs: an owned `String`, and a `&str` to parse from.
 struct PartText {
   owned: TokenStream,
@@ -790,8 +812,11 @@ impl PartText {
   /// The text of the current `part`, read once.
   fn part() -> Self {
     Self {
-      owned: quote! { part.text().await? },
-      borrowed: quote! { &part.text().await? },
+      owned: read_part_text(),
+      borrowed: {
+        let read_text = read_part_text();
+        quote! { &#read_text }
+      },
     }
   }
 
@@ -813,12 +838,13 @@ fn decode_part(part_type: &PartType, part_name: Option<&str>) -> TokenStream {
   }
   let parsed = parse_json(&quote! { &text }, part_name);
   let probed = string_or_json(&part_type.rust_type);
+  let read_text = read_part_text();
   quote! {
     {
       let is_json = part
         .content_type()
         .is_some_and(|content_type| content_type.contains("json"));
-      let text = part.text().await?;
+      let text = #read_text;
       if is_json { #parsed } else #probed
     }
   }

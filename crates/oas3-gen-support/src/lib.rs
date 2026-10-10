@@ -1,5 +1,7 @@
 #[cfg(feature = "eventsource")]
 mod event_stream;
+mod server_events;
+mod validation;
 pub use better_default::Default;
 pub use bon::bon;
 #[cfg(feature = "eventsource")]
@@ -11,6 +13,8 @@ use serde_with::{
   StringWithSeparator,
   formats::{CommaSeparator, Separator, SpaceSeparator},
 };
+pub use server_events::{ServerEvents, ServerEventsMap};
+pub use validation::{multiple_of, multiple_of_ratio};
 
 /// Pipe separator for `OpenAPI` pipeDelimited style
 pub struct PipeSeparator;

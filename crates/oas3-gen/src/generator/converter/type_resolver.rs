@@ -606,15 +606,9 @@ impl TypeResolver {
   /// For patterns like `oneOf: [{ oneOf: [...] }, null]`, promotes the inner union's variants to the outer level.
   /// Returns `None` if the schema is not a nested union pattern.
   pub(crate) fn try_flatten_nested_union(&self, outer: &ObjectSchema) -> Result<Option<FlattenedUnion>> {
-    let Some(variant) = outer.single_non_null_variant(self.spec()) else {
+    let Some(inner) = self.inline_non_null_variant(outer)? else {
       return Ok(None);
     };
-
-    if variant.schema_ref_name().is_some() {
-      return Ok(None);
-    }
-
-    let inner = self.resolve(variant)?;
 
     if inner.has_union() {
       let Some(variants) = inner.union_variants_with_kind() else {
@@ -631,20 +625,36 @@ impl TypeResolver {
       ));
     }
 
-    if let Some(items) = inner.inline_array_items(self.spec())
-      && items.has_union()
-      && let Some(variants) = items.union_variants_with_kind()
-    {
-      Ok(Some(
-        FlattenedUnion::builder()
-          .variants(variants.to_owned())
-          .maybe_description(outer.description.clone().or_else(|| items.description.clone()))
-          .maybe_discriminator(items.discriminator.clone())
-          .is_one_of(!items.one_of.is_empty())
-          .build(),
-      ))
-    } else {
-      Ok(None)
+    Ok(None)
+  }
+
+  /// Returns the inline array a `oneOf` or `anyOf` pairs with `null`, carrying the
+  /// outer description, or `None` for any other union.
+  ///
+  /// Such a schema converts like the array itself; the fields that use it carry
+  /// the nullability.
+  pub(crate) fn nullable_inline_array(&self, outer: &ObjectSchema) -> Result<Option<ObjectSchema>> {
+    let Some(inner) = self.inline_non_null_variant(outer)? else {
+      return Ok(None);
+    };
+
+    Ok(inner.is_array().then(|| ObjectSchema {
+      description: outer.description.clone().or_else(|| inner.description.clone()),
+      ..inner
+    }))
+  }
+
+  /// Resolves the one inline branch a `oneOf` or `anyOf` pairs with `null`, or returns
+  /// `None` when the union has several other branches or its one branch is a `$ref`.
+  fn inline_non_null_variant(&self, outer: &ObjectSchema) -> Result<Option<ObjectSchema>> {
+    let Some(variant) = outer.single_non_null_variant(self.spec()) else {
+      return Ok(None);
+    };
+
+    if variant.schema_ref_name().is_some() {
+      return Ok(None);
     }
+
+    self.resolve(variant).map(Some)
   }
 }

@@ -74,7 +74,7 @@ impl OperationsProcessor {
     let mut warnings = self
       .converter
       .security
-      .unsupported_warnings(entries.iter().map(|entry| entry.operation.as_ref()));
+      .unsupported_warnings(entries.iter().map(|entry| (entry.operation.as_ref(), entry.kind)));
     let mut unique_headers = IndexSet::new();
 
     for entry in entries {
@@ -167,7 +167,7 @@ impl OperationConverter {
     let response_variants = self
       .response_converter
       .build_variants(&entry.operation, &entry.path, &base_name)?;
-    let security = self.security.convert(&entry.operation);
+    let security = self.security.convert(&entry.operation, entry.kind);
     let credentials_type = security
       .as_ref()
       .filter(|_| self.context.config().target == GenerationTarget::Server)
@@ -294,6 +294,7 @@ impl OperationConverter {
             .path(&entry.path)
             .call(),
         )
+        .deprecated(entry.operation.deprecated.unwrap_or(false))
         .build(),
     )
   }

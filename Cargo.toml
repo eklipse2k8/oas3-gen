@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = [
+  "crates/*",
+  "crates/oas3-gen/fixtures/petstore-client",
+  "crates/oas3-gen/fixtures/petstore-server",
+]
 
 [workspace.package]
 version = "0.29.0"
@@ -71,13 +75,16 @@ percent-encoding = { version = "2.3" }
 petgraph = { version = "0.8" }
 prettyplease = { version = "0.3" }
 proc-macro2 = { version = "1.0" }
+proptest = { version = "1.11" }
 quick-xml = { version = ">=0.38", default-features = false }
 quote = { version = "1.0" }
 regex = { version = "1.13" }
 reqwest = { version = "0.13", default-features = false }
 reqwest_cookie_store = { version = "0.10" }
+rstest = { version = "0.27" }
 secrecy = { version = "0.10" }
 serde = { version = "1.0", features = ["derive"] }
+serde_html_form = { version = "0.4", default-features = false, features = ["ser", "std"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = { version = "0.1" }
 serde_with = { version = "3.24", features = ["base64", "chrono"] }
@@ -87,7 +94,10 @@ syn = { version = "3.0", features = ["full", "parsing"] }
 tempfile = { version = "3.27" }
 thiserror = { version = "2.0" }
 tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "fs", "io-std", "io-util", "macros", "process"] }
-toml = { version = "1.1", default-features = false, features = ["display", "serde"] }
-uuid = { version = "1.26", features = ["serde"] }
+toml = { version = "1.1.8+spec-1.1.0", default-features = false, features = ["display", "serde"] }
+uuid = { version = "1.28", features = ["serde"] }
 yaml_serde = { version = "0.10" }
 validator = { version = "0.21" }
+
+[patch.crates-io]
+oas3-gen-support = { path = "crates/oas3-gen-support" }

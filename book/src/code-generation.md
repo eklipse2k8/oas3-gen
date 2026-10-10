@@ -15,8 +15,13 @@ here when an option applies to both targets.
 The commands use `cargo run --` from a checkout of this repository. If you
 installed the tool with Cargo, replace `cargo run --` with `oas3-gen`. Input
 names such as `spec.json` and `petstore.json` refer to OpenAPI documents in your
-current directory; substitute the path to your own document. You can find the
-petstore example in `crates/oas3-gen/fixtures/petstore.json`.
+current directory; substitute the path to your own document.
+
+Unless a section says otherwise, the examples come from
+`crates/oas3-gen/fixtures/petstore.json`. It describes a hypothetical pet store
+and uses every OpenAPI feature the generator supports at least once. When a
+section names an operation, such as `listPets`, or a schema, such as `Pet`,
+you'll find it in that document.
 
 The Rust examples are excerpts that focus on the option being discussed. They
 omit imports, unrelated attributes, and some definitions. An ellipsis marks
@@ -25,18 +30,22 @@ omitted code, so those excerpts aren't complete programs.
 ## Table of Contents
 
 - [Generation Modes](#generation-modes)
+- [Operations and Parameters](#operations-and-parameters)
 - [Responses](#responses)
 - [Multipart Form Bodies](#multipart-form-bodies)
 - [Security Schemes](#security-schemes)
 - [Workspace Crate Output](#workspace-crate-output)
 - [Generated Names](#generated-names)
+- [Field Validation](#field-validation)
 - [Visibility](#visibility)
 - [Enum Mode](#enum-mode)
 - [Enum Layout](#enum-layout)
 - [Numeric-Backed Enums](#numeric-backed-enums)
 - [Boolean and Mixed-Type Enums](#boolean-and-mixed-type-enums)
+- [Discriminated Unions](#discriminated-unions)
 - [Constant Unions](#constant-unions)
 - [Non-Exhaustive Enums](#non-exhaustive-enums)
+- [Field Defaults](#field-defaults)
 - [Constant Properties](#constant-properties)
 - [Helper Methods](#helper-methods)
 - [OData Support](#odata-support)
@@ -49,6 +58,7 @@ omitted code, so those excerpts aren't complete programs.
 - [Builder Generation](#builder-generation)
 - [Ordering and Collections](#ordering-and-collections)
 - [Documentation Formatting](#documentation-formatting)
+- [Known Limitations](#known-limitations)
 - [Flag Summary](#flag-summary)
 
 ## Generation Modes
@@ -63,24 +73,50 @@ cargo run -- generate <MODE> -i spec.json -o <OUTPUT>
 
 ### `types`
 
-The `types` mode writes type definitions to a single file. For example, a
-schema describing pets and their status might produce these types in `types.rs`:
+The `types` mode writes type definitions to a single file. Let's generate the
+petstore's types:
+
+```bash
+cargo run -- generate types -i petstore.json -o types.rs
+```
+
+Among others, `types.rs` now contains the `PetStatus` enum and the `Pet`
+struct:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pet {
-    pub id: i64,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Status {
+/// Where the pet is in the adoption process
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum PetStatus {
     #[serde(rename = "available")]
+    #[default]
     Available,
     #[serde(rename = "pending")]
     Pending,
+    #[serde(rename = "adopted")]
+    Adopted,
+}
+
+/// A pet in the store's care.
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+pub struct Pet {
+    /// Server-assigned identifier
+    pub id: uuid::Uuid,
+    pub name: String,
+    /// Kinds of pets the store cares for
+    pub species: Species,
+    /// Where the pet is in the adoption process
+    pub status: Option<PetStatus>,
+    /* ... */
 }
 ```
+
+The required properties `id`, `name`, and `species` become plain fields, and
+an optional property such as `status` becomes an [`Option`][rustdoc-option].
+The derives follow how the API uses each type. `Pet` appears only in
+responses, so it derives [`Deserialize`][rustdoc-serde-deserialize] but not
+[`Serialize`][rustdoc-serde-serialize]. `NewPet`, which the API only accepts,
+derives `Serialize` and [`Validate`][rustdoc-validate] instead. Server output
+reverses those directions.
 
 ### `client`
 
@@ -98,6 +134,141 @@ See [Client Generation](./client-generation.md) for how to generate and use it.
 The `server-mod` mode writes `types.rs`, `server.rs`, and `mod.rs` to a directory.
 See [Server Generation](./server-generation.md) for how to implement the trait
 and use the generated Axum router.
+
+## Operations and Parameters
+
+Each operation under `paths` becomes a client method, a server trait method,
+and a server route, named after its `operationId` in `snake_case`. The
+operation's parameters and request body travel together in a request struct
+named after it. For example, `showPetById` becomes `show_pet_by_id()`, which
+takes a `ShowPetByIdRequest` whose `path` and `header` fields hold its path and
+header parameters.
+
+Only server output includes the operations under `webhooks`. The petstore's
+`petAdopted` webhook becomes the trait method `pet_adopted()` and the route
+`/webhooks/petAdopted`. The client doesn't get a method for it.
+
+This section covers shared Path Items, query arrays, cookie parameters, and
+deprecation.
+
+### Path Item References
+
+OpenAPI 3.1 lets an entry in `paths` or `webhooks` reference a reusable Path
+Item in `components.pathItems` instead of declaring its operations in place.
+The petstore declares the vaccination endpoints this way:
+
+```json
+"/pets/{petId}/vaccinations": { "$ref": "#/components/pathItems/PetVaccinations" }
+```
+
+The `PetVaccinations` component declares the `petId` parameter, a `get`
+operation named `listVaccinations`, and a `post` operation named
+`recordVaccination`. The generator follows the reference and generates those
+operations as though they were written under `paths`. The client gets
+`list_vaccinations()` and `record_vaccination()` methods, and the server gets
+both trait methods and their route. The `inventoryLow` webhook references the
+`InventoryLowWebhook` component in the same way and becomes the server's
+`inventory_low()` method.
+
+A Path Item component can itself reference another component. The generator
+follows the chain, and fields written next to a `$ref`, such as a `summary`,
+take precedence over the fields of the component it names. Only references to
+`#/components/pathItems/` in the same document are followed. An entry that
+names a missing component, or a chain that loops back on itself, generates no
+operations.
+
+### Query Parameters
+
+OpenAPI's default serialization for query parameters is the `form` style with
+`explode: true`. For an array, that means one `name=value` pair per item, with
+the name repeated. The petstore's `searchPets` operation declares its `tags`
+filter without a `style`, so it uses that default:
+
+```json
+{
+  "name": "tags",
+  "in": "query",
+  "description": "Pets carrying any of these tags, one `tags=` pair per tag",
+  "schema": { "type": "array", "items": { "type": "string" } }
+}
+```
+
+The generated query struct holds the array as a [`Vec`][rustdoc-vec]:
+
+```rust
+pub struct SearchPetsRequestQuery {
+    /* ... */
+    /// Pets carrying any of these tags, one `tags=` pair per tag
+    pub tags: Option<Vec<String>>,
+    /// Pets in any of these statuses, one `statuses=` pair per status
+    pub statuses: Option<Vec<PetStatus>>,
+    /* ... */
+}
+```
+
+When `tags` holds `calm` and `shy`, the query carries `tags=calm&tags=shy`.
+[Query Arrays](./client-generation.md#query-arrays) shows how the client sends
+these values, and [Connecting the Router](./server-generation.md#connecting-the-router)
+shows how the server reads them.
+
+With `explode: false`, the items share a single pair. They're joined by a
+comma for `form`, a space for `spaceDelimited`, or `|` for `pipeDelimited`,
+and the generator adds a `serde_with` adapter that joins and splits them. The
+petstore's `listPets` declares its `tags` filter with `style: form` and
+`explode: false`:
+
+```rust
+pub struct ListPetsRequestQuery {
+    /* ... */
+    /// Only return pets that carry every listed tag
+    #[serde_as(as = "Option<oas3_gen_support::StringWithCommaSeparator>")]
+    pub tags: Option<Vec<String>>,
+}
+```
+
+The same two tags now travel as one `tags` pair whose value is `calm,shy`. A
+tag that contains a comma arrives as two tags.
+
+### Cookie Parameters
+
+A parameter declared with `in: cookie` travels in the `Cookie` header. The
+request struct holds an operation's cookie parameters in a nested struct in its
+`cookie` field. The petstore's `getPetCard` operation declares two optional
+cookies, `cardTheme` and `recentlyViewed`. This excerpt omits the structs'
+attributes:
+
+```rust
+pub struct GetPetCardRequest {
+    pub path: GetPetCardRequestPath,
+    pub cookie: GetPetCardRequestCookie,
+}
+
+pub struct GetPetCardRequestCookie {
+    /// The visitor's preferred card theme
+    pub card_theme: Option<GetPetCardRequestCookieCardTheme>,
+    /// Pets the visitor viewed recently, most recent first
+    pub recently_viewed: Option<Vec<uuid::Uuid>>,
+}
+```
+
+Cookie parameters use OpenAPI's `form` style. An array's items are joined with
+commas into one value, and each `name=value` pair is percent-encoded with the
+[`cookie`][rustdoc-cookie] crate. [Cookie Parameters](./client-generation.md#cookie-parameters)
+shows how the client sends them, and
+[Receiving Cookie Parameters](./server-generation.md#receiving-cookie-parameters)
+shows how the server reads them.
+
+A cookie that carries a credential belongs in an `apiKey` security scheme with
+`in: cookie`, as the petstore's `SessionCookie` does. See
+[Security Schemes](#security-schemes).
+
+### Deprecated Operations
+
+An operation marked `deprecated: true` is still generated. Its client method
+carries the [`#[deprecated]`][reference-deprecated] attribute, as
+[Deprecated Operations](./client-generation.md#deprecated-operations) shows. A
+deprecated schema property, such as the `tag` property of `Pet`, gets
+`#[deprecated]` on its field in both outputs.
 
 ## Responses
 
@@ -132,11 +303,13 @@ determine each parameter as follows:
 | None | [`()`][rustdoc-unit] |
 | One type | That type |
 | One type plus a status that carries a payload but no body | [`Option<Type>`][rustdoc-option] |
-| Several types | An untagged payload union such as `BasicErrorOrValidationError` |
+| Several types | An untagged payload union such as `ErrorOrProblem` |
 | Several types plus a status that carries a payload but no body | `Option<Union>` |
 
-A payload union is an enum that can hold one of several body types. Operations
-that declare the same set of body types share that union definition. If no
+A payload union is an enum that can hold one of several body types. For
+example, `showPetById` answers `404` with a `Problem` and its `4XX` and
+`default` responses with an `Error`, so its `Failure` is `ErrorOrProblem`.
+Operations that declare the same set of body types share that union definition. If no
 status uses one of the response enum's type parameters, the generator omits
 that parameter. If a schema already uses the name `ApiResponse`, the generator
 names the response enum `ApiResponseType`.
@@ -171,7 +344,7 @@ return an error.
 
 Operations with the same header fields share a header struct. The generator
 names that struct after its headers, as in `XNextHeaders` or
-`LinkAndLocationHeaders`, and adds a numeric suffix if the name is already in
+`ETagAndXCacheHeaders`, and adds a numeric suffix if the name is already in
 use. A status without a body can still carry headers: its variant then holds
 a `WithHeaders` value whose body is [`()`][rustdoc-unit] or an [`Option`][rustdoc-option].
 
@@ -180,34 +353,97 @@ A header without a schema uses [`String`][rustdoc-string]. Enums used in headers
 [`FromStr`][rustdoc-from-str] for both client and server output, and response headers receive name
 constants in the same way as request headers.
 
-For example, the petstore response enum and pagination headers include these
-definitions:
+For example, generating the whole petstore produces this response enum and,
+for the pagination headers of `listPets`, this header struct:
 
 ```rust
-/// Response shared by every operation.
+/// Response enum shared by every operation.
+///
+/// `Value` is the operation's success body type and `Failure` its error body type.
+/// A status code is a unit variant when no operation gives it a body.
 #[derive(Debug, Clone)]
 pub enum ApiResponse<Value, Failure> {
-    /// 200
+    ///200
     Ok(Value),
-    /// 201
+    ///201
     Created(Value),
-    /// default
+    ///202
+    Accepted(Value),
+    ///204
+    NoContent(Value),
+    ///304
+    NotModified,
+    ///400
+    BadRequest(Failure),
+    ///401
+    Unauthorized(Failure),
+    ///404
+    NotFound(Failure),
+    ///409
+    Conflict(Failure),
+    ///422
+    UnprocessableEntity(Failure),
+    ///4XX
+    ClientError(http::StatusCode, Failure),
+    ///default
     Unknown(http::StatusCode, Failure),
+    ///Status code the operation does not declare; carries the raw body.
+    Other(http::StatusCode, Vec<u8>),
 }
 
 /// Response headers that share one status class in an operation.
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
-pub struct XNextHeaders {
-    /// A link to the next page of responses.
+pub struct XNextAndXTotalCountAndXRequestIdHeaders {
+    /// A link to the next page of results
     pub x_next: Option<String>,
+    /// Number of pets that match the filters
+    pub x_total_count: Option<i64>,
+    /// Echo of the request's correlation identifier
+    pub x_request_id: Option<uuid::Uuid>,
 }
 ```
 
-An operation returning pets with pagination headers uses
-`ApiResponse<WithHeaders<XNextHeaders, Pets>, Error>`. The client decodes that
-value from an HTTP response, and the server constructs it to send a response.
-See [Reading Responses](./client-generation.md#reading-responses) and
+A status is a unit variant only when no operation declares a body or headers
+for it. No petstore operation returns a `204` body, but `describePets`
+declares an `Allow` header on its `204` response, so `NoContent` carries a
+`Value`. `NotModified` has neither, so it's a unit variant.
+
+The `listPets` operation returns
+`ApiResponse<WithHeaders<XNextAndXTotalCountAndXRequestIdHeaders, Pets>, Error>`.
+The client decodes that value from an HTTP response, and the server constructs
+it to send a response. See [Reading Responses](./client-generation.md#reading-responses) and
 [Returning Responses](./server-generation.md#returning-responses) for examples.
+
+### Response Media Types
+
+Each status declares its body under a media type, and that media type decides
+the body's Rust type:
+
+| Media type | Body type |
+|---|---|
+| JSON, including `+json` types such as `application/problem+json` | The type generated from the schema |
+| `text/*`, such as `text/plain` | [`String`][rustdoc-string] |
+| A binary type, such as `image/png` or `application/octet-stream` | [`Vec<u8>`][rustdoc-vec] |
+| `text/event-stream` | A stream of events, described below |
+
+For example, `getPetCard` returns its kennel card as `text/plain`, so it
+returns `ApiResponse<String, Problem>`. `getPetPhoto` returns `image/png` and
+produces `ApiResponse<Vec<u8>, Problem>`. Both declare their `404` body as
+`application/problem+json`, which decodes into the `Problem` struct.
+
+[Reading Responses](./client-generation.md#reading-responses) shows how the
+client decodes these bodies, and
+[Returning Responses](./server-generation.md#returning-responses) shows how the
+server sends them.
+
+A `text/event-stream` response delivers Server-Sent Events. The client reads
+it as `oas3_gen_support::EventStream<T>` and the server returns
+`oas3_gen_support::ServerEvents<T>`, where `T` is the type of one event. The
+petstore's `streamPetVitals` operation streams `VitalsReading` values this way.
+See [Reading Server-Sent Events](./client-generation.md#reading-server-sent-events)
+for the client side and
+[Streaming Server-Sent Events](./server-generation.md#streaming-server-sent-events)
+for the server side.
 
 ## Multipart Form Bodies
 
@@ -218,26 +454,33 @@ property, and the generated server reads those parts back into the struct.
 This section explains which part each property becomes, so you can predict
 what a server receives.
 
-Let's start with a body that uploads a file next to a few text fields. This is
-the `UploadForm` schema from `crates/oas3-gen/fixtures/multipart.json`, trimmed
-to four of its properties:
+Let's start with a body that uploads files next to a few text fields. The
+petstore's `submitIntakeForm` operation sends the `IntakeForm` schema as
+`multipart/form-data`. Here it is, trimmed to four of its properties and the
+requirements on them:
 
 ```json
-"UploadForm": {
+"IntakeForm": {
   "type": "object",
+  "description": "A shelter intake form",
   "required": ["name", "attachments"],
   "properties": {
     "name": { "type": "string" },
-    "file": { "anyOf": [{ "type": "string", "format": "binary" }, { "type": "null" }] },
+    "file": {
+      "anyOf": [{ "type": "string", "format": "binary" }, { "type": "null" }],
+      "description": "The previous owner's records"
+    },
     "attachments": { "type": "array", "items": { "type": "string", "format": "binary" } },
-    "quality": { "$ref": "#/components/schemas/Quality" }
+    "quality": { "$ref": "#/components/schemas/CoatQuality" }
   }
 }
 ```
 
 The generator produces a struct with `name: String`, `file: Option<Vec<u8>>`,
-`attachments: Vec<Vec<u8>>`, and `quality: Option<Quality>`. The rest of this
-section describes the parts those fields become. See
+`attachments: Vec<Vec<u8>>`, and `quality: Option<CoatQuality>`. The full
+schema also has base64 text, numbers, dates, nested objects, and maps, and the
+operation's `encoding` map changes how several of them are sent. The rest of
+this section describes the parts those fields become. See
 [Sending Multipart Bodies](./client-generation.md#sending-multipart-bodies) and
 [Receiving Multipart Bodies](./server-generation.md#receiving-multipart-bodies)
 for the code that writes and reads them.
@@ -262,7 +505,10 @@ the media type has no `encoding` entry for it:
 
 An untyped property is generated as [`Vec<u8>`][rustdoc-vec] in a multipart body,
 and `items: {}` produces `Vec<Vec<u8>>`. That's how you upload any number of
-files under one name, as in the specification's own example. The generator
+files under one name, as in the specification's own example. The petstore's
+`uploadMedia` operation uses both forms: its untyped `cover` property becomes
+`Option<Vec<u8>>`, and its `file` property, an array with `items: {}`, becomes
+`Option<Vec<Vec<u8>>>`. The generator
 makes this change only when the schema is used just as a multipart body. If
 the same schema is also a JSON response or another schema's property, the field
 stays [`serde_json::Value`][rustdoc-serde-json-value], so its JSON form doesn't
@@ -282,6 +528,8 @@ A media type's `encoding` map adjusts individual properties. Its
   when it labels every file with the first type of a list.
 - A wildcard such as `image/*` describes a range rather than a type a client
   can send, so the generator skips it, falls back to the default, and warns.
+  `IntakeForm` labels its `thumbnail` file this way, so the file is sent as
+  `application/octet-stream`.
 - A JSON media type serializes the value as JSON. A string property with
   `contentType: application/json` is therefore sent as `"hello"`, quotes
   included.
@@ -304,6 +552,10 @@ and map properties:
 | Object | `style: deepObject` | One part per member, named `property[member]` |
 | Object | `style: form`, `explode: true` | One part per member, named by the member |
 | Object | `style: form`, `explode: false` | One part of alternating names and values, such as `min,1,max,5` |
+
+`IntakeForm` uses several of these rows. Its `ids` array is `pipeDelimited`
+with `explode: false`, `filter` uses `deepObject`, `range` uses `form` with
+`explode: false`, and `extras` uses `form` with `explode: true`.
 
 This serialization has no way to escape its delimiters. An item that contains
 the delimiter, such as `a,b` in a comma-joined array, arrives as two items. A
@@ -341,15 +593,20 @@ request. A *security requirement* in `security` names the schemes an operation
 accepts. The generator supports `apiKey` schemes in headers, query parameters,
 and cookies, and `http` schemes that use bearer tokens.
 
-Let's start with a header key. This excerpt from an OpenAPI document declares
-a scheme named `ApiKeyAuth` and uses it as the default requirement:
+Let's start with a header key. This excerpt from the petstore declares a scheme
+named `ApiKeyAuth` and uses it as the default requirement:
 
 ```json
 {
   "security": [{ "ApiKeyAuth": [] }],
   "components": {
     "securitySchemes": {
-      "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "Key issued in the Petstore partner dashboard."
+      }
     }
   }
 }
@@ -361,13 +618,13 @@ inherit the top-level `security` unless they declare their own requirements.
 
 A bearer scheme is an `http` scheme whose `scheme` value is `bearer`. It has no
 `name`, because the token always travels in the `Authorization` header as
-`Bearer <token>`:
+`Bearer <token>`. The petstore declares one named `BearerAuth`:
 
 ```json
 {
   "components": {
     "securitySchemes": {
-      "BearerAuth": { "type": "http", "scheme": "bearer" }
+      "BearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
     }
   }
 }
@@ -383,19 +640,21 @@ explains.
 
 The entries in the `security` array are alternatives: a request needs to
 satisfy one entry. Within an entry, all the named schemes are required. These
-examples show how the grouping changes the requirement:
+petstore operations, most of them under `/staff/keys`, show how the grouping
+changes the requirement:
 
-| Operation's `security` | Requirement |
-|---|---|
-| `[{"ApiKeyAuth": []}]` | Supply the header key. |
-| `[{"QueryKey": []}, {"SessionCookie": []}]` | Supply a query key or a session cookie. |
-| `[{"ApiKeyAuth": [], "SessionCookie": []}]` | Supply both the header key and the session cookie. |
-| `[{"BearerAuth": []}, {"ApiKeyAuth": []}]` | Supply a bearer token or the header key. |
-| `[]` or `[{}]` | Allow anonymous access, replacing any top-level requirement. |
+| Operation's `security` | Requirement | Petstore operation |
+|---|---|---|
+| `[{"ApiKeyAuth": []}]`, inherited from the top level | Supply the header key. | `listApiKeys` |
+| `[{"QueryKey": []}, {"SessionCookie": []}]` | Supply a query key or a session cookie. | `createApiKey` |
+| `[{"ApiKeyAuth": [], "SessionCookie": []}]` | Supply both the header key and the session cookie. | `getApiKey` |
+| `[{"BearerAuth": []}, {"ApiKeyAuth": []}]` | Supply a bearer token or the header key. | `revokeApiKey` |
+| `[{}, {"ApiKeyAuth": []}]` | Allow anonymous access, or accept the header key. | `listPets` |
+| `[]` or `[{}]` | Allow anonymous access, replacing any top-level requirement. | `getHealth` |
 
-The middle examples assume `QueryKey` and `SessionCookie` are also declared as
-`apiKey` schemes, and that `BearerAuth` is the bearer scheme shown earlier. The
-complete example is in `crates/oas3-gen/fixtures/api_key_security.json`.
+`QueryKey` is an `apiKey` scheme read from the `api_key` query parameter, and
+`SessionCookie` is one read from the `session` cookie. `BearerAuth` is the
+bearer scheme shown earlier.
 
 The server represents a credential as required when every alternative needs
 it. Otherwise, the field is optional, and the extractor checks that the
@@ -409,32 +668,28 @@ scheme it can't handle. If an operation has an alternative containing one of
 these schemes, all its credential fields become optional, including those in
 that same alternative. The generated extractor can't enforce the full
 requirement, so your application must handle authorization for that operation.
+In the petstore, `replaceApiKey` accepts `BasicAuth` or `ApiKeyAuth`, and
+`adoptPet` accepts OAuth 2.0, OpenID Connect, or `ApiKeyAuth`. Both operations
+receive the header key as an optional field.
 
 ### Keeping Keys Out of Logs
 
 The server stores API keys and bearer tokens as
-[`secrecy::SecretString`][rustdoc-secret-string].
-The client uses the same type for header keys, query keys, and bearer tokens. Its debug representation
-shows `[REDACTED]` in place of the value, and it clears its own stored value when
-dropped. It doesn't implement [`Display`][rustdoc-display], [`Serialize`][rustdoc-serde-serialize], or [`PartialEq`][rustdoc-partial-eq].
+[`secrecy::SecretString`][rustdoc-secret-string], and the client uses the same
+type for header keys, query keys, and bearer tokens. Its debug representation
+shows `[REDACTED]` in place of the value, and it clears its own stored value
+when dropped. It doesn't implement [`Display`][rustdoc-display],
+[`Serialize`][rustdoc-serde-serialize], or [`PartialEq`][rustdoc-partial-eq].
 
-Client cookie keys live in a cookie store instead. The generated client's
-[`Debug`][rustdoc-debug] implementation leaves that store out. To read a `SecretString`, call
-`expose_secret()` with [`secrecy::ExposeSecret`][rustdoc-expose-secret] in scope; the
+To read a `SecretString`, call `expose_secret()` with
+[`secrecy::ExposeSecret`][rustdoc-expose-secret] in scope; the
 [server example](./server-generation.md#reading-and-checking-keys) shows how.
 Once exposed, the returned string is ordinary text, so keep it out of log output.
 
-### Client
-
-The client provides methods to set header, query, and cookie keys and bearer
-tokens. See [Sending Credentials](./client-generation.md#sending-credentials) for examples and
-[Cookie Keys](./client-generation.md#cookie-keys) for the cookie store's behavior.
-
-### Server
-
-Server request structs carry credentials extracted from the incoming request.
-See [Receiving Credentials](./server-generation.md#receiving-credentials) for the
-generated types, rejection behavior, and checks to perform in your service.
+[Sending Credentials](./client-generation.md#sending-credentials) shows how the
+client stores and sends each scheme, and
+[Receiving Credentials](./server-generation.md#receiving-credentials) shows the
+server's credential types and rejections.
 
 ## Workspace Crate Output
 
@@ -474,8 +729,8 @@ The package takes its name from the final component of the output directory, so
 `-o petstore-api` produces `name = "petstore-api"` and a `petstore_api` library
 target. Names are transliterated to ASCII and converted to kebab-case:
 `-o "output/Pet Store"` yields `pet-store`, `-o café-api` yields `cafe-api`, and
-`-o event_stream` yields `event-stream`. The library target of `event-stream` is
-still `event_stream`, because Cargo maps dashes to underscores.
+`-o petstore_v2` yields `petstore-v2`. The library target of `petstore-v2` is
+still `petstore_v2`, because Cargo maps dashes to underscores.
 
 Generation fails when no valid name can be derived, for example when the
 directory name is empty after sanitization or starts with a digit.
@@ -483,8 +738,8 @@ directory name is empty after sanitization or starts with a digit.
 ### Generated Manifest
 
 The manifest declares the package and the dependencies its generated code
-uses. This example shows a client with builders enabled; the dependency list
-for your API may differ:
+uses. The command above writes this manifest for the petstore client, shown
+here without its banner; the dependency list for your API may differ:
 
 ```toml
 [package]
@@ -492,20 +747,34 @@ name = "petstore-api"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.89"
-description = "Rust client generated from the Swagger Petstore OpenAPI document"
+description = "Rust client generated from the Petstore OpenAPI document"
 
 [dependencies]
 anyhow = "1.0"
-bon = { version = "3.10", features = ["implied-bounds"] }
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock", "serde"] }
 http = "1.5"
 indexmap = { version = "2.14", features = ["serde"] }
 oas3-gen-support = "0.29.0"
-reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "http2", "native-tls", "query", "stream"] }
+regex = "1.13"
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "http2", "native-tls", "query", "stream"] }
+reqwest_cookie_store = "0.10"
+secrecy = "0.10"
 serde = { version = "1.0", features = ["derive"] }
+serde_html_form = { version = "0.4", default-features = false, features = ["ser", "std"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_with = { version = "3.24", features = ["base64", "chrono"] }
-validator = { version = "0.21", features = ["derive"] }
+uuid = { version = "1.26", features = ["serde"] }
+validator = { version = "0.21", features = ["derive", "indexmap"] }
+```
+
+The description comes from the document's `info.title`, `Petstore`. Adding
+`--enable-builders` adds a `bon` entry. Generating the petstore server with
+`server-mod` instead leaves out `reqwest`, `reqwest_cookie_store`, and
+`serde_html_form`, and adds the Axum crates:
+
+```toml
+axum = { version = "0.8.5", features = ["multipart"] }
+axum-extra = { version = "0.12", features = ["cookie", "query"] }
 ```
 
 The generator rewrites `Cargo.toml` on every run and adds a banner identifying
@@ -538,17 +807,18 @@ table describes the dependencies you may see:
 |-------|----------------------------------|
 | `anyhow` | returns [`anyhow::Result`][rustdoc-anyhow-result] from client or server methods |
 | `axum` | defines a `server-mod` router and extractors, with the `multipart` feature |
-| `axum-extra` | reads cookie API keys on the server, with the `cookie` feature |
+| `axum-extra` | reads query parameters or cookie API keys on the server, with the `cookie` and `query` features |
 | `bon` | derives builders (`--enable-builders`) |
 | `chrono` | maps `date`, `date-time`, or `time` formats |
 | `http` | emits header constants or [`HeaderMap`][rustdoc-http-header-map] conversions |
 | `indexmap` | emits [`IndexMap`][rustdoc-indexmap-map]/[`IndexSet`][rustdoc-indexmap-set] collection types |
-| `oas3-gen-support` | uses runtime derives, diagnostics, or event streams |
+| `oas3-gen-support` | uses runtime derives, diagnostics, `multipleOf` checks, or event streams |
 | `regex` | emits `pattern` validation constants |
-| `reqwest` | performs `client-mod` HTTP calls |
-| `reqwest_cookie_store` | sends cookie API keys from the client |
+| `reqwest` | performs `client-mod` HTTP calls; the `form` feature sends `application/x-www-form-urlencoded` bodies |
+| `reqwest_cookie_store` | sends cookie API keys or encodes cookie parameters from the client |
 | `secrecy` | stores API keys and bearer tokens |
 | `serde` | derives [`Serialize`][rustdoc-serde-serialize]/[`Deserialize`][rustdoc-serde-deserialize] |
+| `serde_html_form` | serializes query parameters on the client, with only its `ser` and `std` features |
 | `serde_json` | handles freeform [`serde_json::Value`][rustdoc-serde-json-value] payloads |
 | `serde_with` | applies `serde_as` conversions |
 | `uuid` | maps the `uuid` format |
@@ -557,6 +827,9 @@ table describes the dependencies you may see:
 `serde_json` gains the `preserve_order` feature under the default collection
 policy so that freeform JSON objects keep their key order. With
 [`--no-ordered-collections`](#ordering-and-collections) the feature is omitted.
+Likewise, `validator` gains its `indexmap` feature when the generated code also
+uses `indexmap`. The feature checks the length of an `IndexSet` or `IndexMap`
+field, such as the `maxItems` limit on the `tags` of `NewPet`.
 
 ### Using the Crate
 
@@ -601,6 +874,92 @@ A renamed property keeps its original name on the wire through
 rules as schema names. For example, the enum value `self` becomes the variant
 `SelfType`.
 
+## Field Validation
+
+Schemas often limit the values they accept: a string's length, a number's
+range, or an array's size. The generator turns the limits it supports into
+[`validator`][rustdoc-validate] attributes on the generated fields, and
+`validate()` checks a value against them. The following table shows which
+attribute each schema keyword produces:
+
+| Schema keyword | Validation attribute |
+|---|---|
+| `minLength`, `maxLength` on a string | `length(min = ..., max = ...)` |
+| `minItems`, `maxItems` on an array | `length(min = ..., max = ...)` |
+| `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` | `range(...)` |
+| `pattern` | `regex(path = ...)`, naming a generated `static` that holds the compiled expression |
+| `format: email` | `email` |
+| `format: uri` or `format: url` | `url` |
+| `multipleOf` | `custom(function = ...)`, calling a check in `oas3-gen-support` |
+| A property whose own type has validation | `nested` |
+
+A required string without `minLength` also gets `length(min = 1)`, so an empty
+string fails validation. Strings with a `date`, `date-time`, `time`, `uuid`,
+`byte`, or `binary` format don't get length or pattern checks.
+
+The petstore's `CollarTelemetry` schema uses several of these keywords. Here's
+an excerpt of the generated struct:
+
+```rust
+pub struct CollarTelemetry {
+    #[serde(rename = "collarId")]
+    #[validate(length(min = 1u64), regex(path = "REGEX_COLLAR_TELEMETRY_COLLAR_ID"))]
+    pub collar_id: String,
+    /* ... */
+    /// Latitude and longitude
+    #[validate(length(min = 2u64, max = 2u64))]
+    pub location: Vec<f64>,
+    /* ... */
+    /// Validation: Must be a multiple of 5
+    #[serde(rename = "batteryPercent")]
+    #[validate(
+        range(min = 0i32, max = 100i32),
+        custom(function = oas3_gen_support::multiple_of::<5>)
+    )]
+    pub battery_percent: Option<i32>,
+    /* ... */
+    #[serde(rename = "ownerEmail")]
+    #[validate(email)]
+    pub owner_email: Option<String>,
+    /* ... */
+}
+```
+
+The `collarId` property is required and has a `pattern`, so `collar_id` gets
+both a minimum length and a regular expression check. `batteryPercent` declares
+`minimum: 0`, `maximum: 100`, and `multipleOf: 5`. The same rules apply to a
+request body that isn't an object. For example, the `text/plain` body of
+`setPetNotes` declares `maxLength: 2000`, so the body field of
+`SetPetNotesRequest` carries `length(max = 2_000u64)`.
+
+### Multiples
+
+A `multipleOf` check calls a function from `oas3-gen-support`. An integer
+field calls `multiple_of::<N>`, which accepts a value that divides evenly by
+`N`. With `multipleOf: 5`, `batteryPercent` accepts `85` and rejects `87`. A
+number field calls `multiple_of_ratio::<NUMERATOR, DENOMINATOR>`, with the
+multiple written as a fraction: `multipleOf: 0.25` becomes
+`multiple_of_ratio::<1, 4>`. That check tolerates floating-point rounding, so
+`0.3` counts as a multiple of `0.1`. Either check reports a failure as a
+validation error with the code `multiple_of`.
+
+Every `multipleOf` adds a line such as `Validation: Must be a multiple of 5` to
+the field's documentation. These multiples get only that line:
+
+- A fractional multiple on an integer field, such as `multipleOf: 0.5`.
+- A multiple that can't be written as a fraction whose numerator and
+  denominator fit in a [`u32`][rustdoc-u32], such as `1e-20`.
+
+### When Validation Runs
+
+Generated types derive [`Validate`][rustdoc-validate] only when the API
+accepts them, such as request structs and request bodies. A schema used only
+in responses, such as `Pet`, keeps no validation attributes. Request builders
+validate when you call `build()`, as the [Builder Pattern](./builders.md)
+chapter explains. [Making a Request](./client-generation.md#making-a-request)
+and [Implementing the Service Trait](./server-generation.md#implementing-the-service-trait)
+cover when the client and server check a request.
+
 ## Visibility
 
 Use `--visibility` to choose where generated items can be accessed. The
@@ -617,23 +976,30 @@ the generated API is an internal part of your application.
 | `crate` | `pub(crate)` | Internal crate types |
 | `file` | `pub(super)` | Items used only inside the generated module |
 
+Let's compare the three values on two petstore types: the `Pet` struct and the
+`ChatModelChoice` union, which has [helper methods](#helper-methods).
+
 ### Example: `--visibility public`
 
 With public visibility, the types, fields, and methods use `pub`:
 
 ```rust
 pub struct Pet {
-    pub id: i64,
+    pub id: uuid::Uuid,
     pub name: String,
+    /* ... */
 }
 
-pub enum Status {
-    Available,
-    Pending,
+pub enum ChatModelChoice {
+    ChatModel(ChatModel),
+    String(String),
 }
 
-impl Status {
-    pub fn available() -> Self { Self::Available }
+impl ChatModelChoice {
+    pub fn chat10() -> Self {
+        Self::ChatModel(ChatModel::Chat10)
+    }
+    /* ... */
 }
 ```
 
@@ -643,17 +1009,21 @@ With crate visibility, those items use `pub(crate)`:
 
 ```rust
 pub(crate) struct Pet {
-    pub(crate) id: i64,
+    pub(crate) id: uuid::Uuid,
     pub(crate) name: String,
+    /* ... */
 }
 
-pub(crate) enum Status {
-    Available,
-    Pending,
+pub(crate) enum ChatModelChoice {
+    ChatModel(ChatModel),
+    String(String),
 }
 
-impl Status {
-    pub(crate) fn available() -> Self { Self::Available }
+impl ChatModelChoice {
+    pub(crate) fn chat10() -> Self {
+        Self::ChatModel(ChatModel::Chat10)
+    }
+    /* ... */
 }
 ```
 
@@ -663,17 +1033,21 @@ With file visibility, those items use `pub(super)`:
 
 ```rust
 pub(super) struct Pet {
-    pub(super) id: i64,
+    pub(super) id: uuid::Uuid,
     pub(super) name: String,
+    /* ... */
 }
 
-pub(super) enum Status {
-    Available,
-    Pending,
+pub(super) enum ChatModelChoice {
+    ChatModel(ChatModel),
+    String(String),
 }
 
-impl Status {
-    pub(super) fn available() -> Self { Self::Available }
+impl ChatModelChoice {
+    pub(super) fn chat10() -> Self {
+        Self::ChatModel(ChatModel::Chat10)
+    }
+    /* ... */
 }
 ```
 
@@ -764,14 +1138,14 @@ implementation that converts input to ASCII lowercase before matching:
 ```rust
 #[derive(Debug, Clone, Serialize)]
 pub enum Status {
-    #[serde(rename = "ACTIVE")]
+    #[serde(rename = "ACTIVE", alias = "active", alias = "Active")]
     Active,
     #[serde(rename = "PENDING")]
     Pending,
 }
 
 impl<'de> serde::Deserialize<'de> for Status {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -779,7 +1153,7 @@ impl<'de> serde::Deserialize<'de> for Status {
         match s.to_ascii_lowercase().as_str() {
             "active" => Ok(Self::Active),
             "pending" => Ok(Self::Pending),
-            _ => Err(serde::de::Error::unknown_variant(&s, &["active", "pending"])),
+            _ => Err(serde::de::Error::unknown_variant(&s, &["ACTIVE", "PENDING"])),
         }
     }
 }
@@ -820,25 +1194,45 @@ If no variant matches, it uses the first declared variant. Switching to
 Untagged unions, described with `oneOf` or `anyOf`, always place a variant that
 wraps a plain `String` last, after any sorting. Deserialization tries an
 untagged union's variants in order, and a `String` accepts every JSON string.
-Putting it last lets a value such as `"chat-1.0"` reach a wrapped value enum,
-as in `ChatModel(ChatModel)`, before the catch-all `String(String)`.
+The petstore's `ChatModelChoice` lists `{ "type": "string" }` before a `$ref`
+to the `ChatModel` enum, but its generated `ChatModel(ChatModel)` variant comes
+first, so `"chat-1.0"` decodes as `ChatModel(ChatModel::Chat10)`.
+
+Variants that wrap an array come first. The petstore's `ArrayOrSingle` lists a
+`TextBlock` before an array of them, and the generated enum tries the array
+first:
+
+```rust
+#[serde(untagged)]
+pub enum ArrayOrSingle {
+    Array(Vec<TextBlock>),
+    #[default]
+    TextBlock(TextBlock),
+}
+```
+
+The array's move doesn't change the default: `TextBlock` keeps `#[default]`.
 
 Untagged unions also handle defaults differently. When a variant can represent
 the schema's default, the generator writes an `impl Default` that constructs
 that value, checking variants in the same order deserialization does. For
-example, it might return `Self::Preset(Preset::Auto2k)` for a wrapped enum or
-`Self::String("cheesecake".to_string())` for a string. Without a usable default,
-a union that derives `Default` uses its first generated variant.
+example, the `image_size` property of `ContentRequest` defaults to `auto_2K`,
+so its union's default returns `Self::Preset(ImageSizePreset::Auto2k)`. A
+string default produces a value such as `Self::String("cheesecake".to_string())`.
+Without a usable default, a union that derives `Default` uses its first
+variant, before any array variant moves ahead of it.
 
 A property can also set a `default` next to its `$ref`, as OpenAPI 3.1 allows.
 When the reference names an enum, a `const`, or a union, the field's default
-uses that value instead of the referenced schema's own `default`:
+uses that value instead of the referenced schema's own `default`. The
+petstore's `ChatPreference` schema does this:
 
 ```json
 "fallback": { "$ref": "#/components/schemas/ChatModel", "default": "chat-1.1" }
 ```
 
-This property becomes `#[default(Some(ChatModel::Chat11))] pub fallback: Option<ChatModel>`.
+This property becomes `#[default(Some(ChatModel::Chat11))] pub fallback: Option<ChatModel>`,
+along with the deserialization default described in [Field Defaults](#field-defaults).
 The generator ignores a `default` next to any other reference, because it can't
 build that value for the referenced type.
 
@@ -848,50 +1242,74 @@ including properties listed as required.
 
 ### Input Schema
 
-Consider a schema whose values aren't in alphabetical order:
+The petstore's `Species` schema lists its values in an order that isn't
+alphabetical, and it has no `default`. Its `x-enum-descriptions` extension
+documents each value:
 
 ```json
-{
+"Species": {
   "type": "string",
-  "enum": ["zeta", "alpha", "gamma", "beta"]
+  "description": "Kinds of pets the store cares for",
+  "enum": ["dog", "cat", "bird", "fish", "reptile", "small_mammal"],
+  "x-enum-descriptions": [
+    "a dog",
+    "a cat",
+    "a bird",
+    "a fish",
+    "a reptile",
+    "a rabbit, guinea pig, or other small mammal"
+  ]
 }
 ```
 
 ### Example: `--enum-layout spec`
 
-The default layout keeps `Zeta` first, followed by the remaining values in
-schema order:
+The default layout keeps `Dog` first, followed by the remaining values in
+schema order. Because `Dog` is the first declared variant, it's also the
+default:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Status {
-    #[serde(rename = "zeta")]
-    Zeta,
-    #[serde(rename = "alpha")]
-    Alpha,
-    #[serde(rename = "gamma")]
-    Gamma,
-    #[serde(rename = "beta")]
-    Beta,
+/// Kinds of pets the store cares for
+pub enum Species {
+    /// a dog
+    #[serde(rename = "dog")]
+    #[default]
+    Dog,
+    /// a cat
+    #[serde(rename = "cat")]
+    Cat,
+    /// a bird
+    #[serde(rename = "bird")]
+    Bird,
+    /* ... */
+    /// a rabbit, guinea pig, or other small mammal
+    #[serde(rename = "small_mammal")]
+    SmallMammal,
 }
 ```
 
 ### Example: `--enum-layout sorted`
 
-The sorted layout puts `Alpha` first. The serialization names remain attached
-to the same variants:
+The sorted layout puts `Bird` first. The serialization names and descriptions
+remain attached to the same variants, but the fallback default moves to `Bird`:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Status {
-    #[serde(rename = "alpha")]
-    Alpha,
-    #[serde(rename = "beta")]
-    Beta,
-    #[serde(rename = "gamma")]
-    Gamma,
-    #[serde(rename = "zeta")]
-    Zeta,
+/// Kinds of pets the store cares for
+pub enum Species {
+    /// a bird
+    #[serde(rename = "bird")]
+    #[default]
+    Bird,
+    /// a cat
+    #[serde(rename = "cat")]
+    Cat,
+    /// a dog
+    #[serde(rename = "dog")]
+    Dog,
+    /* ... */
+    /// a rabbit, guinea pig, or other small mammal
+    #[serde(rename = "small_mammal")]
+    SmallMammal,
 }
 ```
 
@@ -903,28 +1321,36 @@ and writes JSON numbers. The generator does the same when a schema lists only
 numbers and declares no `type`, choosing `i64` for whole numbers and `f64` when
 any value has a fractional part. The generator supplies [`Serialize`][rustdoc-serde-serialize] and [`Deserialize`][rustdoc-serde-deserialize]
 implementations so that a value such as `8000` stays a number during
-serialization.
+serialization. The petstore's `Priority` schema, `{ "enum": [1, 2, 3] }`, is
+an example without a `type`.
 
-Consider a schema that lists the sample rates an audio API accepts:
+Consider the petstore's `SampleRate` schema, which lists the sample rates the
+assistant accepts:
 
 ```json
-{
+"SampleRate": {
+  "description": "Audio sample rate in Hz (integer-backed enum)",
   "type": "integer",
-  "enum": [8000, 16000, 24000, 44100, 48000]
+  "enum": [8000, 16000, 24000, 44100, 48000],
+  "default": 24000
 }
 ```
 
 The generator emits one variant per value, a serializer that turns each variant
-into its number, and a deserializer that maps numbers back to variants. These
-implementations use the [`serde::Serializer`][rustdoc-serde-serializer] and [`serde::Deserializer`][rustdoc-serde-deserializer] traits,
+into its number, and a deserializer that maps numbers back to variants. The
+schema's `default` marks `Value24000` as the [`Default`][rustdoc-default]
+variant. These implementations use the [`serde::Serializer`][rustdoc-serde-serializer] and [`serde::Deserializer`][rustdoc-serde-deserializer] traits,
 with [`serde::de::Error`][rustdoc-serde-de-error] for decoding errors:
 
 ```rust
+/// Audio sample rate in Hz (integer-backed enum)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
 pub enum SampleRate {
-    #[default]
     Value8000,
-    /* ... */
+    Value16000,
+    #[default]
+    Value24000,
+    Value44100,
     Value48000,
 }
 
@@ -969,8 +1395,8 @@ JSON number.
 ### Floating-Point Values
 
 For a `number` enum, the generated deserializer reads an [`f64`][rustdoc-f64] and compares
-its bit pattern with each allowed value. Here's an excerpt for a playback
-rate that accepts `0.5`:
+its bit pattern with each allowed value. Here's an excerpt for the petstore's
+`PlaybackRate`, which accepts `0.5`, `1.0`, `1.5`, and `2.0`:
 
 ```rust
 impl<'de> serde::Deserialize<'de> for PlaybackRate {
@@ -998,9 +1424,9 @@ An `enum` array can also list booleans, or mix strings, numbers, and booleans.
 Each listed value keeps its JSON type on the wire, so a `true` in the schema is
 written and read as the JSON boolean `true`, never as the string `"true"`.
 
-A boolean schema such as `{ "type": "boolean", "enum": [true, false] }` produces
-`True` and `False` variants with a serializer that writes a JSON boolean and a
-deserializer that reads one:
+The petstore's `Toggle` schema, `{ "type": "boolean", "enum": [true, false] }`,
+produces `True` and `False` variants with a serializer that writes a JSON
+boolean and a deserializer that reads one:
 
 ```rust
 impl<'de> serde::Deserialize<'de> for Toggle {
@@ -1014,12 +1440,13 @@ impl<'de> serde::Deserialize<'de> for Toggle {
 }
 ```
 
-When the listed values mix JSON types, as in `"enum": ["auto", 1, 0.5, true]`,
-each variant writes its own type, and the deserializer reads a
-[`serde_json::Value`][rustdoc-serde-json-value] and matches it against every listed value:
+When the listed values mix JSON types, as in the petstore's `ResponseQuality`
+schema, `"enum": ["auto", 1, 0.5, true]`, each variant writes its own type, and
+the deserializer reads a [`serde_json::Value`][rustdoc-serde-json-value] and
+matches it against every listed value:
 
 ```rust
-impl serde::Serialize for Quality {
+impl serde::Serialize for ResponseQuality {
     fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -1034,20 +1461,180 @@ impl serde::Serialize for Quality {
 }
 ```
 
-`Quality::Value1` reads only the JSON number `1`, so the string `"1"` is
-rejected with a decoding error. A declared `type` takes precedence over the
+`ResponseQuality::Value1` reads only the JSON number `1`, so the string `"1"`
+is rejected with a decoding error. A declared `type` takes precedence over the
 listed values. With `"type": "string"`, every value is read and written as a
 string.
+
+## Discriminated Unions
+
+A `oneOf` lists alternative schemas for one value. When it declares a
+`discriminator`, one property of each object names its branch, and the
+generator produces an enum that reads that property to choose a variant. The
+petstore's `ContentBlock` schema uses its `type` property this way, mapping
+`text` to `TextBlock`, `image` to `ImageBlock`, and so on. Here's an excerpt of
+the generated enum:
+
+```rust
+/// A union of content block types with discriminator
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContentBlock {
+    Text(TextBlock),
+    Image(ImageBlock),
+    Code(CodeBlock),
+    ToolUse(ToolUseBlock),
+    ToolResult(ToolResultBlock),
+}
+
+impl ContentBlock {
+    pub const DISCRIMINATOR_FIELD: &'static str = "type";
+}
+
+impl<'de> serde::Deserialize<'de> for ContentBlock {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+            Some("text") => {
+                serde_json::from_value(value)
+                    .map(Self::Text)
+                    .map_err(serde::de::Error::custom)
+            }
+            /* ... */
+            None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+            Some(other) => { /* ... */ }
+        }
+    }
+}
+```
+
+The deserializer reads the whole object, looks up `type`, and decodes the
+object as the matching branch. An object without `type` produces a
+missing-field error, and an unlisted value produces an error that names it. To
+serialize, the enum writes the wrapped struct, whose constant `type` field
+supplies the tag, as [Constant Properties](#constant-properties) describes.
+
+### Inferred Discriminators
+
+Some documents leave out the `discriminator` even though each branch fixes a
+property to its own constant. The petstore's `UsageCounterA` and
+`UsageCounterB` schemas differ only in their `type` constants. Here's
+`UsageCounterA`, trimmed of its `title` and `default` keywords:
+
+```json
+"UsageCounterA": {
+  "type": "object",
+  "required": ["output_tokens", "type"],
+  "properties": {
+    "output_tokens": { "type": "integer", "minimum": 0 },
+    "type": { "type": "string", "const": "counter_a" }
+  }
+}
+```
+
+`UsageCounterB` is the same apart from `"const": "counter_b"`. The items of
+`UsageCounters` are an `anyOf` of these two schemas with no `discriminator`.
+
+The generator infers a discriminator when a `oneOf` or `anyOf` meets all of
+these conditions:
+
+- It declares no `discriminator`.
+- It has at least two branches other than `null`, and each is a `$ref` to an
+  object schema.
+- Every such branch requires the same property and sets it to a string
+  `const`.
+- No two branches use the same constant.
+
+The resulting enum routes on that property, exactly as if the document had
+declared it:
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+pub enum UsageCounterUsageCounterKind {
+    A(UsageCounterA),
+    B(UsageCounterB),
+}
+
+impl<'de> serde::Deserialize<'de> for UsageCounterUsageCounterKind {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+            Some("counter_a") => {
+                serde_json::from_value(value)
+                    .map(Self::A)
+                    .map_err(serde::de::Error::custom)
+            }
+            Some("counter_b") => {
+                serde_json::from_value(value)
+                    .map(Self::B)
+                    .map_err(serde::de::Error::custom)
+            }
+            /* ... */
+        }
+    }
+}
+```
+
+Now `{"type": "counter_b", "output_tokens": 3}` decodes as
+`UsageCounterUsageCounterKind::B`. A union that misses any of the conditions,
+such as one with an inline branch, stays untagged.
+
+### Nullable Arrays of Unions
+
+`UsageCounters` itself pairs an inline array with `null`:
+
+```json
+"UsageCounters": {
+  "anyOf": [
+    {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "$ref": "#/components/schemas/UsageCounterA" },
+          { "$ref": "#/components/schemas/UsageCounterB" }
+        ]
+      }
+    },
+    { "type": "null" }
+  ],
+  "default": null
+}
+```
+
+The generator keeps the array shape. `UsageCounters` becomes an alias for a
+[`Vec`][rustdoc-vec] of the item union, and a field that uses it carries the
+nullability as an [`Option`][rustdoc-option], as the `iterations` field of
+`ToolResultBlock` shows:
+
+```rust
+pub type UsageCounters = Vec<UsageCounterUsageCounterKind>;
+
+pub struct ToolResultBlock {
+    /* ... */
+    pub iterations: Option<UsageCounters>,
+    /* ... */
+}
+```
+
+Any `anyOf` or `oneOf` that pairs a single inline array with `null` converts
+this way, whatever the array's items are.
 
 ## Constant Unions
 
 A `oneOf` or `anyOf` whose every branch is a `const` describes the same set of
 values as an `enum` array, so the generator produces the same value enum. Each
 `const` becomes a unit variant documented with its branch's `description`, and
-the schema's `default` marks the matching variant:
+the schema's `default` marks the matching variant. The petstore's
+`ResponseKind` schema is one of these:
 
 ```json
-{
+"ResponseKind": {
+  "description": "A union of constants, generated as a value enum",
   "anyOf": [
     { "type": "string", "const": "text", "description": "Plain text" },
     { "type": "string", "const": "json" }
@@ -1057,6 +1644,7 @@ the schema's `default` marks the matching variant:
 ```
 
 ```rust
+/// A union of constants, generated as a value enum
 pub enum ResponseKind {
     /// Plain text
     #[serde(rename = "text")]
@@ -1074,7 +1662,8 @@ make the property optional instead of adding a variant.
 A union can also mix `const` branches with branches that carry a payload, such
 as an object or a string. Its `const` variants stay tagged so that each matches
 its wire value, and they come first. Only the payload variants are marked
-`#[serde(untagged)]`:
+`#[serde(untagged)]`. The petstore's `UsageChoice` lists a string, a `$ref` to
+the `Usage` object, and the constant `"auto"`, which is also its default:
 
 ```rust
 pub enum UsageChoice {
@@ -1101,15 +1690,13 @@ listed values with a freeform string. This section shows the single enum the
 generator creates for that pattern and how your code can handle values the
 list doesn't include.
 
-Consider a schema for a model name:
+Consider the petstore's schema for a model name. It pairs a freeform string
+with the `ChatModel` enum, which lists `chat-1.0` and `chat-1.1`:
 
 ```json
-{
+"ChatModelId": {
   "description": "A listed chat model or any other model name",
-  "anyOf": [
-    { "type": "string" },
-    { "type": "string", "enum": ["chat-1.0", "chat-1.1"] }
-  ]
+  "anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/ChatModel" }]
 }
 ```
 
@@ -1118,10 +1705,11 @@ variant that holds any other string. It marks the enum `#[non_exhaustive]`:
 
 ```rust
 /// A listed chat model or any other model name
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 #[non_exhaustive]
 pub enum ChatModelId {
     #[serde(rename = "chat-1.0")]
+    #[default]
     Chat10,
     #[serde(rename = "chat-1.1")]
     Chat11,
@@ -1129,6 +1717,10 @@ pub enum ChatModelId {
     Other(String),
 }
 ```
+
+The generator copies the referenced values into the open enum. `ChatModel`
+itself stays exhaustive, so a field typed `ChatModel` still rejects other
+values.
 
 Deserialization checks the listed values first, so `"chat-1.0"` becomes
 `ChatModelId::Chat10`. A value outside the list, such as `"chat-2.0"`, becomes
@@ -1171,15 +1763,16 @@ Inside the crate that defines the enum, the attribute has no effect.
 
 A few details follow from the same rules:
 
-- The listed values can come from a `$ref`, as in
-  `"anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/ChatModel" }]`.
-  The generator copies the referenced values into the open enum. `ChatModel`
-  itself stays exhaustive, so a field typed `ChatModel` still rejects other values.
+- The listed values can also be written inline, as in
+  `{ "type": "string", "enum": ["chat-1.0", "chat-1.1"] }`.
 - If a listed value such as `"other"` already produces an `Other` variant, the
-  catch-all becomes `Other2(String)` so the two stay distinct.
+  catch-all becomes `Other2(String)` so the two stay distinct. The `tier`
+  property of `ChatPreference` lists `standard`, `priority`, and `other`, so
+  its `ChatPreferenceTier` enum ends with `Other` and `Other2(String)`.
 - A schema `default` outside the list becomes the enum's
-  [`Default`][rustdoc-default]. With `"default": "chat-2.0"`,
-  `ChatModelId::default()` returns `ChatModelId::Other("chat-2.0".to_string())`.
+  [`Default`][rustdoc-default]. The same `tier` property declares
+  `"default": "flex"`, so `ChatPreferenceTier::default()` returns
+  `ChatPreferenceTier::Other2("flex".to_string())`.
 - With [`--enum-mode relaxed`](#example---enum-mode-relaxed), listed values and
   their aliases match regardless of ASCII letter case, in deserialization and in
   `From<String>`. Anything else lands in `Other` with its original spelling.
@@ -1193,28 +1786,74 @@ A few details follow from the same rules:
   string with listed values remains an untagged union, which tries its `String`
   variant last, as described in [Enum Layout](#enum-layout).
 
+## Field Defaults
+
+A property's `default` supplies its value when the JSON leaves the property
+out. The generator uses it in two places. A `#[default(...)]` attribute sets
+the field's value in the type's [`Default`][rustdoc-default] implementation,
+and a struct-level `#[serde(default)]` tells Serde to take every missing field
+from that implementation during deserialization.
+
+Let's look at the petstore's `Order` schema, which requires `petId` and gives
+`quantity` and `complete` defaults. Here it is without its `shipDate` and
+`status` properties:
+
+```json
+"Order": {
+  "type": "object",
+  "required": ["petId"],
+  "properties": {
+    "id": { "type": "integer", "format": "int64", "readOnly": true },
+    "petId": { "type": "string", "format": "uuid" },
+    "quantity": { "type": "integer", "format": "int32", "minimum": 1, "maximum": 10, "default": 1 },
+    "complete": { "type": "boolean", "default": false }
+  }
+}
+```
+
+The generated struct carries the defaults on its fields and a single Serde
+attribute on the struct:
+
+```rust
+#[serde(default)]
+pub struct Order {
+    pub id: Option<i64>,
+    #[serde(rename = "petId")]
+    pub pet_id: uuid::Uuid,
+    #[validate(range(min = 1i32, max = 10i32))]
+    #[default(Some(1i32))]
+    pub quantity: Option<i32>,
+    /* ... */
+    #[default(Some(false))]
+    pub complete: Option<bool>,
+}
+```
+
+Deserializing `{"petId": "..."}` gives `quantity` the value `Some(1)` and
+`complete` the value `Some(false)`, the same values `Order::default()` holds.
+
+The attribute applies to the whole struct, so it fills required fields too.
+JSON without `petId` deserializes with the nil UUID from `Order::default()`
+instead of failing. A struct only gets `#[serde(default)]` when at least one of
+its fields has a `default` or a `const`, so required fields in other structs
+are still rejected when they're missing.
+
+Client output also reads `null` in these structs' required fields as a
+default. See [Missing and Null Fields](./client-generation.md#missing-and-null-fields).
+
 ## Constant Properties
 
 A property with a `const`, or with an `enum` that lists a single value, always
 holds that one value. The generator gives the field that value as its default.
-In client output it also marks the field `#[serde(skip_deserializing)]`:
+The constant `object` property of the petstore's `ChatPreference` becomes:
 
 ```rust
-pub struct ChatPreference {
-    #[serde(skip_deserializing)]
-    #[default(Some("chat.preference".to_string()))]
-    pub object: Option<String>,
-    /* ... */
-}
+#[default(Some("chat.preference".to_string()))]
+pub object: Option<String>,
 ```
 
-The client always sends the constant and never reads it back, so a server that
-returns a different value, or a value of another JSON type, can't make a response
-fail to deserialize. Server output still reads the field.
-
-A struct that collects additional properties, because its schema allows
-`additionalProperties`, keeps reading its constant fields. A skipped key would
-otherwise land in the flattened map and be serialized a second time.
+[Constant Properties](./client-generation.md#constant-properties) describes
+how the client reads these fields.
 
 ## Helper Methods
 
@@ -1229,15 +1868,18 @@ Pass `--no-helpers` if you'd prefer to construct the variants yourself.
 
 ### Default (Helpers Enabled)
 
-For this `ContentBlock` enum, the helpers construct the nested structs and
-wrap them in the matching variants:
+For the petstore's `ContentBlock` enum, the helpers construct the nested
+structs and wrap them in the matching variants:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A union of content block types with discriminator
+#[derive(Debug, Clone, PartialEq)]
 pub enum ContentBlock {
     Text(TextBlock),
     Image(ImageBlock),
     Code(CodeBlock),
+    ToolUse(ToolUseBlock),
+    ToolResult(ToolResultBlock),
 }
 
 impl ContentBlock {
@@ -1247,14 +1889,12 @@ impl ContentBlock {
             ..Default::default()
         })
     }
-
     pub fn image(source: Box<ImageSource>) -> Self {
         Self::Image(ImageBlock {
             source,
             ..Default::default()
         })
     }
-
     pub fn code(code: String) -> Self {
         Self::Code(CodeBlock {
             code,
@@ -1263,6 +1903,11 @@ impl ContentBlock {
     }
 }
 ```
+
+Each helper takes the one field its struct requires, and `..Default::default()`
+fills in the rest, including the constant `type` field. `ToolUseBlock` and
+`ToolResultBlock` each require more than one field, so their variants get no
+helper.
 
 The `text()` helper lets us supply the text directly:
 
@@ -1275,11 +1920,14 @@ let block = ContentBlock::text("Hello, world!".to_string());
 The enum still has the same variants, but the constructor helpers are omitted:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A union of content block types with discriminator
+#[derive(Debug, Clone, PartialEq)]
 pub enum ContentBlock {
     Text(TextBlock),
     Image(ImageBlock),
     Code(CodeBlock),
+    ToolUse(ToolUseBlock),
+    ToolResult(ToolResultBlock),
 }
 ```
 
@@ -1384,69 +2032,70 @@ Each adapter must implement [`serde_with::SerializeAs`][rustdoc-serialize-as] or
 adapters, repeat the flag:
 
 ```bash
-cargo run -- generate types -i spec.json -o types.rs \
+cargo run -- generate types -i petstore.json -o types.rs \
   -c date_time=crate::DateTimeAdapter \
   -c date=crate::DateAdapter
 ```
 
 ### Default (No Customization)
 
-Without an override, the fields use their normal Serde implementations:
+The petstore's `CollarTelemetry` schema has a required `recordedAt` date-time
+and an optional `recordedOn` date. Without an override, the fields use their
+normal Serde implementations:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Event {
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub scheduled_date: chrono::NaiveDate,
+pub struct CollarTelemetry {
+    /* ... */
+    #[serde(rename = "recordedAt")]
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "recordedOn")]
+    pub recorded_on: Option<chrono::NaiveDate>,
+    /* ... */
 }
 ```
 
 ### With a Date-Time Adapter
 
 If we pass only `-c date_time=crate::DateTimeAdapter`, the generator adds an
-adapter to `created_at`:
+adapter to `recorded_at`:
 
 ```rust
-#[serde_with::serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Event {
+pub struct CollarTelemetry {
+    /* ... */
     #[serde_as(as = "crate::DateTimeAdapter")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub scheduled_date: chrono::NaiveDate,
+    #[serde(rename = "recordedAt")]
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "recordedOn")]
+    pub recorded_on: Option<chrono::NaiveDate>,
+    /* ... */
 }
 ```
 
-Notice that `created_at` is still a [`chrono::DateTime<chrono::Utc>`][rustdoc-chrono-datetime]. The
+Notice that `recorded_at` is still a [`chrono::DateTime<chrono::Utc>`][rustdoc-chrono-datetime]. The
 `DateTimeAdapter` controls its conversion during serialization and
-deserialization. The `scheduled_date` field is unchanged because we haven't
-supplied a `date` override in this example.
+deserialization. The `recorded_on` field is unchanged because we haven't
+supplied a `date` override in this example. The generator also adds
+`#[serde_with::serde_as]` to any struct that uses an adapter.
 
 ### Handling Optional and Array Fields
 
 The generator wraps the adapter in [`Option`][rustdoc-option] and [`Vec`][rustdoc-vec] to match optional and
-array fields. For example, the same date-time override produces these
-attributes on a schedule:
+array fields. For example, the same date-time override gives the optional
+`homeVisit` property of `AdoptionRequest` this attribute:
 
 ```rust
-#[serde_with::serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Schedule {
-    #[serde_as(as = "crate::DateTimeAdapter")]
-    pub start: chrono::DateTime<chrono::Utc>,
-
+pub struct AdoptionRequest {
+    /* ... */
     #[serde_as(as = "Option<crate::DateTimeAdapter>")]
-    pub end: Option<chrono::DateTime<chrono::Utc>>,
-
-    #[serde_as(as = "Vec<crate::DateTimeAdapter>")]
-    pub milestones: Vec<chrono::DateTime<chrono::Utc>>,
-
-    #[serde_as(as = "Option<Vec<crate::DateTimeAdapter>>")]
-    pub optional_dates: Option<Vec<chrono::DateTime<chrono::Utc>>>,
+    #[serde(rename = "homeVisit")]
+    pub home_visit: Option<chrono::DateTime<chrono::Utc>>,
 }
 ```
 
-Each attribute follows the shape of its field. You supply the adapter for one
-date-time value; the generator adds the surrounding container adapters.
+An array of date-times would get `Vec<crate::DateTimeAdapter>`, and an
+optional array `Option<Vec<crate::DateTimeAdapter>>`. Each attribute follows
+the shape of its field. You supply the adapter for one date-time value; the
+generator adds the surrounding container adapters.
 
 ## Operation Filtering
 
@@ -1463,15 +2112,15 @@ one of these flags at a time.
 
 Pass the normalized `snake_case` operation IDs, separated by commas. Filtering
 uses these IDs before any `--fn-name` overrides. For example, the petstore's
-`listPets` and `createPets` operations use `list_pets` and `create_pets` in the
+`listPets` and `createPet` operations use `list_pets` and `create_pet` in the
 filter:
 
 ```bash
 cargo run -- generate client-mod -i petstore.json -o output/ \
-  --only list_pets,create_pets
+  --only list_pets,create_pet
 ```
 
-The generated client keeps `list_pets()` and `create_pets()` and omits the
+The generated client keeps `list_pets()` and `create_pet()` and omits the
 other operations. With `server-mod`, the same selection keeps those two trait
 methods and their routes. Types needed by the selected methods are still
 included, as we'll see in [Schema Dependency Resolution](#schema-dependency-resolution).
@@ -1487,7 +2136,7 @@ cargo run -- generate client-mod -i petstore.json -o output/ \
 ```
 
 The client keeps the petstore's other operations, including `list_pets()`
-and `create_pets()`, and omits `upload_pet_image()`. In `server-mod` mode, the
+and `create_pet()`, and omits `upload_pet_image()`. In `server-mod` mode, the
 flag omits that operation's trait method and route.
 
 ### Schema Dependency Resolution
@@ -1501,9 +2150,11 @@ types it needs:
 2. It follows references from those schemas to other schemas.
 3. It generates the resulting set of types.
 
-For example, suppose `listPets` returns an array of `Pet` values and each `Pet`
-contains a `Category`. Selecting `listPets` includes both `Pet` and `Category`,
-even though the operation doesn't refer to `Category` directly.
+For example, the petstore's `listPets` returns `Pets`, an array of `Pet`
+values, and an `Error` for its `default` response. Selecting only `list_pets`
+also generates the schemas `Pet` refers to: `Species`, `PetStatus`, the
+`Health` union with its `Allergies` and `Diet` branches, `PetVaccinations`, and
+`VaccineRecord`. The operation doesn't refer to any of them directly.
 
 ## Function Name Overrides
 
@@ -1546,8 +2197,8 @@ name to `PascalCase`.
 ```
 
 By default, the client name comes from the specification's `info.title`.
-For example, `"Swagger Petstore"` becomes `SwaggerPetstoreClient`; an empty
-title produces `ApiClient`. The default server trait name is `ApiServer`.
+For example, the petstore's title, `"Petstore"`, becomes `PetstoreClient`; an
+empty title produces `ApiClient`. The default server trait name is `ApiServer`.
 To choose `PetStoreClient` for the client, run:
 
 ```bash
@@ -1577,17 +2228,17 @@ that no operation references.
 
 ### Default (Reachability Filtering)
 
-Suppose a specification defines `Pet`, `Category`, `Store`, and `Inventory`,
-but its operations only use `Pet` and `Category`. Generate types with the
-default options:
+This example uses a different document. Suppose a specification defines
+`Pet`, `Category`, `Store`, and `Inventory`, but its operations only use `Pet`
+and `Category`. Generate types with the default options:
 
 ```bash
 cargo run -- generate types -i spec.json -o types.rs
 ```
 
 The output contains `Pet` and `Category`. The generator skips `Store` and
-`Inventory` and reports them as orphaned schemas, meaning no selected operation
-needs them.
+`Inventory` because no selected operation needs them. With `--verbose`, it
+reports how many of these orphaned schemas it skipped.
 
 ### With `--all-schemas`
 
@@ -1632,8 +2283,11 @@ refers to `http`'s constant, such as `http::header::LOCATION`, instead.
 OpenAPI says to ignore header parameters named `Accept`, `Content-Type`, or
 `Authorization`, so the generator leaves them out of request types. The
 specification describes those headers elsewhere: media types cover `Accept` and
-`Content-Type`, and security schemes cover `Authorization`. To send credentials
-in `Authorization`, declare a [security scheme](#security-schemes).
+`Content-Type`, and security schemes cover `Authorization`. For example, the
+petstore's `listAuditEvents` declares a required `Authorization` header
+parameter, yet its request struct has no header field. To send credentials in
+`Authorization`, declare a [security scheme](#security-schemes), as that
+operation also does.
 
 ```text
 --all-headers
@@ -1641,35 +2295,40 @@ in `Authorization`, declare a [security scheme](#security-schemes).
 
 ### Default (Operation-Referenced Headers Only)
 
-Suppose an operation uses `x-api-version`, and the specification also defines
-an unused `x-api-key` header in `components/parameters`. Start with the default
+The petstore's `showPetById` operation uses an `x-api-version` header. The
+document also declares an `x-debug-trace` header parameter in
+`components/parameters` that no operation uses. Start with the default
 options:
 
 ```bash
-cargo run -- generate types -i spec.json -o types.rs
+cargo run -- generate types -i petstore.json -o types.rs
 ```
 
-The output contains a constant for the header used by the operation:
+Among the other header constants, the output contains one for the header the
+operation uses:
 
 ```rust
-pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
+pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static(
+    "x-api-version",
+);
 ```
 
-`x-api-key` is not emitted because no operation uses it.
+`x-debug-trace` isn't emitted because no operation uses it.
 
 ### With `--all-headers`
 
 Now include the unused component header:
 
 ```bash
-cargo run -- generate types -i spec.json -o types.rs --all-headers
+cargo run -- generate types -i petstore.json -o types.rs --all-headers
 ```
 
-Both names have constants in the output:
+The output gains a constant for it:
 
 ```rust
-pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
-pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
+pub const X_DEBUG_TRACE: http::HeaderName = http::HeaderName::from_static(
+    "x-debug-trace",
+);
 ```
 
 ## Builder Generation
@@ -1688,17 +2347,24 @@ walks through using them and explains how request builders run validation.
 ### Default (Builders Disabled)
 
 Without the flag, generated structs have no `bon` attributes. This excerpt
-shows a schema type and a request type:
+from the petstore client shows a schema type and a request type:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A pet in the store's care.
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 pub struct Pet {
-    pub id: i64,
+    /// Server-assigned identifier
+    pub id: uuid::Uuid,
     pub name: String,
+    /* ... */
 }
 
-pub struct CreatePetRequest {
-    pub path: CreatePetRequestPath,
+/// Get a pet
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct ShowPetByIdRequest {
+    pub path: ShowPetByIdRequestPath,
+    #[validate(nested)]
+    pub header: ShowPetByIdRequestHeader,
 }
 ```
 
@@ -1708,24 +2374,41 @@ With the flag, the schema gets a derive and the request gets a constructor
 annotated for `bon`:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+/// A pet in the store's care.
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct Pet {
-    pub id: i64,
+    /// Server-assigned identifier
+    pub id: uuid::Uuid,
     pub name: String,
+    /* ... */
 }
 
-pub struct CreatePetRequest {
-    pub path: CreatePetRequestPath,
+/// Get a pet
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct ShowPetByIdRequest {
+    pub path: ShowPetByIdRequestPath,
+    #[validate(nested)]
+    pub header: ShowPetByIdRequestHeader,
 }
 
 #[bon::bon]
-impl CreatePetRequest {
+impl ShowPetByIdRequest {
+    /// Create a new request with the given parameters.
     #[builder]
-    pub fn new(/* params */) -> anyhow::Result<Self> {
+    pub fn new(
+        pet_id: uuid::Uuid,
+        if_none_match: Option<String>,
+        x_api_version: String,
+    ) -> anyhow::Result<Self> {
         /* ... */
     }
 }
 ```
+
+The constructor takes each parameter as a flat argument, so the builder has a
+setter for `pet_id`, `if_none_match`, and `x_api_version`. It assembles the
+nested `path` and `header` structs and validates the request before returning
+it.
 
 ## Ordering and Collections
 
@@ -1737,9 +2420,20 @@ You can change enum ordering separately with
 The generator also uses collection types that preserve insertion order at
 runtime. Maps described by `additionalProperties` use
 [`indexmap::IndexMap<String, T>`][rustdoc-indexmap-map], and arrays with `uniqueItems: true` use
-[`indexmap::IndexSet<T>`][rustdoc-indexmap-set]. If you include these types in an existing crate, add
-`indexmap` with its `serde` feature to your `Cargo.toml`. A generated workspace
-manifest includes that dependency when needed.
+[`indexmap::IndexSet<T>`][rustdoc-indexmap-set]. For example, the `tags` of a petstore `Pet` are
+`uniqueItems`, so the field is `Option<indexmap::IndexSet<String>>`, and its
+`vaccinations` map is `Option<indexmap::IndexMap<String, Vec<VaccineRecord>>>`.
+If you include these types in an existing crate, add `indexmap` with its
+`serde` feature to your `Cargo.toml`. A generated workspace manifest includes
+that dependency when needed.
+
+A `uniqueItems` field also carries a `serde_with::SetPreventDuplicates`
+adapter, so a JSON array with a repeated item fails to deserialize:
+
+```rust
+#[serde_as(as = "Option<serde_with::SetPreventDuplicates<_>>")]
+pub tags: Option<indexmap::IndexSet<String>>,
+```
 
 Use this flag to choose standard library collections instead:
 
@@ -1749,8 +2443,8 @@ Use this flag to choose standard library collections instead:
 
 Set `--no-ordered-collections` to opt out of the `indexmap` runtime types. Map
 schemas then resolve to [`std::collections::HashMap<String, T>`][rustdoc-hashmap], and
-`uniqueItems` arrays resolve to [`Vec<T>`][rustdoc-vec], the same type as a normal array, so
-uniqueness is no longer expressed at the type level. Use this flag when your
+`uniqueItems` arrays resolve to [`Vec<T>`][rustdoc-vec], the same type as a normal array, and
+accept repeated items. Use this flag when your
 code cannot depend on `indexmap`, or when you do not need JSON key and element
 order to survive a deserialize-then-serialize round trip.
 
@@ -1780,30 +2474,62 @@ pip install mdformat
 
 Without the flag, the generator preserves documentation text while converting
 escaped newlines to line breaks. A long description can therefore remain on
-one line:
+one line, as the petstore's `CollarTelemetry` description does:
 
 ```rust
-/// A long description that may contain very long lines that extend well beyond typical line widths because the OpenAPI spec author did not wrap them.
-pub struct Widget {
-    pub id: i64,
+/// A batch of smart-collar readings, written with JSON Schema 2020-12 keywords. Keywords without a Rust equivalent are accepted and ignored.
+pub struct CollarTelemetry {
+    /* ... */
 }
 ```
 
 ### With `--doc-format`
 
 ```bash
-cargo run -- generate types -i spec.json -o types.rs --doc-format
+cargo run -- generate types -i petstore.json -o types.rs --doc-format
 ```
 
 The same description is wrapped into multiple lines:
 
 ```rust
-/// A long description that may contain very long lines that extend well beyond typical line widths
-/// because the OpenAPI spec author did not wrap them.
-pub struct Widget {
-    pub id: i64,
+/// A batch of smart-collar readings, written with JSON Schema 2020-12 keywords. Keywords without a Rust
+/// equivalent are accepted and ignored.
+pub struct CollarTelemetry {
+    /* ... */
 }
 ```
+
+## Known Limitations
+
+Some parts of an OpenAPI document have no exact Rust equivalent. The generator
+accepts the following schemas and parameters, but the generated code doesn't
+enforce everything they say. Each item names the petstore schema or operation
+that shows it:
+
+- With `--no-ordered-collections`, an array with `uniqueItems: true`, such as
+  the `tags` of `Pet`, is a `Vec` and accepts repeated items. See
+  [Ordering and Collections](#ordering-and-collections).
+- An optional field that also allows `null` is an `Option<T>`, so JSON `null`
+  and a missing property both decode as `None`, and `None` is left out when
+  serializing. A client therefore can't send `null` to clear a field with a
+  JSON merge patch, such as the `nickname` in the `PetPatch` body of
+  `updatePet`. Likewise, a field without a type, such as `anyValue` in
+  `CollarTelemetry`, decodes `null` as `None`.
+- The generator ignores `allowReserved` on query parameters. The client
+  percent-encodes reserved characters, such as the `/` in a `q` value for
+  `searchPets`.
+- A query parameter's value must be a scalar or an array of scalars. A JSON
+  object or an array of arrays in an untyped parameter, such as `filter` on
+  `searchPets`, makes the client method return an error before it sends the
+  request.
+- An `anyOf` whose branches each require a different property isn't enforced.
+  The `PetCarrier` schema requires either `wheels` or `straps`, but both become
+  optional fields, so a carrier with neither decodes successfully.
+- A multipart part name can't contain `"`, `\`, a carriage return, a line
+  feed, or another control character. The generator warns about quotes and line
+  breaks, as described in [Generation Warnings](#generation-warnings).
+- A `multipleOf` that the generator can't check exactly only appears in the
+  field's documentation. See [Multiples](#multiples).
 
 ## Flag Summary
 
@@ -1835,6 +2561,7 @@ to see the command-line help, including input, output, and terminal options.
 To work through constructing the generated values, continue to the
 [Builder Pattern](./builders.md) chapter.
 
+[reference-deprecated]: https://doc.rust-lang.org/reference/attributes/diagnostics.html#the-deprecated-attribute
 [reference-non-exhaustive]: https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute
 [rustdoc-anyhow-result]: https://docs.rs/anyhow/1.0.104/anyhow/type.Result.html
 [rustdoc-bon-builder]: https://docs.rs/bon/3.10.1/bon/derive.Builder.html
@@ -1842,7 +2569,7 @@ To work through constructing the generated values, continue to the
 [rustdoc-chrono-datetime]: https://docs.rs/chrono/0.4.45/chrono/struct.DateTime.html
 [rustdoc-chrono-time]: https://docs.rs/chrono/0.4.45/chrono/struct.NaiveTime.html
 [rustdoc-chrono-utc]: https://docs.rs/chrono/0.4.45/chrono/struct.Utc.html
-[rustdoc-debug]: https://doc.rust-lang.org/std/fmt/trait.Debug.html
+[rustdoc-cookie]: https://docs.rs/cookie/0.18.2/cookie/
 [rustdoc-default]: https://doc.rust-lang.org/std/default/trait.Default.html
 [rustdoc-deserialize-as]: https://docs.rs/serde_with/3.24.0/serde_with/trait.DeserializeAs.html
 [rustdoc-display]: https://doc.rust-lang.org/std/fmt/trait.Display.html
@@ -1872,6 +2599,7 @@ To work through constructing the generated values, continue to the
 [rustdoc-serde-serializer]: https://docs.rs/serde/1.0.229/serde/trait.Serializer.html
 [rustdoc-serialize-as]: https://docs.rs/serde_with/3.24.0/serde_with/trait.SerializeAs.html
 [rustdoc-string]: https://doc.rust-lang.org/std/string/struct.String.html
+[rustdoc-u32]: https://doc.rust-lang.org/std/primitive.u32.html
 [rustdoc-u64]: https://doc.rust-lang.org/std/primitive.u64.html
 [rustdoc-unit]: https://doc.rust-lang.org/std/primitive.unit.html
 [rustdoc-uuid]: https://docs.rs/uuid/1.26.1/uuid/struct.Uuid.html

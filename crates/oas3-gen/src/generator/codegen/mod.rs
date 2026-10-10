@@ -26,6 +26,7 @@ pub mod cargo_manifest;
 pub mod client;
 pub mod coercion;
 pub mod constants;
+pub(crate) mod cookies;
 pub mod enums;
 pub(crate) mod headers;
 pub mod http;

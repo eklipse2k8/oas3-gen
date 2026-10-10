@@ -51,9 +51,64 @@ pub enum ValidationAttribute {
     exclusive_max: Option<Number>,
   },
   Regex(String),
+  /// JSON Schema `multipleOf`, checked by an `oas3_gen_support` function
+  MultipleOf(MultipleOfRule),
+}
+
+/// How a `multipleOf` constraint is checked, by the kind of field it constrains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultipleOfRule {
+  /// An integer field must divide evenly by the value
+  Integer(u64),
+  /// A number field must be a whole multiple of `numerator / denominator`
+  Ratio { numerator: u32, denominator: u32 },
+}
+
+impl MultipleOfRule {
+  /// The exact fraction a decimal `multipleOf` such as `0.25` names, or `None` when it
+  /// isn't a positive decimal whose parts fit in `u32`.
+  fn ratio(multiple: &Number) -> Option<Self> {
+    let text = multiple.to_string();
+    if text.starts_with('-') || text.contains(['e', 'E']) {
+      return None;
+    }
+    let (whole, fraction) = text.split_once('.').unwrap_or((text.as_str(), ""));
+    let digits = format!("{whole}{fraction}").parse::<u64>().ok()?;
+    let denominator = 10_u64.checked_pow(u32::try_from(fraction.len()).ok()?)?;
+    let divisor = greatest_common_divisor(digits, denominator);
+    let numerator = u32::try_from(digits / divisor)
+      .ok()
+      .filter(|numerator| *numerator > 0)?;
+    let denominator = u32::try_from(denominator / divisor).ok()?;
+    Some(Self::Ratio { numerator, denominator })
+  }
+}
+
+fn greatest_common_divisor(a: u64, b: u64) -> u64 {
+  if b == 0 { a } else { greatest_common_divisor(b, a % b) }
 }
 
 impl ValidationAttribute {
+  /// The `multipleOf` check for a field of `type_ref`: integer fields of up to 64 bits
+  /// check an integer multiple, number fields a decimal one.
+  pub fn multiple_of(schema: &ObjectSchema, type_ref: &TypeRef) -> Option<Self> {
+    let multiple = schema.multiple_of.as_ref()?;
+    let primitive = &type_ref.base_type;
+    let rule = if primitive.is_float() {
+      MultipleOfRule::ratio(multiple)?
+    } else if primitive.is_integer()
+      && !matches!(
+        primitive,
+        RustPrimitive::U128 | RustPrimitive::Usize | RustPrimitive::Isize
+      )
+    {
+      MultipleOfRule::Integer(multiple.as_u64().filter(|multiple| *multiple > 0)?)
+    } else {
+      return None;
+    };
+    Some(Self::MultipleOf(rule))
+  }
+
   pub fn range(schema: &ObjectSchema, type_ref: &TypeRef) -> Option<Self> {
     let exclusive_min = schema.exclusive_minimum.clone();
     let exclusive_max = schema.exclusive_maximum.clone();
@@ -124,6 +179,7 @@ impl PartialEq for ValidationAttribute {
           && compare_numbers(emax1.as_ref(), emax2.as_ref())
       }
       (Self::Regex(s1), Self::Regex(s2)) => s1 == s2,
+      (Self::MultipleOf(rule1), Self::MultipleOf(rule2)) => rule1 == rule2,
       _ => false,
     }
   }
@@ -156,6 +212,15 @@ impl ToTokens for ValidationAttribute {
       Self::Url => quote! { url },
       Self::Nested => quote! { nested },
       Self::Regex(path) => quote! { regex(path = #path) },
+      Self::MultipleOf(MultipleOfRule::Integer(multiple)) => {
+        let multiple = proc_macro2::Literal::u64_unsuffixed(*multiple);
+        quote! { custom(function = oas3_gen_support::multiple_of::<#multiple>) }
+      }
+      Self::MultipleOf(MultipleOfRule::Ratio { numerator, denominator }) => {
+        let numerator = proc_macro2::Literal::u32_unsuffixed(*numerator);
+        let denominator = proc_macro2::Literal::u32_unsuffixed(*denominator);
+        quote! { custom(function = oas3_gen_support::multiple_of_ratio::<#numerator, #denominator>) }
+      }
       Self::Length { min, max } => {
         let min_part = min.map(|m| {
           let lit = render_unsigned_integer(&RustPrimitive::U64, m)

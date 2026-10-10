@@ -38,7 +38,10 @@ impl ValueEnumBuilder {
   /// - [`CollisionStrategy::Deduplicate`]: Merges collisions into a single variant with
   ///   `#[serde(alias = "...")]` for additional values.
   /// - [`CollisionStrategy::Preserve`]: Creates distinct variants by appending the
-  ///   entry index (e.g., `FooBar`, `FooBar1`).
+  ///   entry index (e.g., `FooBar`, `FooBar1`), numbered again when an earlier variant
+  ///   already holds the suffixed name. A suffixed variant keeps its original
+  ///   value through `#[serde(rename)]`, so it still serializes and displays as the
+  ///   spelling the spec lists.
   pub(crate) fn new(case_insensitive: bool, sort_variants: bool, strategy: CollisionStrategy) -> Self {
     Self {
       case_insensitive,
@@ -65,28 +68,10 @@ impl ValueEnumBuilder {
     variants: Vec<VariantDef>,
     non_exhaustive: bool,
   ) -> RustType {
-    let (resolved_variants, _) = variants.into_iter().enumerate().fold(
-      (vec![], BTreeMap::<String, usize>::new()),
-      |(mut acc, mut seen): (Vec<VariantDef>, BTreeMap<String, usize>), (i, mut variant)| {
-        let variant_name = variant.name.to_string();
-        match seen.get(&variant_name).copied() {
-          Some(idx) if self.strategy == CollisionStrategy::Deduplicate => {
-            acc[idx].add_alias(variant.serde_name());
-          }
-          Some(_) => {
-            let unique_name = format!("{variant_name}{i}");
-            seen.insert(unique_name.clone(), acc.len());
-            variant.name = EnumVariantToken::from(unique_name);
-            acc.push(variant);
-          }
-          None => {
-            seen.insert(variant_name, acc.len());
-            acc.push(variant);
-          }
-        }
-        (acc, seen)
-      },
-    );
+    let resolved_variants = match self.strategy {
+      CollisionStrategy::Deduplicate => merge_collisions(variants),
+      CollisionStrategy::Preserve => suffix_collisions(variants),
+    };
 
     let mut resolved_variants = if self.sort_variants {
       resolved_variants
@@ -137,6 +122,48 @@ impl ValueEnumBuilder {
         .build(),
     )
   }
+}
+
+/// Folds each variant whose Rust identifier is already taken into the first variant
+/// with that identifier, keeping its wire value as a `#[serde(alias)]`.
+fn merge_collisions(variants: Vec<VariantDef>) -> Vec<VariantDef> {
+  let mut merged = Vec::<VariantDef>::with_capacity(variants.len());
+  let mut positions = BTreeMap::<String, usize>::new();
+  for variant in variants {
+    if let Some(&position) = positions.get(variant.name.as_str()) {
+      merged[position].add_alias(variant.serde_name());
+    } else {
+      positions.insert(variant.name.to_string(), merged.len());
+      merged.push(variant);
+    }
+  }
+  merged
+}
+
+/// Keeps every variant, renaming each one whose Rust identifier is already taken to
+/// that identifier plus its entry index, made unique against every earlier variant.
+///
+/// A renamed variant gains a `#[serde(rename)]` holding its original identifier when
+/// it had none, so its wire value stays the spelling the spec lists.
+fn suffix_collisions(variants: Vec<VariantDef>) -> Vec<VariantDef> {
+  let mut preserved = Vec::with_capacity(variants.len());
+  let mut taken = BTreeSet::<String>::new();
+  for (index, mut variant) in variants.into_iter().enumerate() {
+    if taken.contains(variant.name.as_str()) {
+      let original = variant.name.to_string();
+      variant.name = EnumVariantToken::from(ensure_unique(&format!("{original}{index}"), &taken));
+      if !variant
+        .serde_attrs
+        .iter()
+        .any(|attr| matches!(attr, SerdeAttribute::Rename(_)))
+      {
+        variant.serde_attrs.insert(0, SerdeAttribute::Rename(original));
+      }
+    }
+    taken.insert(variant.name.to_string());
+    preserved.push(variant);
+  }
+  preserved
 }
 
 /// Determines the primitive backing a value enum's wire values, or `None` for a

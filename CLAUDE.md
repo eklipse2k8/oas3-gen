@@ -34,9 +34,9 @@ cargo run -- generate --help                 # authoritative flag list
 
 ## Gotchas
 
-- `main.rs` declares `fixtures/` as a `#[cfg(test)]` module, so `cargo test` **compiles** generated
-  output. Stale fixtures break the build. `event_stream` is excluded from that module — nothing
-  compile-checks it.
+- `fixtures/petstore-client` and `fixtures/petstore-server` are workspace members generated from
+  `fixtures/petstore.json`, so every build **compiles** generated output. Stale fixtures break the
+  build; `tests/petstore_*.rs` run the generated client against the generated server.
 - `--doc-format` needs `mdformat` on PATH; its test skips silently when absent.
 - CI runs `cargo clippy --all` and `cargo deny check`, not `cargo test`.
 

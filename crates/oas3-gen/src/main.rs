@@ -29,16 +29,3 @@ async fn main() -> anyhow::Result<()> {
 
   Ok(())
 }
-
-#[cfg(test)]
-#[path = "../fixtures"]
-mod fixtures {
-  pub mod api_key_security;
-  pub mod api_key_security_server;
-  pub mod intersection_union;
-  pub mod multipart;
-  pub mod multipart_server;
-  pub mod petstore;
-  pub mod petstore_server;
-  pub mod union_serde;
-}

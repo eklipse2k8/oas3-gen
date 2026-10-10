@@ -1,3 +1,4 @@
+mod media_types;
 mod operation_registry;
 mod orchestrator;
 mod schema_graph;

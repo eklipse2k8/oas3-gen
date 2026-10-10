@@ -245,6 +245,60 @@ fn test_operation_registry_includes_webhooks() {
 }
 
 #[test]
+fn callbacks_register_under_their_operation_and_name() {
+  let spec = parse_spec(
+    r##"{
+      "openapi": "3.1.0",
+      "info": {"title": "Callback API", "version": "1.0.0"},
+      "paths": {
+        "/subscriptions": {
+          "post": {
+            "operationId": "subscribe",
+            "callbacks": {
+              "onEvent": { "$ref": "#/components/callbacks/Event" },
+              "onRetry": {
+                "{$request.body#/primary}": { "post": { "responses": {"204": {"description": "ok"}} } },
+                "{$request.body#/backup}": { "post": { "operationId": "retryBackup", "responses": {"204": {"description": "ok"}} } }
+              }
+            },
+            "responses": {"201": {"description": "ok"}}
+          }
+        }
+      },
+      "components": {
+        "callbacks": {
+          "Event": {
+            "{$request.body#/callbackUrl}": {
+              "post": { "responses": {"204": {"description": "ok"}} },
+              "put": { "responses": {"204": {"description": "ok"}} }
+            }
+          }
+        }
+      }
+    }"##,
+  );
+
+  let registry = OperationRegistry::new(&spec);
+  let callbacks = registry
+    .operations()
+    .filter(|entry| entry.kind == OperationKind::Callback)
+    .map(|entry| (entry.stable_id.as_str(), entry.method.as_str(), entry.path.as_str()))
+    .collect::<Vec<_>>();
+
+  assert_eq!(
+    callbacks,
+    [
+      ("subscribe_on_event", "PUT", "callbacks/subscribe/onEvent"),
+      ("subscribe_on_event_2", "POST", "callbacks/subscribe/onEvent"),
+      ("subscribe_on_retry", "POST", "callbacks/subscribe/onRetry/0"),
+      ("retry_backup", "POST", "callbacks/subscribe/onRetry/1"),
+    ],
+    "a referenced callback resolves, its methods share a path in oas3's method order, and several \
+     expressions are numbered"
+  );
+}
+
+#[test]
 fn test_operation_registry_strips_common_prefix_with_numeric_suffixes() {
   let spec = create_test_spec(&[
     ("/api/v1/users", "get", Some("listItems")),

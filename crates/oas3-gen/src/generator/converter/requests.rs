@@ -8,6 +8,7 @@ use oas3::{
 };
 
 use super::{
+  fields::FieldConverter,
   inline_resolver::InlineTypeResolver,
   methods::MethodGenerator,
   parameters::{ConvertedParams, ParameterConverter},
@@ -16,7 +17,8 @@ use crate::{
   generator::{
     ast::{
       ContentCategory, Documentation, FieldDef, FieldNameToken, MultipartProperty, OperationBody, PartRfc6570,
-      PartStyle, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef, is_json_media_type,
+      PartStyle, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef, ValidationAttribute,
+      is_json_media_type,
     },
     converter::ConverterContext,
     naming::{
@@ -136,6 +138,8 @@ pub(crate) struct BodyInfo {
   pub(crate) description: Option<String>,
   pub(crate) optional: bool,
   pub(crate) content_category: ContentCategory,
+  pub(crate) content_type: String,
+  pub(crate) validation_attrs: Vec<ValidationAttribute>,
   pub(crate) multipart_properties: IndexMap<String, MultipartProperty>,
   pub(crate) warnings: Vec<String>,
 }
@@ -184,8 +188,16 @@ impl BodyInfo {
 
     let body_type = TypeRef::new(&type_name);
     let content_category = ContentCategory::from_content_type(content_type);
+    let graph = context.graph();
+    let body_schema = match schema_ref.schema_ref_name() {
+      Some(name) => graph.get(&name),
+      None => schema_ref.as_inline(),
+    };
+    let validation_attrs = body_schema
+      .filter(|schema| schema.properties.is_empty() && !schema.has_union() && !schema.has_intersection())
+      .map(|schema| FieldConverter::extract_all_validation(BODY_FIELD_NAME, false, schema, &body_type))
+      .unwrap_or_default();
     let (multipart_properties, warnings) = if content_category == ContentCategory::Multipart {
-      let graph = context.graph();
       let schema = match schema_ref.schema_ref_name() {
         Some(name) => graph.resolved(&name).map_or_else(Cow::default, Cow::Borrowed),
         None => Cow::Owned(graph.merge_inline(&schema_ref.resolve_object(spec)?)?),
@@ -203,6 +215,8 @@ impl BodyInfo {
       description: body.description.clone(),
       optional: !is_required,
       content_category,
+      content_type: content_type.clone(),
+      validation_attrs,
       multipart_properties,
       warnings,
     })
@@ -211,12 +225,10 @@ impl BodyInfo {
   /// Creates a field definition for the request body if present.
   pub(crate) fn create_field(&self) -> Option<FieldDef> {
     let type_ref = self.body_type.clone()?;
-    Some(FieldDef::body_field(
-      BODY_FIELD_NAME,
-      self.description.as_ref(),
-      type_ref,
-      self.optional,
-    ))
+    Some(FieldDef {
+      validation_attrs: self.validation_attrs.clone(),
+      ..FieldDef::body_field(BODY_FIELD_NAME, self.description.as_ref(), type_ref, self.optional)
+    })
   }
 
   /// Converts body info into operation body metadata for code generation.
@@ -229,6 +241,7 @@ impl BodyInfo {
         .maybe_body_type(self.body_type.clone())
         .optional(self.optional)
         .content_category(self.content_category)
+        .content_type(self.content_type.clone())
         .multipart_properties(self.multipart_properties.clone())
         .build(),
     )

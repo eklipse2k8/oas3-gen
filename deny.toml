@@ -2,6 +2,7 @@
 targets = ["aarch64-apple-darwin"]
 all-features = true
 no-default-features = false
+exclude = ["petstore-client", "petstore-server"]
 
 [output]
 feature-depth = 1

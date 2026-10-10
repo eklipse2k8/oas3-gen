@@ -20,6 +20,7 @@ use crate::generator::{
   },
   codegen::{
     attributes::generate_derives_from_slice,
+    cookies::CookieParamsFragment,
     headers::{HeaderFromMapFragment, HeaderMapFragment},
     http::HttpStatusCode,
   },
@@ -57,6 +58,7 @@ impl ToTokens for StructFragment<'_> {
     let impl_block = StructImplBlockFragment::new(self.def, self.visibility);
     let header_map = HeaderMapFragment::new(self.def);
     let header_from_map = HeaderFromMapFragment::new(self.def, self.target);
+    let cookies = CookieParamsFragment::new(self.def, self.target);
 
     tokens.extend(quote! {
       #definition
@@ -67,6 +69,7 @@ impl ToTokens for StructFragment<'_> {
 
       #header_from_map
 
+      #cookies
     });
   }
 }
@@ -173,15 +176,16 @@ impl ToTokens for StructFieldFragment<'_> {
     let vis = &self.visibility;
     let type_tokens = &self.field.rust_type;
 
-    let (serde_as, serde_attrs) =
-      if self.struct_def.kind.is_header_struct() || self.struct_def.kind == StructKind::PathParams {
-        (quote! {}, quote! {})
-      } else {
-        (
-          generate_serde_as_attr(self.field.serde_as_attr.as_ref()),
-          generate_serde_attrs(&self.field.serde_attrs),
-        )
-      };
+    let (serde_as, serde_attrs) = if self.struct_def.kind.is_header_struct()
+      || matches!(self.struct_def.kind, StructKind::PathParams | StructKind::CookieParams)
+    {
+      (quote! {}, quote! {})
+    } else {
+      (
+        generate_serde_as_attr(self.field.serde_as_attr.as_ref()),
+        generate_serde_attrs(&self.field.serde_attrs),
+      )
+    };
 
     let validation = self.validation_attrs();
     let deprecated = generate_deprecated_attr(self.field.deprecated);
