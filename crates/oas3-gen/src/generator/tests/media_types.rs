@@ -83,8 +83,8 @@ fn server_sends_bodies_as_their_declared_media_type() {
       ("axum::Json(body)", "+json bodies are still serialized as JSON"),
       ("\"text/plain\"", "text bodies carry their declared media type"),
       (
-        "oas3_gen_support::ServerEvents<Reading>",
-        "event streams return typed server events",
+        "futures::stream::BoxStream<'static, Reading>",
+        "event streams return a stream of typed items",
       ),
       (
         "axum::response::sse::Sse::new(",
@@ -94,6 +94,7 @@ fn server_sends_bodies_as_their_declared_media_type() {
         "axum::response::sse::Event::default().json_data(item)",
         "each streamed item is one JSON event",
       ),
+      ("futures::StreamExt::map(", "items map to axum events"),
     ],
   );
   assert_not_contains(
@@ -169,15 +170,15 @@ fn client_supports_every_http_method_and_streams_events() {
         "TRACE goes through the generic request builder",
       ),
       (
-        "oas3_gen_support::EventStream<Reading>",
-        "the client reads event streams",
+        "oas3_gen_support::EventStream<oas3_gen_support::SseFrame<Reading>>",
+        "the client reads each item of an event stream in a frame",
       ),
     ],
   );
   assert_not_contains(
     &client,
-    "oas3_gen_support::ServerEvents<",
-    "the client never uses the server's event type",
+    "futures::stream::BoxStream<",
+    "the client never uses the server's stream type",
   );
 }
 

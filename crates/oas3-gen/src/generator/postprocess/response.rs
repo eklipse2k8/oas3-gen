@@ -5,17 +5,17 @@ use itertools::Itertools;
 
 use crate::generator::{
   ast::{
-    ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken,
+    BodyMediaType, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken,
     OperationInfo, OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef, ResponseMediaType,
     ResponseParam, ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant, ResponseVariant,
-    ResponseVariantCategory, RustPrimitive, RustType, SerdeMode, StatusCodeToken, StatusHandler, StatusMediaType,
-    StructDef, StructKind, StructMethod, StructToken, TypeRef, VariantMapping,
+    ResponseVariantCategory, RustPrimitive, RustType, SerdeMode, StatusCodeToken, StatusHandler, StructDef, StructKind,
+    StructMethod, StructToken, TypeRef, VariantMapping,
   },
   converter::GenerationTarget,
   naming::{
     constants::{OTHER_RESPONSE_VARIANT, RESPONSE_FALLBACK_NAME, RESPONSE_NAME, WITH_HEADERS_NAME},
     identifiers::ensure_unique,
-    responses::{headers_name, union_name},
+    responses::{headers_name, union_member_name, union_name},
   },
 };
 
@@ -211,14 +211,13 @@ impl ResponseProcessor {
   ///
   /// A single body type is used as is, several become a response union, and a
   /// bodiless status alongside a body makes the parameter `Option<_>`. With no
-  /// body anywhere in the class the parameter is `()`. Also returns the first media
-  /// type each status code with a body declares; a union keeps only its JSON ones,
-  /// since a union is always sent as JSON.
+  /// body anywhere in the class the parameter is `()`. Also returns each declared
+  /// body with how a server sends it.
   fn resolve_payload(
     &mut self,
     class: ResponsePayload,
     variants: &mut [ResponseVariant],
-  ) -> (TypeRef, Vec<StatusMediaType>) {
+  ) -> (TypeRef, Vec<BodyMediaType>) {
     let keyed = variants
       .iter()
       .enumerate()
@@ -246,16 +245,29 @@ impl ResponseProcessor {
       }
     };
 
+    let members = keyed
+      .iter()
+      .map(|(_, key)| union.as_ref().and(key.as_deref()).map(member_variant))
+      .collect::<Vec<_>>();
     let media_types = keyed
       .iter()
-      .filter_map(|(index, key)| {
-        key.as_ref()?;
+      .zip(&members)
+      .filter_map(|((index, _), member)| {
         let variant = &variants[*index];
-        Some((variant.status_code, variant.media_types.first()?))
+        let body = variant.schema_type.clone()?;
+        let media = variant.media_types.first()?;
+        Some(
+          BodyMediaType::builder()
+            .status(variant.status_code)
+            .maybe_member(member.clone())
+            .category(media.category)
+            .content_type(media.content_type.clone())
+            .body(body)
+            .maybe_stream(media.stream.clone())
+            .build(),
+        )
       })
-      .unique_by(|(status, _)| *status)
-      .filter(|(_, media_type)| union.is_none() || media_type.category == ContentCategory::Json)
-      .map(|(status, media_type)| (status, media_type.clone()))
+      .unique_by(|entry| (entry.status, entry.member.clone()))
       .collect::<Vec<_>>();
 
     let param = if any_bodiless && !bodies.is_empty() {
@@ -264,10 +276,10 @@ impl ResponseProcessor {
       param
     };
 
-    for (index, key) in keyed {
+    for ((index, _), member) in keyed.into_iter().zip(members) {
       variants[index].mapping = VariantMapping::builder()
         .payload(class)
-        .maybe_union_variant(union.as_ref().and(key.as_deref()).map(EnumVariantToken::from_raw))
+        .maybe_union_variant(member)
         .build();
     }
 
@@ -390,17 +402,22 @@ impl ResponseProcessor {
             .iter()
             .map(|(type_name, rust_type, _)| {
               ResponseUnionVariant::builder()
-                .name(EnumVariantToken::from_raw(type_name))
+                .name(member_variant(type_name))
                 .rust_type((*rust_type).clone())
                 .build()
             })
             .collect(),
         )
         .serde_mode(serde_mode)
-        .streaming(streaming)
+        .maybe_streaming(streaming.then_some(self.target))
         .build()
     })
   }
+}
+
+/// The union variant for the body rendered as `member`.
+fn member_variant(member: &str) -> EnumVariantToken {
+  EnumVariantToken::new(union_member_name(member))
 }
 
 /// Collects every declared status code and whether any operation gives it a payload.

@@ -13,8 +13,8 @@ use std::{
 
 use axum::http::StatusCode;
 use chrono::Datelike as _;
+use futures::{StreamExt as _, stream::BoxStream};
 use indexmap::{IndexMap, IndexSet};
-use oas3_gen_support::ServerEvents;
 use petstore_server as server;
 use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
@@ -50,6 +50,8 @@ pub enum Received {
   GetAdoption(server::GetAdoptionRequest),
   SubmitCollarTelemetry(server::SubmitCollarTelemetryRequest),
   SendAssistantMessage(server::SendAssistantMessageRequest),
+  StreamAssistantMessage(server::StreamAssistantMessageRequest),
+  StreamAssistantTokens(server::StreamAssistantTokensRequest),
   ListAssistantEvents(server::ListAssistantEventsRequest),
   GetChatPreference(server::GetChatPreferenceRequest),
   UpdateChatPreference(server::UpdateChatPreferenceRequest),
@@ -65,6 +67,7 @@ pub enum Received {
   UploadMedia(server::UploadMediaRequest),
   SubmitMediaLabels(server::SubmitMediaLabelsRequest),
   SubmitTallies(server::SubmitTalliesRequest),
+  GetMediaBoth(server::GetMediaBothRequest),
   ListApiKeys(server::ListApiKeysRequest),
   CreateApiKey(server::CreateApiKeyRequest),
   GetApiKey(server::GetApiKeyRequest),
@@ -95,6 +98,10 @@ pub struct State {
   pub carriers: Vec<server::PetCarrier>,
   pub api_keys: IndexMap<String, server::ApiKey>,
   pub preference: Option<server::ChatPreference>,
+  /// The frames `streamAssistantMessage` streams when asked to.
+  pub assistant_frames: Vec<server::AssistantEventFrame>,
+  /// The frames `streamAssistantTokens` streams.
+  pub token_frames: Vec<server::AssistantTokenFrame>,
   /// The status each `statusChanged` callback delivery got back, in delivery order.
   pub callback_deliveries: Vec<u16>,
   pub received: Vec<Received>,
@@ -310,6 +317,15 @@ fn default_carriers() -> Vec<server::PetCarrier> {
       straps: Some(1),
     },
   ]
+}
+
+/// The pet the media operations describe, as text, bytes, JSON, or an event stream.
+fn media_pet() -> server::Pet {
+  server::Pet {
+    name: "Biscuit".to_string(),
+    species: server::Species::Dog,
+    ..server::Pet::default()
+  }
 }
 
 #[allow(
@@ -736,7 +752,7 @@ impl server::ApiServer for PetstoreService {
   async fn stream_pet_vitals(
     &self,
     request: server::StreamPetVitalsRequest,
-  ) -> Response<ServerEvents<server::VitalsReading>> {
+  ) -> Response<BoxStream<'static, server::VitalsReading>> {
     self.record(Received::StreamPetVitals(request.clone()));
     let since = request.query.since;
     let readings = self.with_state(|state| {
@@ -747,7 +763,7 @@ impl server::ApiServer for PetstoreService {
         .cloned()
         .collect::<Vec<_>>()
     });
-    Ok(server::ApiResponse::Ok(readings.into_iter().collect()))
+    Ok(server::ApiResponse::Ok(futures::stream::iter(readings).boxed()))
   }
 
   async fn list_cats(
@@ -845,7 +861,7 @@ impl server::ApiServer for PetstoreService {
   async fn stream_adoption_feed(
     &self,
     request: server::StreamAdoptionFeedRequest,
-  ) -> Response<ServerEvents<server::AdoptionFeedEvent>> {
+  ) -> Response<BoxStream<'static, server::AdoptionFeedEvent>> {
     self.record(Received::StreamAdoptionFeed(request.clone()));
     let filter = request.query.filter;
     let events = self.with_state(|state| {
@@ -860,7 +876,7 @@ impl server::ApiServer for PetstoreService {
         .cloned()
         .collect::<Vec<_>>()
     });
-    Ok(server::ApiResponse::Ok(events.into_iter().collect()))
+    Ok(server::ApiResponse::Ok(futures::stream::iter(events).boxed()))
   }
 
   async fn get_adoption(&self, request: server::GetAdoptionRequest) -> Response<server::Adoption, server::Problem> {
@@ -893,6 +909,38 @@ impl server::ApiServer for PetstoreService {
       reading_count: i32::try_from(telemetry.samples.len()).unwrap_or(i32::MAX),
       received_at: Some(now()),
     }))
+  }
+
+  async fn stream_assistant_message(
+    &self,
+    request: server::StreamAssistantMessageRequest,
+  ) -> Response<server::ContentResponseOrAssistantEventFrameStream> {
+    self.record(Received::StreamAssistantMessage(request.clone()));
+    if request.query.stream == Some(true) {
+      let frames = self.with_state(|state| state.assistant_frames.clone());
+      return Ok(server::ApiResponse::Ok(
+        server::ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(
+          futures::stream::iter(frames).boxed(),
+        ),
+      ));
+    }
+    let id = self.with_state(State::next_id);
+    Ok(server::ApiResponse::Ok(
+      server::ContentResponseOrAssistantEventFrameStream::ContentResponse(server::ContentResponse {
+        id: format!("msg_{id}"),
+        content: Box::new(request.body.blocks.last().cloned().unwrap_or_default()),
+        usage: None,
+      }),
+    ))
+  }
+
+  async fn stream_assistant_tokens(
+    &self,
+    request: server::StreamAssistantTokensRequest,
+  ) -> Response<BoxStream<'static, server::AssistantTokenFrame>> {
+    self.record(Received::StreamAssistantTokens(request));
+    let frames = self.with_state(|state| state.token_frames.clone());
+    Ok(server::ApiResponse::Ok(futures::stream::iter(frames).boxed()))
   }
 
   async fn send_assistant_message(
@@ -1088,6 +1136,11 @@ impl server::ApiServer for PetstoreService {
   async fn submit_tallies(&self, request: server::SubmitTalliesRequest) -> Response<server::Tallies> {
     self.record(Received::SubmitTallies(request.clone()));
     Ok(server::ApiResponse::Ok(request.body))
+  }
+
+  async fn get_media_both(&self, request: server::GetMediaBothRequest) -> Response<server::PetOrPetStream> {
+    self.record(Received::GetMediaBoth(request));
+    Ok(server::ApiResponse::Ok(server::PetOrPetStream::Pet(media_pet())))
   }
 
   async fn list_api_keys(

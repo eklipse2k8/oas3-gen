@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::generator::naming::responses::{
   extract_all_response_types, extract_response_type_name, extract_schema_name_from_response, headers_name,
-  is_error_code, is_success_code,
+  is_error_code, is_success_code, union_member_name, union_name,
 };
 
 fn create_test_spec() -> Spec {
@@ -304,4 +304,31 @@ fn test_headers_name() {
       "name mismatch for {headers:?}"
     );
   }
+}
+
+#[test]
+fn test_union_members_name_streams_after_their_items() {
+  let cases = [
+    ("Pet", "Pet"),
+    ("oas3_gen_support::EventStream<Pet>", "PetStream"),
+    (
+      "oas3_gen_support::EventStream<oas3_gen_support::SseFrame<Pet>>",
+      "PetStream",
+    ),
+    (
+      "futures::stream::BoxStream<'static, AssistantEventFrame>",
+      "AssistantEventFrameStream",
+    ),
+    ("Vec<u8>", "Vecu8"),
+  ];
+  for (member, expected) in cases {
+    assert_eq!(union_member_name(member), expected, "member name for {member}");
+  }
+  assert_eq!(
+    union_name(
+      ["ContentResponse", "oas3_gen_support::EventStream<AssistantEventFrame>"],
+      &BTreeSet::new()
+    ),
+    "ContentResponseOrAssistantEventFrameStream"
+  );
 }

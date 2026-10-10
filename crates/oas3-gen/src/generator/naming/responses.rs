@@ -9,7 +9,8 @@ use oas3::{
 use crate::{
   generator::naming::{
     constants::{
-      RESPONSE_HEADERS_SEPARATOR, RESPONSE_HEADERS_SUFFIX, RESPONSE_UNION_FALLBACK_SUFFIX, RESPONSE_UNION_SEPARATOR,
+      CLIENT_EVENT_STREAM_TYPE, CLIENT_SSE_FRAME_TYPE, RESPONSE_HEADERS_SEPARATOR, RESPONSE_HEADERS_SUFFIX,
+      RESPONSE_UNION_FALLBACK_SUFFIX, RESPONSE_UNION_SEPARATOR, RESPONSE_UNION_STREAM_SUFFIX, SERVER_EVENT_STREAM_TYPE,
     },
     identifiers::{ensure_unique, to_rust_type_name},
   },
@@ -94,18 +95,57 @@ pub fn extract_schema_name_from_response(response: &Response) -> Option<String> 
 
 /// Names the union over several response body types, e.g. `BasicErrorOrValidationError`.
 ///
-/// `members` are rendered Rust types in canonical order. A name already in use gets a
-/// `Body` suffix, then a numeric one.
+/// `members` are rendered Rust types in canonical order, each named by
+/// [`union_member_name`]. A name already in use gets a `Body` suffix, then a numeric one.
 pub(crate) fn union_name<'a>(members: impl IntoIterator<Item = &'a str>, taken: &BTreeSet<String>) -> String {
   let base = members
     .into_iter()
-    .map(to_rust_type_name)
+    .map(union_member_name)
     .join(RESPONSE_UNION_SEPARATOR);
   if taken.contains(&base) {
     ensure_unique(&format!("{base}{RESPONSE_UNION_FALLBACK_SUFFIX}"), taken)
   } else {
     base
   }
+}
+
+/// Names one member of a response union after its rendered type: `Pet` for `Pet`, and
+/// `PetStream` for an event stream of `Pet` items.
+pub(crate) fn union_member_name(member: &str) -> String {
+  stream_item(member).map_or_else(
+    || to_rust_type_name(member),
+    |item| format!("{}{RESPONSE_UNION_STREAM_SUFFIX}", to_rust_type_name(item)),
+  )
+}
+
+/// The type a client reads a `text/event-stream` of `item`s as.
+pub(crate) fn client_stream_type(item: &str) -> String {
+  format!("{CLIENT_EVENT_STREAM_TYPE}<{item}>")
+}
+
+/// The type a server returns a `text/event-stream` of `item`s as.
+pub(crate) fn server_stream_type(item: &str) -> String {
+  format!("{SERVER_EVENT_STREAM_TYPE}<'static, {item}>")
+}
+
+/// The frame a client reads each `payload` of a `text/event-stream` in, its event name a
+/// `String` unless the stream declares `event`.
+pub(crate) fn sse_frame_type(payload: &str, event: Option<&str>) -> String {
+  match event {
+    Some(event) => format!("{CLIENT_SSE_FRAME_TYPE}<{payload}, {event}>"),
+    None => format!("{CLIENT_SSE_FRAME_TYPE}<{payload}>"),
+  }
+}
+
+/// The item a stream type streams, outside the frame a client reads it in.
+fn stream_item(member: &str) -> Option<&str> {
+  let item = generic_argument(member, CLIENT_EVENT_STREAM_TYPE)
+    .or_else(|| generic_argument(member, SERVER_EVENT_STREAM_TYPE)?.strip_prefix("'static, "))?;
+  Some(generic_argument(item, CLIENT_SSE_FRAME_TYPE).unwrap_or(item))
+}
+
+fn generic_argument<'a>(rust_type: &'a str, generic: &str) -> Option<&'a str> {
+  rust_type.strip_prefix(generic)?.strip_prefix('<')?.strip_suffix('>')
 }
 
 /// Names the struct over a set of response headers, e.g. `LinkAndLocationHeaders`.

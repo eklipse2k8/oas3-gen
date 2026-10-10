@@ -21,30 +21,32 @@ use super::types::{
   AdoptPetRequest, AdoptPetStatusChangedRequest, Adoption, AdoptionEvent, AdoptionFeedEvent, AdoptionRequest,
   AllowHeaders, ApiKey, ApiKeyAuthAndBearerAuthCredentials, ApiKeyAuthAndSessionCookieCredentials,
   ApiKeyAuthCredentials, ApiKeyAuthCredentials2, ApiResponse, AssistantEventList, AssistantSettings,
-  BearerAuthAndTokenAuthCredentials, Carrier200Response, Cats, ChatPreference, CollarTelemetry, ContentRequest,
-  ContentResponse, CreateApiKeyRequest, CreatePetRequest, DeleteOrderRequest, DeleteOrderRequestPath, DeletePetRequest,
-  DeletePetRequestPath, DescribePetsRequest, ETagAndXCacheHeaders, ETagHeaders, Error, ErrorOrProblem, ErrorResponse,
-  GetAdoptionRequest, GetAdoptionRequestPath, GetApiKeyRequest, GetApiKeyRequestPath, GetChatPreferenceRequest,
-  GetHealthRequest, GetInventoryRequest, GetOrderByIdRequest, GetOrderByIdRequestPath, GetPetCardRequest,
-  GetPetCardRequestCookie, GetPetCardRequestPath, GetPetLineageRequest, GetPetLineageRequestPath,
-  GetPetLineageRequestQuery, GetPetPhotoRequest, GetPetPhotoRequestPath, ImageRequestBody, IntakeForm,
-  IntakeFormLabels, Inventory, InventoryAlert, InventoryLowRequest, Key200Response, Lineage, ListApiKeysRequest,
-  ListApiKeysRequestQuery, ListAssistantEventsRequest, ListAssistantEventsRequestCookie, ListAuditEventsRequest,
-  ListCarriersRequest, ListCatsRequest, ListCatsRequestHeader, ListCatsRequestQuery, ListPetsRequest,
-  ListPetsRequestHeader, ListPetsRequestQuery, ListVaccinationsRequest, ListVaccinationsRequestPath, LocationHeaders,
-  MediaLabels, MediaReceipt, MediumRequestBody, NewApiKey, NewPet, NewsletterOptOut, NewsletterSignup, Order, Pet,
-  PetAdoptedRequest, PetExistsRequest, PetExistsRequestPath, PetPatch, Pets, PlaceOrderRequest, Problem,
-  QueryKeyAndSessionCookieCredentials, RecordVaccinationRequest, RecordVaccinationRequestPath, ReplaceApiKeyRequest,
-  ReplaceApiKeyRequestPath, ReplacePetPhotoRequest, ReplacePetPhotoRequestPath, RevokeApiKeyRequest,
-  RevokeApiKeyRequestPath, SearchPetsRequest, SearchPetsRequestQuery, SearchResults, SendAssistantMessageRequest,
-  SetPetNotesRequest, SetPetNotesRequestPath, ShowPetByIdRequest, ShowPetByIdRequestHeader, ShowPetByIdRequestPath,
-  StreamAdoptionFeedRequest, StreamAdoptionFeedRequestQuery, StreamPetVitalsRequest, StreamPetVitalsRequestPath,
-  StreamPetVitalsRequestQuery, SubmitCollarTelemetryRequest, SubmitCollarTelemetryRequestPath, SubmitIntakeFormRequest,
-  SubmitIntakeFormRequestPath, SubmitMediaLabelsRequest, SubmitTalliesRequest, SubscribeNewsletterRequest,
-  Subscription, Tallies, TelemetryReceipt, TraceHealthRequest, UnsubscribeNewsletterRequest,
-  UpdateAssistantSettingsRequest, UpdateChatPreferenceRequest, UpdatePetRequest, UpdatePetRequestPath,
-  UploadMediaRequest, UploadPetImageRequest, UploadPetImageRequestPath, Vaccination200Response, VaccineRecord,
-  VitalsReading, WithHeaders, X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
+  AssistantTokenFrame, BearerAuthAndTokenAuthCredentials, Carrier200Response, Cats, ChatPreference, CollarTelemetry,
+  ContentRequest, ContentResponse, ContentResponseOrAssistantEventFrameStream, CreateApiKeyRequest, CreatePetRequest,
+  DeleteOrderRequest, DeleteOrderRequestPath, DeletePetRequest, DeletePetRequestPath, DescribePetsRequest,
+  ETagAndXCacheHeaders, ETagHeaders, Error, ErrorOrProblem, ErrorResponse, GetAdoptionRequest, GetAdoptionRequestPath,
+  GetApiKeyRequest, GetApiKeyRequestPath, GetChatPreferenceRequest, GetHealthRequest, GetInventoryRequest,
+  GetMediaBothRequest, GetOrderByIdRequest, GetOrderByIdRequestPath, GetPetCardRequest, GetPetCardRequestCookie,
+  GetPetCardRequestPath, GetPetLineageRequest, GetPetLineageRequestPath, GetPetLineageRequestQuery, GetPetPhotoRequest,
+  GetPetPhotoRequestPath, ImageRequestBody, IntakeForm, IntakeFormLabels, Inventory, InventoryAlert,
+  InventoryLowRequest, Key200Response, Lineage, ListApiKeysRequest, ListApiKeysRequestQuery,
+  ListAssistantEventsRequest, ListAssistantEventsRequestCookie, ListAuditEventsRequest, ListCarriersRequest,
+  ListCatsRequest, ListCatsRequestHeader, ListCatsRequestQuery, ListPetsRequest, ListPetsRequestHeader,
+  ListPetsRequestQuery, ListVaccinationsRequest, ListVaccinationsRequestPath, LocationHeaders, MediaLabels,
+  MediaReceipt, MediumRequestBody, NewApiKey, NewPet, NewsletterOptOut, NewsletterSignup, Order, Pet,
+  PetAdoptedRequest, PetExistsRequest, PetExistsRequestPath, PetOrPetStream, PetPatch, Pets, PlaceOrderRequest,
+  Problem, QueryKeyAndSessionCookieCredentials, RecordVaccinationRequest, RecordVaccinationRequestPath,
+  ReplaceApiKeyRequest, ReplaceApiKeyRequestPath, ReplacePetPhotoRequest, ReplacePetPhotoRequestPath,
+  RevokeApiKeyRequest, RevokeApiKeyRequestPath, SearchPetsRequest, SearchPetsRequestQuery, SearchResults,
+  SendAssistantMessageRequest, SetPetNotesRequest, SetPetNotesRequestPath, ShowPetByIdRequest,
+  ShowPetByIdRequestHeader, ShowPetByIdRequestPath, StreamAdoptionFeedRequest, StreamAdoptionFeedRequestQuery,
+  StreamAssistantMessageRequest, StreamAssistantMessageRequestQuery, StreamAssistantTokensRequest,
+  StreamPetVitalsRequest, StreamPetVitalsRequestPath, StreamPetVitalsRequestQuery, SubmitCollarTelemetryRequest,
+  SubmitCollarTelemetryRequestPath, SubmitIntakeFormRequest, SubmitIntakeFormRequestPath, SubmitMediaLabelsRequest,
+  SubmitTalliesRequest, SubscribeNewsletterRequest, Subscription, Tallies, TelemetryReceipt, TraceHealthRequest,
+  UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest, UpdateChatPreferenceRequest, UpdatePetRequest,
+  UpdatePetRequestPath, UploadMediaRequest, UploadPetImageRequest, UploadPetImageRequestPath, Vaccination200Response,
+  VaccineRecord, VitalsReading, WithHeaders, X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
 };
 pub trait ApiServer: Send + Sync {
   /// List pets
@@ -171,7 +173,9 @@ pub trait ApiServer: Send + Sync {
   fn stream_pet_vitals(
     &self,
     request: StreamPetVitalsRequest,
-  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<oas3_gen_support::ServerEvents<VitalsReading>, ()>>> + Send;
+  ) -> impl std::future::Future<
+    Output = anyhow::Result<ApiResponse<futures::stream::BoxStream<'static, VitalsReading>, ()>>,
+  > + Send;
   /// List cats
   ///
   /// Superseded by `listPets` with `x-only: cat`.
@@ -195,7 +199,7 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: StreamAdoptionFeedRequest,
   ) -> impl std::future::Future<
-    Output = anyhow::Result<ApiResponse<oas3_gen_support::ServerEvents<AdoptionFeedEvent>, ()>>,
+    Output = anyhow::Result<ApiResponse<futures::stream::BoxStream<'static, AdoptionFeedEvent>, ()>>,
   > + Send;
   /// Get an adoption
   ///
@@ -218,6 +222,22 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: SendAssistantMessageRequest,
   ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<ContentResponse, ErrorResponse>>> + Send;
+  /// Send content blocks and receive the reply as one document or as a stream
+  ///
+  /// * Path: `POST /assistant/messages/stream`
+  fn stream_assistant_message(
+    &self,
+    request: StreamAssistantMessageRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<ContentResponseOrAssistantEventFrameStream, ()>>> + Send;
+  /// Stream reply tokens, then the usage they cost
+  ///
+  /// * Path: `GET /assistant/tokens`
+  fn stream_assistant_tokens(
+    &self,
+    request: StreamAssistantTokensRequest,
+  ) -> impl std::future::Future<
+    Output = anyhow::Result<ApiResponse<futures::stream::BoxStream<'static, AssistantTokenFrame>, ()>>,
+  > + Send;
   /// Replay the assistant's streaming events as one JSON document
   ///
   /// * Path: `GET /assistant/events`
@@ -325,6 +345,13 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: SubmitTalliesRequest,
   ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<Tallies, ()>>> + Send;
+  /// Describe a pet as JSON, or stream it as server-sent events
+  ///
+  /// * Path: `GET /media/both`
+  fn get_media_both(
+    &self,
+    request: GetMediaBothRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<PetOrPetStream, ()>>> + Send;
   /// List API keys with the global header key
   ///
   /// * Path: `GET /staff/keys`
@@ -886,7 +913,7 @@ where
         .into_response(),
     },
     Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
-    Ok(ApiResponse::BadRequest(body)) => (
+    Ok(ApiResponse::BadRequest(ErrorOrProblem::Problem(body))) => (
       http::StatusCode::BAD_REQUEST,
       (
         [(
@@ -897,7 +924,10 @@ where
       ),
     )
       .into_response(),
-    Ok(ApiResponse::Unauthorized(body)) => (
+    Ok(ApiResponse::BadRequest(ErrorOrProblem::Error(body))) => {
+      (http::StatusCode::BAD_REQUEST, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Unauthorized(ErrorOrProblem::Problem(body))) => (
       http::StatusCode::UNAUTHORIZED,
       (
         [(
@@ -908,7 +938,10 @@ where
       ),
     )
       .into_response(),
-    Ok(ApiResponse::NotFound(body)) => (
+    Ok(ApiResponse::Unauthorized(ErrorOrProblem::Error(body))) => {
+      (http::StatusCode::UNAUTHORIZED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::NotFound(ErrorOrProblem::Problem(body))) => (
       http::StatusCode::NOT_FOUND,
       (
         [(
@@ -919,7 +952,10 @@ where
       ),
     )
       .into_response(),
-    Ok(ApiResponse::Conflict(body)) => (
+    Ok(ApiResponse::NotFound(ErrorOrProblem::Error(body))) => {
+      (http::StatusCode::NOT_FOUND, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Conflict(ErrorOrProblem::Problem(body))) => (
       http::StatusCode::CONFLICT,
       (
         [(
@@ -930,7 +966,10 @@ where
       ),
     )
       .into_response(),
-    Ok(ApiResponse::UnprocessableEntity(body)) => (
+    Ok(ApiResponse::Conflict(ErrorOrProblem::Error(body))) => {
+      (http::StatusCode::CONFLICT, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::UnprocessableEntity(ErrorOrProblem::Problem(body))) => (
       http::StatusCode::UNPROCESSABLE_ENTITY,
       (
         [(
@@ -941,9 +980,27 @@ where
       ),
     )
       .into_response(),
-    Ok(ApiResponse::ClientError(status, body) | ApiResponse::Unknown(status, body)) => {
-      (status, axum::Json(body)).into_response()
+    Ok(ApiResponse::UnprocessableEntity(ErrorOrProblem::Error(body))) => {
+      (http::StatusCode::UNPROCESSABLE_ENTITY, axum::Json(body)).into_response()
     }
+    Ok(
+      ApiResponse::ClientError(status, ErrorOrProblem::Problem(body))
+      | ApiResponse::Unknown(status, ErrorOrProblem::Problem(body)),
+    ) => (
+      status,
+      (
+        [(
+          axum::http::header::CONTENT_TYPE,
+          axum::http::HeaderValue::from_static("application/problem+json"),
+        )],
+        axum::Json(body),
+      ),
+    )
+      .into_response(),
+    Ok(
+      ApiResponse::ClientError(status, ErrorOrProblem::Error(body))
+      | ApiResponse::Unknown(status, ErrorOrProblem::Error(body)),
+    ) => (status, axum::Json(body)).into_response(),
     Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
     Err(e) => (
       axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -2088,27 +2145,35 @@ where
     query,
     credentials,
   };
-  let result: anyhow::Result<ApiResponse<oas3_gen_support::ServerEvents<VitalsReading>, ()>> =
+  let result: anyhow::Result<ApiResponse<futures::stream::BoxStream<'static, VitalsReading>, ()>> =
     service.stream_pet_vitals(request).await;
   match result {
     Ok(ApiResponse::Ok(body)) => (
       http::StatusCode::OK,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::Created(body)) => (
       http::StatusCode::CREATED,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::Accepted(body)) => (
       http::StatusCode::ACCEPTED,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::NoContent(body)) => (
       http::StatusCode::NO_CONTENT,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
@@ -2277,27 +2342,35 @@ where
   S: ApiServer + Clone + Send + Sync + 'static,
 {
   let request = StreamAdoptionFeedRequest { query, credentials };
-  let result: anyhow::Result<ApiResponse<oas3_gen_support::ServerEvents<AdoptionFeedEvent>, ()>> =
+  let result: anyhow::Result<ApiResponse<futures::stream::BoxStream<'static, AdoptionFeedEvent>, ()>> =
     service.stream_adoption_feed(request).await;
   match result {
     Ok(ApiResponse::Ok(body)) => (
       http::StatusCode::OK,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::Created(body)) => (
       http::StatusCode::CREATED,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::Accepted(body)) => (
       http::StatusCode::ACCEPTED,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::NoContent(body)) => (
       http::StatusCode::NO_CONTENT,
-      axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item))),
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
     )
       .into_response(),
     Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
@@ -2483,6 +2556,146 @@ where
     Ok(ApiResponse::ClientError(status, body) | ApiResponse::Unknown(status, body)) => {
       (status, axum::Json(body)).into_response()
     }
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn stream_assistant_message<S>(
+  State(service): State<S>,
+  credentials: ApiKeyAuthCredentials2,
+  axum_extra::extract::Query(query): axum_extra::extract::Query<StreamAssistantMessageRequestQuery>,
+  body: Result<axum::Json<ContentRequest>, axum::extract::rejection::JsonRejection>,
+) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let body = match body {
+    Ok(axum::Json(body)) => body,
+    Err(e) => {
+      return (axum::http::StatusCode::BAD_REQUEST, format!("Bad request: {e}")).into_response();
+    }
+  };
+  let request = StreamAssistantMessageRequest {
+    query,
+    credentials,
+    body,
+  };
+  let result: anyhow::Result<ApiResponse<ContentResponseOrAssistantEventFrameStream, ()>> =
+    service.stream_assistant_message(request).await;
+  match result {
+    Ok(ApiResponse::Ok(ContentResponseOrAssistantEventFrameStream::ContentResponse(body))) => {
+      (http::StatusCode::OK, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Ok(ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(body))) => (
+      http::StatusCode::OK,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[DONE]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(ContentResponseOrAssistantEventFrameStream::ContentResponse(body))) => {
+      (http::StatusCode::CREATED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Created(ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(body))) => (
+      http::StatusCode::CREATED,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[DONE]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(ContentResponseOrAssistantEventFrameStream::ContentResponse(body))) => {
+      (http::StatusCode::ACCEPTED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Accepted(ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(body))) => (
+      http::StatusCode::ACCEPTED,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[DONE]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(ContentResponseOrAssistantEventFrameStream::ContentResponse(body))) => {
+      (http::StatusCode::NO_CONTENT, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::NoContent(ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(body))) => (
+      http::StatusCode::NO_CONTENT,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[DONE]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
+pub async fn stream_assistant_tokens<S>(
+  State(service): State<S>,
+  credentials: ApiKeyAuthCredentials2,
+) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = StreamAssistantTokensRequest { credentials };
+  let result: anyhow::Result<ApiResponse<futures::stream::BoxStream<'static, AssistantTokenFrame>, ()>> =
+    service.stream_assistant_tokens(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (
+      http::StatusCode::OK,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[END]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(body)) => (
+      http::StatusCode::CREATED,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[END]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(body)) => (
+      http::StatusCode::ACCEPTED,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[END]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(body)) => (
+      http::StatusCode::NO_CONTENT,
+      axum::response::sse::Sse::new(futures::StreamExt::chain(
+        futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+        futures::stream::iter([Ok(axum::response::sse::Event::default().data("[END]"))]),
+      )),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
     Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
     Err(e) => (
       axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -3412,6 +3625,66 @@ where
       .into_response(),
   }
 }
+pub async fn get_media_both<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = GetMediaBothRequest { credentials };
+  let result: anyhow::Result<ApiResponse<PetOrPetStream, ()>> = service.get_media_both(request).await;
+  match result {
+    Ok(ApiResponse::Ok(PetOrPetStream::Pet(body))) => (http::StatusCode::OK, axum::Json(body)).into_response(),
+    Ok(ApiResponse::Ok(PetOrPetStream::PetStream(body))) => (
+      http::StatusCode::OK,
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
+    )
+      .into_response(),
+    Ok(ApiResponse::Created(PetOrPetStream::Pet(body))) => {
+      (http::StatusCode::CREATED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Created(PetOrPetStream::PetStream(body))) => (
+      http::StatusCode::CREATED,
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
+    )
+      .into_response(),
+    Ok(ApiResponse::Accepted(PetOrPetStream::Pet(body))) => {
+      (http::StatusCode::ACCEPTED, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::Accepted(PetOrPetStream::PetStream(body))) => (
+      http::StatusCode::ACCEPTED,
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
+    )
+      .into_response(),
+    Ok(ApiResponse::NoContent(PetOrPetStream::Pet(body))) => {
+      (http::StatusCode::NO_CONTENT, axum::Json(body)).into_response()
+    }
+    Ok(ApiResponse::NoContent(PetOrPetStream::PetStream(body))) => (
+      http::StatusCode::NO_CONTENT,
+      axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+      })),
+    )
+      .into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
 pub async fn list_api_keys<S>(
   State(service): State<S>,
   credentials: ApiKeyAuthCredentials2,
@@ -3866,6 +4139,11 @@ where
       axum::routing::post(submit_collar_telemetry::<S>),
     )
     .route("/assistant/messages", axum::routing::post(send_assistant_message::<S>))
+    .route(
+      "/assistant/messages/stream",
+      axum::routing::post(stream_assistant_message::<S>),
+    )
+    .route("/assistant/tokens", axum::routing::get(stream_assistant_tokens::<S>))
     .route("/assistant/events", axum::routing::get(list_assistant_events::<S>))
     .route(
       "/assistant/preferences",
@@ -3891,6 +4169,7 @@ where
     .route("/media", axum::routing::post(upload_media::<S>))
     .route("/media/labels", axum::routing::post(submit_media_labels::<S>))
     .route("/media/tallies", axum::routing::post(submit_tallies::<S>))
+    .route("/media/both", axum::routing::get(get_media_both::<S>))
     .route(
       "/staff/keys",
       axum::routing::get(list_api_keys::<S>).post(create_api_key::<S>),

@@ -176,8 +176,8 @@ fn test_response_handling_content_categories() {
     },
     Case {
       category: ContentCategory::EventStream,
-      expected_return_ty: "oas3_gen_support :: EventStream < TestResponse >",
-      expected_contains: vec!["EventStream :: from_response", "response"],
+      expected_return_ty: "oas3_gen_support :: EventStream < oas3_gen_support :: SseFrame < TestResponse >>",
+      expected_contains: vec!["EventStream :: json (response , None)"],
     },
   ];
 
@@ -282,8 +282,12 @@ fn test_event_stream_response_handling() {
     "return type should contain the response type"
   );
   assert!(
-    method.contains("EventStream :: from_response"),
-    "parse_body should create EventStream from response"
+    method.contains("SseFrame < TestResponse >"),
+    "each item is read in a frame: {method}"
+  );
+  assert!(
+    method.contains("EventStream :: json (response , None)"),
+    "parse_body should read the response as a stream of JSON frames: {method}"
   );
 }
 

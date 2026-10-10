@@ -80,6 +80,15 @@ const DEPENDENCIES: &[DependencySpec] = &[
     default_features: false,
   },
   DependencySpec {
+    ident: "futures",
+    package: "futures",
+    version: "0.3",
+    features: &[],
+    ordered_features: &[],
+    referenced_features: &[],
+    default_features: true,
+  },
+  DependencySpec {
     ident: "http",
     package: "http",
     version: "1.5",

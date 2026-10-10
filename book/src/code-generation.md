@@ -437,9 +437,15 @@ client decodes these bodies, and
 server sends them.
 
 A `text/event-stream` response delivers Server-Sent Events. The client reads
-it as `oas3_gen_support::EventStream<T>` and the server returns
-`oas3_gen_support::ServerEvents<T>`, where `T` is the type of one event. The
-petstore's `streamPetVitals` operation streams `VitalsReading` values this way.
+it as `oas3_gen_support::EventStream<oas3_gen_support::SseFrame<T>>` and the
+server returns `futures::stream::BoxStream<'static, T>`, where `T` is the type
+of one event's data. The petstore's `streamPetVitals` operation streams
+`VitalsReading` values this way. When the schema describes the whole event,
+with properties drawn from `data`, `event`, `id`, and `retry`, it's a frame
+type: the client reads it as an alias of `SseFrame`, the server sends it as one
+complete Axum event, and the stream carries that type itself. In a payload
+union, a stream member is named after its item type with a `Stream` suffix,
+such as `ContentResponseOrAssistantEventFrameStream`.
 See [Reading Server-Sent Events](./client-generation.md#reading-server-sent-events)
 for the client side and
 [Streaming Server-Sent Events](./server-generation.md#streaming-server-sent-events)
@@ -810,9 +816,10 @@ table describes the dependencies you may see:
 | `axum-extra` | reads query parameters or cookie API keys on the server, with the `cookie` and `query` features |
 | `bon` | derives builders (`--enable-builders`) |
 | `chrono` | maps `date`, `date-time`, or `time` formats |
+| `futures` | returns or sends a server's `text/event-stream` as a [`BoxStream`][rustdoc-futures-boxstream] |
 | `http` | emits header constants or [`HeaderMap`][rustdoc-http-header-map] conversions |
 | `indexmap` | emits [`IndexMap`][rustdoc-indexmap-map]/[`IndexSet`][rustdoc-indexmap-set] collection types |
-| `oas3-gen-support` | uses runtime derives, diagnostics, `multipleOf` checks, or event streams |
+| `oas3-gen-support` | uses runtime derives, diagnostics, `multipleOf` checks, or reads event streams on the client |
 | `regex` | emits `pattern` validation constants |
 | `reqwest` | performs `client-mod` HTTP calls; the `form` feature sends `application/x-www-form-urlencoded` bodies |
 | `reqwest_cookie_store` | sends cookie API keys or encodes cookie parameters from the client |
@@ -2578,6 +2585,7 @@ To work through constructing the generated values, continue to the
 [rustdoc-expose-secret]: https://docs.rs/secrecy/0.10.3/secrecy/trait.ExposeSecret.html
 [rustdoc-f64]: https://doc.rust-lang.org/std/primitive.f64.html
 [rustdoc-from-str]: https://doc.rust-lang.org/std/str/trait.FromStr.html
+[rustdoc-futures-boxstream]: https://docs.rs/futures/0.3.34/futures/stream/type.BoxStream.html
 [rustdoc-hash]: https://doc.rust-lang.org/std/hash/trait.Hash.html
 [rustdoc-hashmap]: https://doc.rust-lang.org/std/collections/struct.HashMap.html
 [rustdoc-http-header-constants]: https://docs.rs/http/1.5.0/http/header/index.html#constants

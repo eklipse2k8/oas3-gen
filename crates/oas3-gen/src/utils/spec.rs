@@ -1,10 +1,12 @@
 use std::{
   collections::{BTreeMap, HashSet},
   ffi::OsStr,
+  fmt::Write as _,
   path::Path,
 };
 
 use fmmap::tokio::{AsyncMmapFile, AsyncMmapFileExt};
+use mediatype::MediaType;
 use oas3::{
   OpenApiV3Spec,
   spec::{Operation, PathItem, SecurityRequirement},
@@ -36,10 +38,16 @@ impl SpecFormat {
   /// an empty array public, and the `default` a property sets next to its `$ref`.
   pub fn parse(self, content: &[u8]) -> anyhow::Result<oas3::Spec> {
     let mut document = self.deserialize::<Value>(content)?;
+    let content_schemas = SseContentSchemas::collect(&document, content);
+    for (pointer, schema) in &content_schemas {
+      if let Some(property) = document.pointer_mut(pointer) {
+        property.clone_from(schema);
+      }
+    }
     let inlined = PathItemRefs::inline(&mut document);
     let lifted = RefSiblingDefaults::lift(&mut document);
     let overrides = SecurityOverrides::deserialize(&document)?;
-    let mut spec = if inlined || lifted {
+    let mut spec = if inlined || lifted || !content_schemas.is_empty() {
       serde_json::from_value::<OpenApiV3Spec>(document)?
     } else {
       self.deserialize::<OpenApiV3Spec>(content)?
@@ -78,6 +86,58 @@ impl SpecLoader {
   pub fn parse(&self) -> anyhow::Result<oas3::Spec> {
     self.format.parse(self.file.as_slice())
   }
+}
+
+/// The JSON pointer to the node a document walk is visiting, kept in one buffer that
+/// grows and shrinks with the walk.
+#[derive(Default)]
+struct PointerBuf(String);
+
+impl PointerBuf {
+  /// Appends `key` as an escaped segment, returning the length to truncate back to.
+  fn push(&mut self, key: &str) -> usize {
+    let mark = self.0.len();
+    self.0.push('/');
+    for ch in key.chars() {
+      match ch {
+        '~' => self.0.push_str("~0"),
+        '/' => self.0.push_str("~1"),
+        other => self.0.push(other),
+      }
+    }
+    mark
+  }
+
+  /// Appends an array index segment, returning the length to truncate back to.
+  fn push_index(&mut self, index: usize) -> usize {
+    let mark = self.0.len();
+    let _ = write!(self.0, "/{index}");
+    mark
+  }
+
+  fn truncate(&mut self, mark: usize) {
+    self.0.truncate(mark);
+  }
+
+  fn as_str(&self) -> &str {
+    &self.0
+  }
+}
+
+/// The frame fields a `text/event-stream` frame type draws its properties from.
+pub(crate) const SSE_FRAME_FIELDS: [&str; 4] = ["data", "event", "id", "retry"];
+
+/// Whether properties named `names` make a `text/event-stream` frame type: every one a
+/// frame field, `data` among them.
+pub(crate) fn is_frame_type<'a>(names: impl IntoIterator<Item = &'a str>) -> bool {
+  let mut has_data = false;
+  for name in names {
+    if !SSE_FRAME_FIELDS.contains(&name) {
+      return false;
+    }
+    has_data |= name == "data";
+  }
+  has_data
 }
 
 /// Entries of `paths` and `webhooks` in the raw document that reference a
@@ -222,6 +282,154 @@ impl RefSiblingDefaults {
       self.lifted = true;
     }
   }
+}
+
+/// `text/event-stream` frame types whose `data` carries JSON in a string the OpenAPI 3.2
+/// way: `{ "type": "string", "contentMediaType": "application/json", "contentSchema": ... }`.
+///
+/// `oas3` drops `contentMediaType` and `contentSchema`, so the data would read as plain
+/// text. Each such property is replaced with its `contentSchema`, which the generated
+/// client then decodes from the frame's data as JSON. The stream schema is a frame type
+/// itself, or a `oneOf` or `anyOf` of frame types keyed by their `event`.
+struct SseContentSchemas<'a> {
+  document: &'a Value,
+  pointer: PointerBuf,
+  lifts: BTreeMap<String, Value>,
+}
+
+impl<'a> SseContentSchemas<'a> {
+  /// The replacements `document` calls for. The walk only runs when its text, `content`,
+  /// mentions a `contentSchema` at all.
+  fn collect(document: &'a Value, content: &[u8]) -> BTreeMap<String, Value> {
+    const KEYWORD: &[u8] = b"contentSchema";
+    if !content.windows(KEYWORD.len()).any(|window| window == KEYWORD) {
+      return BTreeMap::new();
+    }
+    let mut pass = Self {
+      document,
+      pointer: PointerBuf::default(),
+      lifts: BTreeMap::new(),
+    };
+    pass.visit(document);
+    pass.lifts
+  }
+
+  fn visit(&mut self, value: &'a Value) {
+    match value {
+      Value::Object(map) => {
+        for (key, child) in map {
+          let mark = self.pointer.push(key);
+          if is_event_stream(key)
+            && let Some(schema) = child.get("schema")
+          {
+            self.pointer.push("schema");
+            let pointer = self.pointer.as_str().to_string();
+            self.stream_schema(schema, pointer);
+          } else if !key.starts_with("x-") && !matches!(key.as_str(), "example" | "examples") {
+            self.visit(child);
+          }
+          self.pointer.truncate(mark);
+        }
+      }
+      Value::Array(items) => {
+        for (index, item) in items.iter().enumerate() {
+          let mark = self.pointer.push_index(index);
+          self.visit(item);
+          self.pointer.truncate(mark);
+        }
+      }
+      _ => {}
+    }
+  }
+
+  fn stream_schema(&mut self, schema: &'a Value, pointer: String) {
+    let (schema, pointer) = self.resolve(schema, pointer);
+    if is_frame_type_schema(schema) {
+      self.lift_data(schema, &pointer);
+      return;
+    }
+    let keyed_by_event = schema.pointer("/discriminator/propertyName").and_then(Value::as_str) == Some("event");
+    for keyword in ["oneOf", "anyOf"] {
+      let Some(members) = schema.get(keyword).and_then(Value::as_array) else {
+        continue;
+      };
+      let members = members
+        .iter()
+        .enumerate()
+        .map(|(index, member)| self.resolve(member, format!("{pointer}/{keyword}/{index}")))
+        .collect::<Vec<_>>();
+      let frame_types = members
+        .iter()
+        .all(|(member, _)| is_frame_type_schema(member) && (keyed_by_event || fixes_its_event(member)));
+      if frame_types {
+        for (member, member_pointer) in &members {
+          self.lift_data(member, member_pointer);
+        }
+      }
+    }
+  }
+
+  /// Follows a `$ref` to a `components.schemas` entry, returning the schema and its pointer.
+  fn resolve(&self, schema: &'a Value, pointer: String) -> (&'a Value, String) {
+    let Some(target) = schema
+      .get("$ref")
+      .and_then(Value::as_str)
+      .and_then(|reference| reference.strip_prefix('#'))
+    else {
+      return (schema, pointer);
+    };
+    match self.document.pointer(target) {
+      Some(resolved) => (resolved, target.to_string()),
+      None => (schema, pointer),
+    }
+  }
+
+  fn lift_data(&mut self, frame_type: &Value, pointer: &str) {
+    let Some(data) = frame_type.pointer("/properties/data") else {
+      return;
+    };
+    let json = data
+      .get("contentMediaType")
+      .and_then(Value::as_str)
+      .and_then(|media_type| MediaType::parse(media_type).ok())
+      .is_some_and(|media_type| {
+        media_type.subty.as_str().eq_ignore_ascii_case("json")
+          || media_type
+            .suffix
+            .is_some_and(|suffix| suffix.as_str().eq_ignore_ascii_case("json"))
+      });
+    if json && let Some(content_schema) = data.get("contentSchema") {
+      self
+        .lifts
+        .insert(format!("{pointer}/properties/data"), content_schema.clone());
+    }
+  }
+}
+
+/// Whether `key` names the `text/event-stream` media type, parameters aside.
+fn is_event_stream(key: &str) -> bool {
+  MediaType::parse(key).is_ok_and(|media_type| {
+    media_type.ty.as_str().eq_ignore_ascii_case("text")
+      && media_type.subty.as_str().eq_ignore_ascii_case("event-stream")
+  })
+}
+
+fn is_frame_type_schema(schema: &Value) -> bool {
+  schema
+    .get("properties")
+    .and_then(Value::as_object)
+    .is_some_and(|properties| is_frame_type(properties.keys().map(String::as_str)))
+}
+
+/// Whether a union member fixes its `event` to one value, which keys the union by it.
+fn fixes_its_event(member: &Value) -> bool {
+  member.pointer("/properties/event").is_some_and(|event| {
+    event.get("const").is_some()
+      || event
+        .get("enum")
+        .and_then(Value::as_array)
+        .is_some_and(|values| values.len() == 1)
+  })
 }
 
 /// The `security` arrays operations declare in the raw document.
@@ -542,5 +750,93 @@ components:
         "{format:?}: an empty security array in a referenced item stays public"
       );
     }
+  }
+
+  #[test]
+  fn event_stream_frame_types_decode_their_content_schema() {
+    let json = r##"{
+      "openapi": "3.1.0",
+      "info": { "title": "t", "version": "1" },
+      "paths": {
+        "/stream": {
+          "get": {
+            "responses": {
+              "200": {
+                "description": "ok",
+                "content": { "text/event-stream": { "schema": { "$ref": "#/components/schemas/Frame" } } }
+              }
+            }
+          }
+        },
+        "/unkeyed": {
+          "get": {
+            "responses": {
+              "200": {
+                "description": "ok",
+                "content": { "text/event-stream; charset=utf-8": { "schema": { "$ref": "#/components/schemas/Unkeyed" } } }
+              }
+            }
+          }
+        },
+        "/document": {
+          "get": {
+            "responses": {
+              "200": {
+                "description": "ok",
+                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Document" } } }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Payload": { "type": "object", "properties": { "n": { "type": "integer" } } },
+          "Frame": {
+            "type": "object",
+            "properties": {
+              "event": { "type": "string" },
+              "data": {
+                "type": "string",
+                "contentMediaType": "application/json; charset=utf-8",
+                "contentSchema": { "$ref": "#/components/schemas/Payload" }
+              }
+            }
+          },
+          "Document": {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
+                "contentMediaType": "application/json",
+                "contentSchema": { "$ref": "#/components/schemas/Payload" }
+              }
+            }
+          },
+          "Unkeyed": { "oneOf": [{ "$ref": "#/components/schemas/Document" }, { "$ref": "#/components/schemas/Frame" }] }
+        }
+      }
+    }"##;
+    let spec = SpecFormat::Json.parse(json.as_bytes()).expect("spec parses");
+    let data = |schema: &str| {
+      spec
+        .components
+        .as_ref()
+        .and_then(|components| components.schemas.get(schema))
+        .and_then(SchemaInspect::as_inline)
+        .and_then(|object| object.properties.get("data"))
+        .cloned()
+        .expect("the schema has data")
+    };
+    assert_eq!(
+      data("Frame").ref_path(),
+      Some("#/components/schemas/Payload"),
+      "a frame type's data reads as its contentSchema"
+    );
+    assert_eq!(
+      data("Document").ref_path(),
+      None,
+      "a JSON body, and a member of a stream union no event keys, keep their string"
+    );
   }
 }

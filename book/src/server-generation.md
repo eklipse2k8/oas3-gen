@@ -241,8 +241,8 @@ uses one to send live smart-collar readings:
 }
 ```
 
-The schema describes one event. The generated trait method returns a stream of
-`VitalsReading` values, wrapped in `oas3_gen_support::ServerEvents`:
+The schema describes one event. The generated trait method returns a
+[`BoxStream`][rustdoc-futures-boxstream] of `VitalsReading` values:
 
 ```rust
 /// Stream live smart-collar vitals as server-sent events
@@ -253,34 +253,40 @@ fn stream_pet_vitals(
     request: StreamPetVitalsRequest,
 ) -> impl std::future::Future<
     Output = anyhow::Result<
-        ApiResponse<oas3_gen_support::ServerEvents<VitalsReading>, ()>,
+        ApiResponse<futures::stream::BoxStream<'static, VitalsReading>, ()>,
     >,
 > + Send;
 ```
 
-When you already have every event, collect them into a `ServerEvents`. This
-body of `stream_pet_vitals()` sends one reading and then ends the stream:
+`BoxStream` comes from the `futures` crate. When the generator writes a
+`Cargo.toml`, it declares `futures`, and your own crate needs it too so your
+service can build the stream. When you already have every event, turn them into
+a stream with
+[`stream::iter()`][rustdoc-futures-iter] and box it with
+[`StreamExt::boxed()`][rustdoc-futures-boxed]. This body of
+`stream_pet_vitals()` sends one reading and then ends the stream:
 
 ```rust
+use futures::StreamExt;
+
 let reading = VitalsReading {
     id: "reading-1".to_string(),
     heart_rate_bpm: 92,
     ..VitalsReading::default()
 };
-Ok(ApiResponse::Ok([reading].into_iter().collect()))
+Ok(ApiResponse::Ok(futures::stream::iter([reading]).boxed()))
 ```
 
-When events arrive over time, pass a stream to `ServerEvents::new()`. It
-accepts any [`Stream`][rustdoc-futures-stream] that's `Send + 'static`. For
-example, the receiving half of a
+When events arrive over time, box any [`Stream`][rustdoc-futures-stream]
+that's `Send + 'static`. For example, the receiving half of a
 [`futures::channel::mpsc`][rustdoc-futures-mpsc] channel is a stream:
 
 ```rust
-use oas3_gen_support::ServerEvents;
+use futures::StreamExt;
 
 let (sender, receiver) = futures::channel::mpsc::channel(16);
 tokio::spawn(forward_readings(request.path.pet_id, sender));
-Ok(ApiResponse::Ok(ServerEvents::new(receiver)))
+Ok(ApiResponse::Ok(receiver.boxed()))
 ```
 
 Here, `forward_readings` stands for your own async function that sends each
@@ -290,24 +296,54 @@ When `forward_readings` returns and drops the sender, the stream ends, and so
 does the response.
 
 The generated handler hands the stream to Axum's [`Sse`][rustdoc-axum-sse]
-response, sending each item as the JSON `data` of one event, in order:
+response, turning each item into the JSON `data` of one
+[`Event`][rustdoc-axum-sse-event], in order:
 
 ```rust
-Ok(ApiResponse::Ok(body)) => {
-    (
-        http::StatusCode::OK,
-        axum::response::sse::Sse::new(
-            body
-                .map(|item| {
-                    axum::response::sse::Event::default().json_data(item)
-                }),
-        ),
-    )
-        .into_response()
-}
+Ok(ApiResponse::Ok(body)) => (
+    http::StatusCode::OK,
+    axum::response::sse::Sse::new(futures::StreamExt::map(body, |item| {
+        axum::response::sse::Event::default().json_data(item)
+    })),
+)
+    .into_response(),
 ```
 
-This is an excerpt from the `stream_pet_vitals` handler in `server.rs`.
+This is an excerpt from the `stream_pet_vitals` handler in `server.rs`. An item
+that can't be serialized ends the response.
+
+### Sending Whole Frames
+
+When the `text/event-stream` schema is a frame type, as described in
+[Reading Whole Frames](./client-generation.md#reading-whole-frames), your
+method returns values of that type, and the handler sends each one as a whole
+event. The petstore's `stream_assistant_message()` returns
+`AssistantEventFrame` values in the `AssistantEventFrameStream` member of its
+payload union.
+
+For each frame type, the generator implements
+`TryFrom<AssistantEventFrame> for axum::response::sse::Event` in `types.rs`.
+The conversion writes the item's `data` as JSON, or as text when the schema
+declares a plain `string`, and sets the event's name, ID, and retry time from
+the `event`, `id`, and `retry` properties that hold a value. A union of frame
+types, such as `AssistantTokenFrame`, converts whichever member it holds, and
+sends a member that has no `event` property under its discriminator value. The
+handler maps each item through that conversion:
+
+```rust
+axum::response::sse::Sse::new(futures::StreamExt::chain(
+    futures::StreamExt::map(body, axum::response::sse::Event::try_from),
+    futures::stream::iter([Ok(axum::response::sse::Event::default().data("[DONE]"))]),
+))
+```
+
+This is an excerpt from the `stream_assistant_message` handler. Because the
+operation declares the sentinel `[DONE]`, through `x-speakeasy-sse-sentinel`,
+the handler sends `data: [DONE]` after your last item. `x-sse-sentinel` works
+the same way. An `event` or `id` whose text has a line break, an `id` with a
+NUL character, or a `retry` that isn't a whole, non-negative number of
+milliseconds can't be sent, so the conversion returns an error and the response
+ends.
 
 ## Receiving Request Bodies
 
@@ -590,9 +626,13 @@ options, and [Builder Pattern](./builders.md) explains request construction.
 [rustdoc-axum-multipart]: https://docs.rs/axum/0.8.9/axum/extract/struct.Multipart.html
 [rustdoc-axum-router]: https://docs.rs/axum/0.8.9/axum/struct.Router.html
 [rustdoc-axum-sse]: https://docs.rs/axum/0.8.9/axum/response/sse/struct.Sse.html
+[rustdoc-axum-sse-event]: https://docs.rs/axum/0.8.9/axum/response/sse/struct.Event.html
 [rustdoc-clone]: https://doc.rust-lang.org/std/clone/trait.Clone.html
 [rustdoc-expose-secret]: https://docs.rs/secrecy/0.10.3/secrecy/trait.ExposeSecret.html
 [rustdoc-future]: https://doc.rust-lang.org/std/future/trait.Future.html
+[rustdoc-futures-boxed]: https://docs.rs/futures/0.3.34/futures/stream/trait.StreamExt.html#method.boxed
+[rustdoc-futures-boxstream]: https://docs.rs/futures/0.3.34/futures/stream/type.BoxStream.html
+[rustdoc-futures-iter]: https://docs.rs/futures/0.3.34/futures/stream/fn.iter.html
 [rustdoc-futures-mpsc]: https://docs.rs/futures/0.3.34/futures/channel/mpsc/index.html
 [rustdoc-futures-stream]: https://docs.rs/futures/0.3.34/futures/stream/trait.Stream.html
 [rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html

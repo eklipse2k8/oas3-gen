@@ -53,21 +53,24 @@ axum-extra = { version = "0.12", features = ["cookie"] }
 better_default = { version = "1.0" }
 blake3 = { version = "1.8", features = ["neon", "traits-preview"] }
 bon = { version = "3.10", features = ["implied-bounds"] }
+bytes = { version = "1.12" }
 cfg-if = { version = "1.0" }
 chrono = { version = ">=0.4.42", default-features = false, features = ["std", "clock", "serde"] }
 clap = { version = "4.6", features = ["derive", "color"] }
 comfy-table = { version = "8.0" }
+criterion = { version = "0.8" }
 crossterm = { version = "0.29", default-features = false }
 cruet = { version = "1.0" }
-eventsource-stream = { version = "0.2" }
 fmmap = { version = "0.5", features = ["tokio"] }
 futures = { version = "0.3" }
 futures-core = { version = "0.3" }
+futures-util = { version = "0.3", default-features = false }
 http = { version = "1.5" }
 indexmap = { version = "2.14", features = ["serde"] }
 inflections = { version = "1.1" }
 itertools = { version = "0.15" }
 json-canon = { version = "0.1" }
+memchr = { version = "2.8" }
 mediatype = { version = "0.23", features = ["serde"] }
 num-format = { version = "0.4" }
 oas3 = { version = "0.22", features = ["yaml-spec"] }

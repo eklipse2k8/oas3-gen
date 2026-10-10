@@ -705,6 +705,57 @@
         }
       }
     },
+    "/assistant/messages/stream": {
+      "post": {
+        "operationId": "streamAssistantMessage",
+        "tags": ["assistant"],
+        "summary": "Send content blocks and receive the reply as one document or as a stream",
+        "parameters": [
+          {
+            "name": "stream",
+            "in": "query",
+            "description": "Stream the reply as Server-Sent Events instead of one document",
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ContentRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The reply, streamed as frames that end with a [DONE] sentinel when requested",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentResponse" } },
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/AssistantEventFrame" },
+                "x-speakeasy-sse-sentinel": "[DONE]"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/tokens": {
+      "get": {
+        "operationId": "streamAssistantTokens",
+        "tags": ["assistant"],
+        "summary": "Stream reply tokens, then the usage they cost",
+        "responses": {
+          "200": {
+            "description": "Token frames followed by one usage frame, ending with an [END] sentinel",
+            "content": {
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/AssistantTokenFrame" },
+                "x-sse-sentinel": "[END]"
+              }
+            }
+          }
+        }
+      }
+    },
     "/assistant/events": {
       "get": {
         "operationId": "listAssistantEvents",
@@ -1021,6 +1072,22 @@
             "description": "The counts as the server received them",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Tallies" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/both": {
+      "get": {
+        "operationId": "getMediaBoth",
+        "tags": ["media"],
+        "summary": "Describe a pet as JSON, or stream it as server-sent events",
+        "responses": {
+          "200": {
+            "description": "A pet as JSON, or as an event stream",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } },
+              "text/event-stream": { "schema": { "$ref": "#/components/schemas/Pet" } }
             }
           }
         }
@@ -2267,6 +2334,45 @@
         "properties": {
           "input_tokens": { "type": "integer" },
           "output_tokens": { "type": "integer" }
+        }
+      },
+      "AssistantEventFrame": {
+        "description": "One Server-Sent Events frame of a streamed reply: the event in data, its name, and where to resume",
+        "type": "object",
+        "required": ["data", "event"],
+        "properties": {
+          "data": { "$ref": "#/components/schemas/AssistantEvent" },
+          "event": {
+            "type": "string",
+            "enum": ["message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_stop", "ping"]
+          },
+          "id": { "type": "string" },
+          "retry": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "AssistantTokenFrame": {
+        "description": "A token frame or the closing usage frame, told apart by the frame's event name",
+        "oneOf": [{ "$ref": "#/components/schemas/TokenFrame" }, { "$ref": "#/components/schemas/UsageFrame" }]
+      },
+      "TokenFrame": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "type": "string", "const": "token" },
+          "data": { "type": "string", "description": "The text of one token, sent as is" }
+        }
+      },
+      "UsageFrame": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "type": "string", "const": "usage" },
+          "data": {
+            "type": "string",
+            "contentMediaType": "application/json",
+            "contentSchema": { "$ref": "#/components/schemas/Usage" }
+          },
+          "id": { "type": "string" }
         }
       },
       "MessageMetadata": {

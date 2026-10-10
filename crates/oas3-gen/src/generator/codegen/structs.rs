@@ -13,9 +13,10 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, Documentation, FieldDef, MethodKind,
-    MethodNameToken, OperationResponse, RegexKey, ResponseStatusCategory, ResponseVariantCategory, RustPrimitive,
-    StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod, TypeRef, ValidationAttribute,
+    BuilderField, BuilderNestedStruct, ContentCategory, DerivesProvider, Documentation, EventStreamFormat, FieldDef,
+    FrameData, MethodKind, MethodNameToken, OperationResponse, RegexKey, ResponseMediaType, ResponseStatusCategory,
+    ResponseVariantCategory, RustPrimitive, StatusCodeToken, StatusHandler, StreamItem, StructDef, StructKind,
+    StructMethod, TypeRef, ValidationAttribute,
     tokens::{ConstToken, EnumVariantToken},
   },
   codegen::{
@@ -585,7 +586,8 @@ impl ToTokens for ResponseCaseFragment<'_> {
         }
       }
       (Some(schema_type), Some(param)) => {
-        let data = ResponseExtractionFragment::new(schema_type, self.case.category);
+        let stream = ResponseMediaType::event_stream(&variant.media_types).and_then(|media| media.stream.as_ref());
+        let data = ResponseExtractionFragment::new(schema_type, self.case.category, stream);
         let mut value = quote! { data };
         if let Some(union_variant) = &mapping.union_variant {
           let union = &param.body.base_type;
@@ -611,11 +613,23 @@ impl ToTokens for ResponseCaseFragment<'_> {
 pub(crate) struct ResponseExtractionFragment<'a> {
   schema_type: &'a TypeRef,
   category: ContentCategory,
+  stream: Option<&'a EventStreamFormat>,
 }
 
 impl<'a> ResponseExtractionFragment<'a> {
-  pub(crate) fn new(schema_type: &'a TypeRef, category: ContentCategory) -> Self {
-    Self { schema_type, category }
+  /// Reads the body as `category`; a `text/event-stream` body reads as `stream` declares
+  /// it, decoding each frame's data as JSON or text, or a union of frame types by event
+  /// name, and ending at its sentinel.
+  pub(crate) fn new(
+    schema_type: &'a TypeRef,
+    category: ContentCategory,
+    stream: Option<&'a EventStreamFormat>,
+  ) -> Self {
+    Self {
+      schema_type,
+      category,
+      stream,
+    }
   }
 }
 
@@ -638,7 +652,16 @@ impl ToTokens for ResponseExtractionFragment<'_> {
         }
       }
       ContentCategory::EventStream => {
-        quote! { <#schema_type>::from_response(req) }
+        let constructor = match self.stream.map(|stream| stream.item).unwrap_or_default() {
+          StreamItem::Frame(FrameData::Text) => quote! { text },
+          StreamItem::FrameUnion => quote! { frames },
+          StreamItem::Payload | StreamItem::Frame(FrameData::Json) => quote! { json },
+        };
+        let sentinel = self
+          .stream
+          .and_then(|stream| stream.sentinel.as_deref())
+          .map_or_else(|| quote! { None }, |sentinel| quote! { Some(#sentinel) });
+        quote! { <#schema_type>::#constructor(req, #sentinel) }
       }
       ContentCategory::Xml => {
         quote! { oas3_gen_support::Diagnostics::<#schema_type>::xml_with_diagnostics(req).await? }

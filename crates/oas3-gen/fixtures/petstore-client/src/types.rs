@@ -16,7 +16,7 @@ static REGEX_ADOPTER_PHONE: std::sync::LazyLock<regex::Regex> =
   std::sync::LazyLock::new(|| regex::Regex::new("^\\+[1-9][0-9]{6,14}$").expect("invalid regex"));
 static REGEX_COLLAR_TELEMETRY_COLLAR_ID: std::sync::LazyLock<regex::Regex> =
   std::sync::LazyLock::new(|| regex::Regex::new("^COL-[0-9A-F]{8}$").expect("invalid regex"));
-static REGEX_NEW_PET_MICROCHIP: std::sync::LazyLock<regex::Regex> =
+static REGEX_PET_MICROCHIP: std::sync::LazyLock<regex::Regex> =
   std::sync::LazyLock::new(|| regex::Regex::new("^[0-9]{15}$").expect("invalid regex"));
 pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");
 pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
@@ -85,10 +85,14 @@ impl core::fmt::Display for PetStatus {
 }
 /// A pet in the store's care.
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct Pet {
   /// Server-assigned identifier
   pub id: uuid::Uuid,
+  #[validate(length(min = 1u64, max = 64u64))]
   pub name: String,
   /// Kinds of pets the store cares for
   pub species: Species,
@@ -99,10 +103,13 @@ pub struct Pet {
   #[serde(rename = "birthDate")]
   pub birth_date: Option<chrono::NaiveDate>,
   #[serde(rename = "weightKg")]
+  #[validate(range(max = 500.0, exclusive_min = 0.0))]
   pub weight_kg: Option<f64>,
   /// ISO 11784 microchip number
+  #[validate(regex(path = "REGEX_PET_MICROCHIP"))]
   pub microchip: Option<String>,
   #[serde_as(as = "Option<serde_with::SetPreventDuplicates<_>>")]
+  #[validate(length(max = 10u64))]
   pub tags: Option<indexmap::IndexSet<String>>,
   #[serde(rename = "photoUrls")]
   pub photo_urls: Option<Vec<String>>,
@@ -131,7 +138,7 @@ pub struct NewPet {
   #[serde(rename = "weightKg")]
   #[validate(range(max = 500.0, exclusive_min = 0.0))]
   pub weight_kg: Option<f64>,
-  #[validate(regex(path = "REGEX_NEW_PET_MICROCHIP"))]
+  #[validate(regex(path = "REGEX_PET_MICROCHIP"))]
   pub microchip: Option<String>,
   #[serde_as(as = "Option<serde_with::SetPreventDuplicates<_>>")]
   #[validate(length(max = 10u64))]
@@ -189,7 +196,8 @@ pub struct Cat {
 }
 pub type Pets = Vec<Pet>;
 pub type Cats = Vec<Cat>;
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct Allergies {
   #[doc(hidden)]
@@ -199,7 +207,8 @@ pub struct Allergies {
   pub r#type: Option<&'static str>,
   pub allergens: Option<Vec<String>>,
 }
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct Diet {
   #[doc(hidden)]
@@ -221,6 +230,17 @@ impl Health {
 impl Default for Health {
   fn default() -> Self {
     Self::Allergies(<Allergies>::default())
+  }
+}
+impl serde::Serialize for Health {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    match self {
+      Self::Allergies(v) => v.serialize(serializer),
+      Self::Diet(v) => v.serialize(serializer),
+    }
   }
 }
 impl<'de> serde::Deserialize<'de> for Health {
@@ -742,8 +762,12 @@ pub struct ContentRequest {
   #[default(Some(ContentRequestImageSize::Preset(ImageSizePreset::Auto2k)))]
   pub image_size: Option<ContentRequestImageSize>,
 }
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct ContentResponse {
+  #[validate(length(min = 1u64))]
   pub id: String,
   /// A union of content block types with discriminator
   pub content: Box<ContentBlock>,
@@ -1215,6 +1239,21 @@ impl Default for AssistantEvent {
     Self::MessageStart(<MessageStartEvent>::default())
   }
 }
+impl serde::Serialize for AssistantEvent {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    match self {
+      Self::MessageStart(v) => v.serialize(serializer),
+      Self::ContentBlockStart(v) => v.serialize(serializer),
+      Self::ContentBlockDelta(v) => v.serialize(serializer),
+      Self::ContentBlockStop(v) => v.serialize(serializer),
+      Self::MessageStop(v) => v.serialize(serializer),
+      Self::Ping(v) => v.serialize(serializer),
+    }
+  }
+}
 impl<'de> serde::Deserialize<'de> for AssistantEvent {
   fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
   where
@@ -1273,7 +1312,10 @@ impl AssistantEvent {
   }
 }
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 #[serde(default)]
 pub struct MessageStartEvent {
   #[doc(hidden)]
@@ -1282,10 +1324,12 @@ pub struct MessageStartEvent {
   #[builder(skip = Some("message_start"))]
   pub r#type: Option<&'static str>,
   #[serde_as(as = "serde_with::DefaultOnNull")]
+  #[validate(nested)]
   pub message: Message,
 }
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockStartEvent {
   #[doc(hidden)]
@@ -1300,7 +1344,8 @@ pub struct ContentBlockStartEvent {
   pub content_block: Box<ContentBlock>,
 }
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockDeltaEvent {
   #[doc(hidden)]
@@ -1315,7 +1360,8 @@ pub struct ContentBlockDeltaEvent {
   pub delta: Box<Delta>,
 }
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockStopEvent {
   #[doc(hidden)]
@@ -1326,7 +1372,8 @@ pub struct ContentBlockStopEvent {
   #[serde_as(as = "serde_with::DefaultOnNull")]
   pub index: i64,
 }
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct MessageStopEvent {
   #[doc(hidden)]
@@ -1335,7 +1382,8 @@ pub struct MessageStopEvent {
   #[builder(skip = Some("message_stop"))]
   pub r#type: Option<&'static str>,
 }
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct PingEvent {
   #[doc(hidden)]
@@ -1356,6 +1404,17 @@ impl Delta {
 impl Default for Delta {
   fn default() -> Self {
     Self::Text(<TextDelta>::default())
+  }
+}
+impl serde::Serialize for Delta {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    match self {
+      Self::Text(v) => v.serialize(serializer),
+      Self::InputJson(v) => v.serialize(serializer),
+    }
   }
 }
 impl<'de> serde::Deserialize<'de> for Delta {
@@ -1396,7 +1455,10 @@ impl Delta {
   }
 }
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 #[serde(default)]
 pub struct TextDelta {
   #[doc(hidden)]
@@ -1405,10 +1467,14 @@ pub struct TextDelta {
   #[builder(skip = Some("text_delta"))]
   pub r#type: Option<&'static str>,
   #[serde_as(as = "serde_with::DefaultOnNull")]
+  #[validate(length(min = 1u64))]
   pub text: String,
 }
 #[serde_with::serde_as]
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 #[serde(default)]
 pub struct InputJsonDelta {
   #[doc(hidden)]
@@ -1417,13 +1483,19 @@ pub struct InputJsonDelta {
   #[builder(skip = Some("input_json_delta"))]
   pub r#type: Option<&'static str>,
   #[serde_as(as = "serde_with::DefaultOnNull")]
+  #[validate(length(min = 1u64))]
   pub partial_json: String,
 }
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct Message {
+  #[validate(length(min = 1u64))]
   pub id: String,
   pub role: Role,
   pub content: Vec<ContentBlock>,
+  #[validate(length(min = 1u64))]
   pub model: String,
   pub stop_reason: Option<StopReason>,
   pub usage: Option<Usage>,
@@ -1577,6 +1649,27 @@ pub struct Usage {
   pub input_tokens: i64,
   pub output_tokens: i64,
 }
+/// One Server-Sent Events frame of a streamed reply: the event in data, its name, and where to resume
+pub type AssistantEventFrame = oas3_gen_support::SseFrame<Box<AssistantEvent>, AssistantEventFrameEvent>;
+/// A token frame or the closing usage frame, told apart by the frame's event name
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssistantTokenFrame {
+  Token(TokenFrame),
+  Usage(UsageFrame),
+}
+impl oas3_gen_support::FromSseFrame for AssistantTokenFrame {
+  fn from_sse_frame(
+    frame: &oas3_gen_support::RawSseFrame,
+  ) -> core::result::Result<Self, oas3_gen_support::DiagnosticsError> {
+    match frame.event() {
+      "token" => frame.text().map(Self::Token),
+      "usage" => frame.json().map(Self::Usage),
+      _ => Err(frame.unknown_event(&["token", "usage"])),
+    }
+  }
+}
+pub type TokenFrame = oas3_gen_support::SseFrame<String>;
+pub type UsageFrame = oas3_gen_support::SseFrame<Usage>;
 /// Flexible metadata that can be string or object
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 #[serde(untagged)]
@@ -2974,10 +3067,10 @@ impl StreamPetVitalsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(
     req: reqwest::Response,
-  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<VitalsReading>, ()>> {
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<oas3_gen_support::SseFrame<VitalsReading>>, ()>> {
     let status = req.status();
     if status == http::StatusCode::OK {
-      let data = <oas3_gen_support::EventStream<VitalsReading>>::from_response(req);
+      let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<VitalsReading>>>::json(req, None);
       return Ok(ApiResponse::Ok(data));
     }
     Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
@@ -3108,10 +3201,10 @@ impl StreamAdoptionFeedRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(
     req: reqwest::Response,
-  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<AdoptionFeedEvent>, ()>> {
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<oas3_gen_support::SseFrame<AdoptionFeedEvent>>, ()>> {
     let status = req.status();
     if status == http::StatusCode::OK {
-      let data = <oas3_gen_support::EventStream<AdoptionFeedEvent>>::from_response(req);
+      let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<AdoptionFeedEvent>>>::json(req, None);
       return Ok(ApiResponse::Ok(data));
     }
     Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
@@ -3222,6 +3315,75 @@ impl SendAssistantMessageRequest {
     if status == http::StatusCode::BAD_REQUEST {
       let data = oas3_gen_support::Diagnostics::<ErrorResponse>::json_with_diagnostics(req).await?;
       return Ok(ApiResponse::BadRequest(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct StreamAssistantMessageRequestQuery {
+  /// Stream the reply as Server-Sent Events instead of one document
+  pub stream: Option<bool>,
+}
+/// Send content blocks and receive the reply as one document or as a stream
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct StreamAssistantMessageRequest {
+  pub query: StreamAssistantMessageRequestQuery,
+  pub body: ContentRequest,
+}
+#[bon::bon]
+impl StreamAssistantMessageRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(stream: Option<bool>, body: ContentRequest) -> anyhow::Result<Self> {
+    let request = Self {
+      query: StreamAssistantMessageRequestQuery { stream },
+      body,
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
+impl StreamAssistantMessageRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(
+    req: reqwest::Response,
+  ) -> anyhow::Result<ApiResponse<ContentResponseOrAssistantEventFrameStream, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let content_type_str = req
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+      if content_type_str.contains("event-stream") {
+        let data = <oas3_gen_support::EventStream<AssistantEventFrame>>::json(req, Some("[DONE]"));
+        return Ok(ApiResponse::Ok(
+          ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(data),
+        ));
+      }
+      if content_type_str.contains("json") {
+        let data = oas3_gen_support::Diagnostics::<ContentResponse>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(
+          ContentResponseOrAssistantEventFrameStream::ContentResponse(data),
+        ));
+      }
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Stream reply tokens, then the usage they cost
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct StreamAssistantTokensRequest {}
+impl StreamAssistantTokensRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(
+    req: reqwest::Response,
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<AssistantTokenFrame>, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let data = <oas3_gen_support::EventStream<AssistantTokenFrame>>::frames(req, Some("[END]"));
+      return Ok(ApiResponse::Ok(data));
     }
     Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
   }
@@ -3651,6 +3813,31 @@ impl SubmitTalliesRequest {
     if status == http::StatusCode::OK {
       let data = oas3_gen_support::Diagnostics::<Tallies>::json_with_diagnostics(req).await?;
       return Ok(ApiResponse::Ok(data));
+    }
+    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+  }
+}
+/// Describe a pet as JSON, or stream it as server-sent events
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaBothRequest {}
+impl GetMediaBothRequest {
+  /// Parse the HTTP response into the response enum.
+  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<PetOrPetStream, ()>> {
+    let status = req.status();
+    if status == http::StatusCode::OK {
+      let content_type_str = req
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+      if content_type_str.contains("event-stream") {
+        let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<Pet>>>::json(req, None);
+        return Ok(ApiResponse::Ok(PetOrPetStream::PetStream(data)));
+      }
+      if content_type_str.contains("json") {
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(PetOrPetStream::Pet(data)));
+      }
     }
     Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
   }
@@ -4116,6 +4303,34 @@ impl ContentRequestImageSize {
     Self::Preset(ImageSizePreset::Auto2k)
   }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum AssistantEventFrameEvent {
+  #[serde(rename = "message_start")]
+  #[default]
+  MessageStart,
+  #[serde(rename = "content_block_start")]
+  ContentBlockStart,
+  #[serde(rename = "content_block_delta")]
+  ContentBlockDelta,
+  #[serde(rename = "content_block_stop")]
+  ContentBlockStop,
+  #[serde(rename = "message_stop")]
+  MessageStop,
+  #[serde(rename = "ping")]
+  Ping,
+}
+impl core::fmt::Display for AssistantEventFrameEvent {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::MessageStart => write!(f, "message_start"),
+      Self::ContentBlockStart => write!(f, "content_block_start"),
+      Self::ContentBlockDelta => write!(f, "content_block_delta"),
+      Self::ContentBlockStop => write!(f, "content_block_stop"),
+      Self::MessageStop => write!(f, "message_stop"),
+      Self::Ping => write!(f, "ping"),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub enum UsageCounterUsageCounterKind {
   A(UsageCounterA),
@@ -4366,6 +4581,18 @@ pub struct WithHeaders<Headers, Body> {
 pub enum ErrorOrProblem {
   Error(Error),
   Problem(Problem),
+}
+/// Response bodies that share one status class in an operation.
+#[derive(Debug)]
+pub enum ContentResponseOrAssistantEventFrameStream {
+  ContentResponse(ContentResponse),
+  AssistantEventFrameStream(oas3_gen_support::EventStream<AssistantEventFrame>),
+}
+/// Response bodies that share one status class in an operation.
+#[derive(Debug)]
+pub enum PetOrPetStream {
+  Pet(Pet),
+  PetStream(oas3_gen_support::EventStream<oas3_gen_support::SseFrame<Pet>>),
 }
 /// Response headers that share one status class in an operation.
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]

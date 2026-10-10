@@ -4,11 +4,11 @@ use quote::ToTokens as _;
 
 use crate::generator::{
   ast::{
-    ContentCategory, DefaultVariant, DeriveTrait, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken,
-    MethodKind, MethodNameToken, OperationResponse, ResponseHeadersRef, ResponseMediaType, ResponseParam,
-    ResponsePayload, ResponseStatusCategory, ResponseVariant, ResponseVariantCategory, StatusCodeToken, StatusHandler,
-    StructDef, StructKind, StructMethod, StructToken, TypeRef, ValidationAttribute, VariantMapping,
-    bon_attrs::BuilderAttribute,
+    ContentCategory, DefaultVariant, DeriveTrait, Documentation, EnumToken, EnumVariantToken, EventStreamFormat,
+    FieldDef, FieldNameToken, FrameData, MethodKind, MethodNameToken, OperationResponse, ResponseHeadersRef,
+    ResponseMediaType, ResponseParam, ResponsePayload, ResponseStatusCategory, ResponseVariant,
+    ResponseVariantCategory, StatusCodeToken, StatusHandler, StreamItem, StructDef, StructKind, StructMethod,
+    StructToken, TypeRef, ValidationAttribute, VariantMapping, bon_attrs::BuilderAttribute,
   },
   codegen::{
     Visibility,
@@ -238,25 +238,41 @@ fn test_binary_content_type_with_json_schema_uses_json_parsing() {
 }
 
 #[test]
-fn test_event_stream_response_generates_from_response() {
-  let def = make_response_parser_struct(
-    ResponseVariant::builder()
-      .status_code(StatusCodeToken::Ok200)
-      .media_types(vec![ResponseMediaType::with_schema(
-        "text/event-stream",
-        Some(TypeRef::new("StreamEvent")),
-      )])
-      .schema_type(TypeRef::new("oas3_gen_support::EventStream<StreamEvent>"))
-      .mapping(payload_mapping(ResponsePayload::Value))
-      .build(),
-  );
-  let tokens =
-    StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client).into_token_stream();
-  let code = tokens.to_string();
-  assert!(
-    code.contains("from_response"),
-    "EventStream response should call from_response: {code}"
-  );
+fn test_event_stream_response_reads_frames_as_the_item_declares() {
+  let cases = [
+    (StreamItem::Payload, None, "json (req , None)"),
+    (
+      StreamItem::Frame(FrameData::Json),
+      Some("[DONE]"),
+      "json (req , Some (\"[DONE]\"))",
+    ),
+    (StreamItem::Frame(FrameData::Text), None, "text (req , None)"),
+    (StreamItem::FrameUnion, Some("[END]"), "frames (req , Some (\"[END]\"))"),
+  ];
+  for (item, sentinel, expected) in cases {
+    let mut media_type = ResponseMediaType::with_schema("text/event-stream", Some(TypeRef::new("StreamEvent")));
+    media_type.stream = Some(EventStreamFormat {
+      sentinel: sentinel.map(str::to_string),
+      item,
+    });
+    let def = make_response_parser_struct(
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::Ok200)
+        .media_types(vec![media_type])
+        .schema_type(TypeRef::new("oas3_gen_support::EventStream<StreamEvent>"))
+        .mapping(payload_mapping(ResponsePayload::Value))
+        .build(),
+    );
+    let code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
+    assert!(
+      code.contains(&format!(
+        "< oas3_gen_support :: EventStream < StreamEvent > > :: {expected}"
+      )),
+      "{item:?} with sentinel {sentinel:?} should read with `{expected}`: {code}"
+    );
+  }
 }
 
 #[test]

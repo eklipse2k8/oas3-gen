@@ -8,6 +8,7 @@ use super::{
   DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponseUnionDef, SerdeMode, StructDef, StructKind,
   VariantContent,
 };
+use crate::generator::converter::GenerationTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SerdeImpl {
@@ -191,9 +192,11 @@ impl DerivesProvider for ResponseEnumDef {
 
 impl DerivesProvider for ResponseUnionDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    let mut derives = BTreeSet::from([DeriveTrait::Debug]);
-
-    if !self.streaming {
+    let mut derives = BTreeSet::new();
+    if self.streaming != Some(GenerationTarget::Server) {
+      derives.insert(DeriveTrait::Debug);
+    }
+    if self.streaming.is_none() {
       derives.insert(DeriveTrait::Clone);
     }
     if self.is_serializable() == SerdeImpl::Derive {
@@ -208,14 +211,14 @@ impl DerivesProvider for ResponseUnionDef {
 
   fn is_serializable(&self) -> SerdeImpl {
     match self.serde_mode {
-      SerdeMode::SerializeOnly | SerdeMode::Both if !self.streaming => SerdeImpl::Derive,
+      SerdeMode::SerializeOnly | SerdeMode::Both if self.streaming.is_none() => SerdeImpl::Derive,
       _ => SerdeImpl::None,
     }
   }
 
   fn is_deserializable(&self) -> SerdeImpl {
     match self.serde_mode {
-      SerdeMode::DeserializeOnly | SerdeMode::Both if !self.streaming => SerdeImpl::Derive,
+      SerdeMode::DeserializeOnly | SerdeMode::Both if self.streaming.is_none() => SerdeImpl::Derive,
       _ => SerdeImpl::None,
     }
   }

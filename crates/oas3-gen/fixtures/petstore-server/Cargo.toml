@@ -14,6 +14,7 @@ axum = { version = "0.8.5", features = ["multipart"] }
 axum-extra = { version = "0.12", features = ["cookie", "query"] }
 bon = { version = "3.10", features = ["implied-bounds"] }
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock", "serde"] }
+futures = "0.3"
 http = "1.5"
 indexmap = { version = "2.14", features = ["serde"] }
 oas3-gen-support = "0.29.0"

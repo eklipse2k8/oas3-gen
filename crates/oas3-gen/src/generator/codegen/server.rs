@@ -11,9 +11,10 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    ApiKeyLocation, ContentCategory, CredentialKind, CredentialScheme, HandlerBodyInfo, HandlerCredentials,
-    OperationResponse, ResponseEnumDef, ResponseParam, ResponsePayload, RustPrimitive, ServerRequestTraitDef,
-    ServerTraitMethod, StatusCodeToken, StructToken, TraitToken, constants::HttpHeaderRef,
+    ApiKeyLocation, BodyMediaType, ContentCategory, CredentialKind, CredentialScheme, HandlerBodyInfo,
+    HandlerCredentials, OperationResponse, ResponseEnumDef, ResponseParam, ResponsePayload, RustPrimitive,
+    ServerRequestTraitDef, ServerTraitMethod, StatusCodeToken, StreamItem, StructToken, TraitToken,
+    constants::HttpHeaderRef,
   },
   codegen::http::HttpStatusCode,
   naming::constants::DEFAULT_MEDIA_TYPE,
@@ -382,68 +383,74 @@ impl<'a> ResponseArmsFragment<'a> {
     }
   }
 
-  fn body_arms(
-    variant_path: &TokenStream,
-    status_pattern: Option<&TokenStream>,
-    status_expr: &TokenStream,
-    param: Option<&ResponseParam>,
-    status: StatusCodeToken,
-  ) -> Vec<MatchArm> {
+  /// The payload pattern and response of each arm for one status code's body. A response
+  /// union gets one arm per member, each sent under the media type that member was
+  /// declared with.
+  fn body_arms(status_expr: &TokenStream, param: Option<&ResponseParam>, status: StatusCodeToken) -> Vec<MatchArm> {
     let wrapper = param.and_then(|p| p.headers.as_ref()).map(|headers| &headers.wrapper);
-    let arm = |pattern: TokenStream, headed_pattern: TokenStream, body: Option<TokenStream>| {
-      let (payload, response) = match (wrapper, body) {
-        (Some(wrapper), body) => {
-          let body = body.map(|body| quote! { , #body });
-          let internal_error = internal_error();
-          (
-            quote! { #wrapper { headers, #headed_pattern } },
-            quote! {
-              match http::HeaderMap::try_from(headers) {
-                Ok(headers) => (#status_expr, headers #body).into_response(),
-                Err(e) => #internal_error,
-              }
-            },
-          )
-        }
-        (None, Some(body)) => (pattern, quote! { (#status_expr, #body).into_response() }),
-        (None, None) => (pattern, quote! { #status_expr.into_response() }),
-      };
-      let fields = status_pattern.into_iter().cloned().chain(std::iter::once(payload));
-
-      (quote! { #variant_path(#(#fields),*) }, response)
+    let arm = |pattern: TokenStream, headed_pattern: TokenStream, body: Option<TokenStream>| match (wrapper, body) {
+      (Some(wrapper), body) => {
+        let body = body.map(|body| quote! { , #body });
+        let internal_error = internal_error();
+        (
+          quote! { #wrapper { headers, #headed_pattern } },
+          quote! {
+            match http::HeaderMap::try_from(headers) {
+              Ok(headers) => (#status_expr, headers #body).into_response(),
+              Err(e) => #internal_error,
+            }
+          },
+        )
+      }
+      (None, Some(body)) => (pattern, quote! { (#status_expr, #body).into_response() }),
+      (None, None) => (pattern, quote! { #status_expr.into_response() }),
     };
 
-    match param {
-      Some(param) if param.body.nullable => {
-        let some = arm(
-          quote! { Some(body) },
-          quote! { body: Some(body) },
-          Some(Self::body_response(param, status)),
-        );
-        let none = arm(quote! { None }, quote! { body: None }, None);
-        vec![some, none]
-      }
-      Some(param) if !matches!(param.body.base_type, RustPrimitive::Unit) => vec![arm(
-        quote! { body },
-        quote! { body },
-        Some(Self::body_response(param, status)),
-      )],
-      _ => vec![arm(quote! { _ }, quote! { .. }, None)],
+    let Some(param) = param.filter(|param| !matches!(param.body.base_type, RustPrimitive::Unit)) else {
+      return vec![arm(quote! { _ }, quote! { .. }, None)];
+    };
+    let union = &param.body.base_type;
+    let members = param
+      .media_types
+      .iter()
+      .map(|entry| entry.member.as_ref())
+      .unique()
+      .collect::<Vec<_>>();
+    let members = if members.is_empty() { vec![None] } else { members };
+
+    let mut arms = members
+      .into_iter()
+      .map(|member| {
+        let body = Some(Self::body_response(param.body_media(status, member)));
+        let (inner, field) = match member {
+          Some(member) => (quote! { #union::#member(body) }, quote! { body: #union::#member(body) }),
+          None => (quote! { body }, quote! { body }),
+        };
+        if param.body.nullable {
+          arm(quote! { Some(#inner) }, quote! { body: Some(#inner) }, body)
+        } else {
+          arm(inner, field, body)
+        }
+      })
+      .collect::<Vec<_>>();
+    if param.body.nullable {
+      arms.push(arm(quote! { None }, quote! { body: None }, None));
     }
+    arms
   }
 
-  /// The response for a body bound as `body`, encoded as the media type `status`
-  /// declares for it.
+  /// The response for a body bound as `body`, encoded and labelled as `entry` says, or
+  /// serialized as JSON without one.
   ///
-  /// JSON bodies are serialized, keeping a declared `+json` media type such as
-  /// `application/problem+json`. Text and binary bodies are sent as they are under
-  /// their declared media type, and an event stream sends each item as the JSON data
-  /// of one server-sent event.
-  fn body_response(param: &ResponseParam, status: StatusCodeToken) -> TokenStream {
-    let Some(media_type) = param.media_type(status) else {
+  /// JSON keeps a declared label other than `application/json`. Text bodies other than
+  /// strings are written through `Display`. An event stream goes through axum's
+  /// `Sse`, sending each item as the JSON data of one event, or as one whole event for a
+  /// frame type, and ends with its sentinel when it declares one.
+  fn body_response(entry: Option<&BodyMediaType>) -> TokenStream {
+    let Some(entry) = entry else {
       return quote! { axum::Json(body) };
     };
-    let content_type = media_type.content_type.as_str();
+    let content_type = entry.content_type.as_str();
     let declared = |body: TokenStream| {
       quote! {
         (
@@ -453,14 +460,32 @@ impl<'a> ResponseArmsFragment<'a> {
       }
     };
 
-    match media_type.category {
+    match entry.category {
       ContentCategory::Json if content_type != DEFAULT_MEDIA_TYPE => declared(quote! { axum::Json(body) }),
-      ContentCategory::Text if matches!(param.body.base_type, RustPrimitive::String) => declared(quote! { body }),
+      ContentCategory::Text if matches!(entry.body.base_type, RustPrimitive::String) => declared(quote! { body }),
       ContentCategory::Text => declared(quote! { body.to_string() }),
       ContentCategory::Binary => declared(quote! { body }),
-      ContentCategory::EventStream => quote! {
-        axum::response::sse::Sse::new(body.map(|item| axum::response::sse::Event::default().json_data(item)))
-      },
+      ContentCategory::EventStream => {
+        let stream = entry.stream.as_ref();
+        let events = match stream.map(|stream| stream.item).unwrap_or_default() {
+          StreamItem::Frame(_) | StreamItem::FrameUnion => {
+            quote! { futures::StreamExt::map(body, axum::response::sse::Event::try_from) }
+          }
+          StreamItem::Payload => {
+            quote! { futures::StreamExt::map(body, |item| axum::response::sse::Event::default().json_data(item)) }
+          }
+        };
+        let events = match stream.and_then(|stream| stream.sentinel.as_deref()) {
+          Some(sentinel) => quote! {
+            futures::StreamExt::chain(
+              #events,
+              futures::stream::iter([Ok(axum::response::sse::Event::default().data(#sentinel))]),
+            )
+          },
+          None => events,
+        };
+        quote! { axum::response::sse::Sse::new(#events) }
+      }
       ContentCategory::Json | ContentCategory::Xml | ContentCategory::Multipart | ContentCategory::FormUrlEncoded => {
         quote! { axum::Json(body) }
       }
@@ -468,13 +493,13 @@ impl<'a> ResponseArmsFragment<'a> {
   }
 }
 
-/// One arm of the `match` over a service result: the response variant pattern
-/// inside `Ok(..)`, and the response it sends.
+/// One arm of the `match` over a service result: the payload pattern inside the
+/// status variant's `Ok(..)`, and the response it sends.
 type MatchArm = (TokenStream, TokenStream);
 
-/// Arms that send the same response, joined into one or-pattern. Arms only join
-/// within a payload class, so every alternative binds `body` at the same type.
-type MergedArms = IndexMap<(ResponsePayload, String), (Vec<TokenStream>, TokenStream)>;
+/// Arms that send the same response, joined into one or-pattern. Arms only join when
+/// their payload patterns match, so every alternative binds `body` at the same type.
+type MergedArms = IndexMap<(ResponsePayload, String, String), (Vec<TokenStream>, TokenStream)>;
 
 impl ToTokens for ResponseArmsFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
@@ -496,28 +521,29 @@ impl ToTokens for ResponseArmsFragment<'_> {
           let fields = status_pattern.as_ref().map(|status| quote! { (#status) });
           vec![(
             quote! { #variant_path #fields },
+            String::new(),
             quote! { #status_expr.into_response() },
           )]
         }
         ResponsePayload::Raw => vec![(
           quote! { #variant_path(status, body) },
+          String::new(),
           quote! { (status, body).into_response() },
         )],
-        ResponsePayload::Value | ResponsePayload::Failure => Self::body_arms(
-          &variant_path,
-          status_pattern.as_ref(),
-          &status_expr,
-          self.response.param(variant.payload),
-          variant.status_code,
-        ),
+        ResponsePayload::Value | ResponsePayload::Failure => {
+          Self::body_arms(&status_expr, self.response.param(variant.payload), variant.status_code)
+            .into_iter()
+            .map(|(payload, response)| {
+              let fields = status_pattern.iter().chain(std::iter::once(&payload));
+              (quote! { #variant_path(#(#fields),*) }, payload.to_string(), response)
+            })
+            .collect()
+        }
       };
 
-      for (pattern, response) in arms {
-        merged
-          .entry((variant.payload, response.to_string()))
-          .or_insert_with(|| (vec![], response))
-          .0
-          .push(pattern);
+      for (pattern, payload, response) in arms {
+        let key = (variant.payload, payload, response.to_string());
+        merged.entry(key).or_insert_with(|| (vec![], response)).0.push(pattern);
       }
     }
 

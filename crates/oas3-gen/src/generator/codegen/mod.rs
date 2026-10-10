@@ -34,6 +34,7 @@ pub mod methods;
 pub mod mod_file;
 pub(crate) mod multipart;
 pub mod server;
+pub(crate) mod sse;
 pub mod structs;
 pub mod type_aliases;
 pub mod types;

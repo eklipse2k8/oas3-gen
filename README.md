@@ -227,7 +227,7 @@ The generated router automatically:
 - Deserializes request bodies (JSON, form, multipart, text, and binary), answering malformed ones with `400` before your method runs
 - Routes requests to the correct handler based on path and HTTP method
 - Converts `ApiResponse` values into HTTP responses with the status, headers, and media type each response declares
-- Streams Server-Sent Events for `text/event-stream` responses from the `ServerEvents` your method returns
+- Streams Server-Sent Events for `text/event-stream` responses through Axum's `Sse`, from the `BoxStream` your method returns
 
 ## Key Features
 

@@ -1,4 +1,5 @@
 mod defaults;
+mod event_streams;
 mod multipart;
 mod response;
 mod serde_usage;
@@ -16,6 +17,7 @@ use crate::generator::{
   metrics::GenerationWarning,
   postprocess::{
     defaults::FieldDefaultProcessor,
+    event_streams::FrameTypes,
     multipart::MultipartProcessor,
     response::ResponseProcessor,
     serde_usage::SerdeUsage,
@@ -35,12 +37,13 @@ pub struct PostprocessOutput {
 
 impl PostprocessOutput {
   pub(crate) fn new(
-    types: Vec<RustType>,
-    operations: Vec<OperationInfo>,
+    mut types: Vec<RustType>,
+    mut operations: Vec<OperationInfo>,
     seed_usage: std::collections::BTreeMap<EnumToken, (bool, bool)>,
     target: GenerationTarget,
     header_refs: Vec<HttpHeaderRef>,
   ) -> Self {
+    FrameTypes::process(&mut types, &mut operations, target);
     let (mut types, mut operations) = ResponseProcessor::new(types, operations, target).process();
 
     NestedValidationProcessor::new(&types).process(&mut types);

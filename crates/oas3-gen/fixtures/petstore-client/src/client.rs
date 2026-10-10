@@ -16,20 +16,21 @@ use validator::Validate;
 
 use super::types::{
   AdoptPetRequest, Adoption, AdoptionFeedEvent, AllowHeaders, ApiKey, ApiResponse, AssistantEventList,
-  AssistantSettings, Carrier200Response, Cats, ChatPreference, ContentResponse, CreateApiKeyRequest, CreatePetRequest,
-  DeleteOrderRequest, DeletePetRequest, DescribePetsRequest, ETagAndXCacheHeaders, ETagHeaders, Error, ErrorOrProblem,
-  ErrorResponse, GetAdoptionRequest, GetApiKeyRequest, GetChatPreferenceRequest, GetHealthRequest, GetInventoryRequest,
-  GetOrderByIdRequest, GetPetCardRequest, GetPetLineageRequest, GetPetPhotoRequest, IntakeForm, Inventory,
-  Key200Response, Lineage, ListApiKeysRequest, ListAssistantEventsRequest, ListAuditEventsRequest, ListCarriersRequest,
-  ListCatsRequest, ListPetsRequest, ListVaccinationsRequest, LocationHeaders, MediaLabels, MediaReceipt, Order, Pet,
-  PetExistsRequest, Pets, PlaceOrderRequest, Problem, RecordVaccinationRequest, ReplaceApiKeyRequest,
-  ReplacePetPhotoRequest, RevokeApiKeyRequest, SearchPetsRequest, SearchResults, SendAssistantMessageRequest,
-  SetPetNotesRequest, ShowPetByIdRequest, StreamAdoptionFeedRequest, StreamPetVitalsRequest,
-  SubmitCollarTelemetryRequest, SubmitIntakeFormRequest, SubmitMediaLabelsRequest, SubmitTalliesRequest,
-  SubscribeNewsletterRequest, Subscription, Tallies, TelemetryReceipt, TraceHealthRequest,
-  UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest, UpdateChatPreferenceRequest, UpdatePetRequest,
-  UploadMediaRequest, UploadPetImageRequest, Vaccination200Response, VaccineRecord, VitalsReading, WithHeaders,
-  X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
+  AssistantSettings, AssistantTokenFrame, Carrier200Response, Cats, ChatPreference, ContentResponse,
+  ContentResponseOrAssistantEventFrameStream, CreateApiKeyRequest, CreatePetRequest, DeleteOrderRequest,
+  DeletePetRequest, DescribePetsRequest, ETagAndXCacheHeaders, ETagHeaders, Error, ErrorOrProblem, ErrorResponse,
+  GetAdoptionRequest, GetApiKeyRequest, GetChatPreferenceRequest, GetHealthRequest, GetInventoryRequest,
+  GetMediaBothRequest, GetOrderByIdRequest, GetPetCardRequest, GetPetLineageRequest, GetPetPhotoRequest, IntakeForm,
+  Inventory, Key200Response, Lineage, ListApiKeysRequest, ListAssistantEventsRequest, ListAuditEventsRequest,
+  ListCarriersRequest, ListCatsRequest, ListPetsRequest, ListVaccinationsRequest, LocationHeaders, MediaLabels,
+  MediaReceipt, Order, Pet, PetExistsRequest, PetOrPetStream, Pets, PlaceOrderRequest, Problem,
+  RecordVaccinationRequest, ReplaceApiKeyRequest, ReplacePetPhotoRequest, RevokeApiKeyRequest, SearchPetsRequest,
+  SearchResults, SendAssistantMessageRequest, SetPetNotesRequest, ShowPetByIdRequest, StreamAdoptionFeedRequest,
+  StreamAssistantMessageRequest, StreamAssistantTokensRequest, StreamPetVitalsRequest, SubmitCollarTelemetryRequest,
+  SubmitIntakeFormRequest, SubmitMediaLabelsRequest, SubmitTalliesRequest, SubscribeNewsletterRequest, Subscription,
+  Tallies, TelemetryReceipt, TraceHealthRequest, UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest,
+  UpdateChatPreferenceRequest, UpdatePetRequest, UploadMediaRequest, UploadPetImageRequest, Vaccination200Response,
+  VaccineRecord, VitalsReading, WithHeaders, X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
 };
 pub const BASE_URL: &str = "https://api.petstore.example/v3";
 #[derive(Clone)]
@@ -536,7 +537,7 @@ impl PetstoreClient {
   pub async fn stream_pet_vitals(
     &self,
     request: StreamPetVitalsRequest,
-  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<VitalsReading>, ()>> {
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<oas3_gen_support::SseFrame<VitalsReading>>, ()>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -620,7 +621,7 @@ impl PetstoreClient {
   pub async fn stream_adoption_feed(
     &self,
     request: StreamAdoptionFeedRequest,
-  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<AdoptionFeedEvent>, ()>> {
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<oas3_gen_support::SseFrame<AdoptionFeedEvent>>, ()>> {
     request.validate().context("parameter validation")?;
     let mut url = self.base_url.clone();
     url
@@ -703,6 +704,57 @@ impl PetstoreClient {
     }
     let response = req_builder.send().await?;
     SendAssistantMessageRequest::parse_response(response).await
+  }
+  /// Send content blocks and receive the reply as one document or as a stream
+  ///
+  /// * Path: `POST /assistant/messages/stream`
+  pub async fn stream_assistant_message(
+    &self,
+    request: StreamAssistantMessageRequest,
+  ) -> anyhow::Result<ApiResponse<ContentResponseOrAssistantEventFrameStream, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("assistant")
+      .push("messages")
+      .push("stream");
+    serde::Serialize::serialize(
+      &request.query,
+      serde_html_form::Serializer::new(&mut url.query_pairs_mut()),
+    )
+    .context("encoding query parameters")?;
+    if url.query() == Some("") {
+      url.set_query(None);
+    }
+    let mut req_builder = self.client.post(url).json(&request.body);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    StreamAssistantMessageRequest::parse_response(response).await
+  }
+  /// Stream reply tokens, then the usage they cost
+  ///
+  /// * Path: `GET /assistant/tokens`
+  pub async fn stream_assistant_tokens(
+    &self,
+    request: StreamAssistantTokensRequest,
+  ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<AssistantTokenFrame>, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("assistant")
+      .push("tokens");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    StreamAssistantTokensRequest::parse_response(response).await
   }
   /// Replay the assistant's streaming events as one JSON document
   ///
@@ -1235,6 +1287,24 @@ impl PetstoreClient {
     };
     let response = req_builder.send().await?;
     SubmitTalliesRequest::parse_response(response).await
+  }
+  /// Describe a pet as JSON, or stream it as server-sent events
+  ///
+  /// * Path: `GET /media/both`
+  pub async fn get_media_both(&self, request: GetMediaBothRequest) -> anyhow::Result<ApiResponse<PetOrPetStream, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("media")
+      .push("both");
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    GetMediaBothRequest::parse_response(response).await
   }
   /// List API keys with the global header key
   ///

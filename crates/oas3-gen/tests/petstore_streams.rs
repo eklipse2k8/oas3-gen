@@ -1,21 +1,26 @@
 //! Server-Sent Events, end to end.
 //!
 //! `streamPetVitals` and `streamAdoptionFeed` answer `text/event-stream`. The generated
-//! server streams each item its service returns in `ServerEvents` as one `data:` JSON
+//! server sends each item of the `BoxStream` its service returns as one `data:` JSON
 //! event through axum's `Sse`, and the generated client reads them back as an
-//! `EventStream` of typed items. These tests prove that items survive the trip intact
-//! and in order, that query parameters narrow the stream, that each item is exactly one
-//! `data:` event on the wire, and that a malformed event surfaces as an `Err` item naming
-//! the JSON path that failed to decode.
+//! `EventStream` of `SseFrame`s holding typed items. These tests prove that items survive
+//! the trip intact and in order, that query parameters narrow the stream, that each item
+//! is exactly one `data:` event on the wire, and that a malformed event surfaces as an
+//! `Err` item naming the JSON path under `data` that failed to decode.
+//!
+//! `streamAssistantMessage` and `streamAssistantTokens` stream frame types instead:
+//! items whose `data`, `event`, `id`, and `retry` are the frame's own fields. These tests
+//! prove each frame survives the trip whole, that a union of frame types picks its
+//! member by the frame's event name, and that a sentinel ends the stream.
 
 mod support;
 
-use std::convert::Infallible;
+use std::{collections::BTreeMap, convert::Infallible, time::Duration};
 
 use axum::response::sse::{Event, Sse};
 use chrono::{DateTime, TimeDelta, Utc};
 use futures::{StreamExt as _, TryStreamExt as _};
-use oas3_gen_support::EventStreamError;
+use oas3_gen_support::{DiagnosticsError, SseFrame};
 use petstore_client as client;
 use petstore_server as server;
 use proptest::prelude::*;
@@ -99,6 +104,7 @@ async fn stream_vitals(
     panic!("expected 200 with an event stream, got {response:?}");
   };
   events
+    .map_ok(SseFrame::into_data)
     .try_collect::<Vec<_>>()
     .await
     .expect("every vitals event decodes")
@@ -117,7 +123,11 @@ async fn stream_feed(client: &client::PetstoreClient, filter: Option<String>) ->
   let client::ApiResponse::Ok(events) = response else {
     panic!("expected 200 with an event stream, got {response:?}");
   };
-  events.try_collect::<Vec<_>>().await.expect("every feed event decodes")
+  events
+    .map_ok(SseFrame::into_data)
+    .try_collect::<Vec<_>>()
+    .await
+    .expect("every feed event decodes")
 }
 
 /// Adds a dog named `name` and applies to adopt it, which puts one `created` event on the feed.
@@ -389,10 +399,10 @@ async fn the_feed_filter_narrows_events_by_payload_name(
 }
 
 #[rstest]
-#[case::text_for_an_integer(r#"{"id":"bad","heartRateBpm":"fast"}"#, "heartRateBpm")]
-#[case::text_for_a_double(r#"{"id":"bad","heartRateBpm":80,"temperatureC":"warm"}"#, "temperatureC")]
-#[case::unknown_enum_value(r#"{"id":"bad","heartRateBpm":80,"activity":"flying"}"#, "activity")]
-#[case::unparseable_date_time(r#"{"id":"bad","heartRateBpm":80,"timestamp":"yesterday"}"#, "timestamp")]
+#[case::text_for_an_integer(r#"{"id":"bad","heartRateBpm":"fast"}"#, "data.heartRateBpm")]
+#[case::text_for_a_double(r#"{"id":"bad","heartRateBpm":80,"temperatureC":"warm"}"#, "data.temperatureC")]
+#[case::unknown_enum_value(r#"{"id":"bad","heartRateBpm":80,"activity":"flying"}"#, "data.activity")]
+#[case::unparseable_date_time(r#"{"id":"bad","heartRateBpm":80,"timestamp":"yesterday"}"#, "data.timestamp")]
 #[tokio::test]
 async fn a_malformed_vitals_event_is_an_error_item_naming_its_path(#[case] malformed: &str, #[case] path: &str) {
   let client = client_for_raw_events(vec![
@@ -414,18 +424,21 @@ async fn a_malformed_vitals_event_is_an_error_item_naming_its_path(#[case] malfo
   let [Ok(before), Err(error), Ok(after)] = items.as_slice() else {
     panic!("expected a reading, an error, then a reading; got {items:?}");
   };
-  let EventStreamError::JsonDeserialize { path: error_path, .. } = error else {
+  let DiagnosticsError::DeserializationError { path: error_path, .. } = error else {
     panic!("expected a JSON error for {malformed}, got {error:?}");
   };
   assert_eq!(error_path, path, "the error for {malformed} names the failing field");
   assert!(error.to_string().contains(path), "the message {error} names {path}");
-  assert_eq!((before.id.as_str(), after.id.as_str()), ("before", "after"));
+  assert_eq!(
+    (before.data().id.as_str(), after.data().id.as_str()),
+    ("before", "after")
+  );
 }
 
 #[rstest]
-#[case::text_for_a_nested_integer(r#"{"type":"created","payload":{"id":"1","value":"seven"}}"#, "payload.value")]
-#[case::missing_nested_id(r#"{"type":"created","payload":{"name":"Rex"}}"#, "payload")]
-#[case::unknown_event_type(r#"{"type":"archived","payload":{"id":"1"}}"#, "type")]
+#[case::text_for_a_nested_integer(r#"{"type":"created","payload":{"id":"1","value":"seven"}}"#, "data.payload.value")]
+#[case::missing_nested_id(r#"{"type":"created","payload":{"name":"Rex"}}"#, "data.payload")]
+#[case::unknown_event_type(r#"{"type":"archived","payload":{"id":"1"}}"#, "data.type")]
 #[tokio::test]
 async fn a_malformed_feed_event_is_an_error_item_naming_its_path(#[case] malformed: &str, #[case] path: &str) {
   let client = client_for_raw_events(vec![
@@ -451,12 +464,12 @@ async fn a_malformed_feed_event_is_an_error_item_naming_its_path(#[case] malform
   let [Ok(before), Err(error), Ok(after)] = items.as_slice() else {
     panic!("expected an event, an error, then an event; got {items:?}");
   };
-  let EventStreamError::JsonDeserialize { path: error_path, .. } = error else {
+  let DiagnosticsError::DeserializationError { path: error_path, .. } = error else {
     panic!("expected a JSON error for {malformed}, got {error:?}");
   };
   assert_eq!(error_path, path, "the error for {malformed} names the failing field");
   assert_eq!(
-    (before.payload.id.as_str(), after.payload.id.as_str()),
+    (before.data().payload.id.as_str(), after.data().payload.id.as_str()),
     ("before", "after")
   );
 }
@@ -556,4 +569,329 @@ fn the_feed_streams_exactly_the_events_matching_any_filter() {
       })?;
     }
   );
+}
+
+/// The frames `streamAssistantMessage` sends when asked to stream: one with every field
+/// set, then one with only its data and event name.
+fn assistant_frames() -> Vec<server::AssistantEventFrame> {
+  vec![
+    server::AssistantEventFrame {
+      data: Box::new(server::AssistantEvent::MessageStop(server::MessageStopEvent::default())),
+      event: server::AssistantEventFrameEvent::MessageStop,
+      id: Some("evt-1".to_string()),
+      retry: Some(1500),
+    },
+    server::AssistantEventFrame {
+      data: Box::new(server::AssistantEvent::Ping(server::PingEvent::default())),
+      event: server::AssistantEventFrameEvent::Ping,
+      id: None,
+      retry: None,
+    },
+  ]
+}
+
+fn summary_request() -> client::StreamAssistantMessageRequest {
+  client::StreamAssistantMessageRequest::builder()
+    .stream(true)
+    .body(client::ContentRequest {
+      blocks: vec![client::ContentBlock::text("Summarize Biscuit's visit".to_string())],
+      ..Default::default()
+    })
+    .build()
+    .expect("the message request is valid")
+}
+
+/// Streams the assistant's frames through the generated client.
+async fn stream_frames(client: &client::PetstoreClient) -> Vec<Result<client::AssistantEventFrame, DiagnosticsError>> {
+  let response = client
+    .stream_assistant_message(summary_request())
+    .await
+    .expect("the message request completes");
+  let client::ApiResponse::Ok(client::ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(frames)) =
+    response
+  else {
+    panic!("expected 200 with an event stream, got {response:?}");
+  };
+  frames.collect().await
+}
+
+/// Streams the assistant's token frames through the generated client.
+async fn stream_tokens(client: &client::PetstoreClient) -> Vec<Result<client::AssistantTokenFrame, DiagnosticsError>> {
+  let response = client
+    .stream_assistant_tokens(client::StreamAssistantTokensRequest {})
+    .await
+    .expect("the token request completes");
+  let client::ApiResponse::Ok(frames) = response else {
+    panic!("expected 200 with an event stream, got {response:?}");
+  };
+  frames.collect::<Vec<_>>().await
+}
+
+/// What a test compares of a token frame: its event name, its data as JSON, its id, and
+/// its retry time.
+fn token_frame(frame: &client::AssistantTokenFrame) -> (&str, Value, Option<&str>, Option<Duration>) {
+  match frame {
+    client::AssistantTokenFrame::Token(token) => {
+      (token.event().as_str(), json!(token.data()), token.id(), token.retry())
+    }
+    client::AssistantTokenFrame::Usage(usage) => {
+      (usage.event().as_str(), json!(usage.data()), usage.id(), usage.retry())
+    }
+  }
+}
+
+/// The fields of each event in a raw `text/event-stream` body, with data lines joined.
+fn wire_frames(body: &str) -> Vec<BTreeMap<String, String>> {
+  body
+    .split_terminator("\n\n")
+    .map(|event| {
+      let mut fields = BTreeMap::<String, String>::new();
+      for line in event.lines() {
+        let (field, value) = line.split_once(": ").unwrap_or((line, ""));
+        fields
+          .entry(field.to_string())
+          .and_modify(|joined| {
+            joined.push('\n');
+            joined.push_str(value);
+          })
+          .or_insert_with(|| value.to_string());
+      }
+      fields
+    })
+    .collect()
+}
+
+fn frame(fields: &[(&str, &str)]) -> BTreeMap<String, String> {
+  fields
+    .iter()
+    .map(|(field, value)| ((*field).to_string(), (*value).to_string()))
+    .collect()
+}
+
+/// A client for a stand-in server that answers every request with `events` as its stream.
+async fn client_for_raw_frames(events: Vec<Event>) -> client::PetstoreClient {
+  let router = axum::Router::new().fallback(move || {
+    let events = events.clone();
+    async move { Sse::new(futures::stream::iter(events.into_iter().map(Ok::<_, Infallible>))) }
+  });
+  let base_url = support::serve(router).await;
+  client::PetstoreClient::with_base_url(&base_url).expect("the base URL parses")
+}
+
+#[rstest]
+#[tokio::test]
+async fn assistant_frames_arrive_whole_and_end_at_the_sentinel(#[future(awt)] petstore: Petstore) {
+  petstore
+    .service
+    .with_state(|state| state.assistant_frames = assistant_frames());
+
+  let frames = stream_frames(&petstore.client)
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .expect("every frame decodes");
+
+  let read = frames
+    .iter()
+    .map(|frame| (frame.data().as_ref(), frame.event(), frame.id(), frame.retry()))
+    .collect::<Vec<_>>();
+  let retry = Some(Duration::from_millis(1500));
+  assert_eq!(
+    read,
+    vec![
+      (
+        &client::AssistantEvent::MessageStop(client::MessageStopEvent::default()),
+        &client::AssistantEventFrameEvent::MessageStop,
+        Some("evt-1"),
+        retry,
+      ),
+      (
+        &client::AssistantEvent::Ping(client::PingEvent::default()),
+        &client::AssistantEventFrameEvent::Ping,
+        Some("evt-1"),
+        retry,
+      ),
+    ],
+    "a frame without an id or retry keeps the last ones the stream set"
+  );
+  let Some(Received::StreamAssistantMessage(received)) = petstore.service.last_received() else {
+    panic!("the server did not record a message request");
+  };
+  assert_eq!(received.query.stream, Some(true));
+}
+
+#[rstest]
+#[tokio::test]
+async fn assistant_frames_are_whole_frames_on_the_wire_ending_with_done(#[future(awt)] petstore: Petstore) {
+  petstore
+    .service
+    .with_state(|state| state.assistant_frames = assistant_frames());
+
+  let response = reqwest::Client::new()
+    .post(petstore.url("/assistant/messages/stream?stream=true"))
+    .header(client::X_API_KEY, API_KEY)
+    .json(&json!({ "blocks": [{ "type": "text", "text": "Summarize Biscuit's visit" }] }))
+    .send()
+    .await
+    .expect("the raw request completes");
+
+  assert_eq!(response.status(), reqwest::StatusCode::OK);
+  assert_eq!(response.headers()[reqwest::header::CONTENT_TYPE], "text/event-stream");
+  let body = response.text().await.expect("the event stream is text");
+  assert_eq!(
+    wire_frames(&body),
+    vec![
+      frame(&[
+        ("data", r#"{"type":"message_stop"}"#),
+        ("event", "message_stop"),
+        ("id", "evt-1"),
+        ("retry", "1500"),
+      ]),
+      frame(&[("data", r#"{"type":"ping"}"#), ("event", "ping")]),
+      frame(&[("data", "[DONE]")]),
+    ],
+    "the raw stream was {body:?}"
+  );
+}
+
+#[rstest]
+#[tokio::test]
+async fn token_frames_pick_their_member_by_event_name(#[future(awt)] petstore: Petstore) {
+  petstore.service.with_state(|state| {
+    state.token_frames = vec![
+      server::AssistantTokenFrame::Token(server::TokenFrame {
+        data: "Biscuit is".to_string(),
+        ..Default::default()
+      }),
+      server::AssistantTokenFrame::Token(server::TokenFrame {
+        data: "\"healthy\"\nand happy".to_string(),
+        ..Default::default()
+      }),
+      server::AssistantTokenFrame::Usage(server::UsageFrame {
+        data: server::Usage {
+          input_tokens: 3,
+          output_tokens: 2,
+        },
+        id: Some("usage-1".to_string()),
+        ..Default::default()
+      }),
+    ];
+  });
+
+  let frames = stream_tokens(&petstore.client)
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .expect("every frame decodes");
+
+  assert_eq!(
+    frames.iter().map(token_frame).collect::<Vec<_>>(),
+    vec![
+      ("token", json!("Biscuit is"), None, None),
+      ("token", json!("\"healthy\"\nand happy"), None, None),
+      (
+        "usage",
+        json!({ "input_tokens": 3, "output_tokens": 2 }),
+        Some("usage-1"),
+        None
+      ),
+    ],
+    "token text arrives as written, and the usage frame decodes its JSON"
+  );
+
+  let body = reqwest::Client::new()
+    .get(petstore.url("/assistant/tokens"))
+    .header(client::X_API_KEY, API_KEY)
+    .send()
+    .await
+    .expect("the raw request completes")
+    .text()
+    .await
+    .expect("the event stream is text");
+  assert_eq!(
+    wire_frames(&body),
+    vec![
+      frame(&[("data", "Biscuit is"), ("event", "token")]),
+      frame(&[("data", "\"healthy\"\nand happy"), ("event", "token")]),
+      frame(&[
+        ("data", r#"{"input_tokens":3,"output_tokens":2}"#),
+        ("event", "usage"),
+        ("id", "usage-1"),
+      ]),
+      frame(&[("data", "[END]")]),
+    ],
+    "token data is raw text, and the x-sse-sentinel ends the stream; the raw stream was {body:?}"
+  );
+}
+
+#[rstest]
+#[tokio::test]
+async fn an_unknown_event_or_malformed_data_is_an_error_item() {
+  let client = client_for_raw_frames(vec![
+    Event::default().event("token").data("before"),
+    Event::default().event("mystery").data("?"),
+    Event::default()
+      .event("usage")
+      .data(r#"{"input_tokens":"many","output_tokens":1}"#),
+    Event::default().event("token").data("after"),
+    Event::default().data("[END]"),
+    Event::default().event("token").data("ignored"),
+  ])
+  .await;
+
+  let items = stream_tokens(&client).await;
+
+  let [Ok(before), Err(unknown), Err(malformed), Ok(after)] = items.as_slice() else {
+    panic!("expected a token, two errors, then a token, ending at the [END] sentinel; got {items:?}");
+  };
+  let DiagnosticsError::DeserializationError { path, inner } = unknown else {
+    panic!("expected an unknown event error, got {unknown:?}");
+  };
+  assert_eq!(path, "event", "an unlisted event name is an error at the event");
+  assert!(
+    inner.to_string().contains("`mystery`"),
+    "the error names the event: {inner}"
+  );
+  let DiagnosticsError::DeserializationError { path, .. } = malformed else {
+    panic!("expected a JSON error, got {malformed:?}");
+  };
+  assert_eq!(path, "data.input_tokens", "the error names the field under data");
+  for (item, text) in [(before, "before"), (after, "after")] {
+    let client::AssistantTokenFrame::Token(token) = item else {
+      panic!("expected a token frame, got {item:?}");
+    };
+    assert_eq!(token.data(), text);
+  }
+}
+
+#[rstest]
+#[case::event_with_a_line_break(Event::try_from(server::TokenFrame {
+  event: "to\nken".to_string(),
+  data: "text".to_string(),
+}))]
+#[case::id_with_a_carriage_return(Event::try_from(server::UsageFrame {
+  id: Some("usage\r1".to_string()),
+  ..Default::default()
+}))]
+#[case::id_with_a_nul(Event::try_from(server::UsageFrame {
+  id: Some("usage\x001".to_string()),
+  ..Default::default()
+}))]
+#[case::negative_retry(Event::try_from(server::AssistantEventFrame {
+  data: Box::new(server::AssistantEvent::Ping(server::PingEvent::default())),
+  event: server::AssistantEventFrameEvent::Ping,
+  id: None,
+  retry: Some(-1),
+}))]
+fn a_frame_axum_cannot_send_is_an_error_not_a_panic(#[case] event: Result<Event, axum::Error>) {
+  assert!(event.is_err(), "the conversion refuses the frame");
+}
+
+#[test]
+fn a_union_member_converts_to_one_axum_event() {
+  let member = server::AssistantTokenFrame::Usage(server::UsageFrame {
+    id: Some("usage-1".to_string()),
+    ..Default::default()
+  });
+  assert!(Event::try_from(member).is_ok(), "a sendable frame converts");
 }

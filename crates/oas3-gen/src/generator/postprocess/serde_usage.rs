@@ -115,7 +115,7 @@ impl SerdeUsage {
     refs.flat_map(move |type_ref| Self::custom_type_names(type_ref, declared))
   }
 
-  fn custom_type_names<'a>(
+  pub(super) fn custom_type_names<'a>(
     type_ref: &'a TypeRef,
     declared: &'a BTreeSet<EnumToken>,
   ) -> impl Iterator<Item = EnumToken> + 'a {

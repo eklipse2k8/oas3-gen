@@ -55,6 +55,7 @@ pub use validation_attrs::{RegexKey, ValidationAttribute};
 pub use crate::generator::ast::fields::{DefaultVariant, FieldCollection, FieldDef};
 use crate::generator::{
   ast::constants::HttpHeaderRef,
+  converter::GenerationTarget,
   metrics::GenerationWarning,
   naming::{
     constants::{COOKIE_PARAMS_SUFFIX, HEADER_PARAMS_SUFFIX, PATH_PARAMS_SUFFIX, QUERY_PARAMS_SUFFIX},
@@ -101,6 +102,8 @@ pub struct DiscriminatedVariant {
   pub discriminator_values: Vec<String>,
   pub variant_name: EnumVariantToken,
   pub type_name: TypeRef,
+  /// How the member travels, when the enum is a union of frame types.
+  pub frame: Option<FrameMember>,
 }
 
 /// Serde mode controlling which serde traits a type derives/implements
@@ -130,6 +133,9 @@ pub struct DiscriminatedEnumDef {
   pub serde_mode: SerdeMode,
   #[builder(default)]
   pub methods: Vec<EnumMethod>,
+  /// Whether the enum is a union of `text/event-stream` frame types keyed by their `event`.
+  #[builder(default)]
+  pub sse_frame: bool,
 }
 
 impl DiscriminatedEnumDef {
@@ -315,26 +321,35 @@ pub struct ResponseHeadersRef {
 pub struct ResponseParam {
   pub body: TypeRef,
   pub headers: Option<ResponseHeadersRef>,
-  /// The media type a server sends the body as under each status code that declares
-  /// one. A response union keeps only its JSON entries, and a union without any is sent
-  /// as JSON
+  /// Each body the operation declares, with the media type a server sends it as.
   #[builder(default)]
-  pub media_types: Vec<StatusMediaType>,
+  pub media_types: Vec<BodyMediaType>,
 }
 
-/// The first media type one status code declares for its body.
-pub type StatusMediaType = (StatusCodeToken, ResponseMediaType);
+/// One declared body of a payload class, with the response union member it is, and the
+/// category and concrete `content_type` a server sends it as.
+#[derive(Debug, Clone, PartialEq, Eq, bon::Builder)]
+pub struct BodyMediaType {
+  pub status: StatusCodeToken,
+  pub member: Option<EnumVariantToken>,
+  pub body: TypeRef,
+  pub category: ContentCategory,
+  pub content_type: String,
+  pub stream: Option<EventStreamFormat>,
+}
 
 impl ResponseParam {
-  /// The media type the body is sent as under `status`: the one `status` declares,
-  /// or, for a status the operation doesn't declare, the first one it does.
+  /// The body declared for `status` as `member`, or for a status the operation doesn't
+  /// declare, the first body declared as `member`.
   #[must_use]
-  pub fn media_type(&self, status: StatusCodeToken) -> Option<&ResponseMediaType> {
+  pub fn body_media(&self, status: StatusCodeToken, member: Option<&EnumVariantToken>) -> Option<&BodyMediaType> {
+    let same_member = |entry: &&BodyMediaType| entry.member.as_ref() == member;
     self
       .media_types
       .iter()
-      .find_map(|(declared, media_type)| (*declared == status).then_some(media_type))
-      .or_else(|| self.media_types.first().map(|(_, media_type)| media_type))
+      .filter(same_member)
+      .find(|entry| entry.status == status)
+      .or_else(|| self.media_types.iter().find(same_member))
   }
 }
 
@@ -377,8 +392,9 @@ pub struct ResponseUnionDef {
   pub variants: Vec<ResponseUnionVariant>,
   #[builder(default)]
   pub serde_mode: SerdeMode,
-  #[builder(default)]
-  pub streaming: bool,
+  /// The target whose event stream a member holds, if any: a client's `EventStream` is
+  /// `Debug`, a server's `BoxStream` isn't, and neither is `Clone`.
+  pub streaming: Option<GenerationTarget>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -595,6 +611,54 @@ pub struct ResponseMediaType {
   /// The media type as the document declares it, such as `image/png`
   pub content_type: String,
   pub schema_type: Option<TypeRef>,
+  /// How a `text/event-stream` streams its items; `None` for any other media type.
+  pub stream: Option<EventStreamFormat>,
+}
+
+/// How a `text/event-stream` media type streams its items.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EventStreamFormat {
+  /// The event data that ends the stream, from `x-sse-sentinel` or `x-speakeasy-sse-sentinel`.
+  pub sentinel: Option<String>,
+  pub item: StreamItem,
+}
+
+/// What one item of a `text/event-stream` is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StreamItem {
+  /// The JSON `data` of one event.
+  #[default]
+  Payload,
+  /// A frame type, read from and sent as one whole frame.
+  Frame(FrameData),
+  /// A union of frame types, told apart by their event names.
+  FrameUnion,
+}
+
+/// How a frame type carries its `data`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrameData {
+  /// JSON of the `data` property's type.
+  Json,
+  /// The frame's text, as is, for a `string` property.
+  Text,
+}
+
+impl FrameData {
+  /// How a `data` property of type `data` travels.
+  #[must_use]
+  pub fn of(data: &TypeRef) -> Self {
+    if data.is_string_like() { Self::Text } else { Self::Json }
+  }
+}
+
+/// How one member of a union of frame types travels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameMember {
+  pub data: FrameData,
+  /// Whether the member has an `event` property. A member without one is sent under
+  /// its discriminator value.
+  pub declares_event: bool,
 }
 
 impl ResponseMediaType {
@@ -605,11 +669,19 @@ impl ResponseMediaType {
 
   #[must_use]
   pub fn with_schema(content_type: &str, schema_type: Option<TypeRef>) -> Self {
+    let category = ContentCategory::from_content_type(content_type);
     Self {
-      category: ContentCategory::from_content_type(content_type),
+      category,
       content_type: content_type.to_string(),
       schema_type,
+      stream: (category == ContentCategory::EventStream).then(EventStreamFormat::default),
     }
+  }
+
+  /// The `text/event-stream` media type among `media_types`.
+  #[must_use]
+  pub fn event_stream(media_types: &[Self]) -> Option<&Self> {
+    media_types.iter().find(|m| m.category == ContentCategory::EventStream)
   }
 
   #[must_use]
@@ -619,7 +691,7 @@ impl ResponseMediaType {
 
   #[must_use]
   pub fn has_event_stream(media_types: &[Self]) -> bool {
-    media_types.iter().any(|m| m.category == ContentCategory::EventStream)
+    Self::event_stream(media_types).is_some()
   }
 }
 
@@ -692,6 +764,10 @@ pub struct StructDef {
   /// Additional traits to derive beyond the standard set (e.g., Builder), controlled by config options
   #[builder(default)]
   pub additional_derives: BTreeSet<DeriveTrait>,
+  /// Whether the struct is a `text/event-stream` frame type, built from whole Server-Sent
+  /// Events frames.
+  #[builder(default)]
+  pub sse_frame: bool,
 }
 
 impl StructDef {

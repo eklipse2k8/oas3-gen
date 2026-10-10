@@ -1,3 +1,4 @@
+mod event_streams;
 mod media_types;
 mod operation_registry;
 mod orchestrator;

@@ -347,11 +347,15 @@ describes this with a `text/event-stream` response, the media type of
 [Server-Sent Events][mdn-sse] (SSE), and the response's schema describes one
 event. The petstore's `streamPetVitals` operation streams `VitalsReading`
 events, so its client method returns
-`ApiResponse<oas3_gen_support::EventStream<VitalsReading>, ()>`.
+`ApiResponse<oas3_gen_support::EventStream<oas3_gen_support::SseFrame<VitalsReading>>, ()>`.
 
 `EventStream` is a [`Stream`][rustdoc-futures-stream] whose items are
-`Result<VitalsReading, EventStreamError>`: each event's `data`, decoded from
-JSON. Let's print readings as they arrive:
+`Result<SseFrame<VitalsReading>, DiagnosticsError>`. Each `SseFrame` is one
+event as the client read it: `data()` returns its `data` decoded from JSON,
+`event()` its event name, `id()` the last event ID the stream set, and
+`retry()` the reconnection time the stream last asked for. A frame is
+read-only, and only the stream creates one. Let's print readings as they
+arrive:
 
 ```rust
 use futures::StreamExt;
@@ -365,7 +369,7 @@ let mut readings = match client.stream_pet_vitals(request).await? {
 
 while let Some(reading) = readings.next().await {
     match reading {
-        Ok(reading) => println!("{} bpm", reading.heart_rate_bpm),
+        Ok(frame) => println!("{} bpm", frame.data().heart_rate_bpm),
         Err(e) => eprintln!("skipped an event: {e}"),
     }
 }
@@ -374,12 +378,126 @@ while let Some(reading) = readings.next().await {
 The `stream_pet_vitals()` method returns once the response headers arrive.
 The readings are decoded as the server sends them, and the loop ends when the
 server closes the stream. [`StreamExt::next()`][rustdoc-futures-stream-ext]
-comes from the `futures` crate, which the generated manifest doesn't declare,
-so add `futures` to your own dependencies.
+comes from the `futures` crate, which the generated client manifest doesn't
+declare, so add `futures` to your own dependencies. When you only need the
+data, `SseFrame::into_data()` gives it to you without the rest of the frame.
 
-An event whose data doesn't match `VitalsReading` yields an `Err` that names
-the JSON path that failed, and the stream continues with the next event. An
-event without data is skipped.
+An event whose data doesn't match `VitalsReading` yields a
+`DiagnosticsError::DeserializationError` whose `path` names the field under
+`data` that failed, such as `data.heartRateBpm`, and the stream continues with
+the next event. An event without data is skipped. If reading the response body
+fails, the stream yields `DiagnosticsError::BodyReadError` and then ends.
+
+The client reads the stream the way the [HTML standard][whatwg-sse] tells
+browsers to. Lines can end with LF, CR, or CRLF, comment lines and unknown
+fields are ignored, a leading byte order mark is dropped, and invalid UTF-8
+becomes U+FFFD. An event that the server cuts off before its closing blank line
+is never yielded.
+
+### Reading Whole Frames
+
+Some documents describe the whole frame of an event instead of its data. When a
+`text/event-stream` schema is an object whose properties all come from `data`,
+`event`, `id`, and `retry`, with `data` among them, the generator treats it as
+a *frame type*. Speakeasy uses this convention, and OpenAPI 3.2 adopts it for
+event streams. The petstore's `streamAssistantMessage` streams a frame type:
+
+```json
+"AssistantEventFrame": {
+  "type": "object",
+  "required": ["data", "event"],
+  "properties": {
+    "data": { "$ref": "#/components/schemas/AssistantEvent" },
+    "event": { "type": "string", "enum": ["message_start", "message_stop", "ping"] },
+    "id": { "type": "string" },
+    "retry": { "type": "integer", "minimum": 0 }
+  }
+}
+```
+
+This is an excerpt; the petstore lists more event names. A frame type already
+describes an `SseFrame`, so the client generates it as an alias of the frame
+of its `data` and `event` types:
+
+```rust
+pub type AssistantEventFrame = oas3_gen_support::SseFrame<Box<AssistantEvent>, AssistantEventFrameEvent>;
+```
+
+Each part of the frame decodes like this:
+
+- `data` decodes as its own schema. A plain `string` keeps the frame's text as
+  it is. A string with `contentMediaType: application/json` and a
+  `contentSchema` decodes as that schema. Anything else, such as the
+  `AssistantEvent` reference here, decodes from JSON.
+- `event` decodes into the type the schema declares, such as the
+  `AssistantEventFrameEvent` enum, and an event name the type doesn't accept
+  is a `DeserializationError` whose `path` is `event`. A frame without an
+  `event:` line is a `message` event, exactly like one that sends
+  `event: message`, and a `message` is `None` when the `event` property is
+  optional. An `event` declared as a string or a `const` stays a `String`,
+  which is the frame's default event type.
+- `id()` and `retry()` come from the stream, whatever types the `id` and
+  `retry` properties declare. A frame without an `id:` line keeps the last ID
+  the stream set, including one sent in a frame without data, as browsers
+  report it. `retry()` works the same way for the reconnection time.
+
+A `text/event-stream` schema can also be a `oneOf` of frame types that each fix
+`event` to a constant. The petstore's `streamAssistantTokens` streams
+`AssistantTokenFrame`, a `oneOf` of `TokenFrame` and `UsageFrame` whose events
+are `token` and `usage`. The client generates an enum of the frames the members
+alias, `SseFrame<String>` and `SseFrame<Usage>`, and picks the member from the
+frame's event name. Let's print the tokens as they arrive and then the usage:
+
+```rust
+use futures::StreamExt;
+
+let mut frames = match client.stream_assistant_tokens(StreamAssistantTokensRequest {}).await? {
+    ApiResponse::Ok(frames) => frames,
+    other => anyhow::bail!("unexpected response: {other:?}"),
+};
+
+while let Some(frame) = frames.next().await {
+    match frame? {
+        AssistantTokenFrame::Token(token) => print!("{}", token.data()),
+        AssistantTokenFrame::Usage(usage) => println!("\n{} tokens", usage.data().output_tokens),
+    }
+}
+```
+
+A frame whose event name no member declares yields a `DeserializationError`
+whose `path` is `event`, and the stream continues with the next frame. A frame
+without an `event:` line goes to the member whose event is `message`, if there
+is one.
+
+A frame type can also be a JSON body or a property of another schema. Your code
+needs to build and serialize the type there, so the client keeps a frame struct
+that anything besides a stream uses as a struct, and its streams read
+`SseFrame<..>` of its `data` and `event` types in its place. A union of frame
+types that another schema holds streams each event's data as a JSON payload
+instead.
+
+`streamAssistantMessage` answers `200` with either a `ContentResponse` document
+or the stream, so its payload is the union
+`ContentResponseOrAssistantEventFrameStream`. The stream member is named after
+its item type with a `Stream` suffix, and the response's `Content-Type` decides
+which member you receive.
+
+### Ending and Resuming a Stream
+
+A `text/event-stream` media type can name the data that ends the stream with
+the `x-sse-sentinel` or `x-speakeasy-sse-sentinel` extension. When a media type
+declares both, `x-sse-sentinel` wins. `streamAssistantMessage` declares
+`x-speakeasy-sse-sentinel: "[DONE]"`, so its stream returns `None` when an
+event's data is `[DONE]`, and `streamAssistantTokens` declares
+`x-sse-sentinel: "[END]"`. The sentinel itself is never decoded, so it doesn't
+produce an error item. Without a sentinel, the stream ends when the server
+closes it.
+
+To resume an interrupted stream, send `EventStream::last_event_id()` back to
+the server, for example in a `Last-Event-ID` header, after waiting for
+`EventStream::retry()`. Unlike a frame's `id()` and `retry()`, these include
+an ID or reconnection time the server sent in a frame without data after the
+last frame you read.
 
 ## Sending Request Bodies
 
@@ -641,3 +759,4 @@ enums, type adapters, and collection choices.
 [rustdoc-secret-string]: https://docs.rs/secrecy/0.10.3/secrecy/type.SecretString.html
 [rustdoc-serde-html-form]: https://docs.rs/serde_html_form/0.4.1/serde_html_form/
 [rustdoc-uuid]: https://docs.rs/uuid/1.27.0/uuid/struct.Uuid.html
+[whatwg-sse]: https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation

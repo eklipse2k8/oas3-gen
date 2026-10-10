@@ -16,7 +16,7 @@ static REGEX_ADOPTER_PHONE: std::sync::LazyLock<regex::Regex> =
   std::sync::LazyLock::new(|| regex::Regex::new("^\\+[1-9][0-9]{6,14}$").expect("invalid regex"));
 static REGEX_COLLAR_TELEMETRY_COLLAR_ID: std::sync::LazyLock<regex::Regex> =
   std::sync::LazyLock::new(|| regex::Regex::new("^COL-[0-9A-F]{8}$").expect("invalid regex"));
-static REGEX_NEW_PET_MICROCHIP: std::sync::LazyLock<regex::Regex> =
+static REGEX_PET_MICROCHIP: std::sync::LazyLock<regex::Regex> =
   std::sync::LazyLock::new(|| regex::Regex::new("^[0-9]{15}$").expect("invalid regex"));
 pub const X_SORT_ORDER: http::HeaderName = http::HeaderName::from_static("x-sort-order");
 pub const X_ONLY: http::HeaderName = http::HeaderName::from_static("x-only");
@@ -117,10 +117,13 @@ impl core::str::FromStr for PetStatus {
 /// A pet in the store's care.
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct Pet {
   /// Server-assigned identifier
   pub id: uuid::Uuid,
+  #[validate(length(min = 1u64, max = 64u64))]
   pub name: String,
   /// Kinds of pets the store cares for
   pub species: Species,
@@ -131,10 +134,13 @@ pub struct Pet {
   #[serde(rename = "birthDate")]
   pub birth_date: Option<chrono::NaiveDate>,
   #[serde(rename = "weightKg")]
+  #[validate(range(max = 500.0, exclusive_min = 0.0))]
   pub weight_kg: Option<f64>,
   /// ISO 11784 microchip number
+  #[validate(regex(path = "REGEX_PET_MICROCHIP"))]
   pub microchip: Option<String>,
   #[serde_as(as = "Option<serde_with::SetPreventDuplicates<_>>")]
+  #[validate(length(max = 10u64))]
   pub tags: Option<indexmap::IndexSet<String>>,
   #[serde(rename = "photoUrls")]
   pub photo_urls: Option<Vec<String>>,
@@ -162,7 +168,7 @@ pub struct NewPet {
   #[serde(rename = "weightKg")]
   #[validate(range(max = 500.0, exclusive_min = 0.0))]
   pub weight_kg: Option<f64>,
-  #[validate(regex(path = "REGEX_NEW_PET_MICROCHIP"))]
+  #[validate(regex(path = "REGEX_PET_MICROCHIP"))]
   pub microchip: Option<String>,
   #[serde_as(as = "Option<serde_with::SetPreventDuplicates<_>>")]
   #[validate(length(max = 10u64))]
@@ -221,7 +227,7 @@ pub struct Cat {
 pub type Pets = Vec<Pet>;
 pub type Cats = Vec<Cat>;
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct Allergies {
   #[doc(hidden)]
@@ -232,7 +238,7 @@ pub struct Allergies {
   pub allergens: Option<Vec<String>>,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct Diet {
   #[doc(hidden)]
@@ -264,6 +270,27 @@ impl serde::Serialize for Health {
     match self {
       Self::Allergies(v) => v.serialize(serializer),
       Self::Diet(v) => v.serialize(serializer),
+    }
+  }
+}
+impl<'de> serde::Deserialize<'de> for Health {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+      Some("allergies") => serde_json::from_value(value)
+        .map(Self::Allergies)
+        .map_err(serde::de::Error::custom),
+      Some("diet") => serde_json::from_value(value)
+        .map(Self::Diet)
+        .map_err(serde::de::Error::custom),
+      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      Some(other) => Err(serde::de::Error::custom(format!(
+        "Unknown discriminator value '{}' for field '{}'",
+        other, "type"
+      ))),
     }
   }
 }
@@ -804,8 +831,11 @@ pub struct ContentRequest {
   pub image_size: Option<ContentRequestImageSize>,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct ContentResponse {
+  #[validate(length(min = 1u64))]
   pub id: String,
   /// A union of content block types with discriminator
   pub content: Box<ContentBlock>,
@@ -1283,6 +1313,39 @@ impl serde::Serialize for AssistantEvent {
     }
   }
 }
+impl<'de> serde::Deserialize<'de> for AssistantEvent {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+      Some("message_start") => serde_json::from_value(value)
+        .map(Self::MessageStart)
+        .map_err(serde::de::Error::custom),
+      Some("content_block_start") => serde_json::from_value(value)
+        .map(Self::ContentBlockStart)
+        .map_err(serde::de::Error::custom),
+      Some("content_block_delta") => serde_json::from_value(value)
+        .map(Self::ContentBlockDelta)
+        .map_err(serde::de::Error::custom),
+      Some("content_block_stop") => serde_json::from_value(value)
+        .map(Self::ContentBlockStop)
+        .map_err(serde::de::Error::custom),
+      Some("message_stop") => serde_json::from_value(value)
+        .map(Self::MessageStop)
+        .map_err(serde::de::Error::custom),
+      Some("ping") => serde_json::from_value(value)
+        .map(Self::Ping)
+        .map_err(serde::de::Error::custom),
+      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      Some(other) => Err(serde::de::Error::custom(format!(
+        "Unknown discriminator value '{}' for field '{}'",
+        other, "type"
+      ))),
+    }
+  }
+}
 impl AssistantEvent {
   #[must_use]
   pub fn message_start(message: Message) -> Self {
@@ -1308,7 +1371,9 @@ impl AssistantEvent {
   }
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 #[serde(default)]
 pub struct MessageStartEvent {
   #[doc(hidden)]
@@ -1316,10 +1381,11 @@ pub struct MessageStartEvent {
   #[default(Some("message_start"))]
   #[builder(skip = Some("message_start"))]
   pub r#type: Option<&'static str>,
+  #[validate(nested)]
   pub message: Message,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockStartEvent {
   #[doc(hidden)]
@@ -1332,7 +1398,7 @@ pub struct ContentBlockStartEvent {
   pub content_block: Box<ContentBlock>,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockDeltaEvent {
   #[doc(hidden)]
@@ -1345,7 +1411,7 @@ pub struct ContentBlockDeltaEvent {
   pub delta: Box<Delta>,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ContentBlockStopEvent {
   #[doc(hidden)]
@@ -1356,7 +1422,7 @@ pub struct ContentBlockStopEvent {
   pub index: i64,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct MessageStopEvent {
   #[doc(hidden)]
@@ -1366,7 +1432,7 @@ pub struct MessageStopEvent {
   pub r#type: Option<&'static str>,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct PingEvent {
   #[doc(hidden)]
@@ -1400,6 +1466,27 @@ impl serde::Serialize for Delta {
     }
   }
 }
+impl<'de> serde::Deserialize<'de> for Delta {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+      Some("text_delta") => serde_json::from_value(value)
+        .map(Self::Text)
+        .map_err(serde::de::Error::custom),
+      Some("input_json_delta") => serde_json::from_value(value)
+        .map(Self::InputJson)
+        .map_err(serde::de::Error::custom),
+      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      Some(other) => Err(serde::de::Error::custom(format!(
+        "Unknown discriminator value '{}' for field '{}'",
+        other, "type"
+      ))),
+    }
+  }
+}
 impl Delta {
   #[must_use]
   pub fn text(text: String) -> Self {
@@ -1417,7 +1504,9 @@ impl Delta {
   }
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 #[serde(default)]
 pub struct TextDelta {
   #[doc(hidden)]
@@ -1425,10 +1514,13 @@ pub struct TextDelta {
   #[default(Some("text_delta"))]
   #[builder(skip = Some("text_delta"))]
   pub r#type: Option<&'static str>,
+  #[validate(length(min = 1u64))]
   pub text: String,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 #[serde(default)]
 pub struct InputJsonDelta {
   #[doc(hidden)]
@@ -1436,14 +1528,19 @@ pub struct InputJsonDelta {
   #[default(Some("input_json_delta"))]
   #[builder(skip = Some("input_json_delta"))]
   pub r#type: Option<&'static str>,
+  #[validate(length(min = 1u64))]
   pub partial_json: String,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
 pub struct Message {
+  #[validate(length(min = 1u64))]
   pub id: String,
   pub role: Role,
   pub content: Vec<ContentBlock>,
+  #[validate(length(min = 1u64))]
   pub model: String,
   pub stop_reason: Option<StopReason>,
   pub usage: Option<Usage>,
@@ -1655,6 +1752,152 @@ impl core::str::FromStr for StopReason {
 pub struct Usage {
   pub input_tokens: i64,
   pub output_tokens: i64,
+}
+/// One Server-Sent Events frame of a streamed reply: the event in data, its name, and where to resume
+#[serde_with::skip_serializing_none]
+#[derive(
+  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+)]
+pub struct AssistantEventFrame {
+  /// Streaming event with different types
+  pub data: Box<AssistantEvent>,
+  pub event: AssistantEventFrameEvent,
+  pub id: Option<String>,
+  #[validate(range(min = 0i64))]
+  pub retry: Option<i64>,
+}
+impl TryFrom<AssistantEventFrame> for axum::response::sse::Event {
+  type Error = axum::Error;
+  fn try_from(frame: AssistantEventFrame) -> core::result::Result<Self, Self::Error> {
+    let mut event = Self::default();
+    event = event.json_data(frame.data)?;
+    let text = frame.event.to_string();
+    if text.contains(['\r', '\n']) {
+      return Err(axum::Error::new(
+        "a Server-Sent Events `event` can't contain a line break",
+      ));
+    }
+    event = event.event(text);
+    if let Some(value) = frame.id {
+      if value.contains(['\0', '\r', '\n']) {
+        return Err(axum::Error::new(
+          "a Server-Sent Events `id` can't contain a line break or NUL",
+        ));
+      }
+      event = event.id(value);
+    }
+    if let Some(value) = frame.retry {
+      event = event.retry(std::time::Duration::from_millis(
+        u64::try_from(value).map_err(axum::Error::new)?,
+      ));
+    }
+    Ok(event)
+  }
+}
+/// A token frame or the closing usage frame, told apart by the frame's event name
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssistantTokenFrame {
+  Token(TokenFrame),
+  Usage(UsageFrame),
+}
+impl AssistantTokenFrame {
+  pub const DISCRIMINATOR_FIELD: &'static str = "event";
+}
+impl Default for AssistantTokenFrame {
+  fn default() -> Self {
+    Self::Token(<TokenFrame>::default())
+  }
+}
+impl serde::Serialize for AssistantTokenFrame {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    match self {
+      Self::Token(v) => v.serialize(serializer),
+      Self::Usage(v) => v.serialize(serializer),
+    }
+  }
+}
+impl AssistantTokenFrame {
+  #[must_use]
+  pub fn token(data: String) -> Self {
+    Self::Token(TokenFrame {
+      data,
+      ..Default::default()
+    })
+  }
+  #[must_use]
+  pub fn usage(data: Usage) -> Self {
+    Self::Usage(UsageFrame {
+      data,
+      ..Default::default()
+    })
+  }
+}
+impl TryFrom<AssistantTokenFrame> for axum::response::sse::Event {
+  type Error = axum::Error;
+  fn try_from(frame: AssistantTokenFrame) -> core::result::Result<Self, Self::Error> {
+    match frame {
+      AssistantTokenFrame::Token(member) => Self::try_from(member),
+      AssistantTokenFrame::Usage(member) => Self::try_from(member),
+    }
+  }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[serde(default)]
+pub struct TokenFrame {
+  #[default("token".to_string())]
+  #[builder(default = "token".to_string())]
+  pub event: String,
+  /// The text of one token, sent as is
+  pub data: String,
+}
+impl TryFrom<TokenFrame> for axum::response::sse::Event {
+  type Error = axum::Error;
+  fn try_from(frame: TokenFrame) -> core::result::Result<Self, Self::Error> {
+    let mut event = Self::default();
+    if frame.event.contains(['\r', '\n']) {
+      return Err(axum::Error::new(
+        "a Server-Sent Events `event` can't contain a line break",
+      ));
+    }
+    event = event.event(frame.event);
+    event = event.data(frame.data);
+    Ok(event)
+  }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+#[serde(default)]
+pub struct UsageFrame {
+  #[default("usage".to_string())]
+  #[builder(default = "usage".to_string())]
+  pub event: String,
+  pub data: Usage,
+  pub id: Option<String>,
+}
+impl TryFrom<UsageFrame> for axum::response::sse::Event {
+  type Error = axum::Error;
+  fn try_from(frame: UsageFrame) -> core::result::Result<Self, Self::Error> {
+    let mut event = Self::default();
+    if frame.event.contains(['\r', '\n']) {
+      return Err(axum::Error::new(
+        "a Server-Sent Events `event` can't contain a line break",
+      ));
+    }
+    event = event.event(frame.event);
+    event = event.json_data(frame.data)?;
+    if let Some(value) = frame.id {
+      if value.contains(['\0', '\r', '\n']) {
+        return Err(axum::Error::new(
+          "a Server-Sent Events `id` can't contain a line break or NUL",
+        ));
+      }
+      event = event.id(value);
+    }
+    Ok(event)
+  }
 }
 /// Flexible metadata that can be string or object
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
@@ -3149,6 +3392,47 @@ impl SendAssistantMessageRequest {
     Ok(request)
   }
 }
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+pub struct StreamAssistantMessageRequestQuery {
+  /// Stream the reply as Server-Sent Events instead of one document
+  pub stream: Option<bool>,
+}
+/// Send content blocks and receive the reply as one document or as a stream
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct StreamAssistantMessageRequest {
+  pub query: StreamAssistantMessageRequestQuery,
+  pub credentials: ApiKeyAuthCredentials2,
+  pub body: ContentRequest,
+}
+#[bon::bon]
+impl StreamAssistantMessageRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(stream: Option<bool>, credentials: ApiKeyAuthCredentials2, body: ContentRequest) -> anyhow::Result<Self> {
+    let request = Self {
+      query: StreamAssistantMessageRequestQuery { stream },
+      credentials,
+      body,
+    };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Stream reply tokens, then the usage they cost
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct StreamAssistantTokensRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl StreamAssistantTokensRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
+    request.validate()?;
+    Ok(request)
+  }
+}
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
 pub struct ListAssistantEventsRequestCookie {
   /// The conversation whose events to replay
@@ -3459,6 +3743,21 @@ impl SubmitTalliesRequest {
   #[builder]
   pub fn new(credentials: ApiKeyAuthCredentials2, body: Tallies) -> anyhow::Result<Self> {
     let request = Self { credentials, body };
+    request.validate()?;
+    Ok(request)
+  }
+}
+/// Describe a pet as JSON, or stream it as server-sent events
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetMediaBothRequest {
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl GetMediaBothRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(credentials: ApiKeyAuthCredentials2) -> anyhow::Result<Self> {
+    let request = Self { credentials };
     request.validate()?;
     Ok(request)
   }
@@ -3925,6 +4224,51 @@ impl ContentRequestImageSize {
     Self::Preset(ImageSizePreset::Auto2k)
   }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum AssistantEventFrameEvent {
+  #[serde(rename = "message_start")]
+  #[default]
+  MessageStart,
+  #[serde(rename = "content_block_start")]
+  ContentBlockStart,
+  #[serde(rename = "content_block_delta")]
+  ContentBlockDelta,
+  #[serde(rename = "content_block_stop")]
+  ContentBlockStop,
+  #[serde(rename = "message_stop")]
+  MessageStop,
+  #[serde(rename = "ping")]
+  Ping,
+}
+impl core::fmt::Display for AssistantEventFrameEvent {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::MessageStart => write!(f, "message_start"),
+      Self::ContentBlockStart => write!(f, "content_block_start"),
+      Self::ContentBlockDelta => write!(f, "content_block_delta"),
+      Self::ContentBlockStop => write!(f, "content_block_stop"),
+      Self::MessageStop => write!(f, "message_stop"),
+      Self::Ping => write!(f, "ping"),
+    }
+  }
+}
+impl core::str::FromStr for AssistantEventFrameEvent {
+  type Err = String;
+  fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    match s {
+      "message_start" => Ok(Self::MessageStart),
+      "content_block_start" => Ok(Self::ContentBlockStart),
+      "content_block_delta" => Ok(Self::ContentBlockDelta),
+      "content_block_stop" => Ok(Self::ContentBlockStop),
+      "message_stop" => Ok(Self::MessageStop),
+      "ping" => Ok(Self::Ping),
+      _ => Err(format!(
+        "unknown variant '{}', expected one of: {}",
+        s, "message_start, content_block_start, content_block_delta, content_block_stop, message_stop, ping"
+      )),
+    }
+  }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub enum UsageCounterUsageCounterKind {
   A(UsageCounterA),
@@ -4233,6 +4577,16 @@ pub struct WithHeaders<Headers, Body> {
 pub enum ErrorOrProblem {
   Error(Error),
   Problem(Problem),
+}
+/// Response bodies that share one status class in an operation.
+pub enum ContentResponseOrAssistantEventFrameStream {
+  ContentResponse(ContentResponse),
+  AssistantEventFrameStream(futures::stream::BoxStream<'static, AssistantEventFrame>),
+}
+/// Response bodies that share one status class in an operation.
+pub enum PetOrPetStream {
+  Pet(Pet),
+  PetStream(futures::stream::BoxStream<'static, Pet>),
 }
 /// Response headers that share one status class in an operation.
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]

@@ -457,7 +457,9 @@ impl ResponseParsingFragment {
       ResponseKind::Enum { response, .. } => quote! { #response },
       ResponseKind::Typed { resp_type, category } => match category {
         ContentCategory::Text => quote! { String },
-        ContentCategory::EventStream => quote! { oas3_gen_support::EventStream<#resp_type> },
+        ContentCategory::EventStream => {
+          quote! { oas3_gen_support::EventStream<oas3_gen_support::SseFrame<#resp_type>> }
+        }
         ContentCategory::Json => quote! { #resp_type },
         _ => quote! { reqwest::Response },
       },
@@ -474,7 +476,7 @@ impl ResponseParsingFragment {
       ResponseKind::Typed { resp_type, category } => match category {
         ContentCategory::Json => quote! { Ok(response.json::<#resp_type>().await?) },
         ContentCategory::Text => quote! { Ok(response.text().await?) },
-        ContentCategory::EventStream => quote! { Ok(oas3_gen_support::EventStream::from_response(response)) },
+        ContentCategory::EventStream => quote! { Ok(oas3_gen_support::EventStream::json(response, None)) },
         _ => quote! { Ok(response) },
       },
       ResponseKind::Raw => quote! { Ok(response) },

@@ -1077,21 +1077,27 @@ fn test_payload_union_generation() {
   let cases = [
     (
       SerdeMode::None,
-      false,
+      None,
       vec!["# [derive (Debug , Clone)]", "pub enum BasicErrorOrValidationError"],
       vec!["serde"],
     ),
     (
       SerdeMode::SerializeOnly,
-      false,
+      None,
       vec!["Serialize", "# [serde (untagged)]"],
       vec!["Deserialize"],
     ),
     (
       SerdeMode::SerializeOnly,
-      true,
+      Some(GenerationTarget::Client),
       vec!["# [derive (Debug)]"],
       vec!["Clone", "serde"],
+    ),
+    (
+      SerdeMode::SerializeOnly,
+      Some(GenerationTarget::Server),
+      vec![],
+      vec!["derive", "serde"],
     ),
   ];
 
@@ -1100,7 +1106,7 @@ fn test_payload_union_generation() {
       .name(EnumToken::new("BasicErrorOrValidationError"))
       .variants(variants.clone())
       .serde_mode(serde_mode)
-      .streaming(streaming)
+      .maybe_streaming(streaming)
       .build();
     let code = ResponseUnionFragment::new(Visibility::Public, &def)
       .into_token_stream()
@@ -1108,18 +1114,18 @@ fn test_payload_union_generation() {
 
     assert!(
       code.contains("BasicError (BasicError) , ValidationError (ValidationError)"),
-      "members should be tuple variants for {serde_mode:?}/{streaming}: {code}"
+      "members should be tuple variants for {serde_mode:?}/{streaming:?}: {code}"
     );
     for expected in present {
       assert!(
         code.contains(expected),
-        "expected `{expected}` for {serde_mode:?}/{streaming}: {code}"
+        "expected `{expected}` for {serde_mode:?}/{streaming:?}: {code}"
       );
     }
     for unexpected in absent {
       assert!(
         !code.contains(unexpected),
-        "did not expect `{unexpected}` for {serde_mode:?}/{streaming}: {code}"
+        "did not expect `{unexpected}` for {serde_mode:?}/{streaming:?}: {code}"
       );
     }
   }

@@ -17,7 +17,7 @@ use petstore_client::{self as client, ApiResponse, PetstoreClient, WithHeaders};
 use rstest::rstest;
 use support::{API_KEY, API_VERSION, COMPATIBILITY_DATE, Petstore, QUERY_KEY, SESSION, STAFF_TOKEN, now, petstore};
 
-const OPERATIONS: [&str; 49] = [
+const OPERATIONS: [&str; 52] = [
   "AdoptPet",
   "AdoptPetStatusChanged",
   "CreateApiKey",
@@ -30,6 +30,7 @@ const OPERATIONS: [&str; 49] = [
   "GetChatPreference",
   "GetHealth",
   "GetInventory",
+  "GetMediaBoth",
   "GetOrderById",
   "GetPetCard",
   "GetPetLineage",
@@ -54,6 +55,8 @@ const OPERATIONS: [&str; 49] = [
   "SetPetNotes",
   "ShowPetById",
   "StreamAdoptionFeed",
+  "StreamAssistantMessage",
+  "StreamAssistantTokens",
   "StreamPetVitals",
   "SubmitCollarTelemetry",
   "SubmitIntakeForm",
@@ -363,6 +366,27 @@ async fn every_operation_answers_with_its_declared_success(#[future(awt)] petsto
     panic!("sendAssistantMessage answers 200");
   };
   assert!(matches!(*reply.content, client::ContentBlock::Text(_)));
+  let ApiResponse::Ok(client::ContentResponseOrAssistantEventFrameStream::ContentResponse(document)) = pets
+    .stream_assistant_message(
+      client::StreamAssistantMessageRequest::builder()
+        .body(client::ContentRequest {
+          blocks: vec![client::ContentBlock::text("Summarize Biscuit's visit".to_string())],
+          ..Default::default()
+        })
+        .build()?,
+    )
+    .await?
+  else {
+    panic!("streamAssistantMessage answers 200 with one document when not asked to stream");
+  };
+  assert!(matches!(*document.content, client::ContentBlock::Text(_)));
+  let ApiResponse::Ok(tokens) = pets
+    .stream_assistant_tokens(client::StreamAssistantTokensRequest {})
+    .await?
+  else {
+    panic!("streamAssistantTokens answers 200");
+  };
+  assert_eq!(tokens.collect::<Vec<_>>().await.len(), 0);
   let ApiResponse::Ok(events) = pets
     .list_assistant_events(
       client::ListAssistantEventsRequest::builder()
@@ -517,6 +541,13 @@ async fn every_operation_answers_with_its_declared_success(#[future(awt)] petsto
     panic!("submitTallies answers 200");
   };
   assert_eq!(echoed, tallies);
+
+  let ApiResponse::Ok(client::PetOrPetStream::Pet(streamed)) =
+    pets.get_media_both(client::GetMediaBothRequest {}).await?
+  else {
+    panic!("getMediaBoth answers 200 with a pet");
+  };
+  assert_eq!(streamed.name, "Biscuit");
 
   let new_key = client::NewApiKey {
     name: "kiosk".to_string(),

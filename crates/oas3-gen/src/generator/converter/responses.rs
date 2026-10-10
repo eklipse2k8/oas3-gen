@@ -18,11 +18,15 @@ use crate::{
     naming::{
       constants::{DEFAULT_MEDIA_TYPE, RESPONSE_HEADER_PARENT_SUFFIX},
       identifiers::to_rust_type_name,
-      responses as naming_responses,
+      responses::{self as naming_responses, client_stream_type, server_stream_type},
     },
   },
   utils::{SchemaExt as _, SchemaInspect, parse_schema_ref_path, schema_ext::SchemaExtIters},
 };
+
+/// The media type extensions, without their `x-` prefix, naming the data that ends an
+/// event stream, in order of precedence.
+const SSE_SENTINEL_EXTENSIONS: [&str; 2] = ["sse-sentinel", "speakeasy-sse-sentinel"];
 
 /// Extracted metadata about operation responses for code generation.
 #[derive(Debug, Clone, Default)]
@@ -193,7 +197,14 @@ impl ResponseConverter {
       .iter()
       .map(|(content_type, media_type)| {
         let schema_type = self.resolve_media_schema(content_type, media_type, path, status_code)?;
-        Ok(ResponseMediaType::with_schema(content_type, schema_type))
+        let mut response_media_type = ResponseMediaType::with_schema(content_type, schema_type);
+        if let Some(stream) = &mut response_media_type.stream {
+          stream.sentinel = SSE_SENTINEL_EXTENSIONS
+            .iter()
+            .find_map(|extension| media_type.extensions.get(*extension)?.as_str())
+            .map(str::to_string);
+        }
+        Ok(response_media_type)
       })
       .collect()
   }
@@ -268,12 +279,12 @@ impl ResponseConverter {
     Ok(Some(TypeRef::new(output.result)))
   }
 
-  /// The generic type a `text/event-stream` body's items are wrapped in: the client
-  /// reads a stream from the response, the server returns one for the handler to send.
-  fn event_stream_type(&self) -> &'static str {
+  /// The type a `text/event-stream` body of items is: the client reads a stream from the
+  /// response, the server returns one for the handler to send.
+  fn event_stream_type(&self) -> fn(&str) -> String {
     match self.context.config().target {
-      GenerationTarget::Client => "oas3_gen_support::EventStream",
-      GenerationTarget::Server => "oas3_gen_support::ServerEvents",
+      GenerationTarget::Client => client_stream_type,
+      GenerationTarget::Server => server_stream_type,
     }
   }
 
@@ -290,7 +301,7 @@ impl ResponseConverter {
     status_code: StatusCodeToken,
     media_types: &[ResponseMediaType],
     headers: Vec<FieldDef>,
-    event_stream_type: &str,
+    event_stream_type: fn(&str) -> String,
   ) -> Vec<ResponseVariant> {
     let grouped = Self::group_media_types_by_schema(media_types, event_stream_type);
 
@@ -322,14 +333,14 @@ impl ResponseConverter {
   /// Groups media types by their schema type for variant splitting.
   fn group_media_types_by_schema(
     media_types: &[ResponseMediaType],
-    event_stream_type: &str,
+    event_stream_type: fn(&str) -> String,
   ) -> Vec<(String, Vec<ResponseMediaType>)> {
     media_types
       .iter()
       .filter_map(|media_type| {
         let schema = media_type.schema_type.as_ref()?;
         let key = match media_type.category {
-          ContentCategory::EventStream => format!("{event_stream_type}<{}>", schema.to_rust_type()),
+          ContentCategory::EventStream => event_stream_type(&schema.to_rust_type()),
           _ => schema.to_rust_type(),
         };
         Some((key, media_type.clone()))
