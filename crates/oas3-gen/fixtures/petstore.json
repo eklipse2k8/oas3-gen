@@ -2449,6 +2449,26 @@
           { "type": "array", "items": { "$ref": "#/components/schemas/TextBlock" } }
         ]
       },
+      "Node": {
+        "description": "A branch that refers back to a node, or a leaf",
+        "oneOf": [{ "$ref": "#/components/schemas/Branch" }, { "const": "leaf" }]
+      },
+      "Branch": {
+        "type": "object",
+        "required": ["child"],
+        "properties": {
+          "child": { "$ref": "#/components/schemas/Node" },
+          "label": { "type": "string" }
+        }
+      },
+      "Wrapper": {
+        "type": "object",
+        "required": ["node", "kind"],
+        "properties": {
+          "node": { "$ref": "#/components/schemas/Node" },
+          "kind": { "const": "w" }
+        }
+      },
       "RecipeList": {
         "additionalProperties": true,
         "properties": {

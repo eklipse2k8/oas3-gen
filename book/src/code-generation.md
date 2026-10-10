@@ -1233,8 +1233,14 @@ that value, checking variants in the same order deserialization does. For
 example, the `image_size` property of `ContentRequest` defaults to `auto_2K`,
 so its union's default returns `Self::Preset(ImageSizePreset::Auto2k)`. A
 string default produces a value such as `Self::String("cheesecake".to_string())`.
-Without a usable default, a union that derives `Default` uses its first
-variant, before any array variant moves ahead of it.
+Without a usable default, a union that derives `Default` uses the first variant
+that can't lead back to the union, so the derived `Default` never recurses. Unit
+and const variants qualify, as do variants wrapping an array, a nullable type, or
+a payload that doesn't refer back to the union. The generator picks it in spec
+order, or in sorted order under `--enum-layout sorted`, and moving arrays or plain
+strings ahead for deserialization doesn't change it. A union with a `null` branch
+records the same variant in case a struct's derived `Default` later needs the
+union to derive one.
 
 A property can also set a `default` next to its `$ref`, as OpenAPI 3.1 allows.
 When the reference names an enum, a `const`, or a union, the field's default

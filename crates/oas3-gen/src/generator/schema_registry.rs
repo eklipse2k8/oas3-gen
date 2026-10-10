@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use indexmap::{IndexMap, IndexSet};
 use oas3::{
   Spec,
@@ -298,6 +300,24 @@ impl SchemaRegistry {
   /// Checks if a schema participates in a dependency cycle.
   pub(crate) fn is_cyclic(&self, schema_name: &str) -> bool {
     self.cyclic_schemas.contains(schema_name)
+  }
+
+  /// Whether `schema_name` depends on `target` through a chain of references, counting
+  /// `target` itself.
+  pub(crate) fn reaches(&self, schema_name: &str, target: &str) -> bool {
+    let mut pending = vec![schema_name];
+    let mut visited = HashSet::new();
+    while let Some(name) = pending.pop() {
+      if name == target {
+        return true;
+      }
+      if visited.insert(name)
+        && let Some(dependencies) = self.dependencies.get(name)
+      {
+        pending.extend(dependencies.iter().map(String::as_str));
+      }
+    }
+    false
   }
 
   /// Creates a type reference for a named schema, applying `Box` wrapping if the

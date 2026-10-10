@@ -1002,8 +1002,8 @@ pub struct ToolResultBlock {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
 pub enum ToolResultContent {
-  #[default]
   Array(Vec<ToolResultContentBlock>),
+  #[default]
   String(String),
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -1879,8 +1879,8 @@ impl TryFrom<UsageFrame> for axum::response::sse::Event {
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
 pub enum MessageMetadata {
-  #[default]
   Object(indexmap::IndexMap<String, serde_json::Value>),
+  #[default]
   String(String),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
@@ -1971,6 +1971,40 @@ impl ArrayOrSingle {
       ..Default::default()
     })
   }
+}
+/// A branch that refers back to a node, or a leaf
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Node {
+  #[serde(rename = "leaf")]
+  #[default]
+  Leaf,
+  #[serde(untagged)]
+  Branch(Box<Branch>),
+}
+impl Node {
+  #[must_use]
+  pub fn branch(child: Box<Node>) -> Self {
+    Self::Branch(Box::new(Branch {
+      child,
+      ..Default::default()
+    }))
+  }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+pub struct Branch {
+  /// A branch that refers back to a node, or a leaf
+  pub child: Box<Node>,
+  pub label: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde(default)]
+pub struct Wrapper {
+  /// A branch that refers back to a node, or a leaf
+  pub node: Box<Node>,
+  #[default("w".to_string())]
+  #[builder(default = "w".to_string())]
+  pub kind: String,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -2171,8 +2205,8 @@ impl core::str::FromStr for ChatModel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
 pub enum ChatModelChoice {
-  #[default]
   ChatModel(ChatModel),
+  #[default]
   String(String),
 }
 impl ChatModelChoice {

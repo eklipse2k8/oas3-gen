@@ -565,6 +565,24 @@ fn null_required_fields_are_rejected_on_the_server() {
   );
 }
 
+#[test]
+fn recursive_unions_default_to_a_variant_that_does_not_recurse() {
+  assert_eq!(client::Node::default(), client::Node::Leaf, "client Node default");
+  assert_eq!(server::Node::default(), server::Node::Leaf, "server Node default");
+
+  let wire = json!({ "node": "leaf", "kind": "w" });
+  assert_eq!(
+    encode(&decode::<client::Wrapper>(&wire)),
+    wire,
+    "client Wrapper round trip"
+  );
+  assert_eq!(
+    encode(&decode::<server::Wrapper>(&wire)),
+    wire,
+    "server Wrapper round trip"
+  );
+}
+
 #[rstest]
 #[case::uuid_and_double(
   json!({ "id": "8f3c2a4e-1b2c-4d5e-8f90-123456789abc", "name": "Rex", "species": "dog", "weightKg": 12.345 }),

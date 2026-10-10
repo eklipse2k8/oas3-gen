@@ -164,7 +164,7 @@ fn test_union_default_mode() {
     (
       json!({"oneOf": [{"type": "string"}, {"type": "integer"}]}),
       "derive",
-      None,
+      Some("String"),
     ),
     (
       json!({"oneOf": [{"type": "string"}, {"type": "integer"}], "default": "cheesecake"}),
@@ -184,7 +184,7 @@ fn test_union_default_mode() {
     (
       json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]}),
       "none",
-      None,
+      Some("String"),
     ),
     (
       json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}], "default": "cheesecake"}),
@@ -194,17 +194,17 @@ fn test_union_default_mode() {
     (
       json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}], "default": null}),
       "none",
-      None,
+      Some("String"),
     ),
     (
       json!({"oneOf": [{"type": "string"}, {"type": "integer"}], "default": true}),
       "derive",
-      None,
+      Some("String"),
     ),
     (
       json!({"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}], "default": true}),
       "none",
-      None,
+      Some("String"),
     ),
   ];
 
@@ -385,7 +385,13 @@ fn test_union_tries_arrays_first_and_plain_string_variants_last() {
       json!({"oneOf": [{"type": "string"}, {"$ref": "#/components/schemas/Chat"}]}),
       default_config(),
       vec!["Chat", "String"],
-      None,
+      Some("String"),
+    ),
+    (
+      json!({"oneOf": [{"$ref": "#/components/schemas/Chat"}, {"const": "none"}]}),
+      default_config(),
+      vec!["None", "Chat"],
+      Some("Chat"),
     ),
     (
       json!({"oneOf": [{"type": "string"}, {"$ref": "#/components/schemas/Chat"}], "default": "chat-1.0"}),
@@ -417,6 +423,12 @@ fn test_union_tries_arrays_first_and_plain_string_variants_last() {
       vec!["Array", "Chat"],
       None,
     ),
+    (
+      json!({"oneOf": [{"$ref": "#/components/schemas/Chat"}, {"type": "array", "items": {"type": "string"}}, {"type": "null"}]}),
+      default_config(),
+      vec!["Array", "Chat"],
+      Some("Chat"),
+    ),
   ];
 
   for (union, config, expected_order, expected_default) in cases {
@@ -438,6 +450,82 @@ fn test_union_tries_arrays_first_and_plain_string_variants_last() {
     let flagged = enum_def.variants.iter().find(|v| v.default).map(|v| v.name.as_str());
     assert_eq!(flagged, expected_default, "default variant for {union}");
   }
+}
+
+#[test]
+fn test_union_default_never_recurses_back_into_the_union() {
+  let cases = [("Node", "Leaf"), ("Choice", "Branch"), ("CfgFirst", "Cfg")];
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "Node",
+      json!({"oneOf": [{"$ref": "#/components/schemas/Branch"}, {"const": "leaf"}]}),
+    ),
+    (
+      "Branch",
+      json!({"type": "object", "required": ["child"], "properties": {"child": {"$ref": "#/components/schemas/Node"}}}),
+    ),
+    (
+      "Cfg",
+      json!({"type": "object", "properties": {"x": {"type": "string"}}}),
+    ),
+    (
+      "Choice",
+      json!({"oneOf": [{"$ref": "#/components/schemas/Branch"}, {"$ref": "#/components/schemas/Cfg"}]}),
+    ),
+    (
+      "CfgFirst",
+      json!({"oneOf": [{"$ref": "#/components/schemas/Cfg"}, {"$ref": "#/components/schemas/Branch"}]}),
+    ),
+  ]));
+
+  for (union, expected) in cases {
+    let context = create_test_context(graph.clone(), default_config());
+    let types = SchemaConverter::new(&context)
+      .convert_schema(union, graph.get(union).unwrap())
+      .unwrap_or_else(|e| panic!("conversion failed for {union}: {e}"));
+    let Some(RustType::Enum(enum_def)) = types.first() else {
+      panic!("expected enum for {union}")
+    };
+    let effective = enum_def.variants[enum_def.derived_default_index()].name.as_str();
+    assert_eq!(effective, expected, "derived default of {union}");
+  }
+}
+
+#[test]
+fn test_inline_union_default_avoids_a_cycle_through_its_parent() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "Node",
+      json!({"oneOf": [{"$ref": "#/components/schemas/Branch"}, {"const": "leaf"}]}),
+    ),
+    (
+      "Branch",
+      json!({"type": "object", "required": ["child"], "properties": {"child": {"oneOf": [
+        {"$ref": "#/components/schemas/Node"},
+        {"type": "string"}
+      ]}}}),
+    ),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let result = SchemaConverter::new(&context).convert_schema("Branch", graph.get("Branch").unwrap())?;
+  let cache = context.cache.borrow();
+  let inline_union = result
+    .iter()
+    .chain(cache.types.types.iter())
+    .find_map(|rust_type| match rust_type {
+      RustType::Enum(enum_def) => Some(enum_def),
+      _ => None,
+    })
+    .expect("the inline child union is generated");
+
+  let effective = inline_union.variants[inline_union.derived_default_index()]
+    .name
+    .as_str();
+  assert_eq!(
+    effective, "String",
+    "the inline child union must not default back to Node"
+  );
+  Ok(())
 }
 
 #[test]

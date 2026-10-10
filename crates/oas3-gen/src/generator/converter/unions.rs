@@ -185,7 +185,9 @@ impl UnionConverter {
   /// and generates optional helper constructors.
   ///
   /// Attempts to upgrade to a discriminated enum if the schema contains a
-  /// `discriminator` mapping; otherwise produces an untagged enum.
+  /// `discriminator` mapping; otherwise produces an untagged enum, whose derived
+  /// `Default` is pinned to the first variant in layout order that can't recurse back
+  /// into the union, even while the enum has no `Default` to derive.
   fn collect_union_variants(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
     let variants_src = if schema.one_of.is_empty() {
       &schema.any_of
@@ -195,16 +197,23 @@ impl UnionConverter {
 
     let (variant_specs, has_null_variant) = self.collect_union_variant_specs(variants_src)?;
 
-    let (mut variants, inline_types) = itertools::process_results(
+    let (mut variants, inline_types, derivable) = itertools::process_results(
       variant_specs.into_iter().map(|spec| {
         let output = self.variant_builder.build_variant(name, &spec)?;
-        anyhow::Ok((output.result, output.inline_types))
+        let derivable = self.can_derive_default(name, &spec, &output.result);
+        anyhow::Ok((output.result, output.inline_types, derivable))
       }),
-      |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>(),
+      |iter| iter.multiunzip::<(Vec<_>, Vec<_>, Vec<_>)>(),
     )?;
     let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
 
     variants = strip_common_affixes(variants);
+    let derivable_names = variants
+      .iter()
+      .zip(derivable)
+      .filter(|(_, derivable)| *derivable)
+      .map(|(variant, _)| variant.name.clone())
+      .collect::<BTreeSet<_>>();
 
     if self.context.config().sort_enum_variants() {
       variants = variants
@@ -212,10 +221,14 @@ impl UnionConverter {
         .sorted_by(|a, b| a.name.as_str().cmp(b.name.as_str()))
         .collect();
     }
+    let pinned_default = variants
+      .iter()
+      .find(|variant| derivable_names.contains(&variant.name))
+      .map(|variant| variant.name.clone());
     variants = plain_strings_last(variants);
 
     let default_mode = self.resolve_default_mode(schema, &mut variants, &inline_types, has_null_variant);
-    variants = arrays_first(variants, &default_mode);
+    variants = arrays_first(variants);
 
     let methods = if self.context.config().no_helpers() {
       vec![]
@@ -223,7 +236,7 @@ impl UnionConverter {
       self.method_generator.build_constructors(&variants, &inline_types, name)
     };
 
-    let main_enum = self
+    let mut main_enum = self
       .discriminator_converter
       .try_upgrade_to_discriminated(
         name,
@@ -241,7 +254,33 @@ impl UnionConverter {
           .call()
       });
 
+    if let RustType::Enum(enum_def) = &mut main_enum
+      && let Some(pinned) = pinned_default
+      && !enum_def.variants.iter().any(|variant| variant.default)
+      && let Some(position) = enum_def.variants.iter().position(|variant| variant.name == pinned)
+      && position > 0
+    {
+      enum_def.variants[position].default = true;
+    }
     Ok(ConversionOutput::with_inline_types(main_enum, inline_types))
+  }
+
+  /// Whether a derived `Default` may construct `variant` without recursing back into the
+  /// union `union_name`. An inline union has no node in the graph, so any cyclic
+  /// dependency counts as a way back.
+  fn can_derive_default(&self, union_name: &str, spec: &UnionVariantSpec, variant: &VariantDef) -> bool {
+    if variant
+      .single_wrapped_type()
+      .is_none_or(|payload| payload.is_array || payload.nullable)
+    {
+      return true;
+    }
+    let registry = self.context.graph();
+    let inline_union = !registry.contains(union_name);
+    !registry
+      .collect(&spec.resolved_schema, self.context.cache().union_fingerprints())
+      .iter()
+      .any(|dependency| registry.reaches(dependency, union_name) || (inline_union && registry.is_cyclic(dependency)))
   }
 
   /// Gives a union that declares no `discriminator` the one its branches imply.
@@ -417,25 +456,13 @@ fn plain_strings_last(variants: Vec<VariantDef>) -> Vec<VariantDef> {
     .collect()
 }
 
-/// Moves variants wrapping an array ahead of the others, keeping their relative order and
-/// the variant `Default` derives.
+/// Moves variants wrapping an array ahead of the others, keeping their relative order.
 ///
 /// A struct with `#[serde(default)]` deserializes from an empty JSON array, so trying it
 /// first would shadow `Array(Vec<T>)`. An array variant only accepts a JSON array, which no
 /// object variant validly matches.
-fn arrays_first(mut variants: Vec<VariantDef>, default_mode: &EnumDefault) -> Vec<VariantDef> {
+fn arrays_first(variants: Vec<VariantDef>) -> Vec<VariantDef> {
   let wraps_array = |variant: &VariantDef| variant.single_wrapped_type().is_some_and(|t| t.is_array);
-  if variants.iter().is_sorted_by_key(|variant| !wraps_array(variant)) {
-    return variants;
-  }
-
-  if matches!(default_mode, EnumDefault::Derive)
-    && !variants.iter().any(|variant| variant.default)
-    && let Some(first) = variants.first_mut()
-  {
-    first.default = true;
-  }
-
   variants
     .into_iter()
     .sorted_by_key(|variant| !wraps_array(variant))
