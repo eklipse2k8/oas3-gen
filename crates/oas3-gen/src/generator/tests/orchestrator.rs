@@ -1329,7 +1329,7 @@ fn unions_of_const_tagged_objects_route_by_the_tag() {
   }
   assert_contains(
     &types,
-    "pub const DISCRIMINATOR_FIELD: &'static str = \"kind\";",
+    "value.get(\"kind\")",
     "the inferred tag is the shared constant property",
   );
 }

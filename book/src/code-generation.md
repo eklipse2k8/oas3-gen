@@ -1510,24 +1510,20 @@ pub enum ContentBlock {
     ToolResult(ToolResultBlock),
 }
 
-impl ContentBlock {
-    pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
-
 impl<'de> serde::Deserialize<'de> for ContentBlock {
     fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = serde_json::Value::deserialize(deserializer)?;
-        match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+        match value.get("type").and_then(|v| v.as_str()) {
             Some("text") => {
                 serde_json::from_value(value)
                     .map(Self::Text)
                     .map_err(serde::de::Error::custom)
             }
             /* ... */
-            None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+            None => Err(serde::de::Error::missing_field("type")),
             Some(other) => { /* ... */ }
         }
     }
@@ -1587,7 +1583,7 @@ impl<'de> serde::Deserialize<'de> for UsageCounterUsageCounterKind {
         D: serde::Deserializer<'de>,
     {
         let value = serde_json::Value::deserialize(deserializer)?;
-        match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+        match value.get("type").and_then(|v| v.as_str()) {
             Some("counter_a") => {
                 serde_json::from_value(value)
                     .map(Self::A)

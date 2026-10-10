@@ -865,10 +865,9 @@ fn test_discriminated_enum() {
     ("Dog (DogData)", "should have dog variant"),
     ("Cat (CatData)", "should have cat variant"),
     (
-      "pub const DISCRIMINATOR_FIELD",
-      "should have discriminator field constant",
+      "value . get (\"petType\")",
+      "should read the discriminator field by name",
     ),
-    ("\"petType\"", "should have discriminator field value"),
     ("impl Default for Pet", "should have Default impl"),
     ("impl serde :: Serialize for Pet", "should have Serialize impl"),
     (
@@ -877,10 +876,7 @@ fn test_discriminated_enum() {
     ),
     ("Some (\"dog\")", "should have dog discriminator match"),
     ("Some (\"cat\")", "should have cat discriminator match"),
-    (
-      "missing_field (Self :: DISCRIMINATOR_FIELD)",
-      "should error on missing discriminator",
-    ),
+    ("missing_field (\"petType\")", "should error on missing discriminator"),
   ];
   for (expected, msg) in assertions_without {
     assert!(code.contains(expected), "{msg}:\n{code}");

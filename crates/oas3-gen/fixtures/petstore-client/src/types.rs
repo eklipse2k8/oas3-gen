@@ -255,9 +255,6 @@ pub enum Health {
   Allergies(Allergies),
   Diet(Diet),
 }
-impl Health {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for Health {
   fn default() -> Self {
     Self::Allergies(<Allergies>::default())
@@ -280,14 +277,14 @@ impl<'de> serde::Deserialize<'de> for Health {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("allergies") => serde_json::from_value(value)
         .map(Self::Allergies)
         .map_err(serde::de::Error::custom),
       Some("diet") => serde_json::from_value(value)
         .map(Self::Diet)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -850,9 +847,6 @@ pub enum ContentBlock {
   ToolUse(ToolUseBlock),
   ToolResult(ToolResultBlock),
 }
-impl ContentBlock {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for ContentBlock {
   fn default() -> Self {
     Self::Text(<TextBlock>::default())
@@ -878,7 +872,7 @@ impl<'de> serde::Deserialize<'de> for ContentBlock {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("text") => serde_json::from_value(value)
         .map(Self::Text)
         .map_err(serde::de::Error::custom),
@@ -894,7 +888,7 @@ impl<'de> serde::Deserialize<'de> for ContentBlock {
       Some("tool_result") => serde_json::from_value(value)
         .map(Self::ToolResult)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -1030,9 +1024,6 @@ pub enum ToolResultContentBlock {
   Text(TextBlock),
   Image(ImageBlock),
 }
-impl ToolResultContentBlock {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for ToolResultContentBlock {
   fn default() -> Self {
     Self::Text(<TextBlock>::default())
@@ -1055,14 +1046,14 @@ impl<'de> serde::Deserialize<'de> for ToolResultContentBlock {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("text") => serde_json::from_value(value)
         .map(Self::Text)
         .map_err(serde::de::Error::custom),
       Some("image") => serde_json::from_value(value)
         .map(Self::Image)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -1092,9 +1083,6 @@ pub enum ImageSource {
   Base64(Base64ImageSource),
   Url(UrlImageSource),
 }
-impl ImageSource {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for ImageSource {
   fn default() -> Self {
     Self::Base64(<Base64ImageSource>::default())
@@ -1117,14 +1105,14 @@ impl<'de> serde::Deserialize<'de> for ImageSource {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("base64") => serde_json::from_value(value)
         .map(Self::Base64)
         .map_err(serde::de::Error::custom),
       Some("url") => serde_json::from_value(value)
         .map(Self::Url)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -1219,9 +1207,6 @@ pub enum Annotation {
   Citation(CitationAnnotation),
   Link(LinkAnnotation),
 }
-impl Annotation {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for Annotation {
   fn default() -> Self {
     Self::Citation(<CitationAnnotation>::default())
@@ -1244,14 +1229,14 @@ impl<'de> serde::Deserialize<'de> for Annotation {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("citation") => serde_json::from_value(value)
         .map(Self::Citation)
         .map_err(serde::de::Error::custom),
       Some("link") => serde_json::from_value(value)
         .map(Self::Link)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -1314,9 +1299,6 @@ pub enum AssistantEvent {
   MessageStop(MessageStopEvent),
   Ping(PingEvent),
 }
-impl AssistantEvent {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for AssistantEvent {
   fn default() -> Self {
     Self::MessageStart(<MessageStartEvent>::default())
@@ -1343,7 +1325,7 @@ impl<'de> serde::Deserialize<'de> for AssistantEvent {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("message_start") => serde_json::from_value(value)
         .map(Self::MessageStart)
         .map_err(serde::de::Error::custom),
@@ -1362,7 +1344,7 @@ impl<'de> serde::Deserialize<'de> for AssistantEvent {
       Some("ping") => serde_json::from_value(value)
         .map(Self::Ping)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -1481,9 +1463,6 @@ pub enum Delta {
   Text(TextDelta),
   InputJson(InputJsonDelta),
 }
-impl Delta {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for Delta {
   fn default() -> Self {
     Self::Text(<TextDelta>::default())
@@ -1506,14 +1485,14 @@ impl<'de> serde::Deserialize<'de> for Delta {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("text_delta") => serde_json::from_value(value)
         .map(Self::Text)
         .map_err(serde::de::Error::custom),
       Some("input_json_delta") => serde_json::from_value(value)
         .map(Self::InputJson)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -1932,9 +1911,6 @@ pub enum HypotheticalVersion {
   Citation(CitationAnnotation),
   Link(LinkAnnotation),
 }
-impl HypotheticalVersion {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for HypotheticalVersion {
   fn default() -> Self {
     Self::Citation(<CitationAnnotation>::default())
@@ -1957,14 +1933,14 @@ impl<'de> serde::Deserialize<'de> for HypotheticalVersion {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("citation") => serde_json::from_value(value)
         .map(Self::Citation)
         .map_err(serde::de::Error::custom),
       Some("link") => serde_json::from_value(value)
         .map(Self::Link)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"
@@ -4752,9 +4728,6 @@ pub enum UsageCounterUsageCounterKind {
   A(UsageCounterA),
   B(UsageCounterB),
 }
-impl UsageCounterUsageCounterKind {
-  pub const DISCRIMINATOR_FIELD: &'static str = "type";
-}
 impl Default for UsageCounterUsageCounterKind {
   fn default() -> Self {
     Self::A(<UsageCounterA>::default())
@@ -4777,14 +4750,14 @@ impl<'de> serde::Deserialize<'de> for UsageCounterUsageCounterKind {
     D: serde::Deserializer<'de>,
   {
     let value = serde_json::Value::deserialize(deserializer)?;
-    match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+    match value.get("type").and_then(|v| v.as_str()) {
       Some("counter_a") => serde_json::from_value(value)
         .map(Self::A)
         .map_err(serde::de::Error::custom),
       Some("counter_b") => serde_json::from_value(value)
         .map(Self::B)
         .map_err(serde::de::Error::custom),
-      None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+      None => Err(serde::de::Error::missing_field("type")),
       Some(other) => Err(serde::de::Error::custom(format!(
         "Unknown discriminator value '{}' for field '{}'",
         other, "type"

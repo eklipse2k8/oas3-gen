@@ -1178,7 +1178,7 @@ impl ToTokens for DiscriminatedDeserializeImplFragment<'_> {
       }
     } else {
       quote! {
-        None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD))
+        None => Err(serde::de::Error::missing_field(#disc_field))
       }
     };
 
@@ -1189,7 +1189,7 @@ impl ToTokens for DiscriminatedDeserializeImplFragment<'_> {
           D: serde::Deserializer<'de>,
         {
           let value = serde_json::Value::deserialize(deserializer)?;
-          match value.get(Self::DISCRIMINATOR_FIELD).and_then(|v| v.as_str()) {
+          match value.get(#disc_field).and_then(|v| v.as_str()) {
             #(#variant_arms,)*
             #none_handling,
             Some(other) => Err(serde::de::Error::custom(format!(
@@ -1198,39 +1198,6 @@ impl ToTokens for DiscriminatedDeserializeImplFragment<'_> {
             ))),
           }
         }
-      }
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct DiscriminatorConstImplFragment<'a> {
-  name: &'a EnumToken,
-  vis: Visibility,
-  discriminator_field: &'a str,
-}
-
-impl<'a> DiscriminatorConstImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, vis: Visibility, discriminator_field: &'a str) -> Self {
-    Self {
-      name,
-      vis,
-      discriminator_field,
-    }
-  }
-}
-
-impl ToTokens for DiscriminatorConstImplFragment<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = self.name;
-    let vis = &self.vis;
-    let disc_field = self.discriminator_field;
-
-    let ts = quote! {
-      impl #name {
-        #vis const DISCRIMINATOR_FIELD: &'static str = #disc_field;
       }
     };
 
@@ -1273,8 +1240,6 @@ impl ToTokens for DiscriminatedEnumFragment<'_> {
       }
     };
 
-    let discriminator_const = DiscriminatorConstImplFragment::new(name, self.vis, &self.def.discriminator_field);
-
     let default_impl = self
       .def
       .default_variant()
@@ -1296,7 +1261,6 @@ impl ToTokens for DiscriminatedEnumFragment<'_> {
 
     let ts = quote! {
       #enum_def
-      #discriminator_const
       #default_impl
       #serialize_impl
       #deserialize_impl
