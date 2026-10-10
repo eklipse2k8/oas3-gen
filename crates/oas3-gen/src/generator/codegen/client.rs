@@ -10,8 +10,8 @@ use super::{
 };
 use crate::generator::{
   ast::{
-    ApiKeyLocation, ClientRootNode, ContentCategory, CredentialKind, CredentialScheme, Documentation, FieldDef,
-    FieldNameToken, OperationBody, OperationInfo, OperationKind, OperationResponse, OperationSecurity,
+    ApiKeyLocation, ClientRootNode, ContentCategory, CredentialKind, CredentialScheme, Documentation, EnumVariantToken,
+    FieldDef, FieldNameToken, OperationBody, OperationInfo, OperationKind, OperationResponse, OperationSecurity,
     ParameterLocation, ParsedPath, StructToken, constants::HttpHeaderRef,
   },
   naming::constants::DEFAULT_MEDIA_TYPE,
@@ -306,13 +306,9 @@ impl ToTokens for UrlConstructionFragment {
   }
 }
 
-/// Attaches the header and query API keys and the bearer tokens configured on the
-/// client to an operation that accepts them, as statements on `req_builder`. Cookie
-/// keys live in the client's cookie store, which `reqwest` reads on every request.
-///
-/// A request carries one `Authorization` header, so of the credentials that travel
-/// in it, the last one configured in declaration order wins and the rest are left
-/// off. A credential that isn't configured is left off, and the server decides.
+/// Passes the header and query API keys and the bearer tokens an operation accepts, in
+/// declaration order, to the client's `set_security`, as a statement on `req_builder`.
+/// Cookie keys live in the client's cookie store, which `reqwest` reads on every request.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CredentialsFragment<'a> {
   security: &'a OperationSecurity,
@@ -326,23 +322,85 @@ impl<'a> CredentialsFragment<'a> {
 
 impl ToTokens for CredentialsFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let (authorization, others): (Vec<_>, Vec<_>) = self
+    let variants = self
       .security
       .schemes
       .iter()
-      .partition(|scheme| scheme.uses_authorization());
-    let others = others.into_iter().map(attach_credential);
-    let last_wins = authorization.into_iter().rev().map(attach_credential);
+      .filter(|scheme| !scheme.is_cookie())
+      .map(security_variant);
     tokens.extend(quote! {
-      #(#others)*
-      #(#last_wins)else*
+      req_builder = self.set_security(req_builder, &[#(Security::#variants),*]);
     });
   }
 }
 
-/// Attaches `scheme`'s credential to `req_builder` when the client has one, or
-/// nothing for a cookie key.
-fn attach_credential(scheme: &CredentialScheme) -> TokenStream {
+/// Emits the client's private `Security` enum, one variant per credential it stores
+/// in a field, and the `set_security` method operations attach them with.
+#[derive(Clone, Debug)]
+pub(crate) struct SecurityFragment<'a> {
+  schemes: Vec<&'a CredentialScheme>,
+}
+
+impl<'a> SecurityFragment<'a> {
+  /// Returns `None` when the client stores no credential in a field.
+  pub(crate) fn new(schemes: &[&'a CredentialScheme]) -> Option<Self> {
+    let schemes = schemes
+      .iter()
+      .copied()
+      .filter(|scheme| !scheme.is_cookie())
+      .collect::<Vec<_>>();
+    (!schemes.is_empty()).then_some(Self { schemes })
+  }
+
+  /// The `set_security` method, for the client's `impl` block.
+  pub(crate) fn method(&self) -> TokenStream {
+    let guarded = self.schemes.iter().filter(|scheme| scheme.uses_authorization()).count() > 1;
+    let authorized = guarded.then(|| quote! { let mut authorized = false; });
+    let arms = self.schemes.iter().filter_map(|scheme| {
+      let variant = security_variant(scheme);
+      let attach = attach_credential(scheme, guarded && scheme.uses_authorization())?;
+      Some(quote! { Security::#variant => #attach })
+    });
+    quote! {
+      /// Attaches the configured credentials among `schemes`, which an operation lists in
+      /// declaration order, to `builder`. A request carries one `Authorization` header,
+      /// so of the credentials that travel in it, the last one configured wins.
+      fn set_security(&self, mut builder: reqwest::RequestBuilder, schemes: &[Security]) -> reqwest::RequestBuilder {
+        #authorized
+        for scheme in schemes.iter().rev() {
+          match scheme {
+            #(#arms)*
+          }
+        }
+        builder
+      }
+    }
+  }
+}
+
+impl ToTokens for SecurityFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let variants = self.schemes.iter().map(|scheme| security_variant(scheme));
+    tokens.extend(quote! {
+      /// A credential the client attaches to the operations that accept it.
+      #[allow(clippy::enum_variant_names)]
+      enum Security {
+        #(#variants),*
+      }
+    });
+  }
+}
+
+/// Names `scheme`'s `Security` variant after its client field, e.g. `ApiKeyAuth` for
+/// `api_key_auth`.
+fn security_variant(scheme: &CredentialScheme) -> EnumVariantToken {
+  EnumVariantToken::from_raw(scheme.field.as_str())
+}
+
+/// The `set_security` match arm body that attaches `scheme`'s credential to `builder`
+/// when the client has one, or `None` for a cookie key. A `guarded` credential leaves
+/// the `Authorization` header to one attached before it.
+fn attach_credential(scheme: &CredentialScheme, guarded: bool) -> Option<TokenStream> {
   let field = &scheme.field;
   let value = credential_value(scheme);
   let secret = quote! { secrecy::ExposeSecret::expose_secret(#value) };
@@ -352,23 +410,32 @@ fn attach_credential(scheme: &CredentialScheme) -> TokenStream {
       parameter_name,
     } => {
       let header = HttpHeaderRef::from(parameter_name).path();
-      quote! { req_builder.header(#header, #secret) }
+      quote! { builder.header(#header, #value) }
     }
     CredentialKind::ApiKey {
       location: ApiKeyLocation::Query,
       parameter_name,
-    } => quote! { req_builder.query(&[(#parameter_name, #secret)]) },
+    } => quote! { builder.query(&[(#parameter_name, #secret)]) },
     CredentialKind::ApiKey {
       location: ApiKeyLocation::Cookie,
       ..
-    } => return quote! {},
-    CredentialKind::Bearer => quote! { req_builder.bearer_auth(#secret) },
+    } => return None,
+    CredentialKind::Bearer => quote! { builder.bearer_auth(#secret) },
   };
-  quote! {
-    if let Some(#value) = &self.#field {
-      req_builder = #attach;
+  Some(if guarded {
+    quote! {
+      if !authorized && let Some(#value) = &self.#field {
+        builder = #attach;
+        authorized = true;
+      },
     }
-  }
+  } else {
+    quote! {
+      if let Some(#value) = &self.#field {
+        builder = #attach;
+      },
+    }
+  })
 }
 
 /// Names a credential's value in generated code: `token` for a bearer token and
@@ -600,9 +667,14 @@ impl ToTokens for ClientStructFragment<'_> {
         scheme.kind.noun(),
         scheme.whereabouts()
       )]);
+      let ty = if scheme.is_header_key() {
+        quote! { http::HeaderValue }
+      } else {
+        quote! { secrecy::SecretString }
+      };
       quote! {
         #docs
-        #vis #field: Option<secrecy::SecretString>,
+        #vis #field: Option<#ty>,
       }
     });
 
@@ -733,12 +805,39 @@ impl ToTokens for ClientConstructorsFragment<'_> {
         };
       }
       let value = credential_value(scheme);
-      let docs = Documentation::from_lines([format!(
+      let summary = format!(
         "Set the `{}` {}, sent in {} to operations that accept it.",
         scheme.scheme_name,
         scheme.kind.noun(),
         scheme.whereabouts()
-      )]);
+      );
+      if scheme.is_header_key() {
+        let docs = Documentation::from_lines([
+          summary,
+          String::new(),
+          "An empty key, or one that isn't a valid header value, leaves the key unset.".to_string(),
+        ]);
+        return quote! {
+          #docs
+          #[must_use]
+          #vis fn #setter(mut self, #value: impl Into<String>) -> Self {
+            let #value = #value.into();
+
+            if #value.is_empty() {
+              return self;
+            }
+
+            let Ok(mut header) = http::HeaderValue::from_str(&#value) else {
+              return self;
+            };
+            header.set_sensitive(true);
+
+            self.#field = Some(header);
+            self
+          }
+        };
+      }
+      let docs = Documentation::from_lines([summary]);
       quote! {
         #docs
         #[must_use]
@@ -862,6 +961,8 @@ impl ToTokens for ClientFragment {
     let client_struct = ClientStructFragment::new(client_ident.clone(), &schemes, self.visibility);
     let default_impl = ClientDefaultImplFragment::new(client_ident.clone());
     let constructors = ClientConstructorsFragment::new(&schemes, self.visibility);
+    let security = SecurityFragment::new(&schemes);
+    let set_security = security.as_ref().map(SecurityFragment::method);
 
     quote! {
       use anyhow::Context;
@@ -874,10 +975,13 @@ impl ToTokens for ClientFragment {
 
       #client_struct
 
+      #security
+
       #default_impl
 
       impl #client_ident {
         #constructors
+        #set_security
         #(#methods)*
       }
     }

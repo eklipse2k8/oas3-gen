@@ -43,13 +43,13 @@ pub struct PetstoreClient {
   /// Cookie API keys, which `client` sends with every request to the host of `base_url`.
   pub cookies: std::sync::Arc<reqwest_cookie_store::CookieStoreMutex>,
   /// `ApiKeyAuth` API key, sent in the `X-Api-Key` header.
-  pub api_key_auth: Option<secrecy::SecretString>,
+  pub api_key_auth: Option<http::HeaderValue>,
   /// `BearerAuth` bearer token, sent in the `Authorization` header.
   pub bearer_auth: Option<secrecy::SecretString>,
   /// `QueryKey` API key, sent in the `api_key` query parameter.
   pub query_key: Option<secrecy::SecretString>,
   /// `TokenAuth` API key, sent in the `Authorization` header.
-  pub token_auth: Option<secrecy::SecretString>,
+  pub token_auth: Option<http::HeaderValue>,
 }
 impl core::fmt::Debug for PetstoreClient {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -62,6 +62,14 @@ impl core::fmt::Debug for PetstoreClient {
       .field("token_auth", &self.token_auth)
       .finish_non_exhaustive()
   }
+}
+/// A credential the client attaches to the operations that accept it.
+#[allow(clippy::enum_variant_names)]
+enum Security {
+  ApiKeyAuth,
+  BearerAuth,
+  QueryKey,
+  TokenAuth,
 }
 impl Default for PetstoreClient {
   fn default() -> Self {
@@ -120,9 +128,19 @@ impl PetstoreClient {
     })
   }
   /// Set the `ApiKeyAuth` API key, sent in the `X-Api-Key` header to operations that accept it.
+  ///
+  /// An empty key, or one that isn't a valid header value, leaves the key unset.
   #[must_use]
   pub fn with_api_key_auth(mut self, api_key: impl Into<String>) -> Self {
-    self.api_key_auth = Some(secrecy::SecretString::from(api_key.into()));
+    let api_key = api_key.into();
+    if api_key.is_empty() {
+      return self;
+    }
+    let Ok(mut header) = http::HeaderValue::from_str(&api_key) else {
+      return self;
+    };
+    header.set_sensitive(true);
+    self.api_key_auth = Some(header);
     self
   }
   /// Set the `BearerAuth` bearer token, sent in the `Authorization` header to operations that accept it.
@@ -151,10 +169,53 @@ impl PetstoreClient {
     self
   }
   /// Set the `TokenAuth` API key, sent in the `Authorization` header to operations that accept it.
+  ///
+  /// An empty key, or one that isn't a valid header value, leaves the key unset.
   #[must_use]
   pub fn with_token_auth(mut self, api_key: impl Into<String>) -> Self {
-    self.token_auth = Some(secrecy::SecretString::from(api_key.into()));
+    let api_key = api_key.into();
+    if api_key.is_empty() {
+      return self;
+    }
+    let Ok(mut header) = http::HeaderValue::from_str(&api_key) else {
+      return self;
+    };
+    header.set_sensitive(true);
+    self.token_auth = Some(header);
     self
+  }
+  /// Attaches the configured credentials among `schemes`, which an operation lists in
+  /// declaration order, to `builder`. A request carries one `Authorization` header,
+  /// so of the credentials that travel in it, the last one configured wins.
+  fn set_security(&self, mut builder: reqwest::RequestBuilder, schemes: &[Security]) -> reqwest::RequestBuilder {
+    let mut authorized = false;
+    for scheme in schemes.iter().rev() {
+      match scheme {
+        Security::ApiKeyAuth => {
+          if let Some(api_key) = &self.api_key_auth {
+            builder = builder.header(X_API_KEY, api_key);
+          }
+        }
+        Security::BearerAuth => {
+          if !authorized && let Some(token) = &self.bearer_auth {
+            builder = builder.bearer_auth(secrecy::ExposeSecret::expose_secret(token));
+            authorized = true;
+          }
+        }
+        Security::QueryKey => {
+          if let Some(api_key) = &self.query_key {
+            builder = builder.query(&[("api_key", secrecy::ExposeSecret::expose_secret(api_key))]);
+          }
+        }
+        Security::TokenAuth => {
+          if !authorized && let Some(api_key) = &self.token_auth {
+            builder = builder.header(http::header::AUTHORIZATION, api_key);
+            authorized = true;
+          }
+        }
+      }
+    }
+    builder
   }
   /// List pets
   ///
@@ -183,9 +244,7 @@ impl PetstoreClient {
       .client
       .get(url)
       .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ListPetsRequest::parse_response(response).await
   }
@@ -203,9 +262,7 @@ impl PetstoreClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("pets");
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     CreatePetRequest::parse_response(response).await
   }
@@ -245,9 +302,7 @@ impl PetstoreClient {
       url.set_query(None);
     }
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     SearchPetsRequest::parse_response(response).await
   }
@@ -269,9 +324,7 @@ impl PetstoreClient {
       .client
       .get(url)
       .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ShowPetByIdRequest::parse_response(response).await
   }
@@ -287,12 +340,7 @@ impl PetstoreClient {
       .push("pets")
       .push(&request.path.pet_id.to_string());
     let mut req_builder = self.client.delete(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
-    if let Some(token) = &self.bearer_auth {
-      req_builder = req_builder.bearer_auth(secrecy::ExposeSecret::expose_secret(token));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth, Security::BearerAuth]);
     let response = req_builder.send().await?;
     DeletePetRequest::parse_response(response).await
   }
@@ -311,9 +359,7 @@ impl PetstoreClient {
       .push("pets")
       .push(&request.path.pet_id.to_string());
     let mut req_builder = self.client.head(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     PetExistsRequest::parse_response(response).await
   }
@@ -333,9 +379,7 @@ impl PetstoreClient {
       .patch(url)
       .header(reqwest::header::CONTENT_TYPE, "application/merge-patch+json")
       .json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     UpdatePetRequest::parse_response(response).await
   }
@@ -352,9 +396,7 @@ impl PetstoreClient {
       .push(&request.path.pet_id.to_string())
       .push("images");
     let mut req_builder = self.client.post(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let body = request.body;
     let mut form = reqwest::multipart::Form::new().percent_encode_noop();
     form = form.text("name", body.name);
@@ -381,9 +423,7 @@ impl PetstoreClient {
       .push(&request.path.pet_id.to_string())
       .push("photo");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetPetPhotoRequest::parse_response(response).await
   }
@@ -404,9 +444,7 @@ impl PetstoreClient {
       .put(url)
       .header(reqwest::header::CONTENT_TYPE, "image/png")
       .body(request.body.clone());
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ReplacePetPhotoRequest::parse_response(response).await
   }
@@ -431,9 +469,7 @@ impl PetstoreClient {
       (!pairs.is_empty()).then(|| pairs.join("; "))
     };
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     if let Some(cookie) = cookie_header {
       req_builder = req_builder.header(reqwest::header::COOKIE, cookie);
     }
@@ -457,9 +493,7 @@ impl PetstoreClient {
       .put(url)
       .header(reqwest::header::CONTENT_TYPE, "text/plain")
       .body(request.body.clone());
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     SetPetNotesRequest::parse_response(response).await
   }
@@ -484,9 +518,7 @@ impl PetstoreClient {
       url.set_query(None);
     }
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetPetLineageRequest::parse_response(response).await
   }
@@ -506,9 +538,7 @@ impl PetstoreClient {
       .push(&request.path.pet_id.to_string())
       .push("vaccinations");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ListVaccinationsRequest::parse_response(response).await
   }
@@ -528,9 +558,7 @@ impl PetstoreClient {
       .push(&request.path.pet_id.to_string())
       .push("vaccinations");
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     RecordVaccinationRequest::parse_response(response).await
   }
@@ -558,9 +586,7 @@ impl PetstoreClient {
       url.set_query(None);
     }
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     StreamPetVitalsRequest::parse_response(response).await
   }
@@ -592,9 +618,7 @@ impl PetstoreClient {
       .client
       .get(url)
       .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ListCatsRequest::parse_response(response).await
   }
@@ -612,9 +636,7 @@ impl PetstoreClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("adoptions");
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     AdoptPetRequest::parse_response(response).await
   }
@@ -641,9 +663,7 @@ impl PetstoreClient {
       url.set_query(None);
     }
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     StreamAdoptionFeedRequest::parse_response(response).await
   }
@@ -659,9 +679,7 @@ impl PetstoreClient {
       .push("adoptions")
       .push(&request.path.adoption_id.to_string());
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetAdoptionRequest::parse_response(response).await
   }
@@ -681,9 +699,7 @@ impl PetstoreClient {
       .push(&request.path.collar_id.clone())
       .push("telemetry");
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     SubmitCollarTelemetryRequest::parse_response(response).await
   }
@@ -702,9 +718,7 @@ impl PetstoreClient {
       .push("assistant")
       .push("messages");
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     SendAssistantMessageRequest::parse_response(response).await
   }
@@ -732,9 +746,7 @@ impl PetstoreClient {
       url.set_query(None);
     }
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     StreamAssistantMessageRequest::parse_response(response).await
   }
@@ -753,9 +765,7 @@ impl PetstoreClient {
       .push("assistant")
       .push("tokens");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     StreamAssistantTokensRequest::parse_response(response).await
   }
@@ -782,9 +792,7 @@ impl PetstoreClient {
       (!pairs.is_empty()).then(|| pairs.join("; "))
     };
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     if let Some(cookie) = cookie_header {
       req_builder = req_builder.header(reqwest::header::COOKIE, cookie);
     }
@@ -806,9 +814,7 @@ impl PetstoreClient {
       .push("assistant")
       .push("preferences");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetChatPreferenceRequest::parse_response(response).await
   }
@@ -827,9 +833,7 @@ impl PetstoreClient {
       .push("assistant")
       .push("preferences");
     let mut req_builder = self.client.put(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     UpdateChatPreferenceRequest::parse_response(response).await
   }
@@ -848,9 +852,7 @@ impl PetstoreClient {
       .push("assistant")
       .push("settings");
     let mut req_builder = self.client.put(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     UpdateAssistantSettingsRequest::parse_response(response).await
   }
@@ -878,9 +880,7 @@ impl PetstoreClient {
       url.set_query(None);
     }
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     EchoResponseQualityRequest::parse_response(response).await
   }
@@ -896,9 +896,7 @@ impl PetstoreClient {
       .push("store")
       .push("inventory");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetInventoryRequest::parse_response(response).await
   }
@@ -914,9 +912,7 @@ impl PetstoreClient {
       .push("store")
       .push("orders");
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     PlaceOrderRequest::parse_response(response).await
   }
@@ -933,9 +929,7 @@ impl PetstoreClient {
       .push("orders")
       .push(&request.path.order_id.to_string());
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetOrderByIdRequest::parse_response(response).await
   }
@@ -952,9 +946,7 @@ impl PetstoreClient {
       .push("orders")
       .push(&request.path.order_id.to_string());
     let mut req_builder = self.client.delete(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     DeleteOrderRequest::parse_response(response).await
   }
@@ -973,9 +965,7 @@ impl PetstoreClient {
       .push("store")
       .push("carriers");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ListCarriersRequest::parse_response(response).await
   }
@@ -1035,9 +1025,7 @@ impl PetstoreClient {
       .push("intake")
       .push(&request.path.form_id.clone());
     let mut req_builder = self.client.post(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let body = request.body;
     let mut form = reqwest::multipart::Form::new().percent_encode_noop();
     form = form.text("name", body.name);
@@ -1208,9 +1196,7 @@ impl PetstoreClient {
       .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
       .push("media");
     let mut req_builder = self.client.post(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     if let Some(body) = request.body {
       let has_parts =
         body.file.as_ref().is_some_and(|items| !items.is_empty()) || body.cover.is_some() || body.note.is_some();
@@ -1263,9 +1249,7 @@ impl PetstoreClient {
       .push("media")
       .push("labels");
     let mut req_builder = self.client.post(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let body = request.body;
     let has_parts = !body.additional_properties.is_empty();
     let mut form = reqwest::multipart::Form::new().percent_encode_noop();
@@ -1297,9 +1281,7 @@ impl PetstoreClient {
       .push("media")
       .push("tallies");
     let mut req_builder = self.client.post(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let body = request.body;
     let has_parts = body.additional_properties.values().any(|values| !values.is_empty());
     let mut form = reqwest::multipart::Form::new().percent_encode_noop();
@@ -1333,9 +1315,7 @@ impl PetstoreClient {
       .push("media")
       .push("text");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaTextRequest::parse_response(response).await
   }
@@ -1351,9 +1331,7 @@ impl PetstoreClient {
       .push("media")
       .push("wildcard");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaWildcardRequest::parse_response(response).await
   }
@@ -1372,9 +1350,7 @@ impl PetstoreClient {
       .push("media")
       .push("pet-text");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaPetTextRequest::parse_response(response).await
   }
@@ -1390,9 +1366,7 @@ impl PetstoreClient {
       .push("media")
       .push("kind");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaKindRequest::parse_response(response).await
   }
@@ -1411,9 +1385,7 @@ impl PetstoreClient {
       .push("media")
       .push("nickname");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaNicknameRequest::parse_response(response).await
   }
@@ -1432,9 +1404,7 @@ impl PetstoreClient {
       .push("media")
       .push("nullable-name");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaNullableNameRequest::parse_response(response).await
   }
@@ -1450,9 +1420,7 @@ impl PetstoreClient {
       .push("media")
       .push("latin");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaLatinRequest::parse_response(response).await
   }
@@ -1472,9 +1440,7 @@ impl PetstoreClient {
       .put(url)
       .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
       .body(request.body.clone());
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     PutMediaRawRequest::parse_response(response).await
   }
@@ -1493,9 +1459,7 @@ impl PetstoreClient {
       .push("media")
       .push("union");
     let mut req_builder = self.client.post(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     PostMediaUnionRequest::parse_response(response).await
   }
@@ -1511,9 +1475,7 @@ impl PetstoreClient {
       .push("media")
       .push("accepted");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaAcceptedRequest::parse_response(response).await
   }
@@ -1529,9 +1491,7 @@ impl PetstoreClient {
       .push("media")
       .push("both");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetMediaBothRequest::parse_response(response).await
   }
@@ -1555,9 +1515,7 @@ impl PetstoreClient {
       url.set_query(None);
     }
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ListApiKeysRequest::parse_response(response).await
   }
@@ -1573,9 +1531,7 @@ impl PetstoreClient {
       .push("staff")
       .push("keys");
     let mut req_builder = self.client.post(url).json(&request.body);
-    if let Some(api_key) = &self.query_key {
-      req_builder = req_builder.query(&[("api_key", secrecy::ExposeSecret::expose_secret(api_key))]);
-    }
+    req_builder = self.set_security(req_builder, &[Security::QueryKey]);
     let response = req_builder.send().await?;
     CreateApiKeyRequest::parse_response(response).await
   }
@@ -1592,9 +1548,7 @@ impl PetstoreClient {
       .push("keys")
       .push(&request.path.key_id.clone());
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     GetApiKeyRequest::parse_response(response).await
   }
@@ -1611,9 +1565,7 @@ impl PetstoreClient {
       .push("keys")
       .push(&request.path.key_id.clone());
     let mut req_builder = self.client.put(url).json(&request.body);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth]);
     let response = req_builder.send().await?;
     ReplaceApiKeyRequest::parse_response(response).await
   }
@@ -1630,12 +1582,7 @@ impl PetstoreClient {
       .push("keys")
       .push(&request.path.key_id.clone());
     let mut req_builder = self.client.delete(url);
-    if let Some(api_key) = &self.api_key_auth {
-      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
-    }
-    if let Some(token) = &self.bearer_auth {
-      req_builder = req_builder.bearer_auth(secrecy::ExposeSecret::expose_secret(token));
-    }
+    req_builder = self.set_security(req_builder, &[Security::ApiKeyAuth, Security::BearerAuth]);
     let response = req_builder.send().await?;
     RevokeApiKeyRequest::parse_response(response).await
   }
@@ -1654,14 +1601,7 @@ impl PetstoreClient {
       .push("staff")
       .push("audit");
     let mut req_builder = self.client.get(url);
-    if let Some(api_key) = &self.token_auth {
-      req_builder = req_builder.header(
-        http::header::AUTHORIZATION,
-        secrecy::ExposeSecret::expose_secret(api_key),
-      );
-    } else if let Some(token) = &self.bearer_auth {
-      req_builder = req_builder.bearer_auth(secrecy::ExposeSecret::expose_secret(token));
-    }
+    req_builder = self.set_security(req_builder, &[Security::BearerAuth, Security::TokenAuth]);
     let response = req_builder.send().await?;
     ListAuditEventsRequest::parse_response(response).await
   }

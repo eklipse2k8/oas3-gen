@@ -687,9 +687,10 @@ receive the header key as an optional field.
 
 The server stores API keys and bearer tokens as
 [`secrecy::SecretString`][rustdoc-secret-string], and the client uses the same
-type for header keys, query keys, and bearer tokens. Its debug representation
-shows `[REDACTED]` in place of the value, and it clears its own stored value
-when dropped. It doesn't implement [`Display`][rustdoc-display],
+type for query keys and bearer tokens. Its debug representation shows
+`[REDACTED]` in place of the value, and it clears its own stored value when
+dropped. The client keeps header keys as sensitive `http::HeaderValue`s instead,
+which print as `Sensitive` but aren't cleared when dropped. It doesn't implement [`Display`][rustdoc-display],
 [`Serialize`][rustdoc-serde-serialize], or [`PartialEq`][rustdoc-partial-eq].
 
 To read a `SecretString`, call `expose_secret()` with

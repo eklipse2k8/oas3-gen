@@ -624,17 +624,21 @@ let api_key = std::env::var("API_KEY")?;
 let client = PetstoreClient::new().with_api_key_auth(api_key);
 ```
 
-The client stores header keys, query keys, and bearer tokens as [`secrecy::SecretString`][rustdoc-secret-string] values
-wrapped in [`Option`][rustdoc-option]. It gets one field and setter for each
+The client stores header keys as [`http::HeaderValue`][rustdoc-http-header-value]
+values marked sensitive, and query keys and bearer tokens as
+[`secrecy::SecretString`][rustdoc-secret-string] values, each wrapped in
+[`Option`][rustdoc-option]. A header key setter leaves the key unset when it's
+empty or isn't a valid header value. The client gets one field and setter for each
 supported scheme used by the selected operations. Names come from the scheme:
 `ApiKeyAuth` becomes `api_key_auth` and `with_api_key_auth()`. If a name
 collides with another field, including `client` or `base_url`, the generator
 adds a numeric suffix. Schemes the generator doesn't support, such as the
 petstore's `BasicAuth` and `PetstoreOAuth`, don't get a setter.
 
-Each client method attaches the header keys, query keys, and bearer tokens
-you've configured that its operation accepts. It doesn't enforce security requirements before sending
-a request. If you leave a required key unset, the request goes out without it,
+Each client method passes the schemes its operation accepts to a private
+`set_security()` helper, which attaches the header keys, query keys, and bearer
+tokens you've configured among them. The client doesn't enforce security
+requirements before sending a request. If you leave a required key unset, the request goes out without it,
 and a generated server rejects it as described in
 [Rejections from a Generated Server](#rejections-from-a-generated-server).
 
@@ -703,8 +707,9 @@ configuration to the [`reqwest::ClientBuilder`][rustdoc-reqwest-client-builder] 
 
 ### Keeping Keys Out of Logs
 
-Header keys, query keys, and bearer tokens use [`SecretString`][rustdoc-secret-string], whose debug
-output hides the value. The generated client's debug output also omits the
+Header keys are sensitive `HeaderValue`s, whose debug output is `Sensitive`.
+Query keys and bearer tokens use [`SecretString`][rustdoc-secret-string], whose
+debug output hides the value. The generated client's debug output also omits the
 cookie store. Formatting the generated client with `{:?}` therefore doesn't
 print these stored credentials.
 See [Keeping Keys Out of Logs](./code-generation.md#keeping-keys-out-of-logs)
@@ -752,6 +757,7 @@ enums, type adapters, and collection choices.
 [rustdoc-cookie-store]: https://docs.rs/reqwest_cookie_store/0.10.0/reqwest_cookie_store/struct.CookieStoreMutex.html
 [rustdoc-futures-stream]: https://docs.rs/futures/0.3.34/futures/stream/trait.Stream.html
 [rustdoc-futures-stream-ext]: https://docs.rs/futures/0.3.34/futures/stream/trait.StreamExt.html#method.next
+[rustdoc-http-header-value]: https://docs.rs/http/1.5.0/http/header/struct.HeaderValue.html
 [rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html
 [rustdoc-reqwest-bearer-auth]: https://docs.rs/reqwest/0.13.5/reqwest/struct.RequestBuilder.html#method.bearer_auth
 [rustdoc-reqwest-client]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html

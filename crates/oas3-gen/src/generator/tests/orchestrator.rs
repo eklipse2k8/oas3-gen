@@ -480,12 +480,25 @@ fn api_key_edge_cases_keep_credentials_usable() {
     &client,
     &[
       (
-        "pub api_key_auth: Option<secrecy::SecretString>,",
+        "pub api_key_auth: Option<http::HeaderValue>,",
         "an API key paired with an unsupported scheme stays on the client",
       ),
       (
-        "pub client_2: Option<secrecy::SecretString>,",
+        "pub client_2: Option<http::HeaderValue>,",
         "a scheme named after a client member takes a suffix",
+      ),
+      (
+        "let Ok(mut header) = http::HeaderValue::from_str(&api_key) else {",
+        "a header key that isn't a valid header value stays unset",
+      ),
+      ("header.set_sensitive(true);", "a header key is marked sensitive"),
+      (
+        "self.set_security(req_builder, &[Security::ApiKeyAuth]);",
+        "an operation passes only the credentials the client supports",
+      ),
+      (
+        "self.set_security(req_builder, &[Security::Client2]);",
+        "the Security variant follows the suffixed field",
       ),
       (
         "pub cookies: std::sync::Arc<reqwest_cookie_store::CookieStoreMutex>,",
@@ -648,8 +661,16 @@ fn authorization_and_standard_headers_follow_http() {
         "an API key in the Authorization header uses the http constant",
       ),
       (
-        "} else if let Some(token) = &self.bearer_auth {",
+        ".set_security(req_builder, &[Security::BearerAuth, Security::TokenAuth]);",
+        "an operation lists its credentials in declaration order",
+      ),
+      (
+        "for scheme in schemes.iter().rev() {",
         "a request carries one Authorization credential, and the last declared wins",
+      ),
+      (
+        "if !authorized && let Some(token) = &self.bearer_auth {",
+        "an earlier Authorization credential keeps the header",
       ),
     ],
   );
