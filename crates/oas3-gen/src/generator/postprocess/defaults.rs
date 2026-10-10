@@ -101,6 +101,9 @@ impl<'a> DefaultVariantResolver<'a> {
     let resolver = Self { enums };
     for field in fields {
       field.default_variant = resolver.resolve(field);
+      field.default_unrepresentable = field.default_variant.is_none()
+        && !field.rust_type.is_array
+        && resolver.enum_named_by(&field.rust_type).is_some();
     }
   }
 

@@ -175,7 +175,11 @@ pub(crate) fn generate_field_default_attr(field: &FieldDef) -> TokenStream {
 
 /// Rust expression for the field's schema `default`: the resolved enum variant when
 /// postprocessing found one, otherwise the JSON value coerced to the field's type.
+/// `None` when the default names no variant of the field's enum.
 fn field_default_expr(field: &FieldDef) -> Option<TokenStream> {
+  if field.default_unrepresentable {
+    return None;
+  }
   let value = field.default_value.as_ref()?;
   let rust_type = &field.rust_type;
   let Some(default) = &field.default_variant else {

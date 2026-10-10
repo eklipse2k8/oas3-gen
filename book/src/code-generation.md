@@ -1253,8 +1253,13 @@ petstore's `ChatPreference` schema does this:
 
 This property becomes `#[default(Some(ChatModel::Chat11))] pub fallback: Option<ChatModel>`,
 along with the deserialization default described in [Field Defaults](#field-defaults).
-The generator ignores a `default` next to any other reference, because it can't
-build that value for the referenced type.
+A union's default selects its matching variant, so `"default": "slow"` on a
+`oneOf` of `const` values becomes `#[default(Some(Mode::Slow))]`. The generator
+ignores a `default` next to any other reference, because it can't build that
+value for the referenced type. A default that matches no variant of an enum or
+union, such as an object default on a referenced or inline `oneOf`, gets no
+`#[default(...)]` attribute, so the field keeps its plain `Default` instead of a
+placeholder that picks the first variant.
 
 A nullable union includes a `null` branch. If it has no usable default, it gets
 no `Default` implementation. Properties with that union type use [`Option<T>`][rustdoc-option],
