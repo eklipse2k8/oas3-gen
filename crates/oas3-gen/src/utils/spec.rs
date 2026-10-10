@@ -35,24 +35,34 @@ impl SpecFormat {
 
   /// Parses a document, keeping the operations of path items that reference
   /// `components.pathItems`, the operations that clear the top-level `security` with
-  /// an empty array public, and the `default` a property sets next to its `$ref`.
+  /// an empty array public, and the `default` a property sets next to a `$ref` to an
+  /// enum or union component.
+  ///
+  /// The text is parsed into a [`Value`] to find these rewrites, then into the typed
+  /// spec, which keeps located errors, rejects duplicate JSON keys, and reads each YAML
+  /// scalar as written. Rewrites edit the typed spec through a [`Value`] round trip; a
+  /// YAML document the typed parse rejects is rewritten from its [`Value`] instead.
   pub fn parse(self, content: &[u8]) -> anyhow::Result<oas3::Spec> {
-    let mut document = self.deserialize::<Value>(content)?;
-    let content_schemas = SseContentSchemas::collect(&document, content);
-    for (pointer, schema) in &content_schemas {
-      if let Some(property) = document.pointer_mut(pointer) {
-        property.clone_from(schema);
-      }
-    }
-    let inlined = PathItemRefs::inline(&mut document);
-    let lifted = RefSiblingDefaults::lift(&mut document);
-    let overrides = SecurityOverrides::deserialize(&document)?;
-    let mut spec = if inlined || lifted || !content_schemas.is_empty() {
-      serde_json::from_value::<OpenApiV3Spec>(document)?
-    } else {
-      self.deserialize::<OpenApiV3Spec>(content)?
+    let mut document: Value = self.deserialize(content)?;
+    let rewrite = Rewrite {
+      lifts: RefSiblingDefaults::collect(&document),
+      content_schemas: SseContentSchemas::collect(&document, content),
     };
-    if !spec.security.is_empty() {
+    let path_item_components = sibling_path_item_components(&document);
+    let inlined = PathItemRefs::inline(&mut document);
+    let overrides = SecurityOverrides::read(&document)?;
+    let rewrites = inlined || !rewrite.is_empty();
+    drop(document);
+
+    let mut spec = match self.deserialize::<OpenApiV3Spec>(content) {
+      Ok(typed) if rewrites => rewrite_typed(typed, &rewrite, path_item_components)?,
+      Ok(typed) => typed,
+      Err(error) if rewrites && matches!(self, Self::Yaml) => {
+        rewrite_document(self.deserialize::<Value>(content)?, &rewrite).map_err(|_| error)?
+      }
+      Err(error) => return Err(error),
+    };
+    if let Some(overrides) = overrides {
       overrides.apply(&mut spec);
     }
     Ok(spec)
@@ -63,6 +73,87 @@ impl SpecFormat {
       Self::Json => Ok(serde_json::from_slice(content)?),
       Self::Yaml => Ok(yaml_serde::from_str(std::str::from_utf8(content)?)?),
     }
+  }
+}
+
+/// Rewrites the typed spec through its [`Value`] form. The typed spec reads each
+/// `components.pathItems` entry as an `ObjectOrReference`, which drops the siblings of a
+/// `$ref`, so those raw entries are put back before the rewrite.
+fn rewrite_typed(
+  typed: OpenApiV3Spec,
+  rewrite: &Rewrite,
+  path_item_components: Vec<(String, Value)>,
+) -> anyhow::Result<OpenApiV3Spec> {
+  let mut document = serde_json::to_value(typed)?;
+  if let Some(components) = document
+    .pointer_mut("/components/pathItems")
+    .and_then(Value::as_object_mut)
+  {
+    components.extend(path_item_components);
+  }
+  rewrite_document(document, rewrite)
+}
+
+/// The edits the raw document calls for, found before the typed parse.
+struct Rewrite {
+  lifts: Vec<DefaultLift>,
+  /// The `contentSchema` that replaces each frame type `data` property, by JSON pointer.
+  content_schemas: BTreeMap<String, Value>,
+}
+
+impl Rewrite {
+  fn is_empty(&self) -> bool {
+    self.lifts.is_empty() && self.content_schemas.is_empty()
+  }
+}
+
+/// Applies the content schemas and lifts, then inlines the path items, and reads the
+/// result as the typed spec.
+fn rewrite_document(mut document: Value, rewrite: &Rewrite) -> anyhow::Result<OpenApiV3Spec> {
+  for (pointer, schema) in &rewrite.content_schemas {
+    if let Some(property) = document.pointer_mut(pointer) {
+      property.clone_from(schema);
+    }
+  }
+  apply_lifts(&mut document, &rewrite.lifts);
+  PathItemRefs::inline(&mut document);
+  Ok(serde_json::from_value(document)?)
+}
+
+/// Raw `components.pathItems` entries that are a `$ref` with sibling fields beyond the
+/// ones a typed reference keeps.
+fn sibling_path_item_components(document: &Value) -> Vec<(String, Value)> {
+  document
+    .pointer("/components/pathItems")
+    .and_then(Value::as_object)
+    .into_iter()
+    .flatten()
+    .filter(|(_, item)| {
+      item.as_object().is_some_and(|fields| {
+        fields.contains_key("$ref")
+          && fields
+            .keys()
+            .any(|key| !matches!(key.as_str(), "$ref" | "summary" | "description"))
+      })
+    })
+    .map(|(name, item)| (name.clone(), item.clone()))
+    .collect()
+}
+
+/// Moves each lifted property's `$ref` into `allOf` and sets its `default`.
+fn apply_lifts(document: &mut Value, lifts: &[DefaultLift]) {
+  for lift in lifts {
+    let Some(schema) = document.pointer_mut(&lift.pointer).and_then(Value::as_object_mut) else {
+      continue;
+    };
+    let Some(reference) = schema.remove("$ref") else {
+      continue;
+    };
+    schema.insert(
+      "allOf".to_string(),
+      Value::Array(vec![serde_json::json!({ "$ref": reference })]),
+    );
+    schema.insert("default".to_string(), lift.default.clone());
   }
 }
 
@@ -86,6 +177,11 @@ impl SpecLoader {
   pub fn parse(&self) -> anyhow::Result<oas3::Spec> {
     self.format.parse(self.file.as_slice())
   }
+}
+
+/// Escapes a key for use as one segment of a JSON pointer.
+fn escape_pointer_segment(key: &str) -> String {
+  key.replace('~', "~0").replace('/', "~1")
 }
 
 /// The JSON pointer to the node a document walk is visiting, kept in one buffer that
@@ -202,16 +298,23 @@ impl PathItemRefs {
   }
 }
 
+/// The JSON pointer to a property that [`apply_lifts`] rewrites, and its `default`.
+struct DefaultLift {
+  pointer: String,
+  default: Value,
+}
+
 /// Property schemas in the raw document that set a `default` next to their `$ref`.
 ///
 /// `oas3` keeps only `$ref`, `summary`, and `description` from a reference, so the
-/// `default` would be lost. [`RefSiblingDefaults::lift`] rewrites each such property
-/// into `{ "allOf": [{ "$ref": ... }], "default": ... }`, which survives parsing. It
-/// only lifts references to `enum`, `const`, and union components, whose variants
-/// the default can name.
+/// `default` would be lost. [`apply_lifts`] rewrites each such property into
+/// `{ "allOf": [{ "$ref": ... }], "default": ... }`, which survives parsing. It only
+/// lifts references to `enum`, `const`, and union components, whose variants the
+/// default can name.
 struct RefSiblingDefaults {
   targets: HashSet<String>,
-  lifted: bool,
+  pointer: PointerBuf,
+  lifts: Vec<DefaultLift>,
 }
 
 impl RefSiblingDefaults {
@@ -220,8 +323,8 @@ impl RefSiblingDefaults {
   /// Keywords whose values are example or constraint data, never schemas.
   const DATA_KEYWORDS: [&'static str; 4] = ["example", "examples", "enum", "const"];
 
-  /// Rewrites the properties of `document`, returning `true` when any changed.
-  fn lift(document: &mut Value) -> bool {
+  /// Every property of `document` that [`apply_lifts`] would rewrite.
+  fn collect(document: &Value) -> Vec<DefaultLift> {
     let targets = document
       .pointer("/components/schemas")
       .and_then(Value::as_object)
@@ -232,54 +335,63 @@ impl RefSiblingDefaults {
           .iter()
           .any(|keyword| schema.get(keyword).is_some())
       })
-      .map(|(name, _)| format!("#/components/schemas/{}", name.replace('~', "~0").replace('/', "~1")))
+      .map(|(name, _)| format!("#/components/schemas/{}", escape_pointer_segment(name)))
       .collect();
 
-    let mut pass = Self { targets, lifted: false };
+    let mut pass = Self {
+      targets,
+      pointer: PointerBuf::default(),
+      lifts: vec![],
+    };
     if !pass.targets.is_empty() {
       pass.visit(document);
     }
-    pass.lifted
+    pass.lifts
   }
 
-  fn visit(&mut self, value: &mut Value) {
+  fn visit(&mut self, value: &Value) {
     match value {
       Value::Object(map) => {
-        for (keyword, child) in map.iter_mut() {
+        for (keyword, child) in map {
+          let mark = self.pointer.push(keyword);
           if Self::SCHEMA_MAPS.contains(&keyword.as_str())
-            && let Some(schemas) = child.as_object_mut()
+            && let Some(schemas) = child.as_object()
           {
-            for schema in schemas.values_mut() {
+            for (name, schema) in schemas {
+              let schema_mark = self.pointer.push(name);
               if keyword == "properties" {
                 self.lift_property(schema);
               }
               self.visit(schema);
+              self.pointer.truncate(schema_mark);
             }
           } else if !keyword.starts_with("x-") && !Self::DATA_KEYWORDS.contains(&keyword.as_str()) {
             self.visit(child);
           }
+          self.pointer.truncate(mark);
         }
       }
-      Value::Array(items) => items.iter_mut().for_each(|item| self.visit(item)),
+      Value::Array(items) => {
+        for (index, item) in items.iter().enumerate() {
+          let mark = self.pointer.push_index(index);
+          self.visit(item);
+          self.pointer.truncate(mark);
+        }
+      }
       _ => {}
     }
   }
 
-  fn lift_property(&mut self, property: &mut Value) {
-    let Some(schema) = property.as_object_mut() else {
-      return;
-    };
-    let is_lifted = schema.contains_key("default")
-      && schema
-        .get("$ref")
-        .and_then(Value::as_str)
-        .is_some_and(|target| self.targets.contains(target));
-    if is_lifted && let Some(reference) = schema.remove("$ref") {
-      schema.insert(
-        "allOf".to_string(),
-        Value::Array(vec![serde_json::json!({ "$ref": reference })]),
-      );
-      self.lifted = true;
+  fn lift_property(&mut self, property: &Value) {
+    let targeted = property
+      .get("$ref")
+      .and_then(Value::as_str)
+      .is_some_and(|target| self.targets.contains(target));
+    if targeted && let Some(default) = property.get("default") {
+      self.lifts.push(DefaultLift {
+        pointer: self.pointer.as_str().to_string(),
+        default: default.clone(),
+      });
     }
   }
 }
@@ -437,11 +549,8 @@ fn fixes_its_event(member: &Value) -> bool {
 /// `oas3` parses `"security": []` like a missing `security`, so the operation would
 /// inherit the top-level requirement. [`SecurityOverrides::apply`] rewrites those
 /// operations to the equivalent `[{}]`, which survives parsing.
-#[derive(Deserialize)]
 struct SecurityOverrides {
-  #[serde(default)]
   paths: BTreeMap<String, PathItemSecurity>,
-  #[serde(default)]
   webhooks: BTreeMap<String, PathItemSecurity>,
 }
 
@@ -463,6 +572,31 @@ struct OperationSecurity {
 }
 
 impl SecurityOverrides {
+  /// Reads the overrides when the top-level `security` is non-empty. A missing or null
+  /// `paths` or `webhooks` reads as empty.
+  fn read(document: &Value) -> anyhow::Result<Option<Self>> {
+    if document
+      .get("security")
+      .and_then(Value::as_array)
+      .is_none_or(Vec::is_empty)
+    {
+      return Ok(None);
+    }
+    let read_section = |section: &str| -> anyhow::Result<BTreeMap<String, PathItemSecurity>> {
+      let Some(items) = document.get(section).and_then(Value::as_object) else {
+        return Ok(BTreeMap::new());
+      };
+      items
+        .iter()
+        .map(|(name, item)| Ok((name.clone(), PathItemSecurity::deserialize(item)?)))
+        .collect()
+    };
+    Ok(Some(Self {
+      paths: read_section("paths")?,
+      webhooks: read_section("webhooks")?,
+    }))
+  }
+
   fn apply(self, spec: &mut oas3::Spec) {
     let groups = [
       (self.paths, spec.paths.as_mut()),
@@ -654,6 +788,25 @@ paths:
   }
 
   #[test]
+  fn null_paths_with_top_level_security_parse() {
+    let cases = [
+      (
+        "null paths",
+        r#"{ "openapi": "3.1.0", "info": { "title": "t", "version": "1" }, "security": [{ "Key": [] }], "paths": null }"#,
+      ),
+      (
+        "null paths with a webhook",
+        r#"{ "openapi": "3.1.0", "info": { "title": "t", "version": "1" }, "security": [{ "Key": [] }], "paths": null, "webhooks": { "ping": { "post": { "responses": {} } } } }"#,
+      ),
+    ];
+    for (label, json) in cases {
+      SpecFormat::Json
+        .parse(json.as_bytes())
+        .unwrap_or_else(|error| panic!("{label} with top-level security should parse: {error}"));
+    }
+  }
+
+  #[test]
   fn referenced_path_items_keep_their_operations() {
     let json = r##"{
       "openapi": "3.1.0",
@@ -750,6 +903,200 @@ components:
         "{format:?}: an empty security array in a referenced item stays public"
       );
     }
+  }
+
+  #[test]
+  fn yaml_numeric_keys_survive_rewrites() {
+    let cases = [
+      (
+        "pathItems with a 200 response key",
+        "
+openapi: 3.1.0
+info: { title: t, version: '1' }
+paths:
+  /pets: { $ref: '#/components/pathItems/Pets' }
+components:
+  pathItems:
+    Pets: { get: { operationId: listPets, responses: { 200: { description: ok } } } }
+",
+        "/pets",
+      ),
+      (
+        "callback with a 204 response key and an enum reference default",
+        "
+openapi: 3.1.0
+info: { title: t, version: '1' }
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      callbacks:
+        onEvent:
+          '{$request.body#/url}':
+            post:
+              operationId: onEvent
+              responses: { 204: { description: done } }
+      responses: { 200: { description: ok } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { $ref: '#/components/schemas/Mode', default: fast }
+components:
+  schemas:
+    Mode: { type: string, enum: [slow, fast] }
+",
+        "/subscribe",
+      ),
+    ];
+
+    for (label, yaml, path) in cases {
+      let spec = SpecFormat::Yaml
+        .parse(yaml.as_bytes())
+        .unwrap_or_else(|error| panic!("{label} should parse: {error}"));
+      let item = spec.paths.as_ref().and_then(|paths| paths.get(path));
+      assert!(
+        item.and_then(|item| item.get.as_ref().or(item.post.as_ref())).is_some(),
+        "{label}: {path} keeps its operation"
+      );
+    }
+  }
+
+  #[test]
+  fn json_errors_keep_their_location_and_reject_duplicate_keys() {
+    let cases = [
+      (
+        "a type error",
+        r#"{ "openapi": "3.1.0", "info": { "title": 7, "version": "1" }, "paths": {} }"#,
+        " at line ",
+      ),
+      (
+        "a duplicate key",
+        r#"{ "openapi": "3.1.0", "info": { "title": "a", "title": "b", "version": "1" }, "paths": {} }"#,
+        "duplicate field `title`",
+      ),
+    ];
+    for (label, json, expected) in cases {
+      let error = SpecFormat::Json.parse(json.as_bytes()).expect_err(label).to_string();
+      assert!(
+        error.contains(expected),
+        "{label}: `{error}` should contain `{expected}`"
+      );
+    }
+  }
+
+  #[test]
+  fn yaml_scalars_survive_rewritten_documents() {
+    let template = "
+openapi: 3.1.0
+info: { title: true, version: VERSION }
+paths:
+  /pets: { $ref: '#/components/pathItems/Pets' }
+components:
+  schemas:
+    Closed: { type: string, enum: [a, b] }
+    Holder:
+      type: object
+      properties:
+        lifted: { $ref: '#/components/schemas/Closed', default: a }
+  pathItems:
+    Pets: { get: { operationId: listPets, responses: {} } }
+";
+    let cases = [
+      ("1.10", Some("1.10")),
+      ("2", Some("2")),
+      ("1.0", Some("1.0")),
+      ("~", None),
+    ];
+    for (version, expected) in cases {
+      let yaml = template.replace("VERSION", version);
+      let spec = SpecFormat::Yaml
+        .parse(yaml.as_bytes())
+        .unwrap_or_else(|error| panic!("version `{version}` should parse: {error}"));
+      if let Some(expected) = expected {
+        assert_eq!(spec.info.version, expected, "info.version written as `{version}`");
+      }
+      let direct: oas3::Spec = yaml_serde::from_str(&format!(
+        "openapi: 3.1.0\ninfo: {{ title: true, version: {version} }}\npaths: {{}}\n"
+      ))
+      .expect("the document without a rewrite parses");
+      assert_eq!(
+        spec.info.version, direct.info.version,
+        "info.version written as `{version}` matches a document without a rewrite"
+      );
+      assert_eq!(spec.info.title, "true", "info.title written as `true`");
+      let operation = spec
+        .paths
+        .as_ref()
+        .and_then(|paths| paths.get("/pets"))
+        .and_then(|item| item.get.as_ref());
+      assert_eq!(
+        operation.and_then(|operation| operation.operation_id.as_deref()),
+        Some("listPets"),
+        "/pets is inlined from components.pathItems (version `{version}`)"
+      );
+      let lifted = spec
+        .components
+        .as_ref()
+        .and_then(|components| components.schemas.get("Holder"))
+        .and_then(SchemaInspect::as_inline)
+        .and_then(|holder| holder.properties.get("lifted"))
+        .and_then(SchemaInspect::as_inline);
+      assert!(
+        lifted.is_some(),
+        "the enum reference default is lifted (version `{version}`)"
+      );
+    }
+  }
+
+  #[test]
+  fn json_without_rewrites_matches_a_direct_parse() {
+    let json = r#"{
+      "openapi": "3.1.0",
+      "info": { "title": "t", "version": "1" },
+      "paths": { "/pets": { "get": { "operationId": "listPets", "responses": {} } } }
+    }"#;
+    let parsed = SpecFormat::Json.parse(json.as_bytes()).expect("spec parses");
+    let direct = oas3::from_json(json).expect("spec parses directly");
+    assert_eq!(
+      serde_json::to_value(&parsed).expect("serializes"),
+      serde_json::to_value(&direct).expect("serializes"),
+      "a document with no rewrite parses to the same spec as oas3 reads it directly"
+    );
+  }
+
+  #[test]
+  fn union_reference_defaults_are_lifted() {
+    let yaml = "
+openapi: 3.1.0
+info: { title: t, version: '1' }
+components:
+  schemas:
+    Circle: { type: object, properties: { r: { type: number } } }
+    Square: { type: object, properties: { s: { type: number } } }
+    Shape:
+      oneOf: [{ $ref: '#/components/schemas/Circle' }, { $ref: '#/components/schemas/Square' }]
+    Drawing:
+      type: object
+      properties:
+        shape: { $ref: '#/components/schemas/Shape', default: { s: 2 } }
+";
+    let spec = SpecFormat::Yaml.parse(yaml.as_bytes()).expect("spec parses");
+    let drawing = spec
+      .components
+      .as_ref()
+      .and_then(|components| components.schemas.get("Drawing"))
+      .and_then(SchemaInspect::as_inline)
+      .expect("Drawing is inline");
+    let shape = drawing
+      .properties
+      .get("shape")
+      .and_then(SchemaInspect::as_inline)
+      .expect("a union reference with a default becomes an inline wrapper");
+    assert_eq!(shape.default, Some(serde_json::json!({ "s": 2 })), "lifted default");
+    assert_eq!(shape.all_of.len(), 1, "the lifted wrapper references the union");
   }
 
   #[test]
