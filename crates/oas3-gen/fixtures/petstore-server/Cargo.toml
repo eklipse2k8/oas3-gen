@@ -23,5 +23,5 @@ secrecy = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_with = { version = "3.24", features = ["base64", "chrono", "indexmap_2"] }
-uuid = { version = "1.26", features = ["serde"] }
+uuid = { version = "1.28", features = ["serde"] }
 validator = { version = "0.21", features = ["derive", "indexmap"] }

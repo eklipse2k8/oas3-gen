@@ -190,7 +190,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
   DependencySpec {
     ident: "uuid",
     package: "uuid",
-    version: "1.26",
+    version: "1.28",
     features: &["serde"],
     ordered_features: &[],
     referenced_features: &[],
