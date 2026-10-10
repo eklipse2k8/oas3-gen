@@ -78,7 +78,7 @@ percent-encoding = { version = "2.3" }
 petgraph = { version = "0.8" }
 prettyplease = { version = "0.3" }
 proc-macro2 = { version = "1.0" }
-proptest = { version = "1.11" }
+proptest = { version = "1.12" }
 quick-xml = { version = ">=0.38", default-features = false }
 quote = { version = "1.0" }
 regex = { version = "1.13" }
