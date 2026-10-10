@@ -1294,6 +1294,66 @@ fn test_bool_and_mixed_value_enum_serde() {
 }
 
 #[test]
+fn test_mixed_value_enum_text_arms_match_parsed_values() {
+  let variants = [
+    json!("auto"),
+    json!(1),
+    json!(-1),
+    json!(0.5),
+    json!(0.000_001),
+    json!(true),
+  ]
+  .map(|value| {
+    VariantDef::builder()
+      .value(&value)
+      .expect("supported enum value")
+      .content(VariantContent::Unit)
+      .build()
+  });
+  let cases = [
+    (
+      false,
+      vec![
+        "serde_json :: Value :: String (s) if s == \"true\" => Ok (Self :: True) ,",
+        "serde_json :: Value :: String (s) if s . parse :: < i64 > () . ok () == Some (1i64) => Ok (Self :: Value1) ,",
+        "serde_json :: Value :: String (s) if s . parse :: < i64 > () . ok () == Some (- 1i64) => Ok (Self :: Value_1) ,",
+        "serde_json :: Value :: String (s) if s . parse :: < f64 > () . ok () . map (f64 :: to_bits) == Some ((0.5f64) . to_bits ()) => Ok (Self :: Value0_5) ,",
+        "serde_json :: Value :: String (s) if s . parse :: < f64 > () . ok () . map (f64 :: to_bits) == Some ((0.000_001f64) . to_bits ()) => Ok (Self :: Value0_000001) ,",
+      ],
+    ),
+    (
+      true,
+      vec!["serde_json :: Value :: String (s) if s . eq_ignore_ascii_case (\"true\") => Ok (Self :: True) ,"],
+    ),
+  ];
+
+  for (case_insensitive, expected) in cases {
+    let def = EnumDef {
+      scalar_repr: Some(RustPrimitive::Value),
+      case_insensitive,
+      ..make_simple_enum("Choice", variants.to_vec())
+    };
+    let code = EnumFragment::new(&def, Visibility::Public)
+      .into_token_stream()
+      .to_string();
+
+    for pattern in &expected {
+      assert!(
+        code.contains(pattern),
+        "case_insensitive={case_insensitive}: expected `{pattern}`\n{code}"
+      );
+    }
+    for canonical in ["\"1\"", "\"0.5\"", "\"true\""] {
+      let pattern = format!("matches ! (s . as_str () , {canonical})");
+      assert!(
+        !code.contains(&pattern),
+        "case_insensitive={case_insensitive}: text arms must compare parsed values, not `{pattern}`\n{code}"
+      );
+    }
+  }
+}
+
+#[test]
 fn test_non_simple_enum_without_generate_display_has_no_display() {
   let def = EnumDef {
     name: EnumToken::new("StringOrNumber"),

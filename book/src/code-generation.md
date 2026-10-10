@@ -1455,9 +1455,10 @@ impl<'de> serde::Deserialize<'de> for Toggle {
 ```
 
 When the listed values mix JSON types, as in the petstore's `ResponseQuality`
-schema, `"enum": ["auto", 1, 0.5, true]`, each variant writes its own type, and
-the deserializer reads a [`serde_json::Value`][rustdoc-serde-json-value] and
-matches it against every listed value:
+schema, `"enum": ["auto", 1, 0.5, true, 1e-6, 1e21, 18446744073709552000]`, each
+variant writes its own type, and the deserializer reads a
+[`serde_json::Value`][rustdoc-serde-json-value] and matches it against every
+listed value:
 
 ```rust
 impl serde::Serialize for ResponseQuality {
@@ -1475,10 +1476,19 @@ impl serde::Serialize for ResponseQuality {
 }
 ```
 
-`ResponseQuality::Value1` reads only the JSON number `1`, so the string `"1"`
-is rejected with a decoding error. A declared `type` takes precedence over the
-listed values. With `"type": "string"`, every value is read and written as a
-string.
+`ResponseQuality::Value1` reads the JSON number `1`. Query strings and path
+segments hand every value over as a string, so a numeric or boolean variant also
+reads a string that parses to its value: `1` selects `Value1`, `0.5` selects
+`Value0_5`, and `1e-6` selects the variant for `0.000001`. Boolean text matches
+exactly, or case-insensitively under
+[`--enum-mode relaxed`](#example---enum-mode-relaxed), where `TRUE` selects
+`True`. Listed strings are tried first, so in `["1", 1]` the string `"1"` selects
+the string variant while the number `1` still selects the number variant. This
+applies to JSON too: when the enum doesn't list the string `"1"`, the JSON string
+`"1"` decodes to the number variant.
+
+A declared `type` takes precedence over the listed values. With
+`"type": "string"`, every value is read and written as a string.
 
 ## Discriminated Unions
 

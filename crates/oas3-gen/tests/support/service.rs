@@ -56,6 +56,7 @@ pub enum Received {
   GetChatPreference(server::GetChatPreferenceRequest),
   UpdateChatPreference(server::UpdateChatPreferenceRequest),
   UpdateAssistantSettings(server::UpdateAssistantSettingsRequest),
+  EchoResponseQuality(server::EchoResponseQualityRequest),
   GetInventory(server::GetInventoryRequest),
   PlaceOrder(server::PlaceOrderRequest),
   GetOrderById(server::GetOrderByIdRequest),
@@ -1275,6 +1276,19 @@ impl server::ApiServer for PetstoreService {
   async fn trace_health(&self, request: server::TraceHealthRequest) -> Response<String> {
     self.record(Received::TraceHealth(request));
     Ok(server::ApiResponse::Ok("TRACE /health".to_string()))
+  }
+
+  async fn echo_response_quality(
+    &self,
+    request: server::EchoResponseQualityRequest,
+  ) -> Response<server::ResponseQuality> {
+    let quality = request
+      .query
+      .boost
+      .clone()
+      .unwrap_or_else(|| request.path.quality.clone());
+    self.record(Received::EchoResponseQuality(request));
+    Ok(server::ApiResponse::Ok(quality))
   }
 
   async fn adopt_pet_status_changed(&self, request: server::AdoptPetStatusChangedRequest) -> Response<()> {

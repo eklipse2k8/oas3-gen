@@ -18,19 +18,20 @@ use super::types::{
   AdoptPetRequest, Adoption, AdoptionFeedEvent, AllowHeaders, ApiKey, ApiResponse, AssistantEventList,
   AssistantSettings, AssistantTokenFrame, Carrier200Response, Cats, ChatPreference, ContentResponse,
   ContentResponseOrAssistantEventFrameStream, CreateApiKeyRequest, CreatePetRequest, DeleteOrderRequest,
-  DeletePetRequest, DescribePetsRequest, ETagAndXCacheHeaders, ETagHeaders, Error, ErrorOrProblem, ErrorResponse,
-  GetAdoptionRequest, GetApiKeyRequest, GetChatPreferenceRequest, GetHealthRequest, GetInventoryRequest,
-  GetMediaBothRequest, GetOrderByIdRequest, GetPetCardRequest, GetPetLineageRequest, GetPetPhotoRequest, IntakeForm,
-  Inventory, Key200Response, Lineage, ListApiKeysRequest, ListAssistantEventsRequest, ListAuditEventsRequest,
-  ListCarriersRequest, ListCatsRequest, ListPetsRequest, ListVaccinationsRequest, LocationHeaders, MediaLabels,
-  MediaReceipt, Order, Pet, PetExistsRequest, PetOrPetStream, Pets, PlaceOrderRequest, Problem,
-  RecordVaccinationRequest, ReplaceApiKeyRequest, ReplacePetPhotoRequest, RevokeApiKeyRequest, SearchPetsRequest,
-  SearchResults, SendAssistantMessageRequest, SetPetNotesRequest, ShowPetByIdRequest, StreamAdoptionFeedRequest,
-  StreamAssistantMessageRequest, StreamAssistantTokensRequest, StreamPetVitalsRequest, SubmitCollarTelemetryRequest,
-  SubmitIntakeFormRequest, SubmitMediaLabelsRequest, SubmitTalliesRequest, SubscribeNewsletterRequest, Subscription,
-  Tallies, TelemetryReceipt, TraceHealthRequest, UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest,
-  UpdateChatPreferenceRequest, UpdatePetRequest, UploadMediaRequest, UploadPetImageRequest, Vaccination200Response,
-  VaccineRecord, VitalsReading, WithHeaders, X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
+  DeletePetRequest, DescribePetsRequest, ETagAndXCacheHeaders, ETagHeaders, EchoResponseQualityRequest, Error,
+  ErrorOrProblem, ErrorResponse, GetAdoptionRequest, GetApiKeyRequest, GetChatPreferenceRequest, GetHealthRequest,
+  GetInventoryRequest, GetMediaBothRequest, GetOrderByIdRequest, GetPetCardRequest, GetPetLineageRequest,
+  GetPetPhotoRequest, IntakeForm, Inventory, Key200Response, Lineage, ListApiKeysRequest, ListAssistantEventsRequest,
+  ListAuditEventsRequest, ListCarriersRequest, ListCatsRequest, ListPetsRequest, ListVaccinationsRequest,
+  LocationHeaders, MediaLabels, MediaReceipt, Order, Pet, PetExistsRequest, PetOrPetStream, Pets, PlaceOrderRequest,
+  Problem, RecordVaccinationRequest, ReplaceApiKeyRequest, ReplacePetPhotoRequest, ResponseQuality,
+  RevokeApiKeyRequest, SearchPetsRequest, SearchResults, SendAssistantMessageRequest, SetPetNotesRequest,
+  ShowPetByIdRequest, StreamAdoptionFeedRequest, StreamAssistantMessageRequest, StreamAssistantTokensRequest,
+  StreamPetVitalsRequest, SubmitCollarTelemetryRequest, SubmitIntakeFormRequest, SubmitMediaLabelsRequest,
+  SubmitTalliesRequest, SubscribeNewsletterRequest, Subscription, Tallies, TelemetryReceipt, TraceHealthRequest,
+  UnsubscribeNewsletterRequest, UpdateAssistantSettingsRequest, UpdateChatPreferenceRequest, UpdatePetRequest,
+  UploadMediaRequest, UploadPetImageRequest, Vaccination200Response, VaccineRecord, VitalsReading, WithHeaders,
+  X_API_KEY, XNextAndXTotalCountAndXRequestIdHeaders, XNextHeaders,
 };
 pub const BASE_URL: &str = "https://api.petstore.example/v3";
 #[derive(Clone)]
@@ -850,6 +851,36 @@ impl PetstoreClient {
     }
     let response = req_builder.send().await?;
     UpdateAssistantSettingsRequest::parse_response(response).await
+  }
+  /// Echo a response quality sent in the path and an optional boost sent in the query
+  ///
+  /// * Path: `GET /assistant/quality/{quality}`
+  pub async fn echo_response_quality(
+    &self,
+    request: EchoResponseQualityRequest,
+  ) -> anyhow::Result<ApiResponse<ResponseQuality, ()>> {
+    request.validate().context("parameter validation")?;
+    let mut url = self.base_url.clone();
+    url
+      .path_segments_mut()
+      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+      .push("assistant")
+      .push("quality")
+      .push(&request.path.quality.to_string());
+    serde::Serialize::serialize(
+      &request.query,
+      serde_html_form::Serializer::new(&mut url.query_pairs_mut()),
+    )
+    .context("encoding query parameters")?;
+    if url.query() == Some("") {
+      url.set_query(None);
+    }
+    let mut req_builder = self.client.get(url);
+    if let Some(api_key) = &self.api_key_auth {
+      req_builder = req_builder.header(X_API_KEY, secrecy::ExposeSecret::expose_secret(api_key));
+    }
+    let response = req_builder.send().await?;
+    EchoResponseQualityRequest::parse_response(response).await
   }
   /// Count available pets by species
   ///

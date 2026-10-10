@@ -1426,3 +1426,59 @@ fn arbitrary_assistant_settings_round_trip() {
     })?;
   });
 }
+
+/// The server echoes `boost`, or the path value when `boost` is absent.
+#[rstest]
+#[case::path_auto(client::ResponseQuality::Auto, None)]
+#[case::path_integer(client::ResponseQuality::Value1, None)]
+#[case::path_float(client::ResponseQuality::Value0_5, None)]
+#[case::path_boolean(client::ResponseQuality::True, None)]
+#[case::query_auto(client::ResponseQuality::Value1, Some(client::ResponseQuality::Auto))]
+#[case::query_integer(client::ResponseQuality::Auto, Some(client::ResponseQuality::Value1))]
+#[case::query_float(client::ResponseQuality::Auto, Some(client::ResponseQuality::Value0_5))]
+#[case::query_boolean(client::ResponseQuality::Auto, Some(client::ResponseQuality::True))]
+#[case::query_tiny_float(client::ResponseQuality::Auto, Some(client::ResponseQuality::Value0_000001))]
+#[case::query_huge_integer(
+  client::ResponseQuality::Auto,
+  Some(client::ResponseQuality::Value1000000000000000000000)
+)]
+#[case::query_large_float(
+  client::ResponseQuality::Auto,
+  Some(client::ResponseQuality::Value18446744073709552000)
+)]
+#[tokio::test]
+async fn mixed_enum_values_round_trip_through_path_and_query(
+  #[future(awt)] petstore: Petstore,
+  #[case] path: client::ResponseQuality,
+  #[case] boost: Option<client::ResponseQuality>,
+) {
+  let expected = boost.clone().unwrap_or_else(|| path.clone());
+  let request = client::EchoResponseQualityRequest::builder()
+    .quality(path.clone())
+    .maybe_boost(boost.clone())
+    .build()
+    .expect("the request builds");
+  let client::ApiResponse::Ok(echoed) = petstore
+    .client
+    .echo_response_quality(request)
+    .await
+    .expect("the request completes")
+  else {
+    panic!("echoResponseQuality answers 200 for path {path:?} and boost {boost:?}");
+  };
+
+  let Some(Received::EchoResponseQuality(seen)) = petstore.service.last_received() else {
+    panic!("the server did not record an echoResponseQuality request");
+  };
+  assert_eq!(
+    to_json(&seen.path.quality),
+    to_json(&path),
+    "the path value crosses the wire as sent"
+  );
+  assert_eq!(
+    to_json(&seen.query.boost),
+    to_json(&boost),
+    "the query value crosses the wire as sent"
+  );
+  assert_eq!(echoed, expected, "path {path:?}, boost {boost:?}");
+}

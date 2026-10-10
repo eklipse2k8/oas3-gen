@@ -835,6 +835,34 @@
         }
       }
     },
+    "/assistant/quality/{quality}": {
+      "get": {
+        "operationId": "echoResponseQuality",
+        "tags": ["assistant"],
+        "summary": "Echo a response quality sent in the path and an optional boost sent in the query",
+        "parameters": [
+          {
+            "name": "quality",
+            "in": "path",
+            "required": true,
+            "schema": { "$ref": "#/components/schemas/ResponseQuality" }
+          },
+          {
+            "name": "boost",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/ResponseQuality" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The boost when one is sent, otherwise the path quality",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ResponseQuality" } }
+            }
+          }
+        }
+      }
+    },
     "/store/inventory": {
       "get": {
         "operationId": "getInventory",
@@ -2582,7 +2610,7 @@
       },
       "ResponseQuality": {
         "description": "Enum mixing a string, numbers, and a boolean",
-        "enum": ["auto", 1, 0.5, true]
+        "enum": ["auto", 1, 0.5, true, 1e-6, 1e21, 18446744073709552000]
       },
       "Priority": {
         "description": "Integer enum without a declared type",

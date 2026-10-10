@@ -17,7 +17,7 @@ use petstore_client::{self as client, ApiResponse, PetstoreClient, WithHeaders};
 use rstest::rstest;
 use support::{API_KEY, API_VERSION, COMPATIBILITY_DATE, Petstore, QUERY_KEY, SESSION, STAFF_TOKEN, now, petstore};
 
-const OPERATIONS: [&str; 52] = [
+const OPERATIONS: [&str; 53] = [
   "AdoptPet",
   "AdoptPetStatusChanged",
   "CreateApiKey",
@@ -25,6 +25,7 @@ const OPERATIONS: [&str; 52] = [
   "DeleteOrder",
   "DeletePet",
   "DescribePets",
+  "EchoResponseQuality",
   "GetAdoption",
   "GetApiKey",
   "GetChatPreference",
@@ -117,6 +118,19 @@ async fn every_operation_answers_with_its_declared_success(#[future(awt)] petsto
   };
   assert_eq!(headers.location, format!("/pets/{}", pet.id));
   let pet_id = pet.id;
+
+  let ApiResponse::Ok(echoed) = pets
+    .echo_response_quality(
+      client::EchoResponseQualityRequest::builder()
+        .quality(client::ResponseQuality::Value1)
+        .boost(client::ResponseQuality::True)
+        .build()?,
+    )
+    .await?
+  else {
+    panic!("echoResponseQuality answers 200");
+  };
+  assert_eq!(echoed, client::ResponseQuality::True);
 
   let ApiResponse::Ok(WithHeaders { body: listed, .. }) = pets
     .list_pets(

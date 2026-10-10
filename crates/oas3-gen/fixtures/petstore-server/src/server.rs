@@ -24,7 +24,8 @@ use super::types::{
   AssistantTokenFrame, BearerAuthAndTokenAuthCredentials, Carrier200Response, Cats, ChatPreference, CollarTelemetry,
   ContentRequest, ContentResponse, ContentResponseOrAssistantEventFrameStream, CreateApiKeyRequest, CreatePetRequest,
   DeleteOrderRequest, DeleteOrderRequestPath, DeletePetRequest, DeletePetRequestPath, DescribePetsRequest,
-  ETagAndXCacheHeaders, ETagHeaders, Error, ErrorOrProblem, ErrorResponse, GetAdoptionRequest, GetAdoptionRequestPath,
+  ETagAndXCacheHeaders, ETagHeaders, EchoResponseQualityRequest, EchoResponseQualityRequestPath,
+  EchoResponseQualityRequestQuery, Error, ErrorOrProblem, ErrorResponse, GetAdoptionRequest, GetAdoptionRequestPath,
   GetApiKeyRequest, GetApiKeyRequestPath, GetChatPreferenceRequest, GetHealthRequest, GetInventoryRequest,
   GetMediaBothRequest, GetOrderByIdRequest, GetOrderByIdRequestPath, GetPetCardRequest, GetPetCardRequestCookie,
   GetPetCardRequestPath, GetPetLineageRequest, GetPetLineageRequestPath, GetPetLineageRequestQuery, GetPetPhotoRequest,
@@ -36,7 +37,7 @@ use super::types::{
   MediaReceipt, MediumRequestBody, NewApiKey, NewPet, NewsletterOptOut, NewsletterSignup, Order, Pet,
   PetAdoptedRequest, PetExistsRequest, PetExistsRequestPath, PetOrPetStream, PetPatch, Pets, PlaceOrderRequest,
   Problem, QueryKeyAndSessionCookieCredentials, RecordVaccinationRequest, RecordVaccinationRequestPath,
-  ReplaceApiKeyRequest, ReplaceApiKeyRequestPath, ReplacePetPhotoRequest, ReplacePetPhotoRequestPath,
+  ReplaceApiKeyRequest, ReplaceApiKeyRequestPath, ReplacePetPhotoRequest, ReplacePetPhotoRequestPath, ResponseQuality,
   RevokeApiKeyRequest, RevokeApiKeyRequestPath, SearchPetsRequest, SearchPetsRequestQuery, SearchResults,
   SendAssistantMessageRequest, SetPetNotesRequest, SetPetNotesRequestPath, ShowPetByIdRequest,
   ShowPetByIdRequestHeader, ShowPetByIdRequestPath, StreamAdoptionFeedRequest, StreamAdoptionFeedRequestQuery,
@@ -266,6 +267,13 @@ pub trait ApiServer: Send + Sync {
     &self,
     request: UpdateAssistantSettingsRequest,
   ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<AssistantSettings, ()>>> + Send;
+  /// Echo a response quality sent in the path and an optional boost sent in the query
+  ///
+  /// * Path: `GET /assistant/quality/{quality}`
+  fn echo_response_quality(
+    &self,
+    request: EchoResponseQualityRequest,
+  ) -> impl std::future::Future<Output = anyhow::Result<ApiResponse<ResponseQuality, ()>>> + Send;
   /// Count available pets by species
   ///
   /// * Path: `GET /store/inventory`
@@ -2838,6 +2846,41 @@ where
       .into_response(),
   }
 }
+pub async fn echo_response_quality<S>(
+  State(service): State<S>,
+  credentials: ApiKeyAuthCredentials2,
+  Path(path): Path<EchoResponseQualityRequestPath>,
+  axum_extra::extract::Query(query): axum_extra::extract::Query<EchoResponseQualityRequestQuery>,
+) -> impl IntoResponse
+where
+  S: ApiServer + Clone + Send + Sync + 'static,
+{
+  let request = EchoResponseQualityRequest {
+    path,
+    query,
+    credentials,
+  };
+  let result: anyhow::Result<ApiResponse<ResponseQuality, ()>> = service.echo_response_quality(request).await;
+  match result {
+    Ok(ApiResponse::Ok(body)) => (http::StatusCode::OK, axum::Json(body)).into_response(),
+    Ok(ApiResponse::Created(body)) => (http::StatusCode::CREATED, axum::Json(body)).into_response(),
+    Ok(ApiResponse::Accepted(body)) => (http::StatusCode::ACCEPTED, axum::Json(body)).into_response(),
+    Ok(ApiResponse::NoContent(body)) => (http::StatusCode::NO_CONTENT, axum::Json(body)).into_response(),
+    Ok(ApiResponse::NotModified) => http::StatusCode::NOT_MODIFIED.into_response(),
+    Ok(ApiResponse::BadRequest(())) => http::StatusCode::BAD_REQUEST.into_response(),
+    Ok(ApiResponse::Unauthorized(())) => http::StatusCode::UNAUTHORIZED.into_response(),
+    Ok(ApiResponse::NotFound(())) => http::StatusCode::NOT_FOUND.into_response(),
+    Ok(ApiResponse::Conflict(())) => http::StatusCode::CONFLICT.into_response(),
+    Ok(ApiResponse::UnprocessableEntity(())) => http::StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+    Ok(ApiResponse::ClientError(status, ()) | ApiResponse::Unknown(status, ())) => status.into_response(),
+    Ok(ApiResponse::Other(status, body)) => (status, body).into_response(),
+    Err(e) => (
+      axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+      format!("Internal error: {e}"),
+    )
+      .into_response(),
+  }
+}
 pub async fn get_inventory<S>(State(service): State<S>, credentials: ApiKeyAuthCredentials2) -> impl IntoResponse
 where
   S: ApiServer + Clone + Send + Sync + 'static,
@@ -4152,6 +4195,10 @@ where
     .route(
       "/assistant/settings",
       axum::routing::put(update_assistant_settings::<S>),
+    )
+    .route(
+      "/assistant/quality/{quality}",
+      axum::routing::get(echo_response_quality::<S>),
     )
     .route("/store/inventory", axum::routing::get(get_inventory::<S>))
     .route("/store/orders", axum::routing::post(place_order::<S>))

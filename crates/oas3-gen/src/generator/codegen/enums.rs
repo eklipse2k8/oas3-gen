@@ -744,6 +744,29 @@ enum MixedLiteral {
   String,
 }
 
+/// `f64` literal with the digit separators `clippy::unreadable_literal` asks for. `f64`
+/// display never uses exponent notation.
+fn float_literal(value: f64) -> Literal {
+  let sign = if value.is_sign_negative() { "-" } else { "" };
+  let digits = value.abs().to_string();
+  let (integer, fraction) = digits.split_once('.').unwrap_or((digits.as_str(), ""));
+  let integer = integer
+    .as_bytes()
+    .rchunks(3)
+    .rev()
+    .map(String::from_utf8_lossy)
+    .join("_");
+  let fraction = fraction.as_bytes().chunks(3).map(String::from_utf8_lossy).join("_");
+  let text = if fraction.is_empty() {
+    format!("{sign}{integer}f64")
+  } else {
+    format!("{sign}{integer}.{fraction}f64")
+  };
+  text
+    .parse()
+    .expect("a decimal f64 with digit separators is a valid literal")
+}
+
 impl From<&VariantDef> for MixedLiteral {
   fn from(variant: &VariantDef) -> Self {
     let raw = variant.serde_name();
@@ -761,7 +784,9 @@ impl From<&VariantDef> for MixedLiteral {
 }
 
 /// `Serialize` and `Deserialize` for a value enum whose values mix JSON types, such
-/// as `"auto"`, `1`, and `true`. Each variant reads and writes its own JSON type.
+/// as `"auto"`, `1`, and `true`. Each variant reads and writes its own JSON type. Numeric
+/// and boolean variants also match a string that parses to their value, since query
+/// strings and path segments send every value as text.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MixedEnumSerdeImplFragment<'a>(&'a EnumDef);
 
@@ -779,7 +804,7 @@ impl<'a> MixedEnumSerdeImplFragment<'a> {
         quote! { serializer.serialize_i64(#value) }
       }
       MixedLiteral::Float(value) => {
-        let value = Literal::f64_suffixed(value);
+        let value = float_literal(value);
         quote! { serializer.serialize_f64(#value) }
       }
       MixedLiteral::String => {
@@ -799,7 +824,7 @@ impl<'a> MixedEnumSerdeImplFragment<'a> {
         quote! { serde_json::Value::Number(n) if n.as_i64() == Some(#value) }
       }
       MixedLiteral::Float(value) => {
-        let value = Literal::f64_suffixed(value);
+        let value = float_literal(value);
         quote! { serde_json::Value::Number(n) if n.as_f64().map(f64::to_bits) == Some((#value).to_bits()) }
       }
       MixedLiteral::String => {
@@ -823,6 +848,30 @@ impl<'a> MixedEnumSerdeImplFragment<'a> {
     };
     quote! { #pattern => Ok(Self::#variant_name), }
   }
+
+  fn text_arm(self, variant: &VariantDef) -> Option<TokenStream> {
+    let matches_text = match MixedLiteral::from(variant) {
+      MixedLiteral::Bool(value) => {
+        let text = value.to_string();
+        if self.0.case_insensitive {
+          quote! { s.eq_ignore_ascii_case(#text) }
+        } else {
+          quote! { s == #text }
+        }
+      }
+      MixedLiteral::Integer(value) => {
+        let value = Literal::i64_suffixed(value);
+        quote! { s.parse::<i64>().ok() == Some(#value) }
+      }
+      MixedLiteral::Float(value) => {
+        let value = float_literal(value);
+        quote! { s.parse::<f64>().ok().map(f64::to_bits) == Some((#value).to_bits()) }
+      }
+      MixedLiteral::String => return None,
+    };
+    let variant_name = &variant.name;
+    Some(quote! { serde_json::Value::String(s) if #matches_text => Ok(Self::#variant_name), })
+  }
 }
 
 impl ToTokens for MixedEnumSerdeImplFragment<'_> {
@@ -830,6 +879,7 @@ impl ToTokens for MixedEnumSerdeImplFragment<'_> {
     let name = &self.0.name;
     let serialize_arms = self.0.variants.iter().map(Self::serialize_arm);
     let deserialize_arms = self.0.variants.iter().map(|v| self.deserialize_arm(v));
+    let text_arms = self.0.variants.iter().filter_map(|v| self.text_arm(v));
     let expected = self.0.variants.iter().map(VariantDef::serde_name).join(", ");
 
     tokens.extend(quote! {
@@ -852,6 +902,7 @@ impl ToTokens for MixedEnumSerdeImplFragment<'_> {
           let value = serde_json::Value::deserialize(deserializer)?;
           match &value {
             #(#deserialize_arms)*
+            #(#text_arms)*
             _ => Err(serde::de::Error::custom(format!("unknown variant {}, expected one of: {}", value, #expected))),
           }
         }

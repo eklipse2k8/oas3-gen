@@ -2305,6 +2305,9 @@ pub enum ResponseQuality {
   Value1,
   Value0_5,
   True,
+  Value0_000001,
+  Value1000000000000000000000,
+  Value18446744073709552000,
 }
 impl core::fmt::Display for ResponseQuality {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -2313,6 +2316,9 @@ impl core::fmt::Display for ResponseQuality {
       Self::Value1 => write!(f, "1"),
       Self::Value0_5 => write!(f, "0.5"),
       Self::True => write!(f, "true"),
+      Self::Value0_000001 => write!(f, "0.000001"),
+      Self::Value1000000000000000000000 => write!(f, "1000000000000000000000"),
+      Self::Value18446744073709552000 => write!(f, "18446744073709552000"),
     }
   }
 }
@@ -2324,9 +2330,12 @@ impl core::str::FromStr for ResponseQuality {
       "1" => Ok(Self::Value1),
       "0.5" => Ok(Self::Value0_5),
       "true" => Ok(Self::True),
+      "0.000001" => Ok(Self::Value0_000001),
+      "1000000000000000000000" => Ok(Self::Value1000000000000000000000),
+      "18446744073709552000" => Ok(Self::Value18446744073709552000),
       _ => Err(format!(
         "unknown variant '{}', expected one of: {}",
-        s, "auto, 1, 0.5, true"
+        s, "auto, 1, 0.5, true, 0.000001, 1000000000000000000000, 18446744073709552000"
       )),
     }
   }
@@ -2341,6 +2350,9 @@ impl serde::Serialize for ResponseQuality {
       Self::Value1 => serializer.serialize_i64(1i64),
       Self::Value0_5 => serializer.serialize_f64(0.5f64),
       Self::True => serializer.serialize_bool(true),
+      Self::Value0_000001 => serializer.serialize_f64(0.000_001f64),
+      Self::Value1000000000000000000000 => serializer.serialize_f64(1_000_000_000_000_000_000_000f64),
+      Self::Value18446744073709552000 => serializer.serialize_f64(18_446_744_073_709_552_000f64),
     }
   }
 }
@@ -2355,9 +2367,40 @@ impl<'de> serde::Deserialize<'de> for ResponseQuality {
       serde_json::Value::Number(n) if n.as_i64() == Some(1i64) => Ok(Self::Value1),
       serde_json::Value::Number(n) if n.as_f64().map(f64::to_bits) == Some((0.5f64).to_bits()) => Ok(Self::Value0_5),
       serde_json::Value::Bool(true) => Ok(Self::True),
+      serde_json::Value::Number(n) if n.as_f64().map(f64::to_bits) == Some((0.000_001f64).to_bits()) => {
+        Ok(Self::Value0_000001)
+      }
+      serde_json::Value::Number(n)
+        if n.as_f64().map(f64::to_bits) == Some((1_000_000_000_000_000_000_000f64).to_bits()) =>
+      {
+        Ok(Self::Value1000000000000000000000)
+      }
+      serde_json::Value::Number(n)
+        if n.as_f64().map(f64::to_bits) == Some((18_446_744_073_709_552_000f64).to_bits()) =>
+      {
+        Ok(Self::Value18446744073709552000)
+      }
+      serde_json::Value::String(s) if s.parse::<i64>().ok() == Some(1i64) => Ok(Self::Value1),
+      serde_json::Value::String(s) if s.parse::<f64>().ok().map(f64::to_bits) == Some((0.5f64).to_bits()) => {
+        Ok(Self::Value0_5)
+      }
+      serde_json::Value::String(s) if s == "true" => Ok(Self::True),
+      serde_json::Value::String(s) if s.parse::<f64>().ok().map(f64::to_bits) == Some((0.000_001f64).to_bits()) => {
+        Ok(Self::Value0_000001)
+      }
+      serde_json::Value::String(s)
+        if s.parse::<f64>().ok().map(f64::to_bits) == Some((1_000_000_000_000_000_000_000f64).to_bits()) =>
+      {
+        Ok(Self::Value1000000000000000000000)
+      }
+      serde_json::Value::String(s)
+        if s.parse::<f64>().ok().map(f64::to_bits) == Some((18_446_744_073_709_552_000f64).to_bits()) =>
+      {
+        Ok(Self::Value18446744073709552000)
+      }
       _ => Err(serde::de::Error::custom(format!(
         "unknown variant {}, expected one of: {}",
-        value, "auto, 1, 0.5, true"
+        value, "auto, 1, 0.5, true, 0.000001, 1000000000000000000000, 18446744073709552000"
       ))),
     }
   }
@@ -3529,6 +3572,41 @@ impl UpdateAssistantSettingsRequest {
   #[builder]
   pub fn new(credentials: ApiKeyAuthCredentials2, body: AssistantSettings) -> anyhow::Result<Self> {
     let request = Self { credentials, body };
+    request.validate()?;
+    Ok(request)
+  }
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+pub struct EchoResponseQualityRequestPath {
+  /// Enum mixing a string, numbers, and a boolean
+  pub quality: ResponseQuality,
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+pub struct EchoResponseQualityRequestQuery {
+  /// Enum mixing a string, numbers, and a boolean
+  pub boost: Option<ResponseQuality>,
+}
+/// Echo a response quality sent in the path and an optional boost sent in the query
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct EchoResponseQualityRequest {
+  pub path: EchoResponseQualityRequestPath,
+  pub query: EchoResponseQualityRequestQuery,
+  pub credentials: ApiKeyAuthCredentials2,
+}
+#[bon::bon]
+impl EchoResponseQualityRequest {
+  /// Create a new request with the given parameters.
+  #[builder]
+  pub fn new(
+    quality: ResponseQuality,
+    boost: Option<ResponseQuality>,
+    credentials: ApiKeyAuthCredentials2,
+  ) -> anyhow::Result<Self> {
+    let request = Self {
+      path: EchoResponseQualityRequestPath { quality },
+      query: EchoResponseQualityRequestQuery { boost },
+      credentials,
+    };
     request.validate()?;
     Ok(request)
   }
