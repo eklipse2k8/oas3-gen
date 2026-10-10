@@ -4,7 +4,7 @@ use http::Method;
 use oas3::Spec;
 use serde_json::{Map, Value, json};
 
-use super::support::parse_spec;
+use super::support::{parse_spec, string_set};
 use crate::generator::{
   ast::OperationKind,
   naming::operations::{compute_stable_id, generate_operation_id},
@@ -296,6 +296,108 @@ fn callbacks_register_under_their_operation_and_name() {
     "a referenced callback resolves, its methods share a path in oas3's method order, and several \
      expressions are numbered"
   );
+}
+
+type FilterCase<'a> = (Option<&'a [&'a str]>, Option<&'a [&'a str]>, &'a [&'a str]);
+
+fn assert_filtered_ids(spec: &Spec, cases: &[FilterCase]) {
+  for (only, excluded, expected) in cases {
+    let only = only.map(string_set);
+    let excluded = excluded.map(string_set);
+    let registry = OperationRegistry::with_filters(spec, only.as_ref(), excluded.as_ref(), &HashMap::new());
+    assert_stable_ids(&registry, expected, &format!("only={only:?} excluded={excluded:?}"));
+  }
+}
+
+#[test]
+fn test_callbacks_follow_their_owning_operation_filters() {
+  let spec = parse_spec(
+    r#"{
+      "openapi": "3.1.0",
+      "info": {"title": "Callback Filter API", "version": "1.0.0"},
+      "paths": {
+        "/subscriptions": {
+          "post": {
+            "operationId": "createSubscription",
+            "callbacks": {
+              "onEvent": {
+                "{$request.body#/url}": { "post": { "responses": {"204": {"description": "ok"}} } }
+              }
+            },
+            "responses": {"201": {"description": "ok"}}
+          }
+        },
+        "/pets": {
+          "get": {
+            "operationId": "listPets",
+            "responses": {"200": {"description": "ok"}}
+          }
+        }
+      }
+    }"#,
+  );
+
+  let cases: [FilterCase; 6] = [
+    (
+      None,
+      None,
+      &["create_subscription", "create_subscription_on_event", "list_pets"],
+    ),
+    (
+      Some(&["create_subscription"]),
+      None,
+      &["create_subscription", "create_subscription_on_event"],
+    ),
+    (None, Some(&["create_subscription"]), &["list_pets"]),
+    (Some(&["list_pets"]), None, &["list_pets"]),
+    (
+      Some(&["create_subscription_on_event"]),
+      None,
+      &["create_subscription_on_event"],
+    ),
+    (
+      None,
+      Some(&["create_subscription_on_event"]),
+      &["create_subscription", "list_pets"],
+    ),
+  ];
+  assert_filtered_ids(&spec, &cases);
+}
+
+#[test]
+fn test_callbacks_do_not_rename_other_operations() {
+  let spec = parse_spec(
+    r#"{
+      "openapi": "3.1.0",
+      "info": {"title": "Callback Rename API", "version": "1.0.0"},
+      "paths": {
+        "/users": {
+          "get": {
+            "operationId": "getUsers",
+            "callbacks": {
+              "onChange": {
+                "{$request.body#/url}": { "post": { "responses": {"204": {"description": "ok"}} } }
+              }
+            },
+            "responses": {"200": {"description": "ok"}}
+          }
+        },
+        "/posts": {
+          "get": {
+            "operationId": "getPosts",
+            "responses": {"200": {"description": "ok"}}
+          }
+        }
+      }
+    }"#,
+  );
+
+  let cases: [FilterCase; 3] = [
+    (Some(&["get_users"]), None, &["get_users", "get_users_on_change"]),
+    (None, None, &["get_users_on_change", "posts", "users"]),
+    (Some(&["get_users_on_change"]), None, &["get_users_on_change"]),
+  ];
+  assert_filtered_ids(&spec, &cases);
 }
 
 #[test]

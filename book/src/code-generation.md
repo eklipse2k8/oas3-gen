@@ -2153,6 +2153,16 @@ The client keeps the petstore's other operations, including `list_pets()`
 and `create_pet()`, and omits `upload_pet_image()`. In `server-mod` mode, the
 flag omits that operation's trait method and route.
 
+A callback follows the operation that declares it. The petstore's `adopt_pet`
+operation declares the `statusChanged` callback, which `server-mod` generates as
+`adopt_pet_status_changed`. In `server-mod`, `--only adopt_pet` keeps that
+callback's route and trait method, and `--exclude adopt_pet` removes them.
+
+You can also name a callback by its own normalized `snake_case` ID.
+`--only adopt_pet_status_changed` keeps only the callback, and
+`--exclude adopt_pet_status_changed` removes only the callback while
+`adopt_pet` stays.
+
 ### Schema Dependency Resolution
 
 Filtering an operation also filters the types needed to use it. The generator
