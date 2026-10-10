@@ -6,10 +6,7 @@ use oas3::{Spec, spec::ObjectSchema};
 
 use super::identifiers::{FORBIDDEN_IDENTIFIERS, ensure_unique, to_rust_type_name};
 use crate::{
-  generator::{
-    converter::{hashing::CanonicalSchema, union_types::variants_to_cache_key},
-    naming::constants::KNOWN_ENUM_VARIANT,
-  },
+  generator::converter::{hashing::CanonicalSchema, union_types::variants_to_cache_key},
   utils::{SchemaExt, SchemaInspect, SchemaMap},
 };
 
@@ -112,13 +109,9 @@ impl<'a> TypeNameIndex<'a> {
   fn collect_top_level_candidates(&self, schema_name: &str, schema: &ObjectSchema) -> CandidateIndex {
     let mut index = CandidateIndex::default();
 
-    if schema.should_register_as_enum() {
+    if schema.has_enum_values() {
       let entries = schema.extract_enum_entries(self.spec);
-      let mut rust_name = to_rust_type_name(schema_name);
-      if schema.has_relaxed_anyof_enum() {
-        rust_name.push_str(KNOWN_ENUM_VARIANT);
-      }
-      index.add_enum_candidate(variants_to_cache_key(&entries), rust_name, true);
+      index.add_enum_candidate(variants_to_cache_key(&entries), to_rust_type_name(schema_name), true);
     }
 
     index
@@ -138,7 +131,7 @@ impl<'a> TypeNameIndex<'a> {
         let canonical = CanonicalSchema::from_schema(prop_schema)?;
         let rust_name = to_rust_type_name(&next_parent);
 
-        let enum_cache_key = if prop_schema.should_register_as_enum() {
+        let enum_cache_key = if prop_schema.has_enum_values() {
           let entries = prop_schema.extract_enum_entries(self.spec);
           let key = variants_to_cache_key(&entries);
           index.add_enum_candidate(key.clone(), rust_name.clone(), false);

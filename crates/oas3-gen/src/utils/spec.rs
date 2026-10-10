@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, ffi::OsStr, path::Path};
+use std::{
+  collections::{BTreeMap, HashSet},
+  ffi::OsStr,
+  path::Path,
+};
 
 use fmmap::tokio::{AsyncMmapFile, AsyncMmapFileExt};
 use oas3::{
@@ -9,6 +13,7 @@ use serde::{
   Deserialize,
   de::{DeserializeOwned, IgnoredAny},
 };
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpecFormat {
@@ -27,9 +32,14 @@ impl SpecFormat {
   }
 
   /// Parses a document, keeping the operations that clear the top-level `security`
-  /// with an empty array public.
+  /// with an empty array public, and the `default` a property sets next to its `$ref`.
   pub fn parse(self, content: &[u8]) -> anyhow::Result<oas3::Spec> {
-    let mut spec = self.deserialize::<OpenApiV3Spec>(content)?;
+    let mut document = self.deserialize::<Value>(content)?;
+    let mut spec = if RefSiblingDefaults::lift(&mut document) {
+      serde_json::from_value::<OpenApiV3Spec>(document)?
+    } else {
+      self.deserialize::<OpenApiV3Spec>(content)?
+    };
     if !spec.security.is_empty() {
       self.deserialize::<SecurityOverrides>(content)?.apply(&mut spec);
     }
@@ -63,6 +73,88 @@ impl SpecLoader {
 
   pub fn parse(&self) -> anyhow::Result<oas3::Spec> {
     self.format.parse(self.file.as_slice())
+  }
+}
+
+/// Property schemas in the raw document that set a `default` next to their `$ref`.
+///
+/// `oas3` keeps only `$ref`, `summary`, and `description` from a reference, so the
+/// `default` would be lost. [`RefSiblingDefaults::lift`] rewrites each such property
+/// into `{ "allOf": [{ "$ref": ... }], "default": ... }`, which survives parsing. It
+/// only lifts references to `enum`, `const`, and union components, whose variants
+/// the default can name.
+struct RefSiblingDefaults {
+  targets: HashSet<String>,
+  lifted: bool,
+}
+
+impl RefSiblingDefaults {
+  /// Keywords whose values map names to schemas, so every value is visited as a schema.
+  const SCHEMA_MAPS: [&'static str; 5] = ["schemas", "properties", "patternProperties", "$defs", "definitions"];
+  /// Keywords whose values are example or constraint data, never schemas.
+  const DATA_KEYWORDS: [&'static str; 4] = ["example", "examples", "enum", "const"];
+
+  /// Rewrites the properties of `document`, returning `true` when any changed.
+  fn lift(document: &mut Value) -> bool {
+    let targets = document
+      .pointer("/components/schemas")
+      .and_then(Value::as_object)
+      .into_iter()
+      .flatten()
+      .filter(|(_, schema)| {
+        ["enum", "const", "anyOf", "oneOf"]
+          .iter()
+          .any(|keyword| schema.get(keyword).is_some())
+      })
+      .map(|(name, _)| format!("#/components/schemas/{}", name.replace('~', "~0").replace('/', "~1")))
+      .collect();
+
+    let mut pass = Self { targets, lifted: false };
+    if !pass.targets.is_empty() {
+      pass.visit(document);
+    }
+    pass.lifted
+  }
+
+  fn visit(&mut self, value: &mut Value) {
+    match value {
+      Value::Object(map) => {
+        for (keyword, child) in map.iter_mut() {
+          if Self::SCHEMA_MAPS.contains(&keyword.as_str())
+            && let Some(schemas) = child.as_object_mut()
+          {
+            for schema in schemas.values_mut() {
+              if keyword == "properties" {
+                self.lift_property(schema);
+              }
+              self.visit(schema);
+            }
+          } else if !keyword.starts_with("x-") && !Self::DATA_KEYWORDS.contains(&keyword.as_str()) {
+            self.visit(child);
+          }
+        }
+      }
+      Value::Array(items) => items.iter_mut().for_each(|item| self.visit(item)),
+      _ => {}
+    }
+  }
+
+  fn lift_property(&mut self, property: &mut Value) {
+    let Some(schema) = property.as_object_mut() else {
+      return;
+    };
+    let is_lifted = schema.contains_key("default")
+      && schema
+        .get("$ref")
+        .and_then(Value::as_str)
+        .is_some_and(|target| self.targets.contains(target));
+    if is_lifted && let Some(reference) = schema.remove("$ref") {
+      schema.insert(
+        "allOf".to_string(),
+        Value::Array(vec![serde_json::json!({ "$ref": reference })]),
+      );
+      self.lifted = true;
+    }
   }
 }
 
@@ -158,6 +250,87 @@ fn operations_mut(item: &mut PathItem) -> [&mut Option<Operation>; 8] {
 #[cfg(test)]
 mod tests {
   use super::SpecFormat;
+  use crate::utils::SchemaInspect;
+
+  #[test]
+  fn ref_sibling_defaults_survive_parsing() {
+    let json = r##"{
+      "openapi": "3.1.0",
+      "info": { "title": "t", "version": "1" },
+      "components": {
+        "schemas": {
+          "Closed": { "type": "string", "enum": ["a", "b"] },
+          "Cfg": { "type": "object", "properties": { "n": { "type": "integer" } } },
+          "Holder": {
+            "type": "object",
+            "example": { "properties": { "x": { "$ref": "#/components/schemas/Closed", "default": "a" } } },
+            "properties": {
+              "lifted": { "$ref": "#/components/schemas/Closed", "default": "a", "description": "kept" },
+              "struct": { "$ref": "#/components/schemas/Cfg", "default": {} },
+              "plain": { "$ref": "#/components/schemas/Closed" }
+            }
+          }
+        }
+      }
+    }"##;
+    let yaml = "
+openapi: 3.1.0
+info: { title: t, version: '1' }
+components:
+  schemas:
+    Closed: { type: string, enum: [a, b] }
+    Cfg: { type: object, properties: { n: { type: integer } } }
+    Holder:
+      type: object
+      example: { properties: { x: { $ref: '#/components/schemas/Closed', default: a } } }
+      properties:
+        lifted: { $ref: '#/components/schemas/Closed', default: a, description: kept }
+        struct: { $ref: '#/components/schemas/Cfg', default: {} }
+        plain: { $ref: '#/components/schemas/Closed' }
+";
+
+    for (format, content) in [(SpecFormat::Json, json), (SpecFormat::Yaml, yaml)] {
+      let spec = format.parse(content.as_bytes()).expect("spec parses");
+      let schemas = &spec.components.as_ref().expect("components").schemas;
+      let holder = schemas
+        .get("Holder")
+        .and_then(SchemaInspect::as_inline)
+        .expect("Holder should be inline");
+
+      let lifted = holder
+        .properties
+        .get("lifted")
+        .and_then(SchemaInspect::as_inline)
+        .unwrap_or_else(|| panic!("{format:?}: a `$ref` with a `default` should become an inline wrapper"));
+      assert_eq!(
+        lifted.default,
+        Some(serde_json::json!("a")),
+        "{format:?}: lifted default"
+      );
+      assert_eq!(
+        lifted.description.as_deref(),
+        Some("kept"),
+        "{format:?}: lifted description"
+      );
+      assert_eq!(lifted.all_of.len(), 1, "{format:?}: lifted wraps the reference");
+
+      for unchanged in ["struct", "plain"] {
+        assert!(
+          holder
+            .properties
+            .get(unchanged)
+            .and_then(SchemaInspect::ref_path)
+            .is_some(),
+          "{format:?}: {unchanged} should stay a reference"
+        );
+      }
+      assert_eq!(
+        holder.example.as_ref().and_then(|e| e.pointer("/properties/x/$ref")),
+        Some(&serde_json::json!("#/components/schemas/Closed")),
+        "{format:?}: example data should be untouched"
+      );
+    }
+  }
 
   #[test]
   fn empty_operation_security_clears_the_top_level_requirement() {

@@ -34,6 +34,10 @@ omitted code, so those excerpts aren't complete programs.
 - [Enum Mode](#enum-mode)
 - [Enum Layout](#enum-layout)
 - [Numeric-Backed Enums](#numeric-backed-enums)
+- [Boolean and Mixed-Type Enums](#boolean-and-mixed-type-enums)
+- [Constant Unions](#constant-unions)
+- [Non-Exhaustive Enums](#non-exhaustive-enums)
+- [Constant Properties](#constant-properties)
 - [Helper Methods](#helper-methods)
 - [OData Support](#odata-support)
 - [Type Customization](#type-customization)
@@ -813,11 +817,30 @@ Ordering can also affect the default value. For value enums that derive
 If no variant matches, it uses the first declared variant. Switching to
 `sorted` can therefore change the fallback default.
 
-Untagged unions, described with `oneOf` or `anyOf`, handle defaults differently.
-When a variant can represent the schema's default, the generator writes an
-`impl Default` that constructs that value. For example, it might return
-`Self::Preset(Preset::Auto2k)` for a wrapped enum or
-`Self::String("cheesecake".to_string())` for a string.
+Untagged unions, described with `oneOf` or `anyOf`, always place a variant that
+wraps a plain `String` last, after any sorting. Deserialization tries an
+untagged union's variants in order, and a `String` accepts every JSON string.
+Putting it last lets a value such as `"chat-1.0"` reach a wrapped value enum,
+as in `ChatModel(ChatModel)`, before the catch-all `String(String)`.
+
+Untagged unions also handle defaults differently. When a variant can represent
+the schema's default, the generator writes an `impl Default` that constructs
+that value, checking variants in the same order deserialization does. For
+example, it might return `Self::Preset(Preset::Auto2k)` for a wrapped enum or
+`Self::String("cheesecake".to_string())` for a string. Without a usable default,
+a union that derives `Default` uses its first generated variant.
+
+A property can also set a `default` next to its `$ref`, as OpenAPI 3.1 allows.
+When the reference names an enum, a `const`, or a union, the field's default
+uses that value instead of the referenced schema's own `default`:
+
+```json
+"fallback": { "$ref": "#/components/schemas/ChatModel", "default": "chat-1.1" }
+```
+
+This property becomes `#[default(Some(ChatModel::Chat11))] pub fallback: Option<ChatModel>`.
+The generator ignores a `default` next to any other reference, because it can't
+build that value for the referenced type.
 
 A nullable union includes a `null` branch. If it has no usable default, it gets
 no `Default` implementation. Properties with that union type use [`Option<T>`][rustdoc-option],
@@ -876,7 +899,9 @@ pub enum Status {
 
 An enum can represent numbers as well as strings. When a schema combines an
 `enum` array with `type: integer` or `type: number`, the generated type reads
-and writes JSON numbers. The generator supplies [`Serialize`][rustdoc-serde-serialize] and [`Deserialize`][rustdoc-serde-deserialize]
+and writes JSON numbers. The generator does the same when a schema lists only
+numbers and declares no `type`, choosing `i64` for whole numbers and `f64` when
+any value has a fractional part. The generator supplies [`Serialize`][rustdoc-serde-serialize] and [`Deserialize`][rustdoc-serde-deserialize]
 implementations so that a value such as `8000` stays a number during
 serialization.
 
@@ -966,6 +991,230 @@ impl<'de> serde::Deserialize<'de> for PlaybackRate {
 The Rust variants don't store floating-point values: each variant identifies
 one allowed number. These enums can therefore derive [`Eq`][rustdoc-eq] and [`Hash`][rustdoc-hash], and you
 can use them as map keys or set members.
+
+## Boolean and Mixed-Type Enums
+
+An `enum` array can also list booleans, or mix strings, numbers, and booleans.
+Each listed value keeps its JSON type on the wire, so a `true` in the schema is
+written and read as the JSON boolean `true`, never as the string `"true"`.
+
+A boolean schema such as `{ "type": "boolean", "enum": [true, false] }` produces
+`True` and `False` variants with a serializer that writes a JSON boolean and a
+deserializer that reads one:
+
+```rust
+impl<'de> serde::Deserialize<'de> for Toggle {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = bool::deserialize(deserializer)?;
+        if value { Ok(Self::True) } else { Ok(Self::False) }
+    }
+}
+```
+
+When the listed values mix JSON types, as in `"enum": ["auto", 1, 0.5, true]`,
+each variant writes its own type, and the deserializer reads a
+[`serde_json::Value`][rustdoc-serde-json-value] and matches it against every listed value:
+
+```rust
+impl serde::Serialize for Quality {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Auto => serializer.serialize_str("auto"),
+            Self::Value1 => serializer.serialize_i64(1i64),
+            Self::Value0_5 => serializer.serialize_f64(0.5f64),
+            Self::True => serializer.serialize_bool(true),
+        }
+    }
+}
+```
+
+`Quality::Value1` reads only the JSON number `1`, so the string `"1"` is
+rejected with a decoding error. A declared `type` takes precedence over the
+listed values. With `"type": "string"`, every value is read and written as a
+string.
+
+## Constant Unions
+
+A `oneOf` or `anyOf` whose every branch is a `const` describes the same set of
+values as an `enum` array, so the generator produces the same value enum. Each
+`const` becomes a unit variant documented with its branch's `description`, and
+the schema's `default` marks the matching variant:
+
+```json
+{
+  "anyOf": [
+    { "type": "string", "const": "text", "description": "Plain text" },
+    { "type": "string", "const": "json" }
+  ],
+  "default": "json"
+}
+```
+
+```rust
+pub enum ResponseKind {
+    /// Plain text
+    #[serde(rename = "text")]
+    Text,
+    #[serde(rename = "json")]
+    #[default]
+    Json,
+}
+```
+
+Constants of other JSON types keep their types, as described in
+[Boolean and Mixed-Type Enums](#boolean-and-mixed-type-enums), and `null` branches
+make the property optional instead of adding a variant.
+
+A union can also mix `const` branches with branches that carry a payload, such
+as an object or a string. Its `const` variants stay tagged so that each matches
+its wire value, and they come first. Only the payload variants are marked
+`#[serde(untagged)]`:
+
+```rust
+pub enum UsageChoice {
+    #[serde(rename = "auto")]
+    #[default]
+    Auto,
+    #[serde(untagged)]
+    Usage(Usage),
+    #[serde(untagged)]
+    String(String),
+}
+```
+
+Here `"auto"` deserializes to `UsageChoice::Auto` and serializes back to
+`"auto"`. An object becomes `UsageChoice::Usage`, and any other string becomes
+`UsageChoice::String`. A schema `default` that names a constant, like `"auto"`,
+selects its variant.
+
+## Non-Exhaustive Enums
+
+Some APIs list the values they support today and promise to accept others
+later. A specification describes that promise with an `anyOf` that pairs the
+listed values with a freeform string. This section shows the single enum the
+generator creates for that pattern and how your code can handle values the
+list doesn't include.
+
+Consider a schema for a model name:
+
+```json
+{
+  "description": "A listed chat model or any other model name",
+  "anyOf": [
+    { "type": "string" },
+    { "type": "string", "enum": ["chat-1.0", "chat-1.1"] }
+  ]
+}
+```
+
+The generator emits one variant per listed value, followed by an `Other`
+variant that holds any other string. It marks the enum `#[non_exhaustive]`:
+
+```rust
+/// A listed chat model or any other model name
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ChatModelId {
+    #[serde(rename = "chat-1.0")]
+    Chat10,
+    #[serde(rename = "chat-1.1")]
+    Chat11,
+    #[serde(untagged)]
+    Other(String),
+}
+```
+
+Deserialization checks the listed values first, so `"chat-1.0"` becomes
+`ChatModelId::Chat10`. A value outside the list, such as `"chat-2.0"`, becomes
+`ChatModelId::Other("chat-2.0".to_string())` instead of producing an error.
+Because `Other` is `#[serde(untagged)]`, it serializes as the bare string, so an
+unlisted value you received is sent back unchanged. The [`Display`][rustdoc-display]
+implementation writes the same string. You construct a listed value through its
+variant, such as `ChatModelId::Chat11`, and the enum still derives
+[`Eq`][rustdoc-eq] and [`Hash`][rustdoc-hash].
+
+`ChatModelId::Other("chat-1.0".to_string())` serializes like
+`ChatModelId::Chat10` but doesn't compare equal to it, so reserve `Other` for
+values outside the list. When a model name comes from your own code, such as a
+configuration file, convert it with the generated `From<String>` implementation
+instead of building `Other` yourself:
+
+```rust
+impl From<String> for ChatModelId {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "chat-1.0" => Self::Chat10,
+            "chat-1.1" => Self::Chat11,
+            _ => Self::Other(value),
+        }
+    }
+}
+```
+
+`ChatModelId::from(name)` returns `ChatModelId::Chat10` for `"chat-1.0"` and
+`Other` for anything else, the same result deserialization gives. The
+comparison `ChatModelId::from(name) == ChatModelId::Chat10` then behaves as
+you'd expect.
+
+The [`#[non_exhaustive]`][reference-non-exhaustive] attribute matters when the
+generated types live in their own crate, as with
+[workspace crate output](#workspace-crate-output). A `match` in another crate
+must then include a wildcard arm. When a later version of the specification
+lists another value, regenerating adds a variant without breaking that `match`.
+Inside the crate that defines the enum, the attribute has no effect.
+
+A few details follow from the same rules:
+
+- The listed values can come from a `$ref`, as in
+  `"anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/ChatModel" }]`.
+  The generator copies the referenced values into the open enum. `ChatModel`
+  itself stays exhaustive, so a field typed `ChatModel` still rejects other values.
+- If a listed value such as `"other"` already produces an `Other` variant, the
+  catch-all becomes `Other2(String)` so the two stay distinct.
+- A schema `default` outside the list becomes the enum's
+  [`Default`][rustdoc-default]. With `"default": "chat-2.0"`,
+  `ChatModelId::default()` returns `ChatModelId::Other("chat-2.0".to_string())`.
+- With [`--enum-mode relaxed`](#example---enum-mode-relaxed), listed values and
+  their aliases match regardless of ASCII letter case, in deserialization and in
+  `From<String>`. Anything else lands in `Other` with its original spelling.
+- Where the generator writes a [`FromStr`][rustdoc-from-str] implementation, as
+  it does for server output and response headers, parsing delegates to
+  `From<String>`, so a value outside the list returns `Other` instead of an
+  error.
+- The listed values must all be strings. When the list includes numbers or
+  booleans, the schema becomes an untagged union instead.
+- The generator handles only `anyOf` this way. A `oneOf` that mixes a freeform
+  string with listed values remains an untagged union, which tries its `String`
+  variant last, as described in [Enum Layout](#enum-layout).
+
+## Constant Properties
+
+A property with a `const`, or with an `enum` that lists a single value, always
+holds that one value. The generator gives the field that value as its default.
+In client output it also marks the field `#[serde(skip_deserializing)]`:
+
+```rust
+pub struct ChatPreference {
+    #[serde(skip_deserializing)]
+    #[default(Some("chat.preference".to_string()))]
+    pub object: Option<String>,
+    /* ... */
+}
+```
+
+The client always sends the constant and never reads it back, so a server that
+returns a different value, or a value of another JSON type, can't make a response
+fail to deserialize. Server output still reads the field.
+
+A struct that collects additional properties, because its schema allows
+`additionalProperties`, keeps reading its constant fields. A skipped key would
+otherwise land in the flattened map and be serialized a second time.
 
 ## Helper Methods
 
@@ -1586,6 +1835,7 @@ to see the command-line help, including input, output, and terminal options.
 To work through constructing the generated values, continue to the
 [Builder Pattern](./builders.md) chapter.
 
+[reference-non-exhaustive]: https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute
 [rustdoc-anyhow-result]: https://docs.rs/anyhow/1.0.104/anyhow/type.Result.html
 [rustdoc-bon-builder]: https://docs.rs/bon/3.10.1/bon/derive.Builder.html
 [rustdoc-chrono-date]: https://docs.rs/chrono/0.4.45/chrono/struct.NaiveDate.html

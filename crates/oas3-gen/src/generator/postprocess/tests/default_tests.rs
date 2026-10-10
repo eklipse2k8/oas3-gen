@@ -3,7 +3,7 @@ use serde_json::json;
 use crate::generator::{
   ast::{
     EnumDef, EnumDefault, EnumDefaultValue, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, RustType, StructDef,
-    StructToken, TypeRef, VariantContent, VariantDef,
+    StructToken, TypeRef, ValueKind, VariantContent, VariantDef,
   },
   naming::inference::NormalizedVariant,
   postprocess::defaults::FieldDefaultProcessor,
@@ -14,6 +14,7 @@ fn value_variant(name: &str, rename: &str, aliases: &[&str]) -> VariantDef {
     .normalized(NormalizedVariant {
       name: name.to_string(),
       rename_value: rename.to_string(),
+      kind: ValueKind::String,
     })
     .content(VariantContent::Unit)
     .build();

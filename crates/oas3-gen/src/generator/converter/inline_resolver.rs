@@ -127,19 +127,7 @@ impl InlineTypeResolver {
 
     let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
 
-    let enum_cache_key = self
-      .context
-      .cache()
-      .get_precomputed_enum_cache_key(schema)
-      .ok()
-      .flatten()
-      .or_else(|| {
-        if schema.is_relaxed_enum_pattern() {
-          return None;
-        }
-        let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
-      });
+    let enum_cache_key = self.enum_cache_key(schema);
 
     {
       let cache = self.context.cache();
@@ -244,16 +232,7 @@ impl InlineTypeResolver {
       return Ok(None);
     };
 
-    let enum_cache_key = self
-      .context
-      .cache()
-      .get_precomputed_enum_cache_key(schema)
-      .ok()
-      .flatten()
-      .or_else(|| {
-        let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
-      });
+    let enum_cache_key = self.enum_cache_key(schema);
     let registration = self
       .context
       .cache()
@@ -266,6 +245,24 @@ impl InlineTypeResolver {
       .commit_registration(registration, vec![], named_type);
 
     Ok(Some(ConversionOutput::with_inline_types(final_name, generated)))
+  }
+
+  /// Returns the value-set key that deduplicates `schema` against enums with the same
+  /// values, or `None` when it lists no values or also accepts unlisted strings, since
+  /// such a schema must never share a closed enum's type.
+  fn enum_cache_key(&self, schema: &ObjectSchema) -> Option<Vec<String>> {
+    let spec = self.context.graph().spec();
+    self
+      .context
+      .cache()
+      .get_precomputed_enum_cache_key(schema)
+      .ok()
+      .flatten()
+      .or_else(|| {
+        let entries = schema.extract_enum_entries(spec);
+        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
+      })
+      .filter(|_| !schema.has_unconstrained_string_variant(spec))
   }
 
   /// Internal cache-aware resolution with pluggable generation logic.
@@ -304,16 +301,7 @@ impl InlineTypeResolver {
 
     let result = generator(&name)?;
 
-    let enum_cache_key = self
-      .context
-      .cache()
-      .get_precomputed_enum_cache_key(schema)
-      .ok()
-      .flatten()
-      .or_else(|| {
-        let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
-      });
+    let enum_cache_key = self.enum_cache_key(schema);
     let registration = self
       .context
       .cache()

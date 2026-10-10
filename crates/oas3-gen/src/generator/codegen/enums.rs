@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use itertools::Itertools;
 use proc_macro2::{Ident, Literal, Span, TokenStream};
 use quote::{ToTokens, TokenStreamExt as _, quote};
 
@@ -10,8 +13,8 @@ use crate::generator::{
   ast::{
     DeriveTrait, DerivesProvider, DiscriminatedEnumDef, DiscriminatedVariant, EnumDef, EnumDefault, EnumDefaultValue,
     EnumMethod, EnumMethodKind, EnumToken, EnumVariantToken, FieldDef, ResponseEnumDef, ResponseEnumVariant,
-    ResponsePayload, ResponseUnionDef, RustPrimitive, SerdeAttribute, SerdeMode, StructToken, TypeRef, VariantContent,
-    VariantDef, types::generic_args,
+    ResponsePayload, ResponseUnionDef, RustPrimitive, SerdeAttribute, SerdeMode, StructToken, TypeRef, ValueKind,
+    VariantContent, VariantDef, types::generic_args,
   },
   codegen::{
     attributes::DeriveAttribute,
@@ -378,70 +381,140 @@ impl ToTokens for DisplayImplFragment<'_> {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct FromStrImplArmFragment<'a> {
-  variant_name: &'a EnumVariantToken,
-  serde_name: &'a str,
-}
-
-impl<'a> FromStrImplArmFragment<'a> {
-  pub(crate) fn new(variant: &'a VariantDef) -> Self {
-    Self {
-      variant_name: &variant.name,
-      serde_name: variant.serde_name(),
-    }
-  }
-}
-
-impl ToTokens for FromStrImplArmFragment<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let variant_name = self.variant_name;
-    let serde_name = self.serde_name;
-
-    let ts = quote! { #serde_name => Ok(Self::#variant_name), };
-    tokens.extend(ts);
-  }
-}
-
+/// Match arm selecting a unit variant by any of its wire values, e.g.
+/// `"active" | "on" => Ok(Self::Active),`.
+///
+/// A non-exhaustive enum's parse can't fail, so its arms evaluate to the variant
+/// itself: `"active" | "on" => Self::Active,`.
 #[derive(Clone, Debug)]
-pub(crate) struct FromStrImplFragment<'a> {
-  name: &'a EnumToken,
-  arms: Vec<FromStrImplArmFragment<'a>>,
-  serde_names: Vec<&'a str>,
+pub(crate) struct WireValueArmFragment<'a> {
+  variant_name: &'a EnumVariantToken,
+  wire_values: Vec<Cow<'a, str>>,
+  infallible: bool,
 }
 
-impl<'a> FromStrImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, variants: &'a [VariantDef]) -> Self {
-    let (arms, serde_names): (Vec<_>, Vec<_>) = variants
+impl<'a> WireValueArmFragment<'a> {
+  /// Builds one arm per unit variant of `def`, matching its serde name and aliases.
+  ///
+  /// For a case-insensitive enum, the values are ASCII-lowercased. A value an earlier
+  /// arm already matches is dropped, so no pattern is unreachable.
+  pub(crate) fn for_enum(def: &'a EnumDef) -> Vec<Self> {
+    def
+      .variants
       .iter()
       .filter(|v| matches!(v.content, VariantContent::Unit))
-      .map(|v| (FromStrImplArmFragment::new(v), v.serde_name()))
-      .unzip();
+      .flat_map(|variant| {
+        variant.wire_values().map(move |value| {
+          let value = if def.case_insensitive && value.bytes().any(|b| b.is_ascii_uppercase()) {
+            Cow::Owned(value.to_ascii_lowercase())
+          } else {
+            Cow::Borrowed(value)
+          };
+          (&variant.name, value)
+        })
+      })
+      .unique_by(|(_, value)| value.clone())
+      .chunk_by(|(variant_name, _)| *variant_name)
+      .into_iter()
+      .map(|(variant_name, arm)| Self {
+        variant_name,
+        wire_values: arm.map(|(_, value)| value).collect(),
+        infallible: def.non_exhaustive,
+      })
+      .collect()
+  }
+}
 
-    Self {
-      name,
-      arms,
-      serde_names,
-    }
+impl ToTokens for WireValueArmFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let variant_name = self.variant_name;
+    let wire_values = &self.wire_values;
+
+    let result = if self.infallible {
+      quote! { Self::#variant_name }
+    } else {
+      quote! { Ok(Self::#variant_name) }
+    };
+
+    tokens.extend(quote! { #(#wire_values)|* => #result, });
+  }
+}
+
+/// `impl From<String>` for a non-exhaustive enum: a listed value selects its variant,
+/// and any other string lands in the catch-all, e.g. `Other(value)`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FromStringImplFragment<'a>(&'a EnumDef);
+
+impl<'a> FromStringImplFragment<'a> {
+  pub(crate) fn new(def: &'a EnumDef) -> Self {
+    Self(def)
+  }
+}
+
+impl ToTokens for FromStringImplFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let Some(other) = self.0.other_variant() else {
+      return;
+    };
+    let name = &self.0.name;
+    let other = &other.name;
+    let arms = WireValueArmFragment::for_enum(self.0);
+    let subject = if self.0.case_insensitive {
+      quote! { value.to_ascii_lowercase().as_str() }
+    } else {
+      quote! { value.as_str() }
+    };
+
+    tokens.extend(quote! {
+      impl From<String> for #name {
+        fn from(value: String) -> Self {
+          match #subject {
+            #(#arms)*
+            _ => Self::#other(value),
+          }
+        }
+      }
+    });
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FromStrImplFragment<'a>(&'a EnumDef);
+
+impl<'a> FromStrImplFragment<'a> {
+  pub(crate) fn new(def: &'a EnumDef) -> Self {
+    Self(def)
   }
 }
 
 impl ToTokens for FromStrImplFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = self.name;
-    let arms = &self.arms;
-    let serde_names = &self.serde_names;
-    let expected = serde_names.join(", ");
+    let name = &self.0.name;
+
+    let body = if self.0.non_exhaustive {
+      quote! { Ok(Self::from(s.to_string())) }
+    } else {
+      let arms = WireValueArmFragment::for_enum(self.0);
+      let subject = if self.0.case_insensitive {
+        quote! { s.to_ascii_lowercase().as_str() }
+      } else {
+        quote! { s }
+      };
+      let expected = self.0.variants.iter().map(VariantDef::serde_name).join(", ");
+      quote! {
+        match #subject {
+          #(#arms)*
+          _ => Err(format!("unknown variant '{}', expected one of: {}", s, #expected)),
+        }
+      }
+    };
 
     let ts = quote! {
       impl core::str::FromStr for #name {
         type Err = String;
 
         fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
-          match s {
-            #(#arms)*
-            _ => Err(format!("unknown variant '{}', expected one of: {}", s, #expected)),
-          }
+          #body
         }
       }
     };
@@ -450,70 +523,37 @@ impl ToTokens for FromStrImplFragment<'_> {
   }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct CaseInsensitiveDeserializeArmFragment<'a> {
-  variant_name: &'a EnumVariantToken,
-  lower_val: String,
-}
-
-impl<'a> CaseInsensitiveDeserializeArmFragment<'a> {
-  pub(crate) fn new(variant_name: &'a EnumVariantToken, serde_name: &str) -> Self {
-    Self {
-      variant_name,
-      lower_val: serde_name.to_ascii_lowercase(),
-    }
-  }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct CaseInsensitiveDeserializeImplFragment<'a> {
-  name: &'a EnumToken,
-  arms: Vec<CaseInsensitiveDeserializeArmFragment<'a>>,
-  serde_names: Vec<&'a str>,
-  fallback_variant: Option<&'a EnumVariantToken>,
-}
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CaseInsensitiveDeserializeImplFragment<'a>(&'a EnumDef);
 
 impl<'a> CaseInsensitiveDeserializeImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, variants: &'a [VariantDef], fallback_variant: Option<&'a VariantDef>) -> Self {
-    let (arms, serde_names): (Vec<_>, Vec<_>) = variants
-      .iter()
-      .map(|v| {
-        let serde_name = v.serde_name();
-        let arm = CaseInsensitiveDeserializeArmFragment::new(&v.name, serde_name);
-        (arm, serde_name)
-      })
-      .unzip();
-
-    Self {
-      name,
-      arms,
-      serde_names,
-      fallback_variant: fallback_variant.map(|v| &v.name),
-    }
+  pub(crate) fn new(def: &'a EnumDef) -> Self {
+    Self(def)
   }
 }
 
 impl ToTokens for CaseInsensitiveDeserializeImplFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = self.name;
+    let name = &self.0.name;
 
-    let match_arms = self
-      .arms
-      .iter()
-      .map(|arm| {
-        let variant_name = &arm.variant_name;
-        let lower_val = &arm.lower_val;
-        quote! {
-          #lower_val => Ok(#name::#variant_name),
-        }
-      })
-      .collect::<Vec<TokenStream>>();
-
-    let serde_names = &self.serde_names;
-    let fallback_arm = if let Some(fb) = self.fallback_variant {
-      quote! { _ => Ok(#name::#fb), }
+    let body = if self.0.non_exhaustive {
+      quote! { String::deserialize(deserializer).map(Self::from) }
     } else {
-      quote! { _ => Err(serde::de::Error::unknown_variant(&s, &[ #(#serde_names),* ])), }
+      let arms = WireValueArmFragment::for_enum(self.0);
+      let fallback_arm = if let Some(fallback) = self.0.fallback_variant() {
+        let fallback = &fallback.name;
+        quote! { _ => Ok(Self::#fallback), }
+      } else {
+        let serde_names = self.0.variants.iter().map(VariantDef::serde_name);
+        quote! { _ => Err(serde::de::Error::unknown_variant(&s, &[ #(#serde_names),* ])), }
+      };
+      quote! {
+        let s = String::deserialize(deserializer)?;
+        match s.to_ascii_lowercase().as_str() {
+          #(#arms)*
+          #fallback_arm
+        }
+      }
     };
 
     let ts = quote! {
@@ -522,11 +562,7 @@ impl ToTokens for CaseInsensitiveDeserializeImplFragment<'_> {
         where
           D: serde::Deserializer<'de>,
         {
-          let s = String::deserialize(deserializer)?;
-          match s.to_ascii_lowercase().as_str() {
-            #(#match_arms)*
-            #fallback_arm
-          }
+          #body
         }
       }
     };
@@ -535,97 +571,143 @@ impl ToTokens for CaseInsensitiveDeserializeImplFragment<'_> {
   }
 }
 
+/// `Serialize` and `Deserialize` for a value enum whose values share one JSON scalar
+/// type: integers, floats, or booleans.
 #[derive(Clone, Debug)]
-pub(crate) struct NumericEnumSerdeImplFragment<'a> {
+pub(crate) struct ScalarEnumSerdeImplFragment<'a> {
   name: &'a EnumToken,
-  is_float: bool,
-  wire_type: Ident,
-  serialize_method: Ident,
-  arms: Vec<(&'a EnumVariantToken, Literal)>,
+  primitive: &'a RustPrimitive,
+  arms: Vec<(&'a VariantDef, TokenStream)>,
   expected: String,
 }
 
-impl<'a> NumericEnumSerdeImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, primitive: &RustPrimitive, variants: &'a [VariantDef]) -> Self {
-    let is_float = primitive.is_float();
-    let is_unsigned = primitive.is_unsigned_integer();
-
-    let (wire_name, serialize_name) = if is_float {
-      ("f64", "serialize_f64")
-    } else if is_unsigned {
-      ("u64", "serialize_u64")
-    } else {
-      ("i64", "serialize_i64")
-    };
-
+impl<'a> ScalarEnumSerdeImplFragment<'a> {
+  pub(crate) fn new(name: &'a EnumToken, primitive: &'a RustPrimitive, variants: &'a [VariantDef]) -> Self {
     let mut arms = vec![];
     let mut expected_values = vec![];
     for variant in variants {
       let raw = variant.serde_name();
-      let literal = if is_float {
-        raw.parse::<f64>().ok().map(Literal::f64_suffixed)
-      } else if is_unsigned {
-        raw.parse::<u64>().ok().map(Literal::u64_suffixed)
+      let literal = if *primitive == RustPrimitive::Bool {
+        raw.parse::<bool>().ok().map(|value| quote! { #value })
+      } else if primitive.is_float() {
+        raw
+          .parse::<f64>()
+          .ok()
+          .map(|value| Literal::f64_suffixed(value).into_token_stream())
+      } else if primitive.is_unsigned_integer() {
+        raw
+          .parse::<u64>()
+          .ok()
+          .map(|value| Literal::u64_suffixed(value).into_token_stream())
       } else {
-        raw.parse::<i64>().ok().map(Literal::i64_suffixed)
+        raw
+          .parse::<i64>()
+          .ok()
+          .map(|value| Literal::i64_suffixed(value).into_token_stream())
       };
       if let Some(literal) = literal {
         expected_values.push(raw);
-        arms.push((&variant.name, literal));
+        arms.push((variant, literal));
       }
     }
 
     Self {
       name,
-      is_float,
-      wire_type: Ident::new(wire_name, Span::call_site()),
-      serialize_method: Ident::new(serialize_name, Span::call_site()),
+      primitive,
       arms,
       expected: expected_values.join(", "),
     }
   }
-}
 
-impl ToTokens for NumericEnumSerdeImplFragment<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = self.name;
-    let wire_type = &self.wire_type;
-    let serialize_method = &self.serialize_method;
+  fn wire_type(&self) -> (Ident, Ident) {
+    let (wire_name, serialize_name) = if *self.primitive == RustPrimitive::Bool {
+      ("bool", "serialize_bool")
+    } else if self.primitive.is_float() {
+      ("f64", "serialize_f64")
+    } else if self.primitive.is_unsigned_integer() {
+      ("u64", "serialize_u64")
+    } else {
+      ("i64", "serialize_i64")
+    };
+    (
+      Ident::new(wire_name, Span::call_site()),
+      Ident::new(serialize_name, Span::call_site()),
+    )
+  }
+
+  fn deserialize_body(&self, wire_type: &Ident) -> TokenStream {
     let expected = &self.expected;
+    let unknown = quote! {
+      Err(serde::de::Error::custom(format!("unknown variant {}, expected one of: {}", value, #expected)))
+    };
 
-    let serialize_arms = self
-      .arms
-      .iter()
-      .map(|(variant_name, literal)| quote! { Self::#variant_name => #literal, })
-      .collect::<Vec<TokenStream>>();
+    if *self.primitive == RustPrimitive::Bool {
+      let outcome = |wanted: &str| {
+        self
+          .arms
+          .iter()
+          .find(|(variant, _)| variant.serde_name() == wanted)
+          .map_or_else(
+            || unknown.clone(),
+            |(variant, _)| {
+              let variant_name = &variant.name;
+              quote! { Ok(Self::#variant_name) }
+            },
+          )
+      };
+      let (on_true, on_false) = (outcome("true"), outcome("false"));
+      return quote! {
+        let value = bool::deserialize(deserializer)?;
+        if value { #on_true } else { #on_false }
+      };
+    }
 
-    let deserialize_body = if self.is_float {
+    let (subject, arms) = if self.primitive.is_float() {
       let arms = self
         .arms
         .iter()
-        .map(|(variant_name, literal)| quote! { bits if bits == (#literal).to_bits() => Ok(Self::#variant_name), })
+        .map(|(variant, literal)| {
+          let variant_name = &variant.name;
+          quote! { bits if bits == (#literal).to_bits() => Ok(Self::#variant_name), }
+        })
         .collect::<Vec<TokenStream>>();
-      quote! {
-        let value = #wire_type::deserialize(deserializer)?;
-        match value.to_bits() {
-          #(#arms)*
-          _ => Err(serde::de::Error::custom(format!("unknown variant {}, expected one of: {}", value, #expected))),
-        }
-      }
+      (quote! { value.to_bits() }, arms)
     } else {
       let arms = self
         .arms
         .iter()
-        .map(|(variant_name, literal)| quote! { #literal => Ok(Self::#variant_name), })
+        .map(|(variant, literal)| {
+          let variant_name = &variant.name;
+          quote! { #literal => Ok(Self::#variant_name), }
+        })
         .collect::<Vec<TokenStream>>();
-      quote! {
-        let value = #wire_type::deserialize(deserializer)?;
-        match value {
-          #(#arms)*
-          _ => Err(serde::de::Error::custom(format!("unknown variant {}, expected one of: {}", value, #expected))),
-        }
-      }
+      (quote! { value }, arms)
     };
+
+    quote! {
+      let value = #wire_type::deserialize(deserializer)?;
+      match #subject {
+        #(#arms)*
+        _ => #unknown,
+      }
+    }
+  }
+}
+
+impl ToTokens for ScalarEnumSerdeImplFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = self.name;
+    let (wire_type, serialize_method) = self.wire_type();
+    let deserialize_body = self.deserialize_body(&wire_type);
+
+    let serialize_arms = self
+      .arms
+      .iter()
+      .map(|(variant, literal)| {
+        let variant_name = &variant.name;
+        quote! { Self::#variant_name => #literal, }
+      })
+      .collect::<Vec<TokenStream>>();
 
     let ts = quote! {
       impl serde::Serialize for #name {
@@ -651,6 +733,131 @@ impl ToTokens for NumericEnumSerdeImplFragment<'_> {
     };
 
     tokens.extend(ts);
+  }
+}
+
+/// JSON literal a variant of a mixed-type value enum stands for.
+#[derive(Clone, Copy, Debug)]
+enum MixedLiteral {
+  Bool(bool),
+  Integer(i64),
+  Float(f64),
+  String,
+}
+
+impl From<&VariantDef> for MixedLiteral {
+  fn from(variant: &VariantDef) -> Self {
+    let raw = variant.serde_name();
+    let literal = match variant.value_kind {
+      ValueKind::Bool => raw.parse().ok().map(Self::Bool),
+      ValueKind::Number => raw
+        .parse()
+        .ok()
+        .map(Self::Integer)
+        .or_else(|| raw.parse().ok().map(Self::Float)),
+      ValueKind::String => None,
+    };
+    literal.unwrap_or(Self::String)
+  }
+}
+
+/// `Serialize` and `Deserialize` for a value enum whose values mix JSON types, such
+/// as `"auto"`, `1`, and `true`. Each variant reads and writes its own JSON type.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MixedEnumSerdeImplFragment<'a>(&'a EnumDef);
+
+impl<'a> MixedEnumSerdeImplFragment<'a> {
+  pub(crate) fn new(def: &'a EnumDef) -> Self {
+    Self(def)
+  }
+
+  fn serialize_arm(variant: &VariantDef) -> TokenStream {
+    let variant_name = &variant.name;
+    let call = match MixedLiteral::from(variant) {
+      MixedLiteral::Bool(value) => quote! { serializer.serialize_bool(#value) },
+      MixedLiteral::Integer(value) => {
+        let value = Literal::i64_suffixed(value);
+        quote! { serializer.serialize_i64(#value) }
+      }
+      MixedLiteral::Float(value) => {
+        let value = Literal::f64_suffixed(value);
+        quote! { serializer.serialize_f64(#value) }
+      }
+      MixedLiteral::String => {
+        let value = variant.serde_name();
+        quote! { serializer.serialize_str(#value) }
+      }
+    };
+    quote! { Self::#variant_name => #call, }
+  }
+
+  fn deserialize_arm(self, variant: &VariantDef) -> TokenStream {
+    let variant_name = &variant.name;
+    let pattern = match MixedLiteral::from(variant) {
+      MixedLiteral::Bool(value) => quote! { serde_json::Value::Bool(#value) },
+      MixedLiteral::Integer(value) => {
+        let value = Literal::i64_suffixed(value);
+        quote! { serde_json::Value::Number(n) if n.as_i64() == Some(#value) }
+      }
+      MixedLiteral::Float(value) => {
+        let value = Literal::f64_suffixed(value);
+        quote! { serde_json::Value::Number(n) if n.as_f64().map(f64::to_bits) == Some((#value).to_bits()) }
+      }
+      MixedLiteral::String => {
+        let wire_values = variant
+          .wire_values()
+          .map(|value| {
+            if self.0.case_insensitive {
+              value.to_ascii_lowercase()
+            } else {
+              value.to_string()
+            }
+          })
+          .unique();
+        let subject = if self.0.case_insensitive {
+          quote! { s.to_ascii_lowercase().as_str() }
+        } else {
+          quote! { s.as_str() }
+        };
+        quote! { serde_json::Value::String(s) if matches!(#subject, #(#wire_values)|*) }
+      }
+    };
+    quote! { #pattern => Ok(Self::#variant_name), }
+  }
+}
+
+impl ToTokens for MixedEnumSerdeImplFragment<'_> {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = &self.0.name;
+    let serialize_arms = self.0.variants.iter().map(Self::serialize_arm);
+    let deserialize_arms = self.0.variants.iter().map(|v| self.deserialize_arm(v));
+    let expected = self.0.variants.iter().map(VariantDef::serde_name).join(", ");
+
+    tokens.extend(quote! {
+      impl serde::Serialize for #name {
+        fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+        where
+          S: serde::Serializer,
+        {
+          match self {
+            #(#serialize_arms)*
+          }
+        }
+      }
+
+      impl<'de> serde::Deserialize<'de> for #name {
+        fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+        where
+          D: serde::Deserializer<'de>,
+        {
+          let value = serde_json::Value::deserialize(deserializer)?;
+          match &value {
+            #(#deserialize_arms)*
+            _ => Err(serde::de::Error::custom(format!("unknown variant {}, expected one of: {}", value, #expected))),
+          }
+        }
+      }
+    });
   }
 }
 
@@ -684,6 +891,7 @@ impl ToTokens for EnumFragment<'_> {
     let derives = DeriveAttribute::new(derive_traits);
     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
     let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
+    let non_exhaustive = self.def.non_exhaustive.then(|| quote! { #[non_exhaustive] });
 
     let default_idx = match &self.def.default_mode {
       EnumDefault::Derive => Some(self.def.derived_default_index()),
@@ -716,6 +924,7 @@ impl ToTokens for EnumFragment<'_> {
       #outer_attrs
       #derives
       #serde_attrs
+      #non_exhaustive
       #vis enum #name {
         #variants
       }
@@ -733,37 +942,27 @@ impl ToTokens for EnumFragment<'_> {
       && self.def.is_simple()
       && (self.target == GenerationTarget::Server || self.def.in_response_header)
     {
-      FromStrImplFragment::new(name, &self.def.variants).to_token_stream()
+      FromStrImplFragment::new(self.def).to_token_stream()
     } else {
       quote! {}
     };
 
-    let ts = if let Some(primitive) = &self.def.scalar_repr {
-      let serde_impl = NumericEnumSerdeImplFragment::new(name, primitive, &self.def.variants);
-      quote! {
-        #enum_def
-        #display_impl
-        #from_str_impl
-        #serde_impl
-      }
-    } else if self.def.case_insensitive {
-      let deserialize_impl =
-        CaseInsensitiveDeserializeImplFragment::new(name, &self.def.variants, self.def.fallback_variant());
-      quote! {
-        #enum_def
-        #display_impl
-        #from_str_impl
-        #deserialize_impl
-      }
-    } else {
-      quote! {
-        #enum_def
-        #display_impl
-        #from_str_impl
-      }
+    let from_string_impl = FromStringImplFragment::new(self.def);
+
+    let serde_impl = match &self.def.scalar_repr {
+      Some(RustPrimitive::Value) => MixedEnumSerdeImplFragment::new(self.def).to_token_stream(),
+      Some(primitive) => ScalarEnumSerdeImplFragment::new(name, primitive, &self.def.variants).to_token_stream(),
+      None if self.def.case_insensitive => CaseInsensitiveDeserializeImplFragment::new(self.def).to_token_stream(),
+      None => quote! {},
     };
 
-    tokens.extend(ts);
+    tokens.extend(quote! {
+      #enum_def
+      #display_impl
+      #from_str_impl
+      #from_string_impl
+      #serde_impl
+    });
   }
 }
 

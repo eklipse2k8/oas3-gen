@@ -12,7 +12,7 @@ use crate::{
       name_index::SchemaPrecomputed,
     },
   },
-  utils::{SchemaExt, SchemaMap, UnionFingerprint, UnionFingerprints, build_union_fingerprints},
+  utils::{SchemaMap, UnionFingerprint, UnionFingerprints, build_union_fingerprints},
 };
 
 #[derive(Default, Debug, Clone)]
@@ -254,7 +254,6 @@ impl SchemaNameRegistry {
 pub(crate) struct TypeRegistration {
   pub(crate) assigned_name: String,
   pub(crate) canonical: CanonicalSchema,
-  pub(crate) should_register_enum: bool,
   pub(crate) enum_values: Option<Vec<String>>,
 }
 
@@ -321,19 +320,14 @@ impl SharedSchemaCache {
     self.enums.lookup(values).map(String::from)
   }
 
-  /// Returns `true` if an enum with these values has already been generated
-  /// (not just precomputed).
-  pub(crate) fn is_enum_generated(&self, values: &[String]) -> bool {
-    self.enums.is_registered(values)
-  }
-
   /// Returns the type name for an enum only if it has already been generated.
   ///
   /// Unlike [`get_enum_name`], this excludes precomputed names for enums that
   /// have not yet been emitted to the type collector.
   pub(crate) fn get_generated_enum_name(&self, values: &[String]) -> Option<String> {
     self
-      .is_enum_generated(values)
+      .enums
+      .is_registered(values)
       .then(|| self.get_enum_name(values))
       .flatten()
   }
@@ -386,9 +380,10 @@ impl SharedSchemaCache {
   /// Prepares type registration by checking for enum reuse, resolving name conflicts,
   /// and determining whether this schema needs enum registration.
   ///
-  /// The `enum_cache_key` should be provided for schemas with enum values to enable
-  /// deduplication across schemas with identical value sets. Does not mutate cache
-  /// state; call [`commit_registration`] to finalize.
+  /// The `enum_cache_key` should be provided for closed value enums to enable
+  /// deduplication across schemas with identical value sets, and omitted for schemas
+  /// that also accept unlisted strings. Does not mutate cache state; call
+  /// [`commit_registration`] to finalize.
   pub(crate) fn prepare_registration(
     &self,
     schema: &ObjectSchema,
@@ -397,16 +392,13 @@ impl SharedSchemaCache {
   ) -> anyhow::Result<TypeRegistration> {
     let canonical = CanonicalSchema::from_schema(schema)?;
 
-    if !schema.is_relaxed_enum_pattern()
-      && let Some(ref values) = enum_cache_key
+    if let Some(ref values) = enum_cache_key
       && let Some(existing_name) = self.enums.lookup(values)
     {
-      let should_register_enum = !self.enums.is_registered(values);
       return Ok(TypeRegistration {
         assigned_name: existing_name.to_string(),
         canonical,
-        should_register_enum,
-        enum_values: should_register_enum.then(|| values.clone()),
+        enum_values: (!self.enums.is_registered(values)).then(|| values.clone()),
       });
     }
 
@@ -417,19 +409,10 @@ impl SharedSchemaCache {
       self.names.determine_name(preferred, base_name)
     };
 
-    let (should_register_enum, enum_values) = if schema.has_relaxed_anyof_enum() {
-      (false, None)
-    } else if let Some(values) = enum_cache_key {
-      (true, Some(values))
-    } else {
-      (false, None)
-    };
-
     Ok(TypeRegistration {
       assigned_name,
       canonical,
-      should_register_enum,
-      enum_values,
+      enum_values: enum_cache_key,
     })
   }
 
@@ -446,9 +429,7 @@ impl SharedSchemaCache {
       .schemas
       .record(registration.canonical, registration.assigned_name.clone());
 
-    if registration.should_register_enum
-      && let Some(values) = registration.enum_values
-    {
+    if let Some(values) = registration.enum_values {
       self.enums.register(values, registration.assigned_name.clone());
     }
 

@@ -193,8 +193,8 @@ pub struct ToolResultBlock {
 #[serde(untagged)]
 pub enum ToolResultContent {
   #[default]
-  String(String),
   Array(Vec<ToolResultContentBlock>),
+  String(String),
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolResultContentBlock {
@@ -801,7 +801,7 @@ impl core::fmt::Display for StopReason {
     }
   }
 }
-#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct Usage {
   pub input_tokens: i64,
   pub output_tokens: i64,
@@ -811,13 +811,13 @@ pub struct Usage {
 #[serde(untagged)]
 pub enum Metadata {
   #[default]
-  String(String),
   Object(indexmap::IndexMap<String, serde_json::Value>),
+  String(String),
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ErrorResponse {
-  #[serde(rename = "type")]
+  #[serde(rename = "type", skip_deserializing)]
   #[default("error".to_string())]
   #[builder(default = "error".to_string())]
   pub r#type: String,
@@ -864,8 +864,8 @@ impl core::fmt::Display for ErrorType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum NullableStringOrNumber {
-  String(String),
   Number(f64),
+  String(String),
 }
 /// Test union that can be single item or array
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -934,7 +934,7 @@ pub enum HypotheticalVersion {
 pub struct UsageCounterA {
   #[validate(range(min = 0i64))]
   pub output_tokens: i64,
-  #[serde(rename = "type")]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("counter_a".to_string()))]
   pub r#type: Option<String>,
 }
@@ -946,7 +946,7 @@ pub struct UsageCounterA {
 pub struct UsageCounterB {
   #[validate(range(min = 0i64))]
   pub output_tokens: i64,
-  #[serde(rename = "type")]
+  #[serde(rename = "type", skip_deserializing)]
   #[default(Some("counter_b".to_string()))]
   pub r#type: Option<String>,
 }
@@ -1015,6 +1015,245 @@ pub struct ModelSelection {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 pub struct ModelRequirement {
   pub model: ModelFilterModel,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ChatModel {
+  #[serde(rename = "chat-1.0")]
+  #[default]
+  Chat10,
+  #[serde(rename = "chat-1.1")]
+  Chat11,
+}
+impl core::fmt::Display for ChatModel {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Chat10 => write!(f, "chat-1.0"),
+      Self::Chat11 => write!(f, "chat-1.1"),
+    }
+  }
+}
+/// A listed chat model, tried before any other string
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum ChatModelChoice {
+  #[default]
+  ChatModel(ChatModel),
+  String(String),
+}
+impl ChatModelChoice {
+  pub fn chat10() -> Self {
+    Self::ChatModel(ChatModel::Chat10)
+  }
+  pub fn chat11() -> Self {
+    Self::ChatModel(ChatModel::Chat11)
+  }
+}
+/// A union of constants, generated as a value enum
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ResponseKind {
+  /// Plain text
+  #[serde(rename = "text")]
+  Text,
+  #[serde(rename = "json")]
+  #[default]
+  Json,
+}
+impl core::fmt::Display for ResponseKind {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Text => write!(f, "text"),
+      Self::Json => write!(f, "json"),
+    }
+  }
+}
+/// A constant tried before an object and any other string
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum UsageChoice {
+  #[serde(rename = "auto")]
+  #[default]
+  Auto,
+  #[serde(untagged)]
+  Usage(Usage),
+  #[serde(untagged)]
+  String(String),
+}
+/// Boolean enum written as JSON booleans
+#[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
+pub enum Toggle {
+  #[default]
+  True,
+  False,
+}
+impl core::fmt::Display for Toggle {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::True => write!(f, "true"),
+      Self::False => write!(f, "false"),
+    }
+  }
+}
+impl serde::Serialize for Toggle {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    let value: bool = match self {
+      Self::True => true,
+      Self::False => false,
+    };
+    serializer.serialize_bool(value)
+  }
+}
+impl<'de> serde::Deserialize<'de> for Toggle {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = bool::deserialize(deserializer)?;
+    if value { Ok(Self::True) } else { Ok(Self::False) }
+  }
+}
+/// Enum mixing a string, numbers, and a boolean
+#[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
+pub enum Quality {
+  #[default]
+  Auto,
+  Value1,
+  Value0_5,
+  True,
+}
+impl core::fmt::Display for Quality {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Auto => write!(f, "auto"),
+      Self::Value1 => write!(f, "1"),
+      Self::Value0_5 => write!(f, "0.5"),
+      Self::True => write!(f, "true"),
+    }
+  }
+}
+impl serde::Serialize for Quality {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    match self {
+      Self::Auto => serializer.serialize_str("auto"),
+      Self::Value1 => serializer.serialize_i64(1i64),
+      Self::Value0_5 => serializer.serialize_f64(0.5f64),
+      Self::True => serializer.serialize_bool(true),
+    }
+  }
+}
+impl<'de> serde::Deserialize<'de> for Quality {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match &value {
+      serde_json::Value::String(s) if matches!(s.as_str(), "auto") => Ok(Self::Auto),
+      serde_json::Value::Number(n) if n.as_i64() == Some(1i64) => Ok(Self::Value1),
+      serde_json::Value::Number(n) if n.as_f64().map(f64::to_bits) == Some((0.5f64).to_bits()) => Ok(Self::Value0_5),
+      serde_json::Value::Bool(true) => Ok(Self::True),
+      _ => Err(serde::de::Error::custom(format!(
+        "unknown variant {}, expected one of: {}",
+        value, "auto, 1, 0.5, true"
+      ))),
+    }
+  }
+}
+/// Integer enum without a declared type
+#[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
+pub enum Priority {
+  #[default]
+  Value1,
+  Value2,
+  Value3,
+}
+impl core::fmt::Display for Priority {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Value1 => write!(f, "1"),
+      Self::Value2 => write!(f, "2"),
+      Self::Value3 => write!(f, "3"),
+    }
+  }
+}
+impl serde::Serialize for Priority {
+  fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    let value: i64 = match self {
+      Self::Value1 => 1i64,
+      Self::Value2 => 2i64,
+      Self::Value3 => 3i64,
+    };
+    serializer.serialize_i64(value)
+  }
+}
+impl<'de> serde::Deserialize<'de> for Priority {
+  fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+  where
+    D: serde::Deserializer<'de>,
+  {
+    let value = i64::deserialize(deserializer)?;
+    match value {
+      1i64 => Ok(Self::Value1),
+      2i64 => Ok(Self::Value2),
+      3i64 => Ok(Self::Value3),
+      _ => Err(serde::de::Error::custom(format!(
+        "unknown variant {}, expected one of: {}",
+        value, "1, 2, 3"
+      ))),
+    }
+  }
+}
+/// A listed chat model or any other model name
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+#[non_exhaustive]
+pub enum ChatModelId {
+  #[serde(rename = "chat-1.0")]
+  #[default]
+  Chat10,
+  #[serde(rename = "chat-1.1")]
+  Chat11,
+  #[serde(untagged)]
+  Other(String),
+}
+impl core::fmt::Display for ChatModelId {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Chat10 => write!(f, "chat-1.0"),
+      Self::Chat11 => write!(f, "chat-1.1"),
+      Self::Other(v) => write!(f, "{v}"),
+    }
+  }
+}
+impl From<String> for ChatModelId {
+  fn from(value: String) -> Self {
+    match value.as_str() {
+      "chat-1.0" => Self::Chat10,
+      "chat-1.1" => Self::Chat11,
+      _ => Self::Other(value),
+    }
+  }
+}
+/// Non-exhaustive enums: a referenced one, and an inline one that lists `other` and defaults to an unlisted value
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+#[serde(default)]
+pub struct ChatPreference {
+  /// A listed chat model or any other model name
+  pub model: ChatModelId,
+  #[serde(skip_deserializing)]
+  #[default(Some("chat.preference".to_string()))]
+  pub object: Option<String>,
+  #[default(Some(ChatModel::Chat11))]
+  pub fallback: Option<ChatModel>,
+  #[default(Some(ChatPreferenceTier::Other2("flex".to_string())))]
+  pub tier: Option<ChatPreferenceTier>,
 }
 /// Send content blocks
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
@@ -1142,6 +1381,43 @@ pub enum ModelFilterModel {
   #[default]
   Enum(ModelFilterModelEnum),
   Enum2(ModelFilterModelEnum2),
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ChatPreferenceTier {
+  #[serde(rename = "standard")]
+  Standard,
+  #[serde(rename = "priority")]
+  Priority,
+  #[serde(rename = "other")]
+  Other,
+  #[serde(untagged)]
+  Other2(String),
+}
+impl Default for ChatPreferenceTier {
+  fn default() -> Self {
+    Self::Other2("flex".to_string())
+  }
+}
+impl core::fmt::Display for ChatPreferenceTier {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Standard => write!(f, "standard"),
+      Self::Priority => write!(f, "priority"),
+      Self::Other => write!(f, "other"),
+      Self::Other2(v) => write!(f, "{v}"),
+    }
+  }
+}
+impl From<String> for ChatPreferenceTier {
+  fn from(value: String) -> Self {
+    match value.as_str() {
+      "standard" => Self::Standard,
+      "priority" => Self::Priority,
+      "other" => Self::Other,
+      _ => Self::Other2(value),
+    }
+  }
 }
 /// Response enum shared by every operation.
 ///

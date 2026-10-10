@@ -670,13 +670,28 @@ fn test_enum_deduplication() {
       )],
     ),
     (
-      include_str!("../../../fixtures/relaxed_enum_deduplication.json"),
+      include_str!("../../../fixtures/non_exhaustive_enum.json"),
       vec![
-        ("pub enum Status", 1, "Status enum should be defined"),
-        ("pub enum ComplexStatusStatus", 1, "Outer enum should be defined"),
-        ("Known(Status)", 1, "Outer enum should wrap Status"),
+        ("pub enum Status", 1, "Closed Status enum should be defined"),
+        ("pub enum ComplexStatusStatus", 1, "Inline open enum should be defined"),
+        (
+          "pub enum ComplexStatusReferenced",
+          1,
+          "Referenced open enum should be defined",
+        ),
+        ("#[non_exhaustive]", 2, "Both open enums should be non-exhaustive"),
+        (
+          "#[serde(untagged)]\n    Other(String),",
+          2,
+          "Open enums should end in an untagged catch-all",
+        ),
+        (
+          "pub referenced: Option<ComplexStatusReferenced>",
+          1,
+          "Referenced field should keep its open enum",
+        ),
       ],
-      vec![("pub enum ComplexStatusStatusKnown", "Inner enum should be deduplicated")],
+      vec![],
     ),
   ];
 

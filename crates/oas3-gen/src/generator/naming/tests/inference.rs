@@ -8,7 +8,7 @@ use crate::{
   generator::{
     ast::{EnumVariantToken, TypeRef, VariantContent, VariantDef},
     naming::{
-      constants::{KNOWN_ENUM_VARIANT, REQUEST_BODY_SUFFIX},
+      constants::REQUEST_BODY_SUFFIX,
       inference::{NormalizedVariant, derive_method_names, strip_common_affixes},
       name_index::{TypeNameIndex, compute_best_name, is_valid_common_name, longest_common_suffix},
     },
@@ -149,7 +149,7 @@ fn test_compute_best_name() {
 }
 
 #[test]
-fn test_inline_type_scanner_known_suffix_patterns() {
+fn test_inline_type_scanner_skips_non_exhaustive_enums() {
   let voice_ids_shared = ObjectSchema {
     any_of: vec![
       schema_object(make_string_schema()),
@@ -184,28 +184,25 @@ fn test_inline_type_scanner_known_suffix_patterns() {
   let cases = [
     (
       vec!["alloy".to_string(), "ash".to_string(), "ballad".to_string()],
-      "VoiceIdsSharedKnown",
-      "StringEnumOptimizer pattern with enum_values",
+      "anyOf with enum_values",
     ),
     (
       vec!["json".to_string(), "text".to_string(), "xml".to_string()],
-      "FormatTypeKnown",
       "anyOf with const values",
     ),
   ];
 
-  for (enum_values, expected_name, description) in cases {
-    let name = result.enum_names.get(&enum_values);
+  for (enum_values, description) in cases {
     assert_eq!(
-      name,
-      Some(&expected_name.to_string()),
-      "{description} should be named with 'Known' suffix"
+      result.enum_names.get(&enum_values),
+      None,
+      "{description} is non-exhaustive and should not claim a closed enum's value set"
     );
   }
 }
 
 #[test]
-fn test_inline_type_scanner_enum_naming_without_known_suffix() {
+fn test_inline_type_scanner_names_closed_enums_after_schema() {
   let status = make_string_enum_schema(vec![json!("active"), json!("inactive"), json!("pending")]);
 
   let chat_model = make_string_enum_schema(vec![json!("gpt-4"), json!("gpt-3.5-turbo")]);
@@ -227,23 +224,18 @@ fn test_inline_type_scanner_enum_naming_without_known_suffix() {
 
   let mut status_values = vec!["active".to_string(), "inactive".to_string(), "pending".to_string()];
   status_values.sort();
-  let status_name = result.enum_names.get(&status_values);
-  assert!(status_name.is_some(), "Regular enum should have a precomputed name");
-  assert!(
-    !status_name.unwrap().ends_with(KNOWN_ENUM_VARIANT),
-    "Regular enum should not have 'Known' suffix"
+  assert_eq!(
+    result.enum_names.get(&status_values).map(String::as_str),
+    Some("Status"),
+    "Regular enum should be named after its schema"
   );
 
   let mut chat_model_values = vec!["gpt-4".to_string(), "gpt-3.5-turbo".to_string()];
   chat_model_values.sort();
-  let chat_model_name = result.enum_names.get(&chat_model_values);
-  assert!(
-    chat_model_name.is_some(),
-    "Top-level enum referenced by anyOf should have a precomputed name"
-  );
-  assert!(
-    chat_model_name.unwrap().starts_with("ChatModel"),
-    "Precomputed name should be based on ChatModel"
+  assert_eq!(
+    result.enum_names.get(&chat_model_values).map(String::as_str),
+    Some("ChatModel"),
+    "Top-level enum referenced by an open anyOf should keep its own name"
   );
 }
 

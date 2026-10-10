@@ -1,7 +1,7 @@
 {
 	"openapi": "3.1.0",
 	"info": {
-		"title": "Relaxed Enum Deduplication Test",
+		"title": "Non-Exhaustive Enum Test",
 		"version": "1.0.0"
 	},
 	"paths": {},
@@ -15,7 +15,7 @@
 				"type": "object",
 				"properties": {
 					"status": {
-						"description": "A relaxed enum that should reuse Status",
+						"description": "Known statuses plus any other string",
 						"anyOf": [
 							{
 								"type": "string"
@@ -23,6 +23,17 @@
 							{
 								"type": "string",
 								"enum": ["active", "inactive", "pending"]
+							}
+						]
+					},
+					"referenced": {
+						"description": "A referenced closed enum plus any other string",
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"$ref": "#/components/schemas/Status"
 							}
 						]
 					}

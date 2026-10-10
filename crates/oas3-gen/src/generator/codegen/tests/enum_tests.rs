@@ -1,4 +1,5 @@
 use quote::ToTokens;
+use serde_json::json;
 
 use crate::generator::{
   ast::{
@@ -12,7 +13,7 @@ use crate::generator::{
     enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment, ResponseUnionFragment},
   },
   converter::GenerationTarget,
-  naming::constants::{KNOWN_ENUM_VARIANT, OTHER_ENUM_VARIANT},
+  naming::constants::OTHER_ENUM_VARIANT,
 };
 
 fn make_unit_variant(name: &str) -> VariantDef {
@@ -495,7 +496,11 @@ fn test_case_insensitive_enum() {
       VariantDef::builder()
         .name(EnumVariantToken::new("Active"))
         .content(VariantContent::Unit)
-        .serde_attrs(vec![SerdeAttribute::Rename("active".to_string())])
+        .serde_attrs(vec![
+          SerdeAttribute::Rename("active".to_string()),
+          SerdeAttribute::Alias("Active".to_string()),
+          SerdeAttribute::Alias("on".to_string()),
+        ])
         .build(),
       VariantDef::builder()
         .name(EnumVariantToken::new("InProgress"))
@@ -528,11 +533,11 @@ fn test_case_insensitive_enum() {
     "Should implement Deserialize manually"
   );
   assert!(
-    impl_part.contains("\"active\" => Ok (Status :: Active)"),
-    "should match active"
+    impl_part.contains("\"active\" | \"on\" => Ok (Self :: Active)"),
+    "should match active and its alias once each, lowercased"
   );
   assert!(
-    impl_part.contains("\"in-progress\" => Ok (Status :: InProgress)"),
+    impl_part.contains("\"in-progress\" => Ok (Self :: InProgress)"),
     "should match in-progress"
   );
 
@@ -555,7 +560,7 @@ fn test_case_insensitive_enum() {
     .into_token_stream()
     .to_string();
   assert!(
-    fallback_code.contains("_ => Ok (Priority :: Unknown)"),
+    fallback_code.contains("_ => Ok (Self :: Unknown)"),
     "should fallback to Unknown variant for unrecognized values"
   );
 }
@@ -606,7 +611,7 @@ fn test_case_insensitive_enum_deserialize_only() {
     "should have custom Deserialize impl"
   );
   assert!(
-    code.contains("\"active\" => Ok (Status :: Active)"),
+    code.contains("\"active\" => Ok (Self :: Active)"),
     "custom deserialize should match 'active'"
   );
 }
@@ -777,23 +782,23 @@ fn test_known_value_constructor_methods() {
     name: EnumToken::new("ModelOption"),
     variants: vec![
       VariantDef::builder()
-        .name(EnumVariantToken::new(KNOWN_ENUM_VARIANT))
-        .content(VariantContent::Tuple(vec![TypeRef::new("ModelOptionKnown")]))
+        .name(EnumVariantToken::new("Preset"))
+        .content(VariantContent::Tuple(vec![TypeRef::new("ModelOptionPreset")]))
         .build(),
       VariantDef::builder()
-        .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
+        .name(EnumVariantToken::new("Custom"))
         .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
         .build(),
     ],
-    serde_attrs: vec![],
+    serde_attrs: vec![SerdeAttribute::Untagged],
     outer_attrs: vec![],
     case_insensitive: false,
     methods: vec![
       EnumMethod::new(
         "gemini_25_pro",
         EnumMethodKind::KnownValueConstructor {
-          wrapper_variant: EnumVariantToken::new(KNOWN_ENUM_VARIANT),
-          known_type: EnumToken::new("ModelOptionKnown"),
+          wrapper_variant: EnumVariantToken::new("Preset"),
+          known_type: EnumToken::new("ModelOptionPreset"),
           known_variant: EnumVariantToken::new("Gemini25Pro"),
         },
         Documentation::from_lines(["Our best model."]),
@@ -801,8 +806,8 @@ fn test_known_value_constructor_methods() {
       EnumMethod::new(
         "gemini_25_flash",
         EnumMethodKind::KnownValueConstructor {
-          wrapper_variant: EnumVariantToken::new(KNOWN_ENUM_VARIANT),
-          known_type: EnumToken::new("ModelOptionKnown"),
+          wrapper_variant: EnumVariantToken::new("Preset"),
+          known_type: EnumToken::new("ModelOptionPreset"),
           known_variant: EnumVariantToken::new("Gemini25Flash"),
         },
         Documentation::default(),
@@ -819,8 +824,8 @@ fn test_known_value_constructor_methods() {
     "should have gemini_25_pro constructor"
   );
   assert!(
-    code.contains("Self :: Known (ModelOptionKnown :: Gemini25Pro)"),
-    "should construct Known variant with inner enum value"
+    code.contains("Self :: Preset (ModelOptionPreset :: Gemini25Pro)"),
+    "should construct the wrapper variant with the inner enum value"
   );
   assert!(
     code.contains("pub fn gemini_25_flash () -> Self"),
@@ -1121,44 +1126,175 @@ fn test_payload_union_generation() {
 }
 
 #[test]
-fn test_relaxed_wrapper_enum_generates_display() {
+fn test_non_exhaustive_enum_generation() {
   let def = EnumDef {
-    name: EnumToken::new("CuisineType"),
-    variants: vec![
-      VariantDef::builder()
-        .name(EnumVariantToken::new(KNOWN_ENUM_VARIANT))
-        .content(VariantContent::Tuple(vec![TypeRef::new("CuisineTypeKnown")]))
-        .build(),
-      VariantDef::builder()
-        .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
-        .content(VariantContent::Tuple(vec![TypeRef::new("String")]))
-        .build(),
-    ],
-    generate_display: true,
-    ..Default::default()
+    non_exhaustive: true,
+    ..make_simple_enum(
+      "CuisineType",
+      vec![
+        VariantDef::builder()
+          .name(EnumVariantToken::new("Italian"))
+          .content(VariantContent::Unit)
+          .serde_attrs(vec![SerdeAttribute::Rename("italian".to_string())])
+          .build(),
+        VariantDef::builder()
+          .name(EnumVariantToken::new("Thai"))
+          .content(VariantContent::Unit)
+          .serde_attrs(vec![
+            SerdeAttribute::Rename("thai".to_string()),
+            SerdeAttribute::Alias("Thai-Food".to_string()),
+          ])
+          .build(),
+        VariantDef::builder()
+          .name(EnumVariantToken::new(OTHER_ENUM_VARIANT))
+          .content(VariantContent::Tuple(vec![TypeRef::new(RustPrimitive::String)]))
+          .serde_attrs(vec![SerdeAttribute::Untagged])
+          .build(),
+      ],
+    )
   };
 
-  let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
-    .into_token_stream()
-    .to_string();
-
-  let assertions = [
+  let shared_expected = [
+    "# [non_exhaustive] pub enum CuisineType",
+    "# [serde (untagged)] Other (String)",
+    "Self :: Italian => write ! (f , \"italian\")",
+    "Self :: Other (v) => write ! (f , \"{v}\")",
+    "impl From < String > for CuisineType { fn from (value : String) -> Self {",
+    "_ => Self :: Other (value) ,",
+  ];
+  let shared_unexpected = ["\"other\""];
+  let cases = [
     (
-      "impl core :: fmt :: Display for CuisineType",
-      "should generate Display impl for relaxed wrapper enum",
+      GenerationTarget::Client,
+      false,
+      vec![
+        "Eq , Hash , Serialize , Deserialize",
+        "match value . as_str () { \"italian\" => Self :: Italian , \"thai\" | \"Thai-Food\" => Self :: Thai ,",
+      ],
+      vec!["FromStr"],
     ),
     (
-      "Self :: Known (v) => write ! (f , \"{v}\")",
-      "should delegate Known variant to inner Display",
+      GenerationTarget::Server,
+      false,
+      vec![
+        "impl core :: str :: FromStr for CuisineType",
+        "Ok (Self :: from (s . to_string ()))",
+      ],
+      vec!["unknown variant"],
     ),
     (
-      "Self :: Other (v) => write ! (f , \"{v}\")",
-      "should delegate Other variant to inner Display",
+      GenerationTarget::Server,
+      true,
+      vec![
+        "Ok (Self :: from (s . to_string ()))",
+        "String :: deserialize (deserializer) . map (Self :: from)",
+        "match value . to_ascii_lowercase () . as_str () { \"italian\" => Self :: Italian ,",
+        "\"thai\" | \"thai-food\" => Self :: Thai ,",
+      ],
+      vec!["unknown variant", "unknown_variant"],
+    ),
+    (
+      GenerationTarget::Client,
+      true,
+      vec![
+        "impl < 'de > serde :: Deserialize < 'de > for CuisineType",
+        "String :: deserialize (deserializer) . map (Self :: from)",
+        "\"thai\" | \"thai-food\" => Self :: Thai ,",
+      ],
+      vec!["unknown_variant", "FromStr"],
     ),
   ];
 
-  for (expected, msg) in assertions {
-    assert!(code.contains(expected), "{msg}\nGenerated code:\n{code}");
+  for (target, case_insensitive, expected, unexpected) in cases {
+    let def = EnumDef {
+      case_insensitive,
+      ..def.clone()
+    };
+    let code = EnumFragment::new(&def, Visibility::Public, target)
+      .into_token_stream()
+      .to_string();
+
+    for pattern in shared_expected.iter().chain(&expected) {
+      assert!(
+        code.contains(pattern),
+        "{target:?}/case_insensitive={case_insensitive}: expected `{pattern}`\n{code}"
+      );
+    }
+    for pattern in shared_unexpected.iter().chain(&unexpected) {
+      assert!(
+        !code.contains(pattern),
+        "{target:?}/case_insensitive={case_insensitive}: did not expect `{pattern}`\n{code}"
+      );
+    }
+  }
+}
+
+#[test]
+fn test_bool_and_mixed_value_enum_serde() {
+  let value_variant = |value: serde_json::Value| {
+    VariantDef::builder()
+      .value(&value)
+      .expect("supported enum value")
+      .content(VariantContent::Unit)
+      .build()
+  };
+  let cases = [
+    (
+      vec![json!(true), json!(false)],
+      RustPrimitive::Bool,
+      vec![
+        "Self :: True => true , Self :: False => false ,",
+        "serializer . serialize_bool (value)",
+        "let value = bool :: deserialize (deserializer) ? ; if value { Ok (Self :: True) } else { Ok (Self :: False) }",
+      ],
+      vec!["# [serde (rename", "match value {"],
+    ),
+    (
+      vec![json!(true)],
+      RustPrimitive::Bool,
+      vec!["if value { Ok (Self :: True) } else { Err (serde :: de :: Error :: custom"],
+      vec!["Self :: False"],
+    ),
+    (
+      vec![json!("auto"), json!(1), json!(0.5), json!(true)],
+      RustPrimitive::Value,
+      vec![
+        "Self :: Auto => serializer . serialize_str (\"auto\") ,",
+        "Self :: Value1 => serializer . serialize_i64 (1i64) ,",
+        "Self :: Value0_5 => serializer . serialize_f64 (0.5f64) ,",
+        "Self :: True => serializer . serialize_bool (true) ,",
+        "let value = serde_json :: Value :: deserialize (deserializer) ? ; match & value {",
+        "serde_json :: Value :: String (s) if matches ! (s . as_str () , \"auto\") => Ok (Self :: Auto) ,",
+        "serde_json :: Value :: Number (n) if n . as_i64 () == Some (1i64) => Ok (Self :: Value1) ,",
+        "serde_json :: Value :: Number (n) if n . as_f64 () . map (f64 :: to_bits) == Some ((0.5f64) . to_bits ()) => Ok (Self :: Value0_5) ,",
+        "serde_json :: Value :: Bool (true) => Ok (Self :: True) ,",
+        "expected one of: {}\" , value , \"auto, 1, 0.5, true\"",
+      ],
+      vec![
+        "# [serde (rename",
+        "# [derive (Debug , Clone , PartialEq , Eq , Hash , Serialize",
+      ],
+    ),
+  ];
+
+  for (values, primitive, expected, unexpected) in cases {
+    let def = EnumDef {
+      scalar_repr: Some(primitive.clone()),
+      ..make_simple_enum("Choice", values.into_iter().map(value_variant).collect())
+    };
+    let code = EnumFragment::new(&def, Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
+
+    for pattern in &expected {
+      assert!(code.contains(pattern), "{primitive:?}: expected `{pattern}`\n{code}");
+    }
+    for pattern in &unexpected {
+      assert!(
+        !code.contains(pattern),
+        "{primitive:?}: did not expect `{pattern}`\n{code}"
+      );
+    }
   }
 }
 

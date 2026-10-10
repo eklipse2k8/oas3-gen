@@ -5,8 +5,8 @@ use serde_json::json;
 
 use crate::{
   generator::{
-    ast::{OuterAttr, RustPrimitive, RustType, SerdeAsFieldAttr},
-    converter::{CodegenConfig, SchemaConverter, fields::FieldConverter},
+    ast::{OuterAttr, RustPrimitive, RustType, SerdeAsFieldAttr, SerdeAttribute},
+    converter::{CodegenConfig, GenerationTarget, SchemaConverter, fields::FieldConverter},
   },
   tests::common::{create_test_context, create_test_graph, default_config, make_field, parse_schemas},
 };
@@ -693,6 +693,111 @@ fn test_nullable_union_field_is_optional() -> anyhow::Result<()> {
     assert_eq!(
       field.rust_type.nullable, expected_nullable,
       "nullability mismatch for {name}"
+    );
+  }
+
+  Ok(())
+}
+
+#[test]
+fn test_constant_fields_skip_deserializing_in_client_output() -> anyhow::Result<()> {
+  let cases = [
+    (GenerationTarget::Client, None, true),
+    (GenerationTarget::Client, Some(json!(false)), true),
+    (GenerationTarget::Client, Some(json!(true)), false),
+    (GenerationTarget::Server, None, false),
+  ];
+
+  for (target, additional_properties, expect_skip) in cases {
+    let mut holder = json!({
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "const": "holder" },
+        "level": { "type": "integer", "enum": [7] },
+        "name": { "type": "string" }
+      }
+    });
+    if let Some(additional) = &additional_properties {
+      holder["additionalProperties"] = additional.clone();
+    }
+    let graph = create_test_graph(parse_schemas(vec![("Holder", holder)]));
+    let config = CodegenConfig {
+      target,
+      ..Default::default()
+    };
+    let context = create_test_context(graph.clone(), config);
+    let result = SchemaConverter::new(&context).convert_schema("Holder", graph.get("Holder").unwrap())?;
+    let Some(RustType::Struct(holder)) = result.first() else {
+      panic!("expected Holder struct");
+    };
+
+    for (field_name, constant) in [("kind", true), ("level", true), ("name", false)] {
+      let field = holder
+        .fields
+        .iter()
+        .find(|f| f.name == field_name)
+        .unwrap_or_else(|| panic!("{field_name} field should exist"));
+      assert_eq!(
+        field.serde_attrs.contains(&SerdeAttribute::SkipDeserializing),
+        constant && expect_skip,
+        "{target:?}/additionalProperties={additional_properties:?}: skip_deserializing on {field_name}"
+      );
+    }
+  }
+
+  Ok(())
+}
+
+#[test]
+fn test_annotated_ref_property_resolves_like_its_reference() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "Closed",
+      json!({ "type": "string", "enum": ["a", "b"], "default": "b", "description": "Closed choices" }),
+    ),
+    (
+      "Holder",
+      json!({
+        "type": "object",
+        "properties": {
+          "annotated": {
+            "allOf": [{ "$ref": "#/components/schemas/Closed" }],
+            "default": "a",
+            "description": "picked"
+          },
+          "wrapped": { "allOf": [{ "$ref": "#/components/schemas/Closed" }] },
+          "plain": { "$ref": "#/components/schemas/Closed" }
+        }
+      }),
+    ),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let result = SchemaConverter::new(&context).convert_schema("Holder", graph.get("Holder").unwrap())?;
+  let Some(RustType::Struct(holder)) = result.first() else {
+    panic!("expected Holder struct");
+  };
+
+  let cases = [
+    ("annotated", json!("a"), "picked"),
+    ("wrapped", json!("b"), "Closed choices"),
+    ("plain", json!("b"), "Closed choices"),
+  ];
+  for (field_name, expected_default, expected_doc) in cases {
+    let field = holder
+      .fields
+      .iter()
+      .find(|f| f.name == field_name)
+      .unwrap_or_else(|| panic!("{field_name} field should exist"));
+    assert_eq!(
+      field.rust_type.base_type,
+      RustPrimitive::Custom("Closed".into()),
+      "{field_name} type"
+    );
+    assert_eq!(field.default_value, Some(expected_default), "{field_name} default");
+    assert!(
+      field.docs.to_string().contains(expected_doc),
+      "{field_name} docs should contain `{expected_doc}`, got {:?}",
+      field.docs
     );
   }
 

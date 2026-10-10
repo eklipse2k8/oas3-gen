@@ -7,7 +7,6 @@ pub(crate) mod inline_resolver;
 pub(crate) mod methods;
 pub(crate) mod operations;
 pub(crate) mod parameters;
-pub(crate) mod relaxed_enum;
 pub(crate) mod requests;
 pub(crate) mod responses;
 pub(crate) mod security;

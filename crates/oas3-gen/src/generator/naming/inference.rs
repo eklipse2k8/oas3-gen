@@ -7,7 +7,7 @@ use inflections::Inflect;
 
 use crate::{
   generator::{
-    ast::{EnumVariantToken, VariantDef},
+    ast::{EnumVariantToken, ValueKind, VariantDef},
     naming::{
       constants::VARIANT_KIND_SUFFIX,
       identifiers::{split_pascal_case, to_rust_type_name},
@@ -171,6 +171,8 @@ pub struct NormalizedVariant {
   pub name: String,
   /// The original value string for serialization (e.g., "10.5").
   pub rename_value: String,
+  /// The JSON type of the original value.
+  pub kind: ValueKind,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -184,6 +186,7 @@ impl TryFrom<&serde_json::Value> for NormalizedVariant {
       serde_json::Value::String(str_val) => Ok(NormalizedVariant {
         name: to_rust_type_name(str_val),
         rename_value: str_val.clone(),
+        kind: ValueKind::String,
       }),
       serde_json::Value::Number(num) => {
         let raw_str = if let Some(i) = num.as_i64() {
@@ -197,11 +200,13 @@ impl TryFrom<&serde_json::Value> for NormalizedVariant {
         Ok(NormalizedVariant {
           name: format!("Value{safe_name}"),
           rename_value: raw_str,
+          kind: ValueKind::Number,
         })
       }
       serde_json::Value::Bool(bool_val) => Ok(NormalizedVariant {
         name: if *bool_val { "True".into() } else { "False".into() },
         rename_value: bool_val.to_string(),
+        kind: ValueKind::Bool,
       }),
       _ => Err(UnsupportedJsonValue),
     }

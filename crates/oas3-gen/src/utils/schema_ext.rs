@@ -169,14 +169,15 @@ pub(crate) trait SchemaExt {
   /// Returns true if the schema has allOf composition.
   fn has_intersection(&self) -> bool;
 
+  /// Returns the reference a schema only annotates, as in
+  /// `{ "allOf": [{ "$ref": "..." }], "default": "a" }`: a single `allOf` reference
+  /// alongside annotations such as `default` or `description`, but no keywords that
+  /// change the type.
+  fn annotated_ref(&self) -> Option<&Schema>;
+
   /// Returns true if the schema requires a dedicated type definition.
   /// This includes schemas with enum values, oneOf/anyOf unions, or typed object properties.
   fn requires_type_definition(&self) -> bool;
-
-  /// Returns true if the schema has a relaxed enum pattern in anyOf.
-  /// A relaxed enum has both freeform string variants and constrained string variants,
-  /// allowing APIs to accept known values plus arbitrary strings for forward compatibility.
-  fn has_relaxed_anyof_enum(&self) -> bool;
 
   /// Returns an iterator over all union variants (`anyOf` and `oneOf`) in a schema.
   ///
@@ -229,11 +230,9 @@ pub(crate) trait SchemaExt {
   /// ```
   fn is_constrained(&self) -> bool;
 
-  /// Checks if a schema matches the "relaxed enum" pattern.
-  ///
-  /// A relaxed enum is defined as having a freeform string variant (no enum values, no const)
-  /// alongside other variants that are constrained (enum values or const).
-  fn is_relaxed_enum_pattern(&self) -> bool;
+  /// Returns true if any `anyOf`/`oneOf` variant, after resolving `$ref`s, is an
+  /// unconstrained string, so the union accepts strings beyond any values it lists.
+  fn has_unconstrained_string_variant(&self, spec: &Spec) -> bool;
 
   /// Infers a variant name for an inline schema in a union.
   fn infer_variant_name(&self, index: usize) -> String;
@@ -267,7 +266,7 @@ pub(crate) trait SchemaExt {
   /// - Direct `enum` arrays: each value becomes a unit variant
   /// - `const` values: single variant with schema's docs/deprecated
   /// - oneOf/anyOf with const variants: per-variant metadata preserved
-  /// - Relaxed enum patterns: known values extracted from constrained variants
+  /// - Non-exhaustive enum patterns: known values extracted from constrained variants
   ///
   /// Returns fully-constructed `VariantDef`s with normalized names, serde attributes,
   /// documentation, and deprecated status from the source schema when available.
@@ -277,11 +276,6 @@ pub(crate) trait SchemaExt {
   /// extension (`x-enum-descriptions`, `x-speakeasy-enum-descriptions`, or
   /// `x-google-enum-descriptions`), or an empty vec when none is present.
   fn extract_enum_descriptions(&self) -> Vec<String>;
-
-  /// Returns true if the schema should be registered as an enum in the name index.
-  ///
-  /// This includes schemas with direct enum values and relaxed anyOf enum patterns.
-  fn should_register_as_enum(&self) -> bool;
 }
 
 impl SchemaExt for ObjectSchema {
@@ -436,12 +430,26 @@ impl SchemaExt for ObjectSchema {
     !self.all_of.is_empty()
   }
 
-  fn requires_type_definition(&self) -> bool {
-    self.has_enum_values() || self.has_union() || (!self.properties.is_empty() && self.additional_properties.is_none())
+  fn annotated_ref(&self) -> Option<&Schema> {
+    let [reference] = self.all_of.as_slice() else {
+      return None;
+    };
+    let only_annotates = reference.schema_ref_name().is_some()
+      && self.schema_type.is_none()
+      && self.properties.is_empty()
+      && self.additional_properties.is_none()
+      && self.items.is_none()
+      && self.prefix_items.is_empty()
+      && self.any_of.is_empty()
+      && self.one_of.is_empty()
+      && self.enum_values.is_empty()
+      && self.const_value.is_none()
+      && self.discriminator.is_none();
+    only_annotates.then_some(reference)
   }
 
-  fn has_relaxed_anyof_enum(&self) -> bool {
-    self.one_of.is_empty() && self.is_relaxed_enum_pattern()
+  fn requires_type_definition(&self) -> bool {
+    self.has_enum_values() || self.has_union() || (!self.properties.is_empty() && self.additional_properties.is_none())
   }
 
   fn union_variants(&self) -> impl Iterator<Item = &Schema> {
@@ -486,9 +494,11 @@ impl SchemaExt for ObjectSchema {
     !self.enum_values.is_empty() || self.const_value.is_some()
   }
 
-  fn is_relaxed_enum_pattern(&self) -> bool {
-    let variants = || self.union_variants().filter_map(Schema::as_inline);
-    variants().any(SchemaExt::is_unconstrained_string) && variants().any(SchemaExt::is_constrained)
+  fn has_unconstrained_string_variant(&self, spec: &Spec) -> bool {
+    self
+      .union_variants()
+      .resolve_all(spec)
+      .any(|variant| variant.is_unconstrained_string())
   }
 
   fn infer_variant_name(&self, index: usize) -> String {
@@ -694,17 +704,13 @@ impl SchemaExt for ObjectSchema {
       .map(str::to_string)
       .collect()
   }
-
-  fn should_register_as_enum(&self) -> bool {
-    self.has_enum_values() || self.has_relaxed_anyof_enum()
-  }
 }
 
 /// Returns `true` if a resolved union variant can participate in a value enum.
 ///
 /// A union is only representable as a value enum when every non-null variant
 /// contributes discrete values: an explicit `enum`, a `const`, an unconstrained
-/// (freeform) string for relaxed enums, or `null`. Structural variants such as
+/// (freeform) string for non-exhaustive enums, or `null`. Structural variants such as
 /// objects, arrays, or references to structs disqualify the whole union, since
 /// its set of values cannot be enumerated.
 fn is_enum_like_variant(schema: &ObjectSchema) -> bool {

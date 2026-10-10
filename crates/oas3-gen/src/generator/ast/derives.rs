@@ -148,7 +148,10 @@ impl DerivesProvider for EnumDef {
 impl EnumDef {
   #[must_use]
   pub fn is_simple(&self) -> bool {
-    self.variants.iter().all(|v| matches!(v.content, VariantContent::Unit))
+    self
+      .listed_variants()
+      .iter()
+      .all(|v| matches!(v.content, VariantContent::Unit))
   }
 }
 

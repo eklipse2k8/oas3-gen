@@ -2,14 +2,13 @@ use std::{collections::BTreeSet, rc::Rc};
 
 use anyhow::Context;
 use itertools::Itertools;
-use oas3::spec::{ObjectSchema, Schema, SchemaType};
+use oas3::spec::{ObjectSchema, Schema};
 
 use super::{
   ConversionOutput,
   methods::MethodGenerator,
-  relaxed_enum::RelaxedEnumBuilder,
   union_types::{CollisionStrategy, UnionVariantSpec, variants_to_cache_key},
-  value_enums::{ValueEnumBuilder, variant_matches_value},
+  value_enums::{ValueEnumBuilder, scalar_repr, variant_matches_value},
   variants::VariantBuilder,
 };
 use crate::{
@@ -24,7 +23,7 @@ use crate::{
       inference::{NormalizedVariant, strip_common_affixes},
     },
   },
-  utils::{SchemaExt, SchemaRefName, SchemaResolveExt},
+  utils::{SchemaExt, SchemaRefName, SchemaResolveExt, schema_ext::SchemaExtIters},
 };
 
 #[derive(Clone, Debug)]
@@ -36,15 +35,21 @@ pub(crate) struct EnumConverter {
 impl EnumConverter {
   /// Creates a new enum converter with the specified converter context.
   ///
-  /// The converter inherits case-sensitivity settings from the context's
-  /// [`CodegenConfig`] and uses them to configure the underlying
-  /// [`ValueEnumBuilder`].
+  /// The converter inherits case-sensitivity, variant ordering, and collision
+  /// settings from the context's [`CodegenConfig`] and uses them to configure
+  /// the underlying [`ValueEnumBuilder`].
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
-    let case_insensitive = context.config().case_insensitive_enums();
-    let sort_variants = context.config().sort_enum_variants();
+    let config = context.config();
+    let strategy = if config.preserve_case_variants() {
+      CollisionStrategy::Preserve
+    } else {
+      CollisionStrategy::Deduplicate
+    };
+    let value_enum_builder =
+      ValueEnumBuilder::new(config.case_insensitive_enums(), config.sort_enum_variants(), strategy);
     Self {
       context,
-      value_enum_builder: ValueEnumBuilder::new(case_insensitive, sort_variants),
+      value_enum_builder,
     }
   }
 
@@ -53,47 +58,53 @@ impl EnumConverter {
   /// Extracts the `enum` values from the schema and generates a Rust enum
   /// with PascalCase variant names and `#[serde(rename)]` attributes preserving
   /// the original JSON string values.
-  ///
-  /// The collision strategy (from config) determines how variant name collisions
-  /// are resolved: either by appending numeric suffixes or by merging duplicates
-  /// with serde aliases.
   pub(crate) fn convert_value_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
-    let strategy = if self.context.config().preserve_case_variants() {
-      CollisionStrategy::Preserve
-    } else {
-      CollisionStrategy::Deduplicate
-    };
-
     let variants = schema.extract_enum_entries(self.context.graph().spec());
-    let scalar_repr = Self::scalar_repr(schema);
-
-    self.value_enum_builder.build_enum_from_variants(
-      name,
-      variants,
-      strategy,
-      Documentation::from_optional(schema.description.as_ref()),
-      scalar_repr,
-      schema.default.as_ref(),
-    )
+    self
+      .value_enum_builder
+      .build_enum_from_variants(name, schema, variants, false)
   }
 
-  /// Determines the backing scalar primitive for a numeric value enum.
+  /// Converts an `anyOf` of listed string values and a freeform `{ "type": "string" }`
+  /// into a `#[non_exhaustive]` value enum that holds unlisted values in a trailing
+  /// `Other(String)` variant.
   ///
-  /// Returns `Some` for `type: integer` / `type: number` schemas (honoring any
-  /// numeric `format`), and `None` for string-backed enums, which use the
-  /// derived serde path.
-  fn scalar_repr(schema: &ObjectSchema) -> Option<RustPrimitive> {
-    match schema.single_type() {
-      Some(SchemaType::Integer) => Some(RustPrimitive::with_format_override(
-        RustPrimitive::I64,
-        schema.format.as_deref(),
-      )),
-      Some(SchemaType::Number) => Some(RustPrimitive::with_format_override(
-        RustPrimitive::F64,
-        schema.format.as_deref(),
-      )),
-      _ => None,
+  /// Returns `None` when the schema isn't that pattern: a `oneOf`, a union without
+  /// a freeform string branch, or one whose listed values are absent or not all
+  /// strings.
+  pub(crate) fn try_convert_non_exhaustive_enum(&self, name: &str, schema: &ObjectSchema) -> Option<RustType> {
+    let spec = self.context.graph().spec();
+    if !schema.one_of.is_empty() || !schema.has_unconstrained_string_variant(spec) {
+      return None;
     }
+
+    let variants = schema.extract_enum_entries(spec);
+    (!variants.is_empty() && scalar_repr(schema, &variants).is_none()).then(|| {
+      self
+        .value_enum_builder
+        .build_enum_from_variants(name, schema, variants, true)
+    })
+  }
+
+  /// Converts a `oneOf` or `anyOf` whose every non-null branch is a `const` into a
+  /// closed value enum, the same type an `enum` array of those values produces.
+  ///
+  /// Returns `None` when any branch carries a payload or no branch has a `const`.
+  pub(crate) fn try_convert_const_union(&self, name: &str, schema: &ObjectSchema) -> Option<RustType> {
+    let spec = self.context.graph().spec();
+    let branches = schema.union_variants().resolve_all(spec).collect::<Vec<_>>();
+    let is_const_union = branches.iter().all(|b| b.is_null() || b.const_value.is_some())
+      && branches.iter().any(|b| b.const_value.is_some());
+    if !is_const_union {
+      return None;
+    }
+
+    let variants = schema.extract_enum_entries(spec);
+    (!variants.is_empty()).then(|| {
+      self
+        .value_enum_builder
+        .build_enum_from_variants(name, schema, variants, false)
+    })
   }
 }
 
@@ -101,7 +112,7 @@ impl EnumConverter {
 pub(crate) struct UnionConverter {
   context: Rc<ConverterContext>,
   variant_builder: VariantBuilder,
-  relaxed_enum_builder: RelaxedEnumBuilder,
+  enum_converter: EnumConverter,
   method_generator: MethodGenerator,
   discriminator_converter: DiscriminatorConverter,
 }
@@ -109,18 +120,18 @@ pub(crate) struct UnionConverter {
 impl UnionConverter {
   /// Creates a new union converter with the specified converter context.
   ///
-  /// Initializes internal builders for variant construction, relaxed enum
-  /// generation (anyOf with freeform strings), and helper method generation.
+  /// Initializes internal builders for variant construction, non-exhaustive
+  /// enum generation (anyOf with freeform strings), and helper method generation.
   pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
     let variant_builder = VariantBuilder::new(context.clone());
-    let relaxed_enum_builder = RelaxedEnumBuilder::new(context.clone());
+    let enum_converter = EnumConverter::new(context.clone());
     let method_generator = MethodGenerator::new(context.clone());
     let discriminator_converter = DiscriminatorConverter::new(context.clone());
 
     Self {
       context,
       variant_builder,
-      relaxed_enum_builder,
+      enum_converter,
       method_generator,
       discriminator_converter,
     }
@@ -129,7 +140,7 @@ impl UnionConverter {
   /// Converts an OpenAPI `oneOf` or `anyOf` schema into a Rust enum type.
   ///
   /// For `anyOf` schemas containing both enumerated values and a freeform string
-  /// branch, produces a "relaxed enum" with `Known` and `Other` variants.
+  /// branch, produces a non-exhaustive value enum ending in `Other(String)`.
   /// Otherwise, generates an untagged enum with one variant per union branch.
   ///
   /// If the schema has a discriminator mapping, upgrades the result to a
@@ -138,16 +149,17 @@ impl UnionConverter {
   /// Returns the main enum type plus any inline types generated for anonymous
   /// variant schemas.
   pub(crate) fn convert_union(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
-    if !schema.any_of.is_empty()
-      && let Some(output) = self.relaxed_enum_builder.try_build_relaxed_enum(name, schema)
+    if let Some(value_enum) = self
+      .enum_converter
+      .try_convert_non_exhaustive_enum(name, schema)
+      .or_else(|| self.enum_converter.try_convert_const_union(name, schema))
     {
-      return Ok(output);
+      return Ok(ConversionOutput::new(value_enum));
     }
 
     let output = self.collect_union_variants(name, schema)?;
 
-    let should_register_enum = !schema.enum_values.is_empty() || schema.has_relaxed_anyof_enum();
-    if should_register_enum {
+    if !schema.enum_values.is_empty() {
       let variants = schema.extract_enum_entries(self.context.graph().spec());
       if !variants.is_empty()
         && let RustType::Enum(e) = &output.result
@@ -190,8 +202,6 @@ impl UnionConverter {
     )?;
     let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
 
-    let default_mode = self.resolve_default_mode(schema, &mut variants, &inline_types, has_null_variant);
-
     variants = strip_common_affixes(variants);
 
     if self.context.config().sort_enum_variants() {
@@ -200,6 +210,9 @@ impl UnionConverter {
         .sorted_by(|a, b| a.name.as_str().cmp(b.name.as_str()))
         .collect();
     }
+    variants = plain_strings_last(variants);
+
+    let default_mode = self.resolve_default_mode(schema, &mut variants, &inline_types, has_null_variant);
 
     let methods = if self.context.config().no_helpers() {
       vec![]
@@ -231,6 +244,15 @@ impl UnionConverter {
     has_null_variant: bool,
   ) -> EnumDefault {
     let default = schema.default.as_ref().filter(|v| !v.is_null());
+    if let Some(value) = default
+      && let Ok(normalized) = NormalizedVariant::try_from(value)
+      && let Some(unit) = variants
+        .iter_mut()
+        .find(|v| v.content == VariantContent::Unit && variant_matches_value(v, &normalized.rename_value))
+    {
+      unit.default = true;
+      return EnumDefault::Derive;
+    }
     if let Some(value) = default
       && let Some(payload) = self.match_default_payload(value, variants, inline_types)
     {
@@ -304,6 +326,22 @@ impl UnionConverter {
 
     Ok((specs, has_null_variant))
   }
+}
+
+/// Moves variants wrapping a plain `String` after the others, keeping their relative order.
+///
+/// An untagged enum deserializes into the first variant that accepts the input, and a
+/// `String` accepts every JSON string, so trying it first would shadow wrapped value enums
+/// such as `Chat(Chat)`.
+fn plain_strings_last(variants: Vec<VariantDef>) -> Vec<VariantDef> {
+  variants
+    .into_iter()
+    .sorted_by_key(|variant| {
+      variant
+        .single_wrapped_type()
+        .is_some_and(|t| t.base_type == RustPrimitive::String && !t.is_array)
+    })
+    .collect()
 }
 
 /// Builds the payload for a union variant wrapping the non-array `type_ref` from a schema

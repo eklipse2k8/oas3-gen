@@ -2,11 +2,13 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use serde_json::json;
 
+use super::support::assert_single_non_exhaustive_enum;
 use crate::{
   generator::{
     ast::{
-      DeriveTrait, DerivesProvider, EnumDef, EnumDefault, EnumMethodKind, EnumToken, EnumVariantToken, MethodNameToken,
-      RustPrimitive, RustType, SerdeAttribute, TypeRef, VariantContent, VariantDef,
+      DeriveTrait, DerivesProvider, EnumDef, EnumDefault, EnumDefaultValue, EnumMethodKind, EnumToken,
+      EnumVariantToken, MethodNameToken, RustPrimitive, RustType, SerdeAttribute, TypeRef, ValueKind, VariantContent,
+      VariantDef,
     },
     converter::{
       SchemaConverter,
@@ -14,12 +16,11 @@ use crate::{
       unions::{EnumConverter, UnionConverter},
     },
     metrics::GenerationStats,
-    naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
   tests::common::{
-    config_with_no_helpers, config_with_preserve_case, config_with_sorted_enums, create_test_context,
-    create_test_graph, default_config, parse_schema, parse_schemas,
+    config_with_no_helpers, config_with_preserve_case, config_with_sorted_enums, create_empty_test_graph,
+    create_test_context, create_test_graph, default_config, parse_schema, parse_schemas,
   },
 };
 
@@ -233,6 +234,195 @@ fn test_union_default_mode() {
       .collect::<Vec<_>>();
     let expected = expected_variant.into_iter().map(str::to_string).collect::<Vec<_>>();
     assert_eq!(flagged, expected, "flagged variant mismatch for {schema_json}");
+  }
+}
+
+#[test]
+fn test_value_enum_wire_repr() {
+  let cases = [
+    (
+      json!({"type": "boolean", "enum": [true, false]}),
+      Some(RustPrimitive::Bool),
+    ),
+    (json!({"enum": [true]}), Some(RustPrimitive::Bool)),
+    (json!({"enum": [1, 2]}), Some(RustPrimitive::I64)),
+    (json!({"enum": [0.5, 2]}), Some(RustPrimitive::F64)),
+    (
+      json!({"type": ["integer", "null"], "enum": [1, 2, null]}),
+      Some(RustPrimitive::I64),
+    ),
+    (
+      json!({"type": "integer", "format": "int32", "enum": [1, 2]}),
+      Some(RustPrimitive::I32),
+    ),
+    (json!({"enum": ["auto", 1, true]}), Some(RustPrimitive::Value)),
+    (json!({"type": "string", "enum": ["a", "b"]}), None),
+    (json!({"type": "string", "enum": [1, 2]}), None),
+  ];
+
+  for (schema, expected) in cases {
+    let converter = EnumConverter::new(create_test_context(create_empty_test_graph(), default_config()));
+    let RustType::Enum(def) = converter.convert_value_enum("Choice", &parse_schema(schema.clone())) else {
+      panic!("expected enum for {schema}");
+    };
+    assert_eq!(def.scalar_repr, expected, "wire repr for {schema}");
+  }
+
+  let converter = EnumConverter::new(create_test_context(create_empty_test_graph(), default_config()));
+  let RustType::Enum(mixed) = converter.convert_value_enum("Mixed", &parse_schema(json!({"enum": ["auto", 1, true]})))
+  else {
+    panic!("expected enum");
+  };
+  let kinds = mixed.variants.iter().map(|v| v.value_kind).collect::<Vec<_>>();
+  assert_eq!(kinds, [ValueKind::String, ValueKind::Number, ValueKind::Bool]);
+}
+
+#[test]
+fn test_const_unions_become_value_enums() {
+  let cases = [
+    (
+      json!({
+        "anyOf": [
+          { "type": "string", "const": "a", "description": "first" },
+          { "type": "string", "const": "b" }
+        ],
+        "default": "b"
+      }),
+      vec!["A", "B"],
+      Some("B"),
+      None,
+    ),
+    (
+      json!({ "oneOf": [{ "const": "auto" }, { "const": 1 }, { "const": true }] }),
+      vec!["Auto", "Value1", "True"],
+      None,
+      Some(RustPrimitive::Value),
+    ),
+    (
+      json!({ "anyOf": [{ "const": "a" }, { "const": "b" }, { "type": "null" }] }),
+      vec!["A", "B"],
+      None,
+      None,
+    ),
+  ];
+
+  for (schema, expected_variants, expected_default, expected_repr) in cases {
+    let types = convert_inline_union("Choice", schema.clone());
+    let [RustType::Enum(choice)] = types.as_slice() else {
+      panic!("{schema}: expected a single value enum, got {types:?}");
+    };
+
+    assert!(!choice.non_exhaustive, "{schema}: const unions are closed");
+    assert!(choice.serde_attrs.is_empty(), "{schema}: value enums aren't untagged");
+    assert!(choice.generate_display, "{schema}: value enums implement Display");
+    let names = choice.variants.iter().map(|v| v.name.as_str()).collect::<Vec<_>>();
+    assert_eq!(names, expected_variants, "{schema}: variants");
+    let flagged = choice.variants.iter().find(|v| v.default).map(|v| v.name.as_str());
+    assert_eq!(flagged, expected_default, "{schema}: default variant");
+    assert_eq!(choice.scalar_repr, expected_repr, "{schema}: wire repr");
+  }
+
+  let types = convert_inline_union(
+    "Choice",
+    json!({ "anyOf": [{ "type": "string", "const": "a", "description": "first" }, { "const": "b" }] }),
+  );
+  let [RustType::Enum(choice)] = types.as_slice() else {
+    panic!("expected a single value enum");
+  };
+  assert!(
+    choice.variants[0].docs.to_string().contains("first"),
+    "const branch descriptions document their variants"
+  );
+}
+
+#[test]
+fn test_mixed_const_union_default_selects_const_variant() {
+  let graph = create_test_graph(parse_schemas(vec![
+    (
+      "Cfg",
+      json!({ "type": "object", "properties": { "n": { "type": "integer" } } }),
+    ),
+    (
+      "AutoOrCfg",
+      json!({
+        "anyOf": [
+          { "type": "string" },
+          { "$ref": "#/components/schemas/Cfg" },
+          { "type": "string", "const": "auto" }
+        ],
+        "default": "auto"
+      }),
+    ),
+  ]));
+  let context = create_test_context(graph.clone(), default_config());
+  let types = SchemaConverter::new(&context)
+    .convert_schema("AutoOrCfg", graph.get("AutoOrCfg").unwrap())
+    .expect("should convert union");
+  let Some(RustType::Enum(union)) = types
+    .iter()
+    .find(|t| matches!(t, RustType::Enum(e) if e.name == "AutoOrCfg"))
+  else {
+    panic!("expected AutoOrCfg enum, got {types:?}");
+  };
+
+  let order = union.variants.iter().map(|v| v.name.as_str()).collect::<Vec<_>>();
+  assert_eq!(
+    order,
+    ["Auto", "Cfg", "String"],
+    "const variants first, plain String last"
+  );
+  assert_eq!(union.default_mode, EnumDefault::Derive);
+  let flagged = union.variants.iter().find(|v| v.default).map(|v| v.name.as_str());
+  assert_eq!(flagged, Some("Auto"), "the default names the const variant");
+}
+
+#[test]
+fn test_union_tries_plain_string_variants_last() {
+  let cases = [
+    (
+      json!({"oneOf": [{"type": "string"}, {"$ref": "#/components/schemas/Chat"}]}),
+      default_config(),
+      vec!["Chat", "String"],
+      None,
+    ),
+    (
+      json!({"oneOf": [{"type": "string"}, {"$ref": "#/components/schemas/Chat"}], "default": "chat-1.0"}),
+      default_config(),
+      vec!["Chat", "String"],
+      Some("Chat"),
+    ),
+    (
+      json!({"oneOf": [{"$ref": "#/components/schemas/Zeta"}, {"type": "string"}, {"$ref": "#/components/schemas/Chat"}]}),
+      config_with_sorted_enums(),
+      vec!["Chat", "Zeta", "String"],
+      None,
+    ),
+    (
+      json!({"oneOf": [{"$ref": "#/components/schemas/Chat"}, {"type": "array", "items": {"type": "string"}}]}),
+      default_config(),
+      vec!["Chat", "Array"],
+      None,
+    ),
+  ];
+
+  for (union, config, expected_order, expected_default) in cases {
+    let graph = create_test_graph(parse_schemas(vec![
+      ("Chat", json!({"type": "string", "enum": ["chat-1.0", "chat-1.1"]})),
+      ("Zeta", json!({"type": "string", "enum": ["z1", "z2"]})),
+      ("TestUnion", union.clone()),
+    ]));
+    let context = create_test_context(graph.clone(), config);
+    let types = SchemaConverter::new(&context)
+      .convert_schema("TestUnion", graph.get("TestUnion").unwrap())
+      .unwrap_or_else(|e| panic!("conversion failed for {union}: {e}"));
+    let Some(RustType::Enum(enum_def)) = types.first() else {
+      panic!("expected enum for {union}")
+    };
+
+    let order = enum_def.variants.iter().map(|v| v.name.as_str()).collect::<Vec<_>>();
+    assert_eq!(order, expected_order, "variant order for {union}");
+    let flagged = enum_def.variants.iter().find(|v| v.default).map(|v| v.name.as_str());
+    assert_eq!(flagged, expected_default, "default variant for {union}");
   }
 }
 
@@ -740,98 +930,163 @@ fn test_preserve_strategy_with_multiple_collisions() {
   }
 }
 
-#[test]
-fn test_relaxed_enum_detects_freeform_pattern() {
-  let spec = serde_json::from_value::<oas3::Spec>(json!({
-    "openapi": "3.1.0",
-    "info": {
-      "title": "Test",
-      "version": "1.0.0"
-    }
-  }))
-  .unwrap();
-
-  let mut stats = GenerationStats::default();
-  let registry = SchemaRegistry::new(&spec, &mut stats);
-
-  let graph = Arc::new(registry);
-  let context = create_test_context(graph.clone(), default_config());
-  let union_converter = UnionConverter::new(context);
-
-  let schema = parse_schema(json!({
-    "anyOf": [
-      { "type": "string", "const": "known1" },
-      { "type": "string", "const": "known2" },
-      { "type": "string" }
-    ]
-  }));
-
-  let result = union_converter.convert_union("TestEnum", &schema);
-  assert!(result.is_ok());
-
-  let output = result.unwrap();
-  let types = output.into_vec();
-  assert_eq!(types.len(), 2);
-
-  let has_known_enum = types.iter().any(|t| match t {
-    RustType::Enum(e) => e.name == EnumToken::new("TestEnumKnown"),
-    _ => false,
-  });
-  let outer_enum = types.iter().find_map(|t| match t {
-    RustType::Enum(e) if e.name == EnumToken::new("TestEnum") => Some(e),
-    _ => None,
-  });
-
-  assert!(has_known_enum);
-  assert!(outer_enum.is_some(), "should have outer wrapper enum");
-
-  let outer_enum = outer_enum.unwrap();
-  assert_eq!(outer_enum.methods.len(), 2, "wrapper enum should have 2 helper methods");
-  assert!(
-    outer_enum.methods.iter().any(|m| m.name.as_str() == "known1"),
-    "should have known1 method"
-  );
-  assert!(
-    outer_enum.methods.iter().any(|m| m.name.as_str() == "known2"),
-    "should have known2 method"
-  );
+fn convert_inline_union(name: &str, schema: serde_json::Value) -> Vec<RustType> {
+  let union_converter = UnionConverter::new(create_test_context(create_empty_test_graph(), default_config()));
+  union_converter
+    .convert_union(name, &parse_schema(schema))
+    .expect("should convert union")
+    .into_vec()
 }
 
 #[test]
-fn test_relaxed_enum_rejects_no_freeform() {
-  let spec = serde_json::from_value::<oas3::Spec>(json!({
-    "openapi": "3.1.0",
-    "info": {
-      "title": "Test",
-      "version": "1.0.0"
-    }
-  }))
-  .unwrap();
+fn test_non_exhaustive_enum_detects_freeform_pattern() {
+  let cases = [
+    (
+      "TestEnum",
+      json!({
+        "anyOf": [
+          { "type": "string", "const": "known1" },
+          { "type": "string", "const": "known2" },
+          { "type": "string" }
+        ]
+      }),
+      "TestEnum",
+      vec!["Known1", "Known2"],
+    ),
+    (
+      "my-open-enum",
+      json!({
+        "anyOf": [
+          { "type": "string", "const": "known-value" },
+          { "type": "string" }
+        ]
+      }),
+      "MyOpenEnum",
+      vec!["KnownValue"],
+    ),
+    (
+      "Nullable",
+      json!({
+        "anyOf": [
+          { "type": "string", "enum": ["alpha", "beta"] },
+          { "type": "string" },
+          { "type": "null" }
+        ]
+      }),
+      "Nullable",
+      vec!["Alpha", "Beta"],
+    ),
+  ];
 
-  let mut stats = GenerationStats::default();
-  let registry = SchemaRegistry::new(&spec, &mut stats);
+  for (name, schema, expected_name, listed) in cases {
+    let types = convert_inline_union(name, schema);
+    let open_enum = assert_single_non_exhaustive_enum(&types, expected_name, &listed, "Other");
+    assert!(open_enum.methods.is_empty(), "{name}: should not generate constructors");
+  }
+}
 
-  let graph = Arc::new(registry);
-  let context = create_test_context(graph.clone(), default_config());
-  let union_converter = UnionConverter::new(context);
-
-  let schema = parse_schema(json!({
-    "anyOf": [
-      { "type": "string", "const": "known1" },
-      { "type": "string", "const": "known2" }
-    ]
-  }));
-
-  let result = union_converter.convert_union("TestEnum", &schema);
-  assert!(result.is_ok());
-  let output = result.unwrap();
-  let types = output.into_vec();
-  assert!(
-    !types
-      .iter()
-      .any(|t| matches!(t, RustType::Enum(e) if e.name == EnumToken::new("TestEnumKnown"))),
-    "Should not generate relaxed enum without freeform string variant"
+#[test]
+fn test_non_exhaustive_enum_numbers_catch_all_when_other_is_listed() {
+  let types = convert_inline_union(
+    "Choice",
+    json!({
+      "anyOf": [
+        { "type": "string", "enum": ["other", "known"] },
+        { "type": "string" }
+      ]
+    }),
   );
+  assert_single_non_exhaustive_enum(&types, "Choice", &["Other", "Known"], "Other2");
+}
+
+#[test]
+fn test_unions_outside_the_pattern_stay_exhaustive() {
+  let cases = [
+    (
+      json!({
+        "anyOf": [
+          { "type": "string", "const": "known1" },
+          { "type": "string", "const": "known2" }
+        ]
+      }),
+      "anyOf without a freeform string",
+    ),
+    (
+      json!({
+        "oneOf": [
+          { "type": "string" },
+          { "type": "string", "const": "known1" },
+          { "type": "string", "const": "known2" }
+        ]
+      }),
+      "oneOf with a freeform string",
+    ),
+    (
+      json!({
+        "type": "integer",
+        "anyOf": [
+          { "type": "string" },
+          { "type": "integer", "enum": [1, 2] }
+        ]
+      }),
+      "numeric schema with a freeform string branch",
+    ),
+    (
+      json!({
+        "anyOf": [
+          { "type": "string" },
+          { "type": "object", "properties": { "id": { "type": "string" } } }
+        ]
+      }),
+      "freeform string alongside an object",
+    ),
+  ];
+
+  for (schema, description) in cases {
+    let types = convert_inline_union("TestEnum", schema);
+    assert!(
+      types
+        .iter()
+        .all(|t| !matches!(t, RustType::Enum(e) if e.non_exhaustive)),
+      "{description}: should not generate a non-exhaustive enum, got {types:?}"
+    );
+  }
+}
+
+#[test]
+fn test_non_exhaustive_enum_defaults() {
+  let cases = [
+    (Some(json!("thai")), EnumDefault::Derive, Some("Thai")),
+    (
+      Some(json!("fusion")),
+      EnumDefault::Value(EnumDefaultValue {
+        value: json!("fusion"),
+        inner_variant: None,
+      }),
+      Some("Other"),
+    ),
+    (Some(json!(7)), EnumDefault::Derive, None),
+    (None, EnumDefault::Derive, None),
+  ];
+
+  for (default, expected_mode, expected_variant) in cases {
+    let mut schema = json!({
+      "anyOf": [
+        { "type": "string" },
+        { "type": "string", "enum": ["italian", "thai"] }
+      ]
+    });
+    if let Some(default) = &default {
+      schema["default"] = default.clone();
+    }
+
+    let types = convert_inline_union("Cuisine", schema);
+    let cuisine = assert_single_non_exhaustive_enum(&types, "Cuisine", &["Italian", "Thai"], "Other");
+
+    assert_eq!(cuisine.default_mode, expected_mode, "{default:?}: default mode");
+    let flagged = cuisine.variants.iter().find(|v| v.default).map(|v| v.name.as_str());
+    assert_eq!(flagged, expected_variant, "{default:?}: variant flagged default");
+  }
 }
 
 #[test]
@@ -886,95 +1141,55 @@ fn test_anyof_with_const_generates_unit_variant() -> anyhow::Result<()> {
   assert_eq!(text_variant.name, EnumVariantToken::new("TextFormat"));
   assert!(matches!(text_variant.content, VariantContent::Tuple(_)));
 
+  assert!(
+    enum_def.serde_attrs.is_empty(),
+    "a union with const branches can't be untagged as a whole"
+  );
+  assert_eq!(
+    text_variant.serde_attrs,
+    vec![SerdeAttribute::Untagged],
+    "payload variants are untagged individually"
+  );
+
   Ok(())
 }
 
 #[test]
-fn test_const_unit_variant_in_enum() {
-  use serde::{Deserialize, Serialize};
-
-  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-  #[serde(default)]
-  struct DataVariant {
-    #[serde(rename = "type")]
-    r#type: String,
-    value: i32,
-  }
-
-  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-  #[serde(untagged)]
-  enum TestEnum {
-    #[serde(rename = "auto")]
-    Auto,
-    Data(DataVariant),
-  }
-
-  let auto = TestEnum::Auto;
-  let data = TestEnum::Data(DataVariant {
-    r#type: "data".to_string(),
-    value: 42,
-  });
-
-  let auto_json = serde_json::to_string::<TestEnum>(&auto).unwrap();
-  let data_json = serde_json::to_value::<&TestEnum>(&data).unwrap();
-
-  assert_eq!(auto_json, "null");
-  assert_eq!(data_json["type"], "data");
-  assert_eq!(data_json["value"], 42);
-}
-
-#[test]
-fn test_openapi_response_format_serialization() {
+fn test_tagged_const_variants_round_trip() {
   use serde::{Deserialize, Serialize};
 
   #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
   #[serde(default)]
   struct ResponseFormatText {
     #[serde(rename = "type")]
-    #[serde(default = "default_text_type")]
     r#type: String,
-  }
-
-  fn default_text_type() -> String {
-    "text".to_string()
-  }
-
-  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-  #[serde(default)]
-  struct ResponseFormatJsonSchema {
-    #[serde(rename = "type")]
-    #[serde(default = "default_json_schema_type")]
-    r#type: String,
-    json_schema: serde_json::Value,
-  }
-
-  fn default_json_schema_type() -> String {
-    "json_schema".to_string()
   }
 
   #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-  #[serde(untagged)]
   enum ResponseFormat {
     #[serde(rename = "auto")]
     Auto,
+    #[serde(untagged)]
     Text(ResponseFormatText),
-    JsonSchema(ResponseFormatJsonSchema),
+    #[serde(untagged)]
+    String(String),
   }
 
-  let text = ResponseFormat::Text(ResponseFormatText {
-    r#type: "text".to_string(),
-  });
-  let json_schema = ResponseFormat::JsonSchema(ResponseFormatJsonSchema {
-    r#type: "json_schema".to_string(),
-    json_schema: serde_json::json!({"type": "object"}),
-  });
-
-  let text_json = serde_json::to_value::<&ResponseFormat>(&text).unwrap();
-  let json_schema_json = serde_json::to_value::<&ResponseFormat>(&json_schema).unwrap();
-
-  assert_eq!(text_json["type"], "text");
-  assert_eq!(json_schema_json["type"], "json_schema");
-  assert_eq!(json_schema_json["json_schema"]["type"], "object");
+  let cases = [
+    ("\"auto\"", ResponseFormat::Auto),
+    (
+      r#"{"type":"text"}"#,
+      ResponseFormat::Text(ResponseFormatText {
+        r#type: "text".to_string(),
+      }),
+    ),
+    ("\"other\"", ResponseFormat::String("other".to_string())),
+  ];
+  for (json, expected) in cases {
+    let parsed = serde_json::from_str::<ResponseFormat>(json).unwrap_or_else(|e| panic!("{json}: {e}"));
+    assert_eq!(parsed, expected, "deserialize {json}");
+    assert_eq!(serde_json::to_string(&parsed).unwrap(), json, "serialize {json}");
+  }
 }
 
 #[test]
@@ -1433,60 +1648,6 @@ fn test_already_pascalcase_name_not_double_converted() {
 }
 
 #[test]
-fn test_relaxed_enum_with_raw_name() {
-  let spec = serde_json::from_value::<oas3::Spec>(json!({
-    "openapi": "3.1.0",
-    "info": {
-      "title": "Test",
-      "version": "1.0.0"
-    }
-  }))
-  .unwrap();
-
-  let mut stats = GenerationStats::default();
-  let registry = SchemaRegistry::new(&spec, &mut stats);
-
-  let graph = Arc::new(registry);
-  let context = create_test_context(graph.clone(), default_config());
-  let union_converter = UnionConverter::new(context);
-
-  let schema = parse_schema(json!({
-    "anyOf": [
-      { "type": "string", "const": "known-value" },
-      { "type": "string" }
-    ]
-  }));
-
-  let result = union_converter.convert_union("my-relaxed-enum", &schema);
-  assert!(result.is_ok());
-
-  let output = result.unwrap();
-  let types = output.into_vec();
-
-  let outer_enum = types.iter().find_map(|t| match t {
-    RustType::Enum(e) if !e.name.to_string().ends_with(KNOWN_ENUM_VARIANT) => Some(e),
-    _ => None,
-  });
-  assert!(outer_enum.is_some(), "should have outer wrapper enum");
-  assert_eq!(
-    outer_enum.unwrap().name.to_string(),
-    "MyRelaxedEnum",
-    "raw hyphenated name should convert to PascalCase"
-  );
-
-  let known_enum = types.iter().find_map(|t| match t {
-    RustType::Enum(e) if e.name.to_string().ends_with(KNOWN_ENUM_VARIANT) => Some(e),
-    _ => None,
-  });
-  assert!(known_enum.is_some(), "should have known values enum");
-  assert_eq!(
-    known_enum.unwrap().name.to_string(),
-    "MyRelaxedEnumKnown",
-    "known enum should have converted name + Known suffix"
-  );
-}
-
-#[test]
 fn test_nested_anyof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
   let graph = create_test_graph(parse_schemas(vec![
     (
@@ -1556,9 +1717,9 @@ fn test_nested_anyof_with_null_flattens_to_single_enum() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_nested_nullable_relaxed_anyof_produces_known_other_enum() -> anyhow::Result<()> {
+fn test_nested_nullable_non_exhaustive_anyof_produces_one_flat_enum() -> anyhow::Result<()> {
   let graph = create_test_graph(parse_schemas(vec![(
-    "NullableRelaxed",
+    "NullableOpen",
     json!({
       "anyOf": [
         {
@@ -1575,34 +1736,9 @@ fn test_nested_nullable_relaxed_anyof_produces_known_other_enum() -> anyhow::Res
   let context = create_test_context(graph.clone(), default_config());
   let converter = SchemaConverter::new(&context);
 
-  let result = converter.convert_schema("NullableRelaxed", graph.get("NullableRelaxed").unwrap())?;
+  let result = converter.convert_schema("NullableOpen", graph.get("NullableOpen").unwrap())?;
 
-  let outer_enum = result.iter().find_map(|t| match t {
-    RustType::Enum(e) if e.name == "NullableRelaxed" => Some(e),
-    _ => None,
-  });
-  assert!(outer_enum.is_some(), "should produce NullableRelaxed enum");
-  let outer_enum = outer_enum.unwrap();
-
-  let variant_names = outer_enum
-    .variants
-    .iter()
-    .map(|v| v.name.to_string())
-    .collect::<Vec<_>>();
-  assert!(
-    variant_names.contains(&"Known".to_string()),
-    "should have Known variant, got {variant_names:?}"
-  );
-  assert!(
-    variant_names.contains(&"Other".to_string()),
-    "should have Other variant, got {variant_names:?}"
-  );
-
-  let has_known_enum = result.iter().any(|t| match t {
-    RustType::Enum(e) => e.name.to_string().ends_with("Known") && e.name != "NullableRelaxed",
-    _ => false,
-  });
-  assert!(has_known_enum, "should generate inner known values enum");
+  assert_single_non_exhaustive_enum(&result, "NullableOpen", &["Known1", "Known2"], "Other");
 
   Ok(())
 }

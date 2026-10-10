@@ -830,6 +830,106 @@
 						]
 					}
 				}
+			},
+			"ChatModel": {
+				"type": "string",
+				"enum": ["chat-1.0", "chat-1.1"]
+			},
+			"ChatModelChoice": {
+				"description": "A listed chat model, tried before any other string",
+				"oneOf": [
+					{
+						"type": "string"
+					},
+					{
+						"$ref": "#/components/schemas/ChatModel"
+					}
+				]
+			},
+			"ResponseKind": {
+				"description": "A union of constants, generated as a value enum",
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "text",
+						"description": "Plain text"
+					},
+					{
+						"type": "string",
+						"const": "json"
+					}
+				],
+				"default": "json"
+			},
+			"UsageChoice": {
+				"description": "A constant tried before an object and any other string",
+				"anyOf": [
+					{
+						"type": "string"
+					},
+					{
+						"$ref": "#/components/schemas/Usage"
+					},
+					{
+						"type": "string",
+						"const": "auto"
+					}
+				],
+				"default": "auto"
+			},
+			"Toggle": {
+				"description": "Boolean enum written as JSON booleans",
+				"type": "boolean",
+				"enum": [true, false]
+			},
+			"Quality": {
+				"description": "Enum mixing a string, numbers, and a boolean",
+				"enum": ["auto", 1, 0.5, true]
+			},
+			"Priority": {
+				"description": "Integer enum without a declared type",
+				"enum": [1, 2, 3]
+			},
+			"ChatModelId": {
+				"description": "A listed chat model or any other model name",
+				"anyOf": [
+					{
+						"type": "string"
+					},
+					{
+						"$ref": "#/components/schemas/ChatModel"
+					}
+				]
+			},
+			"ChatPreference": {
+				"type": "object",
+				"description": "Non-exhaustive enums: a referenced one, and an inline one that lists `other` and defaults to an unlisted value",
+				"required": ["model"],
+				"properties": {
+					"model": {
+						"$ref": "#/components/schemas/ChatModelId"
+					},
+					"object": {
+						"type": "string",
+						"const": "chat.preference"
+					},
+					"fallback": {
+						"$ref": "#/components/schemas/ChatModel",
+						"default": "chat-1.1"
+					},
+					"tier": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "string",
+								"enum": ["standard", "priority", "other"]
+							}
+						],
+						"default": "flex"
+					}
+				}
 			}
 		}
 	}

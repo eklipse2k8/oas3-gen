@@ -15,10 +15,10 @@ use crate::{
       FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAsFieldAttr, SerdeAttribute, StructKind, TypeRef,
       ValidationAttribute,
     },
-    converter::ConverterContext,
+    converter::{ConverterContext, GenerationTarget},
     schema_registry::DiscriminatorMapping,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, SchemaInspect},
 };
 
 /// Contains resolved field information including type, inline definitions, and validation.
@@ -107,9 +107,8 @@ impl FieldConverter {
     let mut inline_types = vec![];
 
     for (prop_name, prop_schema_ref) in &schema.properties {
-      let prop_schema = self
-        .type_resolver
-        .resolve(prop_schema_ref)
+      let (prop_schema, prop_schema_ref) = self
+        .resolve_property_schema(prop_schema_ref)
         .context(format!("Schema resolution failed for property '{prop_name}'"))?;
 
       let resolved = self
@@ -149,6 +148,24 @@ impl FieldConverter {
     }
 
     Ok(ConversionOutput::with_inline_types(fields, inline_types))
+  }
+
+  /// Resolves a property's schema, along with the schema its type comes from.
+  ///
+  /// A property that only annotates one reference, such as
+  /// `{ "allOf": [{ "$ref": "..." }], "default": "a" }`, takes the referenced type and
+  /// schema, with its own `default`, `description`, and `deprecated` taking precedence.
+  fn resolve_property_schema<'a>(&self, prop_schema_ref: &'a Schema) -> anyhow::Result<(ObjectSchema, &'a Schema)> {
+    let prop_schema = self.type_resolver.resolve(prop_schema_ref)?;
+    let Some(reference) = prop_schema_ref.as_inline().and_then(SchemaExt::annotated_ref) else {
+      return Ok((prop_schema, prop_schema_ref));
+    };
+
+    let mut referenced = self.type_resolver.resolve(reference)?;
+    referenced.default = prop_schema.default.or(referenced.default);
+    referenced.description = prop_schema.description.or(referenced.description);
+    referenced.deprecated = prop_schema.deprecated.or(referenced.deprecated);
+    Ok((referenced, reference))
   }
 
   fn convert_field(
@@ -204,7 +221,7 @@ impl FieldConverter {
 
     let serde_as_attr = self.customization_for_type(&final_type, prop_schema);
 
-    let field = FieldDef::builder()
+    let mut field = FieldDef::builder()
       .schema(prop_schema)
       .maybe_default_value(default_value)
       .maybe_serde_as_attr(serde_as_attr)
@@ -216,10 +233,29 @@ impl FieldConverter {
 
     let should_hide = is_discriminator && !discriminator_has_enum;
     if should_hide {
-      field.with_discriminator_behavior(discriminator_value, is_base)
-    } else {
-      field
+      return field.with_discriminator_behavior(discriminator_value, is_base);
     }
+    if self.ignores_received_constant(parent_schema, prop_schema) {
+      field.serde_attrs.insert(SerdeAttribute::SkipDeserializing);
+    }
+    field
+  }
+
+  /// Returns `true` when client code should always hold a constant property's value
+  /// and never read it, so a server sending something else can't fail deserialization.
+  ///
+  /// A property is constant when it has a `const` or a single-value `enum`; the struct's
+  /// `#[serde(default)]` then fills the skipped field with that value. Structs that
+  /// collect additional properties still read the field, since a skipped key would land
+  /// in the flattened map and serialize twice.
+  fn ignores_received_constant(&self, parent_schema: &ObjectSchema, prop_schema: &ObjectSchema) -> bool {
+    let is_constant = prop_schema.const_value.is_some() || prop_schema.enum_values.len() == 1;
+    let collects_additional = parent_schema
+      .additional_properties
+      .as_ref()
+      .is_some_and(|additional| !matches!(additional, Schema::Boolean(b) if !b.0));
+
+    is_constant && !collects_additional && self.context.config().target == GenerationTarget::Client
   }
 
   fn customization_for_type(&self, type_ref: &TypeRef, prop_schema: &ObjectSchema) -> Option<SerdeAsFieldAttr> {

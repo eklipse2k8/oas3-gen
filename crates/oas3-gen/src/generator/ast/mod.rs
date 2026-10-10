@@ -773,6 +773,10 @@ pub struct EnumDef {
   pub scalar_repr: Option<RustPrimitive>,
   #[builder(default)]
   pub default_mode: EnumDefault,
+  /// Renders `#[non_exhaustive]`; the last variant is then the `#[serde(untagged)]` catch-all
+  /// holding any string the spec doesn't list
+  #[builder(default)]
+  pub non_exhaustive: bool,
 }
 
 impl EnumDef {
@@ -786,6 +790,21 @@ impl EnumDef {
   pub fn fallback_variant(&self) -> Option<&VariantDef> {
     const FALLBACK_NAMES: &[&str] = &["Unknown", "Other"];
     self.variants.iter().find(|v| FALLBACK_NAMES.contains(&v.name.as_str()))
+  }
+
+  /// Catch-all variant of a non-exhaustive enum, e.g. `Other(String)`
+  #[must_use]
+  pub fn other_variant(&self) -> Option<&VariantDef> {
+    self.variants.last().filter(|_| self.non_exhaustive)
+  }
+
+  /// Variants for the values the spec lists, without a non-exhaustive enum's catch-all
+  #[must_use]
+  pub fn listed_variants(&self) -> &[VariantDef] {
+    match self.variants.split_last() {
+      Some((_, listed)) if self.non_exhaustive => listed,
+      _ => &self.variants,
+    }
   }
 }
 
@@ -810,6 +829,15 @@ pub struct EnumDefaultValue {
   pub inner_variant: Option<EnumVariantToken>,
 }
 
+/// JSON type of the listed value a value-enum variant stands for
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ValueKind {
+  #[default]
+  String,
+  Number,
+  Bool,
+}
+
 /// Rust enum variant definition
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct VariantDef {
@@ -823,6 +851,9 @@ pub struct VariantDef {
   pub deprecated: bool,
   #[builder(default)]
   pub default: bool,
+  /// JSON type of the value this unit variant stands for; `String` for payload variants
+  #[builder(default)]
+  pub value_kind: ValueKind,
 }
 
 impl VariantDef {
@@ -842,6 +873,15 @@ impl VariantDef {
 
   pub fn add_alias(&mut self, value: impl Into<String>) {
     self.serde_attrs.push(SerdeAttribute::Alias(value.into()));
+  }
+
+  /// Returns every value this variant deserializes from: its serde name, then each
+  /// `#[serde(alias)]` value.
+  pub fn wire_values(&self) -> impl Iterator<Item = &str> {
+    std::iter::once(self.serde_name()).chain(self.serde_attrs.iter().filter_map(|attr| match attr {
+      SerdeAttribute::Alias(alias) => Some(alias.as_str()),
+      _ => None,
+    }))
   }
 
   #[must_use]
@@ -873,22 +913,21 @@ where
   }
 }
 
+type NormalizedVariantBuilder<S> = VariantDefBuilder<
+  variant_def_builder::SetValueKind<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>>,
+>;
+
 impl<S: variant_def_builder::State> VariantDefBuilder<S>
 where
   S::Name: variant_def_builder::IsUnset,
   S::SerdeAttrs: variant_def_builder::IsUnset,
+  S::ValueKind: variant_def_builder::IsUnset,
 {
-  pub fn value(
-    self,
-    value: &Value,
-  ) -> Option<VariantDefBuilder<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>>> {
+  pub fn value(self, value: &Value) -> Option<NormalizedVariantBuilder<S>> {
     Some(self.normalized(NormalizedVariant::try_from(value).ok()?))
   }
 
-  pub fn normalized(
-    self,
-    normalized: NormalizedVariant,
-  ) -> VariantDefBuilder<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>> {
+  pub fn normalized(self, normalized: NormalizedVariant) -> NormalizedVariantBuilder<S> {
     let attributes = if normalized.name == normalized.rename_value {
       vec![]
     } else {
@@ -897,6 +936,7 @@ where
     self
       .name(EnumVariantToken::from(normalized.name))
       .serde_attrs(attributes)
+      .value_kind(normalized.kind)
   }
 }
 

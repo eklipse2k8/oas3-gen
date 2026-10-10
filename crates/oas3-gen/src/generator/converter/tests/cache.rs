@@ -7,15 +7,14 @@ use std::{
 use oas3::spec::ObjectSchema;
 use serde_json::json;
 
-use super::support::assert_has_known_variant;
+use super::support::assert_single_non_exhaustive_enum;
 use crate::{
   generator::{
-    ast::{EnumDef, EnumToken, EnumVariantToken, RustType, VariantContent},
+    ast::{EnumDef, EnumToken, RustType},
     converter::{
-      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, type_resolver::TypeResolver,
-      union_types::variants_to_cache_key, unions::UnionConverter,
+      SchemaConverter, cache::SharedSchemaCache, hashing::CanonicalSchema, union_types::variants_to_cache_key,
+      unions::UnionConverter,
     },
-    naming::constants::KNOWN_ENUM_VARIANT,
     schema_registry::SchemaRegistry,
   },
   tests::common::{
@@ -73,50 +72,7 @@ fn test_canonical_schema_equality_and_ordering() {
 }
 
 #[test]
-fn test_relaxed_enum_generates_known_variant() {
-  let graph = create_test_graph(parse_schemas(vec![
-    (
-      "PembrokeEnum",
-      json!({
-        "type": "string",
-        "enum": ["bark", "sploot", "loaf"]
-      }),
-    ),
-    (
-      "SplootEnum",
-      json!({
-        "anyOf": [
-          { "type": "string" },
-          { "$ref": "#/components/schemas/PembrokeEnum" }
-        ]
-      }),
-    ),
-  ]));
-
-  let context = create_test_context(graph.clone(), default_config());
-  let _type_resolver = TypeResolver::new(context.clone());
-  let union_converter = UnionConverter::new(context);
-
-  let sploot_schema = graph.get("SplootEnum").unwrap();
-  let optimized_output = union_converter
-    .convert_union("SplootEnum", sploot_schema)
-    .expect("Should convert anyOf union");
-
-  let optimized_result = optimized_output.into_vec();
-  assert!(!optimized_result.is_empty(), "Should generate at least one type");
-
-  let outer_enum = optimized_result
-    .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "SplootEnum"));
-  assert!(outer_enum.is_some(), "Should generate SplootEnum");
-
-  if let Some(RustType::Enum(e)) = outer_enum {
-    assert_has_known_variant(e);
-  }
-}
-
-#[test]
-fn test_relaxed_enum_with_ref() {
+fn test_non_exhaustive_enum_with_ref() {
   let graph = create_test_graph(parse_schemas(vec![
     (
       "BarkModel",
@@ -146,17 +102,7 @@ fn test_relaxed_enum_with_ref() {
   let model_ids_result = converter
     .convert_schema("FloofIds", graph.get("FloofIds").unwrap())
     .expect("Should convert FloofIds");
-
-  assert!(!model_ids_result.is_empty(), "Should generate at least one type");
-
-  let outer_enum = model_ids_result
-    .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "FloofIds"));
-  assert!(outer_enum.is_some(), "Should generate FloofIds enum");
-
-  if let Some(RustType::Enum(outer)) = outer_enum {
-    assert_has_known_variant(outer);
-  }
+  assert_single_non_exhaustive_enum(&model_ids_result, "FloofIds", &["CorgiV1", "CorgiV2"], "Other");
 }
 
 #[test]
@@ -224,13 +170,15 @@ fn test_cache_operations() {
   let mut cache = SharedSchemaCache::new();
 
   let enum_values = vec!["brown".to_string(), "white".to_string(), "black".to_string()];
-  assert!(
-    !cache.is_enum_generated(&enum_values),
+  assert_eq!(
+    cache.get_generated_enum_name(&enum_values),
+    None,
     "Enum should not be generated initially"
   );
   cache.register_enum(enum_values.clone(), "Howl".to_string());
-  assert!(
-    cache.is_enum_generated(&enum_values),
+  assert_eq!(
+    cache.get_generated_enum_name(&enum_values).as_deref(),
+    Some("Howl"),
     "Enum should be marked as generated"
   );
   assert_eq!(
@@ -394,7 +342,7 @@ fn test_canonical_schema_hash_consistency() {
 }
 
 #[test]
-fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
+fn test_non_exhaustive_enums_leave_closed_enum_values_unregistered() {
   let graph = create_test_graph(parse_schemas(vec![
     (
       "PembrokeEnum",
@@ -404,7 +352,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       }),
     ),
     (
-      "FloofRelaxed",
+      "FloofOpen",
       json!({
         "anyOf": [
           { "type": "string" },
@@ -413,7 +361,7 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
       }),
     ),
     (
-      "SplootRelaxed",
+      "SplootOpen",
       json!({
         "anyOf": [
           { "type": "string" },
@@ -426,63 +374,20 @@ fn test_relaxed_enum_does_not_overwrite_inner_enum_registration() {
   let context = create_test_context(graph.clone(), default_config());
   let union_converter = UnionConverter::new(context.clone());
 
-  let floof_schema = graph.get("FloofRelaxed").unwrap();
-  let first_output = union_converter
-    .convert_union("FloofRelaxed", floof_schema)
-    .expect("Should convert first anyOf union");
-  let first_result = first_output.into_vec();
-
-  let first_outer = first_result
-    .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "FloofRelaxed"))
-    .expect("Should generate FloofRelaxed");
-
-  let inner_enum_name = if let RustType::Enum(e) = first_outer {
-    let known_variant = e
-      .variants
-      .iter()
-      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
-      .expect("Should have Known variant");
-    if let VariantContent::Tuple(refs) = &known_variant.content {
-      refs[0].base_type.to_string()
-    } else {
-      panic!("Known variant should have tuple content");
-    }
-  } else {
-    panic!("FloofRelaxed should be an enum");
-  };
-
-  let sploot_schema = graph.get("SplootRelaxed").unwrap();
-  let second_output = union_converter
-    .convert_union("SplootRelaxed", sploot_schema)
-    .expect("Should convert second anyOf union");
-  let second_result = second_output.into_vec();
-
-  let second_outer = second_result
-    .iter()
-    .find(|t| matches!(t, RustType::Enum(e) if e.name == "SplootRelaxed"))
-    .expect("Should generate SplootRelaxed");
-
-  if let RustType::Enum(e) = second_outer {
-    let known_variant = e
-      .variants
-      .iter()
-      .find(|v| v.name == EnumVariantToken::new(KNOWN_ENUM_VARIANT))
-      .expect("Should have Known variant");
-    if let VariantContent::Tuple(refs) = &known_variant.content {
-      let second_inner_name = refs[0].base_type.to_string();
-      assert_eq!(
-        inner_enum_name, second_inner_name,
-        "Both relaxed enums should reference the same inner known values enum. \
-        First references '{inner_enum_name}', second references '{second_inner_name}'. \
-        This is a regression of issue #57."
-      );
-    } else {
-      panic!("Known variant should have tuple content");
-    }
-  } else {
-    panic!("SplootRelaxed should be an enum");
+  for name in ["FloofOpen", "SplootOpen"] {
+    let result = union_converter
+      .convert_union(name, graph.get(name).unwrap())
+      .expect("Should convert anyOf union")
+      .into_vec();
+    assert_single_non_exhaustive_enum(&result, name, &["Waddle", "Sploot", "Loaf", "Zoom"], "Other");
   }
+
+  let pembroke_key = make_enum_cache_key(graph.get("PembrokeEnum").unwrap()).unwrap();
+  assert_eq!(
+    context.cache().get_generated_enum_name(&pembroke_key),
+    None,
+    "non-exhaustive enums must not claim the value set of the closed PembrokeEnum"
+  );
 }
 
 #[test]

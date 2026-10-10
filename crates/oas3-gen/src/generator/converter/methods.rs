@@ -118,9 +118,8 @@ impl MethodGenerator {
   /// Collects union variants that wrap a value enum, along with that enum's values.
   ///
   /// A variant wrapping a value enum (e.g. `Preset(ImageSizePreset)`) can expose one
-  /// convenience constructor per enum value, mirroring the `Known(T)` variant of a
-  /// relaxed enum. Array-typed variants and variants whose wrapped type is not a
-  /// value enum are skipped.
+  /// convenience constructor per enum value. Array-typed variants and variants whose
+  /// wrapped type is not a value enum are skipped.
   fn collect_enum_value_variants(
     &self,
     variants: &[VariantDef],
