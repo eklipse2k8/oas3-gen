@@ -283,24 +283,23 @@ without `petId` does. A field with another adapter keeps it inside, as in
 
 ### Constant Properties
 
-A property with a `const`, or with an `enum` that lists a single value, always
-holds that one value. The client marks its field `#[serde(skip_deserializing)]`
-and never reads the constant back:
+A property with a `const`, or with an `enum` that lists a single value, has that
+one value as its default. The client reads the property from the response like any
+other field, so it keeps the value the server sends. The optional `object` property
+of `ChatPreference` becomes:
 
 ```rust
 pub struct ChatPreference {
     /* ... */
-    #[serde(skip_deserializing)]
     #[default(Some("chat.preference".to_string()))]
     pub object: Option<String>,
     /* ... */
 }
 ```
 
-`ChatPreference` has `#[serde(default)]`, so the skipped `object` field takes
-its value from `#[default(...)]`. A response with a different value, or a value
-of another JSON type, still deserializes. A struct whose schema declares
-`additionalProperties` reads its constant fields as sent.
+A response that omits the property takes the constant from `#[default(...)]`, like any
+other spec default. A response with a different value keeps that value rather than
+replacing it with the constant.
 
 ### Rejections from a Generated Server
 

@@ -254,7 +254,7 @@ fn constants_are_emitted_on_serialization<T: Serialize>(#[case] value: T, #[case
 #[case::error_response(
   json!({ "type": "failure", "error": { "type": "api_error", "message": "boom" } }),
   client::ErrorResponse {
-    r#type: "error".to_string(),
+    r#type: "failure".to_string(),
     error: client::ErrorDetails { r#type: client::ErrorType::ApiError, message: "boom".to_string() },
   }
 )]
@@ -262,12 +262,12 @@ fn constants_are_emitted_on_serialization<T: Serialize>(#[case] value: T, #[case
   json!({ "model": "chat-1.0", "object": "chat.thread" }),
   client::ChatPreference {
     model: client::ChatModelId::Chat10,
-    object: Some("chat.preference".to_string()),
+    object: Some("chat.thread".to_string()),
     fallback: Some(client::ChatModel::Chat11),
     tier: Some(client::ChatPreferenceTier::Other2("flex".to_string())),
   }
 )]
-fn direct_struct_decodes_replace_a_mismatched_constant_with_their_own<T: DeserializeOwned + PartialEq + Debug>(
+fn direct_struct_decodes_keep_a_received_constant<T: DeserializeOwned + PartialEq + Debug>(
   #[case] wire: Value,
   #[case] expected: T,
 ) {

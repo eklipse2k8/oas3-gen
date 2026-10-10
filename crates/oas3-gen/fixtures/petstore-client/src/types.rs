@@ -1803,7 +1803,7 @@ pub enum MessageMetadata {
 #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 #[serde(default)]
 pub struct ErrorResponse {
-  #[serde(rename = "type", skip_deserializing)]
+  #[serde(rename = "type")]
   #[default("error".to_string())]
   #[builder(default = "error".to_string())]
   pub r#type: String,
@@ -1922,7 +1922,6 @@ pub struct Wrapper {
   /// A branch that refers back to a node, or a leaf
   #[serde_as(as = "serde_with::DefaultOnNull")]
   pub node: Box<Node>,
-  #[serde(skip_deserializing)]
   #[default("w".to_string())]
   #[builder(default = "w".to_string())]
   pub kind: String,
@@ -1995,7 +1994,7 @@ pub struct UsageCounterA {
   #[serde_as(as = "serde_with::DefaultOnNull")]
   #[validate(range(min = 0i64))]
   pub output_tokens: i64,
-  #[serde(rename = "type", skip_deserializing)]
+  #[serde(rename = "type")]
   #[default(Some("counter_a".to_string()))]
   pub r#type: Option<String>,
 }
@@ -2009,7 +2008,7 @@ pub struct UsageCounterB {
   #[serde_as(as = "serde_with::DefaultOnNull")]
   #[validate(range(min = 0i64))]
   pub output_tokens: i64,
-  #[serde(rename = "type", skip_deserializing)]
+  #[serde(rename = "type")]
   #[default(Some("counter_b".to_string()))]
   pub r#type: Option<String>,
 }
@@ -2441,7 +2440,6 @@ pub struct ChatPreference {
   /// A listed chat model or any other model name
   #[serde_as(as = "serde_with::DefaultOnNull")]
   pub model: ChatModelId,
-  #[serde(skip_deserializing)]
   #[default(Some("chat.preference".to_string()))]
   pub object: Option<String>,
   #[default(Some(ChatModel::Chat11))]

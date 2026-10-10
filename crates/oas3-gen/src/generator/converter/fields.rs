@@ -15,7 +15,7 @@ use crate::{
       FieldDef, FieldNameToken, RustPrimitive, RustType, SerdeAsFieldAttr, SerdeAttribute, StructKind, TypeRef,
       ValidationAttribute,
     },
-    converter::{ConverterContext, GenerationTarget},
+    converter::ConverterContext,
     schema_registry::DiscriminatorMapping,
   },
   utils::{SchemaExt, SchemaInspect},
@@ -225,7 +225,7 @@ impl FieldConverter {
       })
     });
 
-    let mut field = FieldDef::builder()
+    let field = FieldDef::builder()
       .schema(prop_schema)
       .maybe_default_value(default_value)
       .maybe_serde_as_attr(serde_as_attr)
@@ -237,27 +237,10 @@ impl FieldConverter {
 
     let should_hide = is_discriminator && !discriminator_has_enum;
     if should_hide {
-      return field.with_discriminator_behavior(discriminator_value, is_base);
+      field.with_discriminator_behavior(discriminator_value, is_base)
+    } else {
+      field
     }
-    if self.ignores_received_constant(parent_schema, prop_schema) {
-      field.serde_attrs.insert(SerdeAttribute::SkipDeserializing);
-    }
-    field
-  }
-
-  /// Returns `true` when client code should always hold a constant property's value
-  /// and never read it, so a server sending something else can't fail deserialization.
-  ///
-  /// A property is constant when it has a `const` or a single-value `enum`; the struct's
-  /// `#[serde(default)]` then fills the skipped field with that value. A skipped key
-  /// counts as unknown, so only structs that ignore unknown keys skip it. Declaring
-  /// `additionalProperties` either collects them into a flattened map, where the key
-  /// would serialize twice, or rejects them with `deny_unknown_fields`.
-  fn ignores_received_constant(&self, parent_schema: &ObjectSchema, prop_schema: &ObjectSchema) -> bool {
-    let is_constant = prop_schema.const_value.is_some() || prop_schema.enum_values.len() == 1;
-    is_constant
-      && parent_schema.additional_properties.is_none()
-      && self.context.config().target == GenerationTarget::Client
   }
 
   fn customization_for_type(&self, type_ref: &TypeRef, prop_schema: &ObjectSchema) -> Option<SerdeAsFieldAttr> {

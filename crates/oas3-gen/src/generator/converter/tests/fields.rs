@@ -700,27 +700,23 @@ fn test_nullable_union_field_is_optional() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_constant_fields_skip_deserializing_in_client_output() -> anyhow::Result<()> {
-  let cases = [
-    (GenerationTarget::Client, None, true),
-    (GenerationTarget::Client, Some(json!(false)), false),
-    (GenerationTarget::Client, Some(json!(true)), false),
-    (GenerationTarget::Server, None, false),
-  ];
-
-  for (target, additional_properties, expect_skip) in cases {
-    let mut holder = json!({
+fn test_constant_fields_deserialize_received_values() -> anyhow::Result<()> {
+  let graph = create_test_graph(parse_schemas(vec![(
+    "Holder",
+    json!({
       "type": "object",
+      "required": ["kind"],
       "properties": {
         "kind": { "type": "string", "const": "holder" },
+        "version": { "type": "string", "const": "v1" },
         "level": { "type": "integer", "enum": [7] },
+        "status": { "type": "string", "enum": ["active"] },
         "name": { "type": "string" }
       }
-    });
-    if let Some(additional) = &additional_properties {
-      holder["additionalProperties"] = additional.clone();
-    }
-    let graph = create_test_graph(parse_schemas(vec![("Holder", holder)]));
+    }),
+  )]));
+
+  for target in [GenerationTarget::Client, GenerationTarget::Server] {
     let config = CodegenConfig {
       target,
       ..Default::default()
@@ -731,16 +727,15 @@ fn test_constant_fields_skip_deserializing_in_client_output() -> anyhow::Result<
       panic!("expected Holder struct");
     };
 
-    for (field_name, constant) in [("kind", true), ("level", true), ("name", false)] {
+    for field_name in ["kind", "version", "level", "status", "name"] {
       let field = holder
         .fields
         .iter()
         .find(|f| f.name == field_name)
         .unwrap_or_else(|| panic!("{field_name} field should exist"));
-      assert_eq!(
-        field.serde_attrs.contains(&SerdeAttribute::SkipDeserializing),
-        constant && expect_skip,
-        "{target:?}/additionalProperties={additional_properties:?}: skip_deserializing on {field_name}"
+      assert!(
+        !field.serde_attrs.contains(&SerdeAttribute::SkipDeserializing),
+        "{target:?}: {field_name} should deserialize the received value"
       );
     }
   }

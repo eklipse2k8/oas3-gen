@@ -787,11 +787,11 @@ async fn absent_preference_members_take_spec_defaults(#[future(awt)] petstore: P
   );
 }
 
-/// The server reads a constant as sent so an implementation can reject a misstated one,
-/// while the generated client always sends the constant and reports it on input.
+/// The server reads a misstated constant as sent, and the generated client keeps the value it
+/// receives rather than replacing it with the constant. The client still sends the constant.
 #[rstest]
 #[tokio::test]
-async fn the_server_reads_a_misstated_object_constant_and_the_client_reports_the_constant(
+async fn the_server_reads_a_misstated_object_constant_and_the_client_keeps_the_received_value(
   #[future(awt)] petstore: Petstore,
 ) {
   assert_eq!(
@@ -815,13 +815,13 @@ async fn the_server_reads_a_misstated_object_constant_and_the_client_reports_the
   let echoed = serde_json::from_value::<client::ChatPreference>(reply).expect("the client decodes the reply");
   assert_eq!(
     echoed.object.as_deref(),
-    Some("chat.preference"),
-    "the client reports the constant"
+    Some("chat.thread"),
+    "the client keeps the received value"
   );
   assert_eq!(
     get_preference(&petstore).await.object.as_deref(),
-    Some("chat.preference"),
-    "the generated client reports the constant for the stored preference"
+    Some("chat.thread"),
+    "the generated client keeps the received value for the stored preference"
   );
 }
 

@@ -1874,17 +1874,17 @@ default. See [Missing and Null Fields](./client-generation.md#missing-and-null-f
 
 ## Constant Properties
 
-A property with a `const`, or with an `enum` that lists a single value, always
-holds that one value. The generator gives the field that value as its default.
-The constant `object` property of the petstore's `ChatPreference` becomes:
+A property with a `const`, or with an `enum` that lists a single value, has that
+value as its default, so an absent property takes it like any spec default. The
+optional `object` property of the petstore's `ChatPreference` becomes:
 
 ```rust
 #[default(Some("chat.preference".to_string()))]
 pub object: Option<String>,
 ```
 
-[Constant Properties](./client-generation.md#constant-properties) describes
-how the client reads these fields.
+The client keeps a different value it receives rather than replacing it, as
+[Constant Properties](./client-generation.md#constant-properties) describes.
 
 ## Helper Methods
 
