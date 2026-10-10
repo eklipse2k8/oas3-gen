@@ -537,7 +537,7 @@ impl ToTokens for ResponsePayload {
     match self {
       Self::Value => quote! { Value }.to_tokens(tokens),
       Self::Failure => quote! { Failure }.to_tokens(tokens),
-      Self::None | Self::Raw => {}
+      Self::None | Self::Raw | Self::Unread => {}
     }
   }
 }

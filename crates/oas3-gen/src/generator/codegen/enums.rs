@@ -1312,7 +1312,7 @@ impl ToTokens for ResponseEnumFragment<'_> {
       .def
       .with_headers
       .as_ref()
-      .map(|name| WithHeadersFragment::new(self.vis, name, &derives));
+      .map(|name| WithHeadersFragment::new(self.vis, name));
 
     let ts = quote! {
       #docs
@@ -1333,24 +1333,22 @@ impl ToTokens for ResponseEnumFragment<'_> {
 struct WithHeadersFragment<'a> {
   vis: Visibility,
   name: &'a StructToken,
-  derives: &'a DeriveAttribute<DeriveTrait>,
 }
 
 impl<'a> WithHeadersFragment<'a> {
-  fn new(vis: Visibility, name: &'a StructToken, derives: &'a DeriveAttribute<DeriveTrait>) -> Self {
-    Self { vis, name, derives }
+  fn new(vis: Visibility, name: &'a StructToken) -> Self {
+    Self { vis, name }
   }
 }
 
 impl ToTokens for WithHeadersFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let name = self.name;
-    let derives = self.derives;
     let vis = &self.vis;
 
     tokens.extend(quote! {
       /// A response body together with the headers its response declares.
-      #derives
+      #[derive(Debug, Clone)]
       #vis struct #name<Headers, Body> {
         #vis headers: Headers,
         #vis body: Body,
@@ -1433,15 +1431,12 @@ impl ToTokens for ResponseEnumVariantFragment<'_> {
     let variant_name = &self.variant.name;
     let doc_line = self.variant.doc_line();
 
-    let status = self
-      .variant
-      .status_code
-      .carries_status()
-      .then(|| quote! { http::StatusCode });
+    let status = self.variant.carries_status().then(|| quote! { http::StatusCode });
     let body = match self.variant.payload {
       ResponsePayload::None => None,
       ResponsePayload::Value | ResponsePayload::Failure => Some(self.variant.payload.to_token_stream()),
       ResponsePayload::Raw => Some(quote! { Vec<u8> }),
+      ResponsePayload::Unread => Some(quote! { Box<reqwest::Response> }),
     };
     let fields = status.into_iter().chain(body).collect::<Vec<_>>();
     let content = (!fields.is_empty()).then(|| quote! { (#(#fields),*) });

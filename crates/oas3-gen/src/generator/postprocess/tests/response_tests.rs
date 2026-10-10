@@ -2,9 +2,9 @@ use http::Method;
 
 use crate::generator::{
   ast::{
-    EnumVariantToken, FieldDef, FieldNameToken, MethodKind, OperationInfo, OperationKind, ParsedPath, ResponseEnumDef,
-    ResponseMediaType, ResponseParam, ResponsePayload, ResponseUnionDef, ResponseVariant, RustType, StatusCodeToken,
-    StructDef, StructKind, StructToken, TypeRef,
+    ContentCategory, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, OperationInfo, OperationKind, ParsedPath,
+    ResponseEnumDef, ResponseMediaType, ResponseParam, ResponsePayload, ResponseUnionDef, ResponseVariant, RustType,
+    StatusCodeToken, StructDef, StructKind, StructToken, TypeRef,
   },
   converter::GenerationTarget,
   postprocess::response::ResponseProcessor,
@@ -131,12 +131,12 @@ fn test_response_enum_collects_status_codes_across_operations() {
     ("Created", ResponsePayload::None, false),
     ("NotFound", ResponsePayload::Failure, false),
     ("Unknown", ResponsePayload::Failure, true),
-    ("Other", ResponsePayload::Raw, true),
+    ("Other", ResponsePayload::Unread, false),
   ];
   let actual = response_enum
     .variants
     .iter()
-    .map(|v| (v.name.to_string(), v.payload, v.status_code.carries_status()))
+    .map(|v| (v.name.to_string(), v.payload, v.carries_status()))
     .collect::<Vec<_>>();
   for ((name, payload, carries_status), actual) in expected.iter().zip(&actual) {
     assert_eq!(
@@ -176,6 +176,94 @@ fn test_response_enum_collects_status_codes_across_operations() {
     ]
   );
   assert!(unions(&types).is_empty(), "no union needed for single body types");
+}
+
+#[test]
+fn test_other_variant_by_target() {
+  let cases = [
+    (GenerationTarget::Client, true, Some(ResponsePayload::Unread)),
+    (GenerationTarget::Client, false, Some(ResponsePayload::Unread)),
+    (GenerationTarget::Server, true, None),
+    (GenerationTarget::Server, false, Some(ResponsePayload::Raw)),
+  ];
+  for (target, declares_default, expected) in cases {
+    let fallback = if declares_default {
+      StatusCodeToken::Default
+    } else {
+      StatusCodeToken::NotFound404
+    };
+    let operations = vec![operation(
+      "get_pet",
+      Some(vec![
+        variant(StatusCodeToken::Ok200, Some("Pet")),
+        variant(fallback, Some("Error")),
+      ]),
+    )];
+
+    let (types, _) = assemble(vec![request_struct("get_pet")], operations, target);
+    let other = response_enum(&types)
+      .variants
+      .iter()
+      .find(|v| v.name == "Other")
+      .map(|v| v.payload);
+    assert_eq!(
+      other, expected,
+      "{target:?} with a default response: {declares_default}"
+    );
+  }
+}
+
+#[test]
+fn test_parse_method_orders_exact_statuses_before_ranges_and_reads_every_default_media_type() {
+  let mut problem = variant(StatusCodeToken::NotFound404, Some("Problem"));
+  problem.media_types = vec![ResponseMediaType::with_schema(
+    "application/problem+json",
+    Some(TypeRef::new("Problem")),
+  )];
+  let mut default = variant(StatusCodeToken::Default, Some("Error"));
+  default.media_types.push(ResponseMediaType::with_schema(
+    "application/xml",
+    Some(TypeRef::new("Error")),
+  ));
+  let operations = vec![operation(
+    "get_pet",
+    Some(vec![
+      variant(StatusCodeToken::ClientError4XX, Some("Error")),
+      problem,
+      variant(StatusCodeToken::Ok200, Some("Pet")),
+      default,
+    ]),
+  )];
+
+  let (types, _) = assemble(vec![request_struct("get_pet")], operations, GenerationTarget::Client);
+  let Some(MethodKind::ParseResponse {
+    status_handlers,
+    default_handler,
+    ..
+  }) = types.iter().find_map(|t| match t {
+    RustType::Struct(def) if def.name == "GetPetRequest" => def.methods.first().map(|m| &m.kind),
+    _ => None,
+  })
+  else {
+    panic!("parse method attached to the request struct");
+  };
+
+  let order = status_handlers.iter().map(|h| h.status_code).collect::<Vec<_>>();
+  assert_eq!(
+    order,
+    vec![
+      StatusCodeToken::NotFound404,
+      StatusCodeToken::Ok200,
+      StatusCodeToken::ClientError4XX
+    ]
+  );
+  let default_types = default_handler
+    .as_ref()
+    .expect("default handler")
+    .cases()
+    .map(|case| case.category)
+    .collect::<Vec<_>>();
+  assert_eq!(default_types, vec![ContentCategory::Json, ContentCategory::Xml]);
 }
 
 #[test]

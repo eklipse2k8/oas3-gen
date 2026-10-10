@@ -9,8 +9,8 @@ use crate::generator::{
     BodyMediaType, ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind,
     MethodNameToken, OperationInfo, OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef,
     ResponseMediaType, ResponseParam, ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant,
-    ResponseVariant, ResponseVariantCategory, RustPrimitive, RustType, StatusCodeToken, StatusHandler, StructDef,
-    StructKind, StructMethod, StructToken, TypeRef, VariantMapping,
+    ResponseVariant, RustPrimitive, RustType, StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod,
+    StructToken, TypeRef, VariantMapping,
   },
   converter::{GenerationTarget, requests::sent_media_type},
   naming::{
@@ -144,17 +144,21 @@ impl ResponseProcessor {
           .build()
       });
 
-    let needs_other = self
-      .operations
-      .iter()
-      .filter_map(|op| op.response_variants.as_deref())
-      .any(|variants| !variants.iter().any(|v| v.status_code.is_default()));
+    let other_payload = match self.target {
+      GenerationTarget::Client => Some(ResponsePayload::Unread),
+      GenerationTarget::Server => self
+        .operations
+        .iter()
+        .filter_map(|op| op.response_variants.as_deref())
+        .any(|variants| !variants.iter().any(|v| v.status_code.is_default()))
+        .then_some(ResponsePayload::Raw),
+    };
 
-    let other = needs_other.then(|| {
+    let other = other_payload.map(|payload| {
       ResponseEnumVariant::builder()
         .name(EnumVariantToken::from_raw(OTHER_RESPONSE_VARIANT))
         .status_code(StatusCodeToken::Default)
-        .payload(ResponsePayload::Raw)
+        .payload(payload)
         .build()
     });
 
@@ -527,8 +531,9 @@ fn parse_method(response: &OperationResponse, variants: &[ResponseVariant]) -> S
     .build()
 }
 
-/// Groups variants by status code into handlers and splits off the `default` handler.
-fn partition_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseVariantCategory>) {
+/// Groups variants by status code into handlers, exact status codes ahead of ranges since an
+/// exact code takes precedence, and splits off the `default` handler.
+fn partition_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseStatusCategory>) {
   let (default_variants, status_variants): (Vec<_>, Vec<_>) = variants.iter().partition(|v| v.status_code.is_default());
 
   let status_handlers = status_variants
@@ -541,16 +546,15 @@ fn partition_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Opti
       },
     )
     .into_iter()
+    .sorted_by_key(|(code, _)| code.code().is_none())
     .map(|(code, group)| StatusHandler {
       status_code: code,
       dispatch: ResponseStatusCategory::from_variants(&group),
     })
     .collect();
 
-  let default_handler = default_variants.first().map(|v| ResponseVariantCategory {
-    category: ResponseMediaType::primary_category(&v.media_types),
-    variant: (*v).clone(),
-  });
+  let default_handler =
+    (!default_variants.is_empty()).then(|| ResponseStatusCategory::from_variants(&default_variants));
 
   (status_handlers, default_handler)
 }

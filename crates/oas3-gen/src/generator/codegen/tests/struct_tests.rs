@@ -52,27 +52,33 @@ fn payload_mapping(payload: ResponsePayload) -> VariantMapping {
   VariantMapping::builder().payload(payload).build()
 }
 
-fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
+fn parse_response_struct(
+  status_handlers: Vec<StatusHandler>,
+  default_handler: Option<ResponseStatusCategory>,
+) -> StructDef {
   let mut def = base_struct(StructKind::OperationRequest);
-  let category = variant
-    .media_types
-    .first()
-    .map_or(ContentCategory::Json, |m| m.category);
-  let status_code = variant.status_code;
-
   def.methods.push(StructMethod {
     name: MethodNameToken::new("parse_response"),
     docs: Documentation::from_lines(["Parse response"]),
     kind: MethodKind::ParseResponse {
       response: Box::new(sample_response()),
-      status_handlers: vec![StatusHandler {
-        status_code,
-        dispatch: ResponseStatusCategory::Single(ResponseVariantCategory { category, variant }),
-      }],
-      default_handler: None,
+      status_handlers,
+      default_handler,
     },
   });
   def
+}
+
+fn make_response_parser_struct(variant: ResponseVariant) -> StructDef {
+  let category = variant
+    .media_types
+    .first()
+    .map_or(ContentCategory::Json, |m| m.category);
+  let handler = StatusHandler {
+    status_code: variant.status_code,
+    dispatch: ResponseStatusCategory::Single(ResponseVariantCategory { category, variant }),
+  };
+  parse_response_struct(vec![handler], None)
 }
 
 #[test]
@@ -127,9 +133,160 @@ fn renders_response_parser_method() {
     "bodiless status should map to a unit variant: {code}"
   );
   assert!(
-    code.contains("Ok (ResponseEnum :: Other (status , req . bytes () . await ? . to_vec ()))"),
-    "missing Other fallback: {code}"
+    code.contains("Ok (ResponseEnum :: Other (Box :: new (req))) } }"),
+    "an undeclared status should come back unread as the final expression: {code}"
   );
+  assert!(
+    !code.contains("return Ok (ResponseEnum :: Other"),
+    "a bodiless status reads any response: {code}"
+  );
+  assert!(
+    !code.contains("content_type"),
+    "a bodiless status reads no Content-Type: {code}"
+  );
+}
+
+#[test]
+fn test_parse_response_checks_the_declared_media_types() {
+  const JSON: &str = "content_type . ends_with (\"/json\") || content_type . ends_with (\"+json\")";
+  let cases = [
+    (
+      "a JSON type accepts any JSON type",
+      "application/problem+json",
+      "Problem",
+      Some(JSON),
+    ),
+    (
+      "an XML type accepts any XML type",
+      "text/xml",
+      "Body",
+      Some("content_type . ends_with (\"/xml\") || content_type . ends_with (\"+xml\")"),
+    ),
+    (
+      "any other type accepts itself, lowercased",
+      "text/Plain",
+      "String",
+      Some("content_type == \"text/plain\""),
+    ),
+    (
+      "a type the generator decodes as JSON still accepts only itself",
+      "font/woff2",
+      "Body",
+      Some("content_type == \"font/woff2\""),
+    ),
+    (
+      "a range accepts its subtypes and the type a server sends under it",
+      "image/*",
+      "Vec<u8>",
+      Some("content_type . starts_with (\"image/\") || content_type == \"application/octet-stream\""),
+    ),
+    (
+      "a range already covering the type a server sends adds nothing",
+      "text/*",
+      "String",
+      Some("content_type . starts_with (\"text/\")"),
+    ),
+    (
+      "any type accepts what a server sends under it",
+      "*/*",
+      "Body",
+      Some(JSON),
+    ),
+    (
+      "a binary type decoded as JSON also accepts any JSON type",
+      "application/octet-stream",
+      "ErrorBody",
+      Some(
+        "content_type == \"application/octet-stream\" || content_type . ends_with (\"/json\") || content_type . ends_with (\"+json\")",
+      ),
+    ),
+    (
+      "a type that can't be parsed reads every response",
+      "not a media type",
+      "Body",
+      None,
+    ),
+  ];
+  for (label, media_type, body, expected) in cases {
+    let def = make_response_parser_struct(
+      ResponseVariant::builder()
+        .status_code(StatusCodeToken::NotFound404)
+        .media_types(vec![ResponseMediaType::with_schema(
+          media_type,
+          Some(TypeRef::new(body)),
+        )])
+        .schema_type(TypeRef::new(body))
+        .mapping(payload_mapping(ResponsePayload::Failure))
+        .build(),
+    );
+    let code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
+    match expected {
+      Some(check) => assert!(
+        code.contains(&format!(
+          "if status == http :: StatusCode :: NOT_FOUND {{ if {check} {{"
+        )) && code.contains(
+          "return Ok (ResponseEnum :: Other (Box :: new (req))) ; } Ok (ResponseEnum :: Other (Box :: new (req)))"
+        ),
+        "{label}: expected `{check}` guarding the body, with the response returned unread otherwise: {code}"
+      ),
+      None => assert!(!code.contains("content_type"), "{label}: {code}"),
+    }
+  }
+}
+
+#[test]
+fn test_parse_response_dispatches_on_the_first_matching_case() {
+  let case = |media_type: &str, body: Option<&str>| {
+    let schema = body.map(TypeRef::new);
+    ResponseVariantCategory {
+      category: ContentCategory::from_content_type(media_type),
+      variant: ResponseVariant::builder()
+        .status_code(StatusCodeToken::Ok200)
+        .media_types(vec![ResponseMediaType::with_schema(media_type, schema.clone())])
+        .maybe_schema_type(schema)
+        .mapping(payload_mapping(ResponsePayload::Value))
+        .build(),
+    }
+  };
+  let cases = [
+    (
+      "a declared JSON type keeps the binary case from falling back to JSON",
+      vec![
+        case("application/octet-stream", Some("ErrorBody")),
+        case("application/json", Some("Body")),
+      ],
+      vec![
+        "if content_type == \"application/octet-stream\" {",
+        "if content_type . ends_with (\"/json\") || content_type . ends_with (\"+json\") {",
+        "return Ok (ResponseEnum :: Other (Box :: new (req))) ;",
+      ],
+    ),
+    (
+      "a case that reads no body ends the dispatch",
+      vec![case("text/plain", None), case("application/json", Some("Body"))],
+      vec![
+        "if status == http :: StatusCode :: OK { let _ = req . bytes () . await ? ; return Ok (ResponseEnum :: Ok (())) ; } Ok",
+      ],
+    ),
+  ];
+  for (label, variants, expected) in cases {
+    let handler = StatusHandler {
+      status_code: StatusCodeToken::Ok200,
+      dispatch: ResponseStatusCategory::ContentDispatch {
+        streams: vec![],
+        variants,
+      },
+    };
+    let def = parse_response_struct(vec![handler], None);
+    let code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client)
+      .into_token_stream()
+      .to_string();
+    for snippet in expected {
+      assert!(code.contains(snippet), "{label}: expected `{snippet}` in {code}");
+    }
+  }
 }
 
 #[test]
@@ -431,7 +588,6 @@ fn test_parse_response_slot_shapes() {
 
 #[test]
 fn test_parse_response_default_handler_carries_status() {
-  let mut def = base_struct(StructKind::OperationRequest);
   let variant = ResponseVariant::builder()
     .status_code(StatusCodeToken::Default)
     .media_types(vec![ResponseMediaType::with_schema(
@@ -441,29 +597,26 @@ fn test_parse_response_default_handler_carries_status() {
     .schema_type(TypeRef::new("ErrorBody"))
     .mapping(payload_mapping(ResponsePayload::Failure))
     .build();
-  def.methods.push(StructMethod {
-    name: MethodNameToken::new("parse_response"),
-    docs: Documentation::from_lines(["Parse response"]),
-    kind: MethodKind::ParseResponse {
-      response: Box::new(sample_response()),
-      status_handlers: vec![],
-      default_handler: Some(ResponseVariantCategory {
-        category: ContentCategory::Json,
-        variant,
-      }),
-    },
-  });
+  let def = parse_response_struct(
+    vec![],
+    Some(ResponseStatusCategory::Single(ResponseVariantCategory {
+      category: ContentCategory::Json,
+      variant,
+    })),
+  );
 
   let code = StructFragment::new(&def, &BTreeMap::new(), Visibility::Public, GenerationTarget::Client)
     .into_token_stream()
     .to_string();
   assert!(
-    code.contains("return Ok (ResponseEnum :: Unknown (status , data)) ;"),
-    "default handler should carry the status: {code}"
+    code.contains("if content_type . ends_with (\"/json\") || content_type . ends_with (\"+json\") {"),
+    "default handler should read only a JSON body: {code}"
   );
   assert!(
-    !code.contains("Other"),
-    "declared default replaces the raw fallback: {code}"
+    code.contains(
+      "return Ok (ResponseEnum :: Unknown (status , data)) ; } Ok (ResponseEnum :: Other (Box :: new (req))) }"
+    ),
+    "default handler should carry the status, and return any other media type unread: {code}"
   );
 }
 

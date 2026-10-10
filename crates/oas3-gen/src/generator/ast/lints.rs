@@ -15,6 +15,7 @@ pub enum LintAllow {
   ClippyStructFieldNames,
   ClippyTooManyLines,
   ClippyUnnecessaryWraps,
+  ClippyUnusedAsync,
   ClippyUnusedSelf,
   DeadCode,
 }
@@ -32,6 +33,7 @@ impl ToTokens for LintAllow {
       Self::ClippyStructFieldNames => quote! { #![allow(clippy::struct_field_names)] },
       Self::ClippyTooManyLines => quote! { #![allow(clippy::too_many_lines)] },
       Self::ClippyUnnecessaryWraps => quote! { #![allow(clippy::unnecessary_wraps)] },
+      Self::ClippyUnusedAsync => quote! { #![allow(clippy::unused_async)] },
       Self::ClippyUnusedSelf => quote! { #![allow(clippy::unused_self)] },
       Self::DeadCode => quote! { #![allow(dead_code)] },
     };
@@ -59,6 +61,7 @@ impl Default for GlobalLintsNode {
         LintAllow::ClippyStructFieldNames,
         LintAllow::ClippyTooManyLines,
         LintAllow::ClippyUnnecessaryWraps,
+        LintAllow::ClippyUnusedAsync,
         LintAllow::ClippyUnusedSelf,
         LintAllow::DeadCode,
       ]),

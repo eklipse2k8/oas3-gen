@@ -50,10 +50,10 @@ fn mirrored<Server: DeserializeOwned>(client_value: &impl Serialize) -> Server {
   serde_json::from_value(json).expect("client and server types share one JSON shape")
 }
 
-/// `response` for a failure message, with an undeclared status's raw body shown as text.
+/// `response` for a failure message, with an undeclared response shown by its status.
 fn outcome<Value: std::fmt::Debug, Failure: std::fmt::Debug>(response: &ApiResponse<Value, Failure>) -> String {
   match response {
-    ApiResponse::Other(status, body) => format!("{status} {:?}", String::from_utf8_lossy(body)),
+    ApiResponse::Other(undeclared) => format!("undeclared {}", undeclared.status()),
     declared => format!("{declared:?}"),
   }
 }
@@ -397,7 +397,7 @@ async fn intake_form_round_trips_unchanged(#[future(awt)] petstore: Petstore, #[
 async fn intake_form_parts_follow_the_encoding_objects(#[future(awt)] capture: CaptureServer) {
   let response = submit_intake_form(&capture.client, full_intake_form()).await;
   assert!(
-    matches!(response, ApiResponse::Other(StatusCode::ACCEPTED, _)),
+    matches!(&response, ApiResponse::Other(undeclared) if undeclared.status() == StatusCode::ACCEPTED),
     "{}",
     outcome(&response)
   );

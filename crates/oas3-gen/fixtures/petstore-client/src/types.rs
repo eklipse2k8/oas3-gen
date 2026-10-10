@@ -2612,25 +2612,32 @@ impl ListPetsRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<WithHeaders<XNextAndXTotalCountAndXRequestIdHeaders, Pets>, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let content_type_str = req
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json");
-      if content_type_str.contains("json") {
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
         let headers = XNextAndXTotalCountAndXRequestIdHeaders::try_from(req.headers())?;
         let data = oas3_gen_support::Diagnostics::<Pets>::json_with_diagnostics(req).await?;
         return Ok(ApiResponse::Ok(WithHeaders { headers, body: data }));
       }
-      if content_type_str.contains("xml") {
+      if content_type.ends_with("/xml") || content_type.ends_with("+xml") {
         let headers = XNextAndXTotalCountAndXRequestIdHeaders::try_from(req.headers())?;
         let data = oas3_gen_support::Diagnostics::<Pets>::xml_with_diagnostics(req).await?;
         return Ok(ApiResponse::Ok(WithHeaders { headers, body: data }));
       }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ApiResponse::Unknown(status, data))
+    if content_type.ends_with("/json") || content_type.ends_with("+json") {
+      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Unknown(status, data));
+    }
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Add a pet
@@ -2656,17 +2663,34 @@ impl CreatePetRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, Pet>, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::CREATED {
-      let headers = LocationHeaders::try_from(req.headers())?;
-      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Created(WithHeaders { headers, body: data }));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let headers = LocationHeaders::try_from(req.headers())?;
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Created(WithHeaders { headers, body: data }));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::BAD_REQUEST {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::BadRequest(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::BadRequest(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ApiResponse::Unknown(status, data))
+    if content_type.ends_with("/json") || content_type.ends_with("+json") {
+      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Unknown(status, data));
+    }
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// List the methods the pet collection allows
@@ -2683,7 +2707,7 @@ impl DescribePetsRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(WithHeaders { headers, body: () }));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[serde_with::serde_as]
@@ -2760,15 +2784,29 @@ impl SearchPetsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<SearchResults, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<SearchResults>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<SearchResults>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::BAD_REQUEST {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::BadRequest(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::BadRequest(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -2833,25 +2871,45 @@ impl ShowPetByIdRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<WithHeaders<ETagAndXCacheHeaders, Pet>, ErrorOrProblem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let headers = ETagAndXCacheHeaders::try_from(req.headers())?;
-      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(WithHeaders { headers, body: data }));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let headers = ETagAndXCacheHeaders::try_from(req.headers())?;
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(WithHeaders { headers, body: data }));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_MODIFIED {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NotModified);
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(ErrorOrProblem::Problem(data)));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(ErrorOrProblem::Problem(data)));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status.is_client_error() {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::ClientError(status, ErrorOrProblem::Error(data)));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::ClientError(status, ErrorOrProblem::Error(data)));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ApiResponse::Unknown(status, ErrorOrProblem::Error(data)))
+    if content_type.ends_with("/json") || content_type.ends_with("+json") {
+      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Unknown(status, ErrorOrProblem::Error(data)));
+    }
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -2880,15 +2938,26 @@ impl DeletePetRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<(), Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::NO_CONTENT {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -2926,7 +2995,7 @@ impl PetExistsRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NotFound(()));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -2958,19 +3027,36 @@ impl UpdatePetRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Pet, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::UNPROCESSABLE_ENTITY {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::UnprocessableEntity(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::UnprocessableEntity(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default, bon::Builder)]
@@ -3010,15 +3096,29 @@ impl UploadPetImageRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Pet, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -3047,15 +3147,29 @@ impl GetPetPhotoRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Vec<u8>, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.bytes().await?.to_vec();
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "image/png" {
+        let data = req.bytes().await?.to_vec();
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 pub type PhotoRequestBody = Vec<u8>;
@@ -3087,15 +3201,26 @@ impl ReplacePetPhotoRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<(), Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::NO_CONTENT {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -3192,15 +3317,29 @@ impl GetPetCardRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<String, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.text().await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/plain" {
+        let data = req.text().await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 pub type NoteRequestBody = String;
@@ -3233,15 +3372,26 @@ impl SetPetNotesRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<(), Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::NO_CONTENT {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -3281,15 +3431,29 @@ impl GetPetLineageRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Lineage, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Lineage>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Lineage>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -3318,15 +3482,29 @@ impl ListVaccinationsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Vaccination200Response, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Vaccination200Response>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Vaccination200Response>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -3358,15 +3536,29 @@ impl RecordVaccinationRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<VaccineRecord, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::CREATED {
-      let data = oas3_gen_support::Diagnostics::<VaccineRecord>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Created(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<VaccineRecord>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Created(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -3405,11 +3597,22 @@ impl StreamPetVitalsRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<oas3_gen_support::SseFrame<VitalsReading>>, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<VitalsReading>>>::json(req, None);
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/event-stream" {
+        let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<VitalsReading>>>::json(req, None);
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[serde_with::skip_serializing_none]
@@ -3467,13 +3670,27 @@ impl ListCatsRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<WithHeaders<XNextHeaders, Cats>, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let headers = XNextHeaders::try_from(req.headers())?;
-      let data = oas3_gen_support::Diagnostics::<Cats>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(WithHeaders { headers, body: data }));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let headers = XNextHeaders::try_from(req.headers())?;
+        let data = oas3_gen_support::Diagnostics::<Cats>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(WithHeaders { headers, body: data }));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-    Ok(ApiResponse::Unknown(status, data))
+    if content_type.ends_with("/json") || content_type.ends_with("+json") {
+      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+      return Ok(ApiResponse::Unknown(status, data));
+    }
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Apply to adopt a pet
@@ -3498,16 +3715,30 @@ impl AdoptPetRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<WithHeaders<LocationHeaders, Adoption>, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::ACCEPTED {
-      let headers = LocationHeaders::try_from(req.headers())?;
-      let data = oas3_gen_support::Diagnostics::<Adoption>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Accepted(WithHeaders { headers, body: data }));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let headers = LocationHeaders::try_from(req.headers())?;
+        let data = oas3_gen_support::Diagnostics::<Adoption>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Accepted(WithHeaders { headers, body: data }));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::CONFLICT {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Conflict(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Conflict(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[serde_with::skip_serializing_none]
@@ -3539,11 +3770,22 @@ impl StreamAdoptionFeedRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<oas3_gen_support::SseFrame<AdoptionFeedEvent>>, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<AdoptionFeedEvent>>>::json(req, None);
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/event-stream" {
+        let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<AdoptionFeedEvent>>>::json(req, None);
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -3573,15 +3815,29 @@ impl GetAdoptionRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Adoption, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Adoption>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Adoption>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -3614,15 +3870,29 @@ impl SubmitCollarTelemetryRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<TelemetryReceipt, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::CREATED {
-      let data = oas3_gen_support::Diagnostics::<TelemetryReceipt>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Created(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<TelemetryReceipt>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Created(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::BAD_REQUEST {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::BadRequest(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::BadRequest(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Send content blocks to the pet-care assistant
@@ -3644,15 +3914,29 @@ impl SendAssistantMessageRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ContentResponse, ErrorResponse>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<ContentResponse>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ContentResponse>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::BAD_REQUEST {
-      let data = oas3_gen_support::Diagnostics::<ErrorResponse>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::BadRequest(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ErrorResponse>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::BadRequest(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[serde_with::skip_serializing_none]
@@ -3686,26 +3970,30 @@ impl StreamAssistantMessageRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<ContentResponseOrAssistantEventFrameStream, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let content_type_str = req
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json");
-      if content_type_str.contains("event-stream") {
+      if content_type == "text/event-stream" {
         let data = <oas3_gen_support::EventStream<AssistantEventFrame>>::json(req, Some("[DONE]"));
         return Ok(ApiResponse::Ok(
           ContentResponseOrAssistantEventFrameStream::AssistantEventFrameStream(data),
         ));
       }
-      if content_type_str.contains("json") {
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
         let data = oas3_gen_support::Diagnostics::<ContentResponse>::json_with_diagnostics(req).await?;
         return Ok(ApiResponse::Ok(
           ContentResponseOrAssistantEventFrameStream::ContentResponse(data),
         ));
       }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Stream reply tokens, then the usage they cost
@@ -3717,11 +4005,22 @@ impl StreamAssistantTokensRequest {
     req: reqwest::Response,
   ) -> anyhow::Result<ApiResponse<oas3_gen_support::EventStream<AssistantTokenFrame>, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = <oas3_gen_support::EventStream<AssistantTokenFrame>>::frames(req, Some("[END]"));
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/event-stream" {
+        let data = <oas3_gen_support::EventStream<AssistantTokenFrame>>::frames(req, Some("[END]"));
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -3775,11 +4074,22 @@ impl ListAssistantEventsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<AssistantEventList, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<AssistantEventList>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<AssistantEventList>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Get the caller's assistant preferences
@@ -3789,11 +4099,22 @@ impl GetChatPreferenceRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ChatPreference, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<ChatPreference>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ChatPreference>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Replace the caller's assistant preferences
@@ -3815,11 +4136,22 @@ impl UpdateChatPreferenceRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ChatPreference, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<ChatPreference>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ChatPreference>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Replace the assistant's tuning settings
@@ -3841,11 +4173,22 @@ impl UpdateAssistantSettingsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<AssistantSettings, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<AssistantSettings>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<AssistantSettings>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -3882,11 +4225,22 @@ impl EchoResponseQualityRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ResponseQuality, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<ResponseQuality>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ResponseQuality>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Count available pets by species
@@ -3896,11 +4250,22 @@ impl GetInventoryRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Inventory, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Inventory>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Inventory>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Order supplies for a pet
@@ -3923,15 +4288,29 @@ impl PlaceOrderRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Order, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Order>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Order>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::BAD_REQUEST {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::BadRequest(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::BadRequest(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -3962,15 +4341,29 @@ impl GetOrderByIdRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Order, Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Order>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Order>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -4001,15 +4394,26 @@ impl DeleteOrderRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<(), Problem>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::NO_CONTENT {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
     if status == http::StatusCode::NOT_FOUND {
-      let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::NotFound(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Problem>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::NotFound(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// List pet carriers in stock
@@ -4019,11 +4423,22 @@ impl ListCarriersRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Carrier200Response, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Carrier200Response>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Carrier200Response>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Subscribe to the store newsletter from an HTML form
@@ -4046,11 +4461,22 @@ impl SubscribeNewsletterRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Subscription, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::CREATED {
-      let data = oas3_gen_support::Diagnostics::<Subscription>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Created(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Subscription>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Created(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// A one-click unsubscribe link posts no body and stops every subscription; the form names one address.
@@ -4077,7 +4503,7 @@ impl UnsubscribeNewsletterRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -4110,11 +4536,22 @@ impl SubmitIntakeFormRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<IntakeForm, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<IntakeForm>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<IntakeForm>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[serde_with::skip_serializing_none]
@@ -4144,11 +4581,22 @@ impl UploadMediaRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<MediaReceipt, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<MediaReceipt>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<MediaReceipt>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Submit free-form text labels
@@ -4170,11 +4618,22 @@ impl SubmitMediaLabelsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<MediaLabels, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<MediaLabels>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<MediaLabels>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Submit named lists of counts
@@ -4196,11 +4655,22 @@ impl SubmitTalliesRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Tallies, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Tallies>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Tallies>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Download a text/plain body that is raw bytes
@@ -4210,11 +4680,22 @@ impl GetMediaTextRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Vec<u8>, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.bytes().await?.to_vec();
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/plain" {
+        let data = req.bytes().await?.to_vec();
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Download an image whose media type is a wildcard
@@ -4224,11 +4705,22 @@ impl GetMediaWildcardRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Vec<u8>, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.bytes().await?.to_vec();
-      return Ok(ApiResponse::Ok(data));
+      if content_type.starts_with("image/") || content_type == "application/octet-stream" {
+        let data = req.bytes().await?.to_vec();
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Describe a pet as text, or as raw bytes
@@ -4238,26 +4730,26 @@ impl GetMediaPetTextRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<PetOrVecu8, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let content_type_str = req
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json");
-      if content_type_str.starts_with("text/") && !content_type_str.contains("xml") {
+      if content_type == "text/plain" {
         let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
         return Ok(ApiResponse::Ok(PetOrVecu8::Pet(data)));
       }
-      if content_type_str.starts_with("application/octet-stream")
-        || content_type_str.starts_with("image/")
-        || content_type_str.starts_with("audio/")
-        || content_type_str.starts_with("video/")
-      {
+      if content_type == "application/octet-stream" {
         let data = req.bytes().await?.to_vec();
         return Ok(ApiResponse::Ok(PetOrVecu8::Vecu8(data)));
       }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Describe a species as text
@@ -4267,11 +4759,22 @@ impl GetMediaKindRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Species, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.text().await?.parse::<Species>().map_err(anyhow::Error::msg)?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/plain" {
+        let data = req.text().await?.parse::<Species>().map_err(anyhow::Error::msg)?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Describe a nickname as text
@@ -4281,11 +4784,22 @@ impl GetMediaNicknameRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Nickname, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.text().await?.parse::<Nickname>().map_err(anyhow::Error::msg)?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/plain" {
+        let data = req.text().await?.parse::<Nickname>().map_err(anyhow::Error::msg)?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Describe an optional name as text
@@ -4295,11 +4809,22 @@ impl GetMediaNullableNameRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<NullableName, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<NullableName>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/plain" {
+        let data = oas3_gen_support::Diagnostics::<NullableName>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Describe a place as text in a legacy charset
@@ -4309,11 +4834,22 @@ impl GetMediaLatinRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<String, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.text().await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/plain" {
+        let data = req.text().await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Upload raw bytes whose label names a legacy charset
@@ -4339,7 +4875,7 @@ impl PutMediaRawRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Create a pet or a cat, or accept the request without a body
@@ -4349,19 +4885,33 @@ impl PostMediaUnionRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Option<CatOrPet>, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(Some(CatOrPet::Pet(data))));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(Some(CatOrPet::Pet(data))));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::CREATED {
-      let data = oas3_gen_support::Diagnostics::<Cat>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Created(Some(CatOrPet::Cat(data))));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Cat>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Created(Some(CatOrPet::Cat(data))));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::ACCEPTED {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::Accepted(None));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Check a pet's intake, which is accepted with its record
@@ -4371,11 +4921,22 @@ impl GetMediaAcceptedRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Pet, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::ACCEPTED {
-      let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Accepted(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Accepted(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Describe a pet as JSON, or stream it as server-sent events
@@ -4385,22 +4946,26 @@ impl GetMediaBothRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<PetOrPetStream, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let content_type_str = req
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json");
-      if content_type_str.contains("event-stream") {
+      if content_type == "text/event-stream" {
         let data = <oas3_gen_support::EventStream<oas3_gen_support::SseFrame<Pet>>>::json(req, None);
         return Ok(ApiResponse::Ok(PetOrPetStream::PetStream(data)));
       }
-      if content_type_str.contains("json") {
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
         let data = oas3_gen_support::Diagnostics::<Pet>::json_with_diagnostics(req).await?;
         return Ok(ApiResponse::Ok(PetOrPetStream::Pet(data)));
       }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[serde_with::skip_serializing_none]
@@ -4431,15 +4996,29 @@ impl ListApiKeysRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Key200Response, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Key200Response>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Key200Response>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::UNAUTHORIZED {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Unauthorized(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Unauthorized(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Create an API key with a query key or a session cookie
@@ -4462,15 +5041,29 @@ impl CreateApiKeyRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ApiKey, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::CREATED {
-      let data = oas3_gen_support::Diagnostics::<ApiKey>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Created(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ApiKey>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Created(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::UNAUTHORIZED {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Unauthorized(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Unauthorized(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -4500,15 +5093,29 @@ impl GetApiKeyRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ApiKey, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<ApiKey>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ApiKey>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::UNAUTHORIZED {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Unauthorized(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Unauthorized(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -4541,15 +5148,29 @@ impl ReplaceApiKeyRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<ApiKey, Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<ApiKey>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<ApiKey>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
     if status == http::StatusCode::UNAUTHORIZED {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Unauthorized(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Unauthorized(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
@@ -4579,15 +5200,26 @@ impl RevokeApiKeyRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<(), Error>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::NO_CONTENT {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
     if status == http::StatusCode::UNAUTHORIZED {
-      let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Unauthorized(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Error>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Unauthorized(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// List audit events with a bearer token or a token key, ignoring the Authorization header parameter
@@ -4597,11 +5229,22 @@ impl ListAuditEventsRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<Vec<String>, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = oas3_gen_support::Diagnostics::<Vec<String>>::json_with_diagnostics(req).await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type.ends_with("/json") || content_type.ends_with("+json") {
+        let data = oas3_gen_support::Diagnostics::<Vec<String>>::json_with_diagnostics(req).await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Report health without credentials
@@ -4615,7 +5258,7 @@ impl GetHealthRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Echo the request line the health endpoint received, for diagnosing proxies
@@ -4625,11 +5268,22 @@ impl TraceHealthRequest {
   /// Parse the HTTP response into the response enum.
   pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<ApiResponse<String, ()>> {
     let status = req.status();
+    let content_type = req
+      .headers()
+      .get(reqwest::header::CONTENT_TYPE)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.split(';').next())
+      .unwrap_or_default()
+      .trim()
+      .to_ascii_lowercase();
     if status == http::StatusCode::OK {
-      let data = req.text().await?;
-      return Ok(ApiResponse::Ok(data));
+      if content_type == "text/plain" {
+        let data = req.text().await?;
+        return Ok(ApiResponse::Ok(data));
+      }
+      return Ok(ApiResponse::Other(Box::new(req)));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Notifies a partner that one of its listed pets was adopted
@@ -4655,7 +5309,7 @@ impl PetAdoptedRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::Ok(()));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Notifies a supplier that stock for a species is low
@@ -4682,7 +5336,7 @@ impl InventoryLowRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Sent when the adoption's status changes
@@ -4708,7 +5362,7 @@ impl AdoptPetStatusChangedRequest {
       let _ = req.bytes().await?;
       return Ok(ApiResponse::NoContent(()));
     }
-    Ok(ApiResponse::Other(status, req.bytes().await?.to_vec()))
+    Ok(ApiResponse::Other(Box::new(req)))
   }
 }
 /// Event type
@@ -5243,7 +5897,7 @@ pub type Key200Response = Vec<ApiKey>;
 ///
 /// `Value` is the operation's success body type and `Failure` its error body type.
 /// A status code is a unit variant when no operation gives it a body.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ApiResponse<Value, Failure> {
   ///200
   Ok(Value),
@@ -5269,8 +5923,8 @@ pub enum ApiResponse<Value, Failure> {
   ClientError(http::StatusCode, Failure),
   ///default
   Unknown(http::StatusCode, Failure),
-  ///Status code the operation does not declare; carries the raw body.
-  Other(http::StatusCode, Vec<u8>),
+  ///Response the operation does not declare, by status or media type; carries it unread.
+  Other(Box<reqwest::Response>),
 }
 /// A response body together with the headers its response declares.
 #[derive(Debug, Clone)]

@@ -1375,6 +1375,66 @@ async fn showing_without_the_api_version_header_is_rejected(#[future(awt)] petst
   assert_eq!(petstore.service.received().len(), received_before);
 }
 
+/// The unread response `response` carries, or a panic naming what came back instead.
+fn undeclared<Value: std::fmt::Debug, Failure: std::fmt::Debug>(
+  response: client::ApiResponse<Value, Failure>,
+) -> Box<reqwest::Response> {
+  let client::ApiResponse::Other(undeclared) = response else {
+    panic!("expected the response unread, got {response:?}");
+  };
+  undeclared
+}
+
+/// A response the document doesn't cover comes back unread as `Other`, never as an error, even
+/// where its status is declared: `showPetById` declares a JSON `404` and `listPets` a JSON
+/// `default`, but an unknown path, an unsupported method, or an empty HTML page carries no JSON.
+#[rstest]
+#[case::unknown_path(
+  axum::Router::new().nest("/v2", server::router(PetstoreService::default())),
+  http::StatusCode::NOT_FOUND,
+  None
+)]
+#[case::unsupported_method(
+  axum::Router::new()
+    .route("/pets", axum::routing::post(|| async { http::StatusCode::CREATED }))
+    .route("/pets/{pet_id}", axum::routing::delete(|| async { http::StatusCode::NO_CONTENT })),
+  http::StatusCode::METHOD_NOT_ALLOWED,
+  None
+)]
+#[case::empty_html_page(
+  axum::Router::new().fallback(|| async {
+    (http::StatusCode::NOT_FOUND, [(http::header::CONTENT_TYPE, "text/html")], "")
+  }),
+  http::StatusCode::NOT_FOUND,
+  Some("text/html")
+)]
+#[tokio::test]
+async fn responses_the_document_does_not_cover_come_back_unread(
+  #[case] router: axum::Router,
+  #[case] status: http::StatusCode,
+  #[case] media_type: Option<&str>,
+) {
+  let base_url = support::serve(router).await;
+  let caller = client::PetstoreClient::with_base_url(&base_url)
+    .expect("the base URL parses")
+    .with_api_key_auth(API_KEY);
+
+  let shown = caller
+    .show_pet_by_id(show_request(UNKNOWN_PET))
+    .await
+    .expect("an uncovered showPetById response is not an error");
+  let listed = caller
+    .list_pets(list_request())
+    .await
+    .expect("an uncovered listPets response is not an error");
+
+  for response in [undeclared(shown), undeclared(listed)] {
+    assert_eq!(response.status(), status);
+    assert_eq!(content_type(&response), media_type);
+    assert!(response.bytes().await.expect("the body reads").is_empty());
+  }
+}
+
 #[rstest]
 #[tokio::test]
 async fn updating_applies_the_given_fields(#[future(awt)] petstore: Petstore) {
@@ -1632,10 +1692,7 @@ async fn deleting_without_credentials_is_unauthorized(#[future(awt)] petstore: P
     .await
     .expect("deletePet round trip");
 
-  let client::ApiResponse::Other(status, _) = response else {
-    panic!("an anonymous deletePet answered {response:?}");
-  };
-  assert_eq!(status, http::StatusCode::UNAUTHORIZED);
+  assert_eq!(undeclared(response).status(), http::StatusCode::UNAUTHORIZED);
   assert!(
     petstore
       .service

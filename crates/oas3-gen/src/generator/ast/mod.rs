@@ -26,7 +26,7 @@ pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
 use indexmap::IndexMap;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
 pub use multipart::{
@@ -181,7 +181,10 @@ pub enum ResponsePayload {
   None,
   Value,
   Failure,
+  /// A server's status and raw body.
   Raw,
+  /// A client's unread `reqwest::Response`.
+  Unread,
 }
 
 impl ResponsePayload {
@@ -221,6 +224,14 @@ pub enum ResponseStatusCategory {
 }
 
 impl ResponseStatusCategory {
+  /// The cases a status reads, event streams first.
+  pub fn cases(&self) -> impl Iterator<Item = &ResponseVariantCategory> {
+    match self {
+      Self::Single(case) => Either::Left(std::iter::once(case)),
+      Self::ContentDispatch { streams, variants } => Either::Right(streams.iter().chain(variants)),
+    }
+  }
+
   #[must_use]
   pub fn from_variants(variants: &[&ResponseVariant]) -> Self {
     if let [variant] = variants {
@@ -287,10 +298,19 @@ pub struct ResponseEnumVariant {
 }
 
 impl ResponseEnumVariant {
+  /// Whether the variant holds the status beside its payload; an unread response holds its own.
+  #[must_use]
+  pub fn carries_status(&self) -> bool {
+    self.status_code.carries_status() && self.payload != ResponsePayload::Unread
+  }
+
   #[must_use]
   pub fn doc_line(&self) -> String {
     match self.payload {
       ResponsePayload::Raw => "Status code the operation does not declare; carries the raw body.".to_string(),
+      ResponsePayload::Unread => {
+        "Response the operation does not declare, by status or media type; carries it unread.".to_string()
+      }
       _ => self.status_code.to_string(),
     }
   }
@@ -381,7 +401,7 @@ impl OperationResponse {
     match payload {
       ResponsePayload::Value => self.value.as_ref(),
       ResponsePayload::Failure => self.failure.as_ref(),
-      ResponsePayload::None | ResponsePayload::Raw => None,
+      ResponsePayload::None | ResponsePayload::Raw | ResponsePayload::Unread => None,
     }
   }
 }
@@ -797,7 +817,7 @@ pub enum MethodKind {
   ParseResponse {
     response: Box<OperationResponse>,
     status_handlers: Vec<StatusHandler>,
-    default_handler: Option<ResponseVariantCategory>,
+    default_handler: Option<ResponseStatusCategory>,
   },
   /// Method that wraps bon::Builder for constructing the struct
   Builder {

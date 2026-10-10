@@ -5,8 +5,8 @@ use crate::generator::{
   ast::{
     DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumDefault, EnumDefaultValue, EnumMethod,
     EnumMethodKind, EnumToken, EnumVariantToken, OuterAttr, ResponseEnumDef, ResponseEnumVariant, ResponsePayload,
-    ResponseUnionDef, ResponseUnionVariant, RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken, TypeRef,
-    VariantContent, VariantDef,
+    ResponseUnionDef, ResponseUnionVariant, RustPrimitive, SerdeAttribute, SerdeMode, StatusCodeToken, StructToken,
+    TypeRef, VariantContent, VariantDef,
   },
   codegen::{
     Visibility,
@@ -1054,6 +1054,38 @@ fn test_response_response_enum_generation() {
     code.contains("pub enum ApiResponse < Value >"),
     "unused error parameter should be omitted: {code}"
   );
+
+  let client = ResponseEnumDef::builder()
+    .name(EnumToken::new("ApiResponse"))
+    .variants(vec![
+      ResponseEnumVariant::builder()
+        .name(EnumVariantToken::new("Other"))
+        .status_code(StatusCodeToken::Default)
+        .payload(ResponsePayload::Unread)
+        .build(),
+    ])
+    .with_headers(StructToken::new("WithHeaders"))
+    .build();
+  let code = ResponseEnumFragment::new(Visibility::Public, &client)
+    .into_token_stream()
+    .to_string();
+  let assertions = [
+    (
+      "# [derive (Debug)] pub enum ApiResponse",
+      "an unread response is not Clone",
+    ),
+    (
+      "Other (Box < reqwest :: Response >)",
+      "the unread variant should carry only the boxed response",
+    ),
+    (
+      "# [derive (Debug , Clone)] pub struct WithHeaders",
+      "WithHeaders stays Clone",
+    ),
+  ];
+  for (expected, msg) in assertions {
+    assert!(code.contains(expected), "{msg}: {code}");
+  }
 }
 
 #[test]

@@ -277,9 +277,11 @@ represent the status codes declared by the selected operations. When both
 success and failure payloads are needed, the enum has the form
 `ApiResponse<Value, Failure>`. In module output, you'll find it in `types.rs`.
 
-The generator also adds an `Other` variant when an operation has no `default`
-response. That variant lets the client return an undeclared status and its raw
-body. The following table shows the possible variant shapes:
+The generator also adds an `Other` variant for responses that the document
+doesn't declare. Its shape depends on the output. In client output, `Other`
+holds a response the client won't decode, which it returns unread. In server
+output, it lets a service send a status that the operation doesn't declare. The
+following table shows the possible variant shapes:
 
 | Variant shape | When |
 |---|---|
@@ -288,10 +290,14 @@ body. The following table shows the possible variant shapes:
 | `NoContent`, `NotModified`, ... | A status that has no body, and no [headers](#response-headers) in its class, in any operation |
 | `ClientError(http::StatusCode, Failure)` | A range such as `4XX`; the concrete status travels with the body |
 | `Unknown(http::StatusCode, Failure)` | The spec's `default` response, when it declares a body |
-| `Other(http::StatusCode, Vec<u8>)` | A status the operation does not declare when it has no `default` response |
+| `Other(Box<reqwest::Response>)` | Client output: a response with a status the operation doesn't declare, or a declared status under a media type it doesn't declare |
+| `Other(http::StatusCode, Vec<u8>)` | Server output: a status the operation doesn't declare, when it has no `default` response |
 
-The variants that carry a status use [`http::StatusCode`][rustdoc-http-status]. `Other` holds its raw
-body in a [`Vec<u8>`][rustdoc-vec].
+The variants that carry a status use [`http::StatusCode`][rustdoc-http-status]. The client's `Other`
+holds the unread [`reqwest::Response`][rustdoc-reqwest-response], so you can still read its status,
+headers, and body. Because that type isn't [`Clone`][rustdoc-clone], the client's response enum
+derives only [`Debug`][rustdoc-debug]. The server's `Other` holds its raw body in a
+[`Vec<u8>`][rustdoc-vec].
 
 Each operation supplies its own types for `Value` and `Failure`. We'll call
 these the two *response classes*: `Value` covers 2xx statuses, and `Failure`
@@ -353,15 +359,15 @@ A header without a schema uses [`String`][rustdoc-string]. Enums used in headers
 [`FromStr`][rustdoc-from-str] for both client and server output, and response headers receive name
 constants in the same way as request headers.
 
-For example, generating the whole petstore produces this response enum and,
-for the pagination headers of `listPets`, this header struct:
+For example, generating the whole petstore client produces this response enum
+and, for the pagination headers of `listPets`, this header struct:
 
 ```rust
 /// Response enum shared by every operation.
 ///
 /// `Value` is the operation's success body type and `Failure` its error body type.
 /// A status code is a unit variant when no operation gives it a body.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ApiResponse<Value, Failure> {
     ///200
     Ok(Value),
@@ -387,8 +393,8 @@ pub enum ApiResponse<Value, Failure> {
     ClientError(http::StatusCode, Failure),
     ///default
     Unknown(http::StatusCode, Failure),
-    ///Status code the operation does not declare; carries the raw body.
-    Other(http::StatusCode, Vec<u8>),
+    ///Response the operation does not declare, by status or media type; carries it unread.
+    Other(Box<reqwest::Response>),
 }
 
 /// Response headers that share one status class in an operation.
@@ -435,6 +441,28 @@ For example, `getPetCard` returns its kennel card as `text/plain`, so it
 returns `ApiResponse<String, Problem>`. `getPetPhoto` returns `image/png` and
 produces `ApiResponse<Vec<u8>, Problem>`. Both declare their `404` body as
 `application/problem+json`, which decodes into the `Problem` struct.
+
+The client reads a body only when the response's `Content-Type`, ignoring
+parameters such as `charset`, is one that its status declares a body under:
+
+- A JSON or XML media type accepts any type of that syntax, so a status that
+  declares `application/json` also reads `application/problem+json`.
+- Any other media type accepts itself, and a range such as `image/*` accepts
+  each of its subtypes.
+- `*/*` and a range also accept the type a generated server sends a body under
+  one with: JSON for a body decoded as JSON, `application/octet-stream` for
+  binary data, and `text/plain` for text.
+- A binary media type whose body the client decodes as JSON, such as an error
+  object declared as `application/octet-stream`, also accepts any JSON type.
+  It doesn't when its status declares a JSON type, or declares the same body
+  under a text type, which a generated server sends it as instead.
+- A status that declares no body reads any response.
+
+A response without a `Content-Type`, or with one its status doesn't declare a
+body under, comes back as `Other`. A declared status takes precedence over a
+range such as `4XX` and over `default`, whatever their order in the document,
+so a `404` page that isn't the declared `Problem` returns `Other` rather than
+the `4XX` body.
 
 [Reading Responses](./client-generation.md#reading-responses) shows how the
 client decodes these bodies, and
@@ -2616,7 +2644,9 @@ To work through constructing the generated values, continue to the
 [rustdoc-chrono-datetime]: https://docs.rs/chrono/0.4.45/chrono/struct.DateTime.html
 [rustdoc-chrono-time]: https://docs.rs/chrono/0.4.45/chrono/struct.NaiveTime.html
 [rustdoc-chrono-utc]: https://docs.rs/chrono/0.4.45/chrono/struct.Utc.html
+[rustdoc-clone]: https://doc.rust-lang.org/std/clone/trait.Clone.html
 [rustdoc-cookie]: https://docs.rs/cookie/0.18.2/cookie/
+[rustdoc-debug]: https://doc.rust-lang.org/std/fmt/trait.Debug.html
 [rustdoc-default]: https://doc.rust-lang.org/std/default/trait.Default.html
 [rustdoc-deserialize-as]: https://docs.rs/serde_with/3.24.0/serde_with/trait.DeserializeAs.html
 [rustdoc-display]: https://doc.rust-lang.org/std/fmt/trait.Display.html
@@ -2637,6 +2667,7 @@ To work through constructing the generated values, continue to the
 [rustdoc-indexmap-set]: https://docs.rs/indexmap/2.14.2/indexmap/set/struct.IndexSet.html
 [rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html
 [rustdoc-partial-eq]: https://doc.rust-lang.org/std/cmp/trait.PartialEq.html
+[rustdoc-reqwest-response]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Response.html
 [rustdoc-secret-string]: https://docs.rs/secrecy/0.10.3/secrecy/type.SecretString.html
 [rustdoc-serde-as]: https://docs.rs/serde_with/3.24.0/serde_with/attr.serde_as.html
 [rustdoc-serde-de-error]: https://docs.rs/serde/1.0.229/serde/de/trait.Error.html

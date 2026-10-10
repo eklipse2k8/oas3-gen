@@ -5,8 +5,8 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 use strum::Display;
 
 use super::{
-  DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponseUnionDef, SerdeMode, StructDef, StructKind,
-  VariantContent,
+  DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponsePayload, ResponseUnionDef, SerdeMode, StructDef,
+  StructKind, VariantContent,
 };
 use crate::generator::converter::GenerationTarget;
 
@@ -184,7 +184,11 @@ impl DerivesProvider for DiscriminatedEnumDef {
 
 impl DerivesProvider for ResponseEnumDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
+    if self.has_param(ResponsePayload::Unread) {
+      BTreeSet::from([DeriveTrait::Debug])
+    } else {
+      BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
+    }
   }
 
   fn is_serializable(&self) -> SerdeImpl {

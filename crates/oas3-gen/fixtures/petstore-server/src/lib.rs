@@ -8,6 +8,7 @@
 #![allow(clippy::struct_field_names)]
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::unnecessary_wraps)]
+#![allow(clippy::unused_async)]
 #![allow(clippy::unused_self)]
 #![allow(dead_code)]
 //!

@@ -251,6 +251,26 @@ example, `get_pet_card()` returns its `text/plain` kennel card as
 photo as `ApiResponse<Vec<u8>, Problem>`. See
 [Response Media Types](./code-generation.md#response-media-types).
 
+A response that the document doesn't describe comes back as
+`ApiResponse::Other`, holding the unread
+[`reqwest::Response`][rustdoc-reqwest-response]. That includes a status the
+operation doesn't declare, such as `405 Method Not Allowed`. It also includes
+a declared status under a media type the status doesn't declare, such as an
+empty `text/html` `404` page from a proxy where `showPetById` promises a JSON
+`Problem`. The method returns these responses as values rather than errors, so
+you can still read the status, headers, and body:
+
+```rust
+if let ApiResponse::Other(response) = response {
+    let status = response.status();
+    let body = response.text().await?;
+    eprintln!("{status}: {body}");
+}
+```
+
+The method returns an error when the request fails, or when a response the
+document describes can't be decoded as described.
+
 An optional response header becomes `None` when it's absent or can't be
 parsed. For a list header, one invalid element makes the whole value `None`.
 A missing or invalid required header causes decoding to return an error. See
@@ -308,25 +328,20 @@ replacing it with the constant.
 
 A generated server answers some requests before its service runs. Missing
 credentials receive `401`, and malformed headers or bodies receive `400`. Each
-of these responses carries a plain-text reason rather than a body from the
+of these responses carries a `text/plain` reason rather than a body from the
 document's error schemas; see
 [Returning Responses](./server-generation.md#returning-responses). The client
-decodes such a response by its status, like any other:
-
-- If the operation declares a body for that status, directly, through a range
-  such as `4XX`, or through `default`, the client tries to decode the plain
-  text as that body. Decoding fails, so the method returns an error through its
-  outer `anyhow::Result`.
-- If the operation doesn't declare the status and has no `default` response,
-  the method returns `ApiResponse::Other` with the status and the plain-text
-  bytes.
+decodes a body only under a media type that its status declares, so unless the
+status declares a plain-text body or no body at all, the method returns
+`ApiResponse::Other` with the unread response.
 
 For example, calling `list_api_keys()` without setting the `ApiKeyAuth` key
-sends a request that a generated server rejects with `401`. Because
-`listApiKeys` declares an `Error` body for `401`, the method returns a decoding
-error rather than `ApiResponse::Unauthorized`. Set the required credentials
-before calling an operation. The service's own `401` responses, such as one for
-a key it doesn't recognize, use the declared body and decode normally.
+sends a request that a generated server rejects with `401`. Although
+`listApiKeys` declares a JSON `Error` body for `401`, the method returns
+`ApiResponse::Other` rather than `ApiResponse::Unauthorized`, and the response's
+text names the missing credential. Set the required credentials before calling
+an operation. The service's own `401` responses, such as one for a key it
+doesn't recognize, use the declared body and decode normally.
 
 ### Decoding a Response from Your Own Transport
 

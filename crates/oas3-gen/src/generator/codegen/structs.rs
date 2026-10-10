@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use itertools::Itertools as _;
+use mediatype::{MediaType, names};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 
@@ -25,7 +27,7 @@ use crate::generator::{
     headers::{HeaderFromMapFragment, HeaderMapFragment},
     http::HttpStatusCode,
   },
-  converter::GenerationTarget,
+  converter::{GenerationTarget, requests::category_media_type},
   naming::{constants::OTHER_RESPONSE_VARIANT, identifiers::builder_setter_name},
 };
 
@@ -303,7 +305,7 @@ impl ToTokens for StructMethodFragment<'_> {
 pub(crate) struct ParseResponseMethodFragment<'a> {
   response: &'a OperationResponse,
   status_handlers: &'a [StatusHandler],
-  default_handler: Option<&'a ResponseVariantCategory>,
+  default_handler: Option<&'a ResponseStatusCategory>,
   visibility: Visibility,
   method_name: &'a MethodNameToken,
   docs: &'a Documentation,
@@ -313,7 +315,7 @@ impl<'a> ParseResponseMethodFragment<'a> {
   pub(crate) fn new(
     response: &'a OperationResponse,
     status_handlers: &'a [StatusHandler],
-    default_handler: Option<&'a ResponseVariantCategory>,
+    default_handler: Option<&'a ResponseStatusCategory>,
     visibility: Visibility,
     method_name: &'a MethodNameToken,
     docs: &'a Documentation,
@@ -331,50 +333,60 @@ impl<'a> ParseResponseMethodFragment<'a> {
 
 impl ToTokens for ParseResponseMethodFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
+    let response = self.response;
     let status_checks = self
       .status_handlers
       .iter()
-      .map(|h| StatusCheckFragment::new(h, self.response))
+      .map(|handler| {
+        (
+          StatusConditionFragment::new(handler.status_code),
+          ContentDispatchFragment::new(handler.dispatch.cases(), response, false),
+        )
+      })
       .collect::<Vec<_>>();
+    let fallback = ContentDispatchFragment::new(
+      self.default_handler.into_iter().flat_map(ResponseStatusCategory::cases),
+      response,
+      true,
+    );
 
-    let fallback = FallbackFragment::new(self.response, self.default_handler);
+    let content_type = status_checks
+      .iter()
+      .map(|(_, dispatch)| dispatch)
+      .chain([&fallback])
+      .flat_map(|dispatch| &dispatch.cases)
+      .any(|(_, check)| check.is_some())
+      .then(|| {
+        quote! {
+          let content_type = req
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        }
+      });
+    let status_checks = status_checks.iter().map(|(condition, dispatch)| {
+      quote! {
+        if #condition {
+          #dispatch
+        }
+      }
+    });
 
     let vis = &self.visibility;
     let method_name = self.method_name;
     let docs = self.docs;
-    let response = self.response;
 
     tokens.extend(quote! {
       #docs
       #vis async fn #method_name(req: reqwest::Response) -> anyhow::Result<#response> {
         let status = req.status();
+        #content_type
         #(#status_checks)*
         #fallback
-      }
-    });
-  }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct StatusCheckFragment<'a> {
-  handler: &'a StatusHandler,
-  response: &'a OperationResponse,
-}
-
-impl<'a> StatusCheckFragment<'a> {
-  pub(crate) fn new(handler: &'a StatusHandler, response: &'a OperationResponse) -> Self {
-    Self { handler, response }
-  }
-}
-
-impl ToTokens for StatusCheckFragment<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let cond = StatusConditionFragment::new(self.handler.status_code);
-    let body = ResponseDispatchFragment::new(&self.handler.dispatch, self.response);
-
-    tokens.extend(quote! {
-      if #cond {
-        #body
       }
     });
   }
@@ -411,122 +423,187 @@ impl ToTokens for StatusConditionFragment {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ResponseDispatchFragment<'a> {
-  dispatch: &'a ResponseStatusCategory,
-  response: &'a OperationResponse,
-}
-
-impl<'a> ResponseDispatchFragment<'a> {
-  pub(crate) fn new(dispatch: &'a ResponseStatusCategory, response: &'a OperationResponse) -> Self {
-    Self { dispatch, response }
-  }
-}
-
-impl ToTokens for ResponseDispatchFragment<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let ts = match self.dispatch {
-      ResponseStatusCategory::Single(case) => ResponseCaseFragment::new(case, self.response).into_token_stream(),
-      ResponseStatusCategory::ContentDispatch { streams, variants } => {
-        ContentDispatchFragment::new(streams, variants, self.response).into_token_stream()
-      }
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Copy, Debug)]
+/// Reads a status-matched response as the first case whose media type it carries, or returns it
+/// unread as `Other`.
+///
+/// A case that reads no body, or declares a media type that can't be parsed, reads any
+/// response, so the cases after it are dropped. When a case declares a JSON type, no other case
+/// falls back to JSON.
+#[derive(Clone, Debug)]
 pub(crate) struct ContentDispatchFragment<'a> {
-  event_streams: &'a [ResponseVariantCategory],
-  others: &'a [ResponseVariantCategory],
+  cases: Vec<(&'a ResponseVariantCategory, Option<ContentCheckFragment>)>,
   response: &'a OperationResponse,
+  ends_method: bool,
 }
 
 impl<'a> ContentDispatchFragment<'a> {
+  /// With `ends_method`, the unread response is the method's final expression rather than a
+  /// `return`.
   pub(crate) fn new(
-    event_streams: &'a [ResponseVariantCategory],
-    others: &'a [ResponseVariantCategory],
+    cases: impl IntoIterator<Item = &'a ResponseVariantCategory>,
     response: &'a OperationResponse,
+    ends_method: bool,
   ) -> Self {
+    let mut cases = cases
+      .into_iter()
+      .map(|case| (case, ContentCheckFragment::new(case, response)))
+      .take_while_inclusive(|(_, check)| check.is_some())
+      .collect_vec();
+
+    let declares_json = cases
+      .iter()
+      .filter_map(|(_, check)| check.as_ref())
+      .any(|check| check.accepted.contains(&AcceptedMediaType::JSON));
+    if declares_json {
+      for check in cases.iter_mut().filter_map(|(_, check)| check.as_mut()) {
+        check.json_fallback = false;
+      }
+    }
+
     Self {
-      event_streams,
-      others,
+      cases,
       response,
+      ends_method,
     }
   }
 }
 
 impl ToTokens for ContentDispatchFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let content_type_header = quote! {
-      let content_type_str = req.headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json");
-    };
-
-    let stream_checks: Vec<TokenStream> = self
-      .event_streams
-      .iter()
-      .map(|case| {
-        let block = ResponseCaseFragment::new(case, self.response);
-        quote! {
-          if content_type_str.contains("event-stream") {
-            #block
-          }
-        }
-      })
-      .collect();
-
-    let other_checks: Vec<TokenStream> = self
-      .others
-      .iter()
-      .map(|case| {
-        let check = ContentCheckFragment::new(case.category);
-        let block = ResponseCaseFragment::new(case, self.response);
-        quote! {
+    for (case, check) in &self.cases {
+      let block = ResponseCaseFragment::new(case, self.response);
+      tokens.extend(match check {
+        Some(check) => quote! {
           if #check {
             #block
           }
-        }
-      })
-      .collect();
+        },
+        None => block.into_token_stream(),
+      });
+    }
 
-    tokens.extend(quote! {
-      #content_type_header
-      #(#stream_checks)*
-      #(#other_checks)*
-    });
+    if self.cases.last().is_none_or(|(_, check)| check.is_some()) {
+      let response_enum = &self.response.name;
+      let other = EnumVariantToken::from_raw(OTHER_RESPONSE_VARIANT);
+      let unread = quote! { Ok(#response_enum::#other(Box::new(req))) };
+      tokens.extend(if self.ends_method {
+        unread
+      } else {
+        quote! { return #unread; }
+      });
+    }
   }
 }
 
+/// Tests the response's lowercased, parameterless `content_type` against the media types a case
+/// declares.
+///
+/// A binary type whose body decodes as JSON also accepts any JSON type, since a generated server
+/// sends that body as JSON unless the status also declares a text type.
 #[derive(Clone, Debug)]
 pub(crate) struct ContentCheckFragment {
-  category: ContentCategory,
+  accepted: Vec<AcceptedMediaType>,
+  json_fallback: bool,
 }
 
 impl ContentCheckFragment {
-  pub(crate) fn new(category: ContentCategory) -> Self {
-    Self { category }
+  /// Returns `None` when the case reads no body, or declares no media type or one that can't
+  /// be parsed.
+  pub(crate) fn new(case: &ResponseVariantCategory, response: &OperationResponse) -> Option<Self> {
+    let variant = &case.variant;
+    let schema_type = variant.schema_type.as_ref()?;
+    response.param(variant.mapping.payload)?;
+
+    let mut accepted = vec![];
+    for media in variant
+      .media_types
+      .iter()
+      .filter(|media| media.category == case.category)
+    {
+      accepted.extend(AcceptedMediaType::for_media(media)?);
+    }
+    if accepted.is_empty() {
+      return None;
+    }
+
+    let decodes_json = BodyReading::new(schema_type, case.category, variant.mapping.parses_text) == BodyReading::Json;
+    let declares_text = variant
+      .media_types
+      .iter()
+      .any(|media| media.category == ContentCategory::Text);
+    Some(Self {
+      accepted: accepted.into_iter().unique().collect(),
+      json_fallback: case.category == ContentCategory::Binary && decodes_json && !declares_text,
+    })
   }
 }
 
 impl ToTokens for ContentCheckFragment {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let ts = match self.category {
-      ContentCategory::Json => quote! { content_type_str.contains("json") },
-      ContentCategory::Xml => quote! { content_type_str.contains("xml") },
-      ContentCategory::Text => quote! { content_type_str.starts_with("text/") && !content_type_str.contains("xml") },
-      ContentCategory::Binary => {
-        quote! { content_type_str.starts_with("application/octet-stream") || content_type_str.starts_with("image/") || content_type_str.starts_with("audio/") || content_type_str.starts_with("video/") }
-      }
-      ContentCategory::EventStream => quote! { content_type_str.contains("event-stream") },
-      ContentCategory::FormUrlEncoded => quote! { content_type_str.contains("x-www-form-urlencoded") },
-      ContentCategory::Multipart => quote! { content_type_str.contains("multipart") },
-    };
+    let accepted = self
+      .accepted
+      .iter()
+      .chain(self.json_fallback.then_some(&AcceptedMediaType::JSON));
+    tokens.extend(quote! { #(#accepted)||* });
+  }
+}
 
-    tokens.extend(ts);
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum AcceptedMediaType {
+  /// Any type of a structured syntax, such as `json` for `application/json` or `+json` types.
+  Syntax(&'static str),
+  /// Every subtype of a top-level type, such as `image/`.
+  Range(String),
+  Exact(String),
+}
+
+impl AcceptedMediaType {
+  const JSON: Self = Self::Syntax("json");
+  const XML: Self = Self::Syntax("xml");
+
+  /// Returns `None` when `media` can't be parsed.
+  fn for_media(media: &ResponseMediaType) -> Option<Vec<Self>> {
+    let parsed = MediaType::parse(&media.content_type).ok()?;
+    let syntax = parsed.suffix.unwrap_or(parsed.subty);
+    Some(if syntax == "json" {
+      vec![Self::JSON]
+    } else if syntax == "xml" {
+      vec![Self::XML]
+    } else if parsed.ty == names::_STAR {
+      vec![Self::sent_under_wildcard(media.category)]
+    } else if parsed.subty == names::_STAR {
+      let range = format!("{}/", parsed.ty).to_ascii_lowercase();
+      match Self::sent_under_wildcard(media.category) {
+        Self::Exact(sent) if sent.starts_with(&range) => vec![Self::Range(range)],
+        sent => vec![Self::Range(range), sent],
+      }
+    } else {
+      vec![Self::Exact(parsed.essence().to_string().to_ascii_lowercase())]
+    })
+  }
+
+  /// The type a generated server sends a body of `category` under when the status declares only
+  /// a wildcard.
+  fn sent_under_wildcard(category: ContentCategory) -> Self {
+    match category {
+      ContentCategory::Json => Self::JSON,
+      ContentCategory::Xml => Self::XML,
+      category => Self::Exact(category_media_type(category).to_owned()),
+    }
+  }
+}
+
+impl ToTokens for AcceptedMediaType {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    tokens.extend(match self {
+      Self::Syntax(syntax) => {
+        let subtype = format!("/{syntax}");
+        let suffix = format!("+{syntax}");
+        quote! { content_type.ends_with(#subtype) || content_type.ends_with(#suffix) }
+      }
+      Self::Range(range) => quote! { content_type.starts_with(#range) },
+      Self::Exact(essence) => quote! { content_type == #essence },
+    });
   }
 }
 
@@ -636,25 +713,47 @@ impl<'a> ResponseExtractionFragment<'a> {
   }
 }
 
+/// How the client reads a response body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BodyReading {
+  Bytes,
+  Text,
+  ParsedText,
+  EventStream,
+  Xml,
+  Json,
+}
+
+impl BodyReading {
+  fn new(schema_type: &TypeRef, category: ContentCategory, parses_text: bool) -> Self {
+    match category {
+      ContentCategory::Text | ContentCategory::Binary if matches!(schema_type.base_type, RustPrimitive::Bytes) => {
+        Self::Bytes
+      }
+      ContentCategory::Text | ContentCategory::Binary if schema_type.is_string_like() => Self::Text,
+      ContentCategory::Text if parses_text => Self::ParsedText,
+      ContentCategory::EventStream => Self::EventStream,
+      ContentCategory::Xml => Self::Xml,
+      _ => Self::Json,
+    }
+  }
+}
+
 impl ToTokens for ResponseExtractionFragment<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     let schema_type = self.schema_type;
 
-    let ts = match self.category {
-      ContentCategory::Text | ContentCategory::Binary if matches!(self.schema_type.base_type, RustPrimitive::Bytes) => {
-        quote! { req.bytes().await?.to_vec() }
-      }
-      ContentCategory::Text | ContentCategory::Binary if self.schema_type.is_string_like() => {
-        quote! { req.text().await? }
-      }
-      ContentCategory::Text if self.parses_text => {
+    let ts = match BodyReading::new(schema_type, self.category, self.parses_text) {
+      BodyReading::Bytes => quote! { req.bytes().await?.to_vec() },
+      BodyReading::Text => quote! { req.text().await? },
+      BodyReading::ParsedText => {
         if matches!(self.schema_type.base_type, RustPrimitive::Custom(_)) {
           quote! { req.text().await?.parse::<#schema_type>().map_err(anyhow::Error::msg)? }
         } else {
           quote! { req.text().await?.parse::<#schema_type>()? }
         }
       }
-      ContentCategory::EventStream => {
+      BodyReading::EventStream => {
         let constructor = match self.stream.map(|stream| stream.item).unwrap_or_default() {
           StreamItem::Frame(FrameData::Text) => quote! { text },
           StreamItem::FrameUnion => quote! { frames },
@@ -666,40 +765,11 @@ impl ToTokens for ResponseExtractionFragment<'_> {
           .map_or_else(|| quote! { None }, |sentinel| quote! { Some(#sentinel) });
         quote! { <#schema_type>::#constructor(req, #sentinel) }
       }
-      ContentCategory::Xml => {
+      BodyReading::Xml => {
         quote! { oas3_gen_support::Diagnostics::<#schema_type>::xml_with_diagnostics(req).await? }
       }
-      _ => quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? },
-    };
-
-    tokens.extend(ts);
-  }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct FallbackFragment<'a> {
-  response: &'a OperationResponse,
-  default_handler: Option<&'a ResponseVariantCategory>,
-}
-
-impl<'a> FallbackFragment<'a> {
-  pub(crate) fn new(response: &'a OperationResponse, default_handler: Option<&'a ResponseVariantCategory>) -> Self {
-    Self {
-      response,
-      default_handler,
-    }
-  }
-}
-
-impl ToTokens for FallbackFragment<'_> {
-  fn to_tokens(&self, tokens: &mut TokenStream) {
-    let ts = if let Some(case) = self.default_handler {
-      ResponseCaseFragment::new(case, self.response).into_token_stream()
-    } else {
-      let response_enum = &self.response.name;
-      let unexpected = EnumVariantToken::from_raw(OTHER_RESPONSE_VARIANT);
-      quote! {
-        Ok(#response_enum::#unexpected(status, req.bytes().await?.to_vec()))
+      BodyReading::Json => {
+        quote! { oas3_gen_support::Diagnostics::<#schema_type>::json_with_diagnostics(req).await? }
       }
     };
 

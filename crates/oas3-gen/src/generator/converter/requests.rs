@@ -504,7 +504,7 @@ fn without_charset(content_type: String) -> String {
 }
 
 /// The media type a body of `category` is sent as when the spec declares only a wildcard.
-fn category_media_type(category: ContentCategory) -> &'static str {
+pub(crate) fn category_media_type(category: ContentCategory) -> &'static str {
   match category {
     ContentCategory::Json => DEFAULT_MEDIA_TYPE,
     ContentCategory::FormUrlEncoded => "application/x-www-form-urlencoded",

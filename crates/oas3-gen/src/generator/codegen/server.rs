@@ -528,6 +528,7 @@ impl ToTokens for ResponseArmsFragment<'_> {
           String::new(),
           quote! { (status, body).into_response() },
         )],
+        ResponsePayload::Unread => vec![],
         ResponsePayload::Value | ResponsePayload::Failure => {
           Self::body_arms(&status_expr, self.response.param(variant.payload), variant.status_code)
             .into_iter()

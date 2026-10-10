@@ -227,10 +227,12 @@ async fn send_raw(
   request.send().await.expect("the store answers")
 }
 
-/// A staff operation's parsed answer, reduced to whether it was the declared `401`.
+/// A staff operation's parsed answer, reduced to whether it was the declared `401` or a
+/// response the document doesn't declare.
 #[derive(Debug)]
 enum StaffAnswer {
   Unauthorized(Error),
+  Undeclared(Box<reqwest::Response>),
   Other(#[expect(dead_code, reason = "read through `Debug` in assertion messages")] String),
 }
 
@@ -238,6 +240,7 @@ impl<Value: std::fmt::Debug> From<ApiResponse<Value, Error>> for StaffAnswer {
   fn from(response: ApiResponse<Value, Error>) -> Self {
     match response {
       ApiResponse::Unauthorized(error) => Self::Unauthorized(error),
+      ApiResponse::Other(undeclared) => Self::Undeclared(undeclared),
       other => Self::Other(format!("{other:?}")),
     }
   }
@@ -470,7 +473,7 @@ async fn credentials_the_service_rejects_parse_as_the_declared_unauthorized_erro
 /// A request missing a required credential never reaches the service: the generated extractor
 /// refuses it with `401` and a plain-text reason naming what is missing. The document's JSON `Error`
 /// for `401` is what the service answers when it rejects credential values, so the generated client
-/// reports an extractor refusal as an error rather than parsing it as `Unauthorized`.
+/// hands an extractor refusal back unread as `Other` rather than parsing it as `Unauthorized`.
 #[rstest]
 #[case::list_api_keys_without_a_key(StaffOperation::ListApiKeys, Credentials::NONE, &["`X-Api-Key`"])]
 #[case::create_api_key_without_a_query_key_or_session(
@@ -515,9 +518,14 @@ async fn missing_credentials_are_rejected_before_the_service_runs(
   );
 
   let answer = operation.call(&credentials.client(&petstore)).await;
-  assert!(
-    answer.is_err(),
-    "{operation:?} with {credentials:?} must report the extractor 401 as an error, got {answer:?}"
+  let Ok(StaffAnswer::Undeclared(undeclared)) = answer else {
+    panic!("{operation:?} with {credentials:?} must hand back the extractor 401 unread, got {answer:?}");
+  };
+  assert_eq!(undeclared.status(), StatusCode::UNAUTHORIZED, "{operation:?}");
+  assert_eq!(
+    undeclared.text().await.expect("a UTF-8 reason"),
+    reason,
+    "{operation:?}"
   );
   assert!(
     petstore.service.received().is_empty(),
