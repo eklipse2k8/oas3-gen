@@ -41,16 +41,3 @@ serde_with.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 validator.workspace = true
-
-[dev-dependencies]
-criterion.workspace = true
-futures.workspace = true
-proptest.workspace = true
-reqwest = { workspace = true, features = ["stream"] }
-rstest.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-
-[[bench]]
-name = "sse"
-harness = false
-required-features = ["eventsource"]

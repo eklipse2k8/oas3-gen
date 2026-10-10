@@ -1,0 +1,35 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Enum shapes", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Status": { "type": "string", "enum": ["zeta", "alpha", "gamma", "beta"] },
+      "Pick": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/Zebra" },
+          { "$ref": "#/components/schemas/Apple" },
+          { "$ref": "#/components/schemas/Mango" }
+        ]
+      },
+      "Fruit": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/Zebra" },
+          { "$ref": "#/components/schemas/Apple" },
+          { "$ref": "#/components/schemas/Mango" }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "zebra": "#/components/schemas/Zebra",
+            "apple": "#/components/schemas/Apple",
+            "mango": "#/components/schemas/Mango"
+          }
+        }
+      },
+      "Zebra": { "type": "object", "properties": { "kind": { "type": "string" }, "stripes": { "type": "integer" } } },
+      "Apple": { "type": "object", "properties": { "kind": { "type": "string" }, "color": { "type": "string" } } },
+      "Mango": { "type": "object", "properties": { "kind": { "type": "string" }, "ripe": { "type": "boolean" } } }
+    }
+  }
+}

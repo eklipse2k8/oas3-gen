@@ -157,7 +157,7 @@ pub struct ServerRootNode {
 }
 
 impl TraitToken {
-  pub(crate) fn new_server(name: Option<&str>, fallback: &str) -> Self {
+  pub fn new_server(name: Option<&str>, fallback: &str) -> Self {
     let trait_name = if let Some(name) = name
       && !name.is_empty()
     {

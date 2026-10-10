@@ -32,7 +32,7 @@ use crate::generator::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct StructFragment<'a> {
+pub struct StructFragment<'a> {
   def: &'a StructDef,
   regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
   visibility: Visibility,
@@ -40,7 +40,7 @@ pub(crate) struct StructFragment<'a> {
 }
 
 impl<'a> StructFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     def: &'a StructDef,
     regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
     visibility: Visibility,
@@ -78,18 +78,14 @@ impl ToTokens for StructFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct StructDefinitionFragment<'a> {
+pub struct StructDefinitionFragment<'a> {
   def: &'a StructDef,
   regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
   visibility: Visibility,
 }
 
 impl<'a> StructDefinitionFragment<'a> {
-  pub(crate) fn new(
-    def: &'a StructDef,
-    regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
-    visibility: Visibility,
-  ) -> Self {
+  pub fn new(def: &'a StructDef, regex_lookup: &'a BTreeMap<RegexKey, ConstToken>, visibility: Visibility) -> Self {
     Self {
       def,
       regex_lookup,
@@ -128,7 +124,7 @@ impl ToTokens for StructDefinitionFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct StructFieldFragment<'a> {
+pub struct StructFieldFragment<'a> {
   field: &'a FieldDef,
   struct_def: &'a StructDef,
   regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
@@ -136,7 +132,7 @@ pub(crate) struct StructFieldFragment<'a> {
 }
 
 impl<'a> StructFieldFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     field: &'a FieldDef,
     struct_def: &'a StructDef,
     regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
@@ -211,13 +207,13 @@ impl ToTokens for StructFieldFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct StructImplBlockFragment<'a> {
+pub struct StructImplBlockFragment<'a> {
   def: &'a StructDef,
   visibility: Visibility,
 }
 
 impl<'a> StructImplBlockFragment<'a> {
-  pub(crate) fn new(def: &'a StructDef, visibility: Visibility) -> Self {
+  pub fn new(def: &'a StructDef, visibility: Visibility) -> Self {
     Self { def, visibility }
   }
 }
@@ -265,13 +261,13 @@ impl ToTokens for StructImplBlockFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct StructMethodFragment<'a> {
+pub struct StructMethodFragment<'a> {
   method: &'a StructMethod,
   visibility: Visibility,
 }
 
 impl<'a> StructMethodFragment<'a> {
-  pub(crate) fn new(method: &'a StructMethod, visibility: Visibility) -> Self {
+  pub fn new(method: &'a StructMethod, visibility: Visibility) -> Self {
     Self { method, visibility }
   }
 }
@@ -302,7 +298,7 @@ impl ToTokens for StructMethodFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ParseResponseMethodFragment<'a> {
+pub struct ParseResponseMethodFragment<'a> {
   response: &'a OperationResponse,
   status_handlers: &'a [StatusHandler],
   default_handler: Option<&'a ResponseStatusCategory>,
@@ -312,7 +308,7 @@ pub(crate) struct ParseResponseMethodFragment<'a> {
 }
 
 impl<'a> ParseResponseMethodFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     response: &'a OperationResponse,
     status_handlers: &'a [StatusHandler],
     default_handler: Option<&'a ResponseStatusCategory>,
@@ -393,12 +389,12 @@ impl ToTokens for ParseResponseMethodFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StatusConditionFragment {
+pub struct StatusConditionFragment {
   status_code: StatusCodeToken,
 }
 
 impl StatusConditionFragment {
-  pub(crate) fn new(status_code: StatusCodeToken) -> Self {
+  pub fn new(status_code: StatusCodeToken) -> Self {
     Self { status_code }
   }
 }
@@ -430,7 +426,7 @@ impl ToTokens for StatusConditionFragment {
 /// response, so the cases after it are dropped. When a case declares a JSON type, no other case
 /// falls back to JSON.
 #[derive(Clone, Debug)]
-pub(crate) struct ContentDispatchFragment<'a> {
+pub struct ContentDispatchFragment<'a> {
   cases: Vec<(&'a ResponseVariantCategory, Option<ContentCheckFragment>)>,
   response: &'a OperationResponse,
   ends_method: bool,
@@ -439,7 +435,7 @@ pub(crate) struct ContentDispatchFragment<'a> {
 impl<'a> ContentDispatchFragment<'a> {
   /// With `ends_method`, the unread response is the method's final expression rather than a
   /// `return`.
-  pub(crate) fn new(
+  pub fn new(
     cases: impl IntoIterator<Item = &'a ResponseVariantCategory>,
     response: &'a OperationResponse,
     ends_method: bool,
@@ -501,7 +497,7 @@ impl ToTokens for ContentDispatchFragment<'_> {
 /// A binary type whose body decodes as JSON also accepts any JSON type, since a generated server
 /// sends that body as JSON unless the status also declares a text type.
 #[derive(Clone, Debug)]
-pub(crate) struct ContentCheckFragment {
+pub struct ContentCheckFragment {
   accepted: Vec<AcceptedMediaType>,
   json_fallback: bool,
 }
@@ -509,7 +505,7 @@ pub(crate) struct ContentCheckFragment {
 impl ContentCheckFragment {
   /// Returns `None` when the case reads no body, or declares no media type or one that can't
   /// be parsed.
-  pub(crate) fn new(case: &ResponseVariantCategory, response: &OperationResponse) -> Option<Self> {
+  pub fn new(case: &ResponseVariantCategory, response: &OperationResponse) -> Option<Self> {
     let variant = &case.variant;
     let schema_type = variant.schema_type.as_ref()?;
     response.param(variant.mapping.payload)?;
@@ -608,13 +604,13 @@ impl ToTokens for AcceptedMediaType {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ResponseCaseFragment<'a> {
+pub struct ResponseCaseFragment<'a> {
   case: &'a ResponseVariantCategory,
   response: &'a OperationResponse,
 }
 
 impl<'a> ResponseCaseFragment<'a> {
-  pub(crate) fn new(case: &'a ResponseVariantCategory, response: &'a OperationResponse) -> Self {
+  pub fn new(case: &'a ResponseVariantCategory, response: &'a OperationResponse) -> Self {
     Self { case, response }
   }
 }
@@ -687,7 +683,7 @@ impl ToTokens for ResponseCaseFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ResponseExtractionFragment<'a> {
+pub struct ResponseExtractionFragment<'a> {
   schema_type: &'a TypeRef,
   category: ContentCategory,
   parses_text: bool,
@@ -698,7 +694,7 @@ impl<'a> ResponseExtractionFragment<'a> {
   /// Reads the body as `category`; a `text/event-stream` body reads as `stream` declares
   /// it, decoding each frame's data as JSON or text, or a union of frame types by event
   /// name, and ending at its sentinel.
-  pub(crate) fn new(
+  pub fn new(
     schema_type: &'a TypeRef,
     category: ContentCategory,
     parses_text: bool,
@@ -778,7 +774,7 @@ impl ToTokens for ResponseExtractionFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct BuilderMethodFragment<'a> {
+pub struct BuilderMethodFragment<'a> {
   fields: &'a [BuilderField],
   nested_structs: &'a [BuilderNestedStruct],
   visibility: Visibility,
@@ -786,7 +782,7 @@ pub(crate) struct BuilderMethodFragment<'a> {
 }
 
 impl<'a> BuilderMethodFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     fields: &'a [BuilderField],
     nested_structs: &'a [BuilderNestedStruct],
     visibility: Visibility,
@@ -834,13 +830,13 @@ impl ToTokens for BuilderMethodFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct BuilderConstructionFragment<'a> {
+pub struct BuilderConstructionFragment<'a> {
   fields: &'a [BuilderField],
   nested_structs: &'a [BuilderNestedStruct],
 }
 
 impl<'a> BuilderConstructionFragment<'a> {
-  pub(crate) fn new(fields: &'a [BuilderField], nested_structs: &'a [BuilderNestedStruct]) -> Self {
+  pub fn new(fields: &'a [BuilderField], nested_structs: &'a [BuilderNestedStruct]) -> Self {
     Self { fields, nested_structs }
   }
 }

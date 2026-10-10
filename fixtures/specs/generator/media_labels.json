@@ -1,0 +1,36 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Labels", "version": "1.0.0" },
+  "paths": {
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "requestBody": {
+          "required": true,
+          "content": { "*/*": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } } } }
+        },
+        "responses": { "204": { "description": "created" } }
+      }
+    },
+    "/blobs": {
+      "put": {
+        "operationId": "putBlob",
+        "requestBody": { "required": true, "content": { "image/*": { "schema": { "type": "string", "format": "binary" } } } },
+        "responses": { "204": { "description": "stored" } }
+      }
+    },
+    "/notes": {
+      "put": {
+        "operationId": "putNote",
+        "requestBody": { "required": true, "content": { "text/plain; charset=iso-8859-1": { "schema": { "type": "string" } } } },
+        "responses": { "204": { "description": "stored" } }
+      }
+    },
+    "/note": {
+      "get": {
+        "operationId": "getNote",
+        "responses": { "200": { "description": "ok", "content": { "text/*": { "schema": { "type": "string" } } } } }
+      }
+    }
+  }
+}

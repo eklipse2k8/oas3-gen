@@ -6,13 +6,13 @@ use quote::{ToTokens, quote};
 use crate::generator::ast::{RegexKey, RustType, ValidationAttribute, constants::HttpHeaderRef, tokens::ConstToken};
 
 #[derive(Clone, Debug)]
-pub(crate) struct RegexConstantFragment {
+pub struct RegexConstantFragment {
   const_token: ConstToken,
   pattern: String,
 }
 
 impl RegexConstantFragment {
-  pub(crate) fn new(const_token: ConstToken, pattern: String) -> Self {
+  pub fn new(const_token: ConstToken, pattern: String) -> Self {
     Self { const_token, pattern }
   }
 }
@@ -29,13 +29,13 @@ impl ToTokens for RegexConstantFragment {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct RegexConstantsResult {
+pub struct RegexConstantsResult {
   fragments: Vec<RegexConstantFragment>,
   pub lookup: BTreeMap<RegexKey, ConstToken>,
 }
 
 impl RegexConstantsResult {
-  pub(crate) fn from_types(types: &[RustType]) -> Self {
+  pub fn from_types(types: &[RustType]) -> Self {
     let mut const_defs: BTreeMap<ConstToken, String> = BTreeMap::new();
     let mut lookup: BTreeMap<RegexKey, ConstToken> = BTreeMap::new();
     let mut pattern_to_const: BTreeMap<String, ConstToken> = BTreeMap::new();
@@ -85,10 +85,10 @@ impl ToTokens for RegexConstantsResult {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct HeaderConstantsFragment<'a>(&'a [HttpHeaderRef]);
+pub struct HeaderConstantsFragment<'a>(&'a [HttpHeaderRef]);
 
 impl<'a> HeaderConstantsFragment<'a> {
-  pub(crate) fn new(headers: &'a [HttpHeaderRef]) -> Self {
+  pub fn new(headers: &'a [HttpHeaderRef]) -> Self {
     Self(headers)
   }
 }

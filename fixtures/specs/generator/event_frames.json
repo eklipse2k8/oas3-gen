@@ -1,0 +1,154 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Event Frames", "version": "1.0.0" },
+  "paths": {
+    "/frames": {
+      "get": {
+        "operationId": "streamFrames",
+        "responses": {
+          "200": { "description": "ok", "content": { "text/event-stream": { "schema": { "$ref": "#/components/schemas/Frame" } } } }
+        }
+      }
+    },
+    "/keyed": {
+      "get": {
+        "operationId": "streamKeyed",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/Keyed" },
+                "x-sse-sentinel": "[STOP]",
+                "x-speakeasy-sse-sentinel": "[HALT]"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents": {
+      "get": {
+        "operationId": "getDocument",
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JsonOnly" } } } }
+        }
+      }
+    },
+    "/shared": {
+      "get": {
+        "operationId": "streamShared",
+        "responses": {
+          "200": { "description": "ok", "content": { "text/event-stream": { "schema": { "$ref": "#/components/schemas/Shared" } } } }
+        }
+      }
+    },
+    "/latest": {
+      "get": {
+        "operationId": "latestShared",
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Shared" } } } }
+        }
+      }
+    },
+    "/mapped": {
+      "get": {
+        "operationId": "streamMapped",
+        "responses": {
+          "200": { "description": "ok", "content": { "text/event-stream": { "schema": { "$ref": "#/components/schemas/Mapped" } } } }
+        }
+      }
+    },
+    "/nested": {
+      "get": {
+        "operationId": "streamNested",
+        "responses": {
+          "200": { "description": "ok", "content": { "text/event-stream": { "schema": { "$ref": "#/components/schemas/Nested" } } } }
+        }
+      }
+    },
+    "/holder": {
+      "get": {
+        "operationId": "getHolder",
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Holder" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Payload": {
+        "type": "object",
+        "required": ["data"],
+        "properties": { "data": { "type": "string" } }
+      },
+      "Frame": {
+        "type": "object",
+        "required": ["data"],
+        "properties": {
+          "data": { "$ref": "#/components/schemas/Payload" },
+          "event": { "type": "string", "enum": ["update", "final"] }
+        }
+      },
+      "Keyed": { "oneOf": [{ "$ref": "#/components/schemas/TextFrame" }, { "$ref": "#/components/schemas/JsonFrame" }] },
+      "TextFrame": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": { "event": { "const": "text" }, "data": { "type": "string" } }
+      },
+      "JsonFrame": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "const": "json" },
+          "data": { "type": "string", "contentMediaType": "application/json", "contentSchema": { "$ref": "#/components/schemas/Payload" } }
+        }
+      },
+      "JsonOnly": {
+        "type": "object",
+        "properties": { "data": { "type": "string" }, "event": { "type": "string" } }
+      },
+      "Shared": {
+        "type": "object",
+        "required": ["data"],
+        "properties": { "data": { "type": "string" }, "event": { "type": "string", "enum": ["a", "b"] } }
+      },
+      "Mapped": {
+        "oneOf": [{ "$ref": "#/components/schemas/Named" }, { "$ref": "#/components/schemas/Unnamed" }],
+        "discriminator": {
+          "propertyName": "event",
+          "mapping": { "named": "#/components/schemas/Named", "unnamed": "#/components/schemas/Unnamed" }
+        }
+      },
+      "Named": {
+        "type": "object",
+        "required": ["data"],
+        "properties": { "data": { "type": "string" }, "event": { "type": "string" } }
+      },
+      "Unnamed": {
+        "type": "object",
+        "required": ["data"],
+        "properties": { "data": { "type": "integer" } }
+      },
+      "Nested": {
+        "oneOf": [{ "$ref": "#/components/schemas/NestedA" }, { "$ref": "#/components/schemas/NestedB" }],
+        "discriminator": { "propertyName": "event" }
+      },
+      "NestedA": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": { "event": { "const": "nested-a" }, "data": { "type": "string" } }
+      },
+      "NestedB": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": { "event": { "const": "nested-b" }, "data": { "type": "string" } }
+      },
+      "Holder": {
+        "type": "object",
+        "properties": { "nested": { "$ref": "#/components/schemas/Nested" } }
+      }
+    }
+  }
+}

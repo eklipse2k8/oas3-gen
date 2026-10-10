@@ -97,7 +97,7 @@ pub fn extract_schema_name_from_response(response: &Response) -> Option<String> 
 ///
 /// `members` are rendered Rust types in canonical order, each named by
 /// [`union_member_name`]. A name already in use gets a `Body` suffix, then a numeric one.
-pub(crate) fn union_name<'a>(members: impl IntoIterator<Item = &'a str>, taken: &BTreeSet<String>) -> String {
+pub fn union_name<'a>(members: impl IntoIterator<Item = &'a str>, taken: &BTreeSet<String>) -> String {
   let base = members
     .into_iter()
     .map(union_member_name)
@@ -111,7 +111,7 @@ pub(crate) fn union_name<'a>(members: impl IntoIterator<Item = &'a str>, taken: 
 
 /// Names one member of a response union after its rendered type: `Pet` for `Pet`, and
 /// `PetStream` for an event stream of `Pet` items.
-pub(crate) fn union_member_name(member: &str) -> String {
+pub fn union_member_name(member: &str) -> String {
   stream_item(member).map_or_else(
     || to_rust_type_name(member),
     |item| format!("{}{RESPONSE_UNION_STREAM_SUFFIX}", to_rust_type_name(item)),
@@ -119,18 +119,18 @@ pub(crate) fn union_member_name(member: &str) -> String {
 }
 
 /// The type a client reads a `text/event-stream` of `item`s as.
-pub(crate) fn client_stream_type(item: &str) -> String {
+pub fn client_stream_type(item: &str) -> String {
   format!("{CLIENT_EVENT_STREAM_TYPE}<{item}>")
 }
 
 /// The type a server returns a `text/event-stream` of `item`s as.
-pub(crate) fn server_stream_type(item: &str) -> String {
+pub fn server_stream_type(item: &str) -> String {
   format!("{SERVER_EVENT_STREAM_TYPE}<'static, {item}>")
 }
 
 /// The frame a client reads each `payload` of a `text/event-stream` in, its event name a
 /// `String` unless the stream declares `event`.
-pub(crate) fn sse_frame_type(payload: &str, event: Option<&str>) -> String {
+pub fn sse_frame_type(payload: &str, event: Option<&str>) -> String {
   match event {
     Some(event) => format!("{CLIENT_SSE_FRAME_TYPE}<{payload}, {event}>"),
     None => format!("{CLIENT_SSE_FRAME_TYPE}<{payload}>"),
@@ -152,7 +152,7 @@ fn generic_argument<'a>(rust_type: &'a str, generic: &str) -> Option<&'a str> {
 ///
 /// `headers` are the original header names in declaration order. A name already in
 /// use gets a numeric suffix.
-pub(crate) fn headers_name<'a>(headers: impl IntoIterator<Item = &'a str>, taken: &BTreeSet<String>) -> String {
+pub fn headers_name<'a>(headers: impl IntoIterator<Item = &'a str>, taken: &BTreeSet<String>) -> String {
   let base = headers
     .into_iter()
     .map(to_rust_type_name)

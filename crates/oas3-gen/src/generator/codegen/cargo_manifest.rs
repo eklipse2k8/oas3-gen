@@ -207,12 +207,6 @@ const DEPENDENCIES: &[DependencySpec] = &[
   },
 ];
 
-/// Yields the pinned `(package, version)` pairs the generated manifests declare.
-#[cfg(test)]
-pub(crate) fn pinned_versions() -> impl Iterator<Item = (&'static str, &'static str)> {
-  DEPENDENCIES.iter().map(|spec| (spec.package, spec.version))
-}
-
 impl DependencySpec {
   fn resolve(&self, collection_types: CollectionTypePolicy, referenced: &BTreeSet<String>) -> Dependency {
     let ordered = match collection_types {

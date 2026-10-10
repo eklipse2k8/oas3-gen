@@ -403,7 +403,7 @@ fn apply_fn_name_overrides(entries: &mut [OperationEntry], overrides: &HashMap<S
 /// operation identifiers to valid Rust method names.
 #[derive(Debug)]
 pub struct OperationRegistry {
-  pub(crate) entries: Vec<OperationEntry>,
+  pub entries: Vec<OperationEntry>,
 }
 
 impl OperationRegistry {

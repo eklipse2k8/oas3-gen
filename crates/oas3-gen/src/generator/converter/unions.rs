@@ -29,7 +29,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct EnumConverter {
+pub struct EnumConverter {
   context: Rc<ConverterContext>,
   value_enum_builder: ValueEnumBuilder,
 }
@@ -40,7 +40,7 @@ impl EnumConverter {
   /// The converter inherits case-sensitivity, variant ordering, and collision
   /// settings from the context's [`CodegenConfig`] and uses them to configure
   /// the underlying [`ValueEnumBuilder`].
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     let config = context.config();
     let strategy = if config.preserve_case_variants() {
       CollisionStrategy::Preserve
@@ -60,7 +60,7 @@ impl EnumConverter {
   /// Extracts the `enum` values from the schema and generates a Rust enum
   /// with PascalCase variant names and `#[serde(rename)]` attributes preserving
   /// the original JSON string values.
-  pub(crate) fn convert_value_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
+  pub fn convert_value_enum(&self, name: &str, schema: &ObjectSchema) -> RustType {
     let variants = schema.extract_enum_entries(self.context.graph().spec());
     self
       .value_enum_builder
@@ -74,7 +74,7 @@ impl EnumConverter {
   /// Returns `None` when the schema isn't that pattern: a `oneOf`, a union without
   /// a freeform string branch, or one whose listed values are absent or not all
   /// strings.
-  pub(crate) fn try_convert_non_exhaustive_enum(&self, name: &str, schema: &ObjectSchema) -> Option<RustType> {
+  pub fn try_convert_non_exhaustive_enum(&self, name: &str, schema: &ObjectSchema) -> Option<RustType> {
     let spec = self.context.graph().spec();
     if !schema.one_of.is_empty() || !schema.has_unconstrained_string_variant(spec) {
       return None;
@@ -92,7 +92,7 @@ impl EnumConverter {
   /// closed value enum, the same type an `enum` array of those values produces.
   ///
   /// Returns `None` when any branch carries a payload or no branch has a `const`.
-  pub(crate) fn try_convert_const_union(&self, name: &str, schema: &ObjectSchema) -> Option<RustType> {
+  pub fn try_convert_const_union(&self, name: &str, schema: &ObjectSchema) -> Option<RustType> {
     let spec = self.context.graph().spec();
     let branches = schema.union_variants().resolve_all(spec).collect::<Vec<_>>();
     let is_const_union = branches.iter().all(|b| b.is_null() || b.const_value.is_some())
@@ -111,7 +111,7 @@ impl EnumConverter {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct UnionConverter {
+pub struct UnionConverter {
   context: Rc<ConverterContext>,
   variant_builder: VariantBuilder,
   enum_converter: EnumConverter,
@@ -124,7 +124,7 @@ impl UnionConverter {
   ///
   /// Initializes internal builders for variant construction, non-exhaustive
   /// enum generation (anyOf with freeform strings), and helper method generation.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     let variant_builder = VariantBuilder::new(context.clone());
     let enum_converter = EnumConverter::new(context.clone());
     let method_generator = MethodGenerator::new(context.clone());
@@ -150,7 +150,7 @@ impl UnionConverter {
   ///
   /// Returns the main enum type plus any inline types generated for anonymous
   /// variant schemas.
-  pub(crate) fn convert_union(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
+  pub fn convert_union(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<ConversionOutput<RustType>> {
     if let Some(value_enum) = self
       .enum_converter
       .try_convert_non_exhaustive_enum(name, schema)
@@ -477,7 +477,7 @@ fn arrays_first(variants: Vec<VariantDef>) -> Vec<VariantDef> {
 /// accepted only through the one whose wire value is `rename_value`. Otherwise it is
 /// accepted when its JSON kind fits the primitive. Returns `None` when the variant cannot
 /// hold the value.
-pub(crate) fn wrapped_default_payload(
+pub fn wrapped_default_payload(
   type_ref: &TypeRef,
   value: &serde_json::Value,
   rename_value: &str,

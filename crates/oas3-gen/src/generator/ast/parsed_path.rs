@@ -37,11 +37,6 @@ enum SegmentPart<'a> {
 }
 
 impl PathSegment {
-  #[cfg(test)]
-  pub fn is_mixed(&self) -> bool {
-    matches!(self, Self::Mixed { .. })
-  }
-
   pub fn to_axum_segment(&self) -> String {
     match self {
       Self::Literal(lit) => lit.clone(),
@@ -221,11 +216,6 @@ impl ParsedPath {
         acc.push_str(&seg);
         acc
       })
-  }
-
-  #[cfg(test)]
-  pub fn has_mixed_segments(&self) -> bool {
-    self.segments.iter().any(PathSegment::is_mixed)
   }
 
   pub fn extract_template_params(path: &str) -> impl Iterator<Item = &str> {

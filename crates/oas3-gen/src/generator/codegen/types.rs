@@ -21,7 +21,7 @@ use crate::generator::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TypeFragment<'a> {
+pub struct TypeFragment<'a> {
   rust_type: &'a RustType,
   regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
   visibility: Visibility,
@@ -29,7 +29,7 @@ pub(crate) struct TypeFragment<'a> {
 }
 
 impl<'a> TypeFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     rust_type: &'a RustType,
     regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
     visibility: Visibility,
@@ -67,7 +67,7 @@ impl ToTokens for TypeFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TypesFragment {
+pub struct TypesFragment {
   rust_types: Rc<Vec<RustType>>,
   header_refs: Rc<Vec<HttpHeaderRef>>,
   uses: Rc<BTreeSet<String>>,
@@ -76,7 +76,7 @@ pub(crate) struct TypesFragment {
 }
 
 impl TypesFragment {
-  pub(crate) fn new(
+  pub fn new(
     rust_types: Rc<Vec<RustType>>,
     header_refs: Rc<Vec<HttpHeaderRef>>,
     uses: Rc<BTreeSet<String>>,
@@ -118,13 +118,13 @@ impl ToTokens for TypesFragment {
   }
 }
 
-pub(crate) struct UseFragment {
-  pub(crate) module: String,
-  pub(crate) items: Vec<String>,
+pub struct UseFragment {
+  pub module: String,
+  pub items: Vec<String>,
 }
 
 impl UseFragment {
-  pub(crate) fn new(module: String, items: Vec<String>) -> Self {
+  pub fn new(module: String, items: Vec<String>) -> Self {
     Self { module, items }
   }
 }
@@ -149,10 +149,10 @@ impl ToTokens for UseFragment {
   }
 }
 
-pub(crate) struct ModuleUsesFragment<'a>(&'a BTreeSet<String>);
+pub struct ModuleUsesFragment<'a>(&'a BTreeSet<String>);
 
 impl<'a> ModuleUsesFragment<'a> {
-  pub(crate) fn new(uses: &'a BTreeSet<String>) -> Self {
+  pub fn new(uses: &'a BTreeSet<String>) -> Self {
     Self(uses)
   }
 }

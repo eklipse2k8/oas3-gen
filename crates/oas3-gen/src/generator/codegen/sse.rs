@@ -13,13 +13,13 @@ use crate::generator::{
 /// A client's union of `text/event-stream` frame types: an enum of the frames its members
 /// read as, and the `FromSseFrame` impl that picks the member by the frame's event name.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FrameUnionFragment<'a> {
+pub struct FrameUnionFragment<'a> {
   def: &'a DiscriminatedEnumDef,
   vis: Visibility,
 }
 
 impl<'a> FrameUnionFragment<'a> {
-  pub(crate) fn new(def: &'a DiscriminatedEnumDef, vis: Visibility) -> Self {
+  pub fn new(def: &'a DiscriminatedEnumDef, vis: Visibility) -> Self {
     Self { def, vis }
   }
 }
@@ -80,12 +80,12 @@ impl ToTokens for FrameUnionFragment<'_> {
 /// struct's `data`, `event`, `id`, and `retry` fill the event's own fields, and a union
 /// sends its member.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SseEventFragment<'a> {
+pub struct SseEventFragment<'a> {
   rust_type: &'a RustType,
 }
 
 impl<'a> SseEventFragment<'a> {
-  pub(crate) fn new(rust_type: &'a RustType) -> Self {
+  pub fn new(rust_type: &'a RustType) -> Self {
     Self { rust_type }
   }
 }

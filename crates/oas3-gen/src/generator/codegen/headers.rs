@@ -7,12 +7,12 @@ use crate::generator::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HeaderMapFragment<'a> {
+pub struct HeaderMapFragment<'a> {
   def: &'a StructDef,
 }
 
 impl<'a> HeaderMapFragment<'a> {
-  pub(crate) fn new(def: &'a StructDef) -> Self {
+  pub fn new(def: &'a StructDef) -> Self {
     Self { def }
   }
 
@@ -55,12 +55,12 @@ impl ToTokens for HeaderMapFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HeaderFieldInsertionFragment<'a> {
+pub struct HeaderFieldInsertionFragment<'a> {
   field: &'a FieldDef,
 }
 
 impl<'a> HeaderFieldInsertionFragment<'a> {
-  pub(crate) fn new(field: &'a FieldDef) -> Self {
+  pub fn new(field: &'a FieldDef) -> Self {
     Self { field }
   }
 }
@@ -106,13 +106,13 @@ fn header_value_expr(ty: &TypeRef, accessor: TokenStream) -> TokenStream {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HeaderFromMapFragment<'a> {
+pub struct HeaderFromMapFragment<'a> {
   def: &'a StructDef,
   target: GenerationTarget,
 }
 
 impl<'a> HeaderFromMapFragment<'a> {
-  pub(crate) fn new(def: &'a StructDef, target: GenerationTarget) -> Self {
+  pub fn new(def: &'a StructDef, target: GenerationTarget) -> Self {
     Self { def, target }
   }
 

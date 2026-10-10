@@ -29,7 +29,7 @@ Retrieval over recall for every Rust question. Pinned crate versions live in the
 `Cargo.toml` and move faster than training data.
 
 - Never describe code you haven't opened.
-- Verify generated-output claims against `crates/oas3-gen/fixtures/`.
+- Verify generated-output claims against `fixtures/`.
 
 ## Delegation
 

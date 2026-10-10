@@ -1,0 +1,57 @@
+openapi: 3.1.0
+info: { title: t, version: '1' }
+paths:
+  /stream:
+    get:
+      responses:
+        200: { description: ok, content: { text/event-stream: { schema: { $ref: '#/components/schemas/Frame' } } } }
+  /unkeyed:
+    get:
+      responses:
+        200: { description: ok, content: { 'text/event-stream; charset=utf-8': { schema: { $ref: '#/components/schemas/Unkeyed' } } } }
+  /subscribe:
+    post:
+      operationId: subscribe
+      callbacks:
+        onEvent:
+          '{$request.body#/url}':
+            post: { operationId: onEvent, responses: { 204: { description: done } } }
+      responses: { 200: { description: ok } }
+  /document:
+    get:
+      responses:
+        200: { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } } }
+components:
+  schemas:
+    Closed: { type: string, enum: [a, b] }
+    Cfg: { type: object, properties: { n: { type: integer } } }
+    Circle: { type: object, properties: { r: { type: number } } }
+    Square: { type: object, properties: { s: { type: number } } }
+    Shape:
+      oneOf: [{ $ref: '#/components/schemas/Circle' }, { $ref: '#/components/schemas/Square' }]
+    Holder:
+      type: object
+      example: { properties: { x: { $ref: '#/components/schemas/Closed', default: a } } }
+      properties:
+        lifted: { $ref: '#/components/schemas/Closed', default: a, description: kept }
+        shape: { $ref: '#/components/schemas/Shape', default: { s: 2 } }
+        struct: { $ref: '#/components/schemas/Cfg', default: {} }
+        plain: { $ref: '#/components/schemas/Closed' }
+    Payload: { type: object, properties: { n: { type: integer } } }
+    Frame:
+      type: object
+      properties:
+        event: { type: string }
+        data:
+          type: string
+          contentMediaType: application/json; charset=utf-8
+          contentSchema: { $ref: '#/components/schemas/Payload' }
+    Document:
+      type: object
+      properties:
+        data:
+          type: string
+          contentMediaType: application/json
+          contentSchema: { $ref: '#/components/schemas/Payload' }
+    Unkeyed:
+      oneOf: [{ $ref: '#/components/schemas/Document' }, { $ref: '#/components/schemas/Frame' }]

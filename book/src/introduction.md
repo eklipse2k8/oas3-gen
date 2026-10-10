@@ -84,7 +84,7 @@ with `oas3-gen` below.
 
 Let's start by generating types. The following commands assume you have an
 OpenAPI document named `api.json` in your current directory. If you don't have
-one yet, the repository's `crates/oas3-gen/fixtures/petstore.json` describes a
+one yet, the repository's `fixtures/petstore.json` describes a
 hypothetical pet store that uses every feature the generator supports, and
 most examples in this book come from it:
 

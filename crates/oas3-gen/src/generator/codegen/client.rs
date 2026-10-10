@@ -18,12 +18,12 @@ use crate::generator::{
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct HttpInitFragment {
+pub struct HttpInitFragment {
   method: Method,
 }
 
 impl HttpInitFragment {
-  pub(crate) fn new(method: Method) -> Self {
+  pub fn new(method: Method) -> Self {
     Self { method }
   }
 }
@@ -53,12 +53,12 @@ impl ToTokens for HttpInitFragment {
 /// generated server's `axum_extra::extract::Query` reads it back. A query whose parameters
 /// are all `None` leaves no empty `?` behind.
 #[derive(Clone, Debug)]
-pub(crate) struct QueryParamsFragment {
+pub struct QueryParamsFragment {
   has_query: bool,
 }
 
 impl QueryParamsFragment {
-  pub(crate) fn new(parameters: &[FieldDef]) -> Self {
+  pub fn new(parameters: &[FieldDef]) -> Self {
     let has_query = parameters
       .iter()
       .any(|p| matches!(p.parameter_location, Some(ParameterLocation::Query)));
@@ -81,12 +81,12 @@ impl ToTokens for QueryParamsFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct HeaderParamsFragment {
+pub struct HeaderParamsFragment {
   has_headers: bool,
 }
 
 impl HeaderParamsFragment {
-  pub(crate) fn new(parameters: &[FieldDef]) -> Self {
+  pub fn new(parameters: &[FieldDef]) -> Self {
     let has_headers = parameters
       .iter()
       .any(|p| matches!(p.parameter_location, Some(ParameterLocation::Header)));
@@ -106,17 +106,17 @@ impl ToTokens for HeaderParamsFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct XmlBodyFragment {
+pub struct XmlBodyFragment {
   field: FieldNameToken,
   optional: bool,
 }
 
 impl XmlBodyFragment {
-  pub(crate) fn new(field: FieldNameToken, optional: bool) -> Self {
+  pub fn new(field: FieldNameToken, optional: bool) -> Self {
     Self { field, optional }
   }
 
-  pub(crate) fn needs_conditional(&self) -> bool {
+  pub fn needs_conditional(&self) -> bool {
     self.optional
   }
 }
@@ -152,7 +152,7 @@ enum BodyChainKind {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SimpleBodyFragment {
+pub struct SimpleBodyFragment {
   field: FieldNameToken,
   optional: bool,
   kind: BodyChainKind,
@@ -185,7 +185,7 @@ impl SimpleBodyFragment {
     }
   }
 
-  pub(crate) fn needs_conditional(&self) -> bool {
+  pub fn needs_conditional(&self) -> bool {
     self.optional
   }
 }
@@ -210,7 +210,7 @@ impl ToTokens for SimpleBodyFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum RequestBodyFragment {
+pub enum RequestBodyFragment {
   None,
   Simple(SimpleBodyFragment),
   Xml(XmlBodyFragment),
@@ -218,7 +218,7 @@ pub(crate) enum RequestBodyFragment {
 }
 
 impl RequestBodyFragment {
-  pub(crate) fn new(body: Option<&OperationBody>) -> Self {
+  pub fn new(body: Option<&OperationBody>) -> Self {
     let Some(body) = body else {
       return Self::None;
     };
@@ -254,7 +254,7 @@ impl RequestBodyFragment {
     }
   }
 
-  pub(crate) fn needs_conditional(&self) -> bool {
+  pub fn needs_conditional(&self) -> bool {
     match self {
       Self::None => false,
       Self::Simple(s) => s.needs_conditional(),
@@ -276,12 +276,12 @@ impl ToTokens for RequestBodyFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct UrlConstructionFragment {
+pub struct UrlConstructionFragment {
   path: ParsedPath,
 }
 
 impl UrlConstructionFragment {
-  pub(crate) fn new(path: ParsedPath) -> Self {
+  pub fn new(path: ParsedPath) -> Self {
     Self { path }
   }
 }
@@ -310,12 +310,12 @@ impl ToTokens for UrlConstructionFragment {
 /// declaration order, to the client's `set_security`, as a statement on `req_builder`.
 /// Cookie keys live in the client's cookie store, which `reqwest` reads on every request.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CredentialsFragment<'a> {
+pub struct CredentialsFragment<'a> {
   security: &'a OperationSecurity,
 }
 
 impl<'a> CredentialsFragment<'a> {
-  pub(crate) fn new(security: &'a OperationSecurity) -> Self {
+  pub fn new(security: &'a OperationSecurity) -> Self {
     Self { security }
   }
 }
@@ -337,13 +337,13 @@ impl ToTokens for CredentialsFragment<'_> {
 /// Emits the client's private `Security` enum, one variant per credential it stores
 /// in a field, and the `set_security` method operations attach them with.
 #[derive(Clone, Debug)]
-pub(crate) struct SecurityFragment<'a> {
+pub struct SecurityFragment<'a> {
   schemes: Vec<&'a CredentialScheme>,
 }
 
 impl<'a> SecurityFragment<'a> {
   /// Returns `None` when the client stores no credential in a field.
-  pub(crate) fn new(schemes: &[&'a CredentialScheme]) -> Option<Self> {
+  pub fn new(schemes: &[&'a CredentialScheme]) -> Option<Self> {
     let schemes = schemes
       .iter()
       .copied()
@@ -353,7 +353,7 @@ impl<'a> SecurityFragment<'a> {
   }
 
   /// The `set_security` method, for the client's `impl` block.
-  pub(crate) fn method(&self) -> TokenStream {
+  pub fn method(&self) -> TokenStream {
     let guarded = self.schemes.iter().filter(|scheme| scheme.uses_authorization()).count() > 1;
     let authorized = guarded.then(|| quote! { let mut authorized = false; });
     let arms = self.schemes.iter().filter_map(|scheme| {
@@ -479,12 +479,12 @@ impl std::fmt::Debug for ResponseKind {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ResponseParsingFragment {
+pub struct ResponseParsingFragment {
   kind: ResponseKind,
 }
 
 impl ResponseParsingFragment {
-  pub(crate) fn new(op: &OperationInfo) -> Self {
+  pub fn new(op: &OperationInfo) -> Self {
     if let Some(response) = &op.response {
       return Self {
         kind: ResponseKind::Enum {
@@ -519,7 +519,7 @@ impl ResponseParsingFragment {
     }
   }
 
-  pub(crate) fn success_type(&self) -> TokenStream {
+  pub fn success_type(&self) -> TokenStream {
     match &self.kind {
       ResponseKind::Enum { response, .. } => quote! { #response },
       ResponseKind::Typed { resp_type, category } => match category {
@@ -534,7 +534,7 @@ impl ResponseParsingFragment {
     }
   }
 
-  pub(crate) fn parse_body(&self) -> TokenStream {
+  pub fn parse_body(&self) -> TokenStream {
     match &self.kind {
       ResponseKind::Enum { request_type, .. } => {
         let req_ident = format_ident!("{}", request_type);
@@ -552,7 +552,7 @@ impl ResponseParsingFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ClientMethodFragment {
+pub struct ClientMethodFragment {
   op: OperationInfo,
   visibility: Visibility,
   has_cookie_store: bool,
@@ -561,7 +561,7 @@ pub(crate) struct ClientMethodFragment {
 impl ClientMethodFragment {
   /// Generates `op`'s method; `has_cookie_store` says the client struct keeps a
   /// cookie store, which cookie parameters merge with.
-  pub(crate) fn new(op: OperationInfo, visibility: Visibility, has_cookie_store: bool) -> Self {
+  pub fn new(op: OperationInfo, visibility: Visibility, has_cookie_store: bool) -> Self {
     Self {
       op,
       visibility,
@@ -569,7 +569,7 @@ impl ClientMethodFragment {
     }
   }
 
-  pub(crate) fn generate(&self) -> anyhow::Result<TokenStream> {
+  pub fn generate(&self) -> anyhow::Result<TokenStream> {
     let Some(request_ident) = self.op.request_type.as_ref().map(|r| format_ident!("{r}")) else {
       anyhow::bail!("operation `{}` is missing request type", self.op.operation_id);
     };
@@ -634,14 +634,14 @@ impl ClientMethodFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ClientStructFragment<'a> {
+pub struct ClientStructFragment<'a> {
   name: StructToken,
   schemes: &'a [&'a CredentialScheme],
   visibility: Visibility,
 }
 
 impl<'a> ClientStructFragment<'a> {
-  pub(crate) fn new(name: StructToken, schemes: &'a [&'a CredentialScheme], visibility: Visibility) -> Self {
+  pub fn new(name: StructToken, schemes: &'a [&'a CredentialScheme], visibility: Visibility) -> Self {
     Self {
       name,
       schemes,
@@ -727,12 +727,12 @@ impl ToTokens for ClientStructFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ClientDefaultImplFragment {
+pub struct ClientDefaultImplFragment {
   name: StructToken,
 }
 
 impl ClientDefaultImplFragment {
-  pub(crate) fn new(name: StructToken) -> Self {
+  pub fn new(name: StructToken) -> Self {
     Self { name }
   }
 }
@@ -754,13 +754,13 @@ impl ToTokens for ClientDefaultImplFragment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ClientConstructorsFragment<'a> {
+pub struct ClientConstructorsFragment<'a> {
   schemes: &'a [&'a CredentialScheme],
   visibility: Visibility,
 }
 
 impl<'a> ClientConstructorsFragment<'a> {
-  pub(crate) fn new(schemes: &'a [&'a CredentialScheme], visibility: Visibility) -> Self {
+  pub fn new(schemes: &'a [&'a CredentialScheme], visibility: Visibility) -> Self {
     Self { schemes, visibility }
   }
 }

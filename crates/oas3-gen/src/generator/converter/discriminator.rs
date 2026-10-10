@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct DiscriminatorConverter {
+pub struct DiscriminatorConverter {
   context: Rc<ConverterContext>,
 }
 
@@ -25,7 +25,7 @@ impl DiscriminatorConverter {
   ///
   /// The context provides access to the schema registry for parent lookups
   /// and the reachability filter for selective variant generation.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     Self { context }
   }
 
@@ -34,7 +34,7 @@ impl DiscriminatorConverter {
   ///
   /// Schemas that are children of a discriminated base type do not generate
   /// standalone Rust types; they become enum variants instead.
-  pub(crate) fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&str> {
+  pub fn detect_discriminated_parent(&self, schema_name: &str) -> Option<&str> {
     self.context.graph().parent(schema_name)
   }
 
@@ -43,7 +43,7 @@ impl DiscriminatorConverter {
   /// The discriminator's `propertyName` becomes the serde tag field, and each entry
   /// in the discriminator's `mapping` becomes an enum variant wrapping a boxed type.
   /// A fallback variant is added to capture unknown discriminator values.
-  pub(crate) fn build_base_discriminated_enum(
+  pub fn build_base_discriminated_enum(
     &self,
     name: &str,
     schema: &ObjectSchema,
@@ -96,11 +96,7 @@ impl DiscriminatorConverter {
   ///
   /// Unreachable schemas (filtered by operation selection) are excluded.
   /// Returns an empty vector if no effective mapping is available.
-  pub(crate) fn build_variants_from_mapping(
-    &self,
-    parent_name: &str,
-    schema: &ObjectSchema,
-  ) -> Vec<DiscriminatedVariant> {
+  pub fn build_variants_from_mapping(&self, parent_name: &str, schema: &ObjectSchema) -> Vec<DiscriminatedVariant> {
     let Some(mapping) = self.context.graph().effective_mapping(schema) else {
       return vec![];
     };
@@ -147,7 +143,7 @@ impl DiscriminatorConverter {
   ///
   /// Returns `None` if conversion is not possible, indicating the original union
   /// enum should be used.
-  pub(crate) fn try_upgrade_to_discriminated(
+  pub fn try_upgrade_to_discriminated(
     &self,
     name: &str,
     schema: &ObjectSchema,

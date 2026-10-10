@@ -26,21 +26,18 @@ pub mod cargo_manifest;
 pub mod client;
 pub mod coercion;
 pub mod constants;
-pub(crate) mod cookies;
+pub mod cookies;
 pub mod enums;
-pub(crate) mod headers;
+pub mod headers;
 pub mod http;
 pub mod methods;
 pub mod mod_file;
-pub(crate) mod multipart;
+pub mod multipart;
 pub mod server;
-pub(crate) mod sse;
+pub mod sse;
 pub mod structs;
 pub mod type_aliases;
 pub mod types;
-
-#[cfg(test)]
-mod tests;
 
 pub use cargo_manifest::CratePackage;
 
@@ -64,7 +61,7 @@ impl ToTokens for Visibility {
 }
 
 impl Visibility {
-  pub(crate) fn to_tokens(self) -> TokenStream {
+  pub fn to_tokens(self) -> TokenStream {
     match self {
       Visibility::Public => quote! { pub },
       Visibility::Crate => quote! { pub(crate) },

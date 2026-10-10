@@ -36,12 +36,12 @@ use crate::{
 /// Contains the main request struct, nested parameter structs (path, query, header),
 /// inline types generated from parameter or body schemas, and any warnings.
 #[derive(Debug, Clone)]
-pub(crate) struct RequestOutput {
-  pub(crate) main_struct: StructDef,
-  pub(crate) nested_structs: Vec<StructDef>,
-  pub(crate) inline_types: Vec<RustType>,
-  pub(crate) parameter_fields: Vec<FieldDef>,
-  pub(crate) warnings: Vec<String>,
+pub struct RequestOutput {
+  pub main_struct: StructDef,
+  pub nested_structs: Vec<StructDef>,
+  pub inline_types: Vec<RustType>,
+  pub parameter_fields: Vec<FieldDef>,
+  pub warnings: Vec<String>,
 }
 
 /// Builds request structs from parameters and request bodies.
@@ -49,14 +49,14 @@ pub(crate) struct RequestOutput {
 /// Coordinates parameter conversion and body resolution to produce
 /// a complete request struct with nested parameter structs.
 #[derive(Debug, Clone)]
-pub(crate) struct RequestConverter {
+pub struct RequestConverter {
   param_converter: ParameterConverter,
   enable_builders: bool,
 }
 
 impl RequestConverter {
   /// Creates a new request converter.
-  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+  pub fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       param_converter: ParameterConverter::new(context),
       enable_builders: context.config().enable_builders(),
@@ -67,7 +67,7 @@ impl RequestConverter {
   ///
   /// Converts parameters, adds the server's `credentials` field when the operation
   /// accepts API keys, resolves the request body, and generates builder methods.
-  pub(crate) fn build(
+  pub fn build(
     &self,
     name: &str,
     entry: &OperationEntry,
@@ -130,18 +130,18 @@ impl RequestConverter {
 
 /// Information about a request body for operation metadata.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BodyInfo {
-  pub(crate) generated_types: Vec<RustType>,
-  pub(crate) type_usage: Vec<String>,
-  pub(crate) field_name: Option<FieldNameToken>,
-  pub(crate) body_type: Option<TypeRef>,
-  pub(crate) description: Option<String>,
-  pub(crate) optional: bool,
-  pub(crate) content_category: ContentCategory,
-  pub(crate) content_type: String,
-  pub(crate) validation_attrs: Vec<ValidationAttribute>,
-  pub(crate) multipart_properties: IndexMap<String, MultipartProperty>,
-  pub(crate) warnings: Vec<String>,
+pub struct BodyInfo {
+  pub generated_types: Vec<RustType>,
+  pub type_usage: Vec<String>,
+  pub field_name: Option<FieldNameToken>,
+  pub body_type: Option<TypeRef>,
+  pub description: Option<String>,
+  pub optional: bool,
+  pub content_category: ContentCategory,
+  pub content_type: String,
+  pub validation_attrs: Vec<ValidationAttribute>,
+  pub multipart_properties: IndexMap<String, MultipartProperty>,
+  pub warnings: Vec<String>,
 }
 
 impl BodyInfo {
@@ -151,7 +151,7 @@ impl BodyInfo {
   /// category (JSON, form, multipart, binary), and collects any inline types
   /// generated during schema resolution. Returns an empty body info if no
   /// request body is defined.
-  pub(crate) fn new(context: &Rc<ConverterContext>, entry: &OperationEntry) -> anyhow::Result<Self> {
+  pub fn new(context: &Rc<ConverterContext>, entry: &OperationEntry) -> anyhow::Result<Self> {
     let spec = context.graph().spec();
     let Some(body_ref) = entry.operation.request_body.as_ref() else {
       return Ok(Self::empty(true));
@@ -223,7 +223,7 @@ impl BodyInfo {
   }
 
   /// Creates a field definition for the request body if present.
-  pub(crate) fn create_field(&self) -> Option<FieldDef> {
+  pub fn create_field(&self) -> Option<FieldDef> {
     let type_ref = self.body_type.clone()?;
     Some(FieldDef {
       validation_attrs: self.validation_attrs.clone(),
@@ -232,7 +232,7 @@ impl BodyInfo {
   }
 
   /// Converts body info into operation body metadata for code generation.
-  pub(crate) fn to_operation_body(&self) -> Option<OperationBody> {
+  pub fn to_operation_body(&self) -> Option<OperationBody> {
     let field_name = self.field_name.as_ref()?;
 
     Some(
@@ -475,7 +475,7 @@ fn with_utf8_charset(content_type: String) -> String {
 /// The media type a body of `category` is labelled with: its first concrete declared media type,
 /// or the category's default for a wildcard. Binary drops its `charset`, and anything else names
 /// UTF-8 in place of another charset.
-pub(crate) fn sent_media_type(declared: &str, category: ContentCategory) -> String {
+pub fn sent_media_type(declared: &str, category: ContentCategory) -> String {
   first_concrete_media_type(declared).map_or_else(
     || category_media_type(category).to_owned(),
     |media| match category {
@@ -504,7 +504,7 @@ fn without_charset(content_type: String) -> String {
 }
 
 /// The media type a body of `category` is sent as when the spec declares only a wildcard.
-pub(crate) fn category_media_type(category: ContentCategory) -> &'static str {
+pub fn category_media_type(category: ContentCategory) -> &'static str {
   match category {
     ContentCategory::Json => DEFAULT_MEDIA_TYPE,
     ContentCategory::FormUrlEncoded => "application/x-www-form-urlencoded",

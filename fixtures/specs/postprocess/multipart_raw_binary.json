@@ -1,0 +1,48 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Multipart raw binary", "version": "1.0.0" },
+  "paths": {
+    "/uploads": {
+      "post": {
+        "operationId": "upload",
+        "requestBody": { "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/Upload" } } } },
+        "responses": { "204": { "description": "stored" } }
+      }
+    },
+    "/returned": {
+      "post": {
+        "operationId": "uploadReturned",
+        "requestBody": { "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/Returned" } } } },
+        "responses": { "200": { "description": "stored", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Returned" } } } } }
+      }
+    },
+    "/nested": {
+      "post": {
+        "operationId": "uploadNested",
+        "requestBody": { "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/Nested" } } } },
+        "responses": { "200": { "description": "stored", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Holder" } } } } }
+      }
+    },
+    "/posted": {
+      "post": {
+        "operationId": "uploadPosted",
+        "requestBody": { "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/Posted" } } } },
+        "responses": { "204": { "description": "stored" } }
+      },
+      "put": {
+        "operationId": "replacePosted",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Posted" } } } },
+        "responses": { "204": { "description": "stored" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Upload": { "type": "object", "required": ["blob"], "properties": { "blob": {} } },
+      "Returned": { "type": "object", "required": ["blob"], "properties": { "blob": {} } },
+      "Nested": { "type": "object", "required": ["blob"], "properties": { "blob": {} } },
+      "Holder": { "type": "object", "properties": { "nested": { "$ref": "#/components/schemas/Nested" } } },
+      "Posted": { "type": "object", "required": ["blob"], "properties": { "blob": {} } }
+    }
+  }
+}

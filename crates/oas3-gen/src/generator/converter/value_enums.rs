@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct ValueEnumBuilder {
+pub struct ValueEnumBuilder {
   case_insensitive: bool,
   sort_variants: bool,
   strategy: CollisionStrategy,
@@ -42,7 +42,7 @@ impl ValueEnumBuilder {
   ///   already holds the suffixed name. A suffixed variant keeps its original
   ///   value through `#[serde(rename)]`, so it still serializes and displays as the
   ///   spelling the spec lists.
-  pub(crate) fn new(case_insensitive: bool, sort_variants: bool, strategy: CollisionStrategy) -> Self {
+  pub fn new(case_insensitive: bool, sort_variants: bool, strategy: CollisionStrategy) -> Self {
     Self {
       case_insensitive,
       sort_variants,
@@ -61,7 +61,7 @@ impl ValueEnumBuilder {
   /// a trailing `#[serde(untagged)] Other(String)` variant holding any value the spec
   /// doesn't list. A string `default` no variant matches then becomes the enum's
   /// `Default` through that variant, e.g. `Other("custom".to_string())`.
-  pub(crate) fn build_enum_from_variants(
+  pub fn build_enum_from_variants(
     &self,
     name: &str,
     schema: &ObjectSchema,
@@ -173,7 +173,7 @@ fn suffix_collisions(variants: Vec<VariantDef>) -> Vec<VariantDef> {
 /// any numeric `format`), and `type: string` keeps the enum string-backed. Otherwise
 /// the listed values decide: all booleans give `bool`, all numbers give `i64` (or
 /// `f64` when any is fractional), and a mix of JSON types gives `serde_json::Value`.
-pub(crate) fn scalar_repr(schema: &ObjectSchema, variants: &[VariantDef]) -> Option<RustPrimitive> {
+pub fn scalar_repr(schema: &ObjectSchema, variants: &[VariantDef]) -> Option<RustPrimitive> {
   match schema.single_type() {
     Some(SchemaType::Integer) => {
       return Some(RustPrimitive::with_format_override(
@@ -213,6 +213,6 @@ fn other_variant(listed: &[VariantDef]) -> VariantDef {
 
 /// Returns `true` when the variant serializes to or from `value`, either as its
 /// primary `#[serde(rename)]` value or as one of its `#[serde(alias)]` values.
-pub(crate) fn variant_matches_value(variant: &VariantDef, value: &str) -> bool {
+pub fn variant_matches_value(variant: &VariantDef, value: &str) -> bool {
   variant.wire_values().any(|wire_value| wire_value == value)
 }

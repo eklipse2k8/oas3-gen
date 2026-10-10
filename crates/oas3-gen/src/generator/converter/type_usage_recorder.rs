@@ -46,13 +46,13 @@ impl UsageFlags {
 /// Types used only in requests get `Serialize`, types used only in
 /// responses get `Deserialize`, and types used in both get both derives.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct SerdeUsageRecorder {
+pub struct SerdeUsageRecorder {
   entries: BTreeMap<EnumToken, UsageFlags>,
 }
 
 impl SerdeUsageRecorder {
   /// Creates an empty recorder with no tracked types or statistics.
-  pub(crate) fn new() -> Self {
+  pub fn new() -> Self {
     Self {
       entries: BTreeMap::new(),
     }
@@ -62,7 +62,7 @@ impl SerdeUsageRecorder {
   ///
   /// Empty type names are ignored. The recorded usage propagates through
   /// the dependency graph during postprocessing to determine serde derives.
-  pub(crate) fn mark_request(&mut self, type_name: impl Into<EnumToken>) {
+  pub fn mark_request(&mut self, type_name: impl Into<EnumToken>) {
     let token = type_name.into();
     if token.is_empty() {
       return;
@@ -74,7 +74,7 @@ impl SerdeUsageRecorder {
   ///
   /// Empty type names are ignored. The recorded usage propagates through
   /// the dependency graph during postprocessing to determine serde derives.
-  pub(crate) fn mark_response(&mut self, type_name: impl Into<EnumToken>) {
+  pub fn mark_response(&mut self, type_name: impl Into<EnumToken>) {
     let token = type_name.into();
     if token.is_empty() {
       return;
@@ -86,7 +86,7 @@ impl SerdeUsageRecorder {
   ///
   /// Convenience method that calls [`mark_request`](Self::mark_request) for each type
   /// in the iterator.
-  pub(crate) fn mark_request_iter<I, T>(&mut self, types: I)
+  pub fn mark_request_iter<I, T>(&mut self, types: I)
   where
     I: IntoIterator<Item = T>,
     T: Into<EnumToken>,
@@ -100,7 +100,7 @@ impl SerdeUsageRecorder {
   ///
   /// Convenience method that calls [`mark_response`](Self::mark_response) for each type
   /// in the iterator.
-  pub(crate) fn mark_response_iter<I, T>(&mut self, types: I)
+  pub fn mark_response_iter<I, T>(&mut self, types: I)
   where
     I: IntoIterator<Item = T>,
     T: Into<EnumToken>,
@@ -115,7 +115,7 @@ impl SerdeUsageRecorder {
   /// Each entry maps a type name to a `(is_request, is_response)` tuple.
   /// This map seeds the postprocessing phase, which propagates usage through
   /// type dependencies to compute final serde derive attributes.
-  pub(crate) fn into_usage_map(self) -> BTreeMap<EnumToken, (bool, bool)> {
+  pub fn into_usage_map(self) -> BTreeMap<EnumToken, (bool, bool)> {
     self
       .entries
       .into_iter()
@@ -128,7 +128,7 @@ impl SerdeUsageRecorder {
   /// Extracts the type name from [`RustPrimitive::Custom`] variants and records
   /// it as a response type. Primitive types are ignored since they do not
   /// require generated serde derives.
-  pub(crate) fn mark_response_type_ref(&mut self, type_ref: &TypeRef) {
+  pub fn mark_response_type_ref(&mut self, type_ref: &TypeRef) {
     if let RustPrimitive::Custom(name) = &type_ref.base_type {
       self.mark_response(name.as_str());
     }
@@ -138,7 +138,7 @@ impl SerdeUsageRecorder {
   ///
   /// Usage flags are merged with logical OR: if either recorder marked a type
   /// as request or response, the merged result reflects that.
-  pub(crate) fn merge(&mut self, other: SerdeUsageRecorder) {
+  pub fn merge(&mut self, other: SerdeUsageRecorder) {
     for (token, flags) in other.entries {
       self.entries.entry(token).or_default().merge(flags);
     }

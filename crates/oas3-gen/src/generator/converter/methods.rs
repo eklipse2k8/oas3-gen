@@ -29,14 +29,14 @@ use crate::{
 /// structs, builds a `new()` method that accepts required fields and nested
 /// parameter structs.
 #[derive(Clone, Debug)]
-pub(crate) struct MethodGenerator {
+pub struct MethodGenerator {
   context: Rc<ConverterContext>,
   struct_converter: StructConverter,
 }
 
 impl MethodGenerator {
   /// Creates a new method generator with access to the converter context.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     let struct_converter = StructConverter::new(context.clone());
     Self {
       context,
@@ -51,7 +51,7 @@ impl MethodGenerator {
   /// fields get zero-argument constructors; structs with exactly one required
   /// field get single-argument constructors. Method names are derived by
   /// stripping common prefixes from variant names.
-  pub(crate) fn build_constructors(
+  pub fn build_constructors(
     &self,
     variants: &[VariantDef],
     inline_types: &[RustType],
@@ -152,7 +152,7 @@ impl MethodGenerator {
   /// Prefers an inline enum definition (exact generated variants), falling back to
   /// the named schema in the graph. Only unit variants are returned, so nested
   /// union enums with tuple variants do not produce spurious constructors.
-  pub(crate) fn resolve_enum_value_defs(&self, type_ref: &TypeRef, inline_types: &[RustType]) -> Vec<VariantDef> {
+  pub fn resolve_enum_value_defs(&self, type_ref: &TypeRef, inline_types: &[RustType]) -> Vec<VariantDef> {
     let base_name = type_ref.unboxed_base_type_name();
 
     let variants = inline_types
@@ -337,7 +337,7 @@ impl MethodGenerator {
   /// signature, allowing callers to pass individual parameters rather than
   /// constructing nested types manually. Returns `None` if there are no
   /// fields to include in the builder.
-  pub(crate) fn build_builder_method(nested_structs: &[StructDef], main_fields: &[FieldDef]) -> Option<StructMethod> {
+  pub fn build_builder_method(nested_structs: &[StructDef], main_fields: &[FieldDef]) -> Option<StructMethod> {
     let (fields, nested): BuilderFieldTuple = main_fields
       .iter()
       .map(|field| Self::resolve_field_components(field, nested_structs))
@@ -412,7 +412,7 @@ impl BuilderField {
   ///
   /// The `owner` parameter records which nested struct contains this field,
   /// enabling correct field assignment during code generation.
-  pub(crate) fn from_nested(field: &FieldDef, owner: &FieldNameToken) -> Self {
+  pub fn from_nested(field: &FieldDef, owner: &FieldNameToken) -> Self {
     let mut builder_field = Self::from(field);
     builder_field.owner_field = Some(owner.clone());
     builder_field

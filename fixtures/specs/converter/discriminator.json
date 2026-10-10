@@ -1,0 +1,56 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Discriminators", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Park": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["@odata.type"],
+        "properties": { "id": { "type": "string" }, "@odata.type": { "type": "string" } },
+        "discriminator": {
+          "propertyName": "@odata.type",
+          "mapping": {
+            "#park.stumpy": "#/components/schemas/Stumpy",
+            "#park.floof": "#/components/schemas/Floof",
+            "#park.floof.legacy": "#/components/schemas/Floof",
+            "#park.sploot": "#/components/schemas/Sploot"
+          }
+        }
+      },
+      "Stumpy": { "allOf": [{ "$ref": "#/components/schemas/Park" }] },
+      "Floof": { "allOf": [{ "$ref": "#/components/schemas/Park" }] },
+      "Sploot": { "allOf": [{ "$ref": "#/components/schemas/Park" }] },
+      "Bark": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": { "role": { "type": "string", "enum": ["corgi", "frappe"] }, "content": { "type": "string" } },
+        "discriminator": { "propertyName": "role" }
+      },
+      "Howl": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": { "role": { "type": "string", "enum": ["only_value"] }, "content": { "type": "string" } },
+        "discriminator": { "propertyName": "role" }
+      },
+      "Pembroke": {
+        "type": "object",
+        "required": ["type", "waddle"],
+        "properties": { "type": { "type": "string", "const": "pembroke" }, "waddle": { "type": "string" } }
+      },
+      "Cardigan": {
+        "type": "object",
+        "required": ["type"],
+        "properties": { "type": { "type": "string", "const": "cardigan" }, "sploot": { "type": "string" } }
+      },
+      "Corgi": {
+        "anyOf": [{ "$ref": "#/components/schemas/Pembroke" }, { "$ref": "#/components/schemas/Cardigan" }],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": { "pembroke": "#/components/schemas/Pembroke", "cardigan": "#/components/schemas/Cardigan" }
+        }
+      }
+    }
+  }
+}

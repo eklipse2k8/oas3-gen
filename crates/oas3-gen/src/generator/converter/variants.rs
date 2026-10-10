@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct VariantBuilder {
+pub struct VariantBuilder {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
 }
@@ -24,7 +24,7 @@ impl VariantBuilder {
   /// The `context` provides access to the schema dependency graph, shared type cache,
   /// and configuration. The builder uses this to resolve schema references and detect
   /// cyclic types that require boxing.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     let type_resolver = TypeResolver::new(context.clone());
     Self { context, type_resolver }
   }
@@ -37,7 +37,7 @@ impl VariantBuilder {
   ///
   /// Returns a `ConversionOutput` containing the variant definition and any inline types
   /// that were generated during conversion (such as nested structs or enums).
-  pub(crate) fn build_variant(
+  pub fn build_variant(
     &self,
     enum_name: &str,
     spec: &UnionVariantSpec,

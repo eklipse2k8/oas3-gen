@@ -1761,7 +1761,6 @@ version = "0.29.0"
 dependencies = [
  "any_ascii",
  "anyhow",
- "axum",
  "blake3",
  "bon",
  "cfg-if",
@@ -1771,7 +1770,6 @@ dependencies = [
  "crossterm",
  "cruet",
  "fmmap",
- "futures",
  "http",
  "indexmap 2.14.2",
  "inflections",
@@ -1780,9 +1778,61 @@ dependencies = [
  "mediatype",
  "num-format",
  "oas3",
- "oas3-gen-support",
  "percent-encoding",
  "petgraph",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "serde",
+ "serde_json",
+ "string_cache",
+ "strum",
+ "syn 3.0.7",
+ "tokio",
+ "toml",
+ "yaml_serde",
+]
+
+[[package]]
+name = "oas3-gen-support"
+version = "0.29.0"
+dependencies = [
+ "better_default",
+ "bon",
+ "bytes",
+ "chrono",
+ "futures-core",
+ "futures-util",
+ "http",
+ "memchr",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_with",
+ "thiserror",
+ "validator",
+]
+
+[[package]]
+name = "oas3-gen-tests"
+version = "0.29.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bytes",
+ "chrono",
+ "criterion",
+ "futures",
+ "http",
+ "indexmap 2.14.2",
+ "inflections",
+ "mediatype",
+ "oas3",
+ "oas3-gen",
+ "oas3-gen-support",
  "petstore-client",
  "petstore-server",
  "prettyplease",
@@ -1795,8 +1845,6 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
- "string_cache",
- "strum",
  "syn 3.0.7",
  "tempfile",
  "tokio",
@@ -1804,33 +1852,6 @@ dependencies = [
  "uuid",
  "validator",
  "yaml_serde",
-]
-
-[[package]]
-name = "oas3-gen-support"
-version = "0.29.0"
-dependencies = [
- "better_default",
- "bon",
- "bytes",
- "chrono",
- "criterion",
- "futures",
- "futures-core",
- "futures-util",
- "http",
- "memchr",
- "proptest",
- "quick-xml",
- "reqwest",
- "rstest",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_with",
- "thiserror",
- "tokio",
- "validator",
 ]
 
 [[package]]

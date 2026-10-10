@@ -1,0 +1,32 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Pets", "version": "1.0.0" },
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "parameters": [{ "name": "X-Trace", "in": "header", "schema": { "type": "string" } }],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pets" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pets": { "type": "array", "items": { "$ref": "#/components/schemas/Pet" } },
+      "Pet": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "#/components/schemas/PetId" },
+          "kind": { "$ref": "#/components/schemas/Kind" }
+        }
+      },
+      "PetId": { "type": "string" },
+      "Kind": { "type": "string", "enum": ["dog", "cat"] }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Defaults by target type", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Circle": { "type": "object", "properties": { "r": { "type": "number" } } },
+      "Square": { "type": "object", "properties": { "s": { "type": "number" } } },
+      "Shape": { "oneOf": [{ "$ref": "#/components/schemas/Circle" }, { "$ref": "#/components/schemas/Square" }] },
+      "Level": { "type": "string", "enum": ["1.0", "2.0"] },
+      "Drawing": {
+        "type": "object",
+        "properties": {
+          "config": { "type": "object", "properties": { "n": { "type": "integer" } }, "default": {} },
+          "inline_shape": {
+            "oneOf": [{ "$ref": "#/components/schemas/Circle" }, { "$ref": "#/components/schemas/Square" }],
+            "default": { "s": 2 }
+          },
+          "explicit_shape": { "allOf": [{ "$ref": "#/components/schemas/Shape" }], "default": { "s": 2 } },
+          "level": { "$ref": "#/components/schemas/Level", "default": "3.0" },
+          "shape": { "$ref": "#/components/schemas/Shape", "default": { "s": 2 } }
+        }
+      }
+    }
+  }
+}

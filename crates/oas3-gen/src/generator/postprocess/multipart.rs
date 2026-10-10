@@ -19,7 +19,7 @@ use crate::generator::{
 /// property whose schema declares no `type` as raw binary, so such a `serde_json::Value` field is
 /// retyped to bytes first, unless its struct is also used outside multipart bodies, where the
 /// retype would change its JSON form.
-pub(crate) struct MultipartProcessor<'a> {
+pub struct MultipartProcessor<'a> {
   types: &'a [RustType],
   positions: HashMap<DefaultAtom, usize>,
 }
@@ -27,7 +27,7 @@ pub(crate) struct MultipartProcessor<'a> {
 impl<'a> MultipartProcessor<'a> {
   /// Fills each multipart body's `multipart_fields` and returns warnings for raw binary
   /// properties left untyped because their struct is shared.
-  pub(crate) fn process(types: &'a mut [RustType], operations: &mut [OperationInfo]) -> Vec<GenerationWarning> {
+  pub fn process(types: &'a mut [RustType], operations: &mut [OperationInfo]) -> Vec<GenerationWarning> {
     if !operations.iter().any(|operation| multipart_body(operation).is_some()) {
       return vec![];
     }

@@ -14,10 +14,10 @@ use crate::generator::{
 /// shared definition's `Default`, or its lack of one, comes from whichever schema was
 /// converted first. This pass resolves each field's schema `default` to an explicit variant,
 /// then derives `Default` on every enum a derived `Default` still falls back to.
-pub(crate) struct FieldDefaultProcessor;
+pub struct FieldDefaultProcessor;
 
 impl FieldDefaultProcessor {
-  pub(crate) fn process(types: &mut [RustType]) {
+  pub fn process(types: &mut [RustType]) {
     DefaultVariantResolver::resolve_fields(types);
     Self::derive_required_enum_defaults(types);
   }

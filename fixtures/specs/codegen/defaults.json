@@ -1,0 +1,22 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Defaults", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Settings": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer", "default": "123" },
+          "offset": { "type": "integer", "default": -5 },
+          "label": { "type": "string", "default": 42 },
+          "flag": { "type": "boolean", "default": "Yes" },
+          "ratio": { "type": ["number", "null"], "default": 10 },
+          "size": { "type": "integer", "format": "uint32", "default": -1 },
+          "limit": { "type": "integer", "default": "unbounded" },
+          "tags": { "type": "array", "items": { "type": "string" }, "default": ["a"] }
+        }
+      }
+    }
+  }
+}

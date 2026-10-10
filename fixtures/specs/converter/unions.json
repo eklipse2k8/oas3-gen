@@ -1,0 +1,53 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Unions", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Chat": { "type": "string", "enum": ["chat-1.0", "chat-1.1"] },
+      "Zeta": { "type": "string", "enum": ["z1", "z2"] },
+      "Cfg": { "type": "object", "properties": { "x": { "type": "string" } } },
+      "Node": { "oneOf": [{ "$ref": "#/components/schemas/Branch" }, { "const": "leaf" }] },
+      "Branch": {
+        "type": "object",
+        "required": ["child"],
+        "properties": { "child": { "oneOf": [{ "$ref": "#/components/schemas/Node" }, { "type": "string" }] } }
+      },
+      "StringAfterSorted": {
+        "oneOf": [{ "$ref": "#/components/schemas/Zeta" }, { "type": "string" }, { "$ref": "#/components/schemas/Chat" }]
+      },
+      "ModeOrConfig": {
+        "anyOf": [{ "type": "string", "enum": ["none", "auto"], "title": "Mode" }, { "$ref": "#/components/schemas/Cfg" }]
+      },
+      "AutoOrConfig": { "anyOf": [{ "type": "string", "enum": ["auto"] }, { "$ref": "#/components/schemas/Cfg" }] },
+      "NullDefault": { "oneOf": [{ "type": "string" }, { "type": "integer" }, { "type": "null" }], "default": null },
+      "UnmatchedDefault": { "oneOf": [{ "type": "string" }, { "type": "integer" }], "default": true },
+      "OpenConsts": {
+        "anyOf": [{ "type": "string", "const": "known1" }, { "type": "string", "const": "known2" }, { "type": "string" }]
+      },
+      "open-hyphenated": { "anyOf": [{ "type": "string", "const": "known-value" }, { "type": "string" }] },
+      "OpenNested": {
+        "anyOf": [
+          { "anyOf": [{ "type": "string", "const": "known1" }, { "type": "string", "const": "known2" }, { "type": "string" }] },
+          { "type": "null" }
+        ]
+      },
+      "OpenListedDefault": {
+        "anyOf": [{ "type": "string" }, { "type": "string", "enum": ["italian", "thai"] }],
+        "default": "thai"
+      },
+      "OpenNumberDefault": {
+        "anyOf": [{ "type": "string" }, { "type": "string", "enum": ["italian", "thai"] }],
+        "default": 7
+      },
+      "ClosedConsts": { "anyOf": [{ "type": "string", "const": "known1" }, { "type": "string", "const": "known2" }] },
+      "ClosedOneOf": {
+        "oneOf": [{ "type": "string" }, { "type": "string", "const": "known1" }, { "type": "string", "const": "known2" }]
+      },
+      "ClosedNumeric": { "type": "integer", "anyOf": [{ "type": "string" }, { "type": "integer", "enum": [1, 2] }] },
+      "ClosedObject": {
+        "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "id": { "type": "string" } } }]
+      }
+    }
+  }
+}

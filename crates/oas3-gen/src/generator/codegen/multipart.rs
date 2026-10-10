@@ -19,12 +19,12 @@ use crate::generator::{
 /// because RFC 7578 has no percent-encoded `name*` form. A form that may end up with no parts
 /// sends only the closing boundary, since a multipart body without one is malformed.
 #[derive(Clone, Debug)]
-pub(crate) struct MultipartFormFragment {
+pub struct MultipartFormFragment {
   body: OperationBody,
 }
 
 impl MultipartFormFragment {
-  pub(crate) fn new(body: OperationBody) -> Self {
+  pub fn new(body: OperationBody) -> Self {
     Self { body }
   }
 }
@@ -406,12 +406,12 @@ fn allow_deprecated(field: &MultipartFieldInfo, code: TokenStream) -> TokenStrea
 /// every field's serde attributes apply. File parts bypass JSON: their bytes are assigned after
 /// deserialization, with an empty placeholder standing in for required file fields until then.
 #[derive(Clone, Debug)]
-pub(crate) struct MultipartDecodeFragment<'a> {
+pub struct MultipartDecodeFragment<'a> {
   body: &'a HandlerBodyInfo,
 }
 
 impl<'a> MultipartDecodeFragment<'a> {
-  pub(crate) fn new(body: &'a HandlerBodyInfo) -> Self {
+  pub fn new(body: &'a HandlerBodyInfo) -> Self {
     Self { body }
   }
 }

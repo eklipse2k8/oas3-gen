@@ -1,0 +1,32 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Multipart", "version": "1.0.0" },
+  "paths": {
+    "/upload": {
+      "post": {
+        "operationId": "upload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/UploadForm" },
+              "encoding": { "we{ird}": { "style": "deepObject", "explode": true } }
+            }
+          }
+        },
+        "responses": { "204": { "description": "ok" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UploadForm": {
+        "type": "object",
+        "properties": {
+          "we{ird}": { "type": "object", "properties": { "a": { "type": "string" } } },
+          "legacy": { "type": "string", "deprecated": true }
+        }
+      }
+    }
+  }
+}

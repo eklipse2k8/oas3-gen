@@ -1,13 +1,10 @@
-mod defaults;
-mod event_streams;
-mod multipart;
-mod response;
-mod serde_usage;
-mod uses;
-mod validation;
-
-#[cfg(test)]
-mod tests;
+pub mod defaults;
+pub mod event_streams;
+pub mod multipart;
+pub mod response;
+pub mod serde_usage;
+pub mod uses;
+pub mod validation;
 
 use std::collections::BTreeSet;
 
@@ -36,7 +33,7 @@ pub struct PostprocessOutput {
 }
 
 impl PostprocessOutput {
-  pub(crate) fn new(
+  pub fn new(
     mut types: Vec<RustType>,
     mut operations: Vec<OperationInfo>,
     seed_usage: std::collections::BTreeMap<EnumToken, (bool, bool)>,

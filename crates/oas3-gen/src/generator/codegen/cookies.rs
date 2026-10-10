@@ -14,13 +14,13 @@ use crate::generator::{
 /// request's `Cookie` header back into it with `Cookie::split_parse_encoded`, rejecting a
 /// missing required cookie or a value that doesn't parse.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CookieParamsFragment<'a> {
+pub struct CookieParamsFragment<'a> {
   def: &'a StructDef,
   target: GenerationTarget,
 }
 
 impl<'a> CookieParamsFragment<'a> {
-  pub(crate) fn new(def: &'a StructDef, target: GenerationTarget) -> Self {
+  pub fn new(def: &'a StructDef, target: GenerationTarget) -> Self {
     Self { def, target }
   }
 
@@ -136,7 +136,7 @@ impl ToTokens for CookieParamsFragment<'_> {
 /// Binds `cookie`, which finds the percent-decoded value of the request cookie with a given
 /// name, from the `Cookie` headers in the `http::HeaderMap` `headers` evaluates to. A cookie
 /// that isn't valid percent-encoded UTF-8 is dropped, so it counts as missing.
-pub(crate) fn request_cookie_lookup(headers: &TokenStream) -> TokenStream {
+pub fn request_cookie_lookup(headers: &TokenStream) -> TokenStream {
   quote! {
     let cookies = #headers
       .get_all(http::header::COOKIE)
@@ -171,13 +171,13 @@ fn render_value(field: &FieldDef) -> TokenStream {
 /// client's cookie store, so the stored cookies for the URL are merged in after the
 /// parameters, leaving out any whose name a parameter sends.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CookieHeaderFragment {
+pub struct CookieHeaderFragment {
   has_cookie_store: bool,
 }
 
 impl CookieHeaderFragment {
   /// The fragment for an operation that sends cookie parameters, or `None` when it sends none.
-  pub(crate) fn new(parameters: &[FieldDef], has_cookie_store: bool) -> Option<Self> {
+  pub fn new(parameters: &[FieldDef], has_cookie_store: bool) -> Option<Self> {
     parameters
       .iter()
       .any(|parameter| parameter.parameter_location == Some(ParameterLocation::Cookie))
@@ -185,7 +185,7 @@ impl CookieHeaderFragment {
   }
 
   /// Attaches `cookie_header` to `req_builder`.
-  pub(crate) fn attach() -> TokenStream {
+  pub fn attach() -> TokenStream {
     quote! {
       if let Some(cookie) = cookie_header {
         req_builder = req_builder.header(reqwest::header::COOKIE, cookie);

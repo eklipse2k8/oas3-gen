@@ -1,23 +1,20 @@
 pub mod bon_attrs;
-mod client;
+pub mod client;
 pub mod constants;
-mod derives;
-pub(crate) mod documentation;
+pub mod derives;
+pub mod documentation;
 pub mod fields;
 pub mod lints;
-mod multipart;
-mod outer_attrs;
-mod parsed_path;
-mod security;
-pub(super) mod serde_attrs;
-pub(crate) mod server;
-mod status_codes;
+pub mod multipart;
+pub mod outer_attrs;
+pub mod parsed_path;
+pub mod security;
+pub mod serde_attrs;
+pub mod server;
+pub mod status_codes;
 pub mod tokens;
-pub(super) mod types;
-pub(super) mod validation_attrs;
-
-#[cfg(test)]
-mod tests;
+pub mod types;
+pub mod validation_attrs;
 
 use std::collections::BTreeSet;
 
@@ -39,8 +36,6 @@ use oas3::{
 };
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
-#[cfg(test)]
-pub use parsed_path::{PathParseError, PathSegment};
 pub use security::{ApiKeyLocation, CredentialKind, CredentialScheme, OperationSecurity};
 pub use serde_attrs::SerdeAttribute;
 use serde_json::Value;
@@ -251,7 +246,7 @@ impl ResponseStatusCategory {
   }
 
   #[must_use]
-  pub(crate) fn from_content_types(variants: &[&ResponseVariant]) -> Self {
+  pub fn from_content_types(variants: &[&ResponseVariant]) -> Self {
     let all_categories = variants
       .iter()
       .flat_map(|variant| {

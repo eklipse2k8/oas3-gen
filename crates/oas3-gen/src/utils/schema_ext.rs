@@ -17,7 +17,7 @@ use crate::{
   utils::refs::{SchemaInspect, SchemaRefName},
 };
 
-pub(crate) trait SchemaResolveExt {
+pub trait SchemaResolveExt {
   fn resolve_object(&self, spec: &Spec) -> Result<ObjectSchema, RefError>;
 }
 
@@ -97,7 +97,7 @@ impl<I: Iterator> SchemaExtIters for I {
 }
 
 /// Extension methods for `ObjectSchema` to query its type properties conveniently.
-pub(crate) trait SchemaExt {
+pub trait SchemaExt {
   /// Returns true if the schema represents a primitive type (no properties, oneOf, anyOf, allOf).
   fn is_primitive(&self) -> bool;
 
@@ -717,7 +717,7 @@ fn is_enum_like_variant(schema: &ObjectSchema) -> bool {
   schema.is_null() || schema.is_string_type() || schema.is_constrained()
 }
 
-pub(crate) fn variant_is_nullable(variant: &Schema, spec: &Spec) -> bool {
+pub fn variant_is_nullable(variant: &Schema, spec: &Spec) -> bool {
   variant
     .resolve_object(spec)
     .is_ok_and(|schema| schema.is_nullable_object())

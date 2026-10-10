@@ -23,10 +23,10 @@ use crate::generator::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DefaultConstructorFragment<'a>(&'a TypeRef);
+pub struct DefaultConstructorFragment<'a>(&'a TypeRef);
 
 impl<'a> DefaultConstructorFragment<'a> {
-  pub(crate) fn new(type_token: &'a TypeRef) -> Self {
+  pub fn new(type_token: &'a TypeRef) -> Self {
     Self(type_token)
   }
 }
@@ -47,13 +47,13 @@ impl ToTokens for DefaultConstructorFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EnumMethodFragment<'a> {
+pub struct EnumMethodFragment<'a> {
   vis: Visibility,
   method: &'a EnumMethod,
 }
 
 impl<'a> EnumMethodFragment<'a> {
-  pub(crate) fn new(vis: Visibility, method: &'a EnumMethod) -> Self {
+  pub fn new(vis: Visibility, method: &'a EnumMethod) -> Self {
     Self { vis, method }
   }
 }
@@ -124,14 +124,14 @@ impl ToTokens for EnumMethodFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EnumDefaultImplFragment<'a> {
+pub struct EnumDefaultImplFragment<'a> {
   name: &'a EnumToken,
   variant: &'a VariantDef,
   default: &'a EnumDefaultValue,
 }
 
 impl<'a> EnumDefaultImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, variant: &'a VariantDef, default: &'a EnumDefaultValue) -> Self {
+  pub fn new(name: &'a EnumToken, variant: &'a VariantDef, default: &'a EnumDefaultValue) -> Self {
     Self { name, variant, default }
   }
 }
@@ -164,7 +164,7 @@ impl ToTokens for EnumDefaultImplFragment<'_> {
 /// A unit variant ignores `value`. A tuple variant wraps `inner_variant` of the wrapped value
 /// enum when one is given, otherwise `value` coerced to the wrapped type.
 #[derive(Clone, Debug)]
-pub(crate) struct EnumValueFragment<'a> {
+pub struct EnumValueFragment<'a> {
   owner: TokenStream,
   variant: &'a EnumVariantToken,
   wrapped_type: Option<&'a TypeRef>,
@@ -173,7 +173,7 @@ pub(crate) struct EnumValueFragment<'a> {
 }
 
 impl<'a> EnumValueFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     owner: TokenStream,
     variant: &'a EnumVariantToken,
     wrapped_type: Option<&'a TypeRef>,
@@ -218,13 +218,13 @@ impl ToTokens for EnumValueFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct EnumMethodsImplFragment<'a> {
+pub struct EnumMethodsImplFragment<'a> {
   name: &'a EnumToken,
   methods: Vec<EnumMethodFragment<'a>>,
 }
 
 impl<'a> EnumMethodsImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, vis: Visibility, methods: &'a [EnumMethod]) -> Self {
+  pub fn new(name: &'a EnumToken, vis: Visibility, methods: &'a [EnumMethod]) -> Self {
     let fragments = methods
       .iter()
       .map(|m| EnumMethodFragment::new(vis, m))
@@ -257,7 +257,7 @@ impl ToTokens for EnumMethodsImplFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct EnumValueVariantFragment<'a> {
+pub struct EnumValueVariantFragment<'a> {
   name: &'a EnumVariantToken,
   docs: TokenStream,
   serde_attrs: TokenStream,
@@ -267,7 +267,7 @@ pub(crate) struct EnumValueVariantFragment<'a> {
 }
 
 impl<'a> EnumValueVariantFragment<'a> {
-  pub(crate) fn new(variant: &'a VariantDef, is_default: bool, has_serde_derive: bool) -> Self {
+  pub fn new(variant: &'a VariantDef, is_default: bool, has_serde_derive: bool) -> Self {
     let docs = variant.docs.to_token_stream();
     let serde_attrs = if has_serde_derive {
       generate_serde_attrs(&variant.serde_attrs)
@@ -314,14 +314,14 @@ impl ToTokens for EnumValueVariantFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DisplayImplArmFragment<'a> {
+pub struct DisplayImplArmFragment<'a> {
   variant_name: &'a EnumVariantToken,
   content: &'a VariantContent,
   serde_name: &'a str,
 }
 
 impl<'a> DisplayImplArmFragment<'a> {
-  pub(crate) fn new(variant: &'a VariantDef) -> Self {
+  pub fn new(variant: &'a VariantDef) -> Self {
     Self {
       variant_name: &variant.name,
       content: &variant.content,
@@ -349,13 +349,13 @@ impl ToTokens for DisplayImplArmFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DisplayImplFragment<'a> {
+pub struct DisplayImplFragment<'a> {
   name: &'a EnumToken,
   arms: Vec<DisplayImplArmFragment<'a>>,
 }
 
 impl<'a> DisplayImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, variants: &'a [VariantDef]) -> Self {
+  pub fn new(name: &'a EnumToken, variants: &'a [VariantDef]) -> Self {
     let arms = variants.iter().map(DisplayImplArmFragment::new).collect();
     Self { name, arms }
   }
@@ -386,7 +386,7 @@ impl ToTokens for DisplayImplFragment<'_> {
 /// A non-exhaustive enum's parse can't fail, so its arms evaluate to the variant
 /// itself: `"active" | "on" => Self::Active,`.
 #[derive(Clone, Debug)]
-pub(crate) struct WireValueArmFragment<'a> {
+pub struct WireValueArmFragment<'a> {
   variant_name: &'a EnumVariantToken,
   wire_values: Vec<Cow<'a, str>>,
   infallible: bool,
@@ -397,7 +397,7 @@ impl<'a> WireValueArmFragment<'a> {
   ///
   /// For a case-insensitive enum, the values are ASCII-lowercased. A value an earlier
   /// arm already matches is dropped, so no pattern is unreachable.
-  pub(crate) fn for_enum(def: &'a EnumDef) -> Vec<Self> {
+  pub fn for_enum(def: &'a EnumDef) -> Vec<Self> {
     def
       .variants
       .iter()
@@ -442,10 +442,10 @@ impl ToTokens for WireValueArmFragment<'_> {
 /// `impl From<String>` for a non-exhaustive enum: a listed value selects its variant,
 /// and any other string lands in the catch-all, e.g. `Other(value)`.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FromStringImplFragment<'a>(&'a EnumDef);
+pub struct FromStringImplFragment<'a>(&'a EnumDef);
 
 impl<'a> FromStringImplFragment<'a> {
-  pub(crate) fn new(def: &'a EnumDef) -> Self {
+  pub fn new(def: &'a EnumDef) -> Self {
     Self(def)
   }
 }
@@ -478,10 +478,10 @@ impl ToTokens for FromStringImplFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FromStrImplFragment<'a>(&'a EnumDef);
+pub struct FromStrImplFragment<'a>(&'a EnumDef);
 
 impl<'a> FromStrImplFragment<'a> {
-  pub(crate) fn new(def: &'a EnumDef) -> Self {
+  pub fn new(def: &'a EnumDef) -> Self {
     Self(def)
   }
 }
@@ -523,10 +523,10 @@ impl ToTokens for FromStrImplFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CaseInsensitiveDeserializeImplFragment<'a>(&'a EnumDef);
+pub struct CaseInsensitiveDeserializeImplFragment<'a>(&'a EnumDef);
 
 impl<'a> CaseInsensitiveDeserializeImplFragment<'a> {
-  pub(crate) fn new(def: &'a EnumDef) -> Self {
+  pub fn new(def: &'a EnumDef) -> Self {
     Self(def)
   }
 }
@@ -573,7 +573,7 @@ impl ToTokens for CaseInsensitiveDeserializeImplFragment<'_> {
 /// `Serialize` and `Deserialize` for a value enum whose values share one JSON scalar
 /// type: integers, floats, or booleans.
 #[derive(Clone, Debug)]
-pub(crate) struct ScalarEnumSerdeImplFragment<'a> {
+pub struct ScalarEnumSerdeImplFragment<'a> {
   name: &'a EnumToken,
   primitive: &'a RustPrimitive,
   arms: Vec<(&'a VariantDef, TokenStream)>,
@@ -581,7 +581,7 @@ pub(crate) struct ScalarEnumSerdeImplFragment<'a> {
 }
 
 impl<'a> ScalarEnumSerdeImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, primitive: &'a RustPrimitive, variants: &'a [VariantDef]) -> Self {
+  pub fn new(name: &'a EnumToken, primitive: &'a RustPrimitive, variants: &'a [VariantDef]) -> Self {
     let mut arms = vec![];
     let mut expected_values = vec![];
     for variant in variants {
@@ -788,10 +788,10 @@ impl From<&VariantDef> for MixedLiteral {
 /// and boolean variants also match a string that parses to their value, since query
 /// strings and path segments send every value as text.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct MixedEnumSerdeImplFragment<'a>(&'a EnumDef);
+pub struct MixedEnumSerdeImplFragment<'a>(&'a EnumDef);
 
 impl<'a> MixedEnumSerdeImplFragment<'a> {
-  pub(crate) fn new(def: &'a EnumDef) -> Self {
+  pub fn new(def: &'a EnumDef) -> Self {
     Self(def)
   }
 
@@ -912,13 +912,13 @@ impl ToTokens for MixedEnumSerdeImplFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EnumFragment<'a> {
+pub struct EnumFragment<'a> {
   def: &'a EnumDef,
   vis: Visibility,
 }
 
 impl<'a> EnumFragment<'a> {
-  pub(crate) fn new(def: &'a EnumDef, visibility: Visibility) -> Self {
+  pub fn new(def: &'a EnumDef, visibility: Visibility) -> Self {
     Self { def, vis: visibility }
   }
 }
@@ -1009,13 +1009,13 @@ impl ToTokens for EnumFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DiscriminatedVariantFragment<'a> {
+pub struct DiscriminatedVariantFragment<'a> {
   variant_name: &'a EnumVariantToken,
   type_name: &'a TypeRef,
 }
 
 impl<'a> DiscriminatedVariantFragment<'a> {
-  pub(crate) fn new(variant: &'a DiscriminatedVariant) -> Self {
+  pub fn new(variant: &'a DiscriminatedVariant) -> Self {
     Self {
       variant_name: &variant.variant_name,
       type_name: &variant.type_name,
@@ -1034,14 +1034,14 @@ impl ToTokens for DiscriminatedVariantFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DiscriminatedDefaultImplFragment<'a> {
+pub struct DiscriminatedDefaultImplFragment<'a> {
   name: &'a EnumToken,
   variant_ident: &'a EnumVariantToken,
   type_tokens: &'a TypeRef,
 }
 
 impl<'a> DiscriminatedDefaultImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, default_variant: &'a DiscriminatedVariant) -> Self {
+  pub fn new(name: &'a EnumToken, default_variant: &'a DiscriminatedVariant) -> Self {
     Self {
       name,
       variant_ident: &default_variant.variant_name,
@@ -1069,13 +1069,13 @@ impl ToTokens for DiscriminatedDefaultImplFragment<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DiscriminatedSerializeImplFragment<'a> {
+pub struct DiscriminatedSerializeImplFragment<'a> {
   name: &'a EnumToken,
   variant_names: Vec<&'a EnumVariantToken>,
 }
 
 impl<'a> DiscriminatedSerializeImplFragment<'a> {
-  pub(crate) fn new(name: &'a EnumToken, variants: impl Iterator<Item = &'a DiscriminatedVariant>) -> Self {
+  pub fn new(name: &'a EnumToken, variants: impl Iterator<Item = &'a DiscriminatedVariant>) -> Self {
     let variant_names = variants.map(|v| &v.variant_name).collect::<Vec<_>>();
     Self { name, variant_names }
   }
@@ -1111,13 +1111,13 @@ impl ToTokens for DiscriminatedSerializeImplFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DiscriminatedDeserializeArmFragment<'a> {
+pub struct DiscriminatedDeserializeArmFragment<'a> {
   variant_name: &'a EnumVariantToken,
   discriminator_values: &'a [String],
 }
 
 impl<'a> DiscriminatedDeserializeArmFragment<'a> {
-  pub(crate) fn new(variant: &'a DiscriminatedVariant) -> Self {
+  pub fn new(variant: &'a DiscriminatedVariant) -> Self {
     Self {
       variant_name: &variant.variant_name,
       discriminator_values: &variant.discriminator_values,
@@ -1126,7 +1126,7 @@ impl<'a> DiscriminatedDeserializeArmFragment<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DiscriminatedDeserializeImplFragment<'a> {
+pub struct DiscriminatedDeserializeImplFragment<'a> {
   name: &'a EnumToken,
   discriminator_field: &'a str,
   arms: Vec<DiscriminatedDeserializeArmFragment<'a>>,
@@ -1134,7 +1134,7 @@ pub(crate) struct DiscriminatedDeserializeImplFragment<'a> {
 }
 
 impl<'a> DiscriminatedDeserializeImplFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     name: &'a EnumToken,
     discriminator_field: &'a str,
     variants: &'a [DiscriminatedVariant],
@@ -1206,13 +1206,13 @@ impl ToTokens for DiscriminatedDeserializeImplFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DiscriminatedEnumFragment<'a> {
+pub struct DiscriminatedEnumFragment<'a> {
   def: &'a DiscriminatedEnumDef,
   vis: Visibility,
 }
 
 impl<'a> DiscriminatedEnumFragment<'a> {
-  pub(crate) fn new(def: &'a DiscriminatedEnumDef, visibility: Visibility) -> Self {
+  pub fn new(def: &'a DiscriminatedEnumDef, visibility: Visibility) -> Self {
     Self { def, vis: visibility }
   }
 }
@@ -1279,7 +1279,7 @@ pub struct ResponseEnumFragment<'a> {
 }
 
 impl<'a> ResponseEnumFragment<'a> {
-  pub(crate) fn new(vis: Visibility, def: &'a ResponseEnumDef) -> Self {
+  pub fn new(vis: Visibility, def: &'a ResponseEnumDef) -> Self {
     Self { vis, def }
   }
 
@@ -1365,7 +1365,7 @@ pub struct ResponseUnionFragment<'a> {
 }
 
 impl<'a> ResponseUnionFragment<'a> {
-  pub(crate) fn new(vis: Visibility, def: &'a ResponseUnionDef) -> Self {
+  pub fn new(vis: Visibility, def: &'a ResponseUnionDef) -> Self {
     Self { vis, def }
   }
 }
@@ -1416,12 +1416,12 @@ impl<T: ToTokens> ToTokens for EnumVariants<T> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ResponseEnumVariantFragment<'a> {
+pub struct ResponseEnumVariantFragment<'a> {
   variant: &'a ResponseEnumVariant,
 }
 
 impl<'a> ResponseEnumVariantFragment<'a> {
-  pub(crate) fn new(variant: &'a ResponseEnumVariant) -> Self {
+  pub fn new(variant: &'a ResponseEnumVariant) -> Self {
     Self { variant }
   }
 }

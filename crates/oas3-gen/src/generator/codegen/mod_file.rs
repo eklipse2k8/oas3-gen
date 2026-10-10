@@ -14,7 +14,7 @@ pub enum ModFileKind {
 }
 
 impl ModFileKind {
-  pub(crate) const fn label(self) -> &'static str {
+  pub const fn label(self) -> &'static str {
     match self {
       Self::Client => "client",
       Self::Server => "server",

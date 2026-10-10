@@ -1,0 +1,39 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Shared shapes", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Pembroke": { "type": "string", "enum": ["waddle", "sploot"] },
+      "PembrokeOrAny": { "anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/Pembroke" }] },
+      "First": {
+        "type": "object",
+        "properties": {
+          "meta": {
+            "type": "object",
+            "required": ["a", "b"],
+            "properties": { "a": { "type": "string" }, "b": { "type": ["string", "null"] } }
+          },
+          "mood": { "type": "string", "enum": ["waddle", "sploot"] },
+          "level": { "type": "string", "enum": ["low", "high"] },
+          "bounds": {
+            "type": "object",
+            "properties": { "n": { "type": "integer", "minimum": -9223372036854776000, "maximum": 9999999999999999999 } }
+          }
+        }
+      },
+      "Second": {
+        "type": "object",
+        "properties": {
+          "meta": {
+            "type": "object",
+            "required": ["b", "a"],
+            "properties": { "a": { "type": "string" }, "b": { "type": ["null", "string"] } }
+          },
+          "mood": { "type": "string", "enum": ["waddle", "sploot"] },
+          "level": { "type": "string", "enum": ["high", "low"] }
+        }
+      }
+    }
+  }
+}

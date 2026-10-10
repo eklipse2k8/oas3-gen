@@ -18,7 +18,7 @@ names such as `spec.json` and `petstore.json` refer to OpenAPI documents in your
 current directory; substitute the path to your own document.
 
 Unless a section says otherwise, the examples come from
-`crates/oas3-gen/fixtures/petstore.json`. It describes a hypothetical pet store
+`fixtures/petstore.json`. It describes a hypothetical pet store
 and uses every OpenAPI feature the generator supports at least once. When a
 section names an operation, such as `listPets`, or a schema, such as `Pet`,
 you'll find it in that document.

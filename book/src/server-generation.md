@@ -8,7 +8,7 @@ stream events, and then look at how request bodies, cookie parameters, and
 credentials reach your service.
 
 The commands run from a checkout of this repository and use the petstore
-fixture, `crates/oas3-gen/fixtures/petstore.json`. If you installed the tool,
+fixture, `fixtures/petstore.json`. If you installed the tool,
 replace `cargo run --` with `oas3-gen` and supply the path to your OpenAPI
 document. Rust excerpts assume you've imported the generated types. They show
 the relevant part of a service, not a complete application with a listening
@@ -21,7 +21,7 @@ and router. Let's generate the petstore's `listPets` operation:
 
 ```bash
 cargo run -- generate server-mod \
-  -i crates/oas3-gen/fixtures/petstore.json -o src/api/ \
+  -i fixtures/petstore.json -o src/api/ \
   --only list_pets
 ```
 
@@ -457,7 +457,7 @@ credentials, generate those operations into a separate module:
 
 ```bash
 cargo run -- generate server-mod \
-  -i crates/oas3-gen/fixtures/petstore.json -o src/staff/ \
+  -i fixtures/petstore.json -o src/staff/ \
   --only list_api_keys,create_api_key,get_api_key,revoke_api_key,replace_api_key,list_audit_events \
   --enable-builders
 ```

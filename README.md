@@ -62,7 +62,7 @@ oas3-gen generate server-mod -i path/to/openapi.json -o path/to/output/
 
 #### Example
 
-Consider the following `Pet` OpenAPI schema definition in `crates/oas3-gen/fixtures/petstore.json`:
+Consider the following `Pet` OpenAPI schema definition in `fixtures/petstore.json`:
 
 ```json
 {
@@ -90,7 +90,7 @@ Consider the following `Pet` OpenAPI schema definition in `crates/oas3-gen/fixtu
 }
 ```
 
-Executing `oas3-gen generate -i crates/oas3-gen/fixtures/petstore.json -o types.rs` produces the corresponding Rust type, along with the types it refers to, such as `Species`, `PetStatus`, and `Health`.
+Executing `oas3-gen generate -i fixtures/petstore.json -o types.rs` produces the corresponding Rust type, along with the types it refers to, such as `Species`, `PetStatus`, and `Health`.
 
 ```rust
 // types.rs

@@ -9,7 +9,7 @@ In this chapter, we'll enable builders and use them to construct schema values
 and requests. We'll also look at the difference between checking that a
 required field is set and validating the value of that field.
 
-The examples use the petstore fixture, `crates/oas3-gen/fixtures/petstore.json`.
+The examples use the petstore fixture, `fixtures/petstore.json`.
 Its `NewPet` schema holds the fields a caller supplies when adding a pet: a
 required `name` and `species`, and five optional fields. Your generated types
 will reflect the fields in your own specification. Code excerpts omit imports.

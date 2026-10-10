@@ -1,16 +1,5 @@
-#![allow(clippy::doc_markdown)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::too_many_lines)]
 use clap::Parser;
-
-use crate::ui::{Cli, Colors, Commands, ListCommands, colors};
-
-mod generator;
-mod ui;
-mod utils;
-
-#[cfg(test)]
-mod tests;
+use oas3_gen::ui::{self, Cli, Colors, Commands, ListCommands, colors};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

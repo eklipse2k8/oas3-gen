@@ -29,7 +29,7 @@ use crate::{
 /// property value. This structure captures that relationship for code generation
 /// of tagged unions.
 #[derive(Debug, Clone)]
-pub(crate) struct DiscriminatorMapping {
+pub struct DiscriminatorMapping {
   /// The name of the property used as the discriminator (e.g., `"petType"`).
   pub field_name: String,
   /// The string value that identifies this schema in the discriminator (e.g., `"cat"`).
@@ -42,7 +42,7 @@ pub(crate) struct DiscriminatorMapping {
 /// This structure represents the final merged result with all inherited properties
 /// resolved and combined.
 #[derive(Debug, Clone)]
-pub(crate) struct MergedSchema {
+pub struct MergedSchema {
   /// The merged schema containing all properties from the hierarchy.
   pub schema: ObjectSchema,
   /// The parent schema name if this schema participates in a discriminated union.
@@ -116,7 +116,7 @@ impl MergeAccumulator {
 }
 
 #[derive(Debug)]
-pub(crate) struct SchemaRegistry {
+pub struct SchemaRegistry {
   schemas: SchemaMap,
   merged_schemas: IndexMap<String, MergedSchema>,
   discriminator_parents: IndexMap<String, String>,
@@ -138,7 +138,7 @@ impl SchemaRegistry {
   /// before being used for code generation.
   ///
   /// [`initialize`]: SchemaRegistry::initialize
-  pub(crate) fn new(spec: &Spec, stats: &mut GenerationStats) -> Self {
+  pub fn new(spec: &Spec, stats: &mut GenerationStats) -> Self {
     let mut schemas = SchemaMap::new();
 
     if let Some(components) = &spec.components {
@@ -179,7 +179,7 @@ impl SchemaRegistry {
   /// Returns a tuple containing:
   /// - A list of detected dependency cycles (each cycle is a list of schema names)
   /// - An optional set of reachable schema names (if `include_all` is false)
-  pub(crate) fn initialize(
+  pub fn initialize(
     &mut self,
     operation_registry: &OperationRegistry,
     include_all: bool,
@@ -196,7 +196,7 @@ impl SchemaRegistry {
   }
 
   /// Returns a reference to the OpenAPI specification.
-  pub(crate) fn spec(&self) -> &Spec {
+  pub fn spec(&self) -> &Spec {
     &self.spec
   }
 
@@ -204,12 +204,12 @@ impl SchemaRegistry {
   ///
   /// Returns the original schema as defined in the OpenAPI specification,
   /// without any inheritance flattening applied.
-  pub(crate) fn get(&self, name: &str) -> Option<&ObjectSchema> {
+  pub fn get(&self, name: &str) -> Option<&ObjectSchema> {
     self.schemas.get(name)
   }
 
   /// Returns whether a schema with the given name exists in the registry.
-  pub(crate) fn contains(&self, name: &str) -> bool {
+  pub fn contains(&self, name: &str) -> bool {
     self.schemas.contains_key(name)
   }
 
@@ -217,7 +217,7 @@ impl SchemaRegistry {
   ///
   /// Returns a vector of references to the names of all schemas defined
   /// in the OpenAPI specification.
-  pub(crate) fn keys(&self) -> Vec<&String> {
+  pub fn keys(&self) -> Vec<&String> {
     self.schemas.keys().collect()
   }
 
@@ -225,7 +225,7 @@ impl SchemaRegistry {
   ///
   /// Provides access to the underlying map of schema names to their
   /// original [`ObjectSchema`] definitions.
-  pub(crate) fn schemas(&self) -> &SchemaMap {
+  pub fn schemas(&self) -> &SchemaMap {
     &self.schemas
   }
 
@@ -233,7 +233,7 @@ impl SchemaRegistry {
   ///
   /// Returns the flattened version of the schema with all `all_of`
   /// inheritance resolved, if it exists.
-  pub(crate) fn merged(&self, name: &str) -> Option<&MergedSchema> {
+  pub fn merged(&self, name: &str) -> Option<&MergedSchema> {
     self.merged_schemas.get(name)
   }
 
@@ -242,7 +242,7 @@ impl SchemaRegistry {
   /// Returns the merged schema if available; otherwise returns the
   /// raw schema definition. This is the primary method for retrieving
   /// schema definitions for code generation.
-  pub(crate) fn resolved(&self, name: &str) -> Option<&ObjectSchema> {
+  pub fn resolved(&self, name: &str) -> Option<&ObjectSchema> {
     self.merged(name).map(|m| &m.schema).or_else(|| self.schemas.get(name))
   }
 
@@ -250,7 +250,7 @@ impl SchemaRegistry {
   ///
   /// For schemas that are variants of discriminated unions, returns
   /// the name of the parent schema that serves as the polymorphic base.
-  pub(crate) fn parent(&self, name: &str) -> Option<&str> {
+  pub fn parent(&self, name: &str) -> Option<&str> {
     self.discriminator_parents.get(name).map(String::as_str)
   }
 
@@ -258,7 +258,7 @@ impl SchemaRegistry {
   ///
   /// Returns the property name and value that identifies this schema
   /// in a discriminated union, if it participates in one.
-  pub(crate) fn mapping(&self, schema_name: &str) -> Option<&DiscriminatorMapping> {
+  pub fn mapping(&self, schema_name: &str) -> Option<&DiscriminatorMapping> {
     self.discriminator_cache.get(schema_name)
   }
 
@@ -270,7 +270,7 @@ impl SchemaRegistry {
   /// format expected by OpenAPI: `(discriminator_value -> $ref_path)`.
   ///
   /// Returns `None` if no mapping (explicit or implicit) is available.
-  pub(crate) fn effective_mapping(&self, schema: &ObjectSchema) -> Option<IndexMap<String, String>> {
+  pub fn effective_mapping(&self, schema: &ObjectSchema) -> Option<IndexMap<String, String>> {
     let discriminator = schema.discriminator.as_ref()?;
 
     if let Some(mapping) = &discriminator.mapping {
@@ -298,13 +298,13 @@ impl SchemaRegistry {
   }
 
   /// Checks if a schema participates in a dependency cycle.
-  pub(crate) fn is_cyclic(&self, schema_name: &str) -> bool {
+  pub fn is_cyclic(&self, schema_name: &str) -> bool {
     self.cyclic_schemas.contains(schema_name)
   }
 
   /// Whether `schema_name` depends on `target` through a chain of references, counting
   /// `target` itself.
-  pub(crate) fn reaches(&self, schema_name: &str, target: &str) -> bool {
+  pub fn reaches(&self, schema_name: &str, target: &str) -> bool {
     let mut pending = vec![schema_name];
     let mut visited = HashSet::new();
     while let Some(name) = pending.pop() {
@@ -322,7 +322,7 @@ impl SchemaRegistry {
 
   /// Creates a type reference for a named schema, applying `Box` wrapping if the
   /// schema participates in a dependency cycle.
-  pub(crate) fn type_ref(&self, schema_name: &str) -> TypeRef {
+  pub fn type_ref(&self, schema_name: &str) -> TypeRef {
     let mut type_ref = TypeRef::new(to_rust_type_name(schema_name));
     if self.is_cyclic(schema_name) {
       type_ref = type_ref.with_boxed();
@@ -334,7 +334,7 @@ impl SchemaRegistry {
   ///
   /// Returns the merged schema containing all properties from the
   /// schema and its parent schemas.
-  pub(crate) fn merge_all_of(&self, schema: &ObjectSchema) -> ObjectSchema {
+  pub fn merge_all_of(&self, schema: &ObjectSchema) -> ObjectSchema {
     self.merge_schema(schema).schema
   }
 
@@ -345,7 +345,7 @@ impl SchemaRegistry {
   /// resolves and merges all referenced schemas.
   ///
   /// Returns an error if schema resolution fails for any reference.
-  pub(crate) fn merge_inline(&self, schema: &ObjectSchema) -> anyhow::Result<ObjectSchema> {
+  pub fn merge_inline(&self, schema: &ObjectSchema) -> anyhow::Result<ObjectSchema> {
     if schema.all_of.is_empty() {
       return Ok(schema.clone());
     }
@@ -392,7 +392,7 @@ impl SchemaRegistry {
   /// Union fingerprints are used to identify named union types that may
   /// be referenced via `one_of` or `any_of` composition.
   #[allow(clippy::self_only_used_in_recursion)]
-  pub(crate) fn collect(&self, schema: &ObjectSchema, union_fingerprints: &UnionFingerprints) -> SchemaSet {
+  pub fn collect(&self, schema: &ObjectSchema, union_fingerprints: &UnionFingerprints) -> SchemaSet {
     let mut refs = SchemaSet::new();
 
     for prop_schema in schema.properties.values() {
@@ -448,7 +448,7 @@ impl SchemaRegistry {
   /// If the reference points to a named schema, returns that name.
   /// If it contains an inline object, recursively collects references
   /// from within that object.
-  pub(crate) fn collect_ref(&self, schema_ref: &Schema, union_fingerprints: &UnionFingerprints) -> SchemaSet {
+  pub fn collect_ref(&self, schema_ref: &Schema, union_fingerprints: &UnionFingerprints) -> SchemaSet {
     let mut refs = SchemaSet::new();
     if let Some(ref_name) = schema_ref.schema_ref_name() {
       refs.insert(ref_name);
@@ -470,7 +470,7 @@ impl SchemaRegistry {
   ///
   /// Returns a list of detected cycles, where each cycle is a list
   /// of schema names involved in that cycle.
-  pub(crate) fn detect_cycles(&mut self) -> Vec<Vec<String>> {
+  pub fn detect_cycles(&mut self) -> Vec<Vec<String>> {
     let mut graph = DiGraphMap::<&str, ()>::new();
     for (node, deps) in &self.dependencies {
       graph.add_node(node.as_str());
@@ -497,11 +497,7 @@ impl SchemaRegistry {
   ///
   /// Unreachable schemas can be excluded from code generation to
   /// reduce output size.
-  pub(crate) fn reachable(
-    &self,
-    operation_registry: &OperationRegistry,
-    union_fingerprints: &UnionFingerprints,
-  ) -> SchemaSet {
+  pub fn reachable(&self, operation_registry: &OperationRegistry, union_fingerprints: &UnionFingerprints) -> SchemaSet {
     let initial_refs = operation_registry
       .operations()
       .flat_map(|entry| self.collect_refs_from_operation(&entry.operation, union_fingerprints))
@@ -530,7 +526,7 @@ impl SchemaRegistry {
   ///
   /// Delegates to [`TypeNameIndex`] to handle name collision resolution,
   /// case conversion, and variant naming for discriminated unions.
-  pub(crate) fn scan_and_compute_names(&self) -> anyhow::Result<ScanResult> {
+  pub fn scan_and_compute_names(&self) -> anyhow::Result<ScanResult> {
     let index = TypeNameIndex::new(&self.schemas, &self.spec);
     index.scan_and_compute_names()
   }
@@ -540,7 +536,7 @@ impl SchemaRegistry {
   /// Computes dependencies for all schemas, determines inheritance depths,
   /// and creates merged schemas by flattening `all_of` hierarchies.
   /// Also builds the discriminator parent mappings for polymorphic types.
-  pub(crate) fn build_dependencies(&mut self, union_fingerprints: &UnionFingerprints) {
+  pub fn build_dependencies(&mut self, union_fingerprints: &UnionFingerprints) {
     for (name, schema) in &self.schemas {
       self
         .dependencies
@@ -749,7 +745,7 @@ impl SchemaRegistry {
   ///
   /// Returns `None` if the property doesn't exist, has no `const_value`,
   /// or the `const_value` is not a string.
-  pub(crate) fn extract_const_discriminator_value(schema: &ObjectSchema, property_name: &str) -> Option<String> {
+  pub fn extract_const_discriminator_value(schema: &ObjectSchema, property_name: &str) -> Option<String> {
     let prop_schema = schema.properties.get(property_name)?.as_inline()?;
     prop_schema.const_value.as_ref()?.as_str().map(String::from)
   }

@@ -5,10 +5,10 @@ use crate::generator::ast::StatusCodeToken;
 
 /// Wrapper to convert StatusCodeToken to http::StatusCode tokens
 #[derive(Clone, Debug)]
-pub(crate) struct HttpStatusCode(StatusCodeToken);
+pub struct HttpStatusCode(StatusCodeToken);
 
 impl HttpStatusCode {
-  pub(crate) fn new(token: StatusCodeToken) -> Self {
+  pub fn new(token: StatusCodeToken) -> Self {
     Self(token)
   }
 }

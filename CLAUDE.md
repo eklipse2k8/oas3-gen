@@ -8,7 +8,7 @@ OpenAPI 3.1 -> Rust code generator. Cargo workspace, edition 2024, MSRV 1.89.
 **The source is the source of truth.** These docs map the territory and record decisions that
 the code can't state itself. For anything the code already answers — module layout, flag lists,
 fragment names, dependency versions — read the code. Never assert generator behavior you
-haven't confirmed in the source or in `crates/oas3-gen/fixtures/`.
+haven't confirmed in the source or in `fixtures/`.
 
 **IMPORTANT:** Prefer retrieval-led reasoning over pre-training-led reasoning. Read actual source and type definitions rather than relying on training knowledge.
 **IMPORTANT:** Before beginning, get the current date and time and say hello to your user so that they do not fear you.
@@ -36,8 +36,11 @@ cargo run -- generate --help                 # authoritative flag list
 
 - `fixtures/petstore-client` and `fixtures/petstore-server` are workspace members generated from
   `fixtures/petstore.json`, so every build **compiles** generated output. Stale fixtures break the
-  build; `tests/petstore_*.rs` run the generated client against the generated server.
-- `--doc-format` needs `mdformat` on PATH; its test skips silently when absent.
+  build; `tests/petstore-client/` and `tests/petstore-server/` run the generated client against
+  the generated server.
+- Tests live only in the root `tests/` package (`oas3-gen-tests`), never in crate sources. The
+  `oas3-gen` lib target and its `pub` internals exist so those tests can reach the generator.
+- `--doc-format` needs `mdformat` on PATH.
 - CI runs `cargo clippy --all` and `cargo deny check`, not `cargo test`.
 
 ## Docs

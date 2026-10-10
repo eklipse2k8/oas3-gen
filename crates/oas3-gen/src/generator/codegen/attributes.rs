@@ -13,7 +13,7 @@ use crate::generator::ast::{
 ///
 /// Borrows the field's own [`Documentation`] in the common case where neither note
 /// applies, so the vast majority of fields cost no allocation here.
-pub(crate) fn generate_docs_for_field(field: &FieldDef) -> Cow<'_, Documentation> {
+pub fn generate_docs_for_field(field: &FieldDef) -> Cow<'_, Documentation> {
   if field.example_value.is_none() && field.multiple_of.is_none() {
     return Cow::Borrowed(&field.docs);
   }
@@ -60,7 +60,7 @@ impl<T: ToTokens> ToTokens for DeriveAttribute<T> {
   }
 }
 
-pub(crate) fn generate_derives_from_slice<'a>(derives: impl IntoIterator<Item = &'a DeriveTrait>) -> TokenStream {
+pub fn generate_derives_from_slice<'a>(derives: impl IntoIterator<Item = &'a DeriveTrait>) -> TokenStream {
   let derive_idents = derives
     .into_iter()
     .map(quote::ToTokens::to_token_stream)
@@ -73,7 +73,7 @@ pub(crate) fn generate_derives_from_slice<'a>(derives: impl IntoIterator<Item = 
   }
 }
 
-pub(crate) fn generate_outer_attrs<'a>(attrs: impl IntoIterator<Item = &'a OuterAttr>) -> TokenStream {
+pub fn generate_outer_attrs<'a>(attrs: impl IntoIterator<Item = &'a OuterAttr>) -> TokenStream {
   let attr_tokens = attrs
     .into_iter()
     .map(quote::ToTokens::to_token_stream)
@@ -90,7 +90,7 @@ pub(crate) fn generate_outer_attrs<'a>(attrs: impl IntoIterator<Item = &'a Outer
 ///
 /// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
 /// `#[serde(attr1, attr2, ...)]` attribute to reduce output noise.
-pub(crate) fn generate_serde_attrs<'a>(attrs: impl IntoIterator<Item = &'a SerdeAttribute>) -> TokenStream {
+pub fn generate_serde_attrs<'a>(attrs: impl IntoIterator<Item = &'a SerdeAttribute>) -> TokenStream {
   let attr_tokens = attrs
     .into_iter()
     .map(quote::ToTokens::to_token_stream)
@@ -107,7 +107,7 @@ pub(crate) fn generate_serde_attrs<'a>(attrs: impl IntoIterator<Item = &'a Serde
 ///
 /// If attrs is empty, returns nothing. Otherwise combines all attributes into a single
 /// `#[validate(attr1, attr2, ...)]` attribute.
-pub(crate) fn generate_validation_attrs<'a>(attrs: impl IntoIterator<Item = &'a ValidationAttribute>) -> TokenStream {
+pub fn generate_validation_attrs<'a>(attrs: impl IntoIterator<Item = &'a ValidationAttribute>) -> TokenStream {
   let attr_tokens = attrs
     .into_iter()
     .map(quote::ToTokens::to_token_stream)
@@ -125,7 +125,7 @@ pub(crate) fn generate_validation_attrs<'a>(attrs: impl IntoIterator<Item = &'a 
 /// If the field has none, returns nothing. Otherwise combines all attributes into a single
 /// `#[builder(attr1, attr2, ...)]` attribute to reduce output noise. `Default` and `Skip`
 /// render the same expression as the field's `#[default(...)]` attribute.
-pub(crate) fn generate_builder_attrs(field: &FieldDef) -> TokenStream {
+pub fn generate_builder_attrs(field: &FieldDef) -> TokenStream {
   let attr_tokens = field
     .builder_attrs
     .iter()
@@ -146,7 +146,7 @@ pub(crate) fn generate_builder_attrs(field: &FieldDef) -> TokenStream {
   }
 }
 
-pub(crate) fn generate_deprecated_attr(deprecated: bool) -> TokenStream {
+pub fn generate_deprecated_attr(deprecated: bool) -> TokenStream {
   if deprecated {
     quote! { #[deprecated] }
   } else {
@@ -154,14 +154,14 @@ pub(crate) fn generate_deprecated_attr(deprecated: bool) -> TokenStream {
   }
 }
 
-pub(crate) fn generate_serde_as_attr(attr: Option<&SerdeAsFieldAttr>) -> TokenStream {
+pub fn generate_serde_as_attr(attr: Option<&SerdeAsFieldAttr>) -> TokenStream {
   match attr {
     Some(a) => a.to_token_stream(),
     None => quote! {},
   }
 }
 
-pub(crate) fn generate_doc_hidden_attr(hidden: bool) -> TokenStream {
+pub fn generate_doc_hidden_attr(hidden: bool) -> TokenStream {
   if hidden {
     quote! { #[doc(hidden)] }
   } else {
@@ -169,7 +169,7 @@ pub(crate) fn generate_doc_hidden_attr(hidden: bool) -> TokenStream {
   }
 }
 
-pub(crate) fn generate_field_default_attr(field: &FieldDef) -> TokenStream {
+pub fn generate_field_default_attr(field: &FieldDef) -> TokenStream {
   field_default_expr(field).map_or_else(|| quote! {}, |expr| quote! { #[default(#expr)] })
 }
 

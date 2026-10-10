@@ -1,0 +1,21 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Value enums", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "CaseFold": { "type": "string", "enum": ["ITEM", "item", "SELECT", "select"] },
+      "Collisions": { "type": "string", "enum": ["Active", "active", "in_progress", "ACTIVE", "InProgress"] },
+      "Taken": { "type": "string", "enum": ["A3", "A32", "a", "A"] },
+      "Signed": { "type": "integer", "enum": [0, 1, -5] },
+      "Int32": { "type": "integer", "format": "int32", "enum": [1, 2] },
+      "NullableInt": { "type": ["integer", "null"], "enum": [1, 2, null] },
+      "NumbersAsStrings": { "type": "string", "enum": [1, 2] },
+      "MergedDefault": { "enum": ["foo-bar", "foo_bar"], "default": "foo_bar" },
+      "UnlistedDefault": { "type": "string", "enum": ["active", "inactive"], "default": "unknown" },
+      "MixedConsts": { "oneOf": [{ "const": "auto" }, { "const": 1 }, { "const": true }] },
+      "NullableConsts": { "anyOf": [{ "const": "a" }, { "const": "b" }, { "type": "null" }] },
+      "PartlyDocumented": { "type": "string", "x-enum-descriptions": ["first only"], "enum": ["a", "b", "c"] }
+    }
+  }
+}

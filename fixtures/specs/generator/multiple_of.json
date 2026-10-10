@@ -1,0 +1,19 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Collar", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Reading": {
+        "type": "object",
+        "properties": {
+          "battery": { "type": "integer", "format": "int32", "multipleOf": 5 },
+          "dose": { "type": "number", "multipleOf": 0.25 },
+          "precision": { "type": "number", "format": "float", "multipleOf": 1.5 },
+          "halves": { "type": "integer", "multipleOf": 0.5 },
+          "tiny": { "type": "number", "multipleOf": 1e-12 }
+        }
+      }
+    }
+  }
+}

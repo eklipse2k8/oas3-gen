@@ -19,7 +19,7 @@ pub struct Documentation {
 #[bon::bon]
 impl Documentation {
   #[builder]
-  pub(crate) fn documentation(
+  pub fn documentation(
     summary: Option<&str>,
     description: Option<&str>,
     method: Option<&http::Method>,
@@ -106,7 +106,7 @@ impl Documentation {
     tokio::task::block_in_place(|| Handle::current().block_on(Self::build_async_format_with_mdformat(input)))
   }
 
-  pub(crate) async fn build_async_format_with_mdformat(input: &str) -> String {
+  pub async fn build_async_format_with_mdformat(input: &str) -> String {
     if input.len() > 100 {
       Self::format_with_mdformat(input).await.unwrap_or_default()
     } else {

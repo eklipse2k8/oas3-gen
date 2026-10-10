@@ -30,16 +30,16 @@ const SSE_SENTINEL_EXTENSIONS: [&str; 2] = ["sse-sentinel", "speakeasy-sse-senti
 
 /// Extracted metadata about operation responses for code generation.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ResponseMetadata {
-  pub(crate) type_name: Option<String>,
-  pub(crate) media_types: Vec<ResponseMediaType>,
+pub struct ResponseMetadata {
+  pub type_name: Option<String>,
+  pub media_types: Vec<ResponseMediaType>,
 }
 
 /// Response metadata bundled with type usage data.
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseMetadataOutput {
-  pub(crate) metadata: ResponseMetadata,
-  pub(crate) usage: SerdeUsageRecorder,
+pub struct ResponseMetadataOutput {
+  pub metadata: ResponseMetadata,
+  pub usage: SerdeUsageRecorder,
 }
 
 /// Converts the responses an operation declares into response variants.
@@ -48,7 +48,7 @@ pub(crate) struct ResponseMetadataOutput {
 /// The shared response enum those variants map onto is assembled in
 /// postprocessing, once every operation is known.
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseConverter {
+pub struct ResponseConverter {
   type_resolver: TypeResolver,
   inline_resolver: InlineTypeResolver,
   field_converter: FieldConverter,
@@ -57,7 +57,7 @@ pub(crate) struct ResponseConverter {
 
 impl ResponseConverter {
   /// Creates a new response converter.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     let type_resolver = TypeResolver::new(context.clone());
     let inline_resolver = InlineTypeResolver::new(context.clone());
     let field_converter = FieldConverter::new(&context);
@@ -75,7 +75,7 @@ impl ResponseConverter {
   /// Returns `None` if the operation declares no responses. Variant names are the
   /// status-code names used by the shared response enum. `base_name` prefixes the
   /// names of inline types generated from header schemas.
-  pub(crate) fn build_variants(
+  pub fn build_variants(
     &self,
     operation: &Operation,
     path: &str,
@@ -157,7 +157,7 @@ impl ResponseConverter {
   /// Extracts response metadata for operation info.
   ///
   /// Gathers type names and media types, returning usage data.
-  pub(crate) fn extract_metadata(&self, operation: &Operation) -> ResponseMetadataOutput {
+  pub fn extract_metadata(&self, operation: &Operation) -> ResponseMetadataOutput {
     let spec = self.context.graph().spec();
     let type_name = naming_responses::extract_response_type_name(spec, operation);
     let response_types = naming_responses::extract_all_response_types(spec, operation);

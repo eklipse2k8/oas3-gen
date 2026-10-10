@@ -1,0 +1,36 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Serde usage", "version": "1.0.0" },
+  "paths": {
+    "/classifications": {
+      "post": {
+        "operationId": "classify",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClassifyRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Classification" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClassifyRequest": {
+        "type": "object",
+        "properties": {
+          "allowed": { "type": "object", "additionalProperties": { "type": "array", "items": { "$ref": "#/components/schemas/OutputKind" } } }
+        }
+      },
+      "Classification": {
+        "type": "object",
+        "properties": {
+          "category_applied_input_types": { "type": "object", "additionalProperties": { "type": "array", "items": { "$ref": "#/components/schemas/InputType" } } }
+        }
+      },
+      "OutputKind": { "type": "string", "enum": ["text", "image"] },
+      "InputType": { "type": "string", "enum": ["text", "image"] }
+    }
+  }
+}

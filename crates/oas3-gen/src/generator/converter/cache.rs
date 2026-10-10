@@ -180,8 +180,8 @@ struct CredentialsRegistry {
 }
 
 #[derive(Default, Debug, Clone)]
-pub(crate) struct TypeCollector {
-  pub(crate) types: Vec<RustType>,
+pub struct TypeCollector {
+  pub types: Vec<RustType>,
 }
 
 impl TypeCollector {
@@ -193,7 +193,7 @@ impl TypeCollector {
   }
 
   /// Takes all accumulated types, leaving the collector empty for reuse.
-  pub(crate) fn take_types(&mut self) -> Vec<RustType> {
+  pub fn take_types(&mut self) -> Vec<RustType> {
     std::mem::take(&mut self.types)
   }
 }
@@ -251,19 +251,19 @@ impl SchemaNameRegistry {
   }
 }
 
-pub(crate) struct TypeRegistration {
-  pub(crate) assigned_name: String,
-  pub(crate) canonical: CanonicalSchema,
-  pub(crate) enum_values: Option<Vec<String>>,
+pub struct TypeRegistration {
+  pub assigned_name: String,
+  pub canonical: CanonicalSchema,
+  pub enum_values: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct SharedSchemaCache {
+#[derive(Debug, Clone, Default)]
+pub struct SharedSchemaCache {
   names: NameRegistry,
   schemas: SchemaIdentity,
   enums: EnumRegistry,
   unions: UnionRegistry,
-  pub(crate) types: TypeCollector,
+  pub types: TypeCollector,
   structs: StructIndex,
   type_refs: TypeRefRegistry,
   schema_names: SchemaNameRegistry,
@@ -273,24 +273,13 @@ pub(crate) struct SharedSchemaCache {
 
 impl SharedSchemaCache {
   /// Creates an empty schema cache with no registered types, names, or precomputed mappings.
-  pub(crate) fn new() -> Self {
-    Self {
-      names: NameRegistry::default(),
-      schemas: SchemaIdentity::default(),
-      enums: EnumRegistry::default(),
-      unions: UnionRegistry::default(),
-      types: TypeCollector::default(),
-      structs: StructIndex::default(),
-      type_refs: TypeRefRegistry::default(),
-      schema_names: SchemaNameRegistry::default(),
-      union_fingerprints: UnionFingerprints::new(),
-      credentials: CredentialsRegistry::default(),
-    }
+  pub fn new() -> Self {
+    Self::default()
   }
 
   /// Configures precomputed type names for schemas and enums, enabling deterministic
   /// naming that persists across code generation runs.
-  pub(crate) fn set_precomputed_names(
+  pub fn set_precomputed_names(
     &mut self,
     schema_names: impl IntoIterator<Item = (CanonicalSchema, String)>,
     enum_names: impl IntoIterator<Item = (Vec<String>, String)>,
@@ -302,21 +291,21 @@ impl SharedSchemaCache {
 
   /// Returns the precomputed enum cache key for this schema if one was computed
   /// during the pre-scan phase.
-  pub(crate) fn get_precomputed_enum_cache_key(&self, schema: &ObjectSchema) -> anyhow::Result<Option<Vec<String>>> {
+  pub fn get_precomputed_enum_cache_key(&self, schema: &ObjectSchema) -> anyhow::Result<Option<Vec<String>>> {
     let canonical = CanonicalSchema::from_schema(schema)?;
     Ok(self.schemas.get_precomputed_enum_cache_key(&canonical).cloned())
   }
 
   /// Returns the Rust type name assigned to this schema, or `None` if the schema
   /// has not been registered.
-  pub(crate) fn get_type_name(&self, schema: &ObjectSchema) -> anyhow::Result<Option<String>> {
+  pub fn get_type_name(&self, schema: &ObjectSchema) -> anyhow::Result<Option<String>> {
     let canonical = CanonicalSchema::from_schema(schema)?;
     Ok(self.schemas.lookup(&canonical).map(String::from))
   }
 
   /// Returns the type name for an enum with the given values, or `None` if no such
   /// enum has been registered.
-  pub(crate) fn get_enum_name(&self, values: &[String]) -> Option<String> {
+  pub fn get_enum_name(&self, values: &[String]) -> Option<String> {
     self.enums.lookup(values).map(String::from)
   }
 
@@ -324,7 +313,7 @@ impl SharedSchemaCache {
   ///
   /// Unlike [`get_enum_name`], this excludes precomputed names for enums that
   /// have not yet been emitted to the type collector.
-  pub(crate) fn get_generated_enum_name(&self, values: &[String]) -> Option<String> {
+  pub fn get_generated_enum_name(&self, values: &[String]) -> Option<String> {
     self
       .enums
       .is_registered(values)
@@ -334,31 +323,31 @@ impl SharedSchemaCache {
 
   /// Records that an enum with the given values has been generated with the
   /// specified type name.
-  pub(crate) fn register_enum(&mut self, values: Vec<String>, name: String) {
+  pub fn register_enum(&mut self, values: Vec<String>, name: String) {
     self.enums.register(values, name);
   }
 
   /// Returns the type name for a union with the given variant references and
   /// discriminator, or `None` if no such union has been registered.
-  pub(crate) fn get_union_name(&self, refs: &[String], discriminator: Option<&str>) -> Option<String> {
+  pub fn get_union_name(&self, refs: &[String], discriminator: Option<&str>) -> Option<String> {
     self.unions.lookup(refs, discriminator).map(String::from)
   }
 
   /// Records that a union with the given variant references and discriminator has
   /// been generated with the specified type name.
-  pub(crate) fn register_union(&mut self, refs: UnionFingerprint, discriminator: Option<String>, name: String) {
+  pub fn register_union(&mut self, refs: UnionFingerprint, discriminator: Option<String>, name: String) {
     self.unions.register(refs, discriminator, name);
   }
 
   /// Reserves a type name without associating it with a schema, preventing it from
   /// being assigned to future types.
-  pub(crate) fn mark_name_used(&mut self, name: String) {
+  pub fn mark_name_used(&mut self, name: String) {
     self.names.reserve(name);
   }
 
   /// Registers a top-level schema from `components/schemas` so that inline schemas
   /// with identical structure will reference this type instead of creating duplicates.
-  pub(crate) fn register_top_level_schema(&mut self, schema: &ObjectSchema, name: &str) -> anyhow::Result<()> {
+  pub fn register_top_level_schema(&mut self, schema: &ObjectSchema, name: &str) -> anyhow::Result<()> {
     let canonical = CanonicalSchema::from_schema(schema)?;
     let rust_name = to_rust_type_name(name);
     self.schemas.record(canonical, rust_name.clone());
@@ -368,7 +357,7 @@ impl SharedSchemaCache {
 
   /// Returns the precomputed name for this schema if one exists, otherwise generates
   /// a unique name from the base string.
-  pub(crate) fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> anyhow::Result<String> {
+  pub fn get_preferred_name(&self, schema: &ObjectSchema, base_name: &str) -> anyhow::Result<String> {
     let canonical = CanonicalSchema::from_schema(schema)?;
     if let Some(precomputed) = self.schemas.get_precomputed(&canonical) {
       Ok(precomputed.to_string())
@@ -384,7 +373,7 @@ impl SharedSchemaCache {
   /// deduplication across schemas with identical value sets, and omitted for schemas
   /// that also accept unlisted strings. Does not mutate cache state; call
   /// [`commit_registration`] to finalize.
-  pub(crate) fn prepare_registration(
+  pub fn prepare_registration(
     &self,
     schema: &ObjectSchema,
     base_name: &str,
@@ -418,7 +407,7 @@ impl SharedSchemaCache {
 
   /// Commits a prepared registration by reserving the name, recording schema and
   /// enum mappings, and storing the type definitions.
-  pub(crate) fn commit_registration(
+  pub fn commit_registration(
     &mut self,
     registration: TypeRegistration,
     nested_types: Vec<RustType>,
@@ -439,13 +428,13 @@ impl SharedSchemaCache {
   /// Generates a unique type name from a base string without reserving it.
   ///
   /// The returned name will not conflict with any currently reserved names.
-  pub(crate) fn make_unique_name(&self, base: &str) -> String {
+  pub fn make_unique_name(&self, base: &str) -> String {
     self.names.make_unique(base)
   }
 
   /// Returns `true` if the given name is already allocated to a structurally different
   /// schema, indicating a naming conflict that requires a unique suffix.
-  pub(crate) fn name_conflicts_with_different_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<bool> {
+  pub fn name_conflicts_with_different_schema(&self, name: &str, schema: &ObjectSchema) -> anyhow::Result<bool> {
     if !self.names.is_allocated(name) {
       return Ok(false);
     }
@@ -454,40 +443,40 @@ impl SharedSchemaCache {
   }
 
   /// Takes all accumulated type definitions, leaving the cache empty for reuse.
-  pub(crate) fn take_types(&mut self) -> Vec<RustType> {
+  pub fn take_types(&mut self) -> Vec<RustType> {
     self.types.take_types()
   }
 
   /// Returns the credentials struct registered for `security`, or `None` if none has been.
-  pub(crate) fn credentials_type(&self, security: &OperationSecurity) -> Option<&StructToken> {
+  pub fn credentials_type(&self, security: &OperationSecurity) -> Option<&StructToken> {
     self.credentials.by_security.get(security)
   }
 
   /// Records the credentials struct name for `security`.
-  pub(crate) fn register_credentials(&mut self, security: OperationSecurity, name: StructToken) {
+  pub fn register_credentials(&mut self, security: OperationSecurity, name: StructToken) {
     self.credentials.by_security.insert(security, name);
   }
 
   /// Stores a struct definition indexed by type name for later retrieval when
   /// building type references or validating field access.
-  pub(crate) fn register_struct_def(&mut self, type_name: &str, struct_def: StructDef) {
+  pub fn register_struct_def(&mut self, type_name: &str, struct_def: StructDef) {
     self.structs.register(type_name.to_string(), struct_def);
   }
 
   /// Returns the struct definition for the given type name, or `None` if not registered.
-  pub(crate) fn get_struct_def(&self, type_name: &str) -> Option<&StructDef> {
+  pub fn get_struct_def(&self, type_name: &str) -> Option<&StructDef> {
     self.structs.get(type_name)
   }
 
   /// Returns the cached TypeRef for this schema, or `None` if not yet resolved.
-  pub(crate) fn get_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<Option<TypeRef>> {
+  pub fn get_type_ref(&self, schema: &ObjectSchema) -> anyhow::Result<Option<TypeRef>> {
     let canonical = CanonicalSchema::from_schema(schema)?;
     Ok(self.type_refs.lookup(&canonical).cloned())
   }
 
   /// Caches a resolved TypeRef for this schema to avoid redundant resolution on
   /// subsequent encounters.
-  pub(crate) fn register_type_ref(&mut self, schema: &ObjectSchema, type_ref: TypeRef) -> anyhow::Result<()> {
+  pub fn register_type_ref(&mut self, schema: &ObjectSchema, type_ref: TypeRef) -> anyhow::Result<()> {
     let canonical = CanonicalSchema::from_schema(schema)?;
     self.type_refs.register(canonical, type_ref);
     Ok(())
@@ -495,7 +484,7 @@ impl SharedSchemaCache {
 
   /// Updates the name field of a struct or enum definition to the given name,
   /// leaving other type variants unchanged.
-  pub(crate) fn apply_name_to_type(mut type_def: RustType, name: &str) -> RustType {
+  pub fn apply_name_to_type(mut type_def: RustType, name: &str) -> RustType {
     match &mut type_def {
       RustType::Struct(s) => s.name = StructToken::from(name.to_string()),
       RustType::Enum(e) => e.name = EnumToken::new(name),
@@ -507,7 +496,7 @@ impl SharedSchemaCache {
   /// Returns `true` if the given schema name exists in the registry.
   ///
   /// Checks both original schema names and Rust-converted type names.
-  pub(crate) fn contains_schema_name(&self, name: &str) -> bool {
+  pub fn contains_schema_name(&self, name: &str) -> bool {
     self.schema_names.contains(name)
   }
 
@@ -515,7 +504,7 @@ impl SharedSchemaCache {
   ///
   /// This should be called after parsing the OpenAPI spec to populate the cache
   /// with top-level schema names and union deduplication mappings.
-  pub(crate) fn initialize_from_schemas(&mut self, schemas: &SchemaMap) {
+  pub fn initialize_from_schemas(&mut self, schemas: &SchemaMap) {
     let schema_names = schemas
       .keys()
       .flat_map(|schema_name| {
@@ -528,12 +517,12 @@ impl SharedSchemaCache {
   }
 
   /// Returns the schema name for a union with the given variant references, or `None` if not registered.
-  pub(crate) fn find_union(&self, refs: &[String]) -> Option<&str> {
+  pub fn find_union(&self, refs: &[String]) -> Option<&str> {
     self.union_fingerprints.get(refs).map(String::as_str)
   }
 
   /// Returns a reference to the union fingerprints map.
-  pub(crate) fn union_fingerprints(&self) -> &UnionFingerprints {
+  pub fn union_fingerprints(&self) -> &UnionFingerprints {
     &self.union_fingerprints
   }
 }

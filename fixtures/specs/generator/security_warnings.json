@@ -1,0 +1,22 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Mixed Auth", "version": "1.0.0" },
+  "security": [{ "BasicAuth": [] }],
+  "paths": {
+    "/a": { "get": { "operationId": "a", "responses": { "204": { "description": "ok" } } } },
+    "/b": { "get": { "operationId": "b", "responses": { "204": { "description": "ok" } } } },
+    "/c": {
+      "get": {
+        "operationId": "c",
+        "security": [{ "Missing": [] }, { "ApiKeyAuth": [] }],
+        "responses": { "204": { "description": "ok" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BasicAuth": { "type": "http", "scheme": "basic" },
+      "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
+    }
+  }
+}

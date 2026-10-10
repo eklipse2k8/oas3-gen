@@ -11,7 +11,7 @@ rg 'impl ToTokens for' crates/oas3-gen/src/generator/codegen/<file>.rs
 ```
 
 Because fragments compose, one `quote!` block rarely shows the final output. Confirm emitted
-shape against `crates/oas3-gen/fixtures/`, not by reading a single fragment.
+shape against `fixtures/`, not by reading a single fragment.
 
 ## Dispatch map
 

@@ -1,0 +1,48 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Helper constructors", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Shapes": {
+        "oneOf": [
+          { "title": "Simple", "type": "object", "properties": { "opt_field": { "type": "string" } } },
+          { "title": "SingleParam", "type": "object", "required": ["req_field"], "properties": { "req_field": { "type": "string" } } },
+          {
+            "title": "Complex",
+            "type": "object",
+            "required": ["req1", "req2"],
+            "properties": { "req1": { "type": "string" }, "req2": { "type": "string" } }
+          }
+        ]
+      },
+      "ResponseFormat": {
+        "oneOf": [
+          { "title": "ResponseFormatText", "type": "object", "properties": { "dummy": { "type": "string" } } },
+          { "type": "integer" }
+        ]
+      },
+      "Pembroke": {
+        "type": "object",
+        "required": ["type", "waddle"],
+        "properties": { "type": { "type": "string", "const": "pembroke" }, "waddle": { "type": "string" } }
+      },
+      "Cardigan": {
+        "type": "object",
+        "required": ["type", "sploot", "floof"],
+        "properties": {
+          "type": { "type": "string", "const": "cardigan" },
+          "sploot": { "type": "string" },
+          "floof": { "type": "string" }
+        }
+      },
+      "Corgi": {
+        "oneOf": [{ "$ref": "#/components/schemas/Pembroke" }, { "$ref": "#/components/schemas/Cardigan" }],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": { "pembroke": "#/components/schemas/Pembroke", "cardigan": "#/components/schemas/Cardigan" }
+        }
+      }
+    }
+  }
+}

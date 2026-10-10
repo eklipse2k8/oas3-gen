@@ -7,7 +7,7 @@ responses and event streams, send request bodies, and configure API keys and
 bearer tokens for operations that need them.
 
 The commands run from a checkout of this repository and use the petstore
-fixture, `crates/oas3-gen/fixtures/petstore.json`. If you installed the tool,
+fixture, `fixtures/petstore.json`. If you installed the tool,
 replace `cargo run --` with `oas3-gen` and supply the path to your document.
 Rust excerpts assume you've imported the generated types. Put snippets that use
 `?` in a function returning [`anyhow::Result`][rustdoc-anyhow-result], and use
@@ -19,7 +19,7 @@ The `client` mode puts the client and its types in one file:
 
 ```bash
 cargo run -- generate client \
-  -i crates/oas3-gen/fixtures/petstore.json -o client.rs \
+  -i fixtures/petstore.json -o client.rs \
   --enable-builders
 ```
 
@@ -32,7 +32,7 @@ Use `client-mod` if you'd like to keep the client and types in separate files:
 
 ```bash
 cargo run -- generate client-mod \
-  -i crates/oas3-gen/fixtures/petstore.json -o src/api/ \
+  -i fixtures/petstore.json -o src/api/ \
   --enable-builders
 ```
 

@@ -11,7 +11,7 @@ use regex::Regex;
 
 use super::constants::BON_RESERVED_FIELD_NAMES;
 
-pub(crate) static FORBIDDEN_IDENTIFIERS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+pub static FORBIDDEN_IDENTIFIERS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
   [
     "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
     "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "static", "struct", "super", "trait", "true",
@@ -46,7 +46,7 @@ static MULTI_UNDERSCORE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"_+")
 /// A single, powerful sanitization function that handles the common base transformations.
 /// It transliterates to ASCII, replaces invalid characters with underscores, collapses
 /// consecutive underscores, and trims any leading or trailing underscores.
-pub(crate) fn sanitize(input: &str) -> String {
+pub fn sanitize(input: &str) -> String {
   if input.is_empty() {
     return String::new();
   }
@@ -60,7 +60,7 @@ pub(crate) fn sanitize(input: &str) -> String {
 
 /// Splits a PascalCase string into words.
 /// Handles adjacent uppercase letters correctly (e.g., `"XMLParser"` -> `["XML", "Parser"]`).
-pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
+pub fn split_pascal_case(name: &str) -> Vec<String> {
   if name.is_empty() {
     return vec![];
   }
@@ -89,7 +89,7 @@ pub(crate) fn split_pascal_case(name: &str) -> Vec<String> {
 }
 
 /// Splits a `snake_case` string into words.
-pub(crate) fn split_snake_case<S>(name: S) -> Vec<String>
+pub fn split_snake_case<S>(name: S) -> Vec<String>
 where
   S: AsRef<str>,
 {
@@ -101,7 +101,7 @@ where
     .collect()
 }
 
-pub(crate) fn strip_parent_prefix(parent_name: &str, prop_pascal: &str) -> String {
+pub fn strip_parent_prefix(parent_name: &str, prop_pascal: &str) -> String {
   let parent_words = split_pascal_case(parent_name);
   let prop_words = split_pascal_case(prop_pascal);
   let common = parent_words.iter().zip(&prop_words).take_while(|(p, c)| p == c).count();
@@ -115,7 +115,7 @@ pub(crate) fn strip_parent_prefix(parent_name: &str, prop_pascal: &str) -> Strin
 }
 
 /// Ensures a name is unique within a set of used names, appending a numeric suffix if needed.
-pub(crate) fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
+pub fn ensure_unique(base_name: &str, used_names: &BTreeSet<String>) -> String {
   if !used_names.contains(base_name) {
     return base_name.to_string();
   }
@@ -159,7 +159,7 @@ where
 /// 5. If the result is another keyword, it gets a raw identifier prefix (`r#`).
 /// 6. If the result starts with a digit, it's prefixed with `_`.
 /// 7. If the result is empty, it becomes `_`.
-pub(crate) fn to_rust_field_name(name: &str) -> String {
+pub fn to_rust_field_name(name: &str) -> String {
   if let Some(raw) = name.strip_prefix("r#")
     && !raw.is_empty()
     && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -196,7 +196,7 @@ pub(crate) fn to_rust_field_name(name: &str) -> String {
   ident
 }
 
-pub(crate) fn to_rust_const_name(input: &str) -> String {
+pub fn to_rust_const_name(input: &str) -> String {
   let sanitized = sanitize(input);
   if sanitized.is_empty() {
     return "UNNAMED".to_string();
@@ -219,7 +219,7 @@ pub(crate) fn to_rust_const_name(input: &str) -> String {
 /// 5. If the result is a reserved name (e.g., `Clone`, `Self`, `S`), it gets a `Type` suffix.
 /// 6. If the result starts with a digit, it's prefixed with `T`.
 /// 7. If the result is empty, it becomes `Unnamed`.
-pub(crate) fn to_rust_type_name(name: &str) -> String {
+pub fn to_rust_type_name(name: &str) -> String {
   let name = name.strip_prefix("r#").unwrap_or(name);
 
   let has_leading_minus = name.starts_with('-');
@@ -275,7 +275,7 @@ fn prefix_if_digit_start(ident: &mut String, prefix: char) {
   }
 }
 
-pub(crate) fn to_http_header_name(name: &str) -> String {
+pub fn to_http_header_name(name: &str) -> String {
   name.to_ascii_lowercase()
 }
 
@@ -367,7 +367,7 @@ where
 /// The setter name a `bon` builder needs for a field or parameter named `field`, when it can't
 /// use that name: `bon` reserves `build` and `builder`, and strips leading underscores, which
 /// turns a field such as `_2fa` into the invalid identifier `2fa`.
-pub(crate) fn builder_setter_name(field: &str) -> Option<String> {
+pub fn builder_setter_name(field: &str) -> Option<String> {
   if BON_RESERVED_FIELD_NAMES.contains(&field) {
     return Some(format!("{field}_value"));
   }

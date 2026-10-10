@@ -26,11 +26,11 @@ use crate::{
 /// Returned by [`FieldConverter::resolve_with_metadata`] to bundle all data
 /// needed for field construction in one pass.
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedFieldData {
-  pub(crate) type_ref: TypeRef,
-  pub(crate) inline_types: Vec<RustType>,
-  pub(crate) validation_attrs: Vec<ValidationAttribute>,
-  pub(crate) schema: ObjectSchema,
+pub struct ResolvedFieldData {
+  pub type_ref: TypeRef,
+  pub inline_types: Vec<RustType>,
+  pub validation_attrs: Vec<ValidationAttribute>,
+  pub schema: ObjectSchema,
 }
 
 /// Converts OpenAPI object properties into Rust struct field definitions.
@@ -39,14 +39,14 @@ pub(crate) struct ResolvedFieldData {
 /// attribute generation. Applies special handling for discriminator fields,
 /// OData properties, and custom type mappings.
 #[derive(Clone, Debug)]
-pub(crate) struct FieldConverter {
+pub struct FieldConverter {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
 }
 
 impl FieldConverter {
   /// Creates a new field converter with configuration from the context.
-  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+  pub fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       context: context.clone(),
       type_resolver: TypeResolver::new(context.clone()),
@@ -58,7 +58,7 @@ impl FieldConverter {
   /// This centralizes the common pattern of resolving the schema reference,
   /// checking for inline enums, resolving to a Rust type, and extracting
   /// validation attributes and default values.
-  pub(crate) fn resolve_with_metadata(
+  pub fn resolve_with_metadata(
     &self,
     parent_name: &str,
     prop_name: &str,
@@ -93,7 +93,7 @@ impl FieldConverter {
   /// deduplicates field names, and adds an `additionalProperties` catch-all
   /// field when the schema defines one. Returns the fields along with any
   /// inline types extracted from nested object or enum properties.
-  pub(crate) fn build_struct_fields(
+  pub fn build_struct_fields(
     &self,
     parent_name: &str,
     schema: &ObjectSchema,
@@ -276,7 +276,7 @@ impl FieldConverter {
   /// Extracts a default value from schema `default`, `const`, or single-value `enum`.
   ///
   /// Prefers `default` over `const` over single-element enum arrays.
-  pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
+  pub fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
     schema
       .default
       .clone()
@@ -289,7 +289,7 @@ impl FieldConverter {
   /// Generates `#[validate(email)]`, `#[validate(url)]`, `#[validate(range)]`,
   /// `#[validate(length)]`, and `#[validate(regex)]` based on format,
   /// min/max values, and pattern constraints.
-  pub(crate) fn extract_all_validation(
+  pub fn extract_all_validation(
     prop_name: &str,
     is_required: bool,
     schema: &ObjectSchema,
@@ -358,7 +358,7 @@ impl FieldConverter {
   /// and `foo_bar` both become `foo_bar`), this removes deprecated duplicates
   /// when a non-deprecated version exists, then appends `_2`, `_3`, etc.
   /// to remaining duplicates.
-  pub(crate) fn deduplicate_names(fields: Vec<FieldDef>) -> Vec<FieldDef> {
+  pub fn deduplicate_names(fields: Vec<FieldDef>) -> Vec<FieldDef> {
     let duplicate_names = fields
       .iter()
       .counts_by(|f| f.name.clone())

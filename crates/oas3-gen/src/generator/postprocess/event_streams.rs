@@ -27,10 +27,10 @@ use crate::{
 /// streams refer to becomes an alias of the frame it reads; one that other types or
 /// bodies also use stays a struct, and streams read the frame type in its place. A
 /// stream of payloads reads each one in a frame.
-pub(crate) struct FrameTypes;
+pub struct FrameTypes;
 
 impl FrameTypes {
-  pub(crate) fn process(types: &mut [RustType], operations: &mut [OperationInfo], target: GenerationTarget) {
+  pub fn process(types: &mut [RustType], operations: &mut [OperationInfo], target: GenerationTarget) {
     let items = operations
       .iter()
       .filter_map(|op| op.response_variants.as_deref())

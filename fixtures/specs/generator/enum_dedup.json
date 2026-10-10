@@ -1,0 +1,27 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Enum Deduplication", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "StructA": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "x-enum-descriptions": ["Object is active.", "Object is inactive."], "enum": ["active", "inactive"] }
+        }
+      },
+      "StructB": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "x-enum-descriptions": ["Object is active.", "Object is inactive."], "enum": ["active", "inactive"] }
+        }
+      },
+      "StructC": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "x-enum-descriptions": ["Object is inactive.", "Object is active."], "enum": ["inactive", "active"] }
+        }
+      }
+    }
+  }
+}

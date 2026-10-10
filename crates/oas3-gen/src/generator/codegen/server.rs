@@ -346,7 +346,7 @@ impl ToTokens for HandlerFunctionFragment<'_> {
 }
 
 /// Answers `400` with the error bound as `e` in the enclosing match arm.
-pub(super) fn bad_request() -> TokenStream {
+pub fn bad_request() -> TokenStream {
   quote! {
     (
       axum::http::StatusCode::BAD_REQUEST,

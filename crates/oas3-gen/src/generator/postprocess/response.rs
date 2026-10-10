@@ -31,7 +31,7 @@ type MergedHeader = (FieldDef, usize);
 /// variant it came from.
 type Body<'a> = (String, &'a TypeRef, &'a ResponseVariant);
 
-pub(crate) struct ResponseProcessor {
+pub struct ResponseProcessor {
   types: Vec<RustType>,
   operations: Vec<OperationInfo>,
   target: GenerationTarget,
@@ -56,7 +56,7 @@ impl<'a> TypeLookup<'a> {
 }
 
 impl ResponseProcessor {
-  pub(crate) fn new(types: Vec<RustType>, operations: Vec<OperationInfo>, target: GenerationTarget) -> Self {
+  pub fn new(types: Vec<RustType>, operations: Vec<OperationInfo>, target: GenerationTarget) -> Self {
     Self {
       types,
       operations,
@@ -69,7 +69,7 @@ impl ResponseProcessor {
     }
   }
 
-  pub(crate) fn process(mut self) -> (Vec<RustType>, Vec<OperationInfo>) {
+  pub fn process(mut self) -> (Vec<RustType>, Vec<OperationInfo>) {
     let Some(table) = status_table(&self.operations) else {
       return (self.types, self.operations);
     };

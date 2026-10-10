@@ -2,8 +2,9 @@
 resolver = "3"
 members = [
   "crates/*",
-  "crates/oas3-gen/fixtures/petstore-client",
-  "crates/oas3-gen/fixtures/petstore-server",
+  "fixtures/petstore-client",
+  "fixtures/petstore-server",
+  "tests",
 ]
 
 [workspace.package]
