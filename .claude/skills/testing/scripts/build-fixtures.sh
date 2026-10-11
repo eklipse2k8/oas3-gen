@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Regenerates fixtures/petstore-client and fixtures/petstore-server from fixtures/petstore.json,
-# then applies clippy fixes and nightly rustfmt so the output matches the committed fixtures.
+# marks both `publish = false`, then applies clippy fixes and nightly rustfmt so the output matches
+# the committed fixtures.
 # Prints the resulting fixture diff stat.
 set -euo pipefail
 
@@ -9,6 +10,7 @@ cd "$(git rev-parse --show-toplevel)"
 for side in client server; do
   cargo run -q -- generate "$side-mod" -i fixtures/petstore.json -o "fixtures/petstore-$side" \
     --workspace --enable-builders --all-schemas --all-headers > /dev/null
+  perl -pi -e '$_ .= "publish = false\n" if /^name = /' "fixtures/petstore-$side/Cargo.toml"
 done
 
 log="$(mktemp)"

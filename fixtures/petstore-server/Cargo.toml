@@ -3,6 +3,7 @@
 
 [package]
 name = "petstore-server"
+publish = false
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.89"

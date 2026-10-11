@@ -127,10 +127,12 @@ them by hand. Any change to generated output, from the generator or from
 ```
 
 The script regenerates both crates with `--workspace --enable-builders
---all-schemas --all-headers`, then runs `cargo clippy --fix` with
-`clippy::pedantic` and `cargo +nightly fmt`. Committed fixtures are post-clippy
-and post-rustfmt; without those two steps the diff fills with lint and
-formatting noise. It ends by printing `git diff --stat -- fixtures/`.
+--all-schemas --all-headers`, adds `publish = false` to each generated
+`Cargo.toml` so `cargo publish --workspace` skips them, then runs
+`cargo clippy --fix` with `clippy::pedantic` and `cargo +nightly fmt`. Committed
+fixtures are post-clippy and post-rustfmt; without those two steps the diff
+fills with lint and formatting noise. It ends by printing
+`git diff --stat -- fixtures/`.
 
 The fixture diff is how generated-output changes get reviewed. Read it before
 claiming a change is correct.
