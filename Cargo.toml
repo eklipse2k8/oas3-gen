@@ -100,3 +100,6 @@ toml = { version = "1.1.8", default-features = false, features = ["display", "se
 uuid = { version = "1.28", features = ["serde"] }
 yaml_serde = { version = "0.10" }
 validator = { version = "0.21" }
+
+[patch.crates-io]
+oas3-gen-support = { path = "crates/oas3-gen-support" }

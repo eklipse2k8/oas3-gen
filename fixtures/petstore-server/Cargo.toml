@@ -10,19 +10,19 @@ rust-version = "1.89"
 description = "Rust server generated from the Petstore OpenAPI document"
 
 [dependencies]
-anyhow = "1.0"
-axum = { version = "0.8.5", features = ["multipart"] }
-axum-extra = { version = "0.12", features = ["cookie", "query"] }
-bon = { version = "3.10", features = ["implied-bounds"] }
-chrono = { version = "0.4.42", default-features = false, features = ["std", "clock", "serde"] }
-futures = "0.3"
-http = "1.5"
-indexmap = { version = "2.14", features = ["serde"] }
-oas3-gen-support = "0.29.0"
-regex = "1.13"
-secrecy = "0.10"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", features = ["preserve_order"] }
-serde_with = { version = "3.24", features = ["base64", "chrono", "indexmap_2"] }
-uuid = { version = "1.28", features = ["serde"] }
-validator = { version = "0.21", features = ["derive", "indexmap"] }
+anyhow.workspace = true
+axum = { workspace = true, features = ["multipart"] }
+axum-extra = { workspace = true, features = ["cookie", "query"] }
+bon = { workspace = true, features = ["implied-bounds"] }
+chrono = { workspace = true, default-features = false, features = ["std", "clock", "serde"] }
+futures.workspace = true
+http.workspace = true
+indexmap = { workspace = true, features = ["serde"] }
+oas3-gen-support.workspace = true
+regex.workspace = true
+secrecy.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+serde_with = { workspace = true, features = ["base64", "chrono", "indexmap_2"] }
+uuid = { workspace = true, features = ["serde"] }
+validator = { workspace = true, features = ["derive", "indexmap"] }
