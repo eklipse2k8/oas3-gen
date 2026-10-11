@@ -5,9 +5,10 @@ use quote::{ToTokens, TokenStreamExt as _, quote};
 use strum::Display;
 
 use super::{
-  DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponseUnionDef, SerdeMode, StructDef, StructKind,
-  VariantContent,
+  DiscriminatedEnumDef, EnumDef, EnumDefault, ResponseEnumDef, ResponsePayload, ResponseUnionDef, SerdeMode, StructDef,
+  StructKind, VariantContent,
 };
+use crate::generator::converter::GenerationTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SerdeImpl {
@@ -148,7 +149,16 @@ impl DerivesProvider for EnumDef {
 impl EnumDef {
   #[must_use]
   pub fn is_simple(&self) -> bool {
-    self.variants.iter().all(|v| matches!(v.content, VariantContent::Unit))
+    self
+      .listed_variants()
+      .iter()
+      .all(|v| matches!(v.content, VariantContent::Unit))
+  }
+
+  /// Whether the enum round-trips as text through `Display` and `FromStr`.
+  #[must_use]
+  pub fn is_text_form(&self) -> bool {
+    self.generate_display && self.is_simple()
   }
 }
 
@@ -174,7 +184,11 @@ impl DerivesProvider for DiscriminatedEnumDef {
 
 impl DerivesProvider for ResponseEnumDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
+    if self.has_param(ResponsePayload::Unread) {
+      BTreeSet::from([DeriveTrait::Debug])
+    } else {
+      BTreeSet::from([DeriveTrait::Debug, DeriveTrait::Clone])
+    }
   }
 
   fn is_serializable(&self) -> SerdeImpl {
@@ -188,32 +202,21 @@ impl DerivesProvider for ResponseEnumDef {
 
 impl DerivesProvider for ResponseUnionDef {
   fn derives(&self) -> BTreeSet<DeriveTrait> {
-    let mut derives = BTreeSet::from([DeriveTrait::Debug]);
-
-    if !self.streaming {
+    let mut derives = BTreeSet::new();
+    if self.streaming != Some(GenerationTarget::Server) {
+      derives.insert(DeriveTrait::Debug);
+    }
+    if self.streaming.is_none() {
       derives.insert(DeriveTrait::Clone);
     }
-    if self.is_serializable() == SerdeImpl::Derive {
-      derives.insert(DeriveTrait::Serialize);
-    }
-    if self.is_deserializable() == SerdeImpl::Derive {
-      derives.insert(DeriveTrait::Deserialize);
-    }
-
     derives
   }
 
   fn is_serializable(&self) -> SerdeImpl {
-    match self.serde_mode {
-      SerdeMode::SerializeOnly | SerdeMode::Both if !self.streaming => SerdeImpl::Derive,
-      _ => SerdeImpl::None,
-    }
+    SerdeImpl::None
   }
 
   fn is_deserializable(&self) -> SerdeImpl {
-    match self.serde_mode {
-      SerdeMode::DeserializeOnly | SerdeMode::Both if !self.streaming => SerdeImpl::Derive,
-      _ => SerdeImpl::None,
-    }
+    SerdeImpl::None
   }
 }

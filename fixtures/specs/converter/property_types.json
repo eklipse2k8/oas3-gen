@@ -1,0 +1,40 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Property types", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "CustomType": { "type": "object", "properties": { "field": { "type": "string" } } },
+      "Ephemeral": { "type": "object", "properties": { "type": { "type": "string", "const": "ephemeral" } } },
+      "Summary": {
+        "type": "array",
+        "items": { "oneOf": [{ "$ref": "#/components/schemas/CustomType" }, { "$ref": "#/components/schemas/Ephemeral" }] }
+      },
+      "Holder": {
+        "type": "object",
+        "properties": {
+          "titled": { "title": "CustomType" },
+          "titled_string": { "title": "CustomType", "type": "string" },
+          "float": { "type": "number", "format": "float" },
+          "null": { "type": "null" },
+          "items_true": { "type": "array", "items": true },
+          "no_items": { "type": "array" },
+          "unique": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "map": { "type": "object", "additionalProperties": { "type": "string" } },
+          "map_true": { "type": "object", "additionalProperties": true },
+          "map_empty": { "type": "object", "additionalProperties": {} },
+          "map_false": { "type": "object", "additionalProperties": false },
+          "const_int": { "const": 42 },
+          "const_float": { "const": 3.5 },
+          "const_bool": { "const": true },
+          "const_object": { "const": { "key": "value" } },
+          "anything": true,
+          "impossible": false,
+          "nested_nullable": { "oneOf": [{ "oneOf": [{ "$ref": "#/components/schemas/Ephemeral" }] }, { "type": "null" }] },
+          "strings_or_null": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
+          "summary": { "$ref": "#/components/schemas/Summary" }
+        }
+      }
+    }
+  }
+}

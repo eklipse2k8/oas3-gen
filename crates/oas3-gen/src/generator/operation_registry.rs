@@ -79,6 +79,18 @@ impl OperationFilter {
 
     true
   }
+
+  /// Returns whether a callback passes this filter. Either the ID of the operation
+  /// that declares it or the callback's own ID can include or exclude it.
+  #[must_use]
+  pub fn accepts_callback<O, C>(&self, owner_id: O, callback_id: C) -> bool
+  where
+    O: AsRef<str>,
+    C: AsRef<str>,
+  {
+    let names_either = |ids: &HashSet<String>| ids.contains(owner_id.as_ref()) || ids.contains(callback_id.as_ref());
+    self.only.as_ref().is_none_or(names_either) && !self.excluded.as_ref().is_some_and(names_either)
+  }
 }
 
 /// Internal context for collecting operations during the build process.
@@ -91,6 +103,44 @@ impl RegistrationContext {
   /// Registers an operation entry with its stable ID as the key.
   fn register(&mut self, entry: OperationEntry) {
     self.entries.insert(entry.stable_id.clone(), entry);
+  }
+
+  /// Registers `operation` under a stable ID made unique from `base_id`, unless
+  /// `filter` rejects `base_id`.
+  fn register_accepted(
+    &mut self,
+    filter: &OperationFilter,
+    base_id: &str,
+    method: &Method,
+    path: String,
+    operation: &Operation,
+    kind: OperationKind,
+  ) {
+    if !filter.accepts(base_id) {
+      return;
+    }
+
+    self.register_unique(base_id, method, path, operation, kind);
+  }
+
+  /// Registers `operation` under a stable ID made unique from `base_id`.
+  fn register_unique(
+    &mut self,
+    base_id: &str,
+    method: &Method,
+    path: String,
+    operation: &Operation,
+    kind: OperationKind,
+  ) {
+    let stable_id = ensure_unique_snake_case_id(base_id, |id| self.contains_id(id));
+
+    self.register(OperationEntry {
+      stable_id,
+      method: method.clone(),
+      path,
+      operation: Rc::new(operation.clone()),
+      kind,
+    });
   }
 
   /// Returns whether the given ID is already registered.
@@ -143,10 +193,8 @@ struct HttpOperationSource {
 
 impl HttpOperationSource {
   /// Creates a new HTTP operation source from the given specification.
-  fn new(spec: &Spec) -> Self {
-    Self {
-      spec: Rc::new(spec.clone()),
-    }
+  fn new(spec: Rc<Spec>) -> Self {
+    Self { spec }
   }
 }
 
@@ -154,20 +202,7 @@ impl OperationSource for HttpOperationSource {
   fn ingest(&self, context: &mut RegistrationContext, filter: &OperationFilter) {
     for (path, method, operation) in self.spec.operations() {
       let base_id = compute_stable_id(method.as_str(), &path, operation.operation_id.as_deref());
-
-      if !filter.accepts(&base_id) {
-        continue;
-      }
-
-      let stable_id = ensure_unique_snake_case_id(&base_id, |id| context.contains_id(id));
-
-      context.register(OperationEntry {
-        stable_id,
-        method: method.clone(),
-        path,
-        operation: Rc::new(operation.clone()),
-        kind: OperationKind::Http,
-      });
+      context.register_accepted(filter, &base_id, &method, path, operation, OperationKind::Http);
     }
   }
 }
@@ -179,10 +214,8 @@ struct WebhookOperationSource {
 
 impl WebhookOperationSource {
   /// Creates a new webhook operation source from the given specification.
-  fn new(spec: &Spec) -> Self {
-    Self {
-      spec: Rc::new(spec.clone()),
-    }
+  fn new(spec: Rc<Spec>) -> Self {
+    Self { spec }
   }
 }
 
@@ -192,20 +225,80 @@ impl OperationSource for WebhookOperationSource {
       for (method, operation) in path_item.methods() {
         let display_path = format!("webhooks/{name}");
         let base_id = compute_stable_id(method.as_str(), &display_path, operation.operation_id.as_deref());
+        context.register_accepted(
+          filter,
+          &base_id,
+          &method,
+          display_path,
+          operation,
+          OperationKind::Webhook,
+        );
+      }
+    }
+  }
+}
 
-        if !filter.accepts(&base_id) {
+/// Source that extracts the callbacks HTTP operations declare.
+///
+/// A callback's URL is a runtime expression the caller supplies, so the generated
+/// server receives each callback at `callbacks/{operationId}/{callbackName}`, the
+/// path a caller registers under its own host. A callback with several expressions
+/// appends each one's position.
+struct CallbackOperationSource {
+  spec: Rc<Spec>,
+}
+
+impl CallbackOperationSource {
+  /// Creates a new callback operation source from the given specification.
+  fn new(spec: Rc<Spec>) -> Self {
+    Self { spec }
+  }
+}
+
+impl OperationSource for CallbackOperationSource {
+  fn ingest(&self, context: &mut RegistrationContext, filter: &OperationFilter) {
+    for (path, method, operation) in self.spec.operations() {
+      if operation.callbacks.is_empty() {
+        continue;
+      }
+      let owner = operation
+        .operation_id
+        .clone()
+        .unwrap_or_else(|| compute_stable_id(method.as_str(), &path, None));
+      let owner_id = compute_stable_id(method.as_str(), &path, operation.operation_id.as_deref());
+
+      for (name, callback) in &operation.callbacks {
+        let Ok(callback) = callback.resolve(&self.spec) else {
           continue;
+        };
+        let several = callback.paths.len() > 1;
+        let fallback_id = format!("{owner}_{name}");
+
+        for (position, path_item) in callback.paths.values().enumerate() {
+          let display_path = if several {
+            format!("callbacks/{owner}/{name}/{position}")
+          } else {
+            format!("callbacks/{owner}/{name}")
+          };
+
+          for (callback_method, callback_operation) in path_item.methods() {
+            let base_id = compute_stable_id(
+              callback_method.as_str(),
+              display_path.as_str(),
+              Some(callback_operation.operation_id.as_deref().unwrap_or(&fallback_id)),
+            );
+            if !filter.accepts_callback(&owner_id, &base_id) {
+              continue;
+            }
+            context.register_unique(
+              &base_id,
+              &callback_method,
+              display_path.clone(),
+              callback_operation,
+              OperationKind::Callback,
+            );
+          }
         }
-
-        let stable_id = ensure_unique_snake_case_id(&base_id, |id| context.contains_id(id));
-
-        context.register(OperationEntry {
-          stable_id,
-          method: method.clone(),
-          path: display_path,
-          operation: Rc::new(operation.clone()),
-          kind: OperationKind::Webhook,
-        });
       }
     }
   }
@@ -215,6 +308,7 @@ impl OperationSource for WebhookOperationSource {
 #[derive(Default)]
 struct OperationRegistryBuilder {
   sources: Vec<Box<dyn OperationSource>>,
+  callback_sources: Vec<Box<dyn OperationSource>>,
   filter: OperationFilter,
   fn_name_overrides: HashMap<String, String>,
 }
@@ -243,10 +337,18 @@ impl OperationRegistryBuilder {
     self
   }
 
+  /// Adds a callback source, ingested after the other sources' identifiers are
+  /// simplified so callback IDs never change how those are trimmed.
+  fn with_callback_source<S: OperationSource + 'static>(mut self, source: S) -> Self {
+    self.callback_sources.push(Box::new(source));
+    self
+  }
+
   /// Consumes this builder and constructs the final [`OperationRegistry`].
   ///
-  /// This ingests all operations from registered sources, applies the filter,
-  /// simplifies the resulting identifiers, and applies function name overrides.
+  /// This ingests operations from the sources, applies the filter, simplifies the
+  /// resulting identifiers, ingests the callback sources, and applies function name
+  /// overrides.
   fn build(self) -> OperationRegistry {
     let mut context = RegistrationContext::default();
 
@@ -255,6 +357,10 @@ impl OperationRegistryBuilder {
     }
 
     context.simplify_keys();
+
+    for source in &self.callback_sources {
+      source.ingest(&mut context, &self.filter);
+    }
 
     let mut entries = context.into_entries();
     apply_fn_name_overrides(&mut entries, &self.fn_name_overrides);
@@ -297,7 +403,7 @@ fn apply_fn_name_overrides(entries: &mut [OperationEntry], overrides: &HashMap<S
 /// operation identifiers to valid Rust method names.
 #[derive(Debug)]
 pub struct OperationRegistry {
-  pub(crate) entries: Vec<OperationEntry>,
+  pub entries: Vec<OperationEntry>,
 }
 
 impl OperationRegistry {
@@ -316,19 +422,21 @@ impl OperationRegistry {
     excluded_operations: Option<&HashSet<String>>,
     fn_name_overrides: &HashMap<String, String>,
   ) -> Self {
+    let spec = Rc::new(spec.clone());
     OperationRegistryBuilder::new()
       .with_filter(OperationFilter::new(only_operations, excluded_operations))
       .with_fn_name_overrides(fn_name_overrides)
-      .with_source(HttpOperationSource::new(spec))
-      .with_source(WebhookOperationSource::new(spec))
+      .with_source(HttpOperationSource::new(Rc::clone(&spec)))
+      .with_source(WebhookOperationSource::new(Rc::clone(&spec)))
+      .with_callback_source(CallbackOperationSource::new(spec))
       .build()
   }
 
   /// Returns an iterator over all registered operations.
   ///
   /// Operations are yielded in the order they were registered (HTTP
-  /// operations first, then webhooks), with original specification order
-  /// preserved within each category.
+  /// operations first, then webhooks, then callbacks), with original
+  /// specification order preserved within each category.
   pub fn operations(&self) -> impl Iterator<Item = &OperationEntry> {
     self.entries.iter()
   }

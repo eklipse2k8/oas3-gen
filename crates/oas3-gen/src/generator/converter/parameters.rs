@@ -12,8 +12,8 @@ use crate::{
     },
     converter::ConverterContext,
     naming::constants::{
-      HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD, PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD,
-      QUERY_PARAMS_SUFFIX,
+      COOKIE_PARAMS_FIELD, COOKIE_PARAMS_SUFFIX, HEADER_PARAMS_FIELD, HEADER_PARAMS_SUFFIX, PATH_PARAMS_FIELD,
+      PATH_PARAMS_SUFFIX, QUERY_PARAMS_FIELD, QUERY_PARAMS_SUFFIX,
     },
   },
   utils::schema_ext::SchemaExtIters,
@@ -29,12 +29,12 @@ const IGNORED_HEADER_PARAMETERS: [&str; 3] = ["Accept", "Content-Type", "Authori
 /// parameter groups (path, query, header), and any inline types
 /// generated from parameter schemas.
 #[derive(Debug, Clone)]
-pub(crate) struct ConvertedParams {
-  pub(crate) main_fields: Vec<FieldDef>,
-  pub(crate) nested_structs: Vec<StructDef>,
-  pub(crate) all_fields: Vec<FieldDef>,
-  pub(crate) inline_types: Vec<RustType>,
-  pub(crate) warnings: Vec<String>,
+pub struct ConvertedParams {
+  pub main_fields: Vec<FieldDef>,
+  pub nested_structs: Vec<StructDef>,
+  pub all_fields: Vec<FieldDef>,
+  pub inline_types: Vec<RustType>,
+  pub warnings: Vec<String>,
 }
 
 /// Converts OpenAPI parameters into Rust field definitions.
@@ -42,14 +42,14 @@ pub(crate) struct ConvertedParams {
 /// Groups parameters by location (path, query, header) and generates
 /// nested structs for each group.
 #[derive(Debug, Clone)]
-pub(crate) struct ParameterConverter {
+pub struct ParameterConverter {
   context: Rc<ConverterContext>,
   field_converter: FieldConverter,
 }
 
 impl ParameterConverter {
   /// Creates a new parameter converter.
-  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+  pub fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       context: context.clone(),
       field_converter: FieldConverter::new(context),
@@ -60,12 +60,7 @@ impl ParameterConverter {
   ///
   /// Collects parameters from both path-level and operation-level definitions,
   /// synthesizes missing path parameters, and groups them into nested structs.
-  pub(crate) fn convert_all(
-    &self,
-    request_name: &str,
-    path: &str,
-    operation: &Operation,
-  ) -> anyhow::Result<ConvertedParams> {
+  pub fn convert_all(&self, request_name: &str, path: &str, operation: &Operation) -> anyhow::Result<ConvertedParams> {
     let mut collector = Collector::new(request_name);
     let mut inline_types = vec![];
     let mut warnings = vec![];
@@ -243,6 +238,7 @@ struct Collector {
   path: ParamGroup,
   query: ParamGroup,
   header: ParamGroup,
+  cookie: ParamGroup,
   all: Vec<FieldDef>,
 }
 
@@ -268,6 +264,12 @@ impl Collector {
         HEADER_PARAMS_FIELD,
         StructKind::HeaderParams,
       ),
+      cookie: ParamGroup::new(
+        request_name,
+        COOKIE_PARAMS_SUFFIX,
+        COOKIE_PARAMS_FIELD,
+        StructKind::CookieParams,
+      ),
       all: vec![],
     }
   }
@@ -276,8 +278,9 @@ impl Collector {
   fn parent_name(&self, location: ParameterLocation) -> &str {
     match location {
       ParameterLocation::Path => &self.path.struct_name,
-      ParameterLocation::Query | ParameterLocation::Cookie => &self.query.struct_name,
+      ParameterLocation::Query => &self.query.struct_name,
       ParameterLocation::Header => &self.header.struct_name,
+      ParameterLocation::Cookie => &self.cookie.struct_name,
     }
   }
 
@@ -288,13 +291,13 @@ impl Collector {
       ParameterLocation::Path => self.path.fields.push(field),
       ParameterLocation::Query => self.query.fields.push(field),
       ParameterLocation::Header => self.header.fields.push(field),
-      ParameterLocation::Cookie => {}
+      ParameterLocation::Cookie => self.cookie.fields.push(field),
     }
   }
 
   /// Consumes the collector and produces main fields and nested structs.
   fn finish(self) -> (Vec<FieldDef>, Vec<StructDef>, Vec<FieldDef>) {
-    let (main_fields, nested_structs) = [self.path, self.query, self.header]
+    let (main_fields, nested_structs) = [self.path, self.query, self.header, self.cookie]
       .into_iter()
       .filter_map(ParamGroup::into_structs)
       .unzip();

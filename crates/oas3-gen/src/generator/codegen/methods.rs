@@ -6,7 +6,7 @@ use crate::generator::{
   codegen::Visibility,
 };
 
-pub(crate) trait HelperMethodParts {
+pub trait HelperMethodParts {
   type Kind;
   fn method(&self) -> &MethodNode<Self::Kind>;
   fn parameters(&self) -> impl ToTokens;
@@ -14,7 +14,7 @@ pub(crate) trait HelperMethodParts {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct HelperMethodFragment<'a, Parts>(Visibility, &'a Parts)
+pub struct HelperMethodFragment<'a, Parts>(Visibility, &'a Parts)
 where
   Parts: HelperMethodParts;
 
@@ -22,7 +22,7 @@ impl<'a, Parts> HelperMethodFragment<'a, Parts>
 where
   Parts: HelperMethodParts,
 {
-  pub(crate) fn new(vis: Visibility, node: &'a Parts) -> Self {
+  pub fn new(vis: Visibility, node: &'a Parts) -> Self {
     Self(vis, node)
   }
 }
@@ -51,10 +51,10 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FieldFunctionParameterFragment<'a>(&'a FieldDef);
+pub struct FieldFunctionParameterFragment<'a>(&'a FieldDef);
 
 impl<'a> FieldFunctionParameterFragment<'a> {
-  pub(crate) fn new(field: &'a FieldDef) -> Self {
+  pub fn new(field: &'a FieldDef) -> Self {
     Self(field)
   }
 }
@@ -71,10 +71,10 @@ impl ToTokens for FieldFunctionParameterFragment<'_> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct StructConstructorFragment<'a>(&'a TypeRef, &'a [FieldDef]);
+pub struct StructConstructorFragment<'a>(&'a TypeRef, &'a [FieldDef]);
 
 impl<'a> StructConstructorFragment<'a> {
-  pub(crate) fn new(type_token: &'a TypeRef, fields: &'a [FieldDef]) -> Self {
+  pub fn new(type_token: &'a TypeRef, fields: &'a [FieldDef]) -> Self {
     Self(type_token, fields)
   }
 }

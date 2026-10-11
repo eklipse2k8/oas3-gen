@@ -1,12 +1,10 @@
-mod defaults;
-mod multipart;
-mod response;
-mod serde_usage;
-mod uses;
-mod validation;
-
-#[cfg(test)]
-mod tests;
+pub mod defaults;
+pub mod event_streams;
+pub mod multipart;
+pub mod response;
+pub mod serde_usage;
+pub mod uses;
+pub mod validation;
 
 use std::collections::BTreeSet;
 
@@ -16,6 +14,7 @@ use crate::generator::{
   metrics::GenerationWarning,
   postprocess::{
     defaults::FieldDefaultProcessor,
+    event_streams::FrameTypes,
     multipart::MultipartProcessor,
     response::ResponseProcessor,
     serde_usage::SerdeUsage,
@@ -34,13 +33,14 @@ pub struct PostprocessOutput {
 }
 
 impl PostprocessOutput {
-  pub(crate) fn new(
-    types: Vec<RustType>,
-    operations: Vec<OperationInfo>,
+  pub fn new(
+    mut types: Vec<RustType>,
+    mut operations: Vec<OperationInfo>,
     seed_usage: std::collections::BTreeMap<EnumToken, (bool, bool)>,
     target: GenerationTarget,
     header_refs: Vec<HttpHeaderRef>,
   ) -> Self {
+    FrameTypes::process(&mut types, &mut operations, target);
     let (mut types, mut operations) = ResponseProcessor::new(types, operations, target).process();
 
     NestedValidationProcessor::new(&types).process(&mut types);

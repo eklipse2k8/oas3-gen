@@ -27,9 +27,9 @@ use crate::{
 /// Contains generated types (request struct, response enum, inline types)
 /// and metadata about the operation (path, method, parameters).
 #[derive(Debug, Clone)]
-pub(crate) struct ConversionResult {
-  pub(crate) types: Vec<RustType>,
-  pub(crate) operation_info: OperationInfo,
+pub struct ConversionResult {
+  pub types: Vec<RustType>,
+  pub operation_info: OperationInfo,
 }
 
 /// Aggregate result of converting all operations in a specification.
@@ -37,12 +37,12 @@ pub(crate) struct ConversionResult {
 /// Collects types, operation metadata, warnings, and type usage data
 /// from the full conversion pass.
 #[derive(Debug, Clone)]
-pub(crate) struct OperationsOutput {
-  pub(crate) types: Vec<RustType>,
-  pub(crate) operations: Vec<OperationInfo>,
-  pub(crate) warnings: Vec<GenerationWarning>,
-  pub(crate) usage_recorder: SerdeUsageRecorder,
-  pub(crate) unique_headers: IndexSet<HttpHeaderRef>,
+pub struct OperationsOutput {
+  pub types: Vec<RustType>,
+  pub operations: Vec<OperationInfo>,
+  pub warnings: Vec<GenerationWarning>,
+  pub usage_recorder: SerdeUsageRecorder,
+  pub unique_headers: IndexSet<HttpHeaderRef>,
 }
 
 /// Orchestrates conversion of all operations in a specification.
@@ -50,14 +50,14 @@ pub(crate) struct OperationsOutput {
 /// Iterates over operation entries, converts each to request/response
 /// types, and aggregates results with error handling and warning collection.
 #[derive(Debug, Clone)]
-pub(crate) struct OperationsProcessor {
+pub struct OperationsProcessor {
   context: Rc<ConverterContext>,
   converter: OperationConverter,
 }
 
 impl OperationsProcessor {
   /// Creates a new operations processor with the shared converter context.
-  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: &SchemaConverter) -> Self {
+  pub fn new(context: Rc<ConverterContext>, schema_converter: &SchemaConverter) -> Self {
     let converter = OperationConverter::new(context.clone(), schema_converter.clone());
     Self { context, converter }
   }
@@ -67,14 +67,14 @@ impl OperationsProcessor {
   /// Operations that fail to convert emit warnings rather than failing
   /// the entire generation. Returns accumulated type usage data for
   /// serde derive optimization in postprocessing.
-  pub(crate) fn process_all<'a>(&self, entries: impl Iterator<Item = &'a OperationEntry>) -> OperationsOutput {
+  pub fn process_all<'a>(&self, entries: impl Iterator<Item = &'a OperationEntry>) -> OperationsOutput {
     let entries = entries.collect::<Vec<_>>();
     let mut types = vec![];
     let mut operations = vec![];
     let mut warnings = self
       .converter
       .security
-      .unsupported_warnings(entries.iter().map(|entry| entry.operation.as_ref()));
+      .unsupported_warnings(entries.iter().map(|entry| (entry.operation.as_ref(), entry.kind)));
     let mut unique_headers = IndexSet::new();
 
     for entry in entries {
@@ -129,7 +129,7 @@ type RequestTypes = (Vec<RustType>, Option<StructToken>);
 /// Coordinates [`RequestConverter`] and [`ResponseConverter`] to transform
 /// operation definitions into request types and response variants.
 #[derive(Debug, Clone)]
-pub(crate) struct OperationConverter {
+pub struct OperationConverter {
   context: Rc<ConverterContext>,
   schema_converter: SchemaConverter,
   response_converter: ResponseConverter,
@@ -139,7 +139,7 @@ pub(crate) struct OperationConverter {
 
 impl OperationConverter {
   /// Creates a new operation converter with request and response sub-converters.
-  pub(crate) fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
+  pub fn new(context: Rc<ConverterContext>, schema_converter: SchemaConverter) -> Self {
     let response_converter = ResponseConverter::new(context.clone());
     let request_converter = RequestConverter::new(&context);
     let security = SecurityConverter::new(&context);
@@ -158,7 +158,7 @@ impl OperationConverter {
   /// Generates the request struct (with parameters and body), collects the
   /// declared response variants, and records operation metadata for
   /// client/server code generation.
-  pub(crate) fn convert(&self, entry: &OperationEntry) -> anyhow::Result<ConversionResult> {
+  pub fn convert(&self, entry: &OperationEntry) -> anyhow::Result<ConversionResult> {
     let base_name = to_rust_type_name(&entry.stable_id);
     let body_info = BodyInfo::new(&self.context, entry)?;
 
@@ -167,7 +167,7 @@ impl OperationConverter {
     let response_variants = self
       .response_converter
       .build_variants(&entry.operation, &entry.path, &base_name)?;
-    let security = self.security.convert(&entry.operation);
+    let security = self.security.convert(&entry.operation, entry.kind);
     let credentials_type = security
       .as_ref()
       .filter(|_| self.context.config().target == GenerationTarget::Server)
@@ -294,6 +294,7 @@ impl OperationConverter {
             .path(&entry.path)
             .call(),
         )
+        .deprecated(entry.operation.deprecated.unwrap_or(false))
         .build(),
     )
   }

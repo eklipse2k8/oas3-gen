@@ -1,0 +1,14 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Undeclared Path Parameters", "version": "1.0.0" },
+  "paths": {
+    "/projects/{projectKey}/repos/{repositorySlug}/status": {
+      "get": {
+        "operationId": "getRepoStatus",
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "type": "string" } } } }
+        }
+      }
+    }
+  }
+}

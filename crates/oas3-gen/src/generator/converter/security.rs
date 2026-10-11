@@ -7,8 +7,8 @@ use oas3::spec::{Operation, SecurityRequirement, SecurityScheme};
 use super::{ConverterContext, GenerationTarget};
 use crate::generator::{
   ast::{
-    CredentialKind, CredentialScheme, Documentation, FieldNameToken, OperationInfo, OperationSecurity, RustType,
-    StructDef, StructKind, StructToken,
+    CredentialKind, CredentialScheme, Documentation, FieldNameToken, OperationInfo, OperationKind, OperationSecurity,
+    RustType, StructDef, StructKind, StructToken,
   },
   metrics::GenerationWarning,
   naming::{
@@ -32,14 +32,14 @@ const SUPPORTED_SCHEMES: &str = "only `apiKey` schemes and `http` schemes using 
 /// code, so it leaves every credential of the operation optional, including the
 /// ones it names itself.
 #[derive(Debug, Clone)]
-pub(crate) struct SecurityConverter {
+pub struct SecurityConverter {
   context: Rc<ConverterContext>,
   declared: IndexMap<String, DeclaredScheme>,
   global: Vec<SecurityRequirement>,
 }
 
 impl SecurityConverter {
-  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+  pub fn new(context: &Rc<ConverterContext>) -> Self {
     let spec = context.graph().spec();
     let schemes = spec
       .components
@@ -73,15 +73,17 @@ impl SecurityConverter {
 
   /// Resolves the credentials `operation` accepts, or `None` when it accepts none.
   ///
-  /// Operation-level `security` replaces the top-level requirements. Schemes keep
-  /// their declaration order and requirements are sorted, so operations that list
-  /// the same alternatives in a different order share one credentials struct.
-  pub(crate) fn convert(&self, operation: &Operation) -> Option<OperationSecurity> {
+  /// Operation-level `security` replaces the top-level requirements, which only an
+  /// operation the API serves inherits: a callback is a request the API sends, so it
+  /// carries only its own requirements. Schemes keep their declaration order and
+  /// requirements are sorted, so operations that list the same alternatives in a
+  /// different order share one credentials struct.
+  pub fn convert(&self, operation: &Operation, kind: OperationKind) -> Option<OperationSecurity> {
     let mut schemes = vec![];
     let mut requirements = vec![];
     let mut unchecked = false;
 
-    for requirement in self.requirements(operation) {
+    for requirement in self.requirements(operation, kind) {
       let resolved = requirement.0.keys().map(|name| self.scheme(name)).collect::<Vec<_>>();
       if resolved.iter().all(Result::is_ok) {
         requirements.push(resolved.iter().flatten().map(|scheme| scheme.field.clone()).collect());
@@ -109,7 +111,7 @@ impl SecurityConverter {
   /// Returns the server credentials struct name for `security`, reserving it on first use.
   ///
   /// Operations with the same security share one struct, named after its schemes.
-  pub(crate) fn credentials_type(&self, security: &OperationSecurity) -> StructToken {
+  pub fn credentials_type(&self, security: &OperationSecurity) -> StructToken {
     let mut cache = self.context.cache_mut();
     if let Some(name) = cache.credentials_type(security) {
       return name.clone();
@@ -126,15 +128,15 @@ impl SecurityConverter {
 
   /// Warns once for each security scheme the operations reference but get no
   /// credentials for.
-  pub(crate) fn unsupported_warnings<'a>(
+  pub fn unsupported_warnings<'a>(
     &self,
-    operations: impl IntoIterator<Item = &'a Operation>,
+    operations: impl IntoIterator<Item = (&'a Operation, OperationKind)>,
   ) -> Vec<GenerationWarning> {
     let mut reasons = IndexMap::<&str, &str>::new();
 
-    for operation in operations {
+    for (operation, kind) in operations {
       for name in self
-        .requirements(operation)
+        .requirements(operation, kind)
         .iter()
         .flat_map(|requirement| requirement.0.keys())
       {
@@ -162,8 +164,8 @@ impl SecurityConverter {
     }
   }
 
-  fn requirements<'a>(&'a self, operation: &'a Operation) -> &'a [SecurityRequirement] {
-    if operation.security.is_empty() {
+  fn requirements<'a>(&'a self, operation: &'a Operation, kind: OperationKind) -> &'a [SecurityRequirement] {
+    if operation.security.is_empty() && kind != OperationKind::Callback {
       &self.global
     } else {
       &operation.security
@@ -173,7 +175,7 @@ impl SecurityConverter {
 
 /// The credentials structs that `operations` use, once each, so an operation that
 /// failed to convert leaves no struct behind.
-pub(crate) fn credentials_structs(operations: &[OperationInfo]) -> impl Iterator<Item = RustType> {
+pub fn credentials_structs(operations: &[OperationInfo]) -> impl Iterator<Item = RustType> {
   operations
     .iter()
     .filter_map(|operation| operation.credentials_type.as_ref().zip(operation.security.as_ref()))

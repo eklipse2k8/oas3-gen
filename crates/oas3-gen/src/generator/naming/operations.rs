@@ -26,20 +26,20 @@ where
 /// `QueryKeyAndSessionCookieCredentials`, before it is made unique.
 ///
 /// `schemes` are security scheme names in declaration order.
-pub(crate) fn credentials_name<'a>(schemes: impl IntoIterator<Item = &'a str>) -> String {
+pub fn credentials_name<'a>(schemes: impl IntoIterator<Item = &'a str>) -> String {
   let base = schemes.into_iter().map(to_rust_type_name).join(CREDENTIALS_SEPARATOR);
   format!("{base}{CREDENTIALS_SUFFIX}")
 }
 
 /// Names the request field that holds an operation's credentials, avoiding the
 /// parameter names that `--enable-builders` flattens into the same constructor.
-pub(crate) fn credentials_field_name(parameters: &[&str]) -> String {
+pub fn credentials_field_name(parameters: &[&str]) -> String {
   ensure_unique_snake_case_id(CREDENTIALS_FIELD, |id| parameters.contains(&id))
 }
 
 /// Assigns each security scheme a distinct field name, avoiding `reserved` names,
 /// e.g. `ApiKey` and `api_key` become `api_key` and `api_key_2`.
-pub(crate) fn credential_field_names<'a>(schemes: impl IntoIterator<Item = &'a str>, reserved: &[&str]) -> Vec<String> {
+pub fn credential_field_names<'a>(schemes: impl IntoIterator<Item = &'a str>, reserved: &[&str]) -> Vec<String> {
   let mut taken = reserved.iter().map(ToString::to_string).collect::<HashSet<_>>();
   let mut fields = vec![];
   for scheme in schemes {
@@ -114,7 +114,7 @@ where
   to_rust_field_name(&operation_id.map_or_else(|| generate_operation_id(method, path), |s| s.as_ref().to_string()))
 }
 
-pub(crate) fn generate_operation_id<S>(method: S, path: S) -> String
+pub fn generate_operation_id<S>(method: S, path: S) -> String
 where
   S: AsRef<str>,
 {

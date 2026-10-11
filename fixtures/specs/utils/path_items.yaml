@@ -1,0 +1,20 @@
+openapi: 3.1.0
+info: { title: t, version: '1' }
+security: [{ Key: [] }]
+paths:
+  /cleared: { get: { security: [], responses: { 200: { description: ok } } } }
+  /anonymous: { get: { security: [{}], responses: {} } }
+  /inherited: { get: { responses: {} } }
+  /own: { get: { security: [{ Other: [] }], responses: {} } }
+  /direct: { $ref: '#/components/pathItems/Direct', summary: local }
+  /chained: { $ref: '#/components/pathItems/Alias' }
+  /missing: { $ref: '#/components/pathItems/Missing' }
+  /looping: { $ref: '#/components/pathItems/Loop' }
+webhooks:
+  ping: { $ref: '#/components/pathItems/Public' }
+components:
+  pathItems:
+    Direct: { summary: shared, get: { operationId: readDirect, responses: { 200: { description: ok } } } }
+    Alias: { $ref: '#/components/pathItems/Direct', post: { operationId: writeAlias, responses: {} } }
+    Public: { post: { operationId: ping, security: [], responses: { 204: { description: done } } } }
+    Loop: { $ref: '#/components/pathItems/Loop' }

@@ -45,7 +45,7 @@ stage 4-5 only; it does not feed back to stages 2-3.
 
 - Stages never mutate earlier stages' outputs.
 - Spec declaration order survives to generated output; see
-  [coding-standards.md](coding-standards.md#collections).
+  the [rust skill](../.claude/skills/rust/SKILL.md#collections).
 - Generation is a pure function of (spec, `CodegenConfig`). No clocks, no filesystem reads, no
   hash-order iteration.
 - `CodegenConfig` (`converter/mod.rs`) carries all CLI-driven policy. Route new options through it

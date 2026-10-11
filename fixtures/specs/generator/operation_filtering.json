@@ -1,0 +1,40 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Operation Filtering", "version": "1.0.0" },
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "responses": { "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PetPage" } } } } }
+      }
+    },
+    "/adoptions": {
+      "post": {
+        "operationId": "adoptPet",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdoptionForm" } } } },
+        "responses": { "204": { "description": "ok" } }
+      }
+    },
+    "/orders": {
+      "post": {
+        "operationId": "placeOrder",
+        "responses": { "201": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderReceipt" } } } } }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "checkHealth",
+        "responses": { "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthReport" } } } } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PetPage": { "type": "object", "properties": { "cursor": { "type": "string" } } },
+      "AdoptionForm": { "type": "object", "properties": { "adopter": { "type": "string" } } },
+      "OrderReceipt": { "type": "object", "properties": { "total": { "type": "integer" } } },
+      "HealthReport": { "type": "object", "properties": { "status": { "type": "string" } } },
+      "AuditLog": { "type": "object", "properties": { "entry": { "type": "string" } } }
+    }
+  }
+}

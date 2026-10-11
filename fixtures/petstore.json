@@ -1,0 +1,2860 @@
+{
+  "openapi": "3.1.2",
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.1/dialect/base",
+  "info": {
+    "title": "Petstore",
+    "summary": "A hypothetical pet store service, as it might look in 2026.",
+    "description": "The Petstore API manages pets, adoptions, smart-collar telemetry, a pet-care assistant, store orders, multipart intake forms, and staff API keys.\n\nIt doubles as the oas3-gen reference document: every OpenAPI 3.1.2 feature the generator supports appears here at least once, and the generated client and server are tested against each other.",
+    "termsOfService": "https://petstore.example/terms",
+    "contact": {
+      "name": "Petstore API Team",
+      "url": "https://petstore.example/support",
+      "email": "api@petstore.example"
+    },
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "version": "2026.10.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.petstore.example/v3",
+      "description": "Production"
+    },
+    {
+      "url": "https://{region}.api.petstore.example/{basePath}",
+      "description": "Regional deployment",
+      "variables": {
+        "region": {
+          "enum": ["us-west", "eu-central", "ap-south"],
+          "default": "us-west",
+          "description": "Deployment region"
+        },
+        "basePath": {
+          "default": "v3"
+        }
+      }
+    }
+  ],
+  "security": [{ "ApiKeyAuth": [] }],
+  "tags": [
+    { "name": "pets", "description": "Pet records", "externalDocs": { "url": "https://petstore.example/docs/pets" } },
+    { "name": "adoptions", "description": "The adoption workflow" },
+    { "name": "vitals", "description": "Smart-collar telemetry" },
+    { "name": "assistant", "description": "Pet-care assistant conversations" },
+    { "name": "store", "description": "Orders, inventory, carriers, and the newsletter" },
+    { "name": "media", "description": "Multipart intake forms and uploads" },
+    { "name": "staff", "description": "Staff API keys and the audit log" },
+    { "name": "system", "description": "Service health" }
+  ],
+  "externalDocs": {
+    "description": "Petstore developer portal",
+    "url": "https://petstore.example/docs"
+  },
+  "paths": {
+    "/pets": {
+      "summary": "The pet collection",
+      "get": {
+        "operationId": "listPets",
+        "tags": ["pets"],
+        "summary": "List pets",
+        "description": "Lists pets one page at a time. Anonymous callers may list pets; an API key is optional.",
+        "security": [{}, { "ApiKeyAuth": [] }],
+        "parameters": [
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Cursor" },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only return pets with this status",
+            "schema": { "$ref": "#/components/schemas/PetStatus" }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "description": "Only return pets that carry every listed tag",
+            "style": "form",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string" } }
+          },
+          {
+            "name": "x-sort-order",
+            "in": "header",
+            "description": "Sort order for the results",
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"],
+              "x-enum-descriptions": ["ascending", "descending"]
+            }
+          },
+          {
+            "name": "x-only",
+            "in": "header",
+            "description": "Only include these species",
+            "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Species" } }
+          },
+          { "$ref": "#/components/parameters/CompatibilityDate" },
+          { "$ref": "#/components/parameters/RequestId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of pets",
+            "headers": {
+              "x-next": { "$ref": "#/components/headers/XNext" },
+              "X-Total-Count": {
+                "description": "Number of pets that match the filters",
+                "schema": { "type": "integer", "format": "int64", "minimum": 0 }
+              },
+              "X-Request-Id": { "$ref": "#/components/headers/XRequestId" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Pets" },
+                "examples": {
+                  "oneDog": { "$ref": "#/components/examples/PetListExample" }
+                }
+              },
+              "application/xml": {
+                "schema": { "$ref": "#/components/schemas/Pets" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/UnexpectedError" }
+        }
+      },
+      "post": {
+        "operationId": "createPet",
+        "tags": ["pets"],
+        "summary": "Add a pet",
+        "requestBody": { "$ref": "#/components/requestBodies/NewPet" },
+        "responses": {
+          "201": {
+            "description": "The pet was created",
+            "headers": {
+              "Location": {
+                "description": "URL of the created pet",
+                "required": true,
+                "schema": { "type": "string", "format": "uri-reference" }
+              }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            },
+            "links": {
+              "GetCreatedPet": { "$ref": "#/components/links/GetPetById" }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "default": { "$ref": "#/components/responses/UnexpectedError" }
+        }
+      },
+      "options": {
+        "operationId": "describePets",
+        "tags": ["pets"],
+        "summary": "List the methods the pet collection allows",
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "The allowed methods",
+            "headers": {
+              "Allow": {
+                "description": "Comma-separated HTTP methods",
+                "required": true,
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pets/search": {
+      "get": {
+        "operationId": "searchPets",
+        "tags": ["pets"],
+        "summary": "Search pets",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Free-text query",
+            "allowReserved": true,
+            "schema": { "type": "string", "minLength": 1 },
+            "example": "golden retriever"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "description": "An untyped filter expression",
+            "schema": {}
+          },
+          {
+            "name": "species",
+            "in": "query",
+            "description": "Space-separated species names",
+            "style": "spaceDelimited",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string" } }
+          },
+          {
+            "name": "colors",
+            "in": "query",
+            "description": "Pipe-separated coat colors",
+            "style": "pipeDelimited",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string" } }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "description": "Pets carrying any of these tags, one `tags=` pair per tag",
+            "schema": { "type": "array", "items": { "type": "string" } }
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "description": "Pets in any of these statuses, one `statuses=` pair per status",
+            "schema": { "type": "array", "items": { "$ref": "#/components/schemas/PetStatus" } }
+          },
+          {
+            "name": "bornIn",
+            "in": "query",
+            "description": "Pets born in any of these years, one `bornIn=` pair per year",
+            "explode": true,
+            "schema": { "type": "array", "items": { "type": "integer", "format": "int32", "minimum": 1990 } }
+          },
+          {
+            "name": "minWeightKg",
+            "in": "query",
+            "schema": { "type": "number", "format": "double", "minimum": 0 }
+          },
+          {
+            "name": "vaccinated",
+            "in": "query",
+            "schema": { "type": "boolean" }
+          },
+          {
+            "name": "bornAfter",
+            "in": "query",
+            "schema": { "type": "string", "format": "date" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching pets",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SearchResults" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/pets/{petId}": {
+      "parameters": [{ "$ref": "#/components/parameters/PetId" }],
+      "get": {
+        "operationId": "showPetById",
+        "tags": ["pets"],
+        "summary": "Get a pet",
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "description": "Entity tag from an earlier response",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "x-api-version",
+            "in": "header",
+            "required": true,
+            "description": "API revision to use for this request",
+            "schema": { "type": "string" },
+            "example": "2026-10"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pet",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" },
+              "x-cache": {
+                "description": "Whether the pet was served from cache",
+                "schema": { "type": "string", "enum": ["hit", "miss"] }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Pet" },
+                "example": {
+                  "id": "0192f0c1-7a6e-7c4e-9d2a-5b1e8f3c2a10",
+                  "name": "Biscuit",
+                  "species": "dog",
+                  "status": "available"
+                }
+              }
+            }
+          },
+          "304": { "description": "The pet has not changed since the given entity tag" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "4XX": {
+            "description": "The request was rejected",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/UnexpectedError" }
+        }
+      },
+      "patch": {
+        "operationId": "updatePet",
+        "tags": ["pets"],
+        "summary": "Update a pet with a JSON merge patch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/merge-patch+json": { "schema": { "$ref": "#/components/schemas/PetPatch" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated pet",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": {
+            "description": "The patch is invalid",
+            "content": {
+              "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePet",
+        "tags": ["pets"],
+        "summary": "Remove a pet with a bearer token or an API key",
+        "security": [{ "BearerAuth": [] }, { "ApiKeyAuth": [] }],
+        "responses": {
+          "204": { "description": "The pet was removed" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "head": {
+        "operationId": "petExists",
+        "tags": ["pets"],
+        "summary": "Check whether a pet exists",
+        "responses": {
+          "200": {
+            "description": "The pet exists",
+            "headers": {
+              "ETag": { "$ref": "#/components/headers/ETag" }
+            }
+          },
+          "404": { "description": "No pet has this identifier" }
+        }
+      }
+    },
+    "/pets/{petId}/images": {
+      "post": {
+        "operationId": "uploadPetImage",
+        "tags": ["pets", "media"],
+        "summary": "Upload a pet image and rename the pet",
+        "parameters": [{ "$ref": "#/components/parameters/PetId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "image"],
+                "properties": {
+                  "name": { "type": "string", "description": "The pet's new name" },
+                  "image": { "type": "string", "format": "binary", "description": "The image file" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The renamed pet",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pets/{petId}/photo": {
+      "parameters": [{ "$ref": "#/components/parameters/PetId" }],
+      "get": {
+        "operationId": "getPetPhoto",
+        "tags": ["pets", "media"],
+        "summary": "Download the pet's profile photo",
+        "responses": {
+          "200": {
+            "description": "The photo",
+            "content": {
+              "image/png": {
+                "schema": { "type": "string", "format": "binary", "contentMediaType": "image/png" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "operationId": "replacePetPhoto",
+        "tags": ["pets", "media"],
+        "summary": "Replace the pet's profile photo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/png": {
+              "schema": { "type": "string", "format": "binary", "contentMediaType": "image/png" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "The photo was replaced" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pets/{petId}/card": {
+      "get": {
+        "operationId": "getPetCard",
+        "tags": ["pets"],
+        "summary": "Render the pet's kennel card as plain text",
+        "parameters": [
+          { "$ref": "#/components/parameters/PetId" },
+          {
+            "name": "cardTheme",
+            "in": "cookie",
+            "description": "The visitor's preferred card theme",
+            "schema": { "type": "string", "enum": ["light", "dark", "high-contrast"] }
+          },
+          {
+            "name": "recentlyViewed",
+            "in": "cookie",
+            "description": "Pets the visitor viewed recently, most recent first",
+            "style": "form",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string", "format": "uuid" }, "maxItems": 5 }
+          },
+          {
+            "name": "pinnedPets",
+            "in": "cookie",
+            "description": "Pets the visitor pinned, in no particular order",
+            "style": "form",
+            "explode": false,
+            "schema": { "type": "array", "items": { "type": "string", "format": "uuid" }, "uniqueItems": true }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The kennel card",
+            "content": {
+              "text/plain": { "schema": { "type": "string" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pets/{petId}/notes": {
+      "put": {
+        "operationId": "setPetNotes",
+        "tags": ["pets"],
+        "summary": "Replace the pet's care notes",
+        "parameters": [{ "$ref": "#/components/parameters/PetId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/plain": { "schema": { "type": "string", "maxLength": 2000 } }
+          }
+        },
+        "responses": {
+          "204": { "description": "The notes were saved" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pets/{petId}/lineage": {
+      "get": {
+        "operationId": "getPetLineage",
+        "tags": ["pets"],
+        "summary": "Get the pet's family tree",
+        "parameters": [
+          { "$ref": "#/components/parameters/PetId" },
+          {
+            "name": "depth",
+            "in": "query",
+            "description": "Generations to include",
+            "schema": { "type": "integer", "format": "int32", "minimum": 0, "maximum": 5, "default": 2 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The family tree",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Lineage" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/pets/{petId}/vaccinations": {
+      "$ref": "#/components/pathItems/PetVaccinations"
+    },
+    "/pets/{petId}/vitals": {
+      "get": {
+        "operationId": "streamPetVitals",
+        "tags": ["vitals"],
+        "summary": "Stream live smart-collar vitals as server-sent events",
+        "parameters": [
+          { "$ref": "#/components/parameters/PetId" },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Replay readings recorded after this instant",
+            "schema": { "type": "string", "format": "date-time" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A stream of vitals readings",
+            "content": {
+              "text/event-stream": { "schema": { "$ref": "#/components/schemas/VitalsReading" } }
+            }
+          }
+        }
+      }
+    },
+    "/cats": {
+      "get": {
+        "operationId": "listCats",
+        "tags": ["pets"],
+        "summary": "List cats",
+        "description": "Superseded by `listPets` with `x-only: cat`.",
+        "deprecated": true,
+        "parameters": [
+          { "$ref": "#/components/parameters/Limit" },
+          {
+            "name": "x-sort-order",
+            "in": "header",
+            "description": "Sort order for the results",
+            "schema": { "type": "string", "enum": ["asc", "desc"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of cats",
+            "headers": {
+              "x-next": { "$ref": "#/components/headers/XNext" }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Cats" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/UnexpectedError" }
+        }
+      }
+    },
+    "/adoptions": {
+      "post": {
+        "operationId": "adoptPet",
+        "tags": ["adoptions"],
+        "summary": "Apply to adopt a pet",
+        "security": [
+          { "PetstoreOAuth": ["adoptions:write"] },
+          { "OpenIdConnect": ["adoptions"] },
+          { "ApiKeyAuth": [] }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AdoptionRequest" } }
+          }
+        },
+        "callbacks": {
+          "statusChanged": { "$ref": "#/components/callbacks/AdoptionStatusChanged" }
+        },
+        "responses": {
+          "202": {
+            "description": "The application was accepted for review",
+            "headers": {
+              "Location": {
+                "description": "URL of the adoption",
+                "required": true,
+                "schema": { "type": "string" }
+              }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Adoption" } }
+            }
+          },
+          "409": {
+            "description": "The pet is not available",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    },
+    "/adoptions/feed": {
+      "get": {
+        "operationId": "streamAdoptionFeed",
+        "tags": ["adoptions"],
+        "summary": "Stream adoption changes as server-sent events",
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "description": "Only stream events whose payload name contains this text",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A stream of adoption feed events",
+            "content": {
+              "text/event-stream": { "schema": { "$ref": "#/components/schemas/AdoptionFeedEvent" } }
+            }
+          }
+        }
+      }
+    },
+    "/adoptions/{adoptionId}": {
+      "get": {
+        "operationId": "getAdoption",
+        "tags": ["adoptions"],
+        "summary": "Get an adoption",
+        "parameters": [
+          {
+            "name": "adoptionId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "format": "int64", "minimum": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The adoption",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Adoption" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/collars/{collarId}/telemetry": {
+      "post": {
+        "operationId": "submitCollarTelemetry",
+        "tags": ["vitals"],
+        "summary": "Submit a batch of smart-collar telemetry",
+        "parameters": [
+          {
+            "name": "collarId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^COL-[0-9A-F]{8}$" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CollarTelemetry" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The batch was stored",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TelemetryReceipt" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/assistant/messages": {
+      "post": {
+        "operationId": "sendAssistantMessage",
+        "tags": ["assistant"],
+        "summary": "Send content blocks to the pet-care assistant",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ContentRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The assistant's reply",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentResponse" } }
+            }
+          },
+          "400": {
+            "description": "The request was invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/messages/stream": {
+      "post": {
+        "operationId": "streamAssistantMessage",
+        "tags": ["assistant"],
+        "summary": "Send content blocks and receive the reply as one document or as a stream",
+        "parameters": [
+          {
+            "name": "stream",
+            "in": "query",
+            "description": "Stream the reply as Server-Sent Events instead of one document",
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ContentRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The reply, streamed as frames that end with a [DONE] sentinel when requested",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ContentResponse" } },
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/AssistantEventFrame" },
+                "x-speakeasy-sse-sentinel": "[DONE]"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/tokens": {
+      "get": {
+        "operationId": "streamAssistantTokens",
+        "tags": ["assistant"],
+        "summary": "Stream reply tokens, then the usage they cost",
+        "responses": {
+          "200": {
+            "description": "Token frames followed by one usage frame, ending with an [END] sentinel",
+            "content": {
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/AssistantTokenFrame" },
+                "x-sse-sentinel": "[END]"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/events": {
+      "get": {
+        "operationId": "listAssistantEvents",
+        "tags": ["assistant"],
+        "summary": "Replay the assistant's streaming events as one JSON document",
+        "parameters": [
+          {
+            "name": "conversation",
+            "in": "cookie",
+            "required": true,
+            "description": "The conversation whose events to replay",
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The recorded events",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AssistantEventList" } }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/preferences": {
+      "get": {
+        "operationId": "getChatPreference",
+        "tags": ["assistant"],
+        "summary": "Get the caller's assistant preferences",
+        "responses": {
+          "200": {
+            "description": "The preferences",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChatPreference" } }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateChatPreference",
+        "tags": ["assistant"],
+        "summary": "Replace the caller's assistant preferences",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ChatPreference" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored preferences",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChatPreference" } }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/settings": {
+      "put": {
+        "operationId": "updateAssistantSettings",
+        "tags": ["assistant"],
+        "summary": "Replace the assistant's tuning settings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AssistantSettings" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored settings",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AssistantSettings" } }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/quality/{quality}": {
+      "get": {
+        "operationId": "echoResponseQuality",
+        "tags": ["assistant"],
+        "summary": "Echo a response quality sent in the path and an optional boost sent in the query",
+        "parameters": [
+          {
+            "name": "quality",
+            "in": "path",
+            "required": true,
+            "schema": { "$ref": "#/components/schemas/ResponseQuality" }
+          },
+          {
+            "name": "boost",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/ResponseQuality" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The boost when one is sent, otherwise the path quality",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ResponseQuality" } }
+            }
+          }
+        }
+      }
+    },
+    "/store/inventory": {
+      "get": {
+        "operationId": "getInventory",
+        "tags": ["store"],
+        "summary": "Count available pets by species",
+        "responses": {
+          "200": {
+            "description": "Counts keyed by species",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Inventory" } }
+            }
+          }
+        }
+      }
+    },
+    "/store/orders": {
+      "post": {
+        "operationId": "placeOrder",
+        "tags": ["store"],
+        "summary": "Order supplies for a pet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Order" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The placed order",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Order" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/store/orders/{orderId}": {
+      "parameters": [
+        {
+          "name": "orderId",
+          "in": "path",
+          "required": true,
+          "description": "The order's identifier",
+          "schema": { "type": "integer", "format": "int64", "minimum": 1 }
+        }
+      ],
+      "get": {
+        "operationId": "getOrderById",
+        "tags": ["store"],
+        "summary": "Get an order",
+        "responses": {
+          "200": {
+            "description": "The order",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Order" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteOrder",
+        "tags": ["store"],
+        "summary": "Cancel an order",
+        "responses": {
+          "204": { "description": "The order was cancelled" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/store/carriers": {
+      "get": {
+        "operationId": "listCarriers",
+        "tags": ["store"],
+        "summary": "List pet carriers in stock",
+        "responses": {
+          "200": {
+            "description": "The carriers",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/PetCarrier" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/store/newsletter": {
+      "post": {
+        "operationId": "subscribeNewsletter",
+        "tags": ["store"],
+        "summary": "Subscribe to the store newsletter from an HTML form",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/NewsletterSignup" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The subscription",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Subscription" } }
+            }
+          }
+        }
+      }
+    },
+    "/store/newsletter/unsubscribe": {
+      "post": {
+        "operationId": "unsubscribeNewsletter",
+        "tags": ["store"],
+        "summary": "Stop newsletter mail, from a one-click link or an HTML form",
+        "description": "A one-click unsubscribe link posts no body and stops every subscription; the form names one address.",
+        "security": [],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/NewsletterOptOut" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "The matching subscriptions were stopped" }
+        }
+      }
+    },
+    "/intake/{formId}": {
+      "post": {
+        "operationId": "submitIntakeForm",
+        "tags": ["media"],
+        "summary": "Submit a shelter intake form that mixes files, scalars, and structured values",
+        "parameters": [
+          { "name": "formId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/IntakeForm" },
+              "encoding": {
+                "thumbnail": { "contentType": "image/*" },
+                "addresses": { "contentType": "application/vnd.petstore.address+json" },
+                "note": { "contentType": "text/markdown" },
+                "ids": { "style": "pipeDelimited", "explode": false },
+                "colors": { "explode": true },
+                "filter": { "style": "deepObject" },
+                "range": { "style": "form", "explode": false },
+                "extras": { "style": "form", "explode": true },
+                "options": { "style": "deepObject" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The form as the server received it",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/IntakeForm" } }
+            }
+          }
+        }
+      }
+    },
+    "/media": {
+      "post": {
+        "operationId": "uploadMedia",
+        "tags": ["media"],
+        "summary": "Upload any number of files under one part name",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": { "type": "array", "items": {} },
+                  "cover": { "description": "Raw binary: the schema declares no type" },
+                  "note": { "type": "string" }
+                }
+              },
+              "encoding": {
+                "cover": { "contentType": "image/png" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What the server received",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MediaReceipt" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/labels": {
+      "post": {
+        "operationId": "submitMediaLabels",
+        "tags": ["media"],
+        "summary": "Submit free-form text labels",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": { "schema": { "$ref": "#/components/schemas/MediaLabels" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The labels as the server received them",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/MediaLabels" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/tallies": {
+      "post": {
+        "operationId": "submitTallies",
+        "tags": ["media"],
+        "summary": "Submit named lists of counts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": { "schema": { "$ref": "#/components/schemas/Tallies" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The counts as the server received them",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Tallies" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/text": {
+      "get": {
+        "operationId": "getMediaText",
+        "tags": ["media"],
+        "summary": "Download a text/plain body that is raw bytes",
+        "responses": {
+          "200": {
+            "description": "The bytes, labelled as text",
+            "content": {
+              "text/plain": { "schema": { "type": "string", "format": "binary" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/wildcard": {
+      "get": {
+        "operationId": "getMediaWildcard",
+        "tags": ["media"],
+        "summary": "Download an image whose media type is a wildcard",
+        "responses": {
+          "200": {
+            "description": "Image bytes under a wildcard media type",
+            "content": {
+              "image/*": { "schema": { "type": "string", "format": "binary" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/pet-text": {
+      "get": {
+        "operationId": "getMediaPetText",
+        "tags": ["media"],
+        "summary": "Describe a pet as text, or as raw bytes",
+        "responses": {
+          "200": {
+            "description": "A pet as text, or the raw bytes",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/Pet" } },
+              "application/octet-stream": { "schema": { "type": "string", "format": "binary" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/kind": {
+      "get": {
+        "operationId": "getMediaKind",
+        "tags": ["media"],
+        "summary": "Describe a species as text",
+        "responses": {
+          "200": {
+            "description": "The species as text",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/Species" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/nickname": {
+      "get": {
+        "operationId": "getMediaNickname",
+        "tags": ["media"],
+        "summary": "Describe a nickname as text",
+        "responses": {
+          "200": {
+            "description": "The nickname as text",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/Nickname" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/nullable-name": {
+      "get": {
+        "operationId": "getMediaNullableName",
+        "tags": ["media"],
+        "summary": "Describe an optional name as text",
+        "responses": {
+          "200": {
+            "description": "The name as text",
+            "content": {
+              "text/plain": { "schema": { "$ref": "#/components/schemas/NullableName" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/latin": {
+      "get": {
+        "operationId": "getMediaLatin",
+        "tags": ["media"],
+        "summary": "Describe a place as text in a legacy charset",
+        "responses": {
+          "200": {
+            "description": "The text, labelled as ISO-8859-1",
+            "content": {
+              "text/plain; charset=iso-8859-1": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/raw": {
+      "put": {
+        "operationId": "putMediaRaw",
+        "tags": ["media"],
+        "summary": "Upload raw bytes whose label names a legacy charset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream; charset=iso-8859-1": { "schema": { "type": "string", "format": "binary" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "The bytes were stored" }
+        }
+      }
+    },
+    "/media/union": {
+      "post": {
+        "operationId": "postMediaUnion",
+        "tags": ["media"],
+        "summary": "Create a pet or a cat, or accept the request without a body",
+        "responses": {
+          "200": {
+            "description": "A pet",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          },
+          "201": {
+            "description": "A cat",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Cat" } }
+            }
+          },
+          "202": { "description": "Accepted without a body" }
+        }
+      }
+    },
+    "/media/accepted": {
+      "get": {
+        "operationId": "getMediaAccepted",
+        "tags": ["media"],
+        "summary": "Check a pet's intake, which is accepted with its record",
+        "responses": {
+          "202": {
+            "description": "The intake record",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          }
+        }
+      }
+    },
+    "/media/both": {
+      "get": {
+        "operationId": "getMediaBoth",
+        "tags": ["media"],
+        "summary": "Describe a pet as JSON, or stream it as server-sent events",
+        "responses": {
+          "200": {
+            "description": "A pet as JSON, or as an event stream",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } },
+              "text/event-stream": { "schema": { "$ref": "#/components/schemas/Pet" } }
+            }
+          }
+        }
+      }
+    },
+    "/staff/keys": {
+      "get": {
+        "operationId": "listApiKeys",
+        "tags": ["staff"],
+        "summary": "List API keys with the global header key",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The keys",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ApiKey" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "operationId": "createApiKey",
+        "tags": ["staff"],
+        "summary": "Create an API key with a query key or a session cookie",
+        "security": [{ "QueryKey": [] }, { "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/NewApiKey" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ApiKey" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/staff/keys/{keyId}": {
+      "parameters": [
+        { "name": "keyId", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "operationId": "getApiKey",
+        "tags": ["staff"],
+        "summary": "Read an API key with both the header key and a session cookie",
+        "security": [{ "ApiKeyAuth": [], "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "The key",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ApiKey" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "delete": {
+        "operationId": "revokeApiKey",
+        "tags": ["staff"],
+        "summary": "Revoke an API key with a bearer token or the header key",
+        "security": [{ "BearerAuth": [] }, { "ApiKeyAuth": [] }],
+        "responses": {
+          "204": { "description": "Revoked" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "put": {
+        "operationId": "replaceApiKey",
+        "tags": ["staff"],
+        "summary": "Replace an API key with basic credentials or the header key",
+        "security": [{ "BasicAuth": [] }, { "ApiKeyAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/NewApiKey" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ApiKey" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/staff/audit": {
+      "get": {
+        "operationId": "listAuditEvents",
+        "tags": ["staff"],
+        "summary": "List audit events with a bearer token or a token key, ignoring the Authorization header parameter",
+        "security": [{ "BearerAuth": [] }, { "TokenAuth": [] }],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit events",
+            "content": {
+              "application/json": { "schema": { "type": "array", "items": { "type": "string" } } }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": ["system"],
+        "summary": "Report health without credentials",
+        "security": [],
+        "responses": {
+          "204": { "description": "Healthy" }
+        }
+      },
+      "trace": {
+        "operationId": "traceHealth",
+        "tags": ["system"],
+        "summary": "Echo the request line the health endpoint received, for diagnosing proxies",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The method and path the server received",
+            "content": {
+              "text/plain": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "petAdopted": {
+      "post": {
+        "operationId": "petAdopted",
+        "tags": ["adoptions"],
+        "summary": "Notifies a partner that one of its listed pets was adopted",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AdoptionEvent" } }
+          }
+        },
+        "responses": {
+          "200": { "description": "The partner acknowledged the event" }
+        }
+      }
+    },
+    "inventoryLow": {
+      "$ref": "#/components/pathItems/InventoryLowWebhook"
+    }
+  },
+  "components": {
+    "parameters": {
+      "PetId": {
+        "name": "petId",
+        "in": "path",
+        "required": true,
+        "description": "The pet's identifier",
+        "schema": { "type": "string", "format": "uuid" }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "description": "How many items to return at one time (max 100)",
+        "schema": { "type": "integer", "format": "int32", "minimum": 1, "maximum": 100 }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "description": "Opaque cursor from the previous page's `x-next` header",
+        "schema": { "type": "string" }
+      },
+      "RequestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "description": "Correlates a request with server logs",
+        "schema": { "type": "string", "format": "uuid" }
+      },
+      "CompatibilityDate": {
+        "name": "x-compatibility-date",
+        "in": "header",
+        "required": true,
+        "description": "API compatibility date",
+        "schema": { "type": "string", "format": "date", "enum": ["2026-06-09"] }
+      },
+      "DebugTrace": {
+        "name": "x-debug-trace",
+        "in": "header",
+        "description": "Asks the server to attach a trace to the response. Declared for completeness; no operation uses it.",
+        "schema": { "type": "boolean" }
+      }
+    },
+    "headers": {
+      "XNext": {
+        "description": "A link to the next page of results",
+        "schema": { "type": "string" }
+      },
+      "XRequestId": {
+        "description": "Echo of the request's correlation identifier",
+        "schema": { "type": "string", "format": "uuid" }
+      },
+      "ETag": {
+        "description": "Entity tag of the returned representation",
+        "schema": { "type": "string" }
+      }
+    },
+    "requestBodies": {
+      "NewPet": {
+        "description": "The pet to add",
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/NewPet" },
+            "examples": {
+              "dog": { "$ref": "#/components/examples/NewDog" }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "NotFound": {
+        "description": "The resource does not exist",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } }
+        }
+      },
+      "BadRequest": {
+        "description": "The request was malformed",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      },
+      "Unauthorized": {
+        "description": "Credentials are missing or invalid",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      },
+      "UnexpectedError": {
+        "description": "Unexpected error",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      }
+    },
+    "examples": {
+      "NewDog": {
+        "summary": "A new dog",
+        "value": { "name": "Biscuit", "species": "dog", "tags": ["good-boy"] }
+      },
+      "PetListExample": {
+        "summary": "A page with one dog",
+        "value": [
+          { "id": "0192f0c1-7a6e-7c4e-9d2a-5b1e8f3c2a10", "name": "Biscuit", "species": "dog", "status": "available" }
+        ]
+      }
+    },
+    "links": {
+      "GetPetById": {
+        "operationId": "showPetById",
+        "description": "The `id` in the response can be used as `petId` in `showPetById`.",
+        "parameters": { "petId": "$response.body#/id" }
+      }
+    },
+    "callbacks": {
+      "AdoptionStatusChanged": {
+        "{$request.body#/callbackUrl}": {
+          "post": {
+            "summary": "Sent when the adoption's status changes",
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": { "schema": { "$ref": "#/components/schemas/AdoptionEvent" } }
+              }
+            },
+            "responses": {
+              "204": { "description": "The callback was received" }
+            }
+          }
+        }
+      }
+    },
+    "pathItems": {
+      "PetVaccinations": {
+        "summary": "A pet's vaccination history",
+        "parameters": [{ "$ref": "#/components/parameters/PetId" }],
+        "get": {
+          "operationId": "listVaccinations",
+          "tags": ["pets"],
+          "summary": "List the pet's vaccinations",
+          "responses": {
+            "200": {
+              "description": "The vaccinations",
+              "content": {
+                "application/json": {
+                  "schema": { "type": "array", "items": { "$ref": "#/components/schemas/VaccineRecord" } }
+                }
+              }
+            },
+            "404": { "$ref": "#/components/responses/NotFound" }
+          }
+        },
+        "post": {
+          "operationId": "recordVaccination",
+          "tags": ["pets"],
+          "summary": "Record a vaccination",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VaccineRecord" } }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "The recorded vaccination",
+              "content": {
+                "application/json": { "schema": { "$ref": "#/components/schemas/VaccineRecord" } }
+              }
+            },
+            "404": { "$ref": "#/components/responses/NotFound" }
+          }
+        }
+      },
+      "InventoryLowWebhook": {
+        "post": {
+          "operationId": "inventoryLow",
+          "tags": ["store"],
+          "summary": "Notifies a supplier that stock for a species is low",
+          "security": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/InventoryAlert" } }
+            }
+          },
+          "responses": {
+            "204": { "description": "The supplier acknowledged the alert" }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "Key issued in the Petstore partner dashboard."
+      },
+      "QueryKey": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "api_key"
+      },
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "BasicAuth": {
+        "type": "http",
+        "scheme": "basic"
+      },
+      "TokenAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization"
+      },
+      "PetstoreOAuth": {
+        "type": "oauth2",
+        "description": "OAuth 2.0 for partner applications",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://auth.petstore.example/authorize",
+            "tokenUrl": "https://auth.petstore.example/token",
+            "refreshUrl": "https://auth.petstore.example/refresh",
+            "scopes": {
+              "pets:read": "Read pets",
+              "pets:write": "Modify pets",
+              "adoptions:write": "Apply for adoptions"
+            }
+          },
+          "clientCredentials": {
+            "tokenUrl": "https://auth.petstore.example/token",
+            "scopes": {
+              "inventory:read": "Read inventory"
+            }
+          }
+        }
+      },
+      "OpenIdConnect": {
+        "type": "openIdConnect",
+        "openIdConnectUrl": "https://auth.petstore.example/.well-known/openid-configuration"
+      },
+      "MutualTls": {
+        "type": "mutualTLS",
+        "description": "Client certificates for shelter kiosks"
+      }
+    },
+    "schemas": {
+      "Species": {
+        "type": "string",
+        "description": "Kinds of pets the store cares for",
+        "enum": ["dog", "cat", "bird", "fish", "reptile", "small_mammal"],
+        "x-enum-descriptions": ["a dog", "a cat", "a bird", "a fish", "a reptile", "a rabbit, guinea pig, or other small mammal"]
+      },
+      "PetStatus": {
+        "type": "string",
+        "description": "Where the pet is in the adoption process",
+        "enum": ["available", "pending", "adopted"]
+      },
+      "Nickname": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "A short name a pet answers to"
+      },
+      "NullableName": {
+        "type": ["string", "null"],
+        "description": "A name that may be absent"
+      },
+      "Pet": {
+        "type": "object",
+        "description": "A pet in the store's care.",
+        "required": ["id", "name", "species"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "readOnly": true, "description": "Server-assigned identifier" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "species": { "$ref": "#/components/schemas/Species" },
+          "status": { "$ref": "#/components/schemas/PetStatus" },
+          "nickname": { "type": ["string", "null"], "description": "An optional nickname" },
+          "birthDate": { "type": "string", "format": "date" },
+          "weightKg": { "type": "number", "format": "double", "exclusiveMinimum": 0, "maximum": 500 },
+          "microchip": { "type": "string", "pattern": "^[0-9]{15}$", "description": "ISO 11784 microchip number" },
+          "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "maxItems": 10 },
+          "photoUrls": { "type": "array", "items": { "type": "string", "format": "uri" } },
+          "allergies": { "$ref": "#/components/schemas/Health" },
+          "vaccinations": { "$ref": "#/components/schemas/PetVaccinations" },
+          "createdAt": { "type": "string", "format": "date-time", "readOnly": true },
+          "tag": { "type": "string", "deprecated": true, "description": "Superseded by `tags`" }
+        }
+      },
+      "NewPet": {
+        "type": "object",
+        "description": "The fields a caller supplies when adding a pet.",
+        "required": ["name", "species"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "species": { "$ref": "#/components/schemas/Species" },
+          "nickname": { "type": ["string", "null"] },
+          "birthDate": { "type": "string", "format": "date" },
+          "weightKg": { "type": "number", "format": "double", "exclusiveMinimum": 0, "maximum": 500 },
+          "microchip": { "type": "string", "pattern": "^[0-9]{15}$" },
+          "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "maxItems": 10 }
+        }
+      },
+      "PetPatch": {
+        "type": "object",
+        "description": "A JSON merge patch for a pet. Omitted fields are left unchanged.",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "status": { "$ref": "#/components/schemas/PetStatus" },
+          "nickname": { "type": ["string", "null"] },
+          "weightKg": { "type": ["number", "null"], "format": "double" },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Cat": {
+        "description": "A pet with cat-specific fields.",
+        "allOf": [
+          { "$ref": "#/components/schemas/Pet" },
+          {
+            "type": "object",
+            "required": ["lives"],
+            "properties": {
+              "lives": { "type": "integer", "format": "int32", "minimum": 1, "maximum": 9 },
+              "favoriteToy": { "type": "string" }
+            }
+          }
+        ]
+      },
+      "Pets": {
+        "type": "array",
+        "items": { "$ref": "#/components/schemas/Pet" }
+      },
+      "Cats": {
+        "type": "array",
+        "items": { "$ref": "#/components/schemas/Cat" }
+      },
+      "Allergies": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "const": "allergies" },
+          "allergens": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Diet": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "const": "diet" },
+          "food": { "type": "string" }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "description": "A health note, tagged by `type` without an explicit mapping.",
+        "oneOf": [
+          { "$ref": "#/components/schemas/Allergies" },
+          { "$ref": "#/components/schemas/Diet" }
+        ],
+        "discriminator": { "propertyName": "type" }
+      },
+      "VaccineRecord": {
+        "type": "object",
+        "required": ["vaccine", "date_administered"],
+        "properties": {
+          "vaccine": { "type": "string" },
+          "date_administered": { "type": "string", "format": "date" },
+          "veterinarian": { "type": "string" },
+          "nextDue": { "type": ["string", "null"], "format": "date" }
+        }
+      },
+      "PetVaccinations": {
+        "type": "object",
+        "description": "Vaccination records keyed by vaccine family",
+        "additionalProperties": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/VaccineRecord" }
+        }
+      },
+      "Lineage": {
+        "type": "object",
+        "description": "A recursive family tree",
+        "required": ["petId", "name"],
+        "properties": {
+          "petId": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "species": { "$ref": "#/components/schemas/Species" },
+          "parents": {
+            "type": "array",
+            "maxItems": 2,
+            "items": { "$ref": "#/components/schemas/Lineage" }
+          }
+        }
+      },
+      "SearchResults": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": { "$ref": "#/components/schemas/Pets" },
+          "total": { "type": "integer", "format": "int64", "minimum": 0 },
+          "nextCursor": { "type": ["string", "null"] }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "integer", "format": "int32" },
+          "message": { "type": "string" }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "An RFC 9457 problem detail",
+        "properties": {
+          "type": { "type": "string", "format": "uri-reference", "default": "about:blank" },
+          "title": { "type": "string" },
+          "status": { "type": "integer", "format": "int32", "minimum": 100, "maximum": 599 },
+          "detail": { "type": "string" },
+          "instance": { "type": "string", "format": "uri-reference" }
+        },
+        "additionalProperties": true
+      },
+      "AdoptionStatus": {
+        "type": "string",
+        "enum": ["submitted", "under_review", "approved", "rejected", "completed"]
+      },
+      "Address": {
+        "type": "object",
+        "required": ["city"],
+        "properties": {
+          "city": { "type": "string" },
+          "zip": { "type": "string" }
+        }
+      },
+      "Adopter": {
+        "type": "object",
+        "required": ["name", "email"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "email": { "type": "string", "format": "email" },
+          "phone": { "type": "string", "pattern": "^\\+[1-9][0-9]{6,14}$" },
+          "address": { "$ref": "#/components/schemas/Address" }
+        }
+      },
+      "AdoptionRequest": {
+        "type": "object",
+        "required": ["petId", "adopter"],
+        "properties": {
+          "petId": { "type": "string", "format": "uuid" },
+          "adopter": { "$ref": "#/components/schemas/Adopter" },
+          "callbackUrl": { "type": "string", "format": "uri" },
+          "homeVisit": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "Adoption": {
+        "type": "object",
+        "required": ["id", "petId", "status", "submittedAt"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64", "readOnly": true },
+          "petId": { "type": "string", "format": "uuid" },
+          "adopter": { "$ref": "#/components/schemas/Adopter" },
+          "status": { "$ref": "#/components/schemas/AdoptionStatus" },
+          "submittedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdoptionEvent": {
+        "type": "object",
+        "required": ["adoptionId", "status", "occurredAt"],
+        "properties": {
+          "adoptionId": { "type": "integer", "format": "int64" },
+          "petId": { "type": "string", "format": "uuid" },
+          "status": { "$ref": "#/components/schemas/AdoptionStatus" },
+          "occurredAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdoptionFeedEvent": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "enum": ["created", "updated", "deleted"], "description": "Event type" },
+          "payload": { "$ref": "#/components/schemas/AdoptionFeedPayload" }
+        }
+      },
+      "AdoptionFeedPayload": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "value": { "type": "integer" }
+        }
+      },
+      "VitalsReading": {
+        "type": "object",
+        "description": "One smart-collar reading",
+        "required": ["id", "heartRateBpm"],
+        "properties": {
+          "id": { "type": "string", "description": "Unique reading identifier" },
+          "heartRateBpm": { "type": "integer", "format": "int32", "minimum": 0, "maximum": 400 },
+          "temperatureC": { "type": "number", "format": "double" },
+          "activity": { "type": "string", "enum": ["resting", "walking", "running", "sleeping"] },
+          "timestamp": { "type": "string", "format": "date-time", "description": "When the collar took the reading" }
+        }
+      },
+      "CollarTelemetry": {
+        "type": "object",
+        "description": "A batch of smart-collar readings, written with JSON Schema 2020-12 keywords. Keywords without a Rust equivalent are accepted and ignored.",
+        "$comment": "Exercises readOnly, writeOnly, deprecated, prefixItems, contains, if/then/else, dependentRequired, and unevaluatedProperties.",
+        "required": ["collarId", "recordedAt", "location", "samples"],
+        "properties": {
+          "collarId": { "type": "string", "pattern": "^COL-[0-9A-F]{8}$" },
+          "firmware": { "type": "string", "readOnly": true },
+          "pairingSecret": { "type": "string", "writeOnly": true, "minLength": 12 },
+          "legacySignal": { "type": "integer", "format": "int32", "deprecated": true },
+          "recordedAt": { "type": "string", "format": "date-time" },
+          "recordedOn": { "type": "string", "format": "date" },
+          "localTime": { "type": "string", "format": "time" },
+          "location": {
+            "type": "array",
+            "description": "Latitude and longitude",
+            "prefixItems": [
+              { "type": "number", "minimum": -90, "maximum": 90 },
+              { "type": "number", "minimum": -180, "maximum": 180 }
+            ],
+            "items": { "type": "number", "format": "double" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "samples": {
+            "type": "array",
+            "items": { "type": "integer", "format": "int32", "minimum": 0 },
+            "minItems": 1,
+            "contains": { "type": "integer", "minimum": 1 },
+            "minContains": 1
+          },
+          "batteryPercent": { "type": "integer", "format": "int32", "minimum": 0, "maximum": 100, "multipleOf": 5 },
+          "signalQuality": { "type": "number", "format": "float", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+          "gatewayIp": { "type": "string", "format": "ipv4" },
+          "gatewayHost": { "type": "string", "format": "hostname" },
+          "readingId": { "type": "string", "format": "uuid" },
+          "ownerEmail": { "type": "string", "format": "email" },
+          "firmwareImage": { "type": "string", "contentEncoding": "base64", "contentMediaType": "application/octet-stream" },
+          "signature": { "type": "string", "format": "byte" },
+          "sequence": { "type": "integer", "format": "int64", "minimum": 0 },
+          "mode": { "type": "string", "enum": ["eco", "standard", "tracking"], "default": "standard" },
+          "zones": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "minItems": 1 },
+          "extra": {
+            "type": "object",
+            "patternProperties": { "^x-": { "type": "string" } },
+            "propertyNames": { "maxLength": 32 },
+            "maxProperties": 16,
+            "additionalProperties": { "type": "string" }
+          },
+          "alert": { "type": "string", "not": { "const": "none" } },
+          "notes": { "type": ["string", "null"] },
+          "threshold": { "type": ["integer", "null"], "format": "int32" },
+          "anyValue": { "description": "Any JSON value" },
+          "mixed": { "type": ["integer", "string"] }
+        },
+        "if": { "properties": { "mode": { "const": "tracking" } } },
+        "then": { "required": ["zones"] },
+        "else": {},
+        "dependentRequired": { "pairingSecret": ["collarId"] },
+        "unevaluatedProperties": false,
+        "examples": [
+          {
+            "collarId": "COL-0A1B2C3D",
+            "recordedAt": "2026-10-09T18:30:00Z",
+            "location": [45.52, -122.68],
+            "samples": [72, 75, 80]
+          }
+        ]
+      },
+      "TelemetryReceipt": {
+        "type": "object",
+        "required": ["accepted", "readingCount"],
+        "properties": {
+          "accepted": { "type": "boolean" },
+          "readingCount": { "type": "integer", "format": "int32" },
+          "receivedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "required": ["petId"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64", "readOnly": true },
+          "petId": { "type": "string", "format": "uuid" },
+          "quantity": { "type": "integer", "format": "int32", "minimum": 1, "maximum": 10, "default": 1 },
+          "shipDate": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "description": "Order status", "enum": ["placed", "approved", "delivered"] },
+          "complete": { "type": "boolean", "default": false }
+        }
+      },
+      "Inventory": {
+        "type": "object",
+        "description": "Available pets keyed by species",
+        "additionalProperties": { "type": "integer", "format": "int32", "minimum": 0 }
+      },
+      "InventoryAlert": {
+        "type": "object",
+        "required": ["species", "remaining"],
+        "properties": {
+          "species": { "$ref": "#/components/schemas/Species" },
+          "remaining": { "type": "integer", "format": "int32", "minimum": 0 }
+        }
+      },
+      "PetCarrier": {
+        "description": "A carrier with an ID that has either wheels or shoulder straps.",
+        "type": "object",
+        "allOf": [
+          { "required": ["id"], "properties": { "id": { "type": "string" } } }
+        ],
+        "anyOf": [
+          { "required": ["wheels"], "properties": { "wheels": { "type": "integer" } } },
+          { "required": ["straps"], "properties": { "straps": { "type": "integer" } } }
+        ]
+      },
+      "NewsletterSignup": {
+        "type": "object",
+        "required": ["email", "frequency"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "frequency": { "type": "string", "enum": ["weekly", "monthly"] },
+          "consent": { "type": "boolean", "default": false },
+          "favoriteSpecies": { "$ref": "#/components/schemas/Species" }
+        }
+      },
+      "NewsletterOptOut": {
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "reason": { "type": "string", "maxLength": 200 }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "required": ["id", "email", "frequency"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "frequency": { "type": "string", "enum": ["weekly", "monthly"] },
+          "consent": { "type": "boolean" },
+          "subscribedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "IntakeForm": {
+        "type": "object",
+        "description": "A shelter intake form",
+        "required": ["name", "attachments", "thumbnail", "encoded", "count"],
+        "properties": {
+          "name": { "type": "string" },
+          "fileName": { "type": "string" },
+          "type": { "type": "string" },
+          "résumé": { "type": "string", "description": "A non-ASCII part name" },
+          "file": {
+            "anyOf": [{ "type": "string", "format": "binary" }, { "type": "null" }],
+            "description": "The previous owner's records"
+          },
+          "attachments": { "type": "array", "items": { "type": "string", "format": "binary" } },
+          "thumbnail": { "type": "string", "format": "binary" },
+          "encoded": { "type": "string", "format": "byte" },
+          "count": { "type": "integer", "format": "int64" },
+          "ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+          "enabled": { "type": "boolean" },
+          "quality": { "$ref": "#/components/schemas/CoatQuality" },
+          "level": { "$ref": "#/components/schemas/EnergyLevel" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "address": { "$ref": "#/components/schemas/Address" },
+          "addresses": { "type": "array", "items": { "$ref": "#/components/schemas/Address" } },
+          "note": { "type": "string" },
+          "labels": {
+            "anyOf": [
+              { "type": "object", "additionalProperties": { "type": "string" } },
+              { "type": "string" },
+              { "type": "null" }
+            ]
+          },
+          "ids": { "type": "array", "items": { "type": "integer", "format": "int64" } },
+          "colors": { "type": "array", "items": { "type": "string" } },
+          "filter": { "$ref": "#/components/schemas/IntakeFilter" },
+          "range": { "$ref": "#/components/schemas/AgeRange" },
+          "extras": { "$ref": "#/components/schemas/IntakeExtras" },
+          "options": { "type": "object", "additionalProperties": { "type": "integer", "format": "int64" } }
+        }
+      },
+      "CoatQuality": {
+        "type": "string",
+        "enum": ["high", "low"]
+      },
+      "EnergyLevel": {
+        "type": "integer",
+        "enum": [1, 2, 3]
+      },
+      "IntakeFilter": {
+        "type": "object",
+        "properties": {
+          "size": { "type": "integer", "format": "int64" },
+          "color": { "type": "string" }
+        }
+      },
+      "AgeRange": {
+        "type": "object",
+        "properties": {
+          "min": { "type": "integer", "format": "int64" },
+          "max": { "type": "integer", "format": "int64" }
+        }
+      },
+      "IntakeExtras": {
+        "type": "object",
+        "properties": {
+          "mood": { "type": "string" },
+          "score": { "type": "integer", "format": "int64" }
+        }
+      },
+      "MediaLabels": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      },
+      "MediaReceipt": {
+        "type": "object",
+        "required": ["sizes"],
+        "properties": {
+          "sizes": { "type": "array", "items": { "type": "integer", "format": "int64" } },
+          "note": { "type": "string" },
+          "coverSize": { "type": "integer", "format": "int64" }
+        }
+      },
+      "Tallies": {
+        "type": "object",
+        "additionalProperties": { "type": "array", "items": { "type": "integer", "format": "int64" } }
+      },
+      "ApiKey": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      },
+      "NewApiKey": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "value": { "type": "string" }
+        }
+      },
+      "ContentRequest": {
+        "type": "object",
+        "required": ["blocks"],
+        "properties": {
+          "blocks": { "type": "array", "items": { "$ref": "#/components/schemas/ContentBlock" } },
+          "metadata": { "$ref": "#/components/schemas/MessageMetadata" },
+          "image_size": {
+            "description": "The size of a generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.",
+            "anyOf": [
+              { "$ref": "#/components/schemas/ImageSize" },
+              { "$ref": "#/components/schemas/ImageSizePreset" }
+            ],
+            "title": "Image Size",
+            "default": "auto_2K",
+            "x-petstore-limits": { "max_area": 4194304, "max_aspect_ratio": 16, "min_area": 1048576, "min_aspect_ratio": 0.0625 },
+            "examples": ["auto_2K"]
+          }
+        }
+      },
+      "ContentResponse": {
+        "type": "object",
+        "required": ["id", "content"],
+        "properties": {
+          "id": { "type": "string" },
+          "content": { "$ref": "#/components/schemas/ContentBlock" },
+          "usage": { "$ref": "#/components/schemas/Usage" }
+        }
+      },
+      "ContentBlock": {
+        "description": "A union of content block types with discriminator",
+        "oneOf": [
+          { "$ref": "#/components/schemas/TextBlock" },
+          { "$ref": "#/components/schemas/ImageBlock" },
+          { "$ref": "#/components/schemas/CodeBlock" },
+          { "$ref": "#/components/schemas/ToolUseBlock" },
+          { "$ref": "#/components/schemas/ToolResultBlock" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/TextBlock",
+            "image": "#/components/schemas/ImageBlock",
+            "code": "#/components/schemas/CodeBlock",
+            "tool_use": "#/components/schemas/ToolUseBlock",
+            "tool_result": "#/components/schemas/ToolResultBlock"
+          }
+        }
+      },
+      "TextBlock": {
+        "type": "object",
+        "required": ["type", "text"],
+        "properties": {
+          "type": { "type": "string", "const": "text" },
+          "text": { "type": "string" },
+          "annotations": { "type": "array", "items": { "$ref": "#/components/schemas/Annotation" } },
+          "recipes": { "type": "array", "items": { "$ref": "#/components/schemas/RecipeList" } }
+        }
+      },
+      "ImageBlock": {
+        "type": "object",
+        "required": ["type", "source"],
+        "properties": {
+          "type": { "type": "string", "const": "image" },
+          "source": { "$ref": "#/components/schemas/ImageSource" },
+          "alt_text": { "type": "string" }
+        }
+      },
+      "CodeBlock": {
+        "type": "object",
+        "required": ["type", "code"],
+        "properties": {
+          "type": { "type": "string", "const": "code" },
+          "code": { "type": "string" },
+          "language": { "type": "string" }
+        }
+      },
+      "ToolUseBlock": {
+        "type": "object",
+        "required": ["type", "id", "name", "input"],
+        "properties": {
+          "type": { "type": "string", "const": "tool_use" },
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "input": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "ToolResultBlock": {
+        "type": "object",
+        "required": ["type", "tool_use_id", "content"],
+        "properties": {
+          "type": { "type": "string", "const": "tool_result" },
+          "tool_use_id": { "type": "string" },
+          "content": { "$ref": "#/components/schemas/ToolResultContent" },
+          "iterations": { "$ref": "#/components/schemas/UsageCounters" },
+          "is_error": { "type": "boolean" }
+        }
+      },
+      "ToolResultContent": {
+        "description": "Tool result can be text or array of content blocks",
+        "oneOf": [
+          { "type": "string" },
+          { "type": "array", "items": { "$ref": "#/components/schemas/ToolResultContentBlock" } }
+        ]
+      },
+      "ToolResultContentBlock": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/TextBlock" },
+          { "$ref": "#/components/schemas/ImageBlock" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/TextBlock",
+            "image": "#/components/schemas/ImageBlock"
+          }
+        }
+      },
+      "ImageSource": {
+        "description": "Image source can be base64 or URL",
+        "oneOf": [
+          { "$ref": "#/components/schemas/Base64ImageSource" },
+          { "$ref": "#/components/schemas/UrlImageSource" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "base64": "#/components/schemas/Base64ImageSource",
+            "url": "#/components/schemas/UrlImageSource"
+          }
+        }
+      },
+      "Base64ImageSource": {
+        "type": "object",
+        "required": ["type", "media_type", "data"],
+        "properties": {
+          "type": { "type": "string", "const": "base64" },
+          "media_type": { "$ref": "#/components/schemas/MediaType" },
+          "data": { "type": "string", "format": "byte" }
+        }
+      },
+      "UrlImageSource": {
+        "type": "object",
+        "required": ["type", "url"],
+        "properties": {
+          "type": { "type": "string", "const": "url" },
+          "url": { "type": "string", "format": "uri" }
+        }
+      },
+      "MediaType": {
+        "type": "string",
+        "x-enum-descriptions": ["jpeg image", "png image", "gif image", "webp image"],
+        "enum": ["image/jpeg", "image/png", "image/gif", "image/webp"]
+      },
+      "Annotation": {
+        "description": "Text annotation with different types",
+        "oneOf": [
+          { "$ref": "#/components/schemas/CitationAnnotation" },
+          { "$ref": "#/components/schemas/LinkAnnotation" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "citation": "#/components/schemas/CitationAnnotation",
+            "link": "#/components/schemas/LinkAnnotation"
+          }
+        }
+      },
+      "CitationAnnotation": {
+        "type": "object",
+        "required": ["type", "start", "end", "build"],
+        "properties": {
+          "type": { "type": "string", "const": "citation" },
+          "start": { "type": "integer" },
+          "end": { "type": "integer" },
+          "build": { "type": "string" }
+        }
+      },
+      "LinkAnnotation": {
+        "type": "object",
+        "required": ["type", "start", "end", "url"],
+        "properties": {
+          "type": { "type": "string", "const": "link" },
+          "start": { "type": "integer" },
+          "end": { "type": "integer" },
+          "url": { "type": "string", "format": "uri" }
+        }
+      },
+      "AssistantEventList": {
+        "type": "object",
+        "required": ["events"],
+        "properties": {
+          "events": { "type": "array", "items": { "$ref": "#/components/schemas/AssistantEvent" } }
+        }
+      },
+      "AssistantEvent": {
+        "description": "Streaming event with different types",
+        "oneOf": [
+          { "$ref": "#/components/schemas/MessageStartEvent" },
+          { "$ref": "#/components/schemas/ContentBlockStartEvent" },
+          { "$ref": "#/components/schemas/ContentBlockDeltaEvent" },
+          { "$ref": "#/components/schemas/ContentBlockStopEvent" },
+          { "$ref": "#/components/schemas/MessageStopEvent" },
+          { "$ref": "#/components/schemas/PingEvent" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "message_start": "#/components/schemas/MessageStartEvent",
+            "content_block_start": "#/components/schemas/ContentBlockStartEvent",
+            "content_block_delta": "#/components/schemas/ContentBlockDeltaEvent",
+            "content_block_stop": "#/components/schemas/ContentBlockStopEvent",
+            "message_stop": "#/components/schemas/MessageStopEvent",
+            "ping": "#/components/schemas/PingEvent"
+          }
+        }
+      },
+      "MessageStartEvent": {
+        "type": "object",
+        "required": ["type", "message"],
+        "properties": {
+          "type": { "type": "string", "const": "message_start" },
+          "message": { "$ref": "#/components/schemas/Message" }
+        }
+      },
+      "ContentBlockStartEvent": {
+        "type": "object",
+        "required": ["type", "index", "content_block"],
+        "properties": {
+          "type": { "type": "string", "const": "content_block_start" },
+          "index": { "type": "integer" },
+          "content_block": { "$ref": "#/components/schemas/ContentBlock" }
+        }
+      },
+      "ContentBlockDeltaEvent": {
+        "type": "object",
+        "required": ["type", "index", "delta"],
+        "properties": {
+          "type": { "type": "string", "const": "content_block_delta" },
+          "index": { "type": "integer" },
+          "delta": { "$ref": "#/components/schemas/Delta" }
+        }
+      },
+      "ContentBlockStopEvent": {
+        "type": "object",
+        "required": ["type", "index"],
+        "properties": {
+          "type": { "type": "string", "const": "content_block_stop" },
+          "index": { "type": "integer" }
+        }
+      },
+      "MessageStopEvent": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "const": "message_stop" }
+        }
+      },
+      "PingEvent": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "const": "ping" }
+        }
+      },
+      "Delta": {
+        "description": "Delta content for streaming",
+        "oneOf": [
+          { "$ref": "#/components/schemas/TextDelta" },
+          { "$ref": "#/components/schemas/InputJsonDelta" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text_delta": "#/components/schemas/TextDelta",
+            "input_json_delta": "#/components/schemas/InputJsonDelta"
+          }
+        }
+      },
+      "TextDelta": {
+        "type": "object",
+        "required": ["type", "text"],
+        "properties": {
+          "type": { "type": "string", "const": "text_delta" },
+          "text": { "type": "string" }
+        }
+      },
+      "InputJsonDelta": {
+        "type": "object",
+        "required": ["type", "partial_json"],
+        "properties": {
+          "type": { "type": "string", "const": "input_json_delta" },
+          "partial_json": { "type": "string" }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": ["id", "role", "content", "model"],
+        "properties": {
+          "id": { "type": "string" },
+          "role": { "$ref": "#/components/schemas/Role" },
+          "content": { "type": "array", "items": { "$ref": "#/components/schemas/ContentBlock" } },
+          "model": { "type": "string" },
+          "stop_reason": { "$ref": "#/components/schemas/StopReason" },
+          "usage": { "$ref": "#/components/schemas/Usage" }
+        }
+      },
+      "Role": {
+        "type": "string",
+        "enum": ["user", "assistant"]
+      },
+      "SampleRate": {
+        "description": "Audio sample rate in Hz (integer-backed enum)",
+        "type": "integer",
+        "enum": [8000, 16000, 24000, 44100, 48000],
+        "default": 24000
+      },
+      "PlaybackRate": {
+        "description": "Playback speed multiplier (float-backed enum)",
+        "type": "number",
+        "enum": [0.5, 1.0, 1.5, 2.0],
+        "default": 1.0
+      },
+      "StopReason": {
+        "type": "string",
+        "enum": ["end_turn", "max_tokens", "stop_sequence", "tool_use"]
+      },
+      "Usage": {
+        "type": "object",
+        "required": ["input_tokens", "output_tokens"],
+        "properties": {
+          "input_tokens": { "type": "integer" },
+          "output_tokens": { "type": "integer" }
+        }
+      },
+      "AssistantEventFrame": {
+        "description": "One Server-Sent Events frame of a streamed reply: the event in data, its name, and where to resume",
+        "type": "object",
+        "required": ["data", "event"],
+        "properties": {
+          "data": { "$ref": "#/components/schemas/AssistantEvent" },
+          "event": {
+            "type": "string",
+            "enum": ["message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_stop", "ping"]
+          },
+          "id": { "type": "string" },
+          "retry": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "AssistantTokenFrame": {
+        "description": "A token frame or the closing usage frame, told apart by the frame's event name",
+        "oneOf": [{ "$ref": "#/components/schemas/TokenFrame" }, { "$ref": "#/components/schemas/UsageFrame" }]
+      },
+      "TokenFrame": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "type": "string", "const": "token" },
+          "data": { "type": "string", "description": "The text of one token, sent as is" }
+        }
+      },
+      "UsageFrame": {
+        "type": "object",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "type": "string", "const": "usage" },
+          "data": {
+            "type": "string",
+            "contentMediaType": "application/json",
+            "contentSchema": { "$ref": "#/components/schemas/Usage" }
+          },
+          "id": { "type": "string" }
+        }
+      },
+      "MessageMetadata": {
+        "description": "Flexible metadata that can be string or object",
+        "anyOf": [
+          { "type": "string" },
+          { "type": "object", "additionalProperties": true }
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["type", "error"],
+        "properties": {
+          "type": { "type": "string", "const": "error" },
+          "error": { "$ref": "#/components/schemas/ErrorDetails" }
+        }
+      },
+      "ErrorDetails": {
+        "type": "object",
+        "required": ["type", "message"],
+        "properties": {
+          "type": { "$ref": "#/components/schemas/ErrorType" },
+          "message": { "type": "string" }
+        }
+      },
+      "ErrorType": {
+        "type": "string",
+        "enum": [
+          "invalid_request_error",
+          "authentication_error",
+          "permission_error",
+          "not_found_error",
+          "rate_limit_error",
+          "api_error",
+          "overloaded_error"
+        ]
+      },
+      "NullableStringOrNumber": {
+        "description": "Nullable union of primitives",
+        "oneOf": [{ "type": "null" }, { "type": "string" }, { "type": "number" }]
+      },
+      "ArrayOrSingle": {
+        "description": "A single text block or an array of them",
+        "oneOf": [
+          { "$ref": "#/components/schemas/TextBlock" },
+          { "type": "array", "items": { "$ref": "#/components/schemas/TextBlock" } }
+        ]
+      },
+      "Node": {
+        "description": "A branch that refers back to a node, or a leaf",
+        "oneOf": [{ "$ref": "#/components/schemas/Branch" }, { "const": "leaf" }]
+      },
+      "Branch": {
+        "type": "object",
+        "required": ["child"],
+        "properties": {
+          "child": { "$ref": "#/components/schemas/Node" },
+          "label": { "type": "string" }
+        }
+      },
+      "Wrapper": {
+        "type": "object",
+        "required": ["node", "kind"],
+        "properties": {
+          "node": { "$ref": "#/components/schemas/Node" },
+          "kind": { "const": "w" }
+        }
+      },
+      "RecipeList": {
+        "additionalProperties": true,
+        "properties": {
+          "ingredients": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }],
+            "title": "Ingredients"
+          },
+          "required": {
+            "anyOf": [{ "items": { "type": "string" }, "type": "array" }, { "type": "null" }],
+            "title": "Required"
+          },
+          "type": { "const": "object", "title": "Type", "type": "string" }
+        },
+        "required": ["type"],
+        "title": "RecipeList",
+        "type": "object"
+      },
+      "UsageCounters": {
+        "anyOf": [
+          {
+            "items": {
+              "anyOf": [
+                { "$ref": "#/components/schemas/UsageCounterA" },
+                { "$ref": "#/components/schemas/UsageCounterB" }
+              ]
+            },
+            "type": "array"
+          },
+          { "type": "null" }
+        ],
+        "default": null
+      },
+      "HypotheticalVersion": {
+        "description": "Nested nullable union for flattening coverage",
+        "anyOf": [
+          {
+            "oneOf": [
+              { "$ref": "#/components/schemas/CitationAnnotation" },
+              { "$ref": "#/components/schemas/LinkAnnotation" }
+            ]
+          },
+          { "type": "null" }
+        ]
+      },
+      "UsageCounterA": {
+        "properties": {
+          "output_tokens": { "minimum": 0, "title": "Output Tokens", "type": "integer" },
+          "type": { "const": "counter_a", "default": "counter_a", "title": "Type", "type": "string" }
+        },
+        "required": ["output_tokens", "type"],
+        "title": "UsageCounterA",
+        "type": "object"
+      },
+      "UsageCounterB": {
+        "properties": {
+          "output_tokens": { "minimum": 0, "title": "Output Tokens", "type": "integer" },
+          "type": { "const": "counter_b", "default": "counter_b", "title": "Type", "type": "string" }
+        },
+        "required": ["output_tokens", "type"],
+        "title": "UsageCounterB",
+        "type": "object"
+      },
+      "ImageSize": {
+        "x-petstore-order-properties": ["width", "height"],
+        "properties": {
+          "width": {
+            "description": "The width of the generated image.",
+            "maximum": 14142,
+            "default": 512,
+            "title": "Width",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "height": {
+            "description": "The height of the generated image.",
+            "maximum": 14142,
+            "default": 512,
+            "title": "Height",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          }
+        },
+        "title": "ImageSize",
+        "type": "object"
+      },
+      "ImageSizePreset": {
+        "title": "Image Size",
+        "enum": ["square_hd", "square", "portrait_4_3", "portrait_16_9", "landscape_4_3", "landscape_16_9", "auto_1K", "auto_2K"],
+        "type": "string"
+      },
+      "ModelFilter": {
+        "type": "object",
+        "description": "Shares its inline model union with ModelSelection; this nullable copy has no default",
+        "properties": {
+          "model": {
+            "anyOf": [
+              { "type": "string", "enum": ["model-1.0-draft", "model-1.0", "model-1.1"] },
+              { "type": "string", "enum": ["Legacy 0.1-mini", "Legacy 0.1-plus"] },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "ModelSelection": {
+        "type": "object",
+        "description": "Shares its inline model union with ModelFilter; this copy defaults to a non-first variant",
+        "properties": {
+          "model": {
+            "anyOf": [
+              { "type": "string", "enum": ["model-1.0-draft", "model-1.0", "model-1.1"] },
+              { "type": "string", "enum": ["Legacy 0.1-mini", "Legacy 0.1-plus"] }
+            ],
+            "default": "model-1.0"
+          }
+        }
+      },
+      "ModelRequirement": {
+        "type": "object",
+        "description": "Shares its inline model union with ModelFilter; this copy is required and has no default",
+        "required": ["model"],
+        "properties": {
+          "model": {
+            "anyOf": [
+              { "type": "string", "enum": ["model-1.0-draft", "model-1.0", "model-1.1"] },
+              { "type": "string", "enum": ["Legacy 0.1-mini", "Legacy 0.1-plus"] }
+            ]
+          }
+        }
+      },
+      "ChatModel": {
+        "type": "string",
+        "enum": ["chat-1.0", "chat-1.1"]
+      },
+      "ChatModelChoice": {
+        "description": "A listed chat model, tried before any other string",
+        "oneOf": [{ "type": "string" }, { "$ref": "#/components/schemas/ChatModel" }]
+      },
+      "ResponseKind": {
+        "description": "A union of constants, generated as a value enum",
+        "anyOf": [
+          { "type": "string", "const": "text", "description": "Plain text" },
+          { "type": "string", "const": "json" }
+        ],
+        "default": "json"
+      },
+      "UsageChoice": {
+        "description": "A constant tried before an object and any other string",
+        "anyOf": [
+          { "type": "string" },
+          { "$ref": "#/components/schemas/Usage" },
+          { "type": "string", "const": "auto" }
+        ],
+        "default": "auto"
+      },
+      "Toggle": {
+        "description": "Boolean enum written as JSON booleans",
+        "type": "boolean",
+        "enum": [true, false]
+      },
+      "ResponseQuality": {
+        "description": "Enum mixing a string, numbers, and a boolean",
+        "enum": ["auto", 1, 0.5, true, 1e-6, 1e21, 18446744073709552000]
+      },
+      "Priority": {
+        "description": "Integer enum without a declared type",
+        "enum": [1, 2, 3]
+      },
+      "ChatModelId": {
+        "description": "A listed chat model or any other model name",
+        "anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/ChatModel" }]
+      },
+      "ChatPreference": {
+        "type": "object",
+        "description": "Non-exhaustive enums: a referenced one, and an inline one that lists `other` and defaults to an unlisted value",
+        "required": ["model"],
+        "properties": {
+          "model": { "$ref": "#/components/schemas/ChatModelId" },
+          "object": { "type": "string", "const": "chat.preference" },
+          "fallback": { "$ref": "#/components/schemas/ChatModel", "default": "chat-1.1" },
+          "tier": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "string", "enum": ["standard", "priority", "other"] }
+            ],
+            "default": "flex"
+          }
+        }
+      },
+      "AssistantSettings": {
+        "type": "object",
+        "description": "Assistant tuning knobs. Gathers every remaining union and enum shape in one round-trippable document.",
+        "properties": {
+          "modelFilter": { "$ref": "#/components/schemas/ModelFilter" },
+          "modelSelection": { "$ref": "#/components/schemas/ModelSelection" },
+          "modelRequirement": { "$ref": "#/components/schemas/ModelRequirement" },
+          "modelChoice": { "$ref": "#/components/schemas/ChatModelChoice" },
+          "responseKind": { "$ref": "#/components/schemas/ResponseKind" },
+          "usage": { "$ref": "#/components/schemas/UsageChoice" },
+          "streaming": { "$ref": "#/components/schemas/Toggle" },
+          "quality": { "$ref": "#/components/schemas/ResponseQuality" },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "temperature": { "$ref": "#/components/schemas/NullableStringOrNumber" },
+          "highlights": { "$ref": "#/components/schemas/ArrayOrSingle" },
+          "citation": { "$ref": "#/components/schemas/HypotheticalVersion" },
+          "sampleRate": { "$ref": "#/components/schemas/SampleRate" },
+          "playbackRate": { "$ref": "#/components/schemas/PlaybackRate" },
+          "stopReason": { "$ref": "#/components/schemas/StopReason" },
+          "role": { "$ref": "#/components/schemas/Role" }
+        }
+      }
+    }
+  }
+}

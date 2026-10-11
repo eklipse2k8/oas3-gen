@@ -1,0 +1,30 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Discriminator Mappings", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Explicit": {
+        "oneOf": [{ "$ref": "#/components/schemas/ExplicitA" }, { "$ref": "#/components/schemas/ExplicitB" }],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": { "a_override": "#/components/schemas/ExplicitA", "b_override": "#/components/schemas/ExplicitB" }
+        }
+      },
+      "ExplicitA": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "const": "a" } } },
+      "ExplicitB": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "const": "b" } } },
+      "Missing": {
+        "oneOf": [{ "$ref": "#/components/schemas/MissingA" }, { "$ref": "#/components/schemas/MissingB" }],
+        "discriminator": { "propertyName": "kind" }
+      },
+      "MissingA": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "const": "a" } } },
+      "MissingB": { "type": "object", "properties": { "kind": { "type": "string" } } },
+      "Duplicate": {
+        "oneOf": [{ "$ref": "#/components/schemas/DuplicateA" }, { "$ref": "#/components/schemas/DuplicateB" }],
+        "discriminator": { "propertyName": "kind" }
+      },
+      "DuplicateA": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "const": "same" } } },
+      "DuplicateB": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "const": "same" } } }
+    }
+  }
+}

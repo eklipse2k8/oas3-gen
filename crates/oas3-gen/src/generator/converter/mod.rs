@@ -1,23 +1,22 @@
-pub(crate) mod cache;
-pub(crate) mod common;
-pub(crate) mod discriminator;
-pub(crate) mod fields;
-pub(crate) mod hashing;
-pub(crate) mod inline_resolver;
-pub(crate) mod methods;
-pub(crate) mod operations;
-pub(crate) mod parameters;
-pub(crate) mod relaxed_enum;
-pub(crate) mod requests;
-pub(crate) mod responses;
-pub(crate) mod security;
-pub(crate) mod structs;
-pub(crate) mod type_resolver;
-pub(crate) mod type_usage_recorder;
-pub(crate) mod union_types;
-pub(crate) mod unions;
-pub(crate) mod value_enums;
-pub(crate) mod variants;
+pub mod cache;
+pub mod common;
+pub mod discriminator;
+pub mod fields;
+pub mod hashing;
+pub mod inline_resolver;
+pub mod methods;
+pub mod operations;
+pub mod parameters;
+pub mod requests;
+pub mod responses;
+pub mod security;
+pub mod structs;
+pub mod type_resolver;
+pub mod type_usage_recorder;
+pub mod union_types;
+pub mod unions;
+pub mod value_enums;
+pub mod variants;
 
 use std::{
   cell::{Ref, RefCell, RefMut},
@@ -27,11 +26,11 @@ use std::{
 };
 
 use anyhow::Result;
-pub(crate) use common::ConversionOutput;
+pub use common::ConversionOutput;
 use oas3::spec::ObjectSchema;
-pub(crate) use operations::OperationsProcessor;
-pub(crate) use type_resolver::TypeResolver;
-pub(crate) use type_usage_recorder::SerdeUsageRecorder;
+pub use operations::OperationsProcessor;
+pub use type_resolver::TypeResolver;
+pub use type_usage_recorder::SerdeUsageRecorder;
 
 use crate::{
   generator::{
@@ -264,12 +263,12 @@ impl CodegenConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ConverterContext {
-  pub(crate) graph: Arc<SchemaRegistry>,
-  pub(crate) config: CodegenConfig,
-  pub(crate) cache: RefCell<SharedSchemaCache>,
-  pub(crate) type_usage: RefCell<SerdeUsageRecorder>,
-  pub(crate) reachable_schemas: Option<Arc<SchemaSet>>,
+pub struct ConverterContext {
+  pub graph: Arc<SchemaRegistry>,
+  pub config: CodegenConfig,
+  pub cache: RefCell<SharedSchemaCache>,
+  pub type_usage: RefCell<SerdeUsageRecorder>,
+  pub reachable_schemas: Option<Arc<SchemaSet>>,
 }
 
 impl ConverterContext {
@@ -278,7 +277,7 @@ impl ConverterContext {
   ///
   /// The `reachable_schemas` parameter, when `Some`, restricts conversion to only
   /// schemas reachable from the filtered operations, enabling dead-code elimination.
-  pub(crate) fn new(
+  pub fn new(
     graph: Arc<SchemaRegistry>,
     config: CodegenConfig,
     cache: SharedSchemaCache,
@@ -295,12 +294,12 @@ impl ConverterContext {
 
   /// Returns a reference to the schema registry containing all resolved schemas
   /// and their dependency relationships.
-  pub(crate) fn graph(&self) -> &SchemaRegistry {
+  pub fn graph(&self) -> &SchemaRegistry {
     &self.graph
   }
 
   /// Returns a reference to the code generation configuration.
-  pub(crate) fn config(&self) -> &CodegenConfig {
+  pub fn config(&self) -> &CodegenConfig {
     &self.config
   }
 
@@ -308,14 +307,14 @@ impl ConverterContext {
   ///
   /// Call this after conversion completes to retrieve which types are used in
   /// requests vs responses for serde mode optimization.
-  pub(crate) fn take_type_usage(&self) -> SerdeUsageRecorder {
+  pub fn take_type_usage(&self) -> SerdeUsageRecorder {
     self.type_usage.take()
   }
 
   /// Records that the named type appears in an HTTP request context (request body or parameter).
   ///
   /// Types used only in requests may derive `Serialize` without `Deserialize`.
-  pub(crate) fn mark_request(&self, type_name: impl Into<EnumToken>) {
+  pub fn mark_request(&self, type_name: impl Into<EnumToken>) {
     self.type_usage.borrow_mut().mark_request(type_name);
   }
 
@@ -325,7 +324,7 @@ impl ConverterContext {
   /// Records that multiple types appear in HTTP request contexts.
   ///
   /// More efficient than calling [`mark_request`](Self::mark_request) in a loop.
-  pub(crate) fn mark_request_iter<I, T>(&self, types: I)
+  pub fn mark_request_iter<I, T>(&self, types: I)
   where
     I: IntoIterator<Item = T>,
     T: Into<super::ast::EnumToken>,
@@ -336,22 +335,22 @@ impl ConverterContext {
   /// Extracts custom type names from a [`TypeRef`] and records them as response types.
   ///
   /// Handles nested types like `Box<CustomType>` by extracting the inner type name.
-  pub(crate) fn mark_response_type_ref(&self, type_ref: &TypeRef) {
+  pub fn mark_response_type_ref(&self, type_ref: &TypeRef) {
     self.type_usage.borrow_mut().mark_response_type_ref(type_ref);
   }
 
   /// Combines type usage data from another recorder into this context's recorder.
   ///
   /// Used when sub-converters track usage independently and results must be aggregated.
-  pub(crate) fn merge_usage(&self, other: SerdeUsageRecorder) {
+  pub fn merge_usage(&self, other: SerdeUsageRecorder) {
     self.type_usage.borrow_mut().merge(other);
   }
 
-  pub(crate) fn cache(&self) -> Ref<'_, SharedSchemaCache> {
+  pub fn cache(&self) -> Ref<'_, SharedSchemaCache> {
     self.cache.borrow()
   }
 
-  pub(crate) fn cache_mut(&self) -> RefMut<'_, SharedSchemaCache> {
+  pub fn cache_mut(&self) -> RefMut<'_, SharedSchemaCache> {
     self.cache.borrow_mut()
   }
 }
@@ -362,7 +361,7 @@ impl ConverterContext {
 /// Uses `TypeResolver` for read-only type mapping and navigation, while managing
 /// the conversion flow through specialized converters (`StructConverter`, `EnumConverter`, etc.).
 #[derive(Debug, Clone)]
-pub(crate) struct SchemaConverter {
+pub struct SchemaConverter {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
   struct_converter: StructConverter,
@@ -376,7 +375,7 @@ impl SchemaConverter {
   ///
   /// Each sub-converter receives a clone of the shared context `Rc`, enabling
   /// coordinated type caching and usage tracking across conversion operations.
-  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+  pub fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       type_resolver: TypeResolver::new(context.clone()),
       struct_converter: StructConverter::new(context.clone()),
@@ -388,12 +387,12 @@ impl SchemaConverter {
   }
 
   /// Returns a reference to the shared converter context.
-  pub(crate) fn context(&self) -> &Rc<ConverterContext> {
+  pub fn context(&self) -> &Rc<ConverterContext> {
     &self.context
   }
 
   /// Returns `true` if the schema registry contains a schema with the given name.
-  pub(crate) fn contains(&self, name: &str) -> bool {
+  pub fn contains(&self, name: &str) -> bool {
     self.context.cache().contains_schema_name(name)
   }
 
@@ -409,7 +408,7 @@ impl SchemaConverter {
   ///
   /// Returns multiple types when inline definitions are extracted (e.g., nested
   /// anonymous objects become separate struct definitions).
-  pub(crate) fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> Result<Vec<RustType>> {
+  pub fn convert_schema(&self, name: &str, schema: &ObjectSchema) -> Result<Vec<RustType>> {
     if schema.has_intersection() {
       return self.struct_converter.convert_all_of_schema(name);
     }
@@ -417,6 +416,10 @@ impl SchemaConverter {
     if schema.union_variants_with_kind().is_some() {
       if schema.discriminator.is_none() && self.type_resolver.is_wrapper_union(schema)? {
         return self.convert_nullable_enum(name, schema);
+      }
+
+      if let Some(array) = self.type_resolver.nullable_inline_array(schema)? {
+        return self.convert_schema(name, &array);
       }
 
       if let Some(flattened) = self.type_resolver.try_flatten_nested_union(schema)? {
@@ -475,7 +478,7 @@ impl SchemaConverter {
   ///
   /// When the schema defines a discriminator with mappings, this creates a tagged union
   /// enum that wraps the base struct and its subtypes, enabling polymorphic deserialization.
-  pub(crate) fn finalize_struct_types(
+  pub fn finalize_struct_types(
     &self,
     name: &str,
     schema: &ObjectSchema,
@@ -547,7 +550,7 @@ impl SchemaConverter {
   ///
   /// Processes schemas in two phases: first registers all top-level schemas to enable
   /// deduplication, then converts each to Rust types in specification order.
-  pub(crate) fn convert_all_schemas(
+  pub fn convert_all_schemas(
     &self,
     operation_reachable: Option<&SchemaSet>,
     stats: &mut GenerationStats,
@@ -580,6 +583,3 @@ impl SchemaConverter {
     })
   }
 }
-
-#[cfg(test)]
-mod tests;

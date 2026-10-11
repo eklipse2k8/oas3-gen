@@ -1,0 +1,32 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Telemetry", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Reading": {
+        "type": "object",
+        "required": ["collarId", "payload", "tags", "kind"],
+        "properties": {
+          "collarId": { "type": "string" },
+          "payload": { "type": "string", "format": "byte" },
+          "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+          "kind": { "type": "string", "const": "reading" },
+          "mode": { "type": "string", "enum": ["eco", "standard"], "default": "standard" },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": { "type": "string" }
+      },
+      "Counter": {
+        "type": "object",
+        "required": ["count"],
+        "properties": { "count": { "type": "integer" }, "step": { "type": "integer", "default": 1 } }
+      },
+      "Plain": {
+        "type": "object",
+        "required": ["label"],
+        "properties": { "label": { "type": "string" } }
+      }
+    }
+  }
+}

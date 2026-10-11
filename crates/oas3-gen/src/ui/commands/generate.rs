@@ -240,7 +240,7 @@ impl GenerateConfig {
   }
 }
 
-pub(crate) fn resolve_crate_package(
+pub fn resolve_crate_package(
   mode: &GenerateMode,
   output: &Path,
   workspace: bool,
@@ -258,11 +258,11 @@ pub(crate) fn resolve_crate_package(
   CratePackage::from_output_dir(output, module_version).map(Some)
 }
 
-pub(crate) fn parse_customizations(customize: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
+pub fn parse_customizations(customize: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
   parse_key_value_map(customize, "customize", "TYPE=PATH (e.g., date_time=crate::MyDateTime)")
 }
 
-pub(crate) fn parse_fn_name_overrides(fn_name: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
+pub fn parse_fn_name_overrides(fn_name: Option<Vec<String>>) -> anyhow::Result<HashMap<String, String>> {
   parse_key_value_map(fn_name, "fn-name", "ID=NAME (e.g., listPets=fetch_pets)")
 }
 
@@ -389,6 +389,9 @@ impl<'a> GenerateLogger<'a> {
     self.stat("Operations converted:", stats.operations_converted.to_string());
     if stats.webhooks_converted > 0 {
       self.stat("", format!("{} webhooks", stats.webhooks_converted));
+    }
+    if stats.callbacks_converted > 0 {
+      self.stat("", format!("{} callbacks", stats.callbacks_converted));
     }
   }
 

@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::generator::ast::{RustPrimitive, TypeRef};
 
-pub(crate) fn json_to_rust_literal(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
+pub fn json_to_rust_literal(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
   if matches!(value, serde_json::Value::Null) {
     return quote! { None };
   }

@@ -41,6 +41,7 @@ pub struct ServerTraitMethod {
   pub path_params_type: Option<StructToken>,
   pub query_params_type: Option<StructToken>,
   pub header_params_type: Option<StructToken>,
+  pub cookie_params_type: Option<StructToken>,
   pub body_info: Option<HandlerBodyInfo>,
   pub credentials: Option<HandlerCredentials>,
 }
@@ -79,6 +80,8 @@ impl ServerRequestTraitDef {
           extract_nested_type(&info.parameters, ParameterLocation::Query, info.request_type.as_ref());
         let header_params_type =
           extract_nested_type(&info.parameters, ParameterLocation::Header, info.request_type.as_ref());
+        let cookie_params_type =
+          extract_nested_type(&info.parameters, ParameterLocation::Cookie, info.request_type.as_ref());
 
         let credentials = info
           .credentials_type
@@ -114,6 +117,7 @@ impl ServerRequestTraitDef {
           .maybe_path_params_type(path_params_type)
           .maybe_query_params_type(query_params_type)
           .maybe_header_params_type(header_params_type)
+          .maybe_cookie_params_type(cookie_params_type)
           .maybe_body_info(body_info)
           .maybe_credentials(credentials)
           .build()
@@ -140,7 +144,7 @@ fn extract_nested_type(
   request_type: Option<&StructToken>,
 ) -> Option<StructToken> {
   let has_params = parameters.iter().any(|p| p.parameter_location == Some(location));
-  let suffix = location.suffix()?;
+  let suffix = location.suffix();
 
   has_params
     .then(|| request_type.map(|req| StructToken::new(format!("{req}{suffix}"))))
@@ -153,7 +157,7 @@ pub struct ServerRootNode {
 }
 
 impl TraitToken {
-  pub(crate) fn new_server(name: Option<&str>, fallback: &str) -> Self {
+  pub fn new_server(name: Option<&str>, fallback: &str) -> Self {
     let trait_name = if let Some(name) = name
       && !name.is_empty()
     {

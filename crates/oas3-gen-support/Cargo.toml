@@ -19,7 +19,7 @@ default = ["quick-xml", "reqwest", "eventsource"]
 
 reqwest = ["dep:reqwest"]
 
-eventsource = ["reqwest", "reqwest/stream", "dep:eventsource-stream"]
+eventsource = ["reqwest", "dep:bytes", "dep:futures-util", "dep:memchr"]
 
 quick-xml = ["dep:quick-xml", "quick-xml/serde", "quick-xml/serialize"]
 
@@ -27,10 +27,12 @@ quick-xml = ["dep:quick-xml", "quick-xml/serde", "quick-xml/serialize"]
 [dependencies]
 better_default.workspace = true
 bon.workspace = true
+bytes = { workspace = true, optional = true }
 chrono.workspace = true
-eventsource-stream = { workspace = true, optional = true }
 futures-core.workspace = true
+futures-util = { workspace = true, optional = true }
 http.workspace = true
+memchr = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 serde_json.workspace = true
@@ -39,7 +41,3 @@ serde_with.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 validator.workspace = true
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-futures.workspace = true

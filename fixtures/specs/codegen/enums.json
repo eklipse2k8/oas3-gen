@@ -1,0 +1,27 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Enums", "version": "1.0.0" },
+  "paths": {
+    "/mood": {
+      "get": {
+        "operationId": "getMood",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Mood" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Status": { "type": "string", "enum": ["active", "Active", "ACTIVE", "in-progress"] },
+      "Priority": { "type": "string", "enum": ["high", "low", "unknown"] },
+      "Cuisine": { "anyOf": [{ "type": "string", "enum": ["italian", "Thai-Food"] }, { "type": "string" }] },
+      "Choice": { "enum": ["auto", 1, 0.5, true] },
+      "Mood": { "type": "string", "enum": ["calm", "Calm", "excited"] },
+      "Streaming": { "type": "boolean", "enum": [true] }
+    }
+  }
+}

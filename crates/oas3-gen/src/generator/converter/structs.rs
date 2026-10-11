@@ -15,7 +15,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct StructConverter {
+pub struct StructConverter {
   context: Rc<ConverterContext>,
   field_converter: FieldConverter,
   discriminator_converter: DiscriminatorConverter,
@@ -26,7 +26,7 @@ impl StructConverter {
   ///
   /// The `context` provides access to the schema registry, configuration,
   /// and shared type cache for deduplication.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     let field_converter = FieldConverter::new(&context);
     let discriminator_converter = DiscriminatorConverter::new(context.clone());
     Self {
@@ -41,7 +41,7 @@ impl StructConverter {
   /// For schemas that define a discriminator (polymorphic base types), appends
   /// a `Base` suffix to distinguish the struct from the generated discriminated
   /// enum. Otherwise, converts the name to PascalCase.
-  pub(crate) fn struct_name(name: &str, schema: &ObjectSchema) -> StructToken {
+  pub fn struct_name(name: &str, schema: &ObjectSchema) -> StructToken {
     if schema.is_discriminated_base_type() {
       StructToken::from(format!("{}{}", to_rust_type_name(name), DISCRIMINATED_BASE_SUFFIX))
     } else {
@@ -129,7 +129,7 @@ impl StructConverter {
   /// Routes to [`build_struct`] for field extraction and registers the
   /// result in the shared cache for deduplication. The `kind` parameter
   /// controls struct decoration (e.g., derive macros, serde attributes).
-  pub(crate) fn convert_struct(
+  pub fn convert_struct(
     &self,
     name: &str,
     schema: &ObjectSchema,
@@ -160,7 +160,7 @@ impl StructConverter {
   /// If the schema participates in a discriminated union (has a parent with
   /// a `discriminator`), delegates to [`convert_discriminated_child`].
   /// Otherwise, merges all properties and builds a standard struct.
-  pub(crate) fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
+  pub fn convert_all_of_schema(&self, name: &str) -> anyhow::Result<Vec<RustType>> {
     let graph = self.context.graph();
 
     let merged_info = graph

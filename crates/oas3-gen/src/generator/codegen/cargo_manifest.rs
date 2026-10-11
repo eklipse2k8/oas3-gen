@@ -27,6 +27,9 @@ struct DependencySpec {
   version: &'static str,
   features: &'static [&'static str],
   ordered_features: &'static [&'static str],
+  /// Features enabled only when the generated sources also reference the paired crate,
+  /// as `(crate ident, feature)`
+  referenced_features: &'static [(&'static str, &'static str)],
   default_features: bool,
 }
 
@@ -37,6 +40,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "1.0",
     features: &[],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -45,14 +49,16 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "0.8.5",
     features: &["multipart"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
     ident: "axum_extra",
     package: "axum-extra",
     version: "0.12",
-    features: &["cookie"],
+    features: &["cookie", "query"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -61,6 +67,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "3.10",
     features: &["implied-bounds"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -69,7 +76,17 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "0.4.42",
     features: &["std", "clock", "serde"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: false,
+  },
+  DependencySpec {
+    ident: "futures",
+    package: "futures",
+    version: "0.3",
+    features: &[],
+    ordered_features: &[],
+    referenced_features: &[],
+    default_features: true,
   },
   DependencySpec {
     ident: "http",
@@ -77,6 +94,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "1.5",
     features: &[],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -85,6 +103,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "2.14",
     features: &["serde"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -93,6 +112,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: env!("CARGO_PKG_VERSION"),
     features: &[],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -101,14 +121,16 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "1.13",
     features: &[],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
     ident: "reqwest",
     package: "reqwest",
     version: "0.13",
-    features: &["json", "multipart", "http2", "native-tls", "query", "stream"],
+    features: &["form", "json", "multipart", "http2", "native-tls", "query", "stream"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: false,
   },
   DependencySpec {
@@ -117,6 +139,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "0.10",
     features: &[],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -125,6 +148,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "0.10",
     features: &[],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -133,7 +157,17 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "1.0",
     features: &["derive"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
+  },
+  DependencySpec {
+    ident: "serde_html_form",
+    package: "serde_html_form",
+    version: "0.4",
+    features: &["ser", "std"],
+    ordered_features: &[],
+    referenced_features: &[],
+    default_features: false,
   },
   DependencySpec {
     ident: "serde_json",
@@ -141,6 +175,7 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "1.0",
     features: &[],
     ordered_features: &["preserve_order"],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -149,14 +184,16 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "3.24",
     features: &["base64", "chrono"],
     ordered_features: &[],
+    referenced_features: &[("indexmap", "indexmap_2")],
     default_features: true,
   },
   DependencySpec {
     ident: "uuid",
     package: "uuid",
-    version: "1.26",
+    version: "1.28",
     features: &["serde"],
     ordered_features: &[],
+    referenced_features: &[],
     default_features: true,
   },
   DependencySpec {
@@ -165,27 +202,29 @@ const DEPENDENCIES: &[DependencySpec] = &[
     version: "0.21",
     features: &["derive"],
     ordered_features: &[],
+    referenced_features: &[("indexmap", "indexmap")],
     default_features: true,
   },
 ];
 
-/// Yields the pinned `(package, version)` pairs the generated manifests declare.
-#[cfg(test)]
-pub(crate) fn pinned_versions() -> impl Iterator<Item = (&'static str, &'static str)> {
-  DEPENDENCIES.iter().map(|spec| (spec.package, spec.version))
-}
-
 impl DependencySpec {
-  fn resolve(&self, collection_types: CollectionTypePolicy) -> Dependency {
-    let features = match collection_types {
-      CollectionTypePolicy::Ordered => self
-        .features
-        .iter()
-        .chain(self.ordered_features)
-        .copied()
-        .collect::<Vec<_>>(),
-      CollectionTypePolicy::Hashed => self.features.to_vec(),
+  fn resolve(&self, collection_types: CollectionTypePolicy, referenced: &BTreeSet<String>) -> Dependency {
+    let ordered = match collection_types {
+      CollectionTypePolicy::Ordered => self.ordered_features,
+      CollectionTypePolicy::Hashed => &[],
     };
+    let paired = self
+      .referenced_features
+      .iter()
+      .filter(|(ident, _)| referenced.contains(*ident))
+      .map(|(_, feature)| feature);
+    let features = self
+      .features
+      .iter()
+      .chain(ordered)
+      .chain(paired)
+      .copied()
+      .collect::<Vec<_>>();
 
     let value = if features.is_empty() && self.default_features {
       DependencyValue::Version(self.version)
@@ -317,7 +356,7 @@ impl CargoManifest {
     let dependencies = DEPENDENCIES
       .iter()
       .filter(|spec| referenced.contains(spec.ident))
-      .map(|spec| spec.resolve(collection_types))
+      .map(|spec| spec.resolve(collection_types, &referenced))
       .collect::<Vec<_>>();
 
     Ok(Self {

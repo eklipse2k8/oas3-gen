@@ -1,0 +1,13 @@
+openapi: 3.1.0
+info: { title: true, version: VERSION }
+paths:
+  /pets: { $ref: '#/components/pathItems/Pets' }
+components:
+  schemas:
+    Closed: { type: string, enum: [a, b] }
+    Holder:
+      type: object
+      properties:
+        lifted: { $ref: '#/components/schemas/Closed', default: a }
+  pathItems:
+    Pets: { get: { operationId: listPets, responses: {} } }

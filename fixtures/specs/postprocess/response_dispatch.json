@@ -1,0 +1,52 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Response dispatch", "version": "1.0.0" },
+  "paths": {
+    "/pets/{id}": {
+      "get": {
+        "operationId": "getPet",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "4XX": { "description": "client error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "missing", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } },
+          "default": {
+            "description": "error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } },
+              "application/xml": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    },
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "headers": {
+              "Link": { "required": true, "schema": { "type": "string" } },
+              "X-Total": { "required": true, "schema": { "type": "integer", "format": "int64" } }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pets" } } }
+          },
+          "201": {
+            "description": "created",
+            "headers": { "Link": { "required": true, "schema": { "type": "string" } } }
+          },
+          "404": { "description": "missing", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pet": { "type": "object", "properties": { "name": { "type": "string" } } },
+      "Pets": { "type": "array", "items": { "$ref": "#/components/schemas/Pet" } },
+      "Error": { "type": "object", "properties": { "message": { "type": "string" } } },
+      "Problem": { "type": "object", "properties": { "title": { "type": "string" } } }
+    }
+  }
+}

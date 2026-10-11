@@ -2,6 +2,7 @@
 targets = ["aarch64-apple-darwin"]
 all-features = true
 no-default-features = false
+exclude = ["petstore-client", "petstore-server"]
 
 [output]
 feature-depth = 1
@@ -16,6 +17,7 @@ exceptions = []
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+allow-wildcard-paths = true
 highlight = "simplest-path"
 workspace-default-features = "allow"
 external-default-features = "allow"

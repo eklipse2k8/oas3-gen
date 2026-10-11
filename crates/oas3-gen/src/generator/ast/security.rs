@@ -98,6 +98,13 @@ impl CredentialScheme {
     self.api_key_location() == Some(ApiKeyLocation::Cookie)
   }
 
+  /// Whether the credential is an API key sent in a header, which the client keeps as an
+  /// `http::HeaderValue`.
+  #[must_use]
+  pub fn is_header_key(&self) -> bool {
+    self.api_key_location() == Some(ApiKeyLocation::Header)
+  }
+
   fn docs(&self) -> Documentation {
     let origin = format!(
       "`{}` {}, read from {}.",

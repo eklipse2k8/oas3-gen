@@ -2,20 +2,21 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use indexmap::IndexMap;
 use itertools::Itertools;
+use string_cache::DefaultAtom;
 
 use crate::generator::{
   ast::{
-    Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind, MethodNameToken, OperationInfo,
-    OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef, ResponseMediaType, ResponseParam,
-    ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant, ResponseVariant,
-    ResponseVariantCategory, RustPrimitive, RustType, SerdeMode, StatusCodeToken, StatusHandler, StructDef, StructKind,
-    StructMethod, StructToken, TypeRef, VariantMapping,
+    BodyMediaType, ContentCategory, Documentation, EnumToken, EnumVariantToken, FieldDef, FieldNameToken, MethodKind,
+    MethodNameToken, OperationInfo, OperationResponse, ResponseEnumDef, ResponseEnumVariant, ResponseHeadersRef,
+    ResponseMediaType, ResponseParam, ResponsePayload, ResponseStatusCategory, ResponseUnionDef, ResponseUnionVariant,
+    ResponseVariant, RustPrimitive, RustType, StatusCodeToken, StatusHandler, StructDef, StructKind, StructMethod,
+    StructToken, TypeRef, VariantMapping,
   },
-  converter::GenerationTarget,
+  converter::{GenerationTarget, requests::sent_media_type},
   naming::{
-    constants::{OTHER_RESPONSE_VARIANT, RESPONSE_FALLBACK_NAME, RESPONSE_NAME, WITH_HEADERS_NAME},
+    constants::{DEFAULT_MEDIA_TYPE, OTHER_RESPONSE_VARIANT, RESPONSE_FALLBACK_NAME, RESPONSE_NAME, WITH_HEADERS_NAME},
     identifiers::ensure_unique,
-    responses::{headers_name, union_name},
+    responses::{headers_name, union_member_name, union_name},
   },
 };
 
@@ -30,7 +31,7 @@ type MergedHeader = (FieldDef, usize);
 /// variant it came from.
 type Body<'a> = (String, &'a TypeRef, &'a ResponseVariant);
 
-pub(crate) struct ResponseProcessor {
+pub struct ResponseProcessor {
   types: Vec<RustType>,
   operations: Vec<OperationInfo>,
   target: GenerationTarget,
@@ -38,10 +39,24 @@ pub(crate) struct ResponseProcessor {
   unions: IndexMap<String, ResponseUnionDef>,
   headers: IndexMap<String, StructDef>,
   taken: BTreeSet<String>,
+  type_index: HashMap<DefaultAtom, usize>,
+}
+
+/// The generated types, looked up by name.
+#[derive(Clone, Copy)]
+struct TypeLookup<'a> {
+  types: &'a [RustType],
+  by_name: &'a HashMap<DefaultAtom, usize>,
+}
+
+impl<'a> TypeLookup<'a> {
+  fn get(self, name: &DefaultAtom) -> Option<&'a RustType> {
+    self.by_name.get(name).map(|&index| &self.types[index])
+  }
 }
 
 impl ResponseProcessor {
-  pub(crate) fn new(types: Vec<RustType>, operations: Vec<OperationInfo>, target: GenerationTarget) -> Self {
+  pub fn new(types: Vec<RustType>, operations: Vec<OperationInfo>, target: GenerationTarget) -> Self {
     Self {
       types,
       operations,
@@ -50,15 +65,22 @@ impl ResponseProcessor {
       unions: IndexMap::new(),
       headers: IndexMap::new(),
       taken: BTreeSet::new(),
+      type_index: HashMap::new(),
     }
   }
 
-  pub(crate) fn process(mut self) -> (Vec<RustType>, Vec<OperationInfo>) {
+  pub fn process(mut self) -> (Vec<RustType>, Vec<OperationInfo>) {
     let Some(table) = status_table(&self.operations) else {
       return (self.types, self.operations);
     };
     self.table = table;
     self.taken = self.types.iter().map(|t| t.type_name().to_string()).collect();
+    self.type_index = self
+      .types
+      .iter()
+      .enumerate()
+      .map(|(index, rust_type)| (rust_type.type_name(), index))
+      .collect();
 
     let response_enum = self.build_response_enum();
     let request_structs = self
@@ -89,7 +111,6 @@ impl ResponseProcessor {
       op.response = Some(response);
     }
 
-    self.mark_header_enums();
     self.types.push(RustType::ResponseEnum(response_enum));
     self
       .types
@@ -123,17 +144,21 @@ impl ResponseProcessor {
           .build()
       });
 
-    let needs_other = self
-      .operations
-      .iter()
-      .filter_map(|op| op.response_variants.as_deref())
-      .any(|variants| !variants.iter().any(|v| v.status_code.is_default()));
+    let other_payload = match self.target {
+      GenerationTarget::Client => Some(ResponsePayload::Unread),
+      GenerationTarget::Server => self
+        .operations
+        .iter()
+        .filter_map(|op| op.response_variants.as_deref())
+        .any(|variants| !variants.iter().any(|v| v.status_code.is_default()))
+        .then_some(ResponsePayload::Raw),
+    };
 
-    let other = needs_other.then(|| {
+    let other = other_payload.map(|payload| {
       ResponseEnumVariant::builder()
         .name(EnumVariantToken::from_raw(OTHER_RESPONSE_VARIANT))
         .status_code(StatusCodeToken::Default)
-        .payload(ResponsePayload::Raw)
+        .payload(payload)
         .build()
     });
 
@@ -198,9 +223,11 @@ impl ResponseProcessor {
           .build()
       });
 
+    let (body, media_types) = self.resolve_payload(class, variants);
     ResponseParam::builder()
-      .body(self.resolve_payload(class, variants))
+      .body(body)
       .maybe_headers(headers)
+      .media_types(media_types)
       .build()
   }
 
@@ -209,8 +236,13 @@ impl ResponseProcessor {
   ///
   /// A single body type is used as is, several become a response union, and a
   /// bodiless status alongside a body makes the parameter `Option<_>`. With no
-  /// body anywhere in the class the parameter is `()`.
-  fn resolve_payload(&mut self, class: ResponsePayload, variants: &mut [ResponseVariant]) -> TypeRef {
+  /// body anywhere in the class the parameter is `()`. Also returns each declared
+  /// body with how a server sends it.
+  fn resolve_payload(
+    &mut self,
+    class: ResponsePayload,
+    variants: &mut [ResponseVariant],
+  ) -> (TypeRef, Vec<BodyMediaType>) {
     let keyed = variants
       .iter()
       .enumerate()
@@ -238,20 +270,57 @@ impl ResponseProcessor {
       }
     };
 
+    let members = keyed
+      .iter()
+      .map(|(_, key)| union.as_ref().and(key.as_deref()).map(member_variant))
+      .collect::<Vec<_>>();
+    let lookup = TypeLookup {
+      types: &self.types,
+      by_name: &self.type_index,
+    };
+    let media_types = keyed
+      .iter()
+      .zip(&members)
+      .filter_map(|((index, _), member)| {
+        let variant = &variants[*index];
+        let body = variant.schema_type.clone()?;
+        let (category, content_type) = sent_body(variant, &body, lookup);
+        let stream = (category == ContentCategory::EventStream)
+          .then(|| ResponseMediaType::event_stream(&variant.media_types)?.stream.clone())
+          .flatten();
+        Some(
+          BodyMediaType::builder()
+            .status(variant.status_code)
+            .maybe_member(member.clone())
+            .category(category)
+            .content_type(content_type)
+            .body(body)
+            .maybe_stream(stream)
+            .build(),
+        )
+      })
+      .unique_by(|entry| (entry.status, entry.member.clone()))
+      .collect::<Vec<_>>();
+
     let param = if any_bodiless && !bodies.is_empty() {
       param.with_option()
     } else {
       param
     };
 
-    for (index, key) in keyed {
+    for ((index, _), member) in keyed.into_iter().zip(members) {
+      let parses_text = variants[index]
+        .schema_type
+        .as_ref()
+        .is_some_and(|body| can_write_as(ContentCategory::Text, body, lookup));
       variants[index].mapping = VariantMapping::builder()
         .payload(class)
-        .maybe_union_variant(union.as_ref().and(key.as_deref()).map(EnumVariantToken::from_raw))
+        .maybe_union_variant(member)
+        .parses_text(parses_text)
         .build();
     }
 
-    param
+    (param, media_types)
   }
 
   /// Merges the headers declared across one payload class of an operation into
@@ -318,29 +387,6 @@ impl ResponseProcessor {
     def.name.clone()
   }
 
-  /// Flags the enums that response headers parse into, so they implement `FromStr`
-  /// on every target.
-  fn mark_header_enums(&mut self) {
-    if self.headers.is_empty() {
-      return;
-    }
-
-    let parsed = self
-      .headers
-      .values()
-      .flat_map(|def| &def.fields)
-      .map(|field| field.rust_type.unboxed_base_type_name())
-      .collect::<BTreeSet<_>>();
-
-    for rust_type in &mut self.types {
-      if let RustType::Enum(def) = rust_type
-        && parsed.contains(def.name.as_str())
-      {
-        def.in_response_header = true;
-      }
-    }
-  }
-
   /// Returns the union over the given bodies, creating it on first use.
   ///
   /// Unions are keyed by their sorted member types, so operations with the same
@@ -355,10 +401,6 @@ impl ResponseProcessor {
       let streaming = members
         .iter()
         .any(|(_, _, v)| ResponseMediaType::has_event_stream(&v.media_types));
-      let serde_mode = match self.target {
-        GenerationTarget::Client => SerdeMode::None,
-        GenerationTarget::Server => SerdeMode::SerializeOnly,
-      };
 
       ResponseUnionDef::builder()
         .name(EnumToken::from_raw(name))
@@ -370,17 +412,21 @@ impl ResponseProcessor {
             .iter()
             .map(|(type_name, rust_type, _)| {
               ResponseUnionVariant::builder()
-                .name(EnumVariantToken::from_raw(type_name))
+                .name(member_variant(type_name))
                 .rust_type((*rust_type).clone())
                 .build()
             })
             .collect(),
         )
-        .serde_mode(serde_mode)
-        .streaming(streaming)
+        .maybe_streaming(streaming.then_some(self.target))
         .build()
     })
   }
+}
+
+/// The union variant for the body rendered as `member`.
+fn member_variant(member: &str) -> EnumVariantToken {
+  EnumVariantToken::new(union_member_name(member))
 }
 
 /// Collects every declared status code and whether any operation gives it a payload.
@@ -410,6 +456,65 @@ fn status_table(operations: &[OperationInfo]) -> Option<StatusTable> {
   any_responses.then_some(table)
 }
 
+/// The category a server encodes one body as and the media type it labels it with: the first
+/// declared media type that can carry the body, or else JSON under the first declared text
+/// label, or `application/json` without one.
+fn sent_body(variant: &ResponseVariant, body: &TypeRef, types: TypeLookup<'_>) -> (ContentCategory, String) {
+  if let Some(media) = variant
+    .media_types
+    .iter()
+    .find(|media| can_write_as(media.category, body, types))
+  {
+    return (media.category, sent_media_type(&media.content_type, media.category));
+  }
+  let label = variant
+    .media_types
+    .iter()
+    .find(|media| media.category == ContentCategory::Text)
+    .map_or_else(
+      || DEFAULT_MEDIA_TYPE.to_string(),
+      |media| sent_media_type(&media.content_type, ContentCategory::Text),
+    );
+  (ContentCategory::Json, label)
+}
+
+/// Whether a body of this type can be written under the category's media type. Text needs a
+/// string, a direct byte vector, or a `Display` type; binary needs bytes or a string. An alias
+/// is judged by the type it names.
+fn can_write_as(category: ContentCategory, body: &TypeRef, types: TypeLookup<'_>) -> bool {
+  if !matches!(category, ContentCategory::Text | ContentCategory::Binary) {
+    return true;
+  }
+  let Some(target) = resolve_alias(body, types) else {
+    return false;
+  };
+  if target.is_array || target.map_value.is_some() {
+    return false;
+  }
+  match &target.base_type {
+    RustPrimitive::Custom(name) => {
+      category == ContentCategory::Text && matches!(types.get(name), Some(RustType::Enum(def)) if def.is_text_form())
+    }
+    RustPrimitive::Bytes => category == ContentCategory::Binary || matches!(body.base_type, RustPrimitive::Bytes),
+    RustPrimitive::String => true,
+    RustPrimitive::Unit | RustPrimitive::Duration => false,
+    _ => category == ContentCategory::Text,
+  }
+}
+
+/// Follows an alias chain to the type it names, or `None` through a nullable alias, since
+/// `Option<T>` has no `Display` or raw byte form.
+fn resolve_alias<'a>(body: &'a TypeRef, types: TypeLookup<'a>) -> Option<&'a TypeRef> {
+  let RustPrimitive::Custom(name) = &body.base_type else {
+    return Some(body);
+  };
+  match types.get(name) {
+    Some(RustType::TypeAlias(alias)) if alias.target.nullable => None,
+    Some(RustType::TypeAlias(alias)) => resolve_alias(&alias.target, types),
+    _ => Some(body),
+  }
+}
+
 fn parse_method(response: &OperationResponse, variants: &[ResponseVariant]) -> StructMethod {
   let (status_handlers, default_handler) = partition_handlers(variants);
 
@@ -419,15 +524,16 @@ fn parse_method(response: &OperationResponse, variants: &[ResponseVariant]) -> S
       "Parse the HTTP response into the response enum.",
     ]))
     .kind(MethodKind::ParseResponse {
-      response: response.clone(),
+      response: Box::new(response.clone()),
       status_handlers,
       default_handler,
     })
     .build()
 }
 
-/// Groups variants by status code into handlers and splits off the `default` handler.
-fn partition_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseVariantCategory>) {
+/// Groups variants by status code into handlers, exact status codes ahead of ranges since an
+/// exact code takes precedence, and splits off the `default` handler.
+fn partition_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Option<ResponseStatusCategory>) {
   let (default_variants, status_variants): (Vec<_>, Vec<_>) = variants.iter().partition(|v| v.status_code.is_default());
 
   let status_handlers = status_variants
@@ -440,16 +546,15 @@ fn partition_handlers(variants: &[ResponseVariant]) -> (Vec<StatusHandler>, Opti
       },
     )
     .into_iter()
+    .sorted_by_key(|(code, _)| code.code().is_none())
     .map(|(code, group)| StatusHandler {
       status_code: code,
       dispatch: ResponseStatusCategory::from_variants(&group),
     })
     .collect();
 
-  let default_handler = default_variants.first().map(|v| ResponseVariantCategory {
-    category: ResponseMediaType::primary_category(&v.media_types),
-    variant: (*v).clone(),
-  });
+  let default_handler =
+    (!default_variants.is_empty()).then(|| ResponseStatusCategory::from_variants(&default_variants));
 
   (status_handlers, default_handler)
 }

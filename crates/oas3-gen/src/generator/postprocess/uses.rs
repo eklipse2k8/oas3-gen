@@ -4,16 +4,16 @@ use indexmap::{IndexMap, map::Entry};
 
 use crate::generator::ast::{MethodKind, RustType, SerdeImpl, ValidationAttribute};
 
-pub(crate) struct RustTypeDeduplication {
+pub struct RustTypeDeduplication {
   types: Vec<RustType>,
 }
 
 impl RustTypeDeduplication {
-  pub(crate) fn new(types: Vec<RustType>) -> Self {
+  pub fn new(types: Vec<RustType>) -> Self {
     Self { types }
   }
 
-  pub(crate) fn process(self) -> Vec<RustType> {
+  pub fn process(self) -> Vec<RustType> {
     let mut map = IndexMap::new();
 
     for t in self.types {
@@ -36,16 +36,16 @@ impl RustTypeDeduplication {
   }
 }
 
-pub(crate) struct ModuleImports<'a> {
+pub struct ModuleImports<'a> {
   types: &'a [RustType],
 }
 
 impl<'a> ModuleImports<'a> {
-  pub(crate) fn new(types: &'a [RustType]) -> Self {
+  pub fn new(types: &'a [RustType]) -> Self {
     Self { types }
   }
 
-  pub(crate) fn process(self) -> BTreeSet<String> {
+  pub fn process(self) -> BTreeSet<String> {
     let mut uses = BTreeSet::new();
 
     let mut needs_serialize = false;

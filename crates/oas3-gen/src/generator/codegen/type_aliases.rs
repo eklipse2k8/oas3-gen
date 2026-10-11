@@ -5,13 +5,13 @@ use super::Visibility;
 use crate::generator::ast::TypeAliasDef;
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TypeAliasFragment<'a> {
+pub struct TypeAliasFragment<'a> {
   def: &'a TypeAliasDef,
   visibility: Visibility,
 }
 
 impl<'a> TypeAliasFragment<'a> {
-  pub(crate) fn new(def: &'a TypeAliasDef, visibility: Visibility) -> Self {
+  pub fn new(def: &'a TypeAliasDef, visibility: Visibility) -> Self {
     Self { def, visibility }
   }
 }

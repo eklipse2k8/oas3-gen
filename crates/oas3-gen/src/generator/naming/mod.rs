@@ -4,6 +4,3 @@ pub mod inference;
 pub mod name_index;
 pub mod operations;
 pub mod responses;
-
-#[cfg(test)]
-mod tests;

@@ -2,12 +2,12 @@ use std::collections::BTreeSet;
 
 use crate::generator::ast::{DefaultAtom, RustPrimitive, RustType, TypeRef, ValidationAttribute};
 
-pub(crate) struct NestedValidationProcessor {
+pub struct NestedValidationProcessor {
   validated_structs: BTreeSet<DefaultAtom>,
 }
 
 impl NestedValidationProcessor {
-  pub(crate) fn new(types: &[RustType]) -> Self {
+  pub fn new(types: &[RustType]) -> Self {
     let validated_structs = types
       .iter()
       .filter_map(|rt| match rt {
@@ -19,7 +19,7 @@ impl NestedValidationProcessor {
     Self { validated_structs }
   }
 
-  pub(crate) fn process(&mut self, types: &mut [RustType]) {
+  pub fn process(&mut self, types: &mut [RustType]) {
     let mut changed = true;
     while changed {
       changed = false;

@@ -24,7 +24,7 @@ static UNDERSCORE_FORMAT: LazyLock<CustomFormat> = LazyLock::new(|| {
     .expect("formatter failed to build.")
 });
 
-pub(crate) fn format_number_with_underscores<T: ToFormattedString>(value: &T) -> String {
+pub fn format_number_with_underscores<T: ToFormattedString>(value: &T) -> String {
   value.to_formatted_string(&*UNDERSCORE_FORMAT)
 }
 
@@ -537,13 +537,13 @@ impl ToTokens for ResponsePayload {
     match self {
       Self::Value => quote! { Value }.to_tokens(tokens),
       Self::Failure => quote! { Failure }.to_tokens(tokens),
-      Self::None | Self::Raw => {}
+      Self::None | Self::Raw | Self::Unread => {}
     }
   }
 }
 
 /// Renders `<A, B>` for the given arguments, or nothing when there are none.
-pub(crate) fn generic_args(args: impl IntoIterator<Item = TokenStream>) -> TokenStream {
+pub fn generic_args(args: impl IntoIterator<Item = TokenStream>) -> TokenStream {
   let args = args.into_iter().collect::<Vec<_>>();
   if args.is_empty() {
     quote! {}
@@ -665,7 +665,7 @@ fn format_time_constructor(time_str: &str) -> String {
   }
 }
 
-pub(crate) fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
+pub fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
   let parts = date_str.split('-').collect::<Vec<&str>>();
   if parts.len() == 3 {
     let year = parts[0].parse().ok()?;
@@ -677,7 +677,7 @@ pub(crate) fn parse_date_parts(date_str: &str) -> Option<(i32, u32, u32)> {
   }
 }
 
-pub(crate) fn parse_time_parts(time_str: &str) -> Option<(u32, u32, u32)> {
+pub fn parse_time_parts(time_str: &str) -> Option<(u32, u32, u32)> {
   let parts = time_str.split(':').collect::<Vec<&str>>();
   if parts.len() >= 2 {
     let hour = parts[0].parse::<u32>().ok()?;
@@ -714,7 +714,7 @@ fn render_integer(primitive: &RustPrimitive, value: i64) -> String {
   }
 }
 
-pub(crate) fn render_unsigned_integer(primitive: &RustPrimitive, value: u64) -> String {
+pub fn render_unsigned_integer(primitive: &RustPrimitive, value: u64) -> String {
   match primitive {
     RustPrimitive::U8 if value >= u64::from(u8::MAX) => "u8::MAX".to_string(),
     RustPrimitive::U8 => format!("{}u8", format_number_with_underscores(&value)),

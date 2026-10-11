@@ -7,7 +7,7 @@ use inflections::Inflect;
 
 use crate::{
   generator::{
-    ast::{EnumVariantToken, VariantDef},
+    ast::{EnumVariantToken, ValueKind, VariantDef},
     naming::{
       constants::VARIANT_KIND_SUFFIX,
       identifiers::{split_pascal_case, to_rust_type_name},
@@ -16,17 +16,13 @@ use crate::{
   utils::SchemaRefName,
 };
 
-pub(crate) struct CommonVariantName {
-  pub(crate) name: String,
-  pub(crate) has_suffix: bool,
+pub struct CommonVariantName {
+  pub name: String,
+  pub has_suffix: bool,
 }
 
 impl CommonVariantName {
-  pub(crate) fn union_name_or<S>(
-    variants: &[impl SchemaRefName],
-    suffix_part: S,
-    fallback: impl FnOnce() -> String,
-  ) -> String
+  pub fn union_name_or<S>(variants: &[impl SchemaRefName], suffix_part: S, fallback: impl FnOnce() -> String) -> String
   where
     S: AsRef<str>,
   {
@@ -54,7 +50,7 @@ impl CommonVariantName {
 /// be appended for clarity.
 ///
 /// Returns `None` if fewer than 2 variants have references or no common prefix exists.
-pub(crate) fn extract_common_variant_prefix(variants: &[impl SchemaRefName]) -> Option<CommonVariantName> {
+pub fn extract_common_variant_prefix(variants: &[impl SchemaRefName]) -> Option<CommonVariantName> {
   let ref_names = variants
     .iter()
     .filter_map(SchemaRefName::schema_ref_name)
@@ -90,7 +86,7 @@ pub(crate) fn extract_common_variant_prefix(variants: &[impl SchemaRefName]) -> 
 /// ```
 ///
 #[must_use]
-pub(crate) fn common_prefix_len<S: AsRef<str>>(first: &[S], rest: &[Vec<S>]) -> usize {
+pub fn common_prefix_len<S: AsRef<str>>(first: &[S], rest: &[Vec<S>]) -> usize {
   first
     .iter()
     .enumerate()
@@ -113,7 +109,7 @@ pub(crate) fn common_prefix_len<S: AsRef<str>>(first: &[S], rest: &[Vec<S>]) -> 
 /// ```
 ///
 #[must_use]
-pub(crate) fn common_suffix_len<S: AsRef<str>>(first: &[S], rest: &[Vec<S>]) -> usize {
+pub fn common_suffix_len<S: AsRef<str>>(first: &[S], rest: &[Vec<S>]) -> usize {
   let min_len = std::iter::once(first.len())
     .chain(rest.iter().map(Vec::len))
     .min()
@@ -171,6 +167,8 @@ pub struct NormalizedVariant {
   pub name: String,
   /// The original value string for serialization (e.g., "10.5").
   pub rename_value: String,
+  /// The JSON type of the original value.
+  pub kind: ValueKind,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -184,6 +182,7 @@ impl TryFrom<&serde_json::Value> for NormalizedVariant {
       serde_json::Value::String(str_val) => Ok(NormalizedVariant {
         name: to_rust_type_name(str_val),
         rename_value: str_val.clone(),
+        kind: ValueKind::String,
       }),
       serde_json::Value::Number(num) => {
         let raw_str = if let Some(i) = num.as_i64() {
@@ -197,11 +196,13 @@ impl TryFrom<&serde_json::Value> for NormalizedVariant {
         Ok(NormalizedVariant {
           name: format!("Value{safe_name}"),
           rename_value: raw_str,
+          kind: ValueKind::Number,
         })
       }
       serde_json::Value::Bool(bool_val) => Ok(NormalizedVariant {
         name: if *bool_val { "True".into() } else { "False".into() },
         rename_value: bool_val.to_string(),
+        kind: ValueKind::Bool,
       }),
       _ => Err(UnsupportedJsonValue),
     }
@@ -295,12 +296,7 @@ pub fn strip_common_affixes(variants: Vec<VariantDef>) -> Vec<VariantDef> {
 /// ```
 ///
 #[must_use]
-pub(crate) fn extract_middle_segments<S>(
-  segments: &[S],
-  prefix_len: usize,
-  suffix_len: usize,
-  separator: &str,
-) -> String
+pub fn extract_middle_segments<S>(segments: &[S], prefix_len: usize, suffix_len: usize, separator: &str) -> String
 where
   S: AsRef<str>,
 {
@@ -325,7 +321,7 @@ where
 /// ```
 ///
 #[must_use]
-pub(crate) fn all_non_empty_and_unique<S>(names: &[S]) -> bool
+pub fn all_non_empty_and_unique<S>(names: &[S]) -> bool
 where
   S: AsRef<str> + Eq + Hash,
 {
@@ -349,7 +345,7 @@ struct Candidate {
 /// 3. If the filtered result is unique across all variants, use it.
 /// 4. Otherwise, fall back to the full variant name (snake_cased).
 ///
-pub(crate) fn derive_method_names<S, V>(name: S, variants: &[V]) -> Vec<String>
+pub fn derive_method_names<S, V>(name: S, variants: &[V]) -> Vec<String>
 where
   S: AsRef<str>,
   V: AsRef<str>,

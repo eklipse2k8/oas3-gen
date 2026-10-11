@@ -1,0 +1,46 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Type names", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "VoiceIdsShared": {
+        "anyOf": [{ "type": "string" }, { "type": "string", "enum": ["alloy", "ash", "ballad"] }]
+      },
+      "FormatType": {
+        "anyOf": [{ "type": "string" }, { "const": "json" }, { "const": "text" }, { "const": "xml" }]
+      },
+      "Status": { "type": "string", "enum": ["active", "inactive", "pending"] },
+      "ChatModel": { "type": "string", "enum": ["gpt-4", "gpt-3.5-turbo"] },
+      "ModelIdsShared": { "anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/ChatModel" }] },
+      "ChatRequest": {
+        "type": "object",
+        "properties": {
+          "max_output_tokens": { "anyOf": [{ "type": "integer" }, { "const": "inf" }] },
+          "status": { "type": "string", "enum": ["active", "pending", "done"] },
+          "voice": { "type": "string", "enum": ["alloy", "ash", "ballad"] },
+          "format": { "type": "string", "enum": ["json", "text", "xml"] },
+          "state": { "type": "string", "enum": ["pending", "active", "inactive"] }
+        }
+      },
+      "CompletionRequest": {
+        "type": "object",
+        "properties": {
+          "max_output_tokens": { "anyOf": [{ "type": "integer" }, { "const": "inf" }] }
+        }
+      },
+      "Owner": {
+        "type": "object",
+        "properties": {
+          "address": { "type": "object", "properties": { "street": { "type": "string" } } }
+        }
+      },
+      "Clinic": {
+        "type": "object",
+        "properties": {
+          "location": { "type": "object", "properties": { "street": { "type": "string" } } }
+        }
+      }
+    }
+  }
+}

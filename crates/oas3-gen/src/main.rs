@@ -1,16 +1,5 @@
-#![allow(clippy::doc_markdown)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::too_many_lines)]
 use clap::Parser;
-
-use crate::ui::{Cli, Colors, Commands, ListCommands, colors};
-
-mod generator;
-mod ui;
-mod utils;
-
-#[cfg(test)]
-mod tests;
+use oas3_gen::ui::{self, Cli, Colors, Commands, ListCommands, colors};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,17 +17,4 @@ async fn main() -> anyhow::Result<()> {
   }
 
   Ok(())
-}
-
-#[cfg(test)]
-#[path = "../fixtures"]
-mod fixtures {
-  pub mod api_key_security;
-  pub mod api_key_security_server;
-  pub mod intersection_union;
-  pub mod multipart;
-  pub mod multipart_server;
-  pub mod petstore;
-  pub mod petstore_server;
-  pub mod union_serde;
 }

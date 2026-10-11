@@ -1,23 +1,20 @@
 pub mod bon_attrs;
-mod client;
+pub mod client;
 pub mod constants;
-mod derives;
-pub(crate) mod documentation;
+pub mod derives;
+pub mod documentation;
 pub mod fields;
 pub mod lints;
-mod multipart;
-mod outer_attrs;
-mod parsed_path;
-mod security;
-pub(super) mod serde_attrs;
-pub(crate) mod server;
-mod status_codes;
+pub mod multipart;
+pub mod outer_attrs;
+pub mod parsed_path;
+pub mod security;
+pub mod serde_attrs;
+pub mod server;
+pub mod status_codes;
 pub mod tokens;
-pub(super) mod types;
-pub(super) mod validation_attrs;
-
-#[cfg(test)]
-mod tests;
+pub mod types;
+pub mod validation_attrs;
 
 use std::collections::BTreeSet;
 
@@ -26,7 +23,7 @@ pub use derives::{DeriveTrait, DerivesProvider, SerdeImpl};
 pub use documentation::Documentation;
 use http::Method;
 use indexmap::IndexMap;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 pub use lints::GlobalLintsNode;
 use mediatype::MediaType;
 pub use multipart::{
@@ -39,8 +36,6 @@ use oas3::{
 };
 pub use outer_attrs::{OuterAttr, SerdeAsFieldAttr, SerdeAsSeparator};
 pub use parsed_path::ParsedPath;
-#[cfg(test)]
-pub use parsed_path::{PathParseError, PathSegment};
 pub use security::{ApiKeyLocation, CredentialKind, CredentialScheme, OperationSecurity};
 pub use serde_attrs::SerdeAttribute;
 use serde_json::Value;
@@ -54,7 +49,13 @@ pub use validation_attrs::{RegexKey, ValidationAttribute};
 
 pub use crate::generator::ast::fields::{DefaultVariant, FieldCollection, FieldDef};
 use crate::generator::{
-  ast::constants::HttpHeaderRef, metrics::GenerationWarning, naming::inference::NormalizedVariant,
+  ast::constants::HttpHeaderRef,
+  converter::GenerationTarget,
+  metrics::GenerationWarning,
+  naming::{
+    constants::{COOKIE_PARAMS_SUFFIX, HEADER_PARAMS_SUFFIX, PATH_PARAMS_SUFFIX, QUERY_PARAMS_SUFFIX},
+    inference::NormalizedVariant,
+  },
 };
 
 /// API metadata from the spec's `info` object.
@@ -96,6 +97,8 @@ pub struct DiscriminatedVariant {
   pub discriminator_values: Vec<String>,
   pub variant_name: EnumVariantToken,
   pub type_name: TypeRef,
+  /// How the member travels, when the enum is a union of frame types.
+  pub frame: Option<FrameMember>,
 }
 
 /// Serde mode controlling which serde traits a type derives/implements
@@ -125,6 +128,9 @@ pub struct DiscriminatedEnumDef {
   pub serde_mode: SerdeMode,
   #[builder(default)]
   pub methods: Vec<EnumMethod>,
+  /// Whether the enum is a union of `text/event-stream` frame types keyed by their `event`.
+  #[builder(default)]
+  pub sse_frame: bool,
 }
 
 impl DiscriminatedEnumDef {
@@ -164,13 +170,16 @@ impl ResponseVariant {
   }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ResponsePayload {
   #[default]
   None,
   Value,
   Failure,
+  /// A server's status and raw body.
   Raw,
+  /// A client's unread `reqwest::Response`.
+  Unread,
 }
 
 impl ResponsePayload {
@@ -189,6 +198,9 @@ pub struct VariantMapping {
   #[builder(default)]
   pub payload: ResponsePayload,
   pub union_variant: Option<EnumVariantToken>,
+  /// Whether a text body parses with `FromStr` rather than decoding as JSON.
+  #[builder(default)]
+  pub parses_text: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -207,6 +219,14 @@ pub enum ResponseStatusCategory {
 }
 
 impl ResponseStatusCategory {
+  /// The cases a status reads, event streams first.
+  pub fn cases(&self) -> impl Iterator<Item = &ResponseVariantCategory> {
+    match self {
+      Self::Single(case) => Either::Left(std::iter::once(case)),
+      Self::ContentDispatch { streams, variants } => Either::Right(streams.iter().chain(variants)),
+    }
+  }
+
   #[must_use]
   pub fn from_variants(variants: &[&ResponseVariant]) -> Self {
     if let [variant] = variants {
@@ -226,7 +246,7 @@ impl ResponseStatusCategory {
   }
 
   #[must_use]
-  pub(crate) fn from_content_types(variants: &[&ResponseVariant]) -> Self {
+  pub fn from_content_types(variants: &[&ResponseVariant]) -> Self {
     let all_categories = variants
       .iter()
       .flat_map(|variant| {
@@ -273,10 +293,19 @@ pub struct ResponseEnumVariant {
 }
 
 impl ResponseEnumVariant {
+  /// Whether the variant holds the status beside its payload; an unread response holds its own.
+  #[must_use]
+  pub fn carries_status(&self) -> bool {
+    self.status_code.carries_status() && self.payload != ResponsePayload::Unread
+  }
+
   #[must_use]
   pub fn doc_line(&self) -> String {
     match self.payload {
       ResponsePayload::Raw => "Status code the operation does not declare; carries the raw body.".to_string(),
+      ResponsePayload::Unread => {
+        "Response the operation does not declare, by status or media type; carries it unread.".to_string()
+      }
       _ => self.status_code.to_string(),
     }
   }
@@ -310,11 +339,45 @@ pub struct ResponseHeadersRef {
 pub struct ResponseParam {
   pub body: TypeRef,
   pub headers: Option<ResponseHeadersRef>,
+  /// Each body the operation declares, with the media type a server sends it as.
+  #[builder(default)]
+  pub media_types: Vec<BodyMediaType>,
+}
+
+/// One declared body of a payload class, with the response union member it is, and the
+/// category and concrete `content_type` a server sends it as.
+#[derive(Debug, Clone, PartialEq, Eq, bon::Builder)]
+pub struct BodyMediaType {
+  pub status: StatusCodeToken,
+  pub member: Option<EnumVariantToken>,
+  pub body: TypeRef,
+  pub category: ContentCategory,
+  pub content_type: String,
+  pub stream: Option<EventStreamFormat>,
+}
+
+impl ResponseParam {
+  /// The body declared for `status` as `member`, or for a status the operation doesn't
+  /// declare, the first body declared as `member`.
+  #[must_use]
+  pub fn body_media(&self, status: StatusCodeToken, member: Option<&EnumVariantToken>) -> Option<&BodyMediaType> {
+    let same_member = |entry: &&BodyMediaType| entry.member.as_ref() == member;
+    self
+      .media_types
+      .iter()
+      .filter(same_member)
+      .find(|entry| entry.status == status)
+      .or_else(|| self.media_types.iter().find(same_member))
+  }
 }
 
 impl From<TypeRef> for ResponseParam {
   fn from(body: TypeRef) -> Self {
-    Self { body, headers: None }
+    Self {
+      body,
+      headers: None,
+      media_types: vec![],
+    }
   }
 }
 
@@ -333,7 +396,7 @@ impl OperationResponse {
     match payload {
       ResponsePayload::Value => self.value.as_ref(),
       ResponsePayload::Failure => self.failure.as_ref(),
-      ResponsePayload::None | ResponsePayload::Raw => None,
+      ResponsePayload::None | ResponsePayload::Raw | ResponsePayload::Unread => None,
     }
   }
 }
@@ -345,10 +408,9 @@ pub struct ResponseUnionDef {
   pub docs: Documentation,
   #[builder(default)]
   pub variants: Vec<ResponseUnionVariant>,
-  #[builder(default)]
-  pub serde_mode: SerdeMode,
-  #[builder(default)]
-  pub streaming: bool,
+  /// The target whose event stream a member holds, if any: a client's `EventStream` is
+  /// `Debug`, a server's `BoxStream` isn't, and neither is `Clone`.
+  pub streaming: Option<GenerationTarget>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
@@ -420,6 +482,8 @@ impl RustType {
 pub enum OperationKind {
   Http,
   Webhook,
+  /// A request an operation's `callbacks` declare the API sends back to the caller
+  Callback,
 }
 
 #[derive(Debug, Clone, bon::Builder)]
@@ -446,6 +510,9 @@ pub struct OperationInfo {
   pub credentials_type: Option<StructToken>,
   #[builder(default)]
   pub documentation: Documentation,
+  /// The document marks the operation `deprecated`, so its client method is too
+  #[builder(default)]
+  pub deprecated: bool,
 }
 
 impl OperationInfo {
@@ -494,12 +561,12 @@ pub enum ParameterLocation {
 
 impl ParameterLocation {
   #[must_use]
-  pub const fn suffix(self) -> Option<&'static str> {
+  pub const fn suffix(self) -> &'static str {
     match self {
-      Self::Path => Some("Path"),
-      Self::Query => Some("Query"),
-      Self::Header => Some("Header"),
-      Self::Cookie => None,
+      Self::Path => PATH_PARAMS_SUFFIX,
+      Self::Query => QUERY_PARAMS_SUFFIX,
+      Self::Header => HEADER_PARAMS_SUFFIX,
+      Self::Cookie => COOKIE_PARAMS_SUFFIX,
     }
   }
 }
@@ -557,24 +624,80 @@ impl ContentCategory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseMediaType {
   pub category: ContentCategory,
+  /// The media type as the document declares it, such as `image/png`
+  pub content_type: String,
   pub schema_type: Option<TypeRef>,
+  /// How a `text/event-stream` streams its items; `None` for any other media type.
+  pub stream: Option<EventStreamFormat>,
+}
+
+/// How a `text/event-stream` media type streams its items.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EventStreamFormat {
+  /// The event data that ends the stream, from `x-sse-sentinel` or `x-speakeasy-sse-sentinel`.
+  pub sentinel: Option<String>,
+  pub item: StreamItem,
+}
+
+/// What one item of a `text/event-stream` is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StreamItem {
+  /// The JSON `data` of one event.
+  #[default]
+  Payload,
+  /// A frame type, read from and sent as one whole frame.
+  Frame(FrameData),
+  /// A union of frame types, told apart by their event names.
+  FrameUnion,
+}
+
+/// How a frame type carries its `data`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrameData {
+  /// JSON of the `data` property's type.
+  Json,
+  /// The frame's text, as is, for a `string` property.
+  Text,
+}
+
+impl FrameData {
+  /// How a `data` property of type `data` travels.
+  #[must_use]
+  pub fn of(data: &TypeRef) -> Self {
+    if data.is_string_like() { Self::Text } else { Self::Json }
+  }
+}
+
+/// How one member of a union of frame types travels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameMember {
+  pub data: FrameData,
+  /// Whether the member has an `event` property. A member without one is sent under
+  /// its discriminator value.
+  pub declares_event: bool,
 }
 
 impl ResponseMediaType {
   #[must_use]
   pub fn new(content_type: &str) -> Self {
-    Self {
-      category: ContentCategory::from_content_type(content_type),
-      schema_type: None,
-    }
+    Self::with_schema(content_type, None)
   }
 
   #[must_use]
   pub fn with_schema(content_type: &str, schema_type: Option<TypeRef>) -> Self {
+    let category = ContentCategory::from_content_type(content_type);
     Self {
-      category: ContentCategory::from_content_type(content_type),
+      category,
+      content_type: content_type.to_string(),
       schema_type,
+      stream: (category == ContentCategory::EventStream).then(EventStreamFormat::default),
     }
+  }
+
+  /// The `text/event-stream` media type among `media_types`.
+  #[must_use]
+  pub fn event_stream(media_types: &[Self]) -> Option<&Self> {
+    media_types.iter().find(|m| m.category == ContentCategory::EventStream)
   }
 
   #[must_use]
@@ -584,7 +707,7 @@ impl ResponseMediaType {
 
   #[must_use]
   pub fn has_event_stream(media_types: &[Self]) -> bool {
-    media_types.iter().any(|m| m.category == ContentCategory::EventStream)
+    Self::event_stream(media_types).is_some()
   }
 }
 
@@ -596,6 +719,9 @@ pub struct OperationBody {
   pub optional: bool,
   #[builder(default)]
   pub content_category: ContentCategory,
+  /// The media type as the document declares it, such as `application/merge-patch+json`
+  #[builder(default)]
+  pub content_type: String,
   /// What the spec declares about each `multipart/form-data` property, keyed by property name
   #[builder(default)]
   pub multipart_properties: IndexMap<String, MultipartProperty>,
@@ -617,6 +743,9 @@ pub enum StructKind {
   QueryParams,
   /// Nested struct for header parameters (no serde, just storage)
   HeaderParams,
+  /// Nested struct for cookie parameters (no serde: the client renders a `Cookie`
+  /// header from it and the server parses one into it)
+  CookieParams,
   /// Struct for the headers a response declares (no serde, just storage)
   ResponseHeaders,
   /// Struct for the API keys a server operation accepts (no serde, just storage)
@@ -651,6 +780,10 @@ pub struct StructDef {
   /// Additional traits to derive beyond the standard set (e.g., Builder), controlled by config options
   #[builder(default)]
   pub additional_derives: BTreeSet<DeriveTrait>,
+  /// Whether the struct is a `text/event-stream` frame type, built from whole Server-Sent
+  /// Events frames.
+  #[builder(default)]
+  pub sse_frame: bool,
 }
 
 impl StructDef {
@@ -677,9 +810,9 @@ impl StructDef {
 pub enum MethodKind {
   /// Method to parse a reqwest response into the operation's response enum instantiation
   ParseResponse {
-    response: OperationResponse,
+    response: Box<OperationResponse>,
     status_handlers: Vec<StatusHandler>,
-    default_handler: Option<ResponseVariantCategory>,
+    default_handler: Option<ResponseStatusCategory>,
   },
   /// Method that wraps bon::Builder for constructing the struct
   Builder {
@@ -768,11 +901,13 @@ pub struct EnumDef {
   pub serde_mode: SerdeMode,
   #[builder(default)]
   pub generate_display: bool,
-  #[builder(default)]
-  pub in_response_header: bool,
   pub scalar_repr: Option<RustPrimitive>,
   #[builder(default)]
   pub default_mode: EnumDefault,
+  /// Renders `#[non_exhaustive]`; the last variant is then the `#[serde(untagged)]` catch-all
+  /// holding any string the spec doesn't list
+  #[builder(default)]
+  pub non_exhaustive: bool,
 }
 
 impl EnumDef {
@@ -786,6 +921,21 @@ impl EnumDef {
   pub fn fallback_variant(&self) -> Option<&VariantDef> {
     const FALLBACK_NAMES: &[&str] = &["Unknown", "Other"];
     self.variants.iter().find(|v| FALLBACK_NAMES.contains(&v.name.as_str()))
+  }
+
+  /// Catch-all variant of a non-exhaustive enum, e.g. `Other(String)`
+  #[must_use]
+  pub fn other_variant(&self) -> Option<&VariantDef> {
+    self.variants.last().filter(|_| self.non_exhaustive)
+  }
+
+  /// Variants for the values the spec lists, without a non-exhaustive enum's catch-all
+  #[must_use]
+  pub fn listed_variants(&self) -> &[VariantDef] {
+    match self.variants.split_last() {
+      Some((_, listed)) if self.non_exhaustive => listed,
+      _ => &self.variants,
+    }
   }
 }
 
@@ -810,6 +960,15 @@ pub struct EnumDefaultValue {
   pub inner_variant: Option<EnumVariantToken>,
 }
 
+/// JSON type of the listed value a value-enum variant stands for
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ValueKind {
+  #[default]
+  String,
+  Number,
+  Bool,
+}
+
 /// Rust enum variant definition
 #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
 pub struct VariantDef {
@@ -823,6 +982,9 @@ pub struct VariantDef {
   pub deprecated: bool,
   #[builder(default)]
   pub default: bool,
+  /// JSON type of the value this unit variant stands for; `String` for payload variants
+  #[builder(default)]
+  pub value_kind: ValueKind,
 }
 
 impl VariantDef {
@@ -842,6 +1004,15 @@ impl VariantDef {
 
   pub fn add_alias(&mut self, value: impl Into<String>) {
     self.serde_attrs.push(SerdeAttribute::Alias(value.into()));
+  }
+
+  /// Returns every value this variant deserializes from: its serde name, then each
+  /// `#[serde(alias)]` value.
+  pub fn wire_values(&self) -> impl Iterator<Item = &str> {
+    std::iter::once(self.serde_name()).chain(self.serde_attrs.iter().filter_map(|attr| match attr {
+      SerdeAttribute::Alias(alias) => Some(alias.as_str()),
+      _ => None,
+    }))
   }
 
   #[must_use]
@@ -873,22 +1044,21 @@ where
   }
 }
 
+type NormalizedVariantBuilder<S> = VariantDefBuilder<
+  variant_def_builder::SetValueKind<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>>,
+>;
+
 impl<S: variant_def_builder::State> VariantDefBuilder<S>
 where
   S::Name: variant_def_builder::IsUnset,
   S::SerdeAttrs: variant_def_builder::IsUnset,
+  S::ValueKind: variant_def_builder::IsUnset,
 {
-  pub fn value(
-    self,
-    value: &Value,
-  ) -> Option<VariantDefBuilder<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>>> {
+  pub fn value(self, value: &Value) -> Option<NormalizedVariantBuilder<S>> {
     Some(self.normalized(NormalizedVariant::try_from(value).ok()?))
   }
 
-  pub fn normalized(
-    self,
-    normalized: NormalizedVariant,
-  ) -> VariantDefBuilder<variant_def_builder::SetSerdeAttrs<variant_def_builder::SetName<S>>> {
+  pub fn normalized(self, normalized: NormalizedVariant) -> NormalizedVariantBuilder<S> {
     let attributes = if normalized.name == normalized.rename_value {
       vec![]
     } else {
@@ -897,6 +1067,7 @@ where
     self
       .name(EnumVariantToken::from(normalized.name))
       .serde_attrs(attributes)
+      .value_kind(normalized.kind)
   }
 }
 

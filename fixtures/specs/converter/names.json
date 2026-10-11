@@ -1,0 +1,57 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Names", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "my-test-enum": { "oneOf": [{ "type": "string", "const": "option-a" }, { "type": "string", "const": "option-b" }] },
+      "my_test_union": { "oneOf": [{ "type": "object", "properties": { "data_field": { "type": "string" } } }] },
+      "AlreadyPascal": { "oneOf": [{ "type": "string", "const": "OptionA" }, { "type": "string", "const": "OptionB" }] },
+      "LoafNugget": { "type": "object", "properties": { "crumb": { "type": "string" } } },
+      "Loaf": { "type": "object", "properties": { "nugget": { "type": "object", "properties": { "tag_id": { "type": "string" } } } } },
+      "BetaResponseCharLocationCitation": { "type": "object", "properties": { "location": { "type": "string" } } },
+      "BetaResponseUrlCitation": { "type": "object", "properties": { "url": { "type": "string" } } },
+      "BetaMessageStartEvent": { "type": "object", "properties": { "started": { "type": "string" } } },
+      "BetaMessageStopEvent": { "type": "object", "properties": { "stopped": { "type": "string" } } },
+      "TypeA": { "type": "object", "properties": { "field_a": { "type": "string" } } },
+      "TypeB": { "type": "object", "properties": { "field_b": { "type": "integer" } } },
+      "Holder": {
+        "type": "object",
+        "properties": {
+          "citation": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/BetaResponseCharLocationCitation" },
+              { "$ref": "#/components/schemas/BetaResponseUrlCitation" }
+            ]
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "$ref": "#/components/schemas/BetaMessageStartEvent" },
+                { "$ref": "#/components/schemas/BetaMessageStopEvent" }
+              ]
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": { "anyOf": [{ "$ref": "#/components/schemas/TypeA" }, { "$ref": "#/components/schemas/TypeB" }] }
+          },
+          "fluff": { "properties": { "key": { "type": "string" } } }
+        }
+      },
+      "Matrix": { "type": "array", "items": { "type": "array", "items": { "type": "integer" } } },
+      "Untyped": { "type": "array" },
+      "NoValues": { "type": "string", "enum": [] },
+      "NullableLevel": { "anyOf": [{ "type": "string", "enum": ["low", "high"] }, { "type": "null" }] },
+      "Mixes": {
+        "type": "array",
+        "items": { "oneOf": [{ "$ref": "#/components/schemas/TypeA" }, { "$ref": "#/components/schemas/LoafNugget" }] }
+      },
+      "MaybeMixes": {
+        "type": ["array", "null"],
+        "items": { "oneOf": [{ "$ref": "#/components/schemas/TypeB" }, { "$ref": "#/components/schemas/Loaf" }] }
+      }
+    }
+  }
+}

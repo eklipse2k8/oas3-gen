@@ -1,0 +1,19 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Headers", "version": "1.0.0" },
+  "paths": {
+    "/forwarded": {
+      "get": {
+        "operationId": "forwarded",
+        "parameters": [
+          { "name": "authorization", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "accept", "in": "header", "schema": { "type": "string" } },
+          { "name": "CONTENT-TYPE", "in": "header", "schema": { "type": "string" } },
+          { "name": "If-Match", "in": "header", "schema": { "type": "string" } },
+          { "name": "Accept", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "ok" } }
+      }
+    }
+  }
+}

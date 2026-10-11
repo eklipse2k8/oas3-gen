@@ -13,6 +13,7 @@ use crate::generator::{
     Visibility,
     constants::{HeaderConstantsFragment, RegexConstantsResult},
     enums::{DiscriminatedEnumFragment, EnumFragment, ResponseEnumFragment, ResponseUnionFragment},
+    sse::{FrameUnionFragment, SseEventFragment},
     structs::StructFragment,
     type_aliases::TypeAliasFragment,
   },
@@ -20,7 +21,7 @@ use crate::generator::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TypeFragment<'a> {
+pub struct TypeFragment<'a> {
   rust_type: &'a RustType,
   regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
   visibility: Visibility,
@@ -28,7 +29,7 @@ pub(crate) struct TypeFragment<'a> {
 }
 
 impl<'a> TypeFragment<'a> {
-  pub(crate) fn new(
+  pub fn new(
     rust_type: &'a RustType,
     regex_lookup: &'a BTreeMap<RegexKey, ConstToken>,
     visibility: Visibility,
@@ -49,18 +50,24 @@ impl ToTokens for TypeFragment<'_> {
       RustType::Struct(def) => {
         StructFragment::new(def, self.regex_lookup, self.visibility, self.target).into_token_stream()
       }
-      RustType::Enum(def) => EnumFragment::new(def, self.visibility, self.target).into_token_stream(),
+      RustType::Enum(def) => EnumFragment::new(def, self.visibility).into_token_stream(),
       RustType::TypeAlias(def) => TypeAliasFragment::new(def, self.visibility).into_token_stream(),
+      RustType::DiscriminatedEnum(def) if def.sse_frame && self.target == GenerationTarget::Client => {
+        FrameUnionFragment::new(def, self.visibility).into_token_stream()
+      }
       RustType::DiscriminatedEnum(def) => DiscriminatedEnumFragment::new(def, self.visibility).into_token_stream(),
       RustType::ResponseEnum(def) => ResponseEnumFragment::new(self.visibility, def).into_token_stream(),
       RustType::ResponseUnion(def) => ResponseUnionFragment::new(self.visibility, def).into_token_stream(),
     };
     tokens.extend(ts);
+    if self.target == GenerationTarget::Server {
+      SseEventFragment::new(self.rust_type).to_tokens(tokens);
+    }
   }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TypesFragment {
+pub struct TypesFragment {
   rust_types: Rc<Vec<RustType>>,
   header_refs: Rc<Vec<HttpHeaderRef>>,
   uses: Rc<BTreeSet<String>>,
@@ -69,7 +76,7 @@ pub(crate) struct TypesFragment {
 }
 
 impl TypesFragment {
-  pub(crate) fn new(
+  pub fn new(
     rust_types: Rc<Vec<RustType>>,
     header_refs: Rc<Vec<HttpHeaderRef>>,
     uses: Rc<BTreeSet<String>>,
@@ -111,13 +118,13 @@ impl ToTokens for TypesFragment {
   }
 }
 
-pub(crate) struct UseFragment {
-  pub(crate) module: String,
-  pub(crate) items: Vec<String>,
+pub struct UseFragment {
+  pub module: String,
+  pub items: Vec<String>,
 }
 
 impl UseFragment {
-  pub(crate) fn new(module: String, items: Vec<String>) -> Self {
+  pub fn new(module: String, items: Vec<String>) -> Self {
     Self { module, items }
   }
 }
@@ -142,10 +149,10 @@ impl ToTokens for UseFragment {
   }
 }
 
-pub(crate) struct ModuleUsesFragment<'a>(&'a BTreeSet<String>);
+pub struct ModuleUsesFragment<'a>(&'a BTreeSet<String>);
 
 impl<'a> ModuleUsesFragment<'a> {
-  pub(crate) fn new(uses: &'a BTreeSet<String>) -> Self {
+  pub fn new(uses: &'a BTreeSet<String>) -> Self {
     Self(uses)
   }
 }

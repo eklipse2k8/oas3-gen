@@ -6,7 +6,8 @@ use itertools::Itertools;
 use oas3::spec::{MediaType, ObjectSchema, Operation, Response, Schema};
 
 use super::{
-  ConverterContext, SerdeUsageRecorder, TypeResolver, fields::FieldConverter, inline_resolver::InlineTypeResolver,
+  ConverterContext, GenerationTarget, SerdeUsageRecorder, TypeResolver, fields::FieldConverter,
+  inline_resolver::InlineTypeResolver,
 };
 use crate::{
   generator::{
@@ -17,24 +18,28 @@ use crate::{
     naming::{
       constants::{DEFAULT_MEDIA_TYPE, RESPONSE_HEADER_PARENT_SUFFIX},
       identifiers::to_rust_type_name,
-      responses as naming_responses,
+      responses::{self as naming_responses, client_stream_type, server_stream_type},
     },
   },
   utils::{SchemaExt as _, SchemaInspect, parse_schema_ref_path, schema_ext::SchemaExtIters},
 };
 
+/// The media type extensions, without their `x-` prefix, naming the data that ends an
+/// event stream, in order of precedence.
+const SSE_SENTINEL_EXTENSIONS: [&str; 2] = ["sse-sentinel", "speakeasy-sse-sentinel"];
+
 /// Extracted metadata about operation responses for code generation.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ResponseMetadata {
-  pub(crate) type_name: Option<String>,
-  pub(crate) media_types: Vec<ResponseMediaType>,
+pub struct ResponseMetadata {
+  pub type_name: Option<String>,
+  pub media_types: Vec<ResponseMediaType>,
 }
 
 /// Response metadata bundled with type usage data.
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseMetadataOutput {
-  pub(crate) metadata: ResponseMetadata,
-  pub(crate) usage: SerdeUsageRecorder,
+pub struct ResponseMetadataOutput {
+  pub metadata: ResponseMetadata,
+  pub usage: SerdeUsageRecorder,
 }
 
 /// Converts the responses an operation declares into response variants.
@@ -43,7 +48,7 @@ pub(crate) struct ResponseMetadataOutput {
 /// The shared response enum those variants map onto is assembled in
 /// postprocessing, once every operation is known.
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseConverter {
+pub struct ResponseConverter {
   type_resolver: TypeResolver,
   inline_resolver: InlineTypeResolver,
   field_converter: FieldConverter,
@@ -52,7 +57,7 @@ pub(crate) struct ResponseConverter {
 
 impl ResponseConverter {
   /// Creates a new response converter.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     let type_resolver = TypeResolver::new(context.clone());
     let inline_resolver = InlineTypeResolver::new(context.clone());
     let field_converter = FieldConverter::new(&context);
@@ -70,7 +75,7 @@ impl ResponseConverter {
   /// Returns `None` if the operation declares no responses. Variant names are the
   /// status-code names used by the shared response enum. `base_name` prefixes the
   /// names of inline types generated from header schemas.
-  pub(crate) fn build_variants(
+  pub fn build_variants(
     &self,
     operation: &Operation,
     path: &str,
@@ -96,7 +101,12 @@ impl ResponseConverter {
         );
         let headers = self.header_fields(&response, &header_parent)?;
 
-        anyhow::Ok(Self::split_variants_by_schema(status_code, &media_types, headers))
+        anyhow::Ok(Self::split_variants_by_schema(
+          status_code,
+          &media_types,
+          headers,
+          self.event_stream_type(),
+        ))
       })
       .flatten_ok()
       .filter_ok(|variant| !(variant.status_code.is_default() && variant.schema_type.is_none()))
@@ -147,7 +157,7 @@ impl ResponseConverter {
   /// Extracts response metadata for operation info.
   ///
   /// Gathers type names and media types, returning usage data.
-  pub(crate) fn extract_metadata(&self, operation: &Operation) -> ResponseMetadataOutput {
+  pub fn extract_metadata(&self, operation: &Operation) -> ResponseMetadataOutput {
     let spec = self.context.graph().spec();
     let type_name = naming_responses::extract_response_type_name(spec, operation);
     let response_types = naming_responses::extract_all_response_types(spec, operation);
@@ -187,7 +197,14 @@ impl ResponseConverter {
       .iter()
       .map(|(content_type, media_type)| {
         let schema_type = self.resolve_media_schema(content_type, media_type, path, status_code)?;
-        Ok(ResponseMediaType::with_schema(content_type, schema_type))
+        let mut response_media_type = ResponseMediaType::with_schema(content_type, schema_type);
+        if let Some(stream) = &mut response_media_type.stream {
+          stream.sentinel = SSE_SENTINEL_EXTENSIONS
+            .iter()
+            .find_map(|extension| media_type.extensions.get(*extension)?.as_str())
+            .map(str::to_string);
+        }
+        Ok(response_media_type)
       })
       .collect()
   }
@@ -262,6 +279,15 @@ impl ResponseConverter {
     Ok(Some(TypeRef::new(output.result)))
   }
 
+  /// The type a `text/event-stream` body of items is: the client reads a stream from the
+  /// response, the server returns one for the handler to send.
+  fn event_stream_type(&self) -> fn(&str) -> String {
+    match self.context.config().target {
+      GenerationTarget::Client => client_stream_type,
+      GenerationTarget::Server => server_stream_type,
+    }
+  }
+
   /// Ensures at least one media type exists, defaulting to `application/json`.
   fn with_default_media_type(media_types: Vec<ResponseMediaType>) -> Vec<ResponseMediaType> {
     if media_types.is_empty() {
@@ -275,8 +301,9 @@ impl ResponseConverter {
     status_code: StatusCodeToken,
     media_types: &[ResponseMediaType],
     headers: Vec<FieldDef>,
+    event_stream_type: fn(&str) -> String,
   ) -> Vec<ResponseVariant> {
-    let grouped = Self::group_media_types_by_schema(media_types);
+    let grouped = Self::group_media_types_by_schema(media_types, event_stream_type);
 
     if grouped.is_empty() {
       return vec![
@@ -304,13 +331,16 @@ impl ResponseConverter {
   }
 
   /// Groups media types by their schema type for variant splitting.
-  fn group_media_types_by_schema(media_types: &[ResponseMediaType]) -> Vec<(String, Vec<ResponseMediaType>)> {
+  fn group_media_types_by_schema(
+    media_types: &[ResponseMediaType],
+    event_stream_type: fn(&str) -> String,
+  ) -> Vec<(String, Vec<ResponseMediaType>)> {
     media_types
       .iter()
       .filter_map(|media_type| {
         let schema = media_type.schema_type.as_ref()?;
         let key = match media_type.category {
-          ContentCategory::EventStream => format!("oas3_gen_support::EventStream<{}>", schema.to_rust_type()),
+          ContentCategory::EventStream => event_stream_type(&schema.to_rust_type()),
           _ => schema.to_rust_type(),
         };
         Some((key, media_type.clone()))

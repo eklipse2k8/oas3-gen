@@ -4,16 +4,16 @@ use oas3::spec::{Discriminator, ObjectSchema, Schema};
 
 use crate::generator::ast::{
   DiscriminatedEnumDef, DiscriminatedVariant, Documentation, EnumDef, EnumDefault, EnumMethod, EnumToken,
-  EnumVariantToken, RustType, SerdeAttribute, VariantDef,
+  EnumVariantToken, RustType, SerdeAttribute, VariantContent, VariantDef,
 };
 
 /// Represents a nested union that has been promoted to a flat variant list.
 #[derive(Clone, Debug, PartialEq, Builder)]
-pub(crate) struct FlattenedUnion {
-  pub(crate) variants: Vec<Schema>,
-  pub(crate) description: Option<String>,
-  pub(crate) discriminator: Option<Discriminator>,
-  pub(crate) is_one_of: bool,
+pub struct FlattenedUnion {
+  pub variants: Vec<Schema>,
+  pub description: Option<String>,
+  pub discriminator: Option<Discriminator>,
+  pub is_one_of: bool,
 }
 
 impl From<FlattenedUnion> for ObjectSchema {
@@ -37,7 +37,7 @@ impl From<FlattenedUnion> for ObjectSchema {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) enum CollisionStrategy {
+pub enum CollisionStrategy {
   Preserve,
   Deduplicate,
 }
@@ -48,37 +48,57 @@ pub(crate) enum CollisionStrategy {
 /// sorted alphabetically so enums with identical value sets dedupe regardless
 /// of their declaration order in the spec. The cache key is internal and does
 /// not affect the order of variants emitted in generated code.
-pub(crate) fn variants_to_cache_key(variants: &[VariantDef]) -> Vec<String> {
+pub fn variants_to_cache_key(variants: &[VariantDef]) -> Vec<String> {
   variants.iter().map(|v| v.serde_name().to_string()).sorted().collect()
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct UnionVariantSpec {
-  pub(crate) variant_name: EnumVariantToken,
-  pub(crate) resolved_schema: ObjectSchema,
-  pub(crate) ref_name: Option<String>,
+pub struct UnionVariantSpec {
+  pub variant_name: EnumVariantToken,
+  pub resolved_schema: ObjectSchema,
+  pub ref_name: Option<String>,
 }
 
 #[bon::bon]
 impl RustType {
   /// Creates an untagged enum type for `oneOf`/`anyOf` unions without a discriminator.
   ///
-  /// The generated enum uses `#[serde(untagged)]` for deserialization, which attempts
-  /// each variant in declaration order until one successfully deserializes.
+  /// Payload variants deserialize untagged: serde attempts each in declaration order
+  /// until one succeeds. Unit variants for `const` branches can't match their value
+  /// untagged, so when a union has them they stay tagged and come first, and only
+  /// the payload variants are marked `#[serde(untagged)]`. Otherwise the whole enum
+  /// is `#[serde(untagged)]`.
   #[builder]
-  pub(crate) fn untagged_enum(
+  pub fn untagged_enum(
     name: &str,
     docs: Documentation,
     variants: Vec<VariantDef>,
     methods: Vec<EnumMethod>,
     #[builder(default)] default_mode: EnumDefault,
   ) -> Self {
+    let is_payload = |variant: &VariantDef| variant.content != VariantContent::Unit;
+    let (serde_attrs, variants) = if variants.iter().all(is_payload) {
+      (vec![SerdeAttribute::Untagged], variants)
+    } else {
+      let variants = variants
+        .into_iter()
+        .sorted_by_key(is_payload)
+        .map(|mut variant| {
+          if is_payload(&variant) {
+            variant.serde_attrs.push(SerdeAttribute::Untagged);
+          }
+          variant
+        })
+        .collect();
+      (vec![], variants)
+    };
+
     RustType::Enum(
       EnumDef::builder()
         .name(EnumToken::from_raw(name))
         .docs(docs)
         .variants(variants)
-        .serde_attrs(vec![SerdeAttribute::Untagged])
+        .serde_attrs(serde_attrs)
         .case_insensitive(false)
         .methods(methods)
         .default_mode(default_mode)
@@ -91,7 +111,7 @@ impl RustType {
   /// The generated enum uses the discriminator field value to select the correct variant
   /// during deserialization, avoiding the overhead of trying each variant.
   #[builder]
-  pub(crate) fn discriminated_enum(
+  pub fn discriminated_enum(
     name: &EnumToken,
     docs: Option<Documentation>,
     schema: Option<&ObjectSchema>,

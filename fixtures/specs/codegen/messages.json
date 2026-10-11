@@ -1,0 +1,27 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Messages", "version": "1.0.0" },
+  "paths": {
+    "/v1/messages/{id}.json?beta=true": {
+      "get": {
+        "operationId": "getMessage",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "any type", "content": { "*/*": { "schema": { "$ref": "#/components/schemas/Message" } } } },
+          "201": { "description": "text range", "content": { "text/*": { "schema": { "type": "string" } } } },
+          "202": { "description": "font", "content": { "font/woff2": { "schema": { "$ref": "#/components/schemas/Message" } } } },
+          "203": { "description": "unparseable", "content": { "not a media type": { "schema": { "$ref": "#/components/schemas/Message" } } } },
+          "404": { "description": "binary", "content": { "application/octet-stream": { "schema": { "$ref": "#/components/schemas/Message" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Message": { "type": "object", "properties": { "id": { "type": "string" } } }
+    }
+  }
+}

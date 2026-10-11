@@ -18,7 +18,7 @@ use crate::{
     converter::ConverterContext,
     schema_registry::DiscriminatorMapping,
   },
-  utils::SchemaExt,
+  utils::{SchemaExt, SchemaInspect},
 };
 
 /// Contains resolved field information including type, inline definitions, and validation.
@@ -26,11 +26,11 @@ use crate::{
 /// Returned by [`FieldConverter::resolve_with_metadata`] to bundle all data
 /// needed for field construction in one pass.
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedFieldData {
-  pub(crate) type_ref: TypeRef,
-  pub(crate) inline_types: Vec<RustType>,
-  pub(crate) validation_attrs: Vec<ValidationAttribute>,
-  pub(crate) schema: ObjectSchema,
+pub struct ResolvedFieldData {
+  pub type_ref: TypeRef,
+  pub inline_types: Vec<RustType>,
+  pub validation_attrs: Vec<ValidationAttribute>,
+  pub schema: ObjectSchema,
 }
 
 /// Converts OpenAPI object properties into Rust struct field definitions.
@@ -39,14 +39,14 @@ pub(crate) struct ResolvedFieldData {
 /// attribute generation. Applies special handling for discriminator fields,
 /// OData properties, and custom type mappings.
 #[derive(Clone, Debug)]
-pub(crate) struct FieldConverter {
+pub struct FieldConverter {
   context: Rc<ConverterContext>,
   type_resolver: TypeResolver,
 }
 
 impl FieldConverter {
   /// Creates a new field converter with configuration from the context.
-  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+  pub fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       context: context.clone(),
       type_resolver: TypeResolver::new(context.clone()),
@@ -58,7 +58,7 @@ impl FieldConverter {
   /// This centralizes the common pattern of resolving the schema reference,
   /// checking for inline enums, resolving to a Rust type, and extracting
   /// validation attributes and default values.
-  pub(crate) fn resolve_with_metadata(
+  pub fn resolve_with_metadata(
     &self,
     parent_name: &str,
     prop_name: &str,
@@ -93,7 +93,7 @@ impl FieldConverter {
   /// deduplicates field names, and adds an `additionalProperties` catch-all
   /// field when the schema defines one. Returns the fields along with any
   /// inline types extracted from nested object or enum properties.
-  pub(crate) fn build_struct_fields(
+  pub fn build_struct_fields(
     &self,
     parent_name: &str,
     schema: &ObjectSchema,
@@ -107,9 +107,8 @@ impl FieldConverter {
     let mut inline_types = vec![];
 
     for (prop_name, prop_schema_ref) in &schema.properties {
-      let prop_schema = self
-        .type_resolver
-        .resolve(prop_schema_ref)
+      let (prop_schema, prop_schema_ref) = self
+        .resolve_property_schema(prop_schema_ref)
         .context(format!("Schema resolution failed for property '{prop_name}'"))?;
 
       let resolved = self
@@ -149,6 +148,24 @@ impl FieldConverter {
     }
 
     Ok(ConversionOutput::with_inline_types(fields, inline_types))
+  }
+
+  /// Resolves a property's schema, along with the schema its type comes from.
+  ///
+  /// A property that only annotates one reference, such as
+  /// `{ "allOf": [{ "$ref": "..." }], "default": "a" }`, takes the referenced type and
+  /// schema, with its own `default`, `description`, and `deprecated` taking precedence.
+  fn resolve_property_schema<'a>(&self, prop_schema_ref: &'a Schema) -> anyhow::Result<(ObjectSchema, &'a Schema)> {
+    let prop_schema = self.type_resolver.resolve(prop_schema_ref)?;
+    let Some(reference) = prop_schema_ref.as_inline().and_then(SchemaExt::annotated_ref) else {
+      return Ok((prop_schema, prop_schema_ref));
+    };
+
+    let mut referenced = self.type_resolver.resolve(reference)?;
+    referenced.default = prop_schema.default.or(referenced.default);
+    referenced.description = prop_schema.description.or(referenced.description);
+    referenced.deprecated = prop_schema.deprecated.or(referenced.deprecated);
+    Ok((referenced, reference))
   }
 
   fn convert_field(
@@ -202,7 +219,11 @@ impl FieldConverter {
       BTreeSet::from([SerdeAttribute::Rename(prop_name.to_string())])
     };
 
-    let serde_as_attr = self.customization_for_type(&final_type, prop_schema);
+    let serde_as_attr = self.customization_for_type(&final_type, prop_schema).or_else(|| {
+      (final_type.unique_items && final_type.is_array).then_some(SerdeAsFieldAttr::UniqueItems {
+        optional: final_type.nullable,
+      })
+    });
 
     let field = FieldDef::builder()
       .schema(prop_schema)
@@ -255,7 +276,7 @@ impl FieldConverter {
   /// Extracts a default value from schema `default`, `const`, or single-value `enum`.
   ///
   /// Prefers `default` over `const` over single-element enum arrays.
-  pub(crate) fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
+  pub fn extract_default_value(schema: &ObjectSchema) -> Option<serde_json::Value> {
     schema
       .default
       .clone()
@@ -268,7 +289,7 @@ impl FieldConverter {
   /// Generates `#[validate(email)]`, `#[validate(url)]`, `#[validate(range)]`,
   /// `#[validate(length)]`, and `#[validate(regex)]` based on format,
   /// min/max values, and pattern constraints.
-  pub(crate) fn extract_all_validation(
+  pub fn extract_all_validation(
     prop_name: &str,
     is_required: bool,
     schema: &ObjectSchema,
@@ -285,9 +306,8 @@ impl FieldConverter {
     }
 
     if schema.is_numeric() {
-      if let Some(range_attr) = ValidationAttribute::range(schema, type_ref) {
-        attrs.push(range_attr);
-      }
+      attrs.extend(ValidationAttribute::range(schema, type_ref));
+      attrs.extend(ValidationAttribute::multiple_of(schema, type_ref));
       return attrs;
     }
 
@@ -338,7 +358,7 @@ impl FieldConverter {
   /// and `foo_bar` both become `foo_bar`), this removes deprecated duplicates
   /// when a non-deprecated version exists, then appends `_2`, `_3`, etc.
   /// to remaining duplicates.
-  pub(crate) fn deduplicate_names(fields: Vec<FieldDef>) -> Vec<FieldDef> {
+  pub fn deduplicate_names(fields: Vec<FieldDef>) -> Vec<FieldDef> {
     let duplicate_names = fields
       .iter()
       .counts_by(|f| f.name.clone())

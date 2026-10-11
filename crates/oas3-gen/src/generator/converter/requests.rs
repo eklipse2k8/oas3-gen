@@ -8,6 +8,7 @@ use oas3::{
 };
 
 use super::{
+  fields::FieldConverter,
   inline_resolver::InlineTypeResolver,
   methods::MethodGenerator,
   parameters::{ConvertedParams, ParameterConverter},
@@ -16,11 +17,12 @@ use crate::{
   generator::{
     ast::{
       ContentCategory, Documentation, FieldDef, FieldNameToken, MultipartProperty, OperationBody, PartRfc6570,
-      PartStyle, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef, is_json_media_type,
+      PartStyle, RustPrimitive, RustType, StructDef, StructKind, StructToken, TypeRef, ValidationAttribute,
+      is_json_media_type,
     },
     converter::ConverterContext,
     naming::{
-      constants::{BODY_FIELD_NAME, REQUEST_BODY_SUFFIX},
+      constants::{BODY_FIELD_NAME, DEFAULT_MEDIA_TYPE, OCTET_STREAM_MEDIA_TYPE, REQUEST_BODY_SUFFIX},
       identifiers::to_rust_type_name,
       operations::credentials_field_name,
     },
@@ -34,12 +36,12 @@ use crate::{
 /// Contains the main request struct, nested parameter structs (path, query, header),
 /// inline types generated from parameter or body schemas, and any warnings.
 #[derive(Debug, Clone)]
-pub(crate) struct RequestOutput {
-  pub(crate) main_struct: StructDef,
-  pub(crate) nested_structs: Vec<StructDef>,
-  pub(crate) inline_types: Vec<RustType>,
-  pub(crate) parameter_fields: Vec<FieldDef>,
-  pub(crate) warnings: Vec<String>,
+pub struct RequestOutput {
+  pub main_struct: StructDef,
+  pub nested_structs: Vec<StructDef>,
+  pub inline_types: Vec<RustType>,
+  pub parameter_fields: Vec<FieldDef>,
+  pub warnings: Vec<String>,
 }
 
 /// Builds request structs from parameters and request bodies.
@@ -47,14 +49,14 @@ pub(crate) struct RequestOutput {
 /// Coordinates parameter conversion and body resolution to produce
 /// a complete request struct with nested parameter structs.
 #[derive(Debug, Clone)]
-pub(crate) struct RequestConverter {
+pub struct RequestConverter {
   param_converter: ParameterConverter,
   enable_builders: bool,
 }
 
 impl RequestConverter {
   /// Creates a new request converter.
-  pub(crate) fn new(context: &Rc<ConverterContext>) -> Self {
+  pub fn new(context: &Rc<ConverterContext>) -> Self {
     Self {
       param_converter: ParameterConverter::new(context),
       enable_builders: context.config().enable_builders(),
@@ -65,7 +67,7 @@ impl RequestConverter {
   ///
   /// Converts parameters, adds the server's `credentials` field when the operation
   /// accepts API keys, resolves the request body, and generates builder methods.
-  pub(crate) fn build(
+  pub fn build(
     &self,
     name: &str,
     entry: &OperationEntry,
@@ -128,16 +130,18 @@ impl RequestConverter {
 
 /// Information about a request body for operation metadata.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BodyInfo {
-  pub(crate) generated_types: Vec<RustType>,
-  pub(crate) type_usage: Vec<String>,
-  pub(crate) field_name: Option<FieldNameToken>,
-  pub(crate) body_type: Option<TypeRef>,
-  pub(crate) description: Option<String>,
-  pub(crate) optional: bool,
-  pub(crate) content_category: ContentCategory,
-  pub(crate) multipart_properties: IndexMap<String, MultipartProperty>,
-  pub(crate) warnings: Vec<String>,
+pub struct BodyInfo {
+  pub generated_types: Vec<RustType>,
+  pub type_usage: Vec<String>,
+  pub field_name: Option<FieldNameToken>,
+  pub body_type: Option<TypeRef>,
+  pub description: Option<String>,
+  pub optional: bool,
+  pub content_category: ContentCategory,
+  pub content_type: String,
+  pub validation_attrs: Vec<ValidationAttribute>,
+  pub multipart_properties: IndexMap<String, MultipartProperty>,
+  pub warnings: Vec<String>,
 }
 
 impl BodyInfo {
@@ -147,7 +151,7 @@ impl BodyInfo {
   /// category (JSON, form, multipart, binary), and collects any inline types
   /// generated during schema resolution. Returns an empty body info if no
   /// request body is defined.
-  pub(crate) fn new(context: &Rc<ConverterContext>, entry: &OperationEntry) -> anyhow::Result<Self> {
+  pub fn new(context: &Rc<ConverterContext>, entry: &OperationEntry) -> anyhow::Result<Self> {
     let spec = context.graph().spec();
     let Some(body_ref) = entry.operation.request_body.as_ref() else {
       return Ok(Self::empty(true));
@@ -184,8 +188,16 @@ impl BodyInfo {
 
     let body_type = TypeRef::new(&type_name);
     let content_category = ContentCategory::from_content_type(content_type);
+    let graph = context.graph();
+    let body_schema = match schema_ref.schema_ref_name() {
+      Some(name) => graph.get(&name),
+      None => schema_ref.as_inline(),
+    };
+    let validation_attrs = body_schema
+      .filter(|schema| schema.properties.is_empty() && !schema.has_union() && !schema.has_intersection())
+      .map(|schema| FieldConverter::extract_all_validation(BODY_FIELD_NAME, false, schema, &body_type))
+      .unwrap_or_default();
     let (multipart_properties, warnings) = if content_category == ContentCategory::Multipart {
-      let graph = context.graph();
       let schema = match schema_ref.schema_ref_name() {
         Some(name) => graph.resolved(&name).map_or_else(Cow::default, Cow::Borrowed),
         None => Cow::Owned(graph.merge_inline(&schema_ref.resolve_object(spec)?)?),
@@ -203,24 +215,24 @@ impl BodyInfo {
       description: body.description.clone(),
       optional: !is_required,
       content_category,
+      content_type: sent_media_type(content_type, content_category),
+      validation_attrs,
       multipart_properties,
       warnings,
     })
   }
 
   /// Creates a field definition for the request body if present.
-  pub(crate) fn create_field(&self) -> Option<FieldDef> {
+  pub fn create_field(&self) -> Option<FieldDef> {
     let type_ref = self.body_type.clone()?;
-    Some(FieldDef::body_field(
-      BODY_FIELD_NAME,
-      self.description.as_ref(),
-      type_ref,
-      self.optional,
-    ))
+    Some(FieldDef {
+      validation_attrs: self.validation_attrs.clone(),
+      ..FieldDef::body_field(BODY_FIELD_NAME, self.description.as_ref(), type_ref, self.optional)
+    })
   }
 
   /// Converts body info into operation body metadata for code generation.
-  pub(crate) fn to_operation_body(&self) -> Option<OperationBody> {
+  pub fn to_operation_body(&self) -> Option<OperationBody> {
     let field_name = self.field_name.as_ref()?;
 
     Some(
@@ -229,6 +241,7 @@ impl BodyInfo {
         .maybe_body_type(self.body_type.clone())
         .optional(self.optional)
         .content_category(self.content_category)
+        .content_type(self.content_type.clone())
         .multipart_properties(self.multipart_properties.clone())
         .build(),
     )
@@ -420,8 +433,8 @@ fn is_structured(schema: &ObjectSchema) -> bool {
   schema.is_object() || !schema.properties.is_empty() || schema.additional_properties.is_some()
 }
 
-/// The first media type an Encoding Object's `contentType` lists that a part can carry: a
-/// wildcard such as `image/*` names a range, not a type a sender can label with.
+/// The first concrete media type in a comma-separated list, such as an Encoding Object's
+/// `contentType`. A wildcard such as `image/*` names a range, not a type a sender can label with.
 fn first_concrete_media_type(content_type: &str) -> Option<String> {
   content_type
     .split(',')
@@ -457,6 +470,50 @@ fn with_utf8_charset(content_type: String) -> String {
     .collect::<Vec<_>>()
     .into();
   format!("{media}; charset=utf-8")
+}
+
+/// The media type a body of `category` is labelled with: its first concrete declared media type,
+/// or the category's default for a wildcard. Binary drops its `charset`, and anything else names
+/// UTF-8 in place of another charset.
+pub fn sent_media_type(declared: &str, category: ContentCategory) -> String {
+  first_concrete_media_type(declared).map_or_else(
+    || category_media_type(category).to_owned(),
+    |media| match category {
+      ContentCategory::Binary => without_charset(media),
+      _ => with_utf8_charset(media),
+    },
+  )
+}
+
+/// Drops the `charset` parameter, which names no encoding for bytes.
+fn without_charset(content_type: String) -> String {
+  let Ok(mut media) = MediaType::parse(&content_type) else {
+    return content_type;
+  };
+  let params = media
+    .params
+    .iter()
+    .filter(|(name, _)| !name.as_str().eq_ignore_ascii_case("charset"))
+    .copied()
+    .collect::<Vec<_>>();
+  if params.len() == media.params.len() {
+    return content_type;
+  }
+  media.params = params.into();
+  media.to_string()
+}
+
+/// The media type a body of `category` is sent as when the spec declares only a wildcard.
+pub fn category_media_type(category: ContentCategory) -> &'static str {
+  match category {
+    ContentCategory::Json => DEFAULT_MEDIA_TYPE,
+    ContentCategory::FormUrlEncoded => "application/x-www-form-urlencoded",
+    ContentCategory::Multipart => "multipart/form-data",
+    ContentCategory::Text => "text/plain",
+    ContentCategory::Binary => OCTET_STREAM_MEDIA_TYPE,
+    ContentCategory::Xml => "application/xml",
+    ContentCategory::EventStream => "text/event-stream",
+  }
 }
 
 /// Returns the RFC 6570 serialization an Encoding Object selects. Any explicit `style`,

@@ -1,0 +1,15 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Counters", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "CounterA": { "type": "object", "required": ["kind", "count"], "properties": { "kind": { "type": "string", "const": "a" }, "count": { "type": "integer" } } },
+      "CounterB": { "type": "object", "required": ["kind", "count"], "properties": { "kind": { "type": "string", "const": "b" }, "count": { "type": "integer" } } },
+      "CounterC": { "type": "object", "required": ["count"], "properties": { "kind": { "type": "string", "const": "c" }, "count": { "type": "integer" } } },
+      "Tagged": { "anyOf": [{ "$ref": "#/components/schemas/CounterA" }, { "$ref": "#/components/schemas/CounterB" }, { "type": "null" }] },
+      "Optional": { "oneOf": [{ "$ref": "#/components/schemas/CounterA" }, { "$ref": "#/components/schemas/CounterC" }] },
+      "Repeated": { "oneOf": [{ "$ref": "#/components/schemas/CounterA" }, { "$ref": "#/components/schemas/CounterA" }] }
+    }
+  }
+}

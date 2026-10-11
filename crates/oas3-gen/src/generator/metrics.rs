@@ -14,6 +14,7 @@ pub struct GenerationStats {
   pub type_aliases_generated: usize,
   pub operations_converted: usize,
   pub webhooks_converted: usize,
+  pub callbacks_converted: usize,
   pub cycles_detected: usize,
   pub cycle_details: Vec<Vec<String>>,
   pub warnings: Vec<GenerationWarning>,
@@ -60,8 +61,10 @@ impl GenerationStats {
 
   pub fn record_operation(&mut self, operation: &OperationInfo) {
     self.operations_converted += 1;
-    if matches!(operation.kind, OperationKind::Webhook) {
-      self.webhooks_converted += 1;
+    match operation.kind {
+      OperationKind::Webhook => self.webhooks_converted += 1,
+      OperationKind::Callback => self.callbacks_converted += 1,
+      OperationKind::Http => {}
     }
   }
 

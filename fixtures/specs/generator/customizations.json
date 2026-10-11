@@ -1,0 +1,20 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Customizations", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Frappe": {
+        "type": "object",
+        "required": ["created_at", "birth_date", "tag", "toebeans"],
+        "properties": {
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "birth_date": { "type": "string", "format": "date" },
+          "tag": { "type": "string", "format": "uuid" },
+          "toebeans": { "type": "array", "items": { "type": "string", "format": "date-time" } }
+        }
+      }
+    }
+  }
+}

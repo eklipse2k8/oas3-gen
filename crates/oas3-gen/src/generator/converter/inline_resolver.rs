@@ -26,13 +26,13 @@ use crate::{
 /// Subsequent encounters of structurally identical schemas reuse the cached name,
 /// preventing duplicate type definitions in generated output.
 #[derive(Debug, Clone)]
-pub(crate) struct InlineTypeResolver {
+pub struct InlineTypeResolver {
   context: Rc<ConverterContext>,
 }
 
 impl InlineTypeResolver {
   /// Creates a new inline type resolver with access to the shared converter context.
-  pub(crate) fn new(context: Rc<ConverterContext>) -> Self {
+  pub fn new(context: Rc<ConverterContext>) -> Self {
     Self { context }
   }
 
@@ -42,7 +42,7 @@ impl InlineTypeResolver {
   /// in PascalCase (e.g., `UserAddress` for a property `address` on `User`).
   /// If an identical schema already exists in the cache, returns a reference
   /// to the existing type instead of creating a duplicate.
-  pub(crate) fn resolve_inline_struct(
+  pub fn resolve_inline_struct(
     &self,
     parent_name: &str,
     property_name: &str,
@@ -65,7 +65,7 @@ impl InlineTypeResolver {
   /// Unlike [`resolve_inline_struct`], the caller provides the full type name
   /// rather than deriving it from parent and property names. Useful for
   /// union variant structs where the name follows a different convention.
-  pub(crate) fn resolve_inline_struct_with_name(
+  pub fn resolve_inline_struct_with_name(
     &self,
     schema: &ObjectSchema,
     base_name: &str,
@@ -85,7 +85,7 @@ impl InlineTypeResolver {
   /// across the specification. If an enum with identical values already exists,
   /// returns a reference to that type. Otherwise, generates a new enum with
   /// the name `{parent_name}{property_name}`.
-  pub(crate) fn resolve_inline_enum(
+  pub fn resolve_inline_enum(
     &self,
     parent_name: &str,
     property_name: &str,
@@ -113,7 +113,7 @@ impl InlineTypeResolver {
   /// exists in the cache. If so, returns a reference to that type. Otherwise,
   /// generates a new enum and registers it in both the schema cache and
   /// the union registry for future deduplication.
-  pub(crate) fn resolve_inline_union(
+  pub fn resolve_inline_union(
     &self,
     schema: &ObjectSchema,
     refs: &UnionFingerprint,
@@ -127,19 +127,7 @@ impl InlineTypeResolver {
 
     let discriminator = schema.discriminator.as_ref().map(|d| d.property_name.as_str());
 
-    let enum_cache_key = self
-      .context
-      .cache()
-      .get_precomputed_enum_cache_key(schema)
-      .ok()
-      .flatten()
-      .or_else(|| {
-        if schema.is_relaxed_enum_pattern() {
-          return None;
-        }
-        let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
-      });
+    let enum_cache_key = self.enum_cache_key(schema);
 
     {
       let cache = self.context.cache();
@@ -179,11 +167,7 @@ impl InlineTypeResolver {
   /// (object, enum, or union) that warrants extraction. Returns `None` for
   /// primitive types or empty objects. For nullable unions with a single
   /// non-null variant, returns the inner type wrapped in `Option`.
-  pub(crate) fn try_inline_schema(
-    &self,
-    schema: &ObjectSchema,
-    base_name: &str,
-  ) -> Result<Option<ConversionOutput<String>>> {
+  pub fn try_inline_schema(&self, schema: &ObjectSchema, base_name: &str) -> Result<Option<ConversionOutput<String>>> {
     let schema_converter = SchemaConverter::new(&self.context);
     let result = self.resolve_inline_schema_with_fn(schema, base_name, |name, effective| {
       schema_converter.convert_schema(name, effective)
@@ -210,7 +194,7 @@ impl InlineTypeResolver {
   /// generate the type definition(s) and registers them in the cache.
   /// The primary type name is extracted from the last element of the
   /// generated types vector.
-  pub(crate) fn resolve_inline_schema_with_fn<F>(
+  pub fn resolve_inline_schema_with_fn<F>(
     &self,
     schema: &ObjectSchema,
     base_name: &str,
@@ -244,16 +228,7 @@ impl InlineTypeResolver {
       return Ok(None);
     };
 
-    let enum_cache_key = self
-      .context
-      .cache()
-      .get_precomputed_enum_cache_key(schema)
-      .ok()
-      .flatten()
-      .or_else(|| {
-        let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
-      });
+    let enum_cache_key = self.enum_cache_key(schema);
     let registration = self
       .context
       .cache()
@@ -266,6 +241,24 @@ impl InlineTypeResolver {
       .commit_registration(registration, vec![], named_type);
 
     Ok(Some(ConversionOutput::with_inline_types(final_name, generated)))
+  }
+
+  /// Returns the value-set key that deduplicates `schema` against enums with the same
+  /// values, or `None` when it lists no values or also accepts unlisted strings, since
+  /// such a schema must never share a closed enum's type.
+  fn enum_cache_key(&self, schema: &ObjectSchema) -> Option<Vec<String>> {
+    let spec = self.context.graph().spec();
+    self
+      .context
+      .cache()
+      .get_precomputed_enum_cache_key(schema)
+      .ok()
+      .flatten()
+      .or_else(|| {
+        let entries = schema.extract_enum_entries(spec);
+        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
+      })
+      .filter(|_| !schema.has_unconstrained_string_variant(spec))
   }
 
   /// Internal cache-aware resolution with pluggable generation logic.
@@ -304,16 +297,7 @@ impl InlineTypeResolver {
 
     let result = generator(&name)?;
 
-    let enum_cache_key = self
-      .context
-      .cache()
-      .get_precomputed_enum_cache_key(schema)
-      .ok()
-      .flatten()
-      .or_else(|| {
-        let entries = schema.extract_enum_entries(self.context.graph().spec());
-        (!entries.is_empty()).then(|| variants_to_cache_key(&entries))
-      });
+    let enum_cache_key = self.enum_cache_key(schema);
     let registration = self
       .context
       .cache()

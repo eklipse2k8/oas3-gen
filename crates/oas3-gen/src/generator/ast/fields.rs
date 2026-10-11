@@ -27,6 +27,9 @@ pub struct FieldDef {
   pub default_value: Option<serde_json::Value>,
   /// Variant of the field's enum type that `default_value` selects, resolved in postprocessing
   pub default_variant: Option<DefaultVariant>,
+  /// Whether `default_value` selects no variant of the field's enum type, resolved in postprocessing
+  #[builder(default)]
+  pub default_unrepresentable: bool,
   pub example_value: Option<serde_json::Value>,
   #[builder(into)]
   pub parameter_location: Option<ParameterLocation>,
@@ -149,7 +152,9 @@ pub trait FieldCollection: Send + Sync {
 
   /// Derives struct-level serde attributes from field characteristics.
   ///
-  /// Appends `#[serde(default)]` to `base` when any field carries a default value.
+  /// Appends `#[serde(default)]` to `base` when any field carries a default value, so
+  /// deserialization fills every missing field from the struct's `Default`
+  /// implementation and its `#[default(...)]` field values.
   #[must_use]
   fn struct_serde_attrs(&self, base: Vec<SerdeAttribute>) -> Vec<SerdeAttribute>;
 

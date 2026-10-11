@@ -1,0 +1,65 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Fields", "version": "1.0.0" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Closed": { "type": "string", "enum": ["a", "b"], "default": "b", "description": "Closed choices" },
+      "Collisions": {
+        "type": "object",
+        "properties": {
+          "loaf": { "type": "string" },
+          "Loaf": { "type": "integer" },
+          "LOAF": { "type": "boolean" },
+          "sploot-id": { "type": "string", "deprecated": true },
+          "sploot_id": { "type": "string" },
+          "old-name": { "type": "string", "deprecated": true },
+          "old_name": { "type": "string", "deprecated": true }
+        }
+      },
+      "Stamps": {
+        "type": "object",
+        "required": ["at", "on", "id", "blob", "name", "ats"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "maybe_at": { "type": "string", "format": "date-time" },
+          "ats": { "type": "array", "items": { "type": "string", "format": "date-time" } },
+          "on": { "type": "string", "format": "date" },
+          "id": { "type": "string", "format": "uuid" },
+          "blob": { "type": "string", "format": "byte" },
+          "name": { "type": "string" }
+        }
+      },
+      "Defaults": {
+        "type": "object",
+        "required": ["required_union", "required_plain"],
+        "properties": {
+          "from_default": { "type": "string", "default": "d", "const": "c" },
+          "from_const": { "type": "string", "const": "c" },
+          "from_single_enum": { "type": "string", "enum": ["only"] },
+          "required_union": { "oneOf": [{ "type": "string" }, { "type": "integer" }, { "type": "null" }] },
+          "required_plain": { "type": "string" },
+          "annotated": { "allOf": [{ "$ref": "#/components/schemas/Closed" }], "default": "a", "description": "picked" },
+          "wrapped": { "allOf": [{ "$ref": "#/components/schemas/Closed" }] },
+          "plain": { "$ref": "#/components/schemas/Closed" }
+        }
+      },
+      "Checks": {
+        "type": "object",
+        "required": ["required_string", "nullable_required", "nullable_explicit", "date_min"],
+        "properties": {
+          "required_string": { "type": "string" },
+          "nullable_required": { "type": ["string", "null"] },
+          "nullable_explicit": { "type": ["string", "null"], "minLength": 5 },
+          "date_min": { "type": "string", "format": "date", "minLength": 1 },
+          "bad_regex": { "type": "string", "pattern": "^[a-z+$" },
+          "enum_regex": { "type": "string", "enum": ["x", "y"], "pattern": "^[a-z]+$" },
+          "datetime_regex": { "type": "string", "format": "date-time", "pattern": "^[0-9]+$" },
+          "uuid_regex": { "type": "string", "format": "uuid", "pattern": "^[0-9]+$" },
+          "uri": { "type": "string", "format": "uri" },
+          "exclusive": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 100 }
+        }
+      }
+    }
+  }
+}

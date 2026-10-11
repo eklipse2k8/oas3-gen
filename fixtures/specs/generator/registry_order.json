@@ -1,0 +1,41 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Registry Order", "version": "1.0.0" },
+  "paths": {
+    "/users/{id}": {
+      "get": { "operationId": "getUserById" },
+      "put": {}
+    },
+    "/people": {
+      "get": { "operationId": "GetPeople" },
+      "post": { "operationId": "getPeople" }
+    },
+    "/user-profile": { "get": { "operationId": "user-profile.get" } },
+    "/v2/users": { "get": { "operationId": "v2GetUsers" } },
+    "/type": { "get": { "operationId": "type" } },
+    "/": { "post": {} },
+    "/organizations/{orgId}/members/{memberId}/": { "delete": {} },
+    "/subscriptions": {
+      "post": {
+        "operationId": "subscribe",
+        "callbacks": {
+          "onEvent": { "$ref": "#/components/callbacks/Event" },
+          "onRetry": {
+            "{$request.body#/primary}": { "post": {} },
+            "{$request.body#/backup}": { "post": { "operationId": "retryBackup" } }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "petAdded": { "post": { "operationId": "petAddedHook" } }
+  },
+  "components": {
+    "callbacks": {
+      "Event": {
+        "{$request.body#/callbackUrl}": { "post": {}, "put": {} }
+      }
+    }
+  }
+}

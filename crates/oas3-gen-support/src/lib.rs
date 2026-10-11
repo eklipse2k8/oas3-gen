@@ -1,9 +1,10 @@
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "eventsource")]
-mod event_stream;
+mod sse;
+mod validation;
 pub use better_default::Default;
 pub use bon::bon;
-#[cfg(feature = "eventsource")]
-pub use event_stream::{EventStream, EventStreamError};
 pub use http::Method;
 use http::{StatusCode, header::RETRY_AFTER};
 use serde::de::DeserializeOwned;
@@ -11,6 +12,9 @@ use serde_with::{
   StringWithSeparator,
   formats::{CommaSeparator, Separator, SpaceSeparator},
 };
+#[cfg(feature = "eventsource")]
+pub use sse::{EventStream, FromSseFrame, RawSseFrame, SseFrame};
+pub use validation::{MultipleOfFloat, multiple_of, multiple_of_ratio};
 
 /// Pipe separator for `OpenAPI` pipeDelimited style
 pub struct PipeSeparator;

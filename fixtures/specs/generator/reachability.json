@@ -1,0 +1,75 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Reachability", "version": "1.0.0" },
+  "paths": {
+    "/roots/{id}": {
+      "get": {
+        "operationId": "getRoot",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/ByParameter" } }],
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Root" } } } }
+        }
+      }
+    },
+    "/intake": {
+      "post": {
+        "operationId": "submitIntake",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ByBody" } } } },
+        "callbacks": {
+          "onReview": {
+            "{$request.body#/url}": {
+              "post": {
+                "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ByCallback" } } } },
+                "responses": { "204": { "description": "ok" } }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "ok" } }
+      }
+    }
+  },
+  "webhooks": {
+    "reviewed": {
+      "post": {
+        "operationId": "reviewed",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ByWebhook" } } } },
+        "responses": { "204": { "description": "ok" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Root": {
+        "type": "object",
+        "properties": {
+          "byProperty": { "$ref": "#/components/schemas/ByProperty" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/ByItems" } },
+          "map": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/ByMap" } },
+          "mapOfLists": { "type": "object", "additionalProperties": { "type": "array", "items": { "$ref": "#/components/schemas/ByMapItems" } } },
+          "choice": { "oneOf": [{ "$ref": "#/components/schemas/ByOneOf" }, { "type": "string" }] },
+          "either": { "anyOf": [{ "$ref": "#/components/schemas/ByAnyOf" }, { "type": "integer" }] },
+          "merged": { "allOf": [{ "$ref": "#/components/schemas/ByAllOf" }] },
+          "union": { "oneOf": [{ "$ref": "#/components/schemas/UnionA" }, { "$ref": "#/components/schemas/UnionB" }] }
+        }
+      },
+      "ByProperty": { "type": "object", "properties": { "next": { "$ref": "#/components/schemas/Transitive" } } },
+      "Transitive": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByItems": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByMap": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByMapItems": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByOneOf": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByAnyOf": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByAllOf": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "UnionA": { "type": "object", "properties": { "a": { "type": "string" } } },
+      "UnionB": { "type": "object", "properties": { "b": { "type": "integer" } } },
+      "NamedUnion": { "oneOf": [{ "$ref": "#/components/schemas/UnionA" }, { "$ref": "#/components/schemas/UnionB" }] },
+      "ByParameter": { "type": "string", "enum": ["first", "second"] },
+      "ByBody": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByCallback": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "ByWebhook": { "type": "object", "properties": { "value": { "type": "string" } } },
+      "Orphan": { "type": "object", "properties": { "child": { "$ref": "#/components/schemas/OrphanChild" } } },
+      "OrphanChild": { "type": "object", "properties": { "value": { "type": "string" } } }
+    }
+  }
+}
