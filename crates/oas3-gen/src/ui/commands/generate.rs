@@ -44,6 +44,7 @@ pub struct GenerateConfig {
   pub excluded_operations: Option<HashSet<String>>,
   pub no_helpers: bool,
   pub enable_builders: bool,
+  pub raw_body: bool,
   pub no_ordered_collections: bool,
   pub doc_format: bool,
   pub customizations: HashMap<String, String>,
@@ -109,6 +110,7 @@ impl GenerateConfig {
         EnumLayout::Sorted => EnumLayoutPolicy::Sorted,
       })
       .enable_builders(self.enable_builders)
+      .raw_body(self.raw_body)
       .customizations(self.customizations.clone())
       .fn_name_overrides(self.fn_name_overrides.clone())
       .maybe_api_name(self.api_name.clone())
@@ -190,6 +192,7 @@ impl GenerateConfig {
       all_schemas,
       all_headers,
       enable_builders,
+      raw_body,
       no_ordered_collections,
       doc_format,
       workspace,
@@ -230,6 +233,7 @@ impl GenerateConfig {
       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
       no_helpers,
       enable_builders,
+      raw_body,
       no_ordered_collections,
       doc_format,
       customizations,

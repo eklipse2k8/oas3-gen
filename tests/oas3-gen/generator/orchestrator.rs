@@ -267,6 +267,16 @@ fn shuffled(len: usize) -> impl Strategy<Value = Vec<usize>> {
   ],
   &["\"*/*\"", "\"image/*\"", "\"text/*\"", "iso-8859-1"]
 )]
+#[case::raw_body_hands_the_client_binary_bodies_unread(
+  PETSTORE,
+  CodegenConfig { raw_body: true, ..defaults() },
+  &[
+    "ApiResponse<reqwest::Body, Problem>",
+    "let data = reqwest::Body::from(req);",
+    "#[derive(Debug)]\npub enum PetOrReqwestBody {",
+  ],
+  &["req.bytes().await?.to_vec()"]
+)]
 fn generated_code_pins_spec_edge_semantics(
   #[case] spec_json: &str,
   #[case] config: CodegenConfig,

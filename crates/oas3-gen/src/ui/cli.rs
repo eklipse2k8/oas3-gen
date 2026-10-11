@@ -163,6 +163,10 @@ pub struct GenerateCommand {
   #[arg(long, default_value_t = false, display_order = 16, help_heading = "Code Generation")]
   pub enable_builders: bool,
 
+  /// Hand the client binary response bodies as an unread `reqwest::Body` instead of a `Vec<u8>`
+  #[arg(long, default_value_t = false, display_order = 16, help_heading = "Code Generation")]
+  pub raw_body: bool,
+
   /// Emit `std::collections::HashMap` and `Vec` instead of `indexmap::IndexMap`/`IndexSet`
   /// for generated map fields and `uniqueItems` arrays. JSON key/element order is no longer
   /// preserved at runtime when this is enabled.

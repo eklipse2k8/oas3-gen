@@ -16,7 +16,7 @@ use crate::{
       StatusCodeToken, TypeRef,
     },
     naming::{
-      constants::{DEFAULT_MEDIA_TYPE, RESPONSE_HEADER_PARENT_SUFFIX},
+      constants::{CLIENT_RAW_BODY_TYPE, DEFAULT_MEDIA_TYPE, RESPONSE_HEADER_PARENT_SUFFIX},
       identifiers::to_rust_type_name,
       responses::{self as naming_responses, client_stream_type, server_stream_type},
     },
@@ -198,6 +198,9 @@ impl ResponseConverter {
       .map(|(content_type, media_type)| {
         let schema_type = self.resolve_media_schema(content_type, media_type, path, status_code)?;
         let mut response_media_type = ResponseMediaType::with_schema(content_type, schema_type);
+        if self.reads_raw_body(&response_media_type) {
+          response_media_type.schema_type = Some(TypeRef::new(CLIENT_RAW_BODY_TYPE));
+        }
         if let Some(stream) = &mut response_media_type.stream {
           stream.sentinel = SSE_SENTINEL_EXTENSIONS
             .iter()
@@ -286,6 +289,19 @@ impl ResponseConverter {
       GenerationTarget::Client => client_stream_type,
       GenerationTarget::Server => server_stream_type,
     }
+  }
+
+  /// Whether a client generated with `--raw-body` hands over `media`'s body unread, which
+  /// it does for every body it would otherwise read into a `Vec<u8>`.
+  fn reads_raw_body(&self, media: &ResponseMediaType) -> bool {
+    let config = self.context.config();
+    config.raw_body
+      && config.target == GenerationTarget::Client
+      && matches!(media.category, ContentCategory::Text | ContentCategory::Binary)
+      && media
+        .schema_type
+        .as_ref()
+        .is_some_and(|schema| matches!(schema.base_type, RustPrimitive::Bytes))
   }
 
   /// Ensures at least one media type exists, defaulting to `application/json`.

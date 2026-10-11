@@ -19,6 +19,7 @@ you need. For a worked example, start with [Client Generation](./client-generati
 - <a id="visibility"></a><a id="example---visibility-public"></a><a id="example---visibility-crate"></a><a id="example---visibility-file"></a> [Visibility](./generation-options.md#visibility)
 - <a id="header-emission"></a><a id="default-operation-referenced-headers-only"></a><a id="with---all-headers"></a> [Header Emission](./generation-options.md#header-emission)
 - <a id="builder-generation"></a><a id="default-builders-disabled"></a><a id="with---enable-builders"></a> [Builder Generation](./generation-options.md#builder-generation)
+- <a id="raw-response-bodies"></a><a id="default-bytes"></a><a id="with---raw-body"></a> [Raw Response Bodies](./generation-options.md#raw-response-bodies)
 - <a id="documentation-formatting"></a><a id="default-formatting-disabled"></a><a id="with---doc-format"></a> [Documentation Formatting](./generation-options.md#documentation-formatting)
 - <a id="known-limitations"></a> [Known Limitations](./generation-options.md#known-limitations)
 - <a id="flag-summary"></a> [Flag Summary](./generation-options.md#flag-summary)

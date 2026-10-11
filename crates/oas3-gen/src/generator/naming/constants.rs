@@ -24,6 +24,7 @@ pub const RESPONSE_UNION_FALLBACK_SUFFIX: &str = "Body";
 pub const RESPONSE_UNION_STREAM_SUFFIX: &str = "Stream";
 pub const CLIENT_EVENT_STREAM_TYPE: &str = "oas3_gen_support::EventStream";
 pub const CLIENT_SSE_FRAME_TYPE: &str = "oas3_gen_support::SseFrame";
+pub const CLIENT_RAW_BODY_TYPE: &str = "reqwest::Body";
 pub const SERVER_EVENT_STREAM_TYPE: &str = "futures::stream::BoxStream";
 pub const WITH_HEADERS_NAME: &str = "WithHeaders";
 pub const RESPONSE_HEADERS_SEPARATOR: &str = "And";

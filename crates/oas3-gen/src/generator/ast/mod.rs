@@ -408,8 +408,6 @@ pub struct ResponseUnionDef {
   pub docs: Documentation,
   #[builder(default)]
   pub variants: Vec<ResponseUnionVariant>,
-  /// The target whose event stream a member holds, if any: a client's `EventStream` is
-  /// `Debug`, a server's `BoxStream` isn't, and neither is `Clone`.
   pub streaming: Option<GenerationTarget>,
 }
 

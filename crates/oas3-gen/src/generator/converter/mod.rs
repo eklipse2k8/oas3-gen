@@ -157,9 +157,6 @@ pub enum CollectionTypePolicy {
 }
 
 /// Configuration for code generation.
-///
-/// Uses typed enums instead of booleans to make intent explicit at call sites
-/// and prevent invalid combinations.
 #[derive(Debug, Clone, Default, bon::Builder)]
 pub struct CodegenConfig {
   #[builder(default)]
@@ -182,6 +179,8 @@ pub struct CodegenConfig {
   pub enum_layout: EnumLayoutPolicy,
   #[builder(default)]
   pub enable_builders: bool,
+  #[builder(default)]
+  pub raw_body: bool,
   #[builder(default)]
   pub customizations: HashMap<String, String>,
   #[builder(default)]

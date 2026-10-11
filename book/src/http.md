@@ -412,8 +412,9 @@ and decoded as JSON.
 
 For example, `getPetCard` returns its kennel card as `text/plain` , so it returns
 `ApiResponse<String, Problem>` . `getPetPhoto` returns `image/png` and produces
-`ApiResponse<Vec<u8>, Problem>` . Both declare their `404` body as
-`application/problem+json` , which decodes into the `Problem` struct.
+`ApiResponse<Vec<u8>, Problem>` , or `ApiResponse<reqwest::Body, Problem>` in a client
+generated with [`--raw-body`](./generation-options.md#raw-response-bodies). Both declare
+their `404` body as `application/problem+json` , which decodes into the `Problem` struct.
 
 The client uses the status and `Content-Type` to choose a decoder. It ignores media type
 parameters such as `charset` when matching. These rules determine whether a response

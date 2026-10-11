@@ -14,7 +14,10 @@ use crate::generator::{
   },
   converter::{GenerationTarget, requests::sent_media_type},
   naming::{
-    constants::{DEFAULT_MEDIA_TYPE, OTHER_RESPONSE_VARIANT, RESPONSE_FALLBACK_NAME, RESPONSE_NAME, WITH_HEADERS_NAME},
+    constants::{
+      CLIENT_RAW_BODY_TYPE, DEFAULT_MEDIA_TYPE, OTHER_RESPONSE_VARIANT, RESPONSE_FALLBACK_NAME, RESPONSE_NAME,
+      WITH_HEADERS_NAME,
+    },
     identifiers::ensure_unique,
     responses::{headers_name, union_member_name, union_name},
   },
@@ -400,7 +403,7 @@ impl ResponseProcessor {
 
       let streaming = members
         .iter()
-        .any(|(_, _, v)| ResponseMediaType::has_event_stream(&v.media_types));
+        .any(|(name, _, v)| name == CLIENT_RAW_BODY_TYPE || ResponseMediaType::has_event_stream(&v.media_types));
 
       ResponseUnionDef::builder()
         .name(EnumToken::from_raw(name))

@@ -28,7 +28,10 @@ use crate::generator::{
     http::HttpStatusCode,
   },
   converter::{GenerationTarget, requests::category_media_type},
-  naming::{constants::OTHER_RESPONSE_VARIANT, identifiers::builder_setter_name},
+  naming::{
+    constants::{CLIENT_RAW_BODY_TYPE, OTHER_RESPONSE_VARIANT},
+    identifiers::builder_setter_name,
+  },
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -712,6 +715,7 @@ impl<'a> ResponseExtractionFragment<'a> {
 /// How the client reads a response body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BodyReading {
+  RawBody,
   Bytes,
   Text,
   ParsedText,
@@ -723,6 +727,11 @@ enum BodyReading {
 impl BodyReading {
   fn new(schema_type: &TypeRef, category: ContentCategory, parses_text: bool) -> Self {
     match category {
+      ContentCategory::Text | ContentCategory::Binary
+        if schema_type.base_type == RustPrimitive::from(CLIENT_RAW_BODY_TYPE) =>
+      {
+        Self::RawBody
+      }
       ContentCategory::Text | ContentCategory::Binary if matches!(schema_type.base_type, RustPrimitive::Bytes) => {
         Self::Bytes
       }
@@ -740,6 +749,7 @@ impl ToTokens for ResponseExtractionFragment<'_> {
     let schema_type = self.schema_type;
 
     let ts = match BodyReading::new(schema_type, self.category, self.parses_text) {
+      BodyReading::RawBody => quote! { reqwest::Body::from(req) },
       BodyReading::Bytes => quote! { req.bytes().await?.to_vec() },
       BodyReading::Text => quote! { req.text().await? },
       BodyReading::ParsedText => {

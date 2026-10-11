@@ -666,6 +666,79 @@ The constructor accepts each parameter separately, so the builder has a setter f
 `pet_id` , `if_none_match` , and `x_api_version` . It assembles the nested `path` and
 `header` structs and validates the request before returning it.
 
+## Raw Response Bodies
+
+Use `--raw-body` when a client downloads bodies you don't want to hold in memory all at
+once, such as large files. By default, the client reads each binary response body into a
+[`Vec<u8>`][rustdoc-vec] before it returns. With the flag, the client returns the body
+unread as a [`reqwest::Body`][rustdoc-reqwest-body], and your code reads it as it arrives.
+
+```text
+--raw-body
+```
+
+The flag applies to every response body the client would otherwise read into a
+`Vec<u8>`: binary media types such as `image/png`, and text media types whose schema has
+`format: binary`. It doesn't change JSON, text, or event-stream responses, request
+bodies, or `server-mod` output.
+
+### Default (Bytes)
+
+Without the flag, `get_pet_photo()` in the petstore client returns the `image/png` photo
+as bytes:
+
+```rust
+pub async fn get_pet_photo(
+    &self,
+    request: GetPetPhotoRequest,
+) -> anyhow::Result<ApiResponse<Vec<u8>, Problem>> {
+    /* ... */
+}
+```
+
+### With `--raw-body`
+
+With the flag, the same method returns the body unread:
+
+```rust
+pub async fn get_pet_photo(
+    &self,
+    request: GetPetPhotoRequest,
+) -> anyhow::Result<ApiResponse<reqwest::Body, Problem>> {
+    /* ... */
+}
+```
+
+`reqwest::Body` implements [`http_body::Body`][rustdoc-http-body], so its `size_hint()`
+reports the body's length when the response states it up front.
+[`BodyDataStream`][rustdoc-http-body-util-body-data-stream] turns the body into a stream
+of chunks. This example writes the photo to a file one chunk at a time, using the
+`futures`, `http-body`, `http-body-util`, and `tokio` crates from your own
+`Cargo.toml`:
+
+```rust
+use futures::StreamExt as _;
+use http_body::Body as _;
+use tokio::io::AsyncWriteExt as _;
+
+if let ApiResponse::Ok(body) = response {
+    println!("Photo size: {:?}", body.size_hint().exact());
+    let mut file = tokio::fs::File::create("photo.png").await?;
+    let mut chunks = http_body_util::BodyDataStream::new(body);
+    while let Some(chunk) = chunks.next().await {
+        file.write_all(&chunk?).await?;
+    }
+}
+```
+
+The size is `None` when the length isn't known before the body arrives, as with a
+chunked response. `BodyDataStream` skips trailers, the header fields a server can send
+after the body; [`BodyStream`][rustdoc-http-body-util-body-stream] yields them as frames
+alongside the data.
+
+A payload union that holds a raw body, such as `PetOrReqwestBody`, derives `Debug` but
+not `Clone`, because a `reqwest::Body` can't be cloned.
+
 ## Documentation Formatting
 
 Descriptions and summaries in the OpenAPI document become documentation comments in the
@@ -763,6 +836,7 @@ command-line help, including input, output, and terminal options.
 | `--api-name` | *(none)* | Name for the generated client struct or server trait |
 | `--all-headers` | `false` | Emit header constants for all component-level headers |
 | `--enable-builders` | `false` | Enable `bon` builder derives and methods |
+| `--raw-body` | `false` | Return client binary response bodies as an unread `reqwest::Body` instead of `Vec<u8>` |
 | `--no-ordered-collections` | `false` | Emit [`HashMap`][rustdoc-hashmap]/[`Vec`][rustdoc-vec] instead of `indexmap` collection types |
 | `--doc-format` | `false` | Format documentation comments with `mdformat` |
 | `--only` | *(none)* | Include only specified operations |
@@ -775,10 +849,14 @@ command-line help, including input, output, and terminal options.
 [rustdoc-hashmap]: https://doc.rust-lang.org/std/collections/struct.HashMap.html
 [rustdoc-http-header-constants]: https://docs.rs/http/1.5.0/http/header/index.html#constants
 [rustdoc-http-header-map]: https://docs.rs/http/1.5.0/http/header/struct.HeaderMap.html
+[rustdoc-http-body]: https://docs.rs/http-body/1.1.0/http_body/trait.Body.html
+[rustdoc-http-body-util-body-data-stream]: https://docs.rs/http-body-util/0.1.5/http_body_util/struct.BodyDataStream.html
+[rustdoc-http-body-util-body-stream]: https://docs.rs/http-body-util/0.1.5/http_body_util/struct.BodyStream.html
 [rustdoc-http-header-name]: https://docs.rs/http/1.5.0/http/header/struct.HeaderName.html
 [rustdoc-indexmap-map]: https://docs.rs/indexmap/2.14.2/indexmap/map/struct.IndexMap.html
 [rustdoc-indexmap-set]: https://docs.rs/indexmap/2.14.2/indexmap/set/struct.IndexSet.html
 [rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html
+[rustdoc-reqwest-body]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Body.html
 [rustdoc-serde-deserialize]: https://docs.rs/serde/1.0.229/serde/trait.Deserialize.html
 [rustdoc-serde-json-value]: https://docs.rs/serde_json/1.0.151/serde_json/enum.Value.html
 [rustdoc-serde-serialize]: https://docs.rs/serde/1.0.229/serde/trait.Serialize.html
