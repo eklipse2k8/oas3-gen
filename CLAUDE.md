@@ -52,5 +52,5 @@ cargo run -- generate --help                 # authoritative flag list
 | Working in `codegen/` | [code-fragments.md](docs/code-fragments.md) |
 | Adding tests, rebuilding fixtures | [testing.md](docs/testing.md) |
 | Tooling beyond the four commands above | [commands.md](docs/commands.md) |
-| Writing or editing the book | [book-style-guide.md](docs/book-style-guide.md) |
+| Writing or editing the book | [rust-book skill](.claude/skills/rust-book/SKILL.md) |
 | Scope, verification, delegation, effort | [agent-guidance.md](docs/agent-guidance.md) |

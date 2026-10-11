@@ -9,7 +9,8 @@
 /specs
 
 # No custom agent settings
-.claude/
+.claude/*
+!.claude/skills/
 .opencode/
 .codex/
 .gemini/
