@@ -103,9 +103,16 @@ enum. Generated fields are `snake_case` with keyword escaping (`r#type`).
 - `bon` builders for many-optional-field structs; direct initialization for
   simple ones.
 - `strum` (`EnumString`, `Display`) for fixed string enums.
-- Typed enums over boolean flags for config, so call sites read as intent and
-  matches stay exhaustive (`EnumCasePolicy`, `ODataPolicy`,
-  `CollectionTypePolicy`, …).
+- A `bool` for a config option that is on or off, such as `enable_builders`.
+  An enum when the option picks one of several modes, as `EnumCaseMode` does
+  for `--enum-mode`.
+- Declare command-line rules with clap attributes rather than checking them
+  after parsing: `value_enum` for a fixed set of values, and `requires`,
+  `conflicts_with`, and `group` for how flags combine (`--module-version`
+  declares `requires = "workspace"`). Clap rejects bad input with its usage
+  line, and its default `suggestions` feature proposes the closest flag or
+  value for a typo. Check in `GenerateConfig::from_command` only what the
+  attributes can't express.
 - Typed attribute enums implementing `ToTokens` (`OuterAttr`, `SerdeAttribute`,
   `ValidationAttribute`) over building attribute strings.
 - `anyhow::Context::context()` for error context; `with_context()` only when the

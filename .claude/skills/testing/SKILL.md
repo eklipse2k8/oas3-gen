@@ -117,9 +117,9 @@ exercises every feature the generator supports. It generates two crates with
   through axum.
 
 Both are workspace members, so every `cargo build` compiles generated output
-against its own generated `Cargo.toml`, with the root `[patch.crates-io]`
-supplying the local `oas3-gen-support`. Their files are generated: never edit
-them by hand. Any change to generated output, from the generator or from
+against its own `Cargo.toml`, whose dependencies inherit the root
+`[workspace.dependencies]`, so `oas3-gen-support` resolves to the local crate.
+Their files are generated: never edit them by hand. Any change to generated output, from the generator or from
 `petstore.json`, means rebuilding them, or the build breaks:
 
 ```bash
@@ -127,12 +127,18 @@ them by hand. Any change to generated output, from the generator or from
 ```
 
 The script regenerates both crates with `--workspace --enable-builders
---all-schemas --all-headers`, adds `publish = false` to each generated
-`Cargo.toml` so `cargo publish --workspace` skips them, then runs
-`cargo clippy --fix` with `clippy::pedantic` and `cargo +nightly fmt`. Committed
-fixtures are post-clippy and post-rustfmt; without those two steps the diff
-fills with lint and formatting noise. It ends by printing
-`git diff --stat -- fixtures/`.
+--all-schemas --all-headers` and adds `publish = false` to each generated
+`Cargo.toml` so `cargo publish --workspace` skips them. The generator pins the
+versions a standalone crate needs, such as `anyhow = "1.0"` and
+`bon = { version = "3.10", features = [...] }`; the script rewrites each one to
+inherit from the root, as `anyhow.workspace = true` and
+`bon = { workspace = true, features = [...] }`, keeping its features. A
+dependency the generator starts emitting needs an entry in the root
+`[workspace.dependencies]` as well, or the fixtures stop building. The script
+then runs `cargo clippy --fix` with `clippy::pedantic` and `cargo +nightly fmt`.
+Committed fixtures are workspace-inherited, post-clippy, and post-rustfmt;
+without those steps the diff fills with manifest, lint, and formatting noise.
+It ends by printing `git diff --stat -- fixtures/`.
 
 The fixture diff is how generated-output changes get reviewed. Read it before
 claiming a change is correct.
