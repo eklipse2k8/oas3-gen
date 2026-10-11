@@ -21,18 +21,21 @@ The one thing not obvious from the tree — which AST node reaches which top-lev
 |---|---|---|---|
 | `Vec<RustType>` | `TypesFragment` | `types.rs` | whole `types.rs` (imports, constants, types) |
 | `RustType` | `TypeFragment` | `types.rs` | dispatches on variant to the rows below |
-| `StructDef` | `StructFragment` | `structs.rs` | struct + impls + `TryFrom` for `HeaderMap` |
+| `StructDef` | `StructFragment` | `structs.rs` | struct + impls + `TryFrom` to and from `HeaderMap` |
 | `EnumDef` | `EnumFragment` | `enums.rs` | value enum, `Display`, optional case-insensitive deser |
 | `DiscriminatedEnumDef` | `DiscriminatedEnumFragment` | `enums.rs` | tagged union + hand-rolled serde |
+| `DiscriminatedEnumDef` with `sse_frame`, client target | `FrameUnionFragment` | `sse.rs` | enum of event-stream frame types + `FromSseFrame` impl that picks the variant by event name |
 | `ResponseEnumDef` | `ResponseEnumFragment` | `enums.rs` | the one generic `ApiResponse<Value, Failure>` response enum, both targets |
-| `PayloadUnionDef` | `PayloadUnionFragment` | `enums.rs` | untagged union of body types sharing a status class |
+| `ResponseUnionDef` | `ResponseUnionFragment` | `enums.rs` | untagged union of body types sharing a status class |
 | `TypeAliasDef` | `TypeAliasFragment` | `type_aliases.rs` | `type Alias = Target;` |
 | `Vec<OperationInfo>` | `ClientFragment` | `client.rs` | `impl Client` with async methods |
 | `ServerRequestTraitDef` | `ServerGenerator` | `server.rs` | trait + axum handlers (response enum match arms) + router |
 
 Shared helpers: `attributes.rs` (derives, serde, validation, docs), `methods.rs` (helper methods,
 parameters), `constants.rs` (regex statics, header names), `coercion.rs` (JSON literal -> Rust
-literal), `headers.rs`, `http.rs`, `mod_file.rs`, `cargo_manifest.rs` (`--workspace` output).
+literal), `cookies.rs` (cookie parameter structs to and from the `Cookie` header), `multipart.rs`
+(client `multipart/form-data` bodies), `headers.rs`, `http.rs`, `mod_file.rs`, `cargo_manifest.rs`
+(`--workspace` output).
 
 ## Conventions
 
@@ -40,7 +43,7 @@ literal), `headers.rs`, `http.rs`, `mod_file.rs`, `cargo_manifest.rs` (`--worksp
 - Thread `Visibility` through rather than hard-coding `pub`.
 - Return empty `quote! {}` for absent/empty cases instead of branching at the call site.
 - Spec order for schema/field/variant/header output; sorted only for canonical output like
-  grouped imports and derives. See [coding-standards.md](coding-standards.md#collections).
+  grouped imports and derives. See the [rust skill](../.claude/skills/rust/SKILL.md#collections).
 - `SchemaCodeGenerator` (`mod.rs`) owns `CodegenConfig` by value and reads policy off it
   (`config.collection_types`, `config.target`). The `Rc<ConverterContext>` sharing pattern belongs
   to `converter/`, not here.
