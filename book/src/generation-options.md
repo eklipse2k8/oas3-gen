@@ -159,7 +159,7 @@ anyhow = "1.0"
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock", "serde"] }
 http = "1.5"
 indexmap = { version = "2.14", features = ["serde"] }
-oas3-gen-support = "0.29.0"
+oas3-gen-support = "0.29.1"
 regex = "1.13"
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "http2", "native-tls", "query", "stream"] }
 reqwest_cookie_store = "0.10"
