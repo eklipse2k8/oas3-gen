@@ -33,8 +33,8 @@ cargo run -- generate client \
 
 Here, `--enable-builders` adds the request builders we'll use below. The client's name
 comes from the document's title, `Petstore` , so the generated client is
-`PetstoreClient` . To choose a different name, add
-[`--api-name`](./generation-options.md#api-name-override) .
+`PetstoreClient`. To choose a different name, add `--api-name`, as
+[Choosing Operations and Names](#choosing-operations-and-names) shows.
 
 Use `client-mod` if you'd like to keep the client and types in separate files:
 
@@ -63,11 +63,96 @@ pub use client::*;
 ```
 
 To include this directory in your application, declare `mod api;` in your crate root.
-You'll also need the dependencies referenced by the generated code. If you'd prefer a
-separate crate with its own manifest, add `--workspace` and use a crate directory as the
-output path. See
-[Workspace Crate Output](./generation-options.md#workspace-crate-output) for the layout
-and dependency rules.
+You'll also need the dependencies referenced by the generated code, which
+[Dependencies](./generation-options.md#dependencies) lists.
+
+### Generating a Separate Crate
+
+If you'd prefer a separate crate with its own manifest, add `--workspace` and use a
+crate directory as the output path. Let's generate the petstore client as a crate in
+`petstore-api`:
+
+```bash
+cargo run -- generate client-mod \
+  -i fixtures/petstore.json -o petstore-api \
+  --enable-builders --workspace
+```
+
+The generated directory has this structure:
+
+```text
+petstore-api/
+├── Cargo.toml
+└── src/
+    ├── lib.rs
+    ├── types.rs
+    └── client.rs
+```
+
+The `src/lib.rs` file takes the place of `mod.rs` as the library root, so you can build
+`petstore-api` as a crate. The package takes its name from the output directory;
+[Crate Name](./generation-options.md#crate-name) explains how the generator converts a
+directory name into a package name.
+
+The manifest declares the package and the dependencies its generated code uses. This is
+the petstore client's manifest, shown without its banner:
+
+```toml
+[package]
+name = "petstore-api"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Rust client generated from the Petstore OpenAPI document"
+
+[dependencies]
+anyhow = "1.0"
+bon = { version = "3.10", features = ["implied-bounds"] }
+chrono = { version = "0.4.42", default-features = false, features = ["std", "clock", "serde"] }
+http = "1.5"
+indexmap = { version = "2.14", features = ["serde"] }
+oas3-gen-support = "0.29.1"
+regex = "1.13"
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "http2", "native-tls", "query", "stream"] }
+reqwest_cookie_store = "0.10"
+secrecy = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_html_form = { version = "0.4", default-features = false, features = ["ser", "std"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+serde_with = { version = "3.24", features = ["base64", "chrono", "indexmap_2"] }
+uuid = { version = "1.28", features = ["serde"] }
+validator = { version = "0.21", features = ["derive", "indexmap"] }
+```
+
+The description comes from the document's `info.title`, `Petstore`, and the `bon` entry
+comes from `--enable-builders`. The dependency list for your API may differ;
+[Dependencies](./generation-options.md#dependencies) explains when the generator
+declares each crate. The package version starts at `0.0.0`; pass
+[`--module-version`](./generation-options.md#generated-manifest) to set another.
+
+The generator rewrites `Cargo.toml` on every run and adds a banner identifying it as
+generated output. Put code that needs its own dependencies in a separate crate so that
+regenerating the API doesn't overwrite your changes.
+
+The manifest declares a plain `[package]` with no `[workspace]` table, so the crate
+builds standalone and can also be added to an existing workspace:
+
+```toml
+[workspace]
+members = ["crates/*", "petstore-api"]
+```
+
+To use the generated crate from another crate, add a path dependency to that crate's
+`Cargo.toml`:
+
+```toml
+[dependencies]
+petstore-api = { path = "../petstore-api" }
+```
+
+Keep the default [`--visibility public`](./generation-options.md#visibility) for a
+crate other code depends on. `crate` and `file` visibility restrict the re-exports in
+`lib.rs`, so other crates can't access those re-exported items.
 
 ## Creating a Client
 
@@ -469,7 +554,8 @@ this operation doesn't return.
 The client decodes each body in the media type its status declares. For example,
 `get_pet_card()` returns its `text/plain` kennel card as `ApiResponse<String, Problem>`
 , and `get_pet_photo()` returns its `image/png` photo as `ApiResponse<Vec<u8>, Problem>`
-. See [Response Media Types](./http.md#response-media-types) .
+. See [Response Media Types](./http.md#response-media-types) . To read a binary body as it
+arrives instead of all at once, see [Streaming Binary Bodies](#streaming-binary-bodies).
 
 A response that the document doesn't describe comes back as `ApiResponse::Other` ,
 holding the unread [`reqwest::Response`][rustdoc-reqwest-response] . That includes a
@@ -573,6 +659,66 @@ let response = ShowPetByIdRequest::parse_response(http_response).await?;
 Here, `http_response` is the response you've already received. The decoder reads
 declared headers before decoding the body and returns the operation's `ApiResponse`
 type.
+
+### Streaming Binary Bodies
+
+By default, the client reads each binary response body into a [`Vec<u8>`][rustdoc-vec]
+before it returns. For bodies you don't want to hold in memory all at once, such as
+large files, add `--raw-body` when you generate the client:
+
+```bash
+cargo run -- generate client-mod \
+  -i fixtures/petstore.json -o src/api/ \
+  --enable-builders --raw-body
+```
+
+The client now returns those bodies unread as a
+[`reqwest::Body`][rustdoc-reqwest-body], and your code reads each one as it arrives. The
+flag applies to every response body the client would otherwise read into a `Vec<u8>`:
+binary media types such as `image/png`, and text media types whose schema has
+`format: binary`. It doesn't change JSON, text, or event-stream responses, or request
+bodies.
+
+Here's how the signature of `get_pet_photo()` changes:
+
+```rust
+pub async fn get_pet_photo(
+    &self,
+    request: GetPetPhotoRequest,
+) -> anyhow::Result<ApiResponse<reqwest::Body, Problem>> {
+    /* ... */
+}
+```
+
+`reqwest::Body` implements [`http_body::Body`][rustdoc-http-body], so its `size_hint()`
+reports the body's length when the response states it up front.
+[`BodyDataStream`][rustdoc-http-body-util-body-data-stream] turns the body into a stream
+of chunks. This example writes the photo from a `get_pet_photo()` response to a file one
+chunk at a time, using the `futures`, `http-body`, `http-body-util`, and `tokio` crates
+from your own `Cargo.toml`:
+
+```rust
+use futures::StreamExt as _;
+use http_body::Body as _;
+use tokio::io::AsyncWriteExt as _;
+
+if let ApiResponse::Ok(body) = response {
+    println!("Photo size: {:?}", body.size_hint().exact());
+    let mut file = tokio::fs::File::create("photo.png").await?;
+    let mut chunks = http_body_util::BodyDataStream::new(body);
+    while let Some(chunk) = chunks.next().await {
+        file.write_all(&chunk?).await?;
+    }
+}
+```
+
+The size is `None` when the length isn't known before the body arrives, as with a
+chunked response. `BodyDataStream` skips trailers, the header fields a server can send
+after the body; [`BodyStream`][rustdoc-http-body-util-body-stream] yields them as frames
+alongside the data.
+
+A payload union that holds a raw body, such as `PetOrReqwestBody`, derives `Debug` but
+not `Clone`, because a `reqwest::Body` can't be cloned.
 
 ## Reading Server-Sent Events
 
@@ -755,12 +901,56 @@ method while you migrate, add `#[allow(deprecated)]` to the calling function.
 
 ## Choosing Operations and Names
 
-Use [`--only` or `--exclude`](./generation-options.md#operation-filtering) to select
-operations. Use [`--fn-name`](./generation-options.md#function-name-overrides) to rename
-methods and their request types, or
-[`--api-name`](./generation-options.md#api-name-override) to name the client itself. The
-[shared reference](./generation-options.md#flag-summary) also covers visibility, enums,
-type adapters, and collection choices.
+You may only call a few operations from a large API. Use
+[`--only`](./generation-options.md#operation-filtering) to generate methods for only
+those operations. It takes normalized `snake_case` operation IDs, so the petstore's
+`listPets` and `createPet` operations become `list_pets` and `create_pet`:
+
+```bash
+cargo run -- generate client-mod \
+  -i fixtures/petstore.json -o src/api/ \
+  --only list_pets,create_pet
+```
+
+The client keeps `list_pets()` and `create_pet()` and omits the other methods. The types
+those methods need are still generated, as
+[Schema Dependency Resolution](./generation-options.md#schema-dependency-resolution)
+describes. To keep every operation except a few, use `--exclude` instead:
+`--exclude upload_pet_image` keeps `list_pets()` and `create_pet()` and omits
+`upload_pet_image()`.
+
+The client's name comes from the document's `info.title`, so the petstore's client is
+`PetstoreClient`. To choose a different name, pass
+[`--api-name`](./generation-options.md#api-name-override):
+
+```bash
+cargo run -- generate client-mod \
+  -i fixtures/petstore.json -o src/api/ \
+  --api-name PetStoreClient
+```
+
+The client struct and its implementation now use `PetStoreClient`. Changing the client's
+name doesn't rename its methods. To rename a method, pass
+[`--fn-name`](./generation-options.md#function-name-overrides) with the operation's
+`operationId` and the new name, and repeat the flag for each method:
+
+```bash
+cargo run -- generate client-mod \
+  -i fixtures/petstore.json -o src/api/ \
+  --fn-name listPets=fetch_all_pets \
+  --fn-name showPetById=get_pet
+```
+
+The override renames the method and its request type together:
+
+| Operation ID | Method Name | Request Type |
+|---|---|---|
+| `listPets` | `fetch_all_pets` | `FetchAllPetsRequest` |
+| `showPetById` | `get_pet` | `GetPetRequest` |
+
+Call the client with the new names, such as `client.get_pet(request)`. The
+[Flag Summary](./generation-options.md#flag-summary) lists the remaining options,
+including visibility, enums, type adapters, and collection choices.
 
 [mdn-sse]: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events
 [rust-deprecated]: https://doc.rust-lang.org/reference/attributes/diagnostics.html#the-deprecated-attribute
@@ -770,9 +960,13 @@ type adapters, and collection choices.
 [rustdoc-cookie-store]: https://docs.rs/reqwest_cookie_store/0.10.0/reqwest_cookie_store/struct.CookieStoreMutex.html
 [rustdoc-futures-stream]: https://docs.rs/futures/0.3.34/futures/stream/trait.Stream.html
 [rustdoc-futures-stream-ext]: https://docs.rs/futures/0.3.34/futures/stream/trait.StreamExt.html#method.next
+[rustdoc-http-body]: https://docs.rs/http-body/1.1.0/http_body/trait.Body.html
+[rustdoc-http-body-util-body-data-stream]: https://docs.rs/http-body-util/0.1.5/http_body_util/struct.BodyDataStream.html
+[rustdoc-http-body-util-body-stream]: https://docs.rs/http-body-util/0.1.5/http_body_util/struct.BodyStream.html
 [rustdoc-http-header-value]: https://docs.rs/http/1.5.0/http/header/struct.HeaderValue.html
 [rustdoc-option]: https://doc.rust-lang.org/std/option/enum.Option.html
 [rustdoc-reqwest-bearer-auth]: https://docs.rs/reqwest/0.13.5/reqwest/struct.RequestBuilder.html#method.bearer_auth
+[rustdoc-reqwest-body]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Body.html
 [rustdoc-reqwest-client]: https://docs.rs/reqwest/0.13.5/reqwest/struct.Client.html
 [rustdoc-reqwest-client-builder]: https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuilder.html
 [rustdoc-reqwest-form]: https://docs.rs/reqwest/0.13.5/reqwest/multipart/struct.Form.html
@@ -782,4 +976,5 @@ type adapters, and collection choices.
 [rustdoc-secret-string]: https://docs.rs/secrecy/0.10.3/secrecy/type.SecretString.html
 [rustdoc-serde-html-form]: https://docs.rs/serde_html_form/0.4.1/serde_html_form/
 [rustdoc-uuid]: https://docs.rs/uuid/1.27.0/uuid/struct.Uuid.html
+[rustdoc-vec]: https://doc.rust-lang.org/std/vec/struct.Vec.html
 [whatwg-sse]: https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation

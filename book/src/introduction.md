@@ -119,9 +119,9 @@ the generated trait to provide the behavior of each API operation. Continue with
 [Server Generation](./server-generation.md) to implement one.
 
 These commands generate source files to include in a Rust project. To generate an
-accompanying `Cargo.toml` , add `--workspace` to either module mode. See
-[Workspace Crate Output](./generation-options.md#workspace-crate-output) for an example
-and instructions on using the generated crate.
+accompanying `Cargo.toml`, add `--workspace` to either module mode.
+[Generating a Separate Crate](./client-generation.md#generating-a-separate-crate) walks
+through an example and shows how to use the generated crate.
 
 ## Supported Formats
 

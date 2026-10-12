@@ -45,12 +45,47 @@ src/api/
 
 The `mod.rs` file declares the modules and re-exports their items. Add `mod api;` to
 your crate root to include this directory, and add the dependencies referenced by the
-generated code to your manifest.
+generated code to your manifest. [Dependencies](./generation-options.md#dependencies)
+lists them.
 
-You can also generate a separate crate by adding `--workspace` and choosing a crate
-directory as the output path. The generator then creates a `Cargo.toml` and uses
-`src/lib.rs` as the module root. See
-[Workspace Crate Output](./generation-options.md#workspace-crate-output) for details.
+### Generating a Separate Crate
+
+You can also generate the server as its own crate by adding `--workspace` and choosing a
+crate directory as the output path:
+
+```bash
+cargo run -- generate server-mod \
+  -i fixtures/petstore.json -o petstore-server \
+  --workspace
+```
+
+The generator creates a `Cargo.toml` and uses `src/lib.rs` as the library root:
+
+```text
+petstore-server/
+├── Cargo.toml
+└── src/
+    ├── lib.rs
+    ├── types.rs
+    └── server.rs
+```
+
+The manifest's dependencies follow what the generated server uses. In place of a
+client's `reqwest`, `reqwest_cookie_store`, and `serde_html_form`, it declares the Axum
+crates for the router and extractors. The petstore server also declares `futures`
+because it streams Server-Sent Events:
+
+```toml
+axum = { version = "0.8.5", features = ["multipart"] }
+axum-extra = { version = "0.12", features = ["cookie", "query"] }
+futures = "0.3"
+```
+
+[Dependencies](./generation-options.md#dependencies) explains when the generator declares
+each crate. The generator rewrites `Cargo.toml` on every run, so keep your service
+implementation in a separate crate that depends on this one.
+[Generating a Separate Crate](./client-generation.md#generating-a-separate-crate) in
+the client chapter shows a complete manifest and how to add the crate to a workspace.
 
 ## Implementing the Service Trait
 
@@ -609,13 +644,39 @@ error and the response ends.
 
 ## Choosing Operations and Names
 
-Use [`--only` or `--exclude`](./generation-options.md#operation-filtering) to select
-which trait methods and routes to generate. Use
-[`--fn-name`](./generation-options.md#function-name-overrides) to rename methods and
-request types, or [`--api-name`](./generation-options.md#api-name-override) to rename
-the service trait. The [shared reference](./generation-options.md#flag-summary) covers
-the remaining options, and [Builder Pattern](./builders.md) explains request
-construction.
+In [Generating a Server Module](#generating-a-server-module), `--only list_pets` limited
+the trait to one method. [`--only` and `--exclude`](./generation-options.md#operation-filtering)
+select which trait methods and routes the generator creates. Both take normalized
+`snake_case` operation IDs, so `--exclude upload_pet_image` keeps every operation except
+the image upload.
+
+A callback follows the operation that declares it. The petstore's `adoptPet` operation
+declares a `statusChanged` callback, which the server generates as the
+`adopt_pet_status_changed` trait method and route. `--only adopt_pet` keeps that
+callback's route and trait method, and `--exclude adopt_pet` removes them.
+
+You can also name a callback by its own normalized `snake_case` ID.
+`--only adopt_pet_status_changed` keeps only the callback, and
+`--exclude adopt_pet_status_changed` removes only the callback while `adopt_pet` stays.
+
+The service trait is named `ApiServer` by default. To choose another name, pass
+[`--api-name`](./generation-options.md#api-name-override):
+
+```bash
+cargo run -- generate server-mod \
+  -i fixtures/petstore.json -o src/api/ \
+  --api-name PetStoreApi
+```
+
+The trait is named `PetStoreApi`, and the generated router uses that name in its trait
+bound. Changing the trait's name doesn't rename its methods. To rename a method, pass
+[`--fn-name`](./generation-options.md#function-name-overrides) with the operation's
+`operationId` and the new name. For example, `--fn-name listPets=fetch_all_pets` renames
+`list_pets()` to `fetch_all_pets()` and its request type to `FetchAllPetsRequest`;
+implement the trait with the new names.
+
+The [Flag Summary](./generation-options.md#flag-summary) lists the remaining options,
+and [Builder Pattern](./builders.md) explains request construction.
 
 [mdn-sse]: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events
 [rustdoc-anyhow-result]: https://docs.rs/anyhow/1.0.104/anyhow/type.Result.html
